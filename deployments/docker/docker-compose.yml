@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  quaero:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD: ${BUILD:-unknown}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    container_name: quaero
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - quaero-data:/app/data
+      - quaero-logs:/app/logs
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_OUTPUT=${LOG_OUTPUT:-both}
+      - SERVER_PORT=${PORT:-8080}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - quaero-network
+
+volumes:
+  quaero-data:
+    driver: local
+  quaero-logs:
+    driver: local
+
+networks:
+  quaero-network:
+    driver: bridge

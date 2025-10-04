@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/spf13/cobra"
 )
@@ -28,8 +27,9 @@ func init() {
 func runQuery(cmd *cobra.Command, args []string) {
 	question := args[0]
 
-	log.Printf("Searching for: %s\n", question)
+	logger.Info().Str("question", question).Msg("Searching for question")
 
 	// TODO: Implement query
+	logger.Warn().Msg("Query implementation pending")
 	fmt.Println("\nQuery implementation pending\n")
 }

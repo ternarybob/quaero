@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/spf13/cobra"
 )
@@ -13,20 +13,18 @@ var serveCmd = &cobra.Command{
 	Run:   runServe,
 }
 
-var (
-	serverPort string
-	serverHost string
-)
-
-func init() {
-	serveCmd.Flags().StringVar(&serverPort, "port", "8080", "Server port")
-	serveCmd.Flags().StringVar(&serverHost, "host", "localhost", "Server host")
-}
-
 func runServe(cmd *cobra.Command, args []string) {
-	log.Printf("Quaero server starting on %s:%s", serverHost, serverPort)
-	log.Println("Waiting for authentication from browser extension...")
+	// Server configuration is now managed globally via config and CLI flags
+	logger.Info().
+		Int("port", config.Server.Port).
+		Str("host", config.Server.Host).
+		Msg("Starting Quaero server")
+
+	logger.Info().Msg("Waiting for authentication from browser extension...")
 
 	// TODO: Initialize app and start server
-	log.Println("Server implementation pending")
+	logger.Warn().Msg("Server implementation pending")
+
+	fmt.Printf("\nServer would start on http://%s:%d\n", config.Server.Host, config.Server.Port)
+	fmt.Println("(Implementation pending)")
 }

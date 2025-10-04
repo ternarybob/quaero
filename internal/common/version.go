@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// Version information
+// Version information (set via -ldflags during build)
 var (
-	Version   = "1.0.0"
-	BuildTime = "unknown"
+	Version   = "dev"
+	Build     = "unknown"
 	GitCommit = "unknown"
 )
 
@@ -19,9 +19,19 @@ func GetVersion() string {
 	return Version
 }
 
+// GetBuild returns the build timestamp
+func GetBuild() string {
+	return Build
+}
+
+// GetGitCommit returns the git commit hash
+func GetGitCommit() string {
+	return GitCommit
+}
+
 // GetFullVersion returns version with build info
 func GetFullVersion() string {
-	return fmt.Sprintf("%s (build: %s, commit: %s)", Version, BuildTime, GitCommit)
+	return fmt.Sprintf("%s (build: %s, commit: %s)", Version, Build, GitCommit)
 }
 
 // LoadVersionFromFile reads version from .version file if it exists

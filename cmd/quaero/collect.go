@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"github.com/spf13/cobra"
 )
 
@@ -25,15 +23,15 @@ func init() {
 
 func runCollect(cmd *cobra.Command, args []string) {
 	if collectAll {
-		log.Println("Collecting from all sources...")
+		logger.Info().Msg("Collecting from all sources")
 		// TODO: Implement collection
-		log.Println("Collection implementation pending")
+		logger.Warn().Msg("Collection implementation pending")
 	} else if collectSource != "" {
-		log.Printf("Collecting from %s...\n", collectSource)
+		logger.Info().Str("source", collectSource).Msg("Collecting from source")
 		// TODO: Implement collection
-		log.Println("Collection implementation pending")
+		logger.Warn().Msg("Collection implementation pending")
 	} else {
-		log.Println("Please specify --source or --all")
+		logger.Error().Msg("Please specify --source or --all")
 		cmd.Help()
 	}
 }
