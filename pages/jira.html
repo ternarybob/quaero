@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira Project Management - Quaero</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/common.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+</head>
+<body>
+    <!-- Top Navbar -->
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <div class="navbar-brand-title">QUAERO</div>
+            <div class="navbar-brand-subtitle">DATA COLLECTION SERVICE</div>
+        </a>
+        <div class="navbar-menu">
+            <a href="/" class="navbar-link">HOME</a>
+            <a href="/jira" class="navbar-link active">JIRA DATA</a>
+            <a href="/confluence" class="navbar-link">CONFLUENCE DATA</a>
+        </div>
+        <div class="navbar-status">
+            <div class="status-indicator"></div>
+            <span class="status-text">ONLINE</span>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <!-- Content Area (60%) -->
+        <div class="content-area">
+            <!-- Hero Section -->
+            <div class="hero-section">
+                <h1 class="hero-title">Jira Project Management</h1>
+                <p class="hero-subtitle">
+                    Select projects to scrape issues from authenticated Jira instance
+                </p>
+            </div>
+
+            <!-- Project Management Section -->
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Projects</div>
+                        <div class="action-buttons-header">
+                            <button id="sync-btn" class="menu-btn" onclick="syncProjects()">
+                                <span id="sync-text">GET PROJECTS</span>
+                            </button>
+                            <button id="get-issues-menu-btn" class="menu-btn" onclick="getIssues()" disabled>
+                                GET ISSUES
+                            </button>
+                            <button id="clear-data-btn" class="menu-btn menu-btn-danger" onclick="clearAllData()">
+                                CLEAR ALL DATA
+                            </button>
+                        </div>
+                        <div id="sync-notification" class="menu-notification-inline"></div>
+                    </div>
+
+                    <!-- Search Box -->
+                    <div style="padding: 15px; background: #fafafa; border-bottom: 1px solid #e0e0e0;">
+                        <input type="text" id="search-box" class="search-box" placeholder="Search projects by key, name, or description...">
+                    </div>
+
+                    <!-- Select All Header -->
+                    <div class="select-all-container">
+                        <label class="select-all-label">
+                            <input type="checkbox" id="select-all-checkbox">
+                            <span>SELECT ALL</span>
+                        </label>
+                        <span id="selection-count" class="selection-count">0/0</span>
+                    </div>
+
+                    <!-- Project List -->
+                    <div id="project-list" class="project-list-container">
+                        <div style="text-align: center; padding: 40px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
+                            Loading projects...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Issues Table Section -->
+                <div class="card" id="issues-section">
+                    <div class="card-header">
+                        <div class="card-title">Issues</div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span id="issues-count" class="selection-count">0 issues</span>
+                            <div id="issues-loader" class="spinner" style="display: none;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Issues Table -->
+                    <div class="table-container">
+                        <table id="issues-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 100px;">Project</th>
+                                    <th style="width: 120px;">Key</th>
+                                    <th style="width: 100px;">Type</th>
+                                    <th style="width: 100px;">Status</th>
+                                    <th>Summary</th>
+                                </tr>
+                            </thead>
+                            <tbody id="issues-table-body">
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                                        No issues loaded. Select projects and click "GET ISSUES".
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Issue Detail Section -->
+                <div class="card" id="issue-detail-section">
+                    <div class="card-header">
+                        <div class="card-title">Issue Detail</div>
+                        <span id="selected-issue-key" class="selection-count"></span>
+                    </div>
+                    <pre id="issue-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 500px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel (40%) - Service Logs -->
+        <div class="right-panel">
+            <div class="terminal-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
+                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
+                </div>
+                <div id="service-logs" class="service-logs-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="system-footer">
+        Quaero // Jira Project Management
+    </div>
+
+    <script>
+        // State management
+        let allProjects = [];
+        let filteredProjects = [];
+        let selectedProjects = new Set();
+        let selectedIssue = null;
+        let allIssues = [];
+        let isSyncing = false;
+        let currentPollInterval = null;  // Track active polling interval
+        let currentPollProjectKeys = []; // Track which projects we're currently polling for
+        let ws;
+        let reconnectInterval;
+        let displayedLogs = new Set();
+
+        // URL parameter management
+        function _getProjectsFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const projectsParam = params.get('projects');
+
+            if (!projectsParam) return null;
+            if (projectsParam === 'ALL') return 'ALL';
+
+            return projectsParam.split(',').filter(id => id.trim());
+        }
+
+        function _getIssueFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('issue');
+        }
+
+        function _updateUrlWithProjects(projectIds) {
+            const url = new URL(window.location);
+
+            if (!projectIds || projectIds.length === 0) {
+                url.searchParams.delete('projects');
+            } else if (projectIds === 'ALL') {
+                url.searchParams.set('projects', 'ALL');
+            } else {
+                url.searchParams.set('projects', projectIds.join(','));
+            }
+
+            window.history.replaceState({}, '', url);
+        }
+
+        function _updateUrlWithIssue(issueKey) {
+            const url = new URL(window.location);
+
+            if (!issueKey) {
+                url.searchParams.delete('issue');
+            } else {
+                url.searchParams.set('issue', issueKey);
+            }
+
+            window.history.replaceState({}, '', url);
+        }
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                updateSystemStatus(true);
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'log') {
+                    handleLogMessage(message.payload);
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateSystemStatus(false);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket disconnected');
+                updateSystemStatus(false);
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(connectWebSocket, 3000);
+                }
+            };
+        }
+
+        function updateSystemStatus(online) {
+            const statusIndicator = document.querySelector('.status-indicator');
+            const statusText = document.querySelector('.status-text');
+
+            if (online) {
+                statusIndicator.style.background = '#00cc00';
+                statusText.style.color = '#00cc00';
+                statusText.textContent = 'ONLINE';
+            } else {
+                statusIndicator.style.background = '#cc0000';
+                statusText.style.color = '#cc0000';
+                statusText.textContent = 'OFFLINE';
+            }
+        }
+
+        function handleLogMessage(logData) {
+            const logsContainer = document.getElementById('service-logs');
+            if (!logsContainer) return;
+
+            const logLine = `${logData.timestamp}|${logData.level}|${logData.message}`;
+
+            if (displayedLogs.has(logLine)) return;
+            displayedLogs.add(logLine);
+
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+
+            const timestamp = logData.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false });
+            const level = logData.level || 'info';
+            const message = logData.message || '';
+
+            let levelClass = 'log-level-info';
+            let levelText = 'INFO';
+            if (level.toLowerCase() === 'error') {
+                levelClass = 'log-level-error';
+                levelText = 'ERROR';
+            } else if (level.toLowerCase() === 'warn') {
+                levelClass = 'log-level-warn';
+                levelText = 'WARN';
+            } else if (level.toLowerCase() === 'debug') {
+                levelClass = 'log-level-debug';
+                levelText = 'DEBUG';
+            }
+
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="${levelClass}">[${levelText}]</span>
+                <span class="log-message">${escapeHtml(message)}</span>
+            `;
+
+            logsContainer.appendChild(logEntry);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+
+            // Limit to last 100 entries
+            while (logsContainer.children.length > 100) {
+                const removed = logsContainer.removeChild(logsContainer.firstChild);
+                displayedLogs.delete(removed.textContent);
+            }
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function clearServiceLogs() {
+            const logsContainer = document.getElementById('service-logs');
+            if (logsContainer) {
+                logsContainer.innerHTML = '';
+                displayedLogs.clear();
+            }
+        }
+
+        // Project management functions
+        async function loadProjects() {
+            try {
+                const response = await fetch('/api/data/jira');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch projects');
+                }
+
+                const data = await response.json();
+
+                // Use real projects from the API
+                if (data.projects && data.projects.length > 0) {
+                    allProjects = data.projects.map((p, idx) => ({
+                        key: p.key,
+                        name: p.name || `Project ${p.key}`,
+                        description: p.description || `Description for ${p.key}`,
+                        issueCount: p.issueCount || 0
+                    }));
+                } else {
+                    // No projects in database yet
+                    allProjects = [];
+                }
+
+                filteredProjects = [...allProjects];
+
+                // Restore selection from URL
+                const urlProjects = _getProjectsFromUrl();
+                if (urlProjects === 'ALL') {
+                    allProjects.forEach(p => selectedProjects.add(p.key));
+                } else if (urlProjects && urlProjects.length > 0) {
+                    urlProjects.forEach(key => {
+                        if (allProjects.find(p => p.key === key)) {
+                            selectedProjects.add(key);
+                        }
+                    });
+                }
+
+                renderProjects();
+                updateSelectionCount();
+                updateButtonStates();
+
+                // Auto-load issues if projects are selected
+                if (selectedProjects.size > 0) {
+                    loadIssuesFromDatabase();
+                }
+
+            } catch (error) {
+                console.error('Error loading projects:', error);
+                showNotification('Failed to load projects', 'error');
+                allProjects = [];
+                filteredProjects = [];
+                renderProjects();
+            }
+        }
+
+        function renderProjects() {
+            const container = document.getElementById('project-list');
+
+            if (filteredProjects.length === 0) {
+                const message = allProjects.length === 0
+                    ? 'No projects in cache. Click "SYNC PROJECTS" to load from Jira.'
+                    : 'No projects match your search criteria.';
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
+                        ${message}
+                    </div>
+                `;
+                return;
+            }
+
+            // Sort: selected items first, then by name
+            const sortedProjects = [...filteredProjects].sort((a, b) => {
+                const aSelected = selectedProjects.has(a.key);
+                const bSelected = selectedProjects.has(b.key);
+
+                if (aSelected && !bSelected) return -1;
+                if (!aSelected && bSelected) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            container.innerHTML = sortedProjects.map(project => `
+                <div class="project-item ${selectedProjects.has(project.key) ? 'selected' : ''}" onclick="toggleProject('${project.key}', event)">
+                    <input type="checkbox"
+                           id="project-${project.key}"
+                           value="${project.key}"
+                           ${selectedProjects.has(project.key) ? 'checked' : ''}>
+                    <span class="project-key">${project.key}</span>
+                    <div class="project-info">
+                        <div class="project-name">${project.name}</div>
+                        <div class="project-description">${project.description}</div>
+                    </div>
+                    <span class="project-issues">${project.issueCount} issues</span>
+                </div>
+            `).join('');
+        }
+
+        function toggleProject(key, event) {
+            event.stopPropagation();
+
+            if (selectedProjects.has(key)) {
+                selectedProjects.delete(key);
+            } else {
+                selectedProjects.add(key);
+            }
+
+            renderProjects();
+            updateSelectionCount();
+            updateButtonStates();
+            _syncUrlWithSelection();
+
+            // Auto-load issues from local database when project selection changes
+            loadIssuesFromDatabase();
+        }
+
+        function _syncUrlWithSelection() {
+            if (selectedProjects.size === 0) {
+                _updateUrlWithProjects(null);
+            } else if (selectedProjects.size === allProjects.length && allProjects.length > 0) {
+                _updateUrlWithProjects('ALL');
+            } else {
+                _updateUrlWithProjects(Array.from(selectedProjects));
+            }
+        }
+
+        function updateSelectionCount() {
+            const countElement = document.getElementById('selection-count');
+            countElement.textContent = `${selectedProjects.size}/${filteredProjects.length}`;
+
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            selectAllCheckbox.checked = selectedProjects.size === filteredProjects.length && filteredProjects.length > 0;
+            selectAllCheckbox.indeterminate = selectedProjects.size > 0 && selectedProjects.size < filteredProjects.length;
+        }
+
+        function updateButtonStates() {
+            const getIssuesBtn = document.getElementById('get-issues-menu-btn');
+            getIssuesBtn.disabled = selectedProjects.size === 0;
+        }
+
+        // Search functionality
+        document.getElementById('search-box').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+
+            if (!searchTerm) {
+                filteredProjects = [...allProjects];
+            } else {
+                filteredProjects = allProjects.filter(p =>
+                    p.key.toLowerCase().includes(searchTerm) ||
+                    p.name.toLowerCase().includes(searchTerm) ||
+                    p.description.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            renderProjects();
+            updateSelectionCount();
+        });
+
+        // Select all functionality
+        document.getElementById('select-all-checkbox').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                filteredProjects.forEach(p => selectedProjects.add(p.key));
+            } else {
+                filteredProjects.forEach(p => selectedProjects.delete(p.key));
+            }
+
+            renderProjects();
+            updateSelectionCount();
+            updateButtonStates();
+            _syncUrlWithSelection();
+
+            // Auto-load issues from local database when selection changes
+            loadIssuesFromDatabase();
+        });
+
+        // Sync projects - clears cache and re-syncs from Jira with issue counts
+        async function syncProjects() {
+            if (isSyncing) return;
+
+            isSyncing = true;
+            const syncBtn = document.getElementById('sync-btn');
+            const syncText = document.getElementById('sync-text');
+
+            syncBtn.disabled = true;
+            syncText.innerHTML = '<span class="spinner"></span> SYNCING...';
+            showNotification('Clearing cache and syncing projects from Jira...', 'info');
+
+            try {
+                // Use refresh-cache endpoint which clears and re-syncs
+                const response = await fetch('/api/projects/refresh-cache', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to sync projects');
+                }
+
+                showNotification('Project sync started (fetching issue counts)...', 'success');
+
+                // Poll for completion by checking if sync is done
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const checkResponse = await fetch('/api/data/jira');
+                        if (checkResponse.ok) {
+                            const data = await checkResponse.json();
+                            // If we have projects, reload the UI
+                            if (data.projects && data.projects.length > 0) {
+                                clearInterval(pollInterval);
+                                loadProjects();
+                                showNotification(`Successfully loaded ${data.projects.length} projects`, 'success');
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error polling for projects:', e);
+                    }
+                }, 1000); // Poll every second
+
+                // Fallback timeout in case polling fails
+                setTimeout(() => {
+                    clearInterval(pollInterval);
+                    loadProjects();
+                }, 15000); // 15 second max wait
+
+            } catch (error) {
+                console.error('Error syncing projects:', error);
+                showNotification('Failed to sync projects', 'error');
+            } finally {
+                setTimeout(() => {
+                    isSyncing = false;
+                    syncBtn.disabled = false;
+                    syncText.textContent = 'SYNC PROJECTS';
+                }, 15000); // Match the max wait time
+            }
+        }
+
+        // Clear all data from database
+        async function clearAllData() {
+            if (!confirm('Are you sure you want to clear ALL data? This will delete all projects, issues, and Confluence pages from the local database.')) {
+                return;
+            }
+
+            const clearBtn = document.getElementById('clear-data-btn');
+            clearBtn.disabled = true;
+            clearBtn.textContent = 'CLEARING...';
+
+            try {
+                const response = await fetch('/api/data/clear-all', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showNotification('All data cleared successfully', 'success');
+
+                    // Clear UI
+                    allProjects = [];
+                    filteredProjects = [];
+                    selectedProjects.clear();
+                    renderProjects();
+                    updateSelectionCount();
+                    updateButtonStates();
+
+                    // Clear issues table
+                    const tbody = document.getElementById('issues-table-body');
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                                No issues loaded. Select projects and click "GET ISSUES".
+                            </td>
+                        </tr>
+                    `;
+                    document.getElementById('issues-count').textContent = '0 issues';
+                } else {
+                    showNotification('Failed to clear data', 'error');
+                }
+            } catch (error) {
+                console.error('Error clearing data:', error);
+                showNotification('Failed to clear data', 'error');
+            } finally {
+                clearBtn.disabled = false;
+                clearBtn.textContent = 'CLEAR ALL DATA';
+            }
+        }
+
+        // Get issues for selected projects
+        async function getIssues() {
+            if (selectedProjects.size === 0) {
+                showNotification('Please select at least one project', 'error');
+                return;
+            }
+
+            const getIssuesBtn = document.getElementById('get-issues-menu-btn');
+            const issuesLoader = document.getElementById('issues-loader');
+            const tbody = document.getElementById('issues-table-body');
+
+            // Show loading state
+            getIssuesBtn.disabled = true;
+            getIssuesBtn.innerHTML = '<span>FETCHING...</span>';
+            issuesLoader.style.display = 'inline-block';
+
+            // Show loading message in table
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                        <div style="display: inline-block; margin-right: 10px; width: 16px; height: 16px; border: 2px solid #f3f3f3; border-top: 2px solid #2980b9; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        Loading issues...
+                    </td>
+                </tr>
+            `;
+
+            showNotification(`Fetching issues for ${selectedProjects.size} project(s)...`, 'info');
+
+            try {
+                // Call API to fetch issues for selected projects
+                const projectKeys = Array.from(selectedProjects);
+                const response = await fetch('/api/projects/get-issues', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ projectKeys: projectKeys })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch issues');
+                }
+
+                showNotification('Issue fetching started...', 'info');
+
+                // Poll for issues to appear
+                startPollingIssues(projectKeys);
+
+            } catch (error) {
+                console.error('Error fetching issues:', error);
+                showNotification('Failed to fetch issues', 'error');
+                issuesLoader.style.display = 'none';
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 40px; color: #ff4444;">
+                            Failed to fetch issues. Please try again.
+                        </td>
+                    </tr>
+                `;
+            } finally {
+                setTimeout(() => {
+                    getIssuesBtn.disabled = false;
+                    getIssuesBtn.textContent = 'GET ISSUES';
+                    updateButtonStates();
+                }, 2000);
+            }
+        }
+
+        // Poll for issues data
+        function startPollingIssues(projectKeys) {
+            // Cancel any existing poll
+            if (currentPollInterval) {
+                clearInterval(currentPollInterval);
+                currentPollInterval = null;
+            }
+
+            // Store the project keys we're polling for
+            currentPollProjectKeys = [...projectKeys];
+            console.log('Starting poll for projects:', currentPollProjectKeys);
+
+            const issuesLoader = document.getElementById('issues-loader');
+            let pollCount = 0;
+            const maxPolls = 30; // 30 seconds max
+
+            currentPollInterval = setInterval(async () => {
+                pollCount++;
+
+                try {
+                    // Build query string with project keys
+                    const queryParams = currentPollProjectKeys.map(key => `projectKey=${key}`).join('&');
+                    const response = await fetch(`/api/data/jira/issues?${queryParams}`);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.issues && data.issues.length > 0) {
+                            // Verify these issues belong to the projects we're currently polling for
+                            const validIssues = data.issues.filter(issue => {
+                                const projectKey = issue.fields?.project?.key;
+                                return projectKey && currentPollProjectKeys.includes(projectKey);
+                            });
+
+                            if (validIssues.length > 0) {
+                                clearInterval(currentPollInterval);
+                                currentPollInterval = null;
+                                issuesLoader.style.display = 'none';
+                                displayIssues(validIssues);
+                                showNotification(`Loaded ${validIssues.length} issues`, 'success');
+                            } else {
+                                console.log('Received issues but none match selected projects');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error polling for issues:', e);
+                }
+
+                if (pollCount >= maxPolls) {
+                    clearInterval(currentPollInterval);
+                    currentPollInterval = null;
+                    issuesLoader.style.display = 'none';
+                    showNotification('Issue loading timed out', 'error');
+                }
+            }, 1000);
+        }
+
+        // Load issues from local database for selected projects
+        async function loadIssuesFromDatabase() {
+            // Cancel any existing poll from GET ISSUES button
+            if (currentPollInterval) {
+                console.log('Cancelling existing poll interval');
+                clearInterval(currentPollInterval);
+                currentPollInterval = null;
+            }
+
+            const tbody = document.getElementById('issues-table-body');
+            const issuesCount = document.getElementById('issues-count');
+
+            // If no projects selected, show empty state
+            if (selectedProjects.size === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                            No issues loaded. Select projects and click "GET ISSUES".
+                        </td>
+                    </tr>
+                `;
+                issuesCount.textContent = '0 issues';
+                return;
+            }
+
+            try {
+                // Build query string with selected project keys
+                const projectKeys = Array.from(selectedProjects);
+                const queryParams = projectKeys.map(key => `projectKey=${key}`).join('&');
+                const url = `/api/data/jira/issues?${queryParams}`;
+
+                console.log('Loading issues for projects:', projectKeys);
+                console.log('Request URL:', url);
+
+                const response = await fetch(url);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Received issues:', data.issues ? data.issues.length : 0);
+                    if (data.issues && data.issues.length > 0) {
+                        console.log('First issue project:', data.issues[0]?.fields?.project?.key);
+                    }
+                    displayIssues(data.issues || []);
+                } else {
+                    console.error('Failed to load issues from database:', response.status);
+                }
+            } catch (error) {
+                console.error('Error loading issues from database:', error);
+            }
+        }
+
+        // Display issues in table
+        function displayIssues(issues) {
+            const tbody = document.getElementById('issues-table-body');
+            const issuesCount = document.getElementById('issues-count');
+
+            console.log('displayIssues called with', issues ? issues.length : 0, 'issues');
+
+            allIssues = issues || [];
+
+            if (!issues || issues.length === 0) {
+                console.log('Showing empty state');
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                            No issues found for selected projects. Click "GET ISSUES" to fetch from server.
+                        </td>
+                    </tr>
+                `;
+                issuesCount.textContent = '0 issues';
+                _clearIssueDetail();
+                return;
+            }
+
+            console.log('Rendering', issues.length, 'issues');
+
+            tbody.innerHTML = issues.map((issue, index) => {
+                const fields = issue.fields || {};
+                const project = fields.project || {};
+                const issueType = fields.issuetype || {};
+                const status = fields.status || {};
+                const summary = fields.summary || '';
+                const isSelected = selectedIssue && selectedIssue.key === issue.key;
+
+                return `
+                    <tr onclick="_selectIssue(${index})"
+                        style="cursor: pointer; background-color: ${isSelected ? '#e3f2fd' : 'transparent'};"
+                        class="${isSelected ? 'selected-issue' : ''}">
+                        <td>${project.key || 'N/A'}</td>
+                        <td>${issue.key || 'N/A'}</td>
+                        <td>${issueType.name || 'N/A'}</td>
+                        <td>${status.name || 'N/A'}</td>
+                        <td>${summary}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            issuesCount.textContent = `${issues.length} issue${issues.length !== 1 ? 's' : ''}`;
+
+            // Restore issue selection from URL after rendering
+            const urlIssueKey = _getIssueFromUrl();
+            if (urlIssueKey) {
+                const issueIndex = allIssues.findIndex(issue => issue.key === urlIssueKey);
+                if (issueIndex !== -1) {
+                    _selectIssue(issueIndex, false);
+                }
+            }
+        }
+
+        function _selectIssue(index, updateUrl = true) {
+            selectedIssue = allIssues[index];
+            _displayIssueDetail(selectedIssue);
+
+            if (updateUrl) {
+                _updateUrlWithIssue(selectedIssue ? selectedIssue.key : null);
+            }
+
+            // Update highlighting without full re-render
+            _updateIssueHighlighting();
+        }
+
+        function _updateIssueHighlighting() {
+            const tbody = document.getElementById('issues-table-body');
+            const rows = tbody.querySelectorAll('tr');
+
+            rows.forEach((row, index) => {
+                const issue = allIssues[index];
+                if (issue) {
+                    const isSelected = selectedIssue && selectedIssue.key === issue.key;
+                    row.style.backgroundColor = isSelected ? '#e3f2fd' : 'transparent';
+                    if (isSelected) {
+                        row.classList.add('selected-issue');
+                    } else {
+                        row.classList.remove('selected-issue');
+                    }
+                }
+            });
+        }
+
+        function _displayIssueDetail(issue) {
+            const selectedKey = document.getElementById('selected-issue-key');
+            const detailPre = document.getElementById('issue-detail-json');
+            const codeBlock = detailPre.querySelector('code');
+
+            if (!issue) {
+                _clearIssueDetail();
+                return;
+            }
+
+            selectedKey.textContent = issue.key || 'Unknown';
+            const jsonString = JSON.stringify(issue, null, 2);
+            codeBlock.textContent = jsonString;
+
+            if (typeof hljs !== 'undefined') {
+                hljs.highlightElement(codeBlock);
+            }
+        }
+
+        function _clearIssueDetail() {
+            const selectedKey = document.getElementById('selected-issue-key');
+            const detailPre = document.getElementById('issue-detail-json');
+            const codeBlock = detailPre.querySelector('code');
+
+            selectedKey.textContent = '';
+            codeBlock.textContent = '';
+            selectedIssue = null;
+        }
+
+        function showNotification(message, type) {
+            const notification = document.getElementById('sync-notification');
+            notification.innerHTML = `<div class="sync-message ${type}">${message}</div>`;
+
+            setTimeout(() => {
+                notification.innerHTML = '';
+            }, 5000);
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+            loadProjects();
+            updateButtonStates();
+        });
+    </script>
+</body>
+</html>

@@ -20,6 +20,7 @@ type JiraScraperService struct {
 	authService interfaces.AtlassianAuthService
 	db          *bolt.DB
 	logger      arbor.ILogger
+	uiLogger    interface{}
 }
 
 // NewJiraScraperService creates a new Jira scraper service
@@ -50,6 +51,11 @@ func createJiraBuckets(db *bolt.DB) error {
 // Close closes the scraper and releases resources
 func (s *JiraScraperService) Close() error {
 	return nil
+}
+
+// SetUILogger sets a UI logger for real-time updates
+func (s *JiraScraperService) SetUILogger(logger interface{}) {
+	s.uiLogger = logger
 }
 
 func (s *JiraScraperService) makeRequest(method, path string) ([]byte, error) {

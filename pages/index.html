@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QUAERO - Monitoring Dashboard</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/common.css">
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+</head>
+
+<body>
+    <!-- Top Navbar -->
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">
+            <span class="navbar-brand-title">QUAERO</span>
+            <span class="navbar-brand-subtitle">DATA COLLECTION SERVICE</span>
+        </a>
+        <div class="navbar-menu">
+            <a href="/" class="navbar-link active">HOME</a>
+            <a href="/jira" class="navbar-link">JIRA DATA</a>
+            <a href="/confluence" class="navbar-link">CONFLUENCE DATA</a>
+        </div>
+        <div class="navbar-status">
+            <div class="status-indicator"></div>
+            <span class="status-text">ONLINE</span>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <!-- Content Area (60%) -->
+        <div class="content-area">
+            <!-- Hero Section -->
+            <div class="hero-section">
+                <h1 class="hero-title">QUAERO</h1>
+                <p class="hero-subtitle">
+                    Automated Jira and Confluence data extraction using Chrome extension authentication.
+                    Industrial-grade scraping system with local BoltDB storage and real-time monitoring.
+                </p>
+            </div>
+
+            <!-- Parser Status Section -->
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Parser Status</div>
+                        <button
+                            id="refresh-parser-status"
+                            class="btn-clear-logs"
+                            hx-get="/ui/parser-status"
+                            hx-target="#parser-status"
+                            hx-swap="innerHTML"
+                            hx-trigger="click, load, every 60s"
+                            hx-sync="this:abort"
+                            style="padding: 4px 12px; font-size: 11px;">
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div style="padding: 20px; text-align: center;">
+                        <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; margin-bottom: 20px;">
+                            Install Chrome extension and click icon when logged into Jira/Confluence<br>
+                            Extension will capture authentication and trigger scraping automatically
+                        </p>
+                        <div id="parser-status">
+                            <p>Loading parser status...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Authentication Details Section -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Authentication Details</div>
+                    </div>
+
+                    <div id="auth-details" style="padding: 20px;">
+                        <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
+                            No authentication data captured yet
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- Right Panel (40%) - Service Status & Logs -->
+        <div class="right-panel">
+            <!-- Service Status Monitor -->
+            <div class="terminal-section">
+                <div class="terminal-header">Service Status Monitor</div>
+                <table class="status-table" id="service-status-table" hx-get="/ui/status" hx-trigger="load, every 60s" hx-swap="innerHTML">
+                    <tr>
+                        <td class="status-label">Parser Service</td>
+                        <td class="status-value">ONLINE</td>
+                    </tr>
+                    <tr>
+                        <td class="status-label">Database</td>
+                        <td class="status-value">CONNECTED</td>
+                    </tr>
+                    <tr>
+                        <td class="status-label">Extension Auth</td>
+                        <td class="status-value">WAITING</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Service Logs -->
+            <div class="terminal-section" style="margin-top: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
+                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
+                </div>
+                <div id="service-logs" class="service-logs-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="system-footer" id="footer-version" hx-get="/api/version" hx-trigger="load" hx-swap="innerHTML">
+        Quaero // Version Loading...
+    </div>
+
+    <script>
+        let ws;
+        let reconnectInterval;
+
+        function clearServiceLogs() {
+            const serviceLogsContainer = document.getElementById('service-logs');
+            if (serviceLogsContainer) {
+                serviceLogsContainer.innerHTML = '';
+            }
+        }
+
+        function updateSystemStatus(online) {
+            const statusIndicator = document.querySelector('.status-indicator');
+            const statusText = document.querySelector('.status-text');
+
+            if (online) {
+                statusIndicator.style.background = '#00cc00';
+                statusText.style.color = '#00cc00';
+                statusText.textContent = 'SYSTEM ONLINE';
+            } else {
+                statusIndicator.style.background = '#cc0000';
+                statusText.style.color = '#cc0000';
+                statusText.textContent = 'SYSTEM OFFLINE';
+            }
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                updateSystemStatus(true);
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+
+                if (message.type === 'status') {
+                    updateStatus(message.payload);
+                } else if (message.type === 'log') {
+                    addLogEntry(message.payload.timestamp, message.payload.level, message.payload.message);
+                } else if (message.type === 'auth') {
+                    updateAuthDetails(message.payload);
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateSystemStatus(false);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket disconnected');
+                updateSystemStatus(false);
+
+                // Reconnect after 3 seconds
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(function() {
+                        connectWebSocket();
+                    }, 3000);
+                }
+            };
+        }
+
+        function updateStatus(status) {
+            const statusTable = document.getElementById('service-status-table');
+            if (statusTable) {
+                statusTable.innerHTML = `
+                    <tr>
+                        <td class="status-label">Parser Service</td>
+                        <td class="status-value status-online">${status.status}</td>
+                    </tr>
+                    <tr>
+                        <td class="status-label">Database</td>
+                        <td class="status-value status-online">${status.database}</td>
+                    </tr>
+                    <tr>
+                        <td class="status-label">Extension Auth</td>
+                        <td class="status-value">${status.extensionAuth}</td>
+                    </tr>
+                `;
+            }
+
+            // Parser status updates are now handled by HTMX refresh button
+            // No need to update parser-status div from WebSocket
+        }
+
+        function addLogEntry(timestamp, level, message) {
+            const logsContainer = document.getElementById('service-logs');
+            if (!logsContainer) return;
+
+            // Handle local messages that don't have timestamp
+            if (typeof timestamp !== 'string' || !timestamp.match(/\d+:\d+:\d+/)) {
+                message = level;
+                level = timestamp;
+                timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+            }
+
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+
+            let levelClass = 'log-level-info';
+            let levelText = 'INFO';
+            if (level.toLowerCase() === 'error') {
+                levelClass = 'log-level-error';
+                levelText = 'ERROR';
+            } else if (level.toLowerCase() === 'warn') {
+                levelClass = 'log-level-warn';
+                levelText = 'WARN';
+            } else if (level.toLowerCase() === 'debug') {
+                levelClass = 'log-level-debug';
+                levelText = 'DEBUG';
+            }
+
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="${levelClass}">[${levelText}]</span>
+                <span class="log-message">${message}</span>
+            `;
+
+            logsContainer.appendChild(logEntry);
+
+            // Auto-scroll to bottom
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+
+            // Keep only last 100 log entries
+            while (logsContainer.children.length > 100) {
+                logsContainer.removeChild(logsContainer.firstChild);
+            }
+        }
+
+        function updateAuthDetails(authData) {
+            const authContainer = document.getElementById('auth-details');
+            if (!authContainer) return;
+
+            if (!authData || !authData.cookies || authData.cookies.length === 0) {
+                authContainer.innerHTML = `
+                    <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
+                        No authentication data captured yet
+                    </p>
+                `;
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 15px;">
+                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 8px;">
+                        <strong>Base URL:</strong> ${authData.baseUrl || 'N/A'}
+                    </p>
+                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 8px;">
+                        <strong>Cloud ID:</strong> ${authData.cloudId || 'N/A'}
+                    </p>
+                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 15px;">
+                        <strong>Cookies:</strong> ${authData.cookies.length}
+                    </p>
+                </div>
+                <table class="status-table" style="font-size: 10px;">
+                    <tr style="background: #f8f8f8;">
+                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Name</th>
+                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Domain</th>
+                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Path</th>
+                        <th style="padding: 8px; text-align: left;">Secure</th>
+                    </tr>
+            `;
+
+            authData.cookies.forEach(cookie => {
+                html += `
+                    <tr>
+                        <td style="padding: 8px; border-right: 1px solid #e0e0e0; word-break: break-all;">${cookie.name}</td>
+                        <td style="padding: 8px; border-right: 1px solid #e0e0e0;">${cookie.domain}</td>
+                        <td style="padding: 8px; border-right: 1px solid #e0e0e0;">${cookie.path}</td>
+                        <td style="padding: 8px;">${cookie.secure ? '✓' : '-'}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</table>`;
+            authContainer.innerHTML = html;
+        }
+
+        // Connect on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+        });
+    </script>
+</body>
+</html>

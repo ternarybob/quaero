@@ -293,6 +293,18 @@ if (Test-Path $extensionSourcePath) {
     Write-Host "Deployed Chrome extension: cmd/quaero-chrome-extension -> bin/" -ForegroundColor Green
 }
 
+# Copy pages directory to bin
+$pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
+$pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
+
+if (Test-Path $pagesSourcePath) {
+    if (Test-Path $pagesDestPath) {
+        Remove-Item -Path $pagesDestPath -Recurse -Force
+    }
+    Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
+    Write-Host "Deployed web pages: pages -> bin/" -ForegroundColor Green
+}
+
 # Verify executable was created
 if (-not (Test-Path $outputPath)) {
     Write-Error "Build completed but executable not found: $outputPath"
@@ -326,17 +338,18 @@ Write-Host "Executable: $outputPath" -ForegroundColor Cyan
 if ($Run) {
     Write-Host "`n==== Starting Application ====" -ForegroundColor Yellow
 
-    # Use local deployment config
-    $configPath = Join-Path -Path $projectRoot -ChildPath "deployments\local\quaero.toml"
+    # Use bin config (already deployed from deployments/local/)
+    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 
     # Start in a new terminal window with serve command
     # Use /c to close window when application exits
-    $startCommand = "cd /d `"$projectRoot`" && `"$outputPath`" serve -c `"$configPath`""
+    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" serve -c `"$configPath`""
 
     Start-Process cmd -ArgumentList "/c", $startCommand
 
     Write-Host "Application started in new terminal window" -ForegroundColor Green
-    Write-Host "Command: quaero serve -c deployments\local\quaero.toml" -ForegroundColor Cyan
+    Write-Host "Command: quaero.exe serve -c quaero.toml" -ForegroundColor Cyan
+    Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
     Write-Host "Window will close automatically when application exits" -ForegroundColor Gray
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow

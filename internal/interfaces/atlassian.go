@@ -34,6 +34,7 @@ type JiraScraperService interface {
 // ConfluenceScraperService defines operations for Confluence data scraping
 type ConfluenceScraperService interface {
 	ScrapeSpaces() error
+	ScrapeConfluence() error // Alias for ScrapeSpaces for compatibility
 	GetSpacePages(spaceKey string) error
 	GetSpacePageCount(spaceKey string) (int, error)
 	ClearSpacesCache() error
@@ -102,3 +103,10 @@ func (a *AtlassianAuthData) GetHTTPCookies() []*http.Cookie {
 	}
 	return cookies
 }
+
+// Compatibility aliases for aktis-parser handlers
+type AuthService = AtlassianAuthService
+type JiraScraper = JiraScraperService
+type ConfluenceScraper = ConfluenceScraperService
+type ExtensionCookie = AtlassianExtensionCookie
+type AuthData = AtlassianAuthData

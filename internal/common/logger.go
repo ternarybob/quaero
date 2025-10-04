@@ -4,13 +4,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/arbor/models"
 )
 
+var (
+	globalLogger arbor.ILogger
+	loggerMutex  sync.RWMutex
+)
+
+// GetLogger returns the global logger instance
+func GetLogger() arbor.ILogger {
+	loggerMutex.RLock()
+	if globalLogger != nil {
+		loggerMutex.RUnlock()
+		return globalLogger
+	}
+	loggerMutex.RUnlock()
+
+	loggerMutex.Lock()
+	defer loggerMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if globalLogger == nil {
+		globalLogger = arbor.NewLogger().WithConsoleWriter(models.WriterConfiguration{
+			Type:             models.LogWriterTypeConsole,
+			TimeFormat:       "15:04:05",
+			TextOutput:       true,
+			DisableTimestamp: false,
+		})
+	}
+	return globalLogger
+}
+
 // InitLogger initializes the arbor logger with configuration
 func InitLogger(config *Config) arbor.ILogger {
+	loggerMutex.Lock()
+	defer loggerMutex.Unlock()
+
 	logger := arbor.NewLogger()
 
 	// Get executable path for log directory
@@ -69,6 +102,9 @@ func InitLogger(config *Config) arbor.ILogger {
 
 	// Set log level
 	logger = logger.WithLevelFromString(config.Logging.Level)
+
+	// Store as global logger
+	globalLogger = logger
 
 	return logger
 }

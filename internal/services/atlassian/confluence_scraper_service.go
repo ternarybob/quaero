@@ -20,6 +20,7 @@ type ConfluenceScraperService struct {
 	authService interfaces.AtlassianAuthService
 	db          *bolt.DB
 	logger      arbor.ILogger
+	uiLogger    interface{}
 }
 
 // NewConfluenceScraperService creates a new Confluence scraper service
@@ -50,6 +51,16 @@ func createConfluenceBuckets(db *bolt.DB) error {
 // Close closes the scraper and releases resources
 func (s *ConfluenceScraperService) Close() error {
 	return nil
+}
+
+// SetUILogger sets a UI logger for real-time updates
+func (s *ConfluenceScraperService) SetUILogger(logger interface{}) {
+	s.uiLogger = logger
+}
+
+// ScrapeConfluence is an alias for ScrapeSpaces for compatibility
+func (s *ConfluenceScraperService) ScrapeConfluence() error {
+	return s.ScrapeSpaces()
 }
 
 func (s *ConfluenceScraperService) makeRequest(method, path string) ([]byte, error) {
