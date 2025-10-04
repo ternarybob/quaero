@@ -281,6 +281,18 @@ if (Test-Path $configSourcePath) {
     }
 }
 
+# Copy Chrome extension to bin directory
+$extensionSourcePath = Join-Path -Path $projectRoot -ChildPath "cmd\quaero-chrome-extension"
+$extensionDestPath = Join-Path -Path $binDir -ChildPath "quaero-chrome-extension"
+
+if (Test-Path $extensionSourcePath) {
+    if (Test-Path $extensionDestPath) {
+        Remove-Item -Path $extensionDestPath -Recurse -Force
+    }
+    Copy-Item -Path $extensionSourcePath -Destination $extensionDestPath -Recurse
+    Write-Host "Deployed Chrome extension: cmd/quaero-chrome-extension -> bin/" -ForegroundColor Green
+}
+
 # Verify executable was created
 if (-not (Test-Path $outputPath)) {
     Write-Error "Build completed but executable not found: $outputPath"
@@ -318,16 +330,14 @@ if ($Run) {
     $configPath = Join-Path -Path $projectRoot -ChildPath "deployments\local\quaero.toml"
 
     # Start in a new terminal window with serve command
-    # Use /k to keep window open after execution
-    $startCommand = "cd /d `"$projectRoot`" && `"$outputPath`" serve -c `"$configPath`" && pause"
+    # Use /c to close window when application exits
+    $startCommand = "cd /d `"$projectRoot`" && `"$outputPath`" serve -c `"$configPath`""
 
-    Start-Process cmd -ArgumentList "/k", $startCommand
+    Start-Process cmd -ArgumentList "/c", $startCommand
 
     Write-Host "Application started in new terminal window" -ForegroundColor Green
     Write-Host "Command: quaero serve -c deployments\local\quaero.toml" -ForegroundColor Cyan
-    Write-Host "Working Directory: $projectRoot" -ForegroundColor Cyan
-    Write-Host "Config: $configPath" -ForegroundColor Cyan
-    Write-Host "(Terminal window will remain open - press Ctrl+C to stop)" -ForegroundColor Gray
+    Write-Host "Window will close automatically when application exits" -ForegroundColor Gray
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow
     Write-Host "./bin/quaero.exe serve -c deployments/local/quaero.toml" -ForegroundColor White
