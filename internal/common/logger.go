@@ -100,6 +100,14 @@ func InitLogger(config *Config) arbor.ILogger {
 		})
 	}
 
+	// Always add memory writer for WebSocket log streaming
+	logger = logger.WithMemoryWriter(models.WriterConfiguration{
+		Type:             models.LogWriterTypeMemory,
+		TimeFormat:       "15:04:05",
+		TextOutput:       true,
+		DisableTimestamp: false,
+	})
+
 	// Set log level
 	logger = logger.WithLevelFromString(config.Logging.Level)
 
