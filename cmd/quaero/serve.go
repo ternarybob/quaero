@@ -26,7 +26,7 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) {
 	log.Printf("Quaero server starting on %s:%s", serverHost, serverPort)
 	log.Println("Waiting for authentication from browser extension...")
-	
+
 	// TODO: Initialize app and start server
 	log.Println("Server implementation pending")
 }

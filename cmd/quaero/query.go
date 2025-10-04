@@ -27,9 +27,9 @@ func init() {
 
 func runQuery(cmd *cobra.Command, args []string) {
 	question := args[0]
-	
+
 	log.Printf("Searching for: %s\n", question)
-	
+
 	// TODO: Implement query
 	fmt.Println("\nQuery implementation pending\n")
 }

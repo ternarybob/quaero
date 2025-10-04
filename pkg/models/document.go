@@ -17,9 +17,9 @@ type Document struct {
 
 // Chunk represents a chunk of text with its vector embedding
 type Chunk struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
-	Embedding []float64 `json:"embedding,omitempty"`
+	ID        string                 `json:"id"`
+	Content   string                 `json:"content"`
+	Embedding []float64              `json:"embedding,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
