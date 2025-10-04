@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Monitoring Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #ffffff;
+            color: #2a2a2a;
+            font-family: sans-serif;
+            font-weight: 400;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+            position: relative;
+            min-height: 100vh;
+        }
+
+        /* Top Navbar */
+        .navbar {
+            background: #ffffff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 0 40px;
+            height: 70px;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar-brand {
+            color: #1a1a1a;
+            text-decoration: none;
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .navbar-brand-title {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 3px;
+        }
+
+        .navbar-brand-subtitle {
+            font-size: 11px;
+            font-weight: 400;
+            letter-spacing: 1px;
+            color: #6a6a6a;
+            margin-top: 2px;
+        }
+
+        .navbar-menu {
+            display: flex;
+            gap: 40px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .navbar-link {
+            font-size: 13px;
+            color: #6a6a6a;
+            text-decoration: none;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            font-family: monospace;
+            transition: all 0.3s;
+            padding-bottom: 4px;
+            border-bottom: 2px solid transparent;
+        }
+
+        .navbar-link:hover {
+            color: #1a1a1a;
+        }
+
+        .navbar-link.active {
+            color: #1a1a1a;
+            border-bottom: 2px solid #00cc00;
+        }
+
+        .navbar-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: #00cc00;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .status-text {
+            font-size: 11px;
+            color: #00cc00;
+            font-family: monospace;
+            letter-spacing: 1px;
+        }
+
+        .main-container {
+            max-width: 1920px;
+            margin: 0 auto;
+            background: #ffffff;
+        }
+
+        .dashboard-grid {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            padding: 20px 40px;
+            background: #ffffff;
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            width: 100%;
+        }
+
+        .card:hover {
+            border-color: #00cc00;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .card-title {
+            font-size: 16px;
+            color: #2a2a2a;
+            font-weight: 400;
+        }
+
+        .refresh-btn {
+            padding: 12px 30px;
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            font-family: monospace;
+            border: 1px solid;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 3px;
+            background: #000000;
+            color: #ffffff;
+            border-color: #000000;
+        }
+
+        .refresh-btn:hover {
+            background: #2a2a2a;
+            border-color: #2a2a2a;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .content-area {
+            background: #ffffff;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            min-height: 200px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.8;
+            overflow-y: auto;
+            max-height: 300px;
+            border-radius: 4px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        /* Larger content areas for Buffer and Config tabs */
+        #buffer-content,
+        #config-content {
+            min-height: 70vh;
+            max-height: 70vh;
+        }
+
+        /* Highlight.js overrides for our theme */
+        .content-area pre {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            overflow: visible;
+        }
+
+        .content-area code {
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.8;
+            background: transparent;
+        }
+
+        .hljs {
+            background: transparent !important;
+            padding: 0 !important;
+        }
+
+        .hljs-string { color: #00cc00; }
+        .hljs-number { color: #ff9900; }
+        .hljs-literal { color: #ff9900; }
+        .hljs-attr { color: #6a6a6a; font-weight: 600; }
+        .hljs-punctuation { color: #4a4a4a; }
+
+        .json-display {
+            background: #ffffff;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.8;
+            overflow-x: auto;
+            max-height: 300px;
+            border-radius: 4px;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+            color: #2a2a2a;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+            width: 100%;
+            max-width: 500px;
+            margin: 15px 0;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 20px;
+            background: #f8f8f8;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+
+        .status-item.healthy .status-value {
+            color: #00cc00;
+        }
+
+        .status-item.warning .status-value {
+            color: #ff9900;
+        }
+
+        .status-item.critical .status-value {
+            color: #ff4444;
+        }
+
+        .status-label {
+            font-size: 10px;
+            color: #8a8a8a;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: monospace;
+            margin-bottom: 10px;
+        }
+
+        .status-value {
+            font-size: 36px;
+            color: #2a2a2a;
+            font-weight: 300;
+        }
+
+        /* Metrics Section */
+        .metrics-section {
+            margin-bottom: 30px;
+            padding: 0 20px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: #f8f8f8;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .metric-card.healthy {
+            /* Removed green border to avoid false impression of all-OK */
+        }
+
+        .metric-card.warning {
+            border-left: 4px solid #ff9900;
+        }
+
+        .metric-card.critical {
+            border-left: 4px solid #ff4444;
+        }
+
+        .metric-title {
+            font-size: 12px;
+            color: #8a8a8a;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            font-family: monospace;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #2a2a2a;
+            margin: 5px 0;
+        }
+
+        .metric-subtitle {
+            font-size: 10px;
+            color: #8a8a8a;
+            margin-top: 5px;
+        }
+
+        .metrics-header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f8f8;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+
+        .metrics-header h3 {
+            margin: 0;
+            color: #2a2a2a;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .loading {
+            text-align: center;
+            color: #8a8a8a;
+            font-family: monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .error {
+            color: #ff4444;
+            background: #ffffff;
+            border: 1px solid #ff4444;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 11px;
+            border-radius: 4px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: #ffffff;
+            padding: 0 40px;
+        }
+
+        .nav-tab {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            border: none;
+            background: transparent;
+            color: #6a6a6a;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+        }
+
+        .nav-tab.active {
+            color: #2a2a2a;
+            border-bottom: 2px solid #00cc00;
+        }
+
+        .nav-tab:hover {
+            color: #2a2a2a;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 200ms ease-in;
+        }
+
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+
+        .htmx-request.htmx-indicator {
+            opacity: 1;
+        }
+
+        /* Log entry styling */
+        .log-entry {
+            color: #2a2a2a;
+            margin-bottom: 8px;
+        }
+
+        .log-timestamp {
+            color: #00cc00;
+            margin-right: 10px;
+        }
+
+        .log-entry.warning {
+            color: #ff9900;
+        }
+
+        .log-entry.error {
+            color: #ff4444;
+        }
+
+        /* Cursor blink animation */
+        .cursor-blink {
+            animation: blink 1s infinite;
+            color: #00cc00;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border: 1px solid #e0e0e0;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #c0c0c0;
+            border: 1px solid #b0b0b0;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a0a0a0;
+        }
+
+        /* Footer */
+        .system-footer {
+            background: #fafafa;
+            padding: 15px 40px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 11px;
+            color: #6a6a6a;
+            letter-spacing: 2px;
+            border-top: 1px solid #e0e0e0;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Top Navbar -->
+    <nav class="navbar">
+        <a href="#" class="navbar-brand">
+            <span class="navbar-brand-title">{{.ServiceName}}</span>
+            <span class="navbar-brand-subtitle">Industrial Data Collection & Orchestration Engine</span>
+        </a>
+        <div class="navbar-menu">
+            <a href="#overview" class="navbar-link active" onclick="showTab('overview', event)">System Status</a>
+            <a href="#buffer" class="navbar-link" onclick="showTab('buffer', event)">Buffer</a>
+            <a href="#config" class="navbar-link" onclick="showTab('config', event)">Configuration</a>
+        </div>
+        <div class="navbar-status">
+            <div class="status-indicator"></div>
+            <span class="status-text">SYSTEM ONLINE</span>
+        </div>
+    </nav>
+
+    <div class="main-container">
+
+    <!-- Overview Tab -->
+    <div id="overview" class="tab-content active">
+        <!-- Collector & Transmission Metrics -->
+        <div class="metrics-section">
+            <div id="metrics-content" hx-get="/status" hx-trigger="load, every 30s">
+                <div class="loading">Loading metrics...</div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Health Status Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">System Health Monitor</div>
+                    <button class="refresh-btn" hx-get="/health" hx-target="#health-content">
+                        Refresh
+                    </button>
+                </div>
+                <div id="health-content" class="content-area" hx-get="/health" hx-trigger="load, every 30s">
+                    <div class="loading htmx-indicator">Loading health status...</div>
+                </div>
+            </div>
+
+            <!-- System Status Card -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">Operational Status</div>
+                    <button class="refresh-btn" hx-get="/status" hx-target="#status-content">
+                        Refresh
+                    </button>
+                </div>
+                <div id="status-content" class="content-area" hx-get="/status" hx-trigger="load, every 15s">
+                    <div class="loading htmx-indicator">Loading system status...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        <!-- Buffer Tab -->
+        <div id="buffer" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Buffer Status</div>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="refresh-btn" hx-get="/database/data" hx-target="#buffer-content">
+                                Refresh Buffer
+                            </button>
+                            <button class="refresh-btn clear-btn" style="background: #ff4444; border-color: #ff4444;"
+                                    hx-delete="/database/data"
+                                    hx-target="#buffer-content"
+                                    hx-confirm="Are you sure you want to clear all buffer items? This cannot be undone.">
+                                Clear Buffer
+                            </button>
+                        </div>
+                    </div>
+                    <div id="buffer-content" class="content-area" hx-get="/database/data" hx-trigger="load">
+                        <div class="loading htmx-indicator">Loading buffer contents...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div id="config" class="tab-content">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">System Configuration</div>
+                        <button class="refresh-btn" hx-get="/config" hx-target="#config-content">
+                            Display Config
+                        </button>
+                    </div>
+                    <div id="config-content" class="content-area" hx-get="/config" hx-trigger="load">
+                        <div class="loading htmx-indicator">Loading configuration...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="system-footer">
+            {{.ServiceName}} v{{.Version}} // Build: {{.Build}} // Environment: {{.Environment}}
+        </div>
+    </div>
+
+    <script>
+        // Update performance metrics (similar to documentation style)
+        function updateMetrics() {
+            const elements = document.querySelectorAll('.status-value');
+            elements.forEach(el => {
+                if (Math.random() > 0.95) {
+                    // Subtle animation for data updates
+                    el.style.transform = 'scale(1.05)';
+                    setTimeout(() => {
+                        el.style.transform = 'scale(1)';
+                    }, 200);
+                }
+            });
+        }
+        setInterval(updateMetrics, 3000);
+        function showTab(tabName, event) {
+            // Prevent default link behavior
+            if (event) {
+                event.preventDefault();
+            }
+
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Remove active class from all navbar links
+            document.querySelectorAll('.navbar-link').forEach(link => {
+                link.classList.remove('active');
+            });
+
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+
+            // Add active class to clicked navbar link
+            if (event) {
+                event.target.classList.add('active');
+            } else {
+                // Find and activate the correct navbar link when called programmatically
+                document.querySelector(`.navbar-link[href="#${tabName}"]`).classList.add('active');
+            }
+
+            // Update URL hash
+            window.location.hash = tabName;
+        }
+
+        // Handle page load and hash changes
+        function handleHashChange() {
+            const hash = window.location.hash.slice(1); // Remove #
+            const validTabs = ['overview', 'buffer', 'config'];
+            const tabName = validTabs.includes(hash) ? hash : 'overview';
+            showTab(tabName);
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', function() {
+            handleHashChange();
+        });
+
+        // Handle hash changes (back/forward buttons)
+        window.addEventListener('hashchange', handleHashChange);
+
+        // Format and highlight responses
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            // Handle metrics content specially
+            if (evt.target.id === 'metrics-content') {
+                try {
+                    const content = evt.target.textContent.trim();
+                    if (content.startsWith('{')) {
+                        const data = JSON.parse(content);
+                        renderMetrics(evt.target, data);
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Error parsing metrics data:', e);
+                }
+            }
+
+            if (evt.target.id.includes('-content')) {
+                try {
+                    const content = evt.target.textContent.trim();
+
+                    // Check if content starts with HTML tags (error messages)
+                    if (content.startsWith('<')) {
+                        // Already formatted HTML, leave as-is
+                        return;
+                    }
+
+                    // Check if it's JSON content
+                    if (content.startsWith('{') || content.startsWith('[')) {
+                        try {
+                            // Parse and prettify JSON
+                            const jsonData = JSON.parse(content);
+                            const formattedJson = JSON.stringify(jsonData, null, 2);
+
+                            // Wrap in pre/code tags and apply highlighting
+                            evt.target.innerHTML = '<pre><code class="language-json">' +
+                                escapeHtml(formattedJson) + '</code></pre>';
+
+                            // Apply highlight.js to the new code block
+                            evt.target.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        } catch (jsonError) {
+                            // If JSON parsing fails, treat as plain text
+                            formatAsPlainText(evt.target, content);
+                        }
+                    } else if (content.length > 0) {
+                        // For non-JSON content, format as plain text with basic highlighting
+                        formatAsPlainText(evt.target, content);
+                    }
+                } catch (e) {
+                    console.error('Error formatting content:', e);
+                }
+            }
+        });
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatAsPlainText(target, content) {
+            // Check if content looks like log entries or structured data
+            if (content.includes('\n') || content.includes('=')) {
+                target.innerHTML = '<pre><code>' + escapeHtml(content) + '</code></pre>';
+            } else {
+                // Keep as-is for simple text
+                target.textContent = content;
+            }
+        }
+
+        function renderMetrics(target, data) {
+            const services = data.services || {};
+            const collection = services.collection || {};
+            const transmission = services.transmission || {};
+            const metrics = transmission.metrics || {};
+            const queueStats = transmission.queue_stats || {};
+
+            // Calculate uptime in readable format
+            const formatUptime = (seconds) => {
+                if (!seconds) return 'N/A';
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+            };
+
+            // Determine status classes
+            const getStatusClass = (running, errorCount = 0) => {
+                if (!running) return 'critical';
+                if (errorCount > 0) return 'warning';
+                return 'healthy';
+            };
+
+            const collectionClass = getStatusClass(collection.running, collection.plugin_errors || collection.failed_plugins);
+            const transmissionClass = getStatusClass(transmission.running);
+
+            // Calculate success rate class
+            const successRate = metrics.success_rate || 0;
+            const successClass = successRate > 90 ? 'healthy' : successRate > 70 ? 'warning' : 'critical';
+
+            target.innerHTML = `
+                <div class="metrics-header">
+                    <h3>Collector & Transmission Metrics</h3>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-card ${collectionClass}">
+                        <div class="metric-title">Collection Service</div>
+                        <div class="metric-value">${collection.running ? 'RUNNING' : 'STOPPED'}</div>
+                        <div class="metric-subtitle">${collection.plugins || 0} total • ${collection.registered_plugins || 0} active • ${collection.failed_plugins || 0} failed • ${formatUptime(collection.uptime)}</div>
+                    </div>
+                    <div class="metric-card ${transmissionClass}">
+                        <div class="metric-title">Transmission Service</div>
+                        <div class="metric-value">${transmission.running ? 'RUNNING' : 'STOPPED'}</div>
+                        <div class="metric-subtitle">Queue: ${queueStats.queue_length || 0} • ${formatUptime(transmission.uptime)}</div>
+                    </div>
+                    <div class="metric-card healthy">
+                        <div class="metric-title">Items Collected</div>
+                        <div class="metric-value">${metrics.total_collected || 0}</div>
+                        <div class="metric-subtitle">Total items collected</div>
+                    </div>
+                    <div class="metric-card ${successClass}">
+                        <div class="metric-title">Items Transmitted</div>
+                        <div class="metric-value">${metrics.total_transmitted || 0}</div>
+                        <div class="metric-subtitle">${successRate.toFixed(1)}% success rate</div>
+                    </div>
+                    <div class="metric-card ${metrics.total_failed > 0 ? 'warning' : 'healthy'}">
+                        <div class="metric-title">Failed Transmissions</div>
+                        <div class="metric-value">${metrics.total_failed || 0}</div>
+                        <div class="metric-subtitle">Total failed items</div>
+                    </div>
+                    <div class="metric-card healthy">
+                        <div class="metric-title">Queue Status</div>
+                        <div class="metric-value">${queueStats.batch_size || 0}/${queueStats.batch_limit || 0}</div>
+                        <div class="metric-subtitle">Current batch size</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Auto-refresh on window focus
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) {
+                // Trigger refresh of visible content
+                const activeTab = document.querySelector('.tab-content.active');
+                if (activeTab) {
+                    const refreshBtns = activeTab.querySelectorAll('.refresh-btn:not(.clear-btn)');
+                    refreshBtns.forEach(btn => btn.click());
+                }
+            }
+        });
+    </script>
+</body>
+</html>

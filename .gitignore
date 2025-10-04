@@ -1,0 +1,50 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+
+# Data directories (runtime data)
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+
+# Build artifacts
+build/
+dist/
+
+# Python
+__pycache__/
+venv/
+*.pyc
+
+# Node (for potential tooling)
+node_modules/
+
+# Config with secrets (use config.yaml.example instead)
+config.yaml
+
+# Temporary files
+*.tmp
+*.log

@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "userPromptSubmit": [
+      {
+        "type": "command",
+        "command": "node .claude/hooks/remind-standards.js"
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/go-enforce-structure.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/go-enforce-structure.js"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,7 +1,7 @@
-# Quaero: Knowledge Search System
+# quaero: Knowledge Search System
 ## Monorepo Architecture & Migration Guide
 
-**Quaero** (Latin: "I seek, I search") - A local knowledge base system with natural language query capabilities.
+**quaero** (Latin: "I seek, I search") - A local knowledge base system with natural language query capabilities.
 
 Version: 1.0  
 Date: 2025-10-04  
@@ -24,13 +24,13 @@ Author: ternarybob
 ## Project Overview
 
 ### Name Etymology
-**Quaero** [KWAI-roh] - Latin verb meaning "I seek, I search, I inquire"
+**quaero** [KWAI-roh] - Latin verb meaning "I seek, I search, I inquire"
 - First person singular present active indicative of *quaerō*
 - Perfect for a knowledge retrieval system
 - Implies active searching and questioning
 
 ### Purpose
-Quaero is a self-contained knowledge base system that:
+quaero is a self-contained knowledge base system that:
 - Collects documentation from multiple sources (Confluence, Jira, GitHub, Slack, Linear, etc.)
 - Processes and stores content with full-text and vector search
 - Provides natural language query interface using local LLMs (Ollama)
@@ -39,6 +39,7 @@ Quaero is a self-contained knowledge base system that:
 
 ### Technology Stack
 - **Language:** Go 1.21+
+- **CLI Framework:** Cobra (subcommands and flags)
 - **Storage:** RavenDB (document store with vector search)
 - **LLM:** Ollama (Qwen2.5-32B for text, Llama3.2-Vision-11B for images)
 - **Browser Automation:** rod (for web scraping)
@@ -130,8 +131,8 @@ aktis-parser/extension/              → quaero-auth-extension/
 
 **Changes needed in extension:**
 - Update `SERVICE_URL` to point to quaero server
-- Update extension name: "Quaero Authentication"
-- Update notifications to say "Quaero"
+- Update extension name: "quaero authentication"
+- Update notifications to say "quaero"
 
 #### ❌ Don't Migrate (Replaced)
 
@@ -161,8 +162,10 @@ quaero/
 │   └── quaero/                      # Single binary with subcommands
 │       ├── main.go                  # Root command & CLI setup
 │       ├── serve.go                 # 'quaero serve' - HTTP server
+│       ├── web.go                   # 'quaero web' - Development web UI
 │       ├── collect.go               # 'quaero collect' - Manual collection
 │       ├── query.go                 # 'quaero query' - Ask questions
+│       ├── inspect.go               # 'quaero inspect' - Inspect storage
 │       └── version.go               # 'quaero version' - Show version
 │
 ├── pkg/
@@ -259,6 +262,16 @@ quaero/
 │   ├── images/
 │   └── attachments/
 │
+├── web/                             # Development web interface
+│   ├── static/
+│   │   ├── index.html               # Main UI
+│   │   ├── style.css                # Styling
+│   │   └── app.js                   # Frontend logic
+│   └── templates/
+│       ├── inspect.html             # Storage inspector
+│       ├── query.html               # Query interface
+│       └── collectors.html          # Collector status
+│
 ├── docs/
 │   ├── architecture.md
 │   ├── migration.md                 # This document
@@ -289,16 +302,16 @@ quaero/
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser (User authenticated in Jira/Confluence)            │
 │  ┌────────────────────────────────────────────────┐         │
-│  │  Quaero Auth Extension                         │         │
+│  │  quaero auth extension                         │         │
 │  │  • Extracts cookies, tokens, localStorage      │         │
-│  │  • Sends to Quaero service every 30 min        │         │
+│  │  • Sends to quaero service every 30 min        │         │
 │  └──────────────────┬─────────────────────────────┘         │
 └────────────────────┼──────────────────────────────────────────┘
                      │ POST /api/auth
                      │ (auth credentials)
                      ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Quaero Server (Go - HTTP service)                          │
+│  quaero server (Go - HTTP service)                          │
 │  ┌─────────────────────────────────────────────────┐        │
 │  │  Auth Manager                                   │        │
 │  │  • Receives auth from extension                 │        │
@@ -331,7 +344,7 @@ quaero/
                      │ Query
                      ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Quaero CLI or Query Service                                │
+│  quaero CLI or Query Service                                │
 │  ┌─────────────────────────────────────────────────┐        │
 │  │  RAG Engine                                     │        │
 │  │  • Search relevant docs                         │        │
@@ -359,14 +372,14 @@ This is the **key innovation** from aktis-parser that we're preserving:
 ```
 1. User logs into Jira/Confluence normally (handles 2FA, SSO, etc.)
    ↓
-2. Quaero extension extracts complete auth state:
+2. quaero extension extracts complete auth state:
    • All cookies (.atlassian.net)
    • localStorage tokens
    • sessionStorage tokens
    • cloudId, atl_token
    • User agent
    ↓
-3. Extension POSTs to Quaero server:
+3. Extension POSTs to quaero server:
    POST http://localhost:8080/api/auth
    {
      "cookies": [...],
@@ -374,7 +387,7 @@ This is the **key innovation** from aktis-parser that we're preserving:
      "baseUrl": "https://yourcompany.atlassian.net"
    }
    ↓
-4. Quaero server stores auth credentials
+4. quaero server stores auth credentials
    ↓
 5. Collectors use stored auth to make API calls
    (No manual token management needed!)
@@ -413,7 +426,7 @@ async function extractAuthState() {
 
 #### Server Receives Auth
 
-**Quaero Server (Go):**
+**quaero server (Go):**
 ```go
 // internal/auth/handler.go
 package auth
@@ -477,6 +490,12 @@ func (c *APIClient) makeRequest(endpoint string) (*http.Response, error) {
 mkdir quaero
 cd quaero
 go mod init github.com/ternarybob/quaero
+
+# Install dependencies
+go get github.com/spf13/cobra           # CLI framework
+go get github.com/stretchr/testify      # Testing
+go get github.com/go-rod/rod            # Browser automation
+# Add RavenDB client when ready
 
 # Create directory structure
 mkdir -p cmd/quaero
@@ -645,8 +664,8 @@ import (
 
 var rootCmd = &cobra.Command{
     Use:   "quaero",
-    Short: "Quaero - Knowledge search system",
-    Long:  `Quaero (Latin: "I seek") - A local knowledge base system with natural language queries.`,
+    Short: "quaero - Knowledge search system",
+    Long:  `quaero (Latin: "I seek") - A local knowledge base system with natural language queries.`,
 }
 
 func main() {
@@ -679,7 +698,7 @@ import (
 var serveCmd = &cobra.Command{
     Use:   "serve",
     Short: "Start HTTP server to receive auth from extension",
-    Long:  `Starts the Quaero server which receives authentication from the browser extension and runs background collection.`,
+    Long:  `Starts the quaero server which receives authentication from the browser extension and runs background collection.`,
     Run:   runServe,
 }
 
@@ -700,7 +719,7 @@ func runServe(cmd *cobra.Command, args []string) {
     // Create and start server
     srv := server.New(app, serverHost, serverPort)
     
-    log.Printf("Quaero server starting on %s:%s", serverHost, serverPort)
+    log.Printf("quaero server starting on %s:%s", serverHost, serverPort)
     log.Println("Waiting for authentication from browser extension...")
     
     if err := srv.Start(); err != nil {
@@ -892,7 +911,7 @@ var versionCmd = &cobra.Command{
     Use:   "version",
     Short: "Print version information",
     Run: func(cmd *cobra.Command, args []string) {
-        fmt.Printf("Quaero version %s\n", Version)
+        fmt.Printf("quaero version %s\n", Version)
     },
 }
 ```
@@ -931,6 +950,30 @@ Implement RavenDB storage and RAG engine as per original spec.
 
 ### Phase 5: CLI & Testing (Week 5)
 
+#### Build and Test
+
+```bash
+# Build
+make build
+
+# Output: bin/quaero (single binary)
+
+# Test all commands
+./bin/quaero --help
+./bin/quaero serve --help
+./bin/quaero collect --help
+./bin/quaero query --help
+
+# Or install globally
+make install
+
+# Then use anywhere
+quaero serve
+quaero query "test question"
+```
+
+#### Create Example Queries
+
 ```bash
 # Collection
 quaero collect --all
@@ -944,12 +987,534 @@ quaero serve
 
 ---
 
+## Binary Architecture
+
+### Single Binary, Multiple Commands
+
+Quaero uses the **single binary pattern** (like Docker, Consul, Terraform):
+
+```
+quaero
+├── serve      # Start HTTP server
+├── web        # Start development web UI
+├── collect    # Trigger collection
+├── query      # Ask questions
+├── inspect    # Inspect storage/documents
+├── debug      # Debug tools
+└── version    # Show version
+```
+
+**Benefits:**
+- ✅ Simple deployment - one file
+- ✅ Consistent interface
+- ✅ Easy to install (`go install`)
+- ✅ No confusion about which binary to run
+
+### Usage Patterns
+
+#### Pattern 1: Server Mode (Recommended)
+
+Keep server running continuously:
+
+```bash
+# Start once
+quaero serve
+
+# Extension handles auth automatically
+# Server collects in background
+# Query anytime from another terminal
+quaero query "your question"
+```
+
+**When to use:**
+- Daily development workflow
+- Want automatic collection
+- Multiple users querying
+
+#### Pattern 2: Manual Mode
+
+Run collection manually when needed:
+
+```bash
+# No server running
+
+# Collect manually (uses last stored auth)
+quaero collect --all
+
+# Then query
+quaero query "your question"
+```
+
+**When to use:**
+- One-off data collection
+- Scheduled cron jobs
+- Testing/development
+
+#### Pattern 3: CLI Only
+
+Just query without server:
+
+```bash
+# Assume data already collected
+quaero query "your question"
+```
+
+**When to use:**
+- Data already in RavenDB
+- Read-only queries
+- Script automation
+
+---
+
+## Development Interface Requirements
+
+### Purpose
+
+Developers need visibility into the data pipeline for debugging, verification, and optimization:
+
+**What needs visualization:**
+1. **Data Inputs** - What's being collected from each source
+2. **Storage State** - What's in RavenDB, how it's structured
+3. **Outputs** - Query results, relevance, source attribution
+4. **Collection Status** - Which collectors ran, when, success/failure
+5. **Processing Pipeline** - Chunking, OCR, image processing results
+
+### CLI Interface (Primary)
+
+Command-line tools for quick inspection and debugging:
+
+#### Inspect Commands
+
+```bash
+# View storage stats
+quaero inspect stats
+# Output:
+# Documents: 1,247
+# Images: 89
+# Sources: confluence (892), jira (355)
+# Last updated: 2025-10-04 14:23:11
+
+# List documents from a source
+quaero inspect list --source confluence --limit 10
+
+# Show specific document
+quaero inspect doc confluence-page-12345
+# Output: Full document with metadata, chunks, images
+
+# View collection history
+quaero inspect collections
+# Output: Last 10 collection runs with status
+
+# Search without LLM (raw search results)
+quaero inspect search "authentication"
+# Output: Raw search results with scores
+```
+
+#### Debug Commands
+
+```bash
+# Test a collector without storing
+quaero collect --source confluence --dry-run --limit 5
+
+# Show what would be chunked
+quaero debug chunk --file sample.md
+
+# Test OCR on image
+quaero debug ocr --image path/to/diagram.png
+
+# Show prompt that would be sent to LLM
+quaero debug prompt "How to onboard a new user?"
+```
+
+#### Analysis Commands
+
+```bash
+# Show source breakdown
+quaero analyze sources
+
+# Show most common topics
+quaero analyze topics
+
+# Find documents without images
+quaero analyze missing-images
+
+# Storage size breakdown
+quaero analyze storage
+```
+
+### Web Interface (Development)
+
+Browser-based UI for richer visualization:
+
+#### Start Web UI
+
+```bash
+# Start development web interface
+quaero web
+
+# Or combined with server
+quaero serve --with-ui
+
+# Accessible at http://localhost:8080/ui
+```
+
+#### Web UI Features
+
+**1. Dashboard (Home Page)**
+```
+┌─────────────────────────────────────────┐
+│  quaero Development Dashboard           │
+├─────────────────────────────────────────┤
+│  Collection Status                      │
+│  ✓ Confluence: 892 docs (2h ago)       │
+│  ✓ Jira: 355 issues (2h ago)           │
+│  ○ GitHub: Not configured               │
+│                                          │
+│  Storage                                │
+│  📊 Total Documents: 1,247              │
+│  📊 Total Chunks: 15,430                │
+│  📊 Images: 89                          │
+│  📊 Attachments: 23                     │
+│                                          │
+│  Recent Queries                         │
+│  • "How to onboard?" (3 sources)       │
+│  • "Data architecture" (1 source)      │
+└─────────────────────────────────────────┘
+```
+
+**2. Document Browser**
+```
+┌─────────────────────────────────────────┐
+│  Documents                              │
+├─────────────────────────────────────────┤
+│  Filter: [confluence ▼] [all spaces ▼] │
+│  Search: [________________] 🔍          │
+│                                          │
+│  ┌─ Confluence Page: Authentication    │
+│  │  ID: confluence-page-12345          │
+│  │  Space: TEAM                        │
+│  │  Updated: 2025-10-03                │
+│  │  Chunks: 12 | Images: 3             │
+│  │  [View] [Raw JSON] [Delete]         │
+│  └─                                     │
+│                                          │
+│  ┌─ Jira Issue: DATA-123              │
+│  │  ...                                │
+└─────────────────────────────────────────┘
+```
+
+**3. Document Detail View**
+```
+┌─────────────────────────────────────────┐
+│  Authentication Guide                    │
+│  confluence-page-12345                  │
+├─────────────────────────────────────────┤
+│  Metadata                               │
+│  Source: confluence                     │
+│  Space: TEAM                            │
+│  URL: https://...                       │
+│  Updated: 2025-10-03 14:23             │
+│                                          │
+│  Content (Markdown)                     │
+│  ┌───────────────────────────────────┐ │
+│  │ # Authentication                  │ │
+│  │                                    │ │
+│  │ Our system uses OAuth 2.0...      │ │
+│  └───────────────────────────────────┘ │
+│                                          │
+│  Chunks (12)                            │
+│  ┌─ Chunk 0 (Position: 0)             │
+│  │  "# Authentication Our system..."  │
+│  │  Vector: [0.23, -0.45, ...]       │
+│  └─                                     │
+│                                          │
+│  Images (3)                             │
+│  ┌─ OAuth Flow Diagram                │
+│  │  [📷 Image Preview]                │
+│  │  OCR Text: "Client -> Auth..."    │
+│  │  Description: "Diagram showing..." │
+│  └─                                     │
+└─────────────────────────────────────────┘
+```
+
+**4. Query Debugger**
+```
+┌─────────────────────────────────────────┐
+│  Query Debugger                         │
+├─────────────────────────────────────────┤
+│  Question:                              │
+│  [How to onboard a new user?]          │
+│  [Execute Query]                        │
+│                                          │
+│  Search Results (5 documents found)    │
+│  ┌─ Onboarding Guide (score: 0.89)    │
+│  │  confluence-page-456                │
+│  │  Matched chunks: 3                  │
+│  └─                                     │
+│                                          │
+│  Context Sent to LLM                   │
+│  ┌───────────────────────────────────┐ │
+│  │ Based on the following docs:      │ │
+│  │                                    │ │
+│  │ # Onboarding Guide                │ │
+│  │ To onboard a new user...          │ │
+│  └───────────────────────────────────┘ │
+│                                          │
+│  LLM Response                           │
+│  ┌───────────────────────────────────┐ │
+│  │ To onboard a new user:            │ │
+│  │ 1. Request access...              │ │
+│  └───────────────────────────────────┘ │
+│                                          │
+│  Processing Time: 2.3s                 │
+│  Sources Used: 3                       │
+└─────────────────────────────────────────┘
+```
+
+**5. Collector Management**
+```
+┌─────────────────────────────────────────┐
+│  Collectors                             │
+├─────────────────────────────────────────┤
+│  ┌─ Confluence                         │
+│  │  Status: ✓ Running                 │
+│  │  Last run: 2h ago                  │
+│  │  Documents: 892                    │
+│  │  [Run Now] [Configure] [Logs]     │
+│  └─                                     │
+│                                          │
+│  ┌─ Jira                               │
+│  │  Status: ✓ Idle                    │
+│  │  Last run: 2h ago                  │
+│  │  Issues: 355                       │
+│  │  [Run Now] [Configure] [Logs]     │
+│  └─                                     │
+│                                          │
+│  ┌─ GitHub                             │
+│  │  Status: ○ Not configured          │
+│  │  [Configure]                        │
+│  └─                                     │
+└─────────────────────────────────────────┘
+```
+
+**6. Collection Logs**
+```
+┌─────────────────────────────────────────┐
+│  Collection Log - Confluence           │
+├─────────────────────────────────────────┤
+│  2025-10-04 12:23:11  Started          │
+│  2025-10-04 12:23:15  Authenticated    │
+│  2025-10-04 12:23:20  Fetching pages.. │
+│  2025-10-04 12:25:33  Page 1/50: Auth  │
+│  2025-10-04 12:25:34  Processing...    │
+│  2025-10-04 12:25:35  ✓ Stored         │
+│  ...                                    │
+│  2025-10-04 12:48:22  ✓ Complete       │
+│  Total: 892 documents, 89 images       │
+└─────────────────────────────────────────┘
+```
+
+### Implementation
+
+#### CLI Commands Code
+
+```go
+// cmd/quaero/inspect.go
+var inspectCmd = &cobra.Command{
+    Use:   "inspect",
+    Short: "Inspect storage and documents",
+}
+
+var inspectStatsCmd = &cobra.Command{
+    Use:   "stats",
+    Short: "Show storage statistics",
+    Run:   runInspectStats,
+}
+
+var inspectDocCmd = &cobra.Command{
+    Use:   "doc [id]",
+    Short: "Show document details",
+    Args:  cobra.ExactArgs(1),
+    Run:   runInspectDoc,
+}
+
+var inspectListCmd = &cobra.Command{
+    Use:   "list",
+    Short: "List documents",
+    Run:   runInspectList,
+}
+
+func init() {
+    inspectCmd.AddCommand(inspectStatsCmd)
+    inspectCmd.AddCommand(inspectDocCmd)
+    inspectCmd.AddCommand(inspectListCmd)
+    
+    inspectListCmd.Flags().StringVar(&source, "source", "", "Filter by source")
+    inspectListCmd.Flags().IntVar(&limit, "limit", 20, "Limit results")
+}
+```
+
+#### Web UI Code
+
+```go
+// cmd/quaero/web.go
+var webCmd = &cobra.Command{
+    Use:   "web",
+    Short: "Start development web interface",
+    Long:  `Starts a web interface for inspecting data, testing queries, and monitoring collectors.`,
+    Run:   runWeb,
+}
+
+var webPort string
+
+func init() {
+    webCmd.Flags().StringVar(&webPort, "port", "8080", "Web UI port")
+}
+
+func runWeb(cmd *cobra.Command, args []string) {
+    app := app.New()
+    
+    // Serve static files
+    http.Handle("/", http.FileServer(http.Dir("web/static")))
+    
+    // API endpoints for UI
+    http.HandleFunc("/api/documents", app.HandleListDocuments)
+    http.HandleFunc("/api/document/", app.HandleGetDocument)
+    http.HandleFunc("/api/stats", app.HandleGetStats)
+    http.HandleFunc("/api/query", app.HandleQuery)
+    http.HandleFunc("/api/collectors", app.HandleCollectors)
+    http.HandleFunc("/api/logs", app.HandleLogs)
+    
+    log.Printf("Web UI available at http://localhost:%s", webPort)
+    http.ListenAndServe(":"+webPort, nil)
+}
+```
+
+#### Simple HTML/JS UI
+
+```html
+<!-- web/static/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>quaero - Development Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav>
+        <h1>quaero</h1>
+        <ul>
+            <li><a href="#dashboard">Dashboard</a></li>
+            <li><a href="#documents">Documents</a></li>
+            <li><a href="#query">Query</a></li>
+            <li><a href="#collectors">Collectors</a></li>
+        </ul>
+    </nav>
+    
+    <main id="app">
+        <!-- Dynamic content loaded here -->
+    </main>
+    
+    <script src="app.js"></script>
+</body>
+</html>
+```
+
+```javascript
+// web/static/app.js
+async function loadDashboard() {
+    const stats = await fetch('/api/stats').then(r => r.json());
+    
+    document.getElementById('app').innerHTML = `
+        <h2>Dashboard</h2>
+        <div class="stats">
+            <div class="stat">
+                <h3>${stats.documents}</h3>
+                <p>Documents</p>
+            </div>
+            <div class="stat">
+                <h3>${stats.chunks}</h3>
+                <p>Chunks</p>
+            </div>
+            <div class="stat">
+                <h3>${stats.images}</h3>
+                <p>Images</p>
+            </div>
+        </div>
+    `;
+}
+```
+
+### Development Workflow
+
+**Typical development session:**
+
+```bash
+# Terminal 1: Start web UI
+quaero web
+
+# Terminal 2: Run collection
+quaero collect --source confluence --dry-run
+
+# Browser: http://localhost:8080
+# - View what would be collected
+# - Inspect chunking strategy
+# - Test search queries
+# - Debug RAG pipeline
+
+# Terminal 2: Actually collect
+quaero collect --source confluence
+
+# Browser: Refresh to see new documents
+
+# Terminal 2: Test query
+quaero query "How to authenticate?"
+
+# Browser: Use Query Debugger
+# - See search results
+# - View context sent to LLM
+# - Inspect answer quality
+```
+
+### Why Both CLI and Web?
+
+**CLI:**
+- ✅ Fast for scripting/automation
+- ✅ Works in SSH/remote environments
+- ✅ Great for CI/CD pipelines
+- ✅ Unix philosophy (composable)
+
+**Web UI:**
+- ✅ Visual inspection of documents
+- ✅ Image preview
+- ✅ Rich formatting
+- ✅ Easier for non-technical users
+- ✅ Better for debugging complex queries
+
+### Production vs Development
+
+**Development Mode (default):**
+- Web UI enabled
+- Verbose logging
+- Debug endpoints
+- No authentication
+
+**Production Mode (future):**
+```bash
+quaero serve --production
+# - Web UI requires auth
+# - Reduced logging
+# - Debug endpoints disabled
+```
+
+---
+
 ## Configuration
 
 ```yaml
 # config.yaml
 app:
-  name: "Quaero"
+  name: "quaero"
   version: "1.0.0"
 
 server:
@@ -1021,17 +1586,31 @@ make test-e2e
 ## Makefile
 
 ```makefile
-.PHONY: build test migrate
+.PHONY: build test migrate clean run-serve run-collect run-query
 
-# Build
+# Build single binary
 build:
 	go build -o bin/quaero ./cmd/quaero
-	go build -o bin/quaero-server ./cmd/quaero-server
+
+# Install globally
+install:
+	go install ./cmd/quaero
 
 # Test
 test:
 	go test ./...
 
+test-unit:
+	go test -short ./...
+
+test-integration:
+	go test ./test/integration/...
+
+test-coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out
+
+# Test specific components
 test-auth:
 	go test ./internal/auth/...
 
@@ -1041,26 +1620,82 @@ test-jira:
 test-confluence:
 	go test ./internal/sources/confluence/...
 
-test-integration:
-	go test ./test/integration/...
+test-rag:
+	go test ./internal/rag/...
+
+# Run commands
+serve:
+	go run ./cmd/quaero serve
+
+web:
+	go run ./cmd/quaero web
+
+inspect-stats:
+	go run ./cmd/quaero inspect stats
+
+inspect-list:
+	go run ./cmd/quaero inspect list --source confluence
+
+collect:
+	go run ./cmd/quaero collect --all
+
+collect-confluence:
+	go run ./cmd/quaero collect --source confluence
+
+collect-jira:
+	go run ./cmd/quaero collect --source jira
+
+query:
+	@if [ -z "$(Q)" ]; then \
+		echo "Usage: make query Q=\"your question\""; \
+	else \
+		go run ./cmd/quaero query "$(Q)"; \
+	fi
 
 # Migrate from aktis-parser
 migrate:
 	./scripts/migrate_from_aktis.sh
 
-# Run
-serve:
-	go run ./cmd/quaero-server
+# Development
+fmt:
+	go fmt ./...
+	goimports -w .
 
-collect:
-	go run ./cmd/quaero collect --all
+lint:
+	golangci-lint run
 
-query:
-	go run ./cmd/quaero query "$(Q)"
+# Watch tests
+watch:
+	find . -name "*.go" | entr -c make test-unit
 
 # Clean
 clean:
-	rm -rf bin/ data/
+	rm -rf bin/
+	rm -rf data/
+	rm -f coverage.out
+
+# Setup development environment
+setup:
+	go mod download
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install golang.org/x/tools/cmd/goimports@latest
+	./scripts/setup.sh
+
+# Help
+help:
+	@echo "quaero Makefile Commands:"
+	@echo "  make build            - Build quaero binary"
+	@echo "  make install          - Install quaero globally"
+	@echo "  make test             - Run all tests"
+	@echo "  make test-integration - Run integration tests"
+	@echo "  make serve            - Start server"
+	@echo "  make web              - Start development web UI"
+	@echo "  make inspect-stats    - Show storage statistics"
+	@echo "  make inspect-list     - List documents"
+	@echo "  make collect          - Collect from all sources"
+	@echo "  make query Q=\"...\"    - Run a query"
+	@echo "  make migrate          - Migrate from aktis-parser"
+	@echo "  make clean            - Clean build artifacts"
 ```
 
 ---
@@ -1095,11 +1730,25 @@ github.com/ternarybob/quaero-docs          # Documentation
 1. **Create quaero repo** - Setup monorepo structure
 2. **Run migration script** - Copy code from aktis-parser
 3. **Refactor to interfaces** - Adapt to new architecture
-4. **Create extension repo** - Separate out the extension
-5. **Test auth flow** - Verify end-to-end
-6. **Implement storage** - RavenDB integration
-7. **Build RAG** - Query engine
-8. **Add more sources** - GitHub, Slack, etc.
+4. **Implement CLI with Cobra** - Single binary with subcommands
+5. **Create extension repo** - Separate out the extension
+6. **Test auth flow** - Verify end-to-end
+7. **Implement storage** - RavenDB integration
+8. **Build RAG** - Query engine
+9. **Add more sources** - GitHub, Slack, etc.
+
+### Quick Start After Migration
+
+```bash
+# Build
+make build
+
+# Terminal 1: Start server
+./bin/quaero serve
+
+# Terminal 2: (after extension sends auth)
+./bin/quaero query "How to onboard a new user?"
+```
 
 ---
 
@@ -1114,4 +1763,4 @@ github.com/ternarybob/quaero-docs          # Documentation
 
 ---
 
-**Quaero: I seek knowledge. 🔍**
+**quaero: I seek knowledge. 🔍**

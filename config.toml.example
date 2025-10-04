@@ -1,0 +1,47 @@
+[app]
+name = "Quaero"
+version = "1.0.0"
+
+[server]
+port = 8080
+host = "localhost"
+
+[sources.confluence]
+enabled = true
+spaces = ["TEAM", "DOCS"]
+
+[sources.jira]
+enabled = true
+projects = ["DATA", "ENG"]
+
+[sources.github]
+enabled = true
+token = "${GITHUB_TOKEN}"
+repos = ["your-org/repo1"]
+
+[sources.slack]
+enabled = false
+
+[sources.linear]
+enabled = false
+
+[sources.notion]
+enabled = false
+
+[storage.ravendb]
+urls = ["http://localhost:8080"]
+database = "quaero"
+
+[storage.filesystem]
+images = "./data/images"
+attachments = "./data/attachments"
+
+[llm.ollama]
+url = "http://localhost:11434"
+text_model = "qwen2.5:32b"
+vision_model = "llama3.2-vision:11b"
+
+[logging]
+level = "info"
+format = "text"
+output = "stdout"
