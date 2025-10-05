@@ -262,6 +262,17 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		}
 	}
 
+	// Apply defaults if not set (prevents SQL syntax errors)
+	if opts.OrderBy == "" {
+		opts.OrderBy = "updated_at"
+	}
+	if opts.OrderDir == "" {
+		opts.OrderDir = "desc"
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 50
+	}
+
 	query := "SELECT id, source_type, source_id, title, content, content_markdown, embedding, embedding_model, metadata, url, created_at, updated_at FROM documents"
 
 	// Add WHERE clause if filtering by source

@@ -2,7 +2,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": [
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

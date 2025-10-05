@@ -61,7 +61,7 @@ func (s *JiraScraperService) scrapeProjectIssues(projectKey string) error {
 			break
 		}
 
-		startAt += len(issues)
+		startAt += maxResults
 		time.Sleep(300 * time.Millisecond)
 	}
 
