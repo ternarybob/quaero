@@ -19,11 +19,12 @@ Quaero draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zer
 - Tool-based architecture for modular RAG components
 
 **Key differences from Agent Zero:**
-- **Deployment**: Native Go binary (no Docker) vs Docker-required
-- **Scope**: Focused knowledge base vs general AI assistant
-- **Storage**: SQLite with FTS5 vs FAISS vector database
-- **LLM**: Ollama-only (local-first) vs multi-provider via LiteLLM
-- **UI**: WebSocket streaming vs HTTP polling
+- **Deployment:** Quaero runs as native binary (Agent Zero requires Docker)
+- **LLM Strategy:** Multi-provider with cloud-first approach (Agent Zero: local-first with LiteLLM)
+- **Scope:** Focused knowledge base vs general AI assistant
+- **Storage:** SQLite with FTS5 vs FAISS vector database
+- **UI:** WebSocket streaming vs HTTP polling
+- **Default Setup:** Cloud API (simple) with optional local Ollama (privacy)
 
 ---
 
@@ -44,7 +45,9 @@ Quaero is a self-contained knowledge base system that:
 - **Language:** Go 1.25+
 - **Web UI:** HTML templates, vanilla JavaScript, WebSockets
 - **Storage:** SQLite with FTS5 (full-text search) and vector embeddings
-- **LLM:** Ollama (local models for embeddings and text generation) - **NO Docker required**
+- **LLM Integration:** Multi-provider support (Claude, Gemini, OpenAI, or local Ollama)
+  - **Recommended:** Cloud providers (API key only, no infrastructure)
+  - **Optional:** Local Ollama (requires Docker, privacy-focused)
 - **Browser Automation:** rod (for web scraping)
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
@@ -53,24 +56,52 @@ Quaero is a self-contained knowledge base system that:
 
 ### Deployment Model
 
-**Zero Dependencies Deployment:**
-- Quaero: Native Go binary (Windows, macOS, Linux)
-- Ollama: Native service (no Docker)
-- SQLite: Embedded database (no server)
-- **Total Docker containers required: 0**
+**Quaero Application:**
+- Native Go binary (Windows, macOS, Linux)
+- SQLite embedded database (no server)
+- **No Docker required for Quaero itself**
 
-**Installation:**
+**LLM Provider Options:**
+
+**Option A: Cloud Providers (Recommended - Simplest)**
+- **Claude (Anthropic):** API key only
+- **Gemini (Google):** API key only
+- **OpenAI (GPT-4):** API key only
+- **Setup:** Add API key to config file or environment variable
+- **Advantages:** Zero infrastructure, latest models, no Docker
+
+**Option B: Local Ollama (Privacy-Focused)**
+- **Deployment:** Best run via Docker (local setup is complex)
+- **Setup:** Docker Compose or manual Docker container
+- **Advantages:** Fully local, no external API calls, privacy
+- **Disadvantages:** Requires Docker, resource-intensive
+
+**Recommended Setup (Cloud Provider):**
 ```bash
-# Install Ollama (native service)
-# Windows: Download from ollama.com
-# macOS: brew install ollama
-# Linux: curl -fsSL https://ollama.com/install.sh | sh
+# 1. Install Quaero
+./bin/quaero serve --config deployments/local/quaero.toml
 
-# Pull models
-ollama pull nomic-embed-text
-ollama pull qwen2.5:32b
+# 2. Configure LLM provider (example: Claude)
+export QUAERO_LLM_PROVIDER=anthropic
+export QUAERO_LLM_API_KEY=sk-ant-xxx
+export QUAERO_EMBEDDING_PROVIDER=openai
+export QUAERO_EMBEDDING_API_KEY=sk-xxx
 
-# Run Quaero
+# That's it - no Docker needed!
+```
+
+**Alternative Setup (Local Ollama with Docker):**
+```bash
+# 1. Run Ollama in Docker
+docker run -d -p 11434:11434 ollama/ollama
+docker exec -it ollama ollama pull nomic-embed-text
+docker exec -it ollama ollama pull qwen2.5:32b
+
+# 2. Configure Quaero for Ollama
+export QUAERO_LLM_PROVIDER=ollama
+export QUAERO_LLM_URL=http://localhost:11434
+
+# 3. Run Quaero
 ./bin/quaero serve --config deployments/local/quaero.toml
 ```
 
@@ -139,14 +170,33 @@ path = "./data/quaero.db"
 [storage.sqlite]
 enable_fts5 = true
 enable_vector = true
-embedding_dimension = 768
+embedding_dimension = 768  # Varies by embedding provider
 cache_size_mb = 100
 wal_mode = true
 
-[embeddings]
-ollama_url = "http://localhost:11434"
-model = "nomic-embed-text"
-dimension = 768
+# LLM Configuration - Option A: Cloud Providers (Recommended)
+[llm]
+provider = "anthropic"  # anthropic, openai, google, ollama
+api_key = ""  # Set via environment variable
+chat_model = "claude-3-5-sonnet-20241022"
+
+[llm.embeddings]
+provider = "openai"  # openai, cohere, ollama
+api_key = ""  # Set via environment variable
+model = "text-embedding-3-small"
+dimension = 1536
+
+# LLM Configuration - Option B: Local Ollama (Privacy-focused)
+# [llm]
+# provider = "ollama"
+# url = "http://localhost:11434"
+# chat_model = "qwen2.5:32b"
+#
+# [llm.embeddings]
+# provider = "ollama"
+# url = "http://localhost:11434"
+# model = "nomic-embed-text"
+# dimension = 768
 
 [processing]
 schedule = "0 0 */6 * * *"  # Every 6 hours
@@ -155,12 +205,38 @@ enabled = true
 
 ### Environment Variables
 
+**Cloud Provider Configuration:**
 ```bash
+# Server
 QUAERO_PORT=8080
 QUAERO_HOST=localhost
 QUAERO_LOG_LEVEL=info
+
+# Data Sources
 QUAERO_GITHUB_TOKEN=ghp_xxx
-QUAERO_OLLAMA_URL=http://localhost:11434
+
+# LLM - Cloud Provider (Recommended)
+QUAERO_LLM_PROVIDER=anthropic  # or openai, google
+QUAERO_LLM_API_KEY=sk-ant-xxx
+QUAERO_LLM_CHAT_MODEL=claude-3-5-sonnet-20241022
+
+QUAERO_EMBEDDING_PROVIDER=openai  # or cohere, anthropic
+QUAERO_EMBEDDING_API_KEY=sk-xxx
+QUAERO_EMBEDDING_MODEL=text-embedding-3-small
+QUAERO_EMBEDDING_DIMENSION=1536
+```
+
+**Local Ollama Configuration (Optional):**
+```bash
+# LLM - Local Ollama (Privacy-focused)
+QUAERO_LLM_PROVIDER=ollama
+QUAERO_LLM_URL=http://localhost:11434
+QUAERO_LLM_CHAT_MODEL=qwen2.5:32b
+
+QUAERO_EMBEDDING_PROVIDER=ollama
+QUAERO_EMBEDDING_URL=http://localhost:11434
+QUAERO_EMBEDDING_MODEL=nomic-embed-text
+QUAERO_EMBEDDING_DIMENSION=768
 ```
 
 ---
@@ -280,9 +356,13 @@ type RAGTool interface {
 ```
 
 **LLM Integration:**
-- Primary: Ollama (local models)
-- Future: Multi-provider via LiteLLM (if needed)
-- Model roles: chat (text generation), embedding (vectors)
+- **Primary:** Multi-provider support (Claude, Gemini, OpenAI, Ollama)
+- **Implementation:** LiteLLM for unified API across providers
+- **Recommended:** Cloud providers (simplest setup - just API keys)
+- **Privacy Option:** Local Ollama (requires Docker)
+- **Model Roles:**
+  - **Embedding:** Generate vector embeddings (OpenAI, Cohere, or Ollama)
+  - **Chat:** Answer generation (Claude, Gemini, GPT-4, or Ollama)
 
 ---
 

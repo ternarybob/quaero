@@ -8,14 +8,15 @@
 
 ## Overview
 
-Quaero is a knowledge collection and search system that gathers documentation from multiple sources (Confluence, Jira, GitHub) and provides semantic search capabilities using vector embeddings and local LLMs.
+Quaero is a knowledge collection and search system that gathers documentation from multiple sources (Confluence, Jira, GitHub) and provides semantic search capabilities using vector embeddings and multi-provider LLM integration.
 
 **Inspiration:** Quaero's memory system and RAG architecture draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zero), adapting its intelligent memory categorization and tool-based RAG approach for knowledge base management.
 
 **Key Differences from Agent Zero:**
-- **Deployment:** Native Go binary (no Docker required)
+- **Deployment:** Native Go binary (Quaero itself requires no Docker)
 - **Storage:** SQLite with FTS5 + vector embeddings (vs FAISS)
-- **LLM Integration:** Ollama-only for simplicity (vs LiteLLM multi-provider)
+- **LLM Strategy:** Multi-provider with cloud-first approach (vs local-first with Docker)
+- **Simplest Setup:** Cloud API keys (vs Docker Compose)
 - **Scope:** Focused knowledge base for enterprise documentation (vs general AI assistant)
 - **UI:** WebSocket-based real-time updates (vs HTTP polling)
 
@@ -154,11 +155,18 @@ Quaero is a knowledge collection and search system that gathers documentation fr
                      │
                      ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  Ollama (Local LLM Server - Native Service)                     │
-│  • Runs at localhost:11434 (NO Docker required)                 │
-│  • nomic-embed-text - Embedding generation (768d)               │
-│  • qwen2.5:32b / llama3.2 - Text generation (RAG)               │
-│  • llama3.2-vision:11b - Vision tasks (future)                  │
+│  LLM Provider (Multi-Provider Support)                          │
+│                                                                  │
+│  Option A: Cloud APIs (Recommended - Simplest)                  │
+│  • Claude (Anthropic) - Best reasoning                          │
+│  • Gemini (Google) - Fast multimodal                            │
+│  • OpenAI (GPT-4) - Industry standard                           │
+│  • Setup: API key only (NO Docker)                              │
+│                                                                  │
+│  Option B: Local Ollama (Privacy-focused)                       │
+│  • Runs in Docker at localhost:11434                            │
+│  • nomic-embed-text (768d), qwen2.5:32b                         │
+│  • Setup: Docker required                                       │
 │                                                                  │
 │  RAG Pipeline:                                                   │
 │  ┌────────────────────────────────────────────────────┐         │
@@ -764,38 +772,104 @@ WS   /ws                            - WebSocket connection
 
 ### Architecture Philosophy
 
-Quaero follows a **Docker-free, native binary** deployment model for both the application and LLM infrastructure.
+Quaero supports **multi-provider LLM integration** with a cloud-first approach for simplicity, and optional local deployment for privacy.
 
-### Ollama Integration
+### Deployment Options
 
-**Current Implementation:**
-- **Deployment:** Ollama runs as a native service (Windows/Linux/macOS)
-- **Connection:** HTTP API at `localhost:11434`
-- **NO Docker Required:** Both Quaero and Ollama run as native processes
-- **Models:**
-  - **Embedding:** `nomic-embed-text` (768 dimensions)
-  - **Chat:** `qwen2.5:32b`, `llama3.2`, or user's choice
-  - **Vision:** `llama3.2-vision:11b` (future, for image processing)
+**Option A: Cloud Providers (Recommended - Simplest)**
 
-**Why Ollama-Only?**
-- **Simplicity:** Single dependency, easy setup
-- **Performance:** Native performance without Docker overhead
-- **Privacy:** Fully local, no external API calls
-- **Reliability:** Stable API, active development
-- **User Choice:** Users can select any Ollama-compatible model
+**Supported Providers:**
+- **Claude (Anthropic):** Best for reasoning and analysis
+- **Gemini (Google):** Fast, multimodal capabilities
+- **OpenAI (GPT-4):** Industry standard, reliable
+- **Cohere:** Specialized in embeddings and search
 
-### Future: Multi-Provider Support (Optional)
+**Setup:**
+- Requires API key only (no infrastructure)
+- Set via environment variable or config file
+- Zero Docker requirement
+- Access to latest models
 
-**If users request it:**
-- **LiteLLM Integration:** Optional abstraction layer for multiple providers
-- **Supported Providers:** OpenAI, Anthropic, Azure, local models
-- **Backward Compatibility:** Ollama remains default and recommended
-- **Configuration:** Provider selection via config file
+**Example Configuration:**
+```toml
+[llm]
+provider = "anthropic"
+api_key = "${ANTHROPIC_API_KEY}"
+chat_model = "claude-3-5-sonnet-20241022"
 
-**Decision Criteria:**
-- Wait for user demand before adding complexity
-- Maintain Ollama as primary/recommended path
-- Ensure Docker-free deployment remains possible
+[llm.embeddings]
+provider = "openai"
+api_key = "${OPENAI_API_KEY}"
+model = "text-embedding-3-small"
+dimension = 1536
+```
+
+**Option B: Local Ollama (Privacy-Focused)**
+
+**When to Use:**
+- Privacy requirements (no external API calls)
+- Air-gapped environments
+- Cost optimization for high volume
+
+**Setup Requirements:**
+- **Docker required** (Ollama local setup is complex)
+- Resource-intensive (8GB+ RAM for good models)
+- Manual model management
+
+**Docker Setup:**
+```bash
+# Run Ollama in Docker
+docker run -d -p 11434:11434 ollama/ollama
+
+# Pull models
+docker exec ollama ollama pull nomic-embed-text
+docker exec ollama ollama pull qwen2.5:32b
+```
+
+**Configuration:**
+```toml
+[llm]
+provider = "ollama"
+url = "http://localhost:11434"
+chat_model = "qwen2.5:32b"
+
+[llm.embeddings]
+provider = "ollama"
+url = "http://localhost:11434"
+model = "nomic-embed-text"
+dimension = 768
+```
+
+### LiteLLM Integration
+
+**Unified API Layer:**
+- Single codebase supports all providers
+- Runtime provider switching via configuration
+- Automatic retries and fallbacks
+- Rate limiting and cost tracking
+
+**Implementation:**
+```go
+// Unified interface for all providers
+type LLMClient interface {
+    Chat(ctx context.Context, messages []Message) (string, error)
+    Embed(ctx context.Context, text string) ([]float32, error)
+}
+
+// Factory creates provider-specific clients
+func NewLLMClient(config *LLMConfig) (LLMClient, error) {
+    switch config.Provider {
+    case "anthropic":
+        return NewClaudeClient(config.APIKey), nil
+    case "openai":
+        return NewOpenAIClient(config.APIKey), nil
+    case "google":
+        return NewGeminiClient(config.APIKey), nil
+    case "ollama":
+        return NewOllamaClient(config.URL), nil
+    }
+}
+```
 
 ### Embedding Cache
 
@@ -839,8 +913,10 @@ Quaero follows a **Docker-free, native binary** deployment model for both the ap
 | **Primary Purpose** | Enterprise knowledge base | General AI assistant |
 | **Deployment** | Native Go binary | Docker containers |
 | **Storage** | SQLite + FTS5 + vector | FAISS + ChromaDB |
-| **LLM Provider** | Ollama (local only) | LiteLLM (multi-provider) |
-| **Docker Required** | NO | Yes |
+| **LLM Provider** | Multi-provider (cloud-first) | LiteLLM (local-first) |
+| **LLM Default** | Cloud APIs (Claude, Gemini, OpenAI) | Local Ollama |
+| **Docker Required** | Only for local Ollama (optional) | Yes (always) |
+| **Simplest Setup** | Cloud API key | Docker Compose |
 | **Language** | Go | Python |
 | **UI Updates** | WebSocket (real-time) | HTTP polling |
 | **Memory System** | Categorized (Main/Fragments/Solutions/Facts) | Categorized (similar approach) |
@@ -849,10 +925,10 @@ Quaero follows a **Docker-free, native binary** deployment model for both the ap
 | **Search** | Hybrid (FTS5 + vector) | Vector only |
 | **Focus** | Documentation (Jira, Confluence, GitHub) | General tasks + memory |
 | **Similarity Threshold** | 0.7 (configurable) | Configurable |
-| **Installation** | Single binary + Ollama | Docker compose |
-| **Dependencies** | Minimal (SQLite, Ollama) | Multiple (Docker, LiteLLM, etc.) |
+| **Installation** | Binary + API key OR Docker Ollama | Docker compose |
+| **Privacy Option** | Optional local Ollama (Docker) | Default local (Docker) |
 
-**Key Takeaway:** Quaero adapts Agent Zero's intelligent memory categorization and tool-based RAG architecture while maintaining a simpler, Docker-free deployment model focused specifically on enterprise knowledge management.
+**Key Takeaway:** Quaero adapts Agent Zero's intelligent memory categorization and tool-based RAG architecture while offering a simpler cloud-first deployment (just API keys) OR optional local Ollama (requires Docker), focused specifically on enterprise knowledge management.
 
 ---
 
@@ -875,7 +951,10 @@ Quaero follows a **Docker-free, native binary** deployment model for both the ap
 
 **Browser:** Chrome Extension (Manifest V3)
 
-**LLM:** Ollama (local, native service - NO Docker)
+**LLM:** Multi-provider support via unified client interface
+- **Recommended:** Cloud providers (Claude, Gemini, OpenAI) - API key only
+- **Privacy Option:** Local Ollama (requires Docker)
+- **Implementation:** Provider-agnostic interface with runtime switching
 
 ---
 
