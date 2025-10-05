@@ -1,8 +1,23 @@
 # Quaero Project Standards
 
+## Agent-Based Development System
+
+This project uses an **autonomous agent architecture** with specialized agents in `.claude/agents/`:
+
+- **overwatch.md** - Guardian (always active, reviews all changes, delegates)
+- **go-refactor.md** - Code quality (consolidates duplicates, optimizes structure)
+- **go-compliance.md** - Standards enforcement (logging, startup, configuration)
+- **test-engineer.md** - Testing (writes tests, ensures coverage)
+- **collector-impl.md** - Collectors (Jira, Confluence, GitHub only)
+- **doc-writer.md** - Documentation (maintains docs, requirements)
+
+**Usage:** Overwatch reviews all Write/Edit automatically. Explicitly invoke: `> Use go-refactor to consolidate duplicates`
+
+---
+
 ## Code Quality Enforcement System
 
-This project includes an automated code quality enforcement system that runs continuously to ensure code structure compliance and prevent duplicate implementations.
+This project includes an automated code quality enforcement system integrated with the agent architecture.
 
 **Language-Specific Enforcement:**
 - **Go**: Clean architecture patterns, receiver methods, directory structure compliance
@@ -76,19 +91,60 @@ This ensures:
 
 ### Directory Structure
 ```
-cmd/quaero/                  Main entry point
-internal/common/             Stateless utility functions - NO receiver methods
-internal/services/           Stateful services with receiver methods
-internal/handlers/           HTTP handlers (dependency injection)
-internal/models/             Data models
-internal/interfaces/         Service interface definitions
-pkg/                         Public packages
-data/                        Data files
-docs/                        Documentation
-scripts/                     Build and deployment scripts
-test/                        Test files
-.github/workflows/           CI/CD pipelines
+cmd/quaero/                      Main entry point
+cmd/quaero-chrome-extension/     Chrome extension for authentication
+internal/
+  ├── common/                    Stateless utilities - NO receiver methods
+  ├── services/                  Stateful services WITH receiver methods
+  │   ├── atlassian/            Jira & Confluence collectors
+  │   └── github/               GitHub collector
+  ├── handlers/                  HTTP handlers (dependency injection)
+  │   ├── websocket.go          WebSocket for real-time updates
+  │   ├── collector.go          Collector endpoints
+  │   └── ui.go                 Web UI handler
+  ├── models/                    Data models
+  ├── interfaces/                Service interfaces
+  └── server/                    HTTP server
+pages/                           Web UI templates (NOT CLI)
+  ├── index.html                Main dashboard
+  ├── confluence.html           Confluence UI
+  ├── jira.html                 Jira UI
+  ├── partials/                 Reusable components
+  └── static/                   CSS, JS
+test/                            Integration tests
+docs/                            Documentation
+scripts/                         Build scripts
+.github/workflows/               CI/CD
 ```
+
+### Quaero-Specific Requirements
+
+**Collectors (ONLY These):**
+1. **Jira** (`internal/services/atlassian/jira_*`)
+2. **Confluence** (`internal/services/atlassian/confluence_*`)
+3. **GitHub** (`internal/services/github/*`)
+
+**Web UI (NOT CLI):**
+- Templates in `pages/*.html`
+- NO CLI commands for collection
+- WebSocket for real-time updates
+- Log streaming to browser
+
+**Chrome Extension:**
+- Location: `cmd/quaero-chrome-extension/`
+- Captures authentication from Atlassian
+- WebSocket communication with server
+
+**Configuration Priority:**
+1. CLI flags (highest)
+2. Environment variables
+3. Config file (`config.toml`)
+4. Defaults (lowest)
+
+**Banner Requirement:**
+- MUST display on startup using `ternarybob/banner`
+- MUST show version, host, port
+- MUST log configuration source
 
 ### Critical Distinctions
 

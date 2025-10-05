@@ -67,7 +67,5 @@ func init() {
 
 	// Add subcommands
 	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(collectCmd)
-	rootCmd.AddCommand(queryCmd)
 	rootCmd.AddCommand(versionCmd)
 }

@@ -1,0 +1,56 @@
+package server
+
+import "net/http"
+
+// setupRoutes configures all HTTP routes
+func (s *Server) setupRoutes() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// UI routes
+	mux.HandleFunc("/", s.app.UIHandler.IndexHandler)
+	mux.HandleFunc("/jira", s.app.UIHandler.JiraPageHandler)
+	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler)
+	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/ui/status", s.app.UIHandler.StatusHandler)
+	mux.HandleFunc("/ui/parser-status", s.app.UIHandler.ParserStatusHandler)
+
+	// WebSocket route
+	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
+
+	// API routes - Authentication
+	mux.HandleFunc("/api/auth", s.app.ScraperHandler.AuthUpdateHandler)
+
+	// API routes - Scraping (UI-triggered collection)
+	mux.HandleFunc("/api/scrape", s.app.ScraperHandler.ScrapeHandler)
+	mux.HandleFunc("/api/scrape/projects", s.app.ScraperHandler.ScrapeProjectsHandler)
+	mux.HandleFunc("/api/scrape/spaces", s.app.ScraperHandler.ScrapeSpacesHandler)
+
+	// API routes - Cache management
+	mux.HandleFunc("/api/projects/refresh-cache", s.app.ScraperHandler.RefreshProjectsCacheHandler)
+	mux.HandleFunc("/api/projects/get-issues", s.app.ScraperHandler.GetProjectIssuesHandler)
+	mux.HandleFunc("/api/spaces/refresh-cache", s.app.ScraperHandler.RefreshSpacesCacheHandler)
+	mux.HandleFunc("/api/spaces/get-pages", s.app.ScraperHandler.GetSpacePagesHandler)
+
+	// API routes - Data management
+	mux.HandleFunc("/api/data/clear-all", s.app.ScraperHandler.ClearAllDataHandler)
+	mux.HandleFunc("/api/data/jira", s.app.DataHandler.GetJiraDataHandler)
+	mux.HandleFunc("/api/data/jira/issues", s.app.DataHandler.GetJiraIssuesHandler)
+	mux.HandleFunc("/api/data/confluence", s.app.DataHandler.GetConfluenceDataHandler)
+	mux.HandleFunc("/api/data/confluence/pages", s.app.DataHandler.GetConfluencePagesHandler)
+
+	// API routes - Collector (paginated data)
+	mux.HandleFunc("/api/collector/projects", s.app.CollectorHandler.GetProjectsHandler)
+	mux.HandleFunc("/api/collector/spaces", s.app.CollectorHandler.GetSpacesHandler)
+	mux.HandleFunc("/api/collector/issues", s.app.CollectorHandler.GetIssuesHandler)
+	mux.HandleFunc("/api/collector/pages", s.app.CollectorHandler.GetPagesHandler)
+
+	// API routes - System
+	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
+	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
+
+	// 404 handler for unmatched API routes
+	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)
+
+	return mux
+}
