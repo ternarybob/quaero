@@ -1,6 +1,6 @@
 # Quaero Architecture
 
-**Version:** 2.1
+**Version:** 2.2
 **Last Updated:** 2025-10-06
 **Status:** Active Development
 
@@ -9,6 +9,15 @@
 ## Overview
 
 Quaero is a knowledge collection and search system that gathers documentation from multiple sources (Confluence, Jira, GitHub) and provides semantic search capabilities using vector embeddings and local LLMs.
+
+**Inspiration:** Quaero's memory system and RAG architecture draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zero), adapting its intelligent memory categorization and tool-based RAG approach for knowledge base management.
+
+**Key Differences from Agent Zero:**
+- **Deployment:** Native Go binary (no Docker required)
+- **Storage:** SQLite with FTS5 + vector embeddings (vs FAISS)
+- **LLM Integration:** Ollama-only for simplicity (vs LiteLLM multi-provider)
+- **Scope:** Focused knowledge base for enterprise documentation (vs general AI assistant)
+- **UI:** WebSocket-based real-time updates (vs HTTP polling)
 
 ---
 
@@ -45,10 +54,20 @@ Quaero is a knowledge collection and search system that gathers documentation fr
 - Scheduling: Configurable CRON schedule (default: every 6 hours)
 
 ### 🚧 Phase 1.2 - RAG Pipeline (IN PROGRESS)
-- RAG orchestration service
-- Context building from search results
-- LLM integration for answer generation
-- Natural language query interface (CLI & Web)
+- **Memory Area Categorization:** Inspired by Agent Zero's memory system
+  - Main memory (general documents)
+  - Fragments (document chunks)
+  - Solutions (resolved issues, how-tos)
+  - Facts (extracted key information)
+- **RAG Service:** Tool-based architecture for context retrieval
+  - Similarity threshold filtering (default 0.7)
+  - Embedding cache with LRU eviction
+  - Hybrid search (FTS5 + vector)
+  - Configurable top-k results
+- **Context Builder:** Assembles relevant context from search results
+- **LLM Integration:** Answer generation via Ollama
+- **Query Interface:** Natural language query (CLI & Web)
+- **Citation System:** Links answers back to source documents
 
 ### 📋 Phase 2.0 - GitHub Integration (PLANNED)
 - GitHub collector implementation
@@ -135,10 +154,21 @@ Quaero is a knowledge collection and search system that gathers documentation fr
                      │
                      ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  Ollama (Local LLM Server)                                      │
+│  Ollama (Local LLM Server - Native Service)                     │
+│  • Runs at localhost:11434 (NO Docker required)                 │
 │  • nomic-embed-text - Embedding generation (768d)               │
-│  • qwen2.5:32b - Text generation (future)                       │
+│  • qwen2.5:32b / llama3.2 - Text generation (RAG)               │
 │  • llama3.2-vision:11b - Vision tasks (future)                  │
+│                                                                  │
+│  RAG Pipeline:                                                   │
+│  ┌────────────────────────────────────────────────────┐         │
+│  │ Query → Embedding → Vector Search → Context →     │         │
+│  │ LLM → Answer with Citations                        │         │
+│  │                                                     │         │
+│  │ Memory Areas: Main | Fragments | Solutions | Facts │         │
+│  │ Embedding Cache (LRU)                              │         │
+│  │ Similarity Threshold: 0.7                          │         │
+│  └────────────────────────────────────────────────────┘         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -579,21 +609,83 @@ CREATE TABLE document_chunks (
 3. Mode: Vector or Hybrid
    ↓
 4. EmbeddingService.GenerateQueryEmbedding()
+   ├─ Check embedding cache (LRU)
+   ├─ If cached: Return cached embedding
+   └─ If not: Get from Ollama + cache result
    ↓
-5. Get embedding from Ollama
+5. Embedding ready
    ↓
 6a. Vector Mode:
     └─ DocumentStorage.VectorSearch()
-       └─ sqlite-vec similarity search
-       └─ Return top-k results
+       ├─ sqlite-vec similarity search
+       ├─ Cosine similarity scoring
+       ├─ Filter by threshold (default: 0.7)
+       └─ Return top-k results (default: 10)
    ↓
 6b. Hybrid Mode:
-    ├─ DocumentStorage.FullTextSearch()
-    ├─ DocumentStorage.VectorSearch()
-    ├─ Merge and rank results
-    └─ Return combined results
+    ├─ DocumentStorage.FullTextSearch() → FTS5 BM25 scores
+    ├─ DocumentStorage.VectorSearch() → Cosine similarity scores
+    ├─ Merge results by document ID
+    ├─ Combine scores (weighted average)
+    ├─ Re-rank by combined score
+    └─ Return top-k combined results
    ↓
-7. Display in UI with relevance scores
+7. Filter by memory area (if specified)
+   ├─ Main (all documents)
+   ├─ Fragments (chunks)
+   ├─ Solutions (resolved issues)
+   └─ Facts (extracted metadata)
+   ↓
+8. Display in UI with relevance scores and citations
+```
+
+### RAG Answer Generation Flow (Phase 1.2)
+
+```
+1. User enters natural language question
+   ↓
+2. RAGService.Query()
+   ↓
+3. Query Processing Tool
+   ├─ Validate query
+   ├─ Determine memory areas to search
+   └─ Extract keywords
+   ↓
+4. Embedding Tool
+   ├─ Check cache for query embedding
+   └─ Generate if not cached
+   ↓
+5. Search Tool
+   ├─ Perform hybrid search (FTS5 + vector)
+   ├─ Filter by similarity threshold (0.7)
+   ├─ Retrieve top-k results (10)
+   └─ Get full document content
+   ↓
+6. Context Builder Tool
+   ├─ Rank results by relevance
+   ├─ Extract most relevant passages
+   ├─ Build context window (respects token limits)
+   ├─ Add source metadata for citations
+   └─ Format context for LLM
+   ↓
+7. Answer Generator Tool
+   ├─ Construct prompt: System + Context + Question
+   ├─ Send to Ollama chat API
+   ├─ Stream response
+   └─ Parse answer
+   ↓
+8. Citation Tool
+   ├─ Extract referenced sources from context
+   ├─ Create citation links (Jira keys, Confluence URLs)
+   └─ Attach to answer
+   ↓
+9. Return formatted answer with citations
+   ↓
+10. Display in UI with:
+    ├─ Generated answer
+    ├─ Source citations (clickable links)
+    ├─ Confidence score
+    └─ Related documents
 ```
 
 ---
@@ -668,6 +760,102 @@ WS   /ws                            - WebSocket connection
 
 ---
 
+## LLM Integration Strategy
+
+### Architecture Philosophy
+
+Quaero follows a **Docker-free, native binary** deployment model for both the application and LLM infrastructure.
+
+### Ollama Integration
+
+**Current Implementation:**
+- **Deployment:** Ollama runs as a native service (Windows/Linux/macOS)
+- **Connection:** HTTP API at `localhost:11434`
+- **NO Docker Required:** Both Quaero and Ollama run as native processes
+- **Models:**
+  - **Embedding:** `nomic-embed-text` (768 dimensions)
+  - **Chat:** `qwen2.5:32b`, `llama3.2`, or user's choice
+  - **Vision:** `llama3.2-vision:11b` (future, for image processing)
+
+**Why Ollama-Only?**
+- **Simplicity:** Single dependency, easy setup
+- **Performance:** Native performance without Docker overhead
+- **Privacy:** Fully local, no external API calls
+- **Reliability:** Stable API, active development
+- **User Choice:** Users can select any Ollama-compatible model
+
+### Future: Multi-Provider Support (Optional)
+
+**If users request it:**
+- **LiteLLM Integration:** Optional abstraction layer for multiple providers
+- **Supported Providers:** OpenAI, Anthropic, Azure, local models
+- **Backward Compatibility:** Ollama remains default and recommended
+- **Configuration:** Provider selection via config file
+
+**Decision Criteria:**
+- Wait for user demand before adding complexity
+- Maintain Ollama as primary/recommended path
+- Ensure Docker-free deployment remains possible
+
+### Embedding Cache
+
+**Inspired by Agent Zero:**
+- **LRU Cache:** Least Recently Used eviction policy
+- **Cache Key:** Hash of input text
+- **Benefits:**
+  - Avoid redundant API calls for duplicate queries
+  - Faster response times
+  - Reduced Ollama load
+- **Configuration:** Configurable cache size (default: 1000 entries)
+
+### RAG Pipeline Design
+
+**Tool-Based Architecture (Agent Zero-Inspired):**
+1. **Query Processing Tool:** Validates and preprocesses user queries
+2. **Embedding Tool:** Generates query embeddings (with cache)
+3. **Search Tool:** Performs hybrid search (FTS5 + vector)
+4. **Context Builder Tool:** Assembles relevant context from results
+5. **Answer Generator Tool:** Sends context + query to LLM
+6. **Citation Tool:** Links answers to source documents
+
+**Memory Area Categorization:**
+- **Main Memory:** General documents (Jira issues, Confluence pages)
+- **Fragments:** Document chunks for large content
+- **Solutions:** Resolved issues, how-to guides, patterns
+- **Facts:** Extracted key information (metadata, dates, people)
+
+**Similarity Filtering:**
+- **Default Threshold:** 0.7 (configurable)
+- **Top-K Results:** 10 (configurable)
+- **Scoring:** Cosine similarity for vector search
+- **Ranking:** Combined FTS5 BM25 + vector similarity for hybrid
+
+---
+
+## Comparison with Agent Zero
+
+| Feature | Quaero | Agent Zero |
+|---------|--------|------------|
+| **Primary Purpose** | Enterprise knowledge base | General AI assistant |
+| **Deployment** | Native Go binary | Docker containers |
+| **Storage** | SQLite + FTS5 + vector | FAISS + ChromaDB |
+| **LLM Provider** | Ollama (local only) | LiteLLM (multi-provider) |
+| **Docker Required** | NO | Yes |
+| **Language** | Go | Python |
+| **UI Updates** | WebSocket (real-time) | HTTP polling |
+| **Memory System** | Categorized (Main/Fragments/Solutions/Facts) | Categorized (similar approach) |
+| **Embedding Cache** | LRU cache (Agent Zero-inspired) | LRU cache |
+| **RAG Tools** | Tool-based retrieval (Agent Zero-inspired) | Tool-based retrieval |
+| **Search** | Hybrid (FTS5 + vector) | Vector only |
+| **Focus** | Documentation (Jira, Confluence, GitHub) | General tasks + memory |
+| **Similarity Threshold** | 0.7 (configurable) | Configurable |
+| **Installation** | Single binary + Ollama | Docker compose |
+| **Dependencies** | Minimal (SQLite, Ollama) | Multiple (Docker, LiteLLM, etc.) |
+
+**Key Takeaway:** Quaero adapts Agent Zero's intelligent memory categorization and tool-based RAG architecture while maintaining a simpler, Docker-free deployment model focused specifically on enterprise knowledge management.
+
+---
+
 ## Technology Stack
 
 **Language:** Go 1.25+
@@ -687,18 +875,28 @@ WS   /ws                            - WebSocket connection
 
 **Browser:** Chrome Extension (Manifest V3)
 
-**LLM:** Ollama (local)
+**LLM:** Ollama (local, native service - NO Docker)
 
 ---
 
 ## Remaining Work
 
 ### Phase 1.2 - RAG Pipeline
-- RAG orchestration service
-- Context building from search results
-- LLM integration for answer generation
-- Natural language query interface (CLI & Web)
-- Answer formatting with citations
+- **RAG Service:** Tool-based orchestration (Agent Zero-inspired)
+  - Query processing tool
+  - Embedding tool with LRU cache
+  - Search tool (hybrid FTS5 + vector)
+  - Context builder tool
+  - Answer generator tool
+  - Citation tool
+- **Memory Areas:** Categorize documents (Main, Fragments, Solutions, Facts)
+- **Embedding Cache:** LRU cache for query embeddings
+- **Similarity Threshold:** Configurable filtering (default 0.7)
+- **Context Builder:** Assemble relevant passages with token limit awareness
+- **LLM Chat Integration:** Ollama chat API for answer generation
+- **Query Interface:** Natural language query (CLI & Web UI)
+- **Answer Formatting:** Display with citations and source links
+- **Configuration:** RAG-specific settings (threshold, top-k, cache size)
 
 ### Phase 2.0 - GitHub Integration
 - GitHub service implementation
@@ -795,4 +993,4 @@ WS   /ws                            - WebSocket connection
 
 **Last Updated:** 2025-10-06
 **Status:** Active Development
-**Version:** 2.1
+**Version:** 2.2

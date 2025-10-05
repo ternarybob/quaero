@@ -2,9 +2,28 @@
 
 **quaero** (Latin: "I seek, I search") - A local knowledge base system with natural language query capabilities.
 
-Version: 2.1
+Version: 2.2
 Date: 2025-10-06
 Status: Active Development
+
+---
+
+## Acknowledgments
+
+Quaero draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zero), a sophisticated AI framework featuring advanced memory management and multi-provider LLM integration. While Agent Zero is a general-purpose AI assistant focused on task execution, Quaero is purpose-built for local knowledge base management with a simpler, Docker-free deployment model.
+
+**Key concepts adopted from Agent Zero:**
+- Memory area categorization for organizing different knowledge types
+- Similarity threshold filtering for better search relevance
+- Embedding caching to improve performance
+- Tool-based architecture for modular RAG components
+
+**Key differences from Agent Zero:**
+- **Deployment**: Native Go binary (no Docker) vs Docker-required
+- **Scope**: Focused knowledge base vs general AI assistant
+- **Storage**: SQLite with FTS5 vs FAISS vector database
+- **LLM**: Ollama-only (local-first) vs multi-provider via LiteLLM
+- **UI**: WebSocket streaming vs HTTP polling
 
 ---
 
@@ -16,20 +35,44 @@ Quaero is a self-contained knowledge base system that:
 - Collects documentation from approved sources (Confluence, Jira, GitHub)
 - Processes and stores content with full-text and vector search
 - Provides natural language query interface using local LLMs (Ollama)
-- Runs completely offline on a single machine
+- **Runs completely offline on a single machine (NO Docker required)**
 - Uses Chrome extension for seamless authentication
+- Organizes knowledge into memory areas for better retrieval
 
 ### Technology Stack
 
 - **Language:** Go 1.25+
 - **Web UI:** HTML templates, vanilla JavaScript, WebSockets
 - **Storage:** SQLite with FTS5 (full-text search) and vector embeddings
-- **LLM:** Ollama (local models for embeddings and text generation)
+- **LLM:** Ollama (local models for embeddings and text generation) - **NO Docker required**
 - **Browser Automation:** rod (for web scraping)
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Banner:** github.com/ternarybob/banner (startup display)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
+
+### Deployment Model
+
+**Zero Dependencies Deployment:**
+- Quaero: Native Go binary (Windows, macOS, Linux)
+- Ollama: Native service (no Docker)
+- SQLite: Embedded database (no server)
+- **Total Docker containers required: 0**
+
+**Installation:**
+```bash
+# Install Ollama (native service)
+# Windows: Download from ollama.com
+# macOS: brew install ollama
+# Linux: curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull models
+ollama pull nomic-embed-text
+ollama pull qwen2.5:32b
+
+# Run Quaero
+./bin/quaero serve --config deployments/local/quaero.toml
+```
 
 ---
 
@@ -119,6 +162,127 @@ QUAERO_LOG_LEVEL=info
 QUAERO_GITHUB_TOKEN=ghp_xxx
 QUAERO_OLLAMA_URL=http://localhost:11434
 ```
+
+---
+
+## Memory System & RAG Design
+
+### Memory Areas (Inspired by Agent Zero)
+
+Documents are categorized into memory areas for better organization and retrieval:
+
+**Memory Area Types:**
+- **main** - Primary knowledge (Confluence pages, Jira issues, GitHub docs)
+- **fragments** - Conversation history and interactions
+- **solutions** - Resolved queries and answers
+- **facts** - Extracted facts and summaries
+
+**Benefits:**
+- Targeted retrieval based on query type
+- Better context selection for RAG
+- Cleaner separation of knowledge types
+
+**Implementation:**
+```go
+type MemoryArea string
+
+const (
+    MemoryAreaMain       MemoryArea = "main"
+    MemoryAreaFragments  MemoryArea = "fragments"
+    MemoryAreaSolutions  MemoryArea = "solutions"
+    MemoryAreaFacts      MemoryArea = "facts"
+)
+
+type Document struct {
+    // ... existing fields
+    MemoryArea MemoryArea `json:"memory_area"`
+}
+```
+
+### Search & Retrieval
+
+**Search Modes:**
+- **Keyword Search** - FTS5 full-text search
+- **Vector Search** - Cosine similarity with embeddings
+- **Hybrid Search** - Combined keyword + vector with weighted ranking
+
+**Search Options:**
+```go
+type SearchOptions struct {
+    Query               string
+    Limit               int
+    Mode                SearchMode  // keyword, vector, hybrid
+    SimilarityThreshold float32     // 0.0-1.0 (filter by relevance)
+    MinScore            float32     // FTS5 minimum score
+    MemoryAreas         []MemoryArea // Filter by area
+}
+```
+
+**Similarity Threshold Filtering:**
+- Inspired by Agent Zero's filtering mechanism
+- Only returns results above configurable threshold (default: 0.7)
+- Reduces noise and improves relevance
+- Configurable per-query
+
+### Embedding Caching
+
+**Purpose:** Avoid redundant embedding generation for duplicate content
+
+**Strategy:**
+- Cache embeddings by content hash (SHA-256)
+- In-memory cache with LRU eviction
+- TTL-based expiration (default: 24 hours)
+- Survives restarts via database storage
+
+**Implementation:**
+```go
+type EmbeddingCache struct {
+    cache   map[string]CachedEmbedding
+    maxSize int           // LRU limit
+    ttl     time.Duration // Expiration
+}
+
+func (s *EmbeddingService) GenerateEmbedding(text string) ([]float32, error) {
+    // Check cache first
+    if cached := s.cache.Get(hash(text)); cached != nil {
+        return cached, nil
+    }
+    // Generate and cache
+    embedding := s.ollama.Embed(text)
+    s.cache.Set(hash(text), embedding)
+    return embedding
+}
+```
+
+### RAG (Retrieval-Augmented Generation)
+
+**Architecture:** Tool-based modular design
+
+**RAG Pipeline:**
+1. **Query Analysis** - Understand user intent
+2. **Retrieval** - Search knowledge base (hybrid search)
+3. **Context Building** - Assemble relevant documents
+4. **Generation** - LLM generates answer with context
+5. **Citation** - Include source links
+
+**Tool Interface:**
+```go
+type RAGTool interface {
+    Name() string
+    Description() string
+    Execute(ctx context.Context, input map[string]interface{}) (interface{}, error)
+}
+
+// Tools:
+// - SearchTool: Knowledge base search
+// - SummarizeTool: Document summarization
+// - ExtractTool: Fact extraction
+```
+
+**LLM Integration:**
+- Primary: Ollama (local models)
+- Future: Multi-provider via LiteLLM (if needed)
+- Model roles: chat (text generation), embedding (vectors)
 
 ---
 
