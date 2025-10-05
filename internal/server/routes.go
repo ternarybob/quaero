@@ -10,6 +10,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/", s.app.UIHandler.IndexHandler)
 	mux.HandleFunc("/jira", s.app.UIHandler.JiraPageHandler)
 	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler)
+	mux.HandleFunc("/documents", s.app.UIHandler.DocumentsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/ui/status", s.app.UIHandler.StatusHandler)
@@ -44,6 +45,11 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/collector/spaces", s.app.CollectorHandler.GetSpacesHandler)
 	mux.HandleFunc("/api/collector/issues", s.app.CollectorHandler.GetIssuesHandler)
 	mux.HandleFunc("/api/collector/pages", s.app.CollectorHandler.GetPagesHandler)
+
+	// API routes - Documents
+	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
+	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
+	mux.HandleFunc("/api/documents/process", s.app.DocumentHandler.ProcessHandler)
 
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)

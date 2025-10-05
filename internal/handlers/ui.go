@@ -127,6 +127,12 @@ func (h *UIHandler) ConfluencePageHandler(w http.ResponseWriter, r *http.Request
 	http.ServeFile(w, r, confluencePath)
 }
 
+// DocumentsPageHandler serves the Documents page
+func (h *UIHandler) DocumentsPageHandler(w http.ResponseWriter, r *http.Request) {
+	documentsPath := filepath.Join(h.staticDir, "documents.html")
+	http.ServeFile(w, r, documentsPath)
+}
+
 // StaticFileHandler serves static files (CSS, favicon) from the pages/static directory
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files

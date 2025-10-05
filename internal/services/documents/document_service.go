@@ -1,0 +1,240 @@
+package documents
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
+)
+
+// Service implements DocumentService interface
+type Service struct {
+	storage          interfaces.DocumentStorage
+	embeddingService interfaces.EmbeddingService
+	logger           arbor.ILogger
+}
+
+// NewService creates a new document service
+func NewService(
+	storage interfaces.DocumentStorage,
+	embeddingService interfaces.EmbeddingService,
+	logger arbor.ILogger,
+) interfaces.DocumentService {
+	return &Service{
+		storage:          storage,
+		embeddingService: embeddingService,
+		logger:           logger,
+	}
+}
+
+// SaveDocument saves a document and generates its embedding
+func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error {
+	// Generate embedding if not present
+	if doc.Embedding == nil || len(doc.Embedding) == 0 {
+		if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("doc_id", doc.ID).
+				Msg("Failed to generate embedding, saving without it")
+			// Continue without embedding - we can backfill later
+		}
+	}
+
+	// Save to storage
+	if err := s.storage.SaveDocument(doc); err != nil {
+		return fmt.Errorf("failed to save document: %w", err)
+	}
+
+	embeddedStatus := "no"
+	if doc.Embedding != nil && len(doc.Embedding) > 0 {
+		embeddedStatus = "yes"
+	}
+	s.logger.Info().
+		Str("doc_id", doc.ID).
+		Str("source", doc.SourceType).
+		Str("source_id", doc.SourceID).
+		Str("embedded", embeddedStatus).
+		Msg("Document saved")
+
+	return nil
+}
+
+// SaveDocuments saves multiple documents in batch
+func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) error {
+	if len(docs) == 0 {
+		return nil
+	}
+
+	// Generate embeddings for documents that don't have them
+	embeddedCount := 0
+	failedCount := 0
+
+	for _, doc := range docs {
+		if doc.Embedding == nil || len(doc.Embedding) == 0 {
+			if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
+				s.logger.Warn().
+					Err(err).
+					Str("doc_id", doc.ID).
+					Msg("Failed to generate embedding")
+				failedCount++
+				continue
+			}
+			embeddedCount++
+		}
+	}
+
+	// Save all documents (even those without embeddings)
+	if err := s.storage.SaveDocuments(docs); err != nil {
+		return fmt.Errorf("failed to save documents: %w", err)
+	}
+
+	s.logger.Info().
+		Int("total", len(docs)).
+		Int("embedded", embeddedCount).
+		Int("failed_embedding", failedCount).
+		Msg("Documents saved")
+
+	return nil
+}
+
+// UpdateDocument updates an existing document
+func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) error {
+	// Check if document exists
+	existing, err := s.storage.GetDocument(doc.ID)
+	if err != nil {
+		return fmt.Errorf("document not found: %w", err)
+	}
+
+	// Regenerate embedding if content changed
+	contentChanged := existing.Content != doc.Content || existing.Title != doc.Title
+	if contentChanged {
+		if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("doc_id", doc.ID).
+				Msg("Failed to regenerate embedding")
+		}
+	}
+
+	// Update in storage
+	if err := s.storage.UpdateDocument(doc); err != nil {
+		return fmt.Errorf("failed to update document: %w", err)
+	}
+
+	changedStatus := "no"
+	if contentChanged {
+		changedStatus = "yes"
+	}
+	s.logger.Info().
+		Str("doc_id", doc.ID).
+		Str("content_changed", changedStatus).
+		Str("re_embedded", changedStatus).
+		Msg("Document updated")
+
+	return nil
+}
+
+// GetDocument retrieves a document by ID
+func (s *Service) GetDocument(ctx context.Context, id string) (*models.Document, error) {
+	return s.storage.GetDocument(id)
+}
+
+// GetBySource retrieves a document by source reference
+func (s *Service) GetBySource(ctx context.Context, sourceType, sourceID string) (*models.Document, error) {
+	return s.storage.GetDocumentBySource(sourceType, sourceID)
+}
+
+// DeleteDocument deletes a document and its chunks
+func (s *Service) DeleteDocument(ctx context.Context, id string) error {
+	// Delete chunks first
+	if err := s.storage.DeleteChunks(id); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("doc_id", id).
+			Msg("Failed to delete chunks")
+	}
+
+	// Delete document
+	if err := s.storage.DeleteDocument(id); err != nil {
+		return fmt.Errorf("failed to delete document: %w", err)
+	}
+
+	s.logger.Info().Str("doc_id", id).Msg("Document deleted")
+	return nil
+}
+
+// Search performs a search based on the query mode
+func (s *Service) Search(ctx context.Context, query *interfaces.SearchQuery) ([]*models.Document, error) {
+	if query.Limit <= 0 {
+		query.Limit = 10
+	}
+
+	switch query.Mode {
+	case interfaces.SearchModeKeyword:
+		if query.Text == "" {
+			return nil, fmt.Errorf("text query required for keyword search")
+		}
+		return s.storage.FullTextSearch(query.Text, query.Limit)
+
+	case interfaces.SearchModeVector:
+		if query.Embedding == nil {
+			// Generate embedding from text query
+			if query.Text == "" {
+				return nil, fmt.Errorf("text or embedding required for vector search")
+			}
+			embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query.Text)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+			}
+			query.Embedding = embedding
+		}
+		return s.storage.VectorSearch(query.Embedding, query.Limit)
+
+	case interfaces.SearchModeHybrid:
+		if query.Text == "" {
+			return nil, fmt.Errorf("text query required for hybrid search")
+		}
+		if query.Embedding == nil {
+			// Generate embedding from text query
+			embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query.Text)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to generate query embedding, falling back to keyword search")
+				return s.storage.FullTextSearch(query.Text, query.Limit)
+			}
+			query.Embedding = embedding
+		}
+		return s.storage.HybridSearch(query.Text, query.Embedding, query.Limit)
+
+	default:
+		return nil, fmt.Errorf("invalid search mode: %s", query.Mode)
+	}
+}
+
+// GetStats retrieves document statistics
+func (s *Service) GetStats(ctx context.Context) (*models.DocumentStats, error) {
+	return s.storage.GetStats()
+}
+
+// Count returns document count, optionally filtered by source
+func (s *Service) Count(ctx context.Context, sourceType string) (int, error) {
+	if sourceType == "" {
+		return s.storage.CountDocuments()
+	}
+	return s.storage.CountDocumentsBySource(sourceType)
+}
+
+// List returns documents with pagination
+func (s *Service) List(ctx context.Context, opts *interfaces.ListOptions) ([]*models.Document, error) {
+	if opts == nil {
+		opts = &interfaces.ListOptions{
+			Limit:    50,
+			Offset:   0,
+			OrderBy:  "updated_at",
+			OrderDir: "desc",
+		}
+	}
+
+	return s.storage.ListDocuments(opts)
+}

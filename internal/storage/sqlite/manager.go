@@ -12,6 +12,7 @@ type Manager struct {
 	jira       interfaces.JiraStorage
 	confluence interfaces.ConfluenceStorage
 	auth       interfaces.AuthStorage
+	document   interfaces.DocumentStorage
 	logger     arbor.ILogger
 }
 
@@ -27,6 +28,7 @@ func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.S
 		jira:       NewJiraStorage(db, logger),
 		confluence: NewConfluenceStorage(db, logger),
 		auth:       NewAuthStorage(db, logger),
+		document:   NewDocumentStorage(db, logger),
 		logger:     logger,
 	}, nil
 }
@@ -44,6 +46,11 @@ func (m *Manager) ConfluenceStorage() interfaces.ConfluenceStorage {
 // AuthStorage returns the Auth storage interface
 func (m *Manager) AuthStorage() interfaces.AuthStorage {
 	return m.auth
+}
+
+// DocumentStorage returns the Document storage interface
+func (m *Manager) DocumentStorage() interfaces.DocumentStorage {
+	return m.document
 }
 
 // Close closes the database connection

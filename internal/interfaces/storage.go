@@ -66,10 +66,45 @@ type AuthStorage interface {
 	ListServices(ctx context.Context) ([]string, error)
 }
 
+// DocumentStorage - interface for normalized document persistence
+type DocumentStorage interface {
+	// CRUD operations
+	SaveDocument(doc *models.Document) error
+	SaveDocuments(docs []*models.Document) error
+	GetDocument(id string) (*models.Document, error)
+	GetDocumentBySource(sourceType, sourceID string) (*models.Document, error)
+	UpdateDocument(doc *models.Document) error
+	DeleteDocument(id string) error
+
+	// Search operations
+	FullTextSearch(query string, limit int) ([]*models.Document, error)
+	VectorSearch(embedding []float32, limit int) ([]*models.Document, error)
+	HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error)
+
+	// List operations
+	ListDocuments(opts *ListOptions) ([]*models.Document, error)
+	GetDocumentsBySource(sourceType string) ([]*models.Document, error)
+
+	// Stats operations
+	CountDocuments() (int, error)
+	CountDocumentsBySource(sourceType string) (int, error)
+	CountVectorized() (int, error)
+	GetStats() (*models.DocumentStats, error)
+
+	// Chunk operations
+	SaveChunk(chunk *models.DocumentChunk) error
+	GetChunks(documentID string) ([]*models.DocumentChunk, error)
+	DeleteChunks(documentID string) error
+
+	// Bulk operations
+	ClearAll() error
+}
+
 // StorageManager - composite interface for all storage operations
 type StorageManager interface {
 	JiraStorage() JiraStorage
 	ConfluenceStorage() ConfluenceStorage
 	AuthStorage() AuthStorage
+	DocumentStorage() DocumentStorage
 	Close() error
 }

@@ -9,23 +9,37 @@ import (
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
+	"github.com/ternarybob/quaero/internal/services/documents"
+	"github.com/ternarybob/quaero/internal/services/embeddings"
+	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/storage"
 )
 
 // App holds all application components and dependencies
 type App struct {
-	Config            *common.Config
-	Logger            arbor.ILogger
-	StorageManager    interfaces.StorageManager
+	Config         *common.Config
+	Logger         arbor.ILogger
+	StorageManager interfaces.StorageManager
+
+	// Document services
+	EmbeddingService    interfaces.EmbeddingService
+	DocumentService     interfaces.DocumentService
+	ProcessingService   *processing.Service
+	ProcessingScheduler *processing.Scheduler
+
+	// Atlassian services
 	AuthService       *atlassian.AtlassianAuthService
 	JiraService       *atlassian.JiraScraperService
 	ConfluenceService *atlassian.ConfluenceScraperService
-	APIHandler        *handlers.APIHandler
-	UIHandler         *handlers.UIHandler
-	WSHandler         *handlers.WebSocketHandler
-	ScraperHandler    *handlers.ScraperHandler
-	DataHandler       *handlers.DataHandler
-	CollectorHandler  *handlers.CollectorHandler
+
+	// HTTP handlers
+	APIHandler       *handlers.APIHandler
+	UIHandler        *handlers.UIHandler
+	WSHandler        *handlers.WebSocketHandler
+	ScraperHandler   *handlers.ScraperHandler
+	DataHandler      *handlers.DataHandler
+	CollectorHandler *handlers.CollectorHandler
+	DocumentHandler  *handlers.DocumentHandler
 }
 
 // New initializes the application with all dependencies
@@ -82,7 +96,22 @@ func (a *App) initDatabase() error {
 func (a *App) initServices() error {
 	var err error
 
-	// Initialize auth service with AuthStorage
+	// 1. Initialize embedding service
+	a.EmbeddingService = embeddings.NewService(
+		a.Config.Embeddings.OllamaURL,
+		a.Config.Embeddings.Model,
+		a.Config.Embeddings.Dimension,
+		a.Logger,
+	)
+
+	// 2. Initialize document service
+	a.DocumentService = documents.NewService(
+		a.StorageManager.DocumentStorage(),
+		a.EmbeddingService,
+		a.Logger,
+	)
+
+	// 3. Initialize auth service
 	a.AuthService, err = atlassian.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
 		a.Logger,
@@ -91,19 +120,37 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// Initialize Jira service with JiraStorage
+	// 4. Initialize Jira service with DocumentService
 	a.JiraService = atlassian.NewJiraScraperService(
 		a.StorageManager.JiraStorage(),
+		a.DocumentService,
 		a.AuthService,
 		a.Logger,
 	)
 
-	// Initialize Confluence service with ConfluenceStorage
+	// 5. Initialize Confluence service with DocumentService
 	a.ConfluenceService = atlassian.NewConfluenceScraperService(
 		a.StorageManager.ConfluenceStorage(),
+		a.DocumentService,
 		a.AuthService,
 		a.Logger,
 	)
+
+	// 6. Initialize processing service
+	a.ProcessingService = processing.NewService(
+		a.DocumentService,
+		a.StorageManager.JiraStorage(),
+		a.StorageManager.ConfluenceStorage(),
+		a.Logger,
+	)
+
+	// 7. Initialize and start processing scheduler (if enabled)
+	if a.Config.Processing.Enabled {
+		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
+		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to start processing scheduler")
+		}
+	}
 
 	return nil
 }
@@ -126,6 +173,10 @@ func (a *App) initHandlers() error {
 		a.ConfluenceService,
 		a.Logger,
 	)
+	a.DocumentHandler = handlers.NewDocumentHandler(
+		a.DocumentService,
+		a.ProcessingService,
+	)
 
 	// Set UI logger for services
 	a.JiraService.SetUILogger(a.WSHandler)
@@ -139,6 +190,12 @@ func (a *App) initHandlers() error {
 
 // Close closes all application resources
 func (a *App) Close() error {
+	// Stop processing scheduler
+	if a.ProcessingScheduler != nil {
+		a.ProcessingScheduler.Stop()
+	}
+
+	// Close storage
 	if a.StorageManager != nil {
 		if err := a.StorageManager.Close(); err != nil {
 			return fmt.Errorf("failed to close storage: %w", err)

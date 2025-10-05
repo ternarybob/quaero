@@ -1,28 +1,39 @@
 package atlassian
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // JiraScraperService scrapes Jira projects and issues
 type JiraScraperService struct {
-	authService interfaces.AtlassianAuthService
-	jiraStorage interfaces.JiraStorage
-	logger      arbor.ILogger
-	uiLogger    interface{}
+	authService     interfaces.AtlassianAuthService
+	jiraStorage     interfaces.JiraStorage
+	documentService interfaces.DocumentService
+	logger          arbor.ILogger
+	uiLogger        interface{}
 }
 
 // NewJiraScraperService creates a new Jira scraper service
-func NewJiraScraperService(jiraStorage interfaces.JiraStorage, authService interfaces.AtlassianAuthService, logger arbor.ILogger) *JiraScraperService {
+func NewJiraScraperService(
+	jiraStorage interfaces.JiraStorage,
+	documentService interfaces.DocumentService,
+	authService interfaces.AtlassianAuthService,
+	logger arbor.ILogger,
+) *JiraScraperService {
 	return &JiraScraperService{
-		jiraStorage: jiraStorage,
-		authService: authService,
-		logger:      logger,
+		jiraStorage:     jiraStorage,
+		documentService: documentService,
+		authService:     authService,
+		logger:          logger,
 	}
 }
 
@@ -70,4 +81,175 @@ func (s *JiraScraperService) makeRequest(method, path string) ([]byte, error) {
 	}
 
 	return body, readErr
+}
+
+// transformToDocument converts Jira issue to normalized document
+func (s *JiraScraperService) transformToDocument(issue *models.JiraIssue) (*models.Document, error) {
+	docID := fmt.Sprintf("doc_%s", uuid.New().String())
+
+	// Extract fields from the Fields map
+	summary := s.getStringField(issue.Fields, "summary")
+	description := s.getStringField(issue.Fields, "description")
+
+	// Extract project info
+	projectKey := ""
+	if project, ok := issue.Fields["project"].(map[string]interface{}); ok {
+		projectKey = s.getStringField(project, "key")
+	}
+
+	// Extract issue type
+	issueType := ""
+	if issueTypeObj, ok := issue.Fields["issuetype"].(map[string]interface{}); ok {
+		issueType = s.getStringField(issueTypeObj, "name")
+	}
+
+	// Extract status
+	status := ""
+	if statusObj, ok := issue.Fields["status"].(map[string]interface{}); ok {
+		status = s.getStringField(statusObj, "name")
+	}
+
+	// Extract priority
+	priority := ""
+	if priorityObj, ok := issue.Fields["priority"].(map[string]interface{}); ok {
+		priority = s.getStringField(priorityObj, "name")
+	}
+
+	// Extract assignee and reporter
+	assignee := ""
+	if assigneeObj, ok := issue.Fields["assignee"].(map[string]interface{}); ok {
+		assignee = s.getStringField(assigneeObj, "displayName")
+	}
+
+	reporter := ""
+	if reporterObj, ok := issue.Fields["reporter"].(map[string]interface{}); ok {
+		reporter = s.getStringField(reporterObj, "displayName")
+	}
+
+	// Extract labels
+	labels := []string{}
+	if labelsArray, ok := issue.Fields["labels"].([]interface{}); ok {
+		for _, label := range labelsArray {
+			if labelStr, ok := label.(string); ok {
+				labels = append(labels, labelStr)
+			}
+		}
+	}
+
+	// Extract components
+	components := []string{}
+	if componentsArray, ok := issue.Fields["components"].([]interface{}); ok {
+		for _, comp := range componentsArray {
+			if compMap, ok := comp.(map[string]interface{}); ok {
+				components = append(components, s.getStringField(compMap, "name"))
+			}
+		}
+	}
+
+	// Build plain text content
+	content := fmt.Sprintf("Issue: %s\n\nSummary: %s\n\nDescription:\n%s\n\nProject: %s\nType: %s\nStatus: %s\nPriority: %s\nAssignee: %s\nReporter: %s\nLabels: %v\nComponents: %v",
+		issue.Key, summary, description, projectKey, issueType, status, priority, assignee, reporter, labels, components)
+
+	// Build markdown content
+	contentMD := fmt.Sprintf("# %s\n\n**Summary:** %s\n\n## Description\n\n%s\n\n## Details\n\n- **Project:** %s\n- **Type:** %s\n- **Status:** %s\n- **Priority:** %s\n- **Assignee:** %s\n- **Reporter:** %s\n- **Labels:** %v\n- **Components:** %v",
+		issue.Key, summary, description, projectKey, issueType, status, priority, assignee, reporter, labels, components)
+
+	// Build metadata
+	metadata := models.JiraMetadata{
+		IssueKey:   issue.Key,
+		ProjectKey: projectKey,
+		IssueType:  issueType,
+		Status:     status,
+		Priority:   priority,
+		Assignee:   assignee,
+		Reporter:   reporter,
+		Labels:     labels,
+		Components: components,
+	}
+
+	metadataMap, err := metadata.ToMap()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert metadata: %w", err)
+	}
+
+	// Extract timestamps
+	now := time.Now()
+	createdAt := now
+	updatedAt := now
+
+	if createdStr, ok := issue.Fields["created"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdAt = parsed
+		}
+	}
+
+	if updatedStr, ok := issue.Fields["updated"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, updatedStr); err == nil {
+			updatedAt = parsed
+		}
+	}
+
+	return &models.Document{
+		ID:              docID,
+		SourceType:      "jira",
+		SourceID:        issue.Key,
+		Title:           fmt.Sprintf("[%s] %s", issue.Key, summary),
+		Content:         content,
+		ContentMarkdown: contentMD,
+		Metadata:        metadataMap,
+		URL:             fmt.Sprintf("%s/browse/%s", s.authService.GetBaseURL(), issue.Key),
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+	}, nil
+}
+
+// getStringField safely extracts a string field from a map
+func (s *JiraScraperService) getStringField(m map[string]interface{}, field string) string {
+	if val, ok := m[field]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+// ProcessIssuesForProject transforms and saves Jira issues as documents
+func (s *JiraScraperService) ProcessIssuesForProject(ctx context.Context, projectKey string) error {
+	// Get issues from storage
+	issues, err := s.jiraStorage.GetIssuesByProject(ctx, projectKey)
+	if err != nil {
+		return fmt.Errorf("failed to get issues: %w", err)
+	}
+
+	if len(issues) == 0 {
+		s.logger.Info().Str("project", projectKey).Msg("No issues to process")
+		return nil
+	}
+
+	// Transform to documents
+	documents := make([]*models.Document, 0, len(issues))
+	for _, issue := range issues {
+		doc, err := s.transformToDocument(issue)
+		if err != nil {
+			s.logger.Error().
+				Err(err).
+				Str("issue", issue.Key).
+				Msg("Failed to transform issue")
+			continue
+		}
+		documents = append(documents, doc)
+	}
+
+	// Save via DocumentService (which handles embedding)
+	if err := s.documentService.SaveDocuments(ctx, documents); err != nil {
+		return fmt.Errorf("failed to save documents: %w", err)
+	}
+
+	s.logger.Info().
+		Str("project", projectKey).
+		Int("issues", len(issues)).
+		Int("documents", len(documents)).
+		Msg("Processed Jira issues to documents")
+
+	return nil
 }

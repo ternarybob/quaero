@@ -10,11 +10,13 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server  ServerConfig  `toml:"server"`
-	Sources SourcesConfig `toml:"sources"`
-	Storage StorageConfig `toml:"storage"`
-	LLM     LLMConfig     `toml:"llm"`
-	Logging LoggingConfig `toml:"logging"`
+	Server     ServerConfig     `toml:"server"`
+	Sources    SourcesConfig    `toml:"sources"`
+	Storage    StorageConfig    `toml:"storage"`
+	LLM        LLMConfig        `toml:"llm"`
+	Embeddings EmbeddingsConfig `toml:"embeddings"`
+	Processing ProcessingConfig `toml:"processing"`
+	Logging    LoggingConfig    `toml:"logging"`
 }
 
 type ServerConfig struct {
@@ -81,6 +83,19 @@ type OllamaConfig struct {
 	VisionModel string `toml:"vision_model"`
 }
 
+type EmbeddingsConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	OllamaURL string `toml:"ollama_url"`
+	Model     string `toml:"model"`
+	Dimension int    `toml:"dimension"`
+	BatchSize int    `toml:"batch_size"`
+}
+
+type ProcessingConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Schedule string `toml:"schedule"` // Cron schedule format
+}
+
 type LoggingConfig struct {
 	Level  string   `toml:"level"`
 	Format string   `toml:"format"`
@@ -100,7 +115,7 @@ func NewDefaultConfig() *Config {
 				Path:               "./data/quaero.db",
 				EnableFTS5:         true,
 				EnableVector:       true,
-				EmbeddingDimension: 1536,
+				EmbeddingDimension: 768,
 				CacheSizeMB:        64,
 				WALMode:            true,
 				BusyTimeoutMS:      5000,
@@ -109,6 +124,17 @@ func NewDefaultConfig() *Config {
 				Images:      "./data/images",
 				Attachments: "./data/attachments",
 			},
+		},
+		Embeddings: EmbeddingsConfig{
+			Enabled:   true,
+			OllamaURL: "http://localhost:11434",
+			Model:     "nomic-embed-text",
+			Dimension: 768,
+			BatchSize: 10,
+		},
+		Processing: ProcessingConfig{
+			Enabled:  false,           // Disabled by default, user must opt-in
+			Schedule: "0 0 */6 * * *", // Every 6 hours
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

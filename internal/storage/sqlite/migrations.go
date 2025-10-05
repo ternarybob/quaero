@@ -19,6 +19,7 @@ func (s *SQLiteDB) migrate() error {
 	migrations := []migration{
 		{version: 1, name: "initial_schema", up: migrateV1},
 		{version: 2, name: "fts5_indexes", up: migrateV2},
+		{version: 3, name: "documents_table", up: migrateV3},
 	}
 
 	for _, m := range migrations {
@@ -226,6 +227,81 @@ func migrateV2(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			// FTS5 creation might fail if not supported, log but don't fail migration
 			return nil
+		}
+	}
+
+	return nil
+}
+
+// migrateV3 creates normalized documents table with vector support
+func migrateV3(ctx context.Context, tx *sql.Tx) error {
+	queries := []string{
+		// Documents table
+		`CREATE TABLE IF NOT EXISTS documents (
+			id TEXT PRIMARY KEY,
+			source_type TEXT NOT NULL,
+			source_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			content TEXT NOT NULL,
+			content_markdown TEXT,
+			embedding BLOB,
+			embedding_model TEXT,
+			metadata TEXT,
+			url TEXT,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+			UNIQUE(source_type, source_id)
+		)`,
+
+		// Indexes for documents
+		`CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_source_id ON documents(source_type, source_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(updated_at)`,
+
+		// Document chunks table
+		`CREATE TABLE IF NOT EXISTS document_chunks (
+			id TEXT PRIMARY KEY,
+			document_id TEXT NOT NULL,
+			chunk_index INTEGER NOT NULL,
+			content TEXT NOT NULL,
+			embedding BLOB,
+			token_count INTEGER,
+			created_at INTEGER DEFAULT (strftime('%s', 'now')),
+			FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+			UNIQUE(document_id, chunk_index)
+		)`,
+
+		// Index for chunks
+		`CREATE INDEX IF NOT EXISTS idx_chunks_document ON document_chunks(document_id)`,
+
+		// FTS5 for documents (if available)
+		`CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+			title,
+			content,
+			content=documents,
+			content_rowid=rowid
+		)`,
+
+		// Triggers to keep FTS in sync
+		`CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+			INSERT INTO documents_fts(rowid, title, content)
+			VALUES (new.rowid, new.title, new.content);
+		END`,
+
+		`CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+			DELETE FROM documents_fts WHERE rowid = old.rowid;
+		END`,
+
+		`CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+			DELETE FROM documents_fts WHERE rowid = old.rowid;
+			INSERT INTO documents_fts(rowid, title, content)
+			VALUES (new.rowid, new.title, new.content);
+		END`,
+	}
+
+	for _, query := range queries {
+		if _, err := tx.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("failed to execute query: %w\nQuery: %s", err, query)
 		}
 	}
 

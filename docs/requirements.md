@@ -647,23 +647,37 @@ See `CLAUDE.md` for agent architecture details.
 
 ## Future Enhancements
 
-### Planned (Not Implemented)
+See [remaining-requirements.md](remaining-requirements.md) for detailed roadmap.
 
-- RAG pipeline with Ollama
-- Vector embeddings storage
-- Natural language query interface
-- Slack collector
-- Linear collector
-- Document versioning
-- Incremental updates
-- Full-text search UI
+### Near Term (v2.1)
+
+- [ ] Vector embeddings with sqlite-vec
+- [ ] RAG pipeline with Ollama
+- [ ] Natural language query interface (CLI & Web)
+- [ ] Image processing and OCR
+
+### Medium Term (v2.2 - v3.0)
+
+- [ ] GitHub collector
+- [ ] Slack collector (optional)
+- [ ] Linear collector (optional)
+- [ ] Hybrid search (keyword + semantic)
+- [ ] Document versioning
+- [ ] Incremental updates
+
+### Long Term (v3.1+)
+
+- [ ] Multi-user support
+- [ ] Cloud deployment options
+- [ ] API key management
+- [ ] Scheduled collections
+- [ ] Notifications system
 
 ### Not Planned
 
 - CLI-based collection (replaced by Web UI)
-- Multiple database backends
-- Cloud deployment
-- Multi-user support
+- Multiple database backends (SQLite only)
+- Built-in authentication (extension handles auth)
 
 ---
 
