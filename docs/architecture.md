@@ -1,95 +1,145 @@
 # Quaero Architecture
 
-**Version:** 2.0
-**Last Updated:** 2025-10-05
+**Version:** 2.1
+**Last Updated:** 2025-10-06
 **Status:** Active Development
 
 ---
 
 ## Overview
 
-Quaero is a knowledge collection and search system that gathers documentation from Atlassian (Confluence, Jira) using browser extension authentication and provides a web-based interface for accessing the data.
+Quaero is a knowledge collection and search system that gathers documentation from multiple sources (Confluence, Jira, GitHub) and provides semantic search capabilities using vector embeddings and local LLMs.
 
-### Current Implementation Status
+---
 
-**✅ Implemented:**
+## Current Implementation Status
+
+### ✅ Phase 1.0 - Core Infrastructure (COMPLETE)
 - Web-based UI with real-time updates
-- SQLite storage with full-text search
+- SQLite storage with FTS5 full-text search
 - Chrome extension authentication
 - Jira & Confluence collectors
 - WebSocket for live log streaming
 - RESTful API endpoints
+- HTTP server with graceful shutdown
+- Dependency injection architecture
+- Test suite (integration & unit tests)
 
-**🚧 In Progress:**
-- Vector embeddings for semantic search
-- RAG pipeline integration
-- Natural language query interface
+### ✅ Phase 1.1 - Vector Embeddings (COMPLETE)
+- **Document Model:** Normalized document structure with metadata
+- **Embedding Service:** Ollama integration for vector generation
+- **Document Service:** High-level document management with embedding
+- **Processing Service:** Background job for document extraction and vectorization
+- **Scheduler:** CRON-based periodic processing
+- **Document Storage:** SQLite persistence with embedding support
+- **Documents UI:** Web interface for browsing vectorized documents
+- **API Endpoints:**
+  - `GET /api/documents/stats` - Document statistics
+  - `GET /api/documents` - List documents with filtering
+  - `POST /api/documents/process` - Trigger document processing
 
-**📋 Planned:**
-- GitHub collector
+**Implementation Details:**
+- Model: `nomic-embed-text` (768 dimensions)
+- Storage: Binary serialization of float32 embeddings
+- Processing: Automatic embedding generation on document save
+- Scheduling: Configurable CRON schedule (default: every 6 hours)
+
+### 🚧 Phase 1.2 - RAG Pipeline (IN PROGRESS)
+- RAG orchestration service
+- Context building from search results
+- LLM integration for answer generation
+- Natural language query interface (CLI & Web)
+
+### 📋 Phase 2.0 - GitHub Integration (PLANNED)
+- GitHub collector implementation
+- Repository and wiki collection
+- GitHub UI page
+
+### 📋 Phase 3.0 - Advanced Search (PLANNED)
+- Vector similarity search (requires sqlite-vec)
+- Hybrid search (keyword + semantic)
+- Image processing and OCR
 - Additional data sources (Slack, Linear)
-- Multi-user support
 
 ---
 
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Browser (Chrome)                                           │
-│  ┌────────────────────────────────────────────────┐         │
-│  │  Quaero Chrome Extension                       │         │
-│  │  • Captures Atlassian auth (cookies, tokens)   │         │
-│  │  • Connects via WebSocket                      │         │
-│  │  • Sends auth data to server                   │         │
-│  └──────────────────┬─────────────────────────────┘         │
-└────────────────────┼──────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser (Chrome)                                               │
+│  ┌────────────────────────────────────────────────────┐         │
+│  │  Quaero Chrome Extension                           │         │
+│  │  • Captures Atlassian auth (cookies, tokens)       │         │
+│  │  • Connects via WebSocket                          │         │
+│  │  • Sends auth data to server                       │         │
+│  └──────────────────┬─────────────────────────────────┘         │
+└────────────────────┼────────────────────────────────────────────┘
                      │ WebSocket: ws://localhost:8080/ws
                      │
                      ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Quaero Server (Go HTTP/WebSocket)                          │
-│                                                              │
-│  ┌─────────────────────────────────────────────────┐        │
-│  │  HTTP Server (internal/server/)                 │        │
-│  │  • Routes (routes.go)                           │        │
-│  │  • Middleware (middleware.go)                   │        │
-│  │  • Graceful shutdown                            │        │
-│  └──────────────────┬──────────────────────────────┘        │
-│                     │                                        │
-│  ┌──────────────────▼──────────────────────────────┐        │
-│  │  Handlers (internal/handlers/)                  │        │
-│  │  • WebSocketHandler - Real-time comms           │        │
-│  │  • UIHandler - Serves web pages                 │        │
-│  │  • CollectorHandler - Collection triggers       │        │
-│  │  • DataHandler - API endpoints                  │        │
-│  │  • ScraperHandler - Scraping operations         │        │
-│  └──────────────────┬──────────────────────────────┘        │
-│                     │                                        │
-│  ┌──────────────────▼──────────────────────────────┐        │
-│  │  Services (internal/services/atlassian/)        │        │
-│  │  • AtlassianAuthService - Auth management       │        │
-│  │  • JiraScraperService - Jira collection         │        │
-│  │  • ConfluenceScraperService - Confluence        │        │
-│  └──────────────────┬──────────────────────────────┘        │
-│                     │                                        │
-│  ┌──────────────────▼──────────────────────────────┐        │
-│  │  Storage Manager (internal/storage/sqlite/)     │        │
-│  │  • SQLite database                              │        │
-│  │  • Full-text search (FTS5)                      │        │
-│  │  • Migrations                                   │        │
-│  │  • JiraStorage, ConfluenceStorage, AuthStorage  │        │
-│  └─────────────────────────────────────────────────┘        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Quaero Server (Go HTTP/WebSocket)                              │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────┐        │
+│  │  HTTP Server (internal/server/)                     │        │
+│  │  • Routes (routes.go)                               │        │
+│  │  • Middleware (middleware.go)                       │        │
+│  │  • Graceful shutdown                                │        │
+│  └──────────────────┬──────────────────────────────────┘        │
+│                     │                                            │
+│  ┌──────────────────▼──────────────────────────────────┐        │
+│  │  Handlers (internal/handlers/)                      │        │
+│  │  • WebSocketHandler - Real-time comms               │        │
+│  │  • UIHandler - Serves web pages                     │        │
+│  │  • CollectorHandler - Collection triggers           │        │
+│  │  • DocumentHandler - Document API                   │        │
+│  │  • DataHandler - Data API endpoints                 │        │
+│  └──────────────────┬──────────────────────────────────┘        │
+│                     │                                            │
+│  ┌──────────────────▼──────────────────────────────────┐        │
+│  │  Services (internal/services/)                      │        │
+│  │  • atlassian/                                       │        │
+│  │    - AtlassianAuthService - Auth management         │        │
+│  │    - JiraScraperService - Jira collection           │        │
+│  │    - ConfluenceScraperService - Confluence          │        │
+│  │  • documents/                                       │        │
+│  │    - DocumentService - Document management          │        │
+│  │  • embeddings/                                      │        │
+│  │    - EmbeddingService - Vector generation           │        │
+│  │  • processing/                                      │        │
+│  │    - ProcessingService - Background jobs            │        │
+│  │    - Scheduler - CRON scheduling                    │        │
+│  └──────────────────┬──────────────────────────────────┘        │
+│                     │                                            │
+│  ┌──────────────────▼──────────────────────────────────┐        │
+│  │  Storage Layer (internal/storage/sqlite/)           │        │
+│  │  • SQLiteDB - Connection manager                    │        │
+│  │  • JiraStorage - Jira persistence                   │        │
+│  │  • ConfluenceStorage - Confluence persistence       │        │
+│  │  • DocumentStorage - Document persistence           │        │
+│  │  • AuthStorage - Auth credentials                   │        │
+│  └──────────────────┬──────────────────────────────────┘        │
+└────────────────────┼────────────────────────────────────────────┘
                      │
                      ↓
-┌─────────────────────────────────────────────────────────────┐
-│  SQLite Database (./quaero.db)                              │
-│  • jira_projects, jira_issues                               │
-│  • confluence_spaces, confluence_pages                      │
-│  • auth_credentials                                         │
-│  • Full-text search indexes                                 │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  SQLite Database (./quaero.db)                                  │
+│  • jira_projects, jira_issues                                   │
+│  • confluence_spaces, confluence_pages                          │
+│  • documents (normalized with embeddings)                       │
+│  • document_chunks (for large documents)                        │
+│  • documents_fts (FTS5 full-text search index)                  │
+│  • auth_credentials                                             │
+└─────────────────────────────────────────────────────────────────┘
+                     │
+                     ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  Ollama (Local LLM Server)                                      │
+│  • nomic-embed-text - Embedding generation (768d)               │
+│  • qwen2.5:32b - Text generation (future)                       │
+│  • llama3.2-vision:11b - Vision tasks (future)                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -111,34 +161,44 @@ quaero/
 │       └── content.js               # Page content interaction
 │
 ├── internal/
-│   ├── common/                      # Stateless utilities
+│   ├── common/                      # Stateless utilities (NO receiver methods)
 │   │   ├── config.go                # Configuration loading (TOML)
 │   │   ├── logger.go                # Logger initialization (arbor)
 │   │   ├── banner.go                # Startup banner (ternarybob/banner)
 │   │   └── version.go               # Version management
 │   │
 │   ├── app/                         # Application orchestration
-│   │   └── app.go                   # App initialization & manual dependency wiring
+│   │   └── app.go                   # Manual dependency wiring
 │   │
-│   ├── services/                    # Stateful services (receiver methods)
-│   │   └── atlassian/               # Jira & Confluence
-│   │       ├── auth_service.go      # Authentication management
-│   │       ├── jira_scraper_service.go
-│   │       ├── jira_projects.go
-│   │       ├── jira_issues.go
-│   │       ├── jira_data.go
-│   │       ├── confluence_scraper_service.go
-│   │       ├── confluence_spaces.go
-│   │       ├── confluence_pages.go
-│   │       └── confluence_data.go
+│   ├── services/                    # Stateful services (WITH receiver methods)
+│   │   ├── atlassian/               # Jira & Confluence
+│   │   │   ├── auth_service.go      # Authentication management
+│   │   │   ├── jira_scraper_service.go
+│   │   │   ├── jira_projects.go
+│   │   │   ├── jira_issues.go
+│   │   │   ├── jira_data.go
+│   │   │   ├── confluence_scraper_service.go
+│   │   │   ├── confluence_spaces.go
+│   │   │   ├── confluence_pages.go
+│   │   │   └── confluence_data.go
+│   │   │
+│   │   ├── documents/               # Document management
+│   │   │   └── document_service.go  # High-level document operations
+│   │   │
+│   │   ├── embeddings/              # Vector embedding generation
+│   │   │   └── embedding_service.go # Ollama integration
+│   │   │
+│   │   └── processing/              # Background processing
+│   │       ├── processing_service.go # Document extraction & vectorization
+│   │       └── scheduler.go         # CRON scheduler
 │   │
 │   ├── handlers/                    # HTTP handlers (constructor injection)
 │   │   ├── websocket.go             # WebSocket handler
 │   │   ├── ui.go                    # Web UI handler
 │   │   ├── collector.go             # Collection endpoints
-│   │   ├── scraper.go               # Scraping endpoints
+│   │   ├── document_handler.go      # Document API endpoints
 │   │   ├── data.go                  # Data API endpoints
-│   │   └── api.go                   # General API
+│   │   └── scraper.go               # Scraping endpoints
 │   │
 │   ├── storage/                     # Storage layer
 │   │   ├── factory.go               # Storage factory
@@ -148,24 +208,24 @@ quaero/
 │   │       ├── migrations.go        # Schema migrations
 │   │       ├── jira_storage.go      # Jira persistence
 │   │       ├── confluence_storage.go # Confluence persistence
+│   │       ├── document_storage.go  # Document persistence
 │   │       └── auth_storage.go      # Auth persistence
-│   │
-│   ├── server/                      # HTTP server
-│   │   ├── server.go                # Server implementation
-│   │   ├── routes.go                # Route definitions
-│   │   └── middleware.go            # Middleware
 │   │
 │   ├── interfaces/                  # Service interfaces
 │   │   ├── storage.go               # Storage interfaces
-│   │   └── atlassian.go             # Atlassian interfaces
+│   │   ├── atlassian.go             # Atlassian interfaces
+│   │   ├── document_service.go      # Document service interface
+│   │   └── embedding_service.go     # Embedding service interface
 │   │
 │   └── models/                      # Data models
-│       └── atlassian.go             # Atlassian data structures
+│       ├── atlassian.go             # Atlassian data structures
+│       └── document.go              # Document model with embeddings
 │
 ├── pages/                           # Web UI (NOT CLI)
 │   ├── index.html                   # Main dashboard
 │   ├── confluence.html              # Confluence UI
 │   ├── jira.html                    # Jira UI
+│   ├── documents.html               # Documents UI (NEW)
 │   ├── partials/                    # Reusable components
 │   │   ├── navbar.html
 │   │   └── service-logs.html
@@ -184,141 +244,357 @@ quaero/
 │
 └── docs/                            # Documentation
     ├── architecture.md              # This file
-    ├── requirements.md              # Requirements doc
-    └── remaining-requirements.md    # Remaining work
+    └── requirements.md              # Requirements doc
 ```
 
 ---
 
 ## Core Components
 
-### 1. Startup Sequence (cmd/quaero/main.go)
+### 1. Document Model
 
-**Required Order:**
-1. Configuration loading (`common.LoadFromFile`)
-2. CLI flag overrides (`common.ApplyCLIOverrides`)
-3. Logger initialization (`common.InitLogger`)
-4. Banner display (`common.PrintBanner`) - MANDATORY
-5. Application initialization (`app.New`)
-6. Server start
+**Location:** `internal/models/document.go`
 
-### 2. Configuration System
+**Structure:**
+```go
+type Document struct {
+    // Identity
+    ID         string // doc_{uuid}
+    SourceType string // jira, confluence, github
+    SourceID   string // Original ID from source
 
-**Priority Order:**
-1. CLI flags (highest)
-2. Environment variables
-3. Config file (`quaero.toml`)
-4. Defaults (lowest)
+    // Content
+    Title           string
+    Content         string // Plain text
+    ContentMarkdown string // Markdown format
 
-**Required Libraries:**
-- `github.com/pelletier/go-toml/v2` - TOML configuration
+    // Vector embedding
+    Embedding      []float32 // 768 dimensions (nomic-embed-text)
+    EmbeddingModel string    // Model name
 
-### 3. Logging System
+    // Metadata (source-specific data stored as JSON)
+    Metadata map[string]interface{}
+    URL      string // Link to original
 
-**Required Library:**
-- `github.com/ternarybob/arbor` - Structured logging
+    // Timestamps
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+```
 
-**Forbidden:**
-- `fmt.Println`
-- `log.Println`
-- Any other logging library
+**Source-Specific Metadata:**
+- **Jira:** IssueKey, ProjectKey, IssueType, Status, Priority, Assignee, Reporter, Labels, Components
+- **Confluence:** PageID, SpaceKey, SpaceName, Author, Version, ContentType
 
-### 4. Banner System
+### 2. Embedding Service
 
-**Required Library:**
-- `github.com/ternarybob/banner` - Startup banner
+**Location:** `internal/services/embeddings/embedding_service.go`
 
-**Must Display:**
-- Application name
-- Version
-- Server host and port
-- Configuration source
+**Responsibilities:**
+- Connect to Ollama API
+- Generate embeddings for text
+- Embed documents (title + content)
+- Generate query embeddings for search
+- Check Ollama availability
 
-### 5. Storage Layer
+**Key Methods:**
+```go
+func (s *Service) GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
+func (s *Service) EmbedDocument(ctx context.Context, doc *models.Document) error
+func (s *Service) EmbedDocuments(ctx context.Context, docs []*models.Document) error
+func (s *Service) GenerateQueryEmbedding(ctx context.Context, query string) ([]float32, error)
+func (s *Service) IsAvailable(ctx context.Context) bool
+```
 
-**Implementation:** SQLite with FTS5
+**Configuration:**
+- Ollama URL: `http://localhost:11434`
+- Model: `nomic-embed-text`
+- Dimension: 768
+- Timeout: 30 seconds
 
-**Components:**
-- `StorageManager` interface
-- `JiraStorage` interface
-- `ConfluenceStorage` interface
-- `AuthStorage` interface
+### 3. Document Service
+
+**Location:** `internal/services/documents/document_service.go`
+
+**Responsibilities:**
+- Save documents with automatic embedding generation
+- Update documents with re-embedding on content change
+- Retrieve documents by ID or source reference
+- Delete documents and chunks
+- Search (keyword, vector, hybrid)
+- Get statistics
+
+**Key Methods:**
+```go
+func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error
+func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) error
+func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) error
+func (s *Service) GetDocument(ctx context.Context, id string) (*models.Document, error)
+func (s *Service) GetBySource(ctx context.Context, sourceType, sourceID string) (*models.Document, error)
+func (s *Service) DeleteDocument(ctx context.Context, id string) error
+func (s *Service) Search(ctx context.Context, query *SearchQuery) ([]*models.Document, error)
+func (s *Service) GetStats(ctx context.Context) (*models.DocumentStats, error)
+func (s *Service) Count(ctx context.Context, sourceType string) (int, error)
+func (s *Service) List(ctx context.Context, opts *ListOptions) ([]*models.Document, error)
+```
+
+**Search Modes:**
+- **Keyword:** FTS5 full-text search
+- **Vector:** Similarity search (requires sqlite-vec)
+- **Hybrid:** Combined keyword + vector (future)
+
+### 4. Processing Service
+
+**Location:** `internal/services/processing/processing_service.go`
+
+**Responsibilities:**
+- Extract documents from source tables (Jira, Confluence)
+- Transform to normalized document format
+- Generate embeddings via DocumentService
+- Track processing statistics
+- Support incremental updates
+
+**Key Methods:**
+```go
+func (s *Service) ProcessAll(ctx context.Context) (*ProcessingStats, error)
+func (s *Service) ProcessJira(ctx context.Context) (*SourceStats, error)
+func (s *Service) ProcessConfluence(ctx context.Context) (*SourceStats, error)
+func (s *Service) VectorizeExisting(ctx context.Context) error
+```
+
+**Processing Flow:**
+1. Get all items from source storage (Jira/Confluence)
+2. For each item, check if document exists
+3. If new, create document (will be done by collector)
+4. If exists, check for updates
+5. Track statistics (new, updated, errors)
+
+### 5. Scheduler
+
+**Location:** `internal/services/processing/scheduler.go`
+
+**Responsibilities:**
+- Schedule periodic document processing
+- Support configurable CRON schedules
+- Provide manual trigger capability
+- Log processing results
+
+**Key Methods:**
+```go
+func (s *Scheduler) Start(schedule string) error
+func (s *Scheduler) Stop()
+func (s *Scheduler) RunNow()
+```
+
+**Default Schedule:** `0 0 */6 * * *` (every 6 hours)
+
+### 6. Document Storage
+
+**Location:** `internal/storage/sqlite/document_storage.go`
+
+**Responsibilities:**
+- Persist documents with embeddings
+- Binary serialization of float32 embeddings
+- Full-text search using FTS5
+- Vector search (future with sqlite-vec)
+- Document statistics and counts
+
+**Schema:**
+```sql
+CREATE TABLE documents (
+    id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT,
+    content_markdown TEXT,
+    embedding BLOB,
+    embedding_model TEXT,
+    metadata TEXT,
+    url TEXT,
+    created_at INTEGER,
+    updated_at INTEGER,
+    UNIQUE(source_type, source_id)
+);
+
+CREATE VIRTUAL TABLE documents_fts USING fts5(
+    title,
+    content,
+    content=documents,
+    content_rowid=rowid
+);
+
+CREATE TABLE document_chunks (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT,
+    embedding BLOB,
+    token_count INTEGER,
+    created_at INTEGER,
+    UNIQUE(document_id, chunk_index),
+    FOREIGN KEY(document_id) REFERENCES documents(id)
+);
+```
+
+**Embedding Serialization:**
+- Format: Little-endian binary (4 bytes per float32)
+- Storage: BLOB column
+- Deserialization: On-demand when needed
+
+### 7. Document Handler
+
+**Location:** `internal/handlers/document_handler.go`
+
+**Endpoints:**
+- `GET /api/documents/stats` - Document statistics
+- `GET /api/documents` - List documents with filtering
+- `POST /api/documents/process` - Trigger document processing
+
+**Statistics Response:**
+```json
+{
+    "total_documents": 150,
+    "documents_by_source": {
+        "jira": 75,
+        "confluence": 75
+    },
+    "vectorized_count": 140,
+    "vectorized_documents": 140,
+    "jira_documents": 75,
+    "confluence_documents": 75,
+    "pending_vectorize": 10,
+    "last_updated": "2025-10-06T12:00:00Z",
+    "embedding_model": "nomic-embed-text",
+    "average_content_size": 2500
+}
+```
+
+### 8. Documents UI
+
+**Location:** `pages/documents.html`
 
 **Features:**
-- Full-text search (FTS5)
-- Schema migrations
-- Transaction support
+- Document statistics dashboard
+- Searchable document table
+- Source type filtering (Jira, Confluence)
+- Vectorization status filtering
+- Document detail viewer with JSON highlighting
+- Real-time log streaming
+- Manual processing trigger
+- Responsive design
 
-### 6. Services (internal/services/)
+**Filters:**
+- Text search (title, content, source ID)
+- Source type (all, jira, confluence)
+- Vectorization status (all, vectorized, not vectorized)
 
-**Pattern:** Stateful services with receiver methods
+---
 
-**AtlassianAuthService:**
-- Receives auth from extension
-- Stores credentials in database
-- Provides auth to collectors
+## Data Flow Diagrams
 
-**JiraScraperService:**
-- Fetches projects
-- Fetches issues
-- Stores in SQLite
+### Document Collection Flow
 
-**ConfluenceScraperService:**
-- Fetches spaces
-- Fetches pages
-- Stores in SQLite
+```
+1. User triggers collection via Web UI
+   ↓
+2. CollectorHandler receives request
+   ↓
+3. JiraScraperService/ConfluenceScraperService
+   ↓
+4. Fetches data from Atlassian API
+   ↓
+5. Stores in source-specific tables
+   ↓
+6. Processing Service extracts from source tables
+   ↓
+7. Transforms to Document model
+   ↓
+8. DocumentService.SaveDocument()
+   ↓
+9. EmbeddingService.EmbedDocument()
+   ↓
+10. Generates vector embedding via Ollama
+    ↓
+11. DocumentStorage.SaveDocument()
+    ↓
+12. Persists to SQLite with embedding
+    ↓
+13. Updates FTS5 index
+    ↓
+14. Returns success
+```
 
-### 7. Handlers (internal/handlers/)
+### Document Processing Flow
 
-**Pattern:** Constructor-based dependency injection with interfaces
+```
+1. Scheduler triggers (CRON or manual)
+   ↓
+2. ProcessingService.ProcessAll()
+   ↓
+3. For Jira:
+   ├─ Get all projects
+   ├─ Get all issues per project
+   ├─ Check if document exists
+   ├─ Track new/updated/errors
+   └─ Return statistics
+   ↓
+4. For Confluence:
+   ├─ Get all spaces
+   ├─ Get all pages per space
+   ├─ Check if document exists
+   ├─ Track new/updated/errors
+   └─ Return statistics
+   ↓
+5. Log final statistics
+   ↓
+6. WebSocket broadcast to UI
+```
 
-**WebSocketHandler:**
-- Real-time communication
-- Log streaming
-- Status updates
-- Auth reception from extension
+### Search Flow (Current - FTS5 only)
 
-**UIHandler:**
-- Serves HTML pages
-- Template rendering
-- Static file serving
+```
+1. User enters search query
+   ↓
+2. DocumentService.Search()
+   ↓
+3. Mode: Keyword
+   ↓
+4. DocumentStorage.FullTextSearch()
+   ↓
+5. FTS5 MATCH query
+   ↓
+6. Return ranked results
+   ↓
+7. Display in UI
+```
 
-**CollectorHandler:**
-- Trigger collections
-- Collection status
-- Progress monitoring
+### Search Flow (Future - Vector + Hybrid)
 
-**DataHandler:**
-- API endpoints for data
-- CRUD operations
-
-### 8. Web UI (pages/)
-
-**Architecture:** Server-side rendered HTML with JavaScript
-
-**Pages:**
-- `index.html` - Dashboard
-- `confluence.html` - Confluence UI
-- `jira.html` - Jira UI
-
-**Features:**
-- Real-time log streaming (WebSocket)
-- Collection triggering
-- Status monitoring
-- Data browsing
-
-### 9. Chrome Extension
-
-**Location:** `cmd/quaero-chrome-extension/`
-
-**Purpose:** Capture Atlassian authentication
-
-**Flow:**
-1. User navigates to Atlassian
-2. Extension captures cookies/tokens
-3. Extension connects to `ws://localhost:8080/ws`
-4. Extension sends auth data
-5. Server stores and uses for collection
+```
+1. User enters search query
+   ↓
+2. DocumentService.Search()
+   ↓
+3. Mode: Vector or Hybrid
+   ↓
+4. EmbeddingService.GenerateQueryEmbedding()
+   ↓
+5. Get embedding from Ollama
+   ↓
+6a. Vector Mode:
+    └─ DocumentStorage.VectorSearch()
+       └─ sqlite-vec similarity search
+       └─ Return top-k results
+   ↓
+6b. Hybrid Mode:
+    ├─ DocumentStorage.FullTextSearch()
+    ├─ DocumentStorage.VectorSearch()
+    ├─ Merge and rank results
+    └─ Return combined results
+   ↓
+7. Display in UI with relevance scores
+```
 
 ---
 
@@ -355,183 +631,40 @@ quaero/
 
 ---
 
-## Data Collection Flow
-
-```
-1. User triggers collection via Web UI
-   ↓
-2. CollectorHandler receives request
-   ↓
-3. Service (Jira/Confluence) loads auth from database
-   ↓
-4. Service makes API calls with stored credentials
-   ↓
-5. Service processes responses
-   ↓
-6. Service stores in SQLite
-   ↓
-7. Service sends progress via WebSocket
-   ↓
-8. UI updates in real-time
-```
-
----
-
-## WebSocket Protocol
-
-**Endpoint:** `ws://localhost:8080/ws`
-
-### Client → Server Messages
-
-**Auth Data:**
-```json
-{
-  "type": "auth",
-  "payload": {
-    "cookies": ["session=abc123"],
-    "localStorage": {"key": "value"},
-    "cloudId": "...",
-    "baseUrl": "https://company.atlassian.net"
-  }
-}
-```
-
-### Server → Client Messages
-
-**Log Stream:**
-```json
-{
-  "type": "log",
-  "payload": {
-    "timestamp": "15:04:05",
-    "level": "info",
-    "message": "Collection started",
-    "service": "confluence"
-  }
-}
-```
-
-**Status Update:**
-```json
-{
-  "type": "status",
-  "payload": {
-    "service": "confluence",
-    "status": "running",
-    "progress": 42,
-    "total": 100
-  }
-}
-```
-
----
-
-## Clean Architecture Patterns
-
-### internal/common/ - Stateless Utilities
-
-**Rules:**
-- ✅ Pure functions only
-- ✅ No state
-- ❌ No receiver methods
-
-**Example:**
-```go
-// ✅ CORRECT
-func LoadFromFile(path string) (*Config, error) {
-    // Pure function
-}
-
-// ❌ WRONG
-func (c *Config) Load() error {
-    // Belongs in services/
-}
-```
-
-### internal/services/ - Stateful Services
-
-**Rules:**
-- ✅ Receiver methods required
-- ✅ State management
-- ✅ Implement interfaces
-
-**Example:**
-```go
-// ✅ CORRECT
-type JiraScraperService struct {
-    storage interfaces.JiraStorage
-    auth    *AtlassianAuthService
-    logger  arbor.ILogger
-}
-
-func (j *JiraScraperService) FetchProjects() error {
-    j.logger.Info().Msg("Fetching projects")
-    // Use j.storage, j.auth
-}
-```
-
-### internal/handlers/ - HTTP Handlers
-
-**Rules:**
-- ✅ Constructor-based dependency injection
-- ✅ Interface-based (where applicable)
-- ✅ Thin layer - delegates to services
-
-**Example:**
-```go
-// ✅ CORRECT - Constructor injection
-type CollectorHandler struct {
-    jira       *atlassian.JiraScraperService
-    confluence *atlassian.ConfluenceScraperService
-    logger     arbor.ILogger
-}
-
-func NewCollectorHandler(
-    jira *atlassian.JiraScraperService,
-    confluence *atlassian.ConfluenceScraperService,
-    logger arbor.ILogger,
-) *CollectorHandler {
-    return &CollectorHandler{
-        jira:       jira,
-        confluence: confluence,
-        logger:     logger,
-    }
-}
-
-func (h *CollectorHandler) HandleCollect(w http.ResponseWriter, r *http.Request) {
-    // Delegate to services
-    err := h.jira.Collect()
-    // Handle response
-}
-```
-
----
-
 ## API Endpoints
 
 ### HTTP Endpoints
 
 ```
-GET  /                     - Dashboard UI
-GET  /confluence           - Confluence UI
-GET  /jira                 - Jira UI
+GET  /                              - Dashboard UI
+GET  /confluence                    - Confluence UI
+GET  /jira                          - Jira UI
+GET  /documents                     - Documents UI (NEW)
 
-POST /api/collect/jira     - Trigger Jira collection
-POST /api/collect/confluence - Trigger Confluence collection
+POST /api/collect/jira              - Trigger Jira collection
+POST /api/collect/confluence        - Trigger Confluence collection
 
-GET  /api/data/jira/projects - Get Jira projects
-GET  /api/data/jira/issues   - Get Jira issues
-GET  /api/data/confluence/spaces - Get Confluence spaces
-GET  /api/data/confluence/pages  - Get Confluence pages
+GET  /api/data/jira/projects        - Get Jira projects
+GET  /api/data/jira/issues          - Get Jira issues
+GET  /api/data/confluence/spaces    - Get Confluence spaces
+GET  /api/data/confluence/pages     - Get Confluence pages
 
-GET  /health               - Health check
+GET  /api/documents/stats           - Get document statistics (NEW)
+GET  /api/documents                 - List documents with filtering (NEW)
+POST /api/documents/process         - Trigger document processing (NEW)
+
+GET  /health                        - Health check
 ```
 
 ### WebSocket Endpoint
 
 ```
-WS   /ws                   - WebSocket connection
+WS   /ws                            - WebSocket connection
 ```
+
+**Messages:**
+- **Client → Server:** Auth data from extension
+- **Server → Client:** Log messages, status updates
 
 ---
 
@@ -539,13 +672,14 @@ WS   /ws                   - WebSocket connection
 
 **Language:** Go 1.25+
 
-**Libraries:**
+**Core Libraries:**
 - `github.com/ternarybob/arbor` - Logging (REQUIRED)
 - `github.com/ternarybob/banner` - Banners (REQUIRED)
 - `github.com/pelletier/go-toml/v2` - TOML config (REQUIRED)
 - `github.com/spf13/cobra` - CLI framework
 - `github.com/gorilla/websocket` - WebSocket
 - `modernc.org/sqlite` - SQLite driver
+- `github.com/robfig/cron/v3` - CRON scheduling
 
 **Storage:** SQLite with FTS5
 
@@ -553,124 +687,112 @@ WS   /ws                   - WebSocket connection
 
 **Browser:** Chrome Extension (Manifest V3)
 
----
-
-## Testing
-
-**Structure:**
-```
-test/
-├── integration/           # Integration tests
-│   ├── auth_test.go
-│   ├── jira_test.go
-│   └── confluence_test.go
-├── ui/                   # UI tests
-└── run-tests.ps1         # Test runner
-```
-
-**Commands:**
-```bash
-# Run all tests
-./test/run-tests.ps1 -Type all
-
-# Unit tests only
-./test/run-tests.ps1 -Type unit
-
-# Integration tests only
-./test/run-tests.ps1 -Type integration
-```
+**LLM:** Ollama (local)
 
 ---
 
-## Build & Deployment
+## Remaining Work
 
-**Build Script:** `scripts/build.ps1`
+### Phase 1.2 - RAG Pipeline
+- RAG orchestration service
+- Context building from search results
+- LLM integration for answer generation
+- Natural language query interface (CLI & Web)
+- Answer formatting with citations
 
-```bash
-# Development build
-./scripts/build.ps1
+### Phase 2.0 - GitHub Integration
+- GitHub service implementation
+- Repository and wiki collection
+- GitHub storage schema
+- GitHub UI page
+- API endpoints for GitHub data
 
-# Production build
-./scripts/build.ps1 -Release
+### Phase 3.0 - Advanced Search
+- **Vector Search:** Integrate sqlite-vec extension
+- **Hybrid Search:** Combine FTS5 + vector similarity
+- **Image Processing:** OCR and vision model integration
+- **Search Ranking:** Advanced ranking algorithms
+- **Faceted Search:** Multiple filter dimensions
 
-# Clean build
-./scripts/build.ps1 -Clean
-```
-
-**Output:** `bin/quaero.exe` (Windows) or `bin/quaero` (Unix)
-
----
-
-## Configuration Example
-
-**File:** `quaero.toml`
-
-```toml
-[server]
-host = "localhost"
-port = 8080
-
-[logging]
-level = "info"
-format = "json"
-
-[storage]
-type = "sqlite"
-
-[storage.sqlite]
-path = "./quaero.db"
-enable_fts5 = true
-enable_wal = true
-```
+### Phase 4.0 - Additional Features
+- **Incremental Updates:** Only process changed documents
+- **Document Versioning:** Track changes over time
+- **Scheduled Collections:** Automated periodic collection
+- **Multi-User Support:** User authentication and preferences
+- **Additional Sources:** Slack, Linear, Notion
 
 ---
 
-## Error Handling
+## Performance Considerations
 
-**Required Patterns:**
+### Current Performance
 
-```go
-// ✅ CORRECT - No ignored errors
-data, err := loadData()
-if err != nil {
-    return fmt.Errorf("failed to load: %w", err)
-}
+**Document Processing:**
+- Embedding generation: ~100-200ms per document (depends on Ollama)
+- Batch processing: Processes documents sequentially
+- Storage: SQLite handles thousands of documents efficiently
 
-// ❌ FORBIDDEN - Ignored errors
-data, _ := loadData()
-```
+**Search Performance:**
+- FTS5 keyword search: Sub-second for 10k+ documents
+- Vector search: Not yet implemented (requires sqlite-vec)
 
-**Error Logging:**
-```go
-if err := service.Collect(); err != nil {
-    logger.Error().Err(err).Msg("Collection failed")
-    return err
-}
-```
+### Future Optimizations
 
----
+**Embedding Generation:**
+- Batch embedding requests to Ollama
+- Parallel processing for multiple documents
+- Caching for duplicate content
 
-## Code Quality Standards
+**Vector Search:**
+- Approximate nearest neighbor (ANN) with sqlite-vec
+- Index optimization for large datasets
+- Result caching for common queries
 
-### Function Structure
-- Max 80 lines (ideal: 20-40)
-- Single responsibility
-- Comprehensive error handling
-
-### File Structure
-- Max 500 lines
-- Modular design
-
-### Forbidden Patterns
-- `TODO:` comments
-- `FIXME:` comments
-- Hardcoded credentials
-- Unused imports
-- Dead code
-- Ignored errors (`_ = err`)
+**Storage:**
+- WAL mode for better concurrency
+- Periodic VACUUM for database maintenance
+- Connection pooling for handlers
 
 ---
 
-**Last Updated:** 2025-10-05
+## Security Considerations
+
+**Authentication:**
+- Credentials stored in SQLite (encrypted at rest recommended)
+- WebSocket origin validation
+- HTTPS for production deployments
+
+**Input Validation:**
+- SQL injection prevention (parameterized queries)
+- XSS prevention (HTML escaping in UI)
+- CSRF protection for state-changing operations
+
+**Dependencies:**
+- Regular dependency updates
+- Vulnerability scanning
+- Minimal dependency surface
+
+---
+
+## Testing Strategy
+
+**Unit Tests:**
+- Service logic
+- Data transformations
+- Utility functions
+
+**Integration Tests:**
+- End-to-end collection flows
+- Database operations
+- API endpoints
+
+**Performance Tests:**
+- Embedding generation benchmarks
+- Search performance
+- Large dataset handling
+
+---
+
+**Last Updated:** 2025-10-06
 **Status:** Active Development
-**Version:** 2.0
+**Version:** 2.1

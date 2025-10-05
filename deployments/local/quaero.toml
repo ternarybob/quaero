@@ -1,43 +1,108 @@
+# Quaero Configuration
+# ====================
+#
+# Configuration Load Order (priority from lowest to highest):
+#   1. Defaults (hardcoded in application)
+#   2. TOML file (this file)
+#   3. Environment variables (QUAERO_*)
+#   4. Command line flags (--port, --host, --config)
+#
+# Only uncomment settings you want to override from defaults.
+# User-specific settings (sources, models) should remain uncommented.
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+# Defaults: port=8080, host="localhost"
+# CLI flags: --port, --host (highest priority)
+# Env vars: QUAERO_SERVER_PORT, QUAERO_SERVER_HOST
+
 [server]
-port = 8080
-host = "localhost"
+# port = 8080         # Default: 8080
+# host = "localhost"  # Default: localhost
+
+# =============================================================================
+# Data Sources Configuration
+# =============================================================================
+# Configure which sources to scrape and what projects/spaces to include.
+# These are user-specific and should be uncommented and customized.
 
 [sources.confluence]
 enabled = true
-spaces = ["TEAM", "DOCS"]
+spaces = ["TEAM", "DOCS"]  # Customize: Your Confluence spaces
 
 [sources.jira]
 enabled = true
-projects = ["DATA", "ENG"]
+projects = ["DATA", "ENG"]  # Customize: Your Jira projects
 
 [sources.github]
 enabled = true
-token = "${GITHUB_TOKEN}"
-repos = ["your-org/repo1"]
+token = "${GITHUB_TOKEN}"  # Use environment variable for security
+repos = ["your-org/repo1"] # Customize: Your GitHub repositories
 
-# Storage configuration
+# =============================================================================
+# Storage Configuration
+# =============================================================================
+# Defaults: type="sqlite", path="./data/quaero.db"
+# Env vars: QUAERO_STORAGE_TYPE, QUAERO_SQLITE_PATH
+
 [storage]
-type = "sqlite"
+# type = "sqlite"  # Default: sqlite
 
 [storage.sqlite]
-path = "./data/quaero.db"
-enable_fts5 = true
-enable_vector = true
-embedding_dimension = 1536
-cache_size_mb = 64
-wal_mode = true
-busy_timeout_ms = 5000
+# path = "./data/quaero.db"     # Default: ./data/quaero.db
+# enable_fts5 = true             # Default: true (full-text search)
+# enable_vector = true           # Default: true (vector embeddings)
+# embedding_dimension = 768      # Default: 768 (matches nomic-embed-text)
+# cache_size_mb = 64             # Default: 64
+# wal_mode = true                # Default: true (Write-Ahead Logging)
+# busy_timeout_ms = 5000         # Default: 5000
 
 [storage.filesystem]
-images = "./data/images"
-attachments = "./data/attachments"
+# images = "./data/images"           # Default: ./data/images
+# attachments = "./data/attachments" # Default: ./data/attachments
+
+# =============================================================================
+# LLM Configuration (Ollama)
+# =============================================================================
+# Configure which models to use for text and vision tasks.
+# Models must be pulled via: ollama pull <model-name>
 
 [llm.ollama]
-url = "http://localhost:11434"
-text_model = "qwen2.5:32b"
-vision_model = "llama3.2-vision:11b"
+# url = "http://localhost:11434"  # Default: http://localhost:11434
+text_model = "qwen2.5:32b"        # Customize: Your preferred text model
+vision_model = "llama3.2-vision:11b"  # Customize: Your preferred vision model
+
+# =============================================================================
+# Embeddings Configuration
+# =============================================================================
+# Defaults: enabled=true, ollama_url="http://localhost:11434",
+#           model="nomic-embed-text", dimension=768, batch_size=10
+
+[embeddings]
+# enabled = true                           # Default: true
+# ollama_url = "http://localhost:11434"    # Default: http://localhost:11434
+# model = "nomic-embed-text"               # Default: nomic-embed-text (768-dim)
+# dimension = 768                          # Default: 768
+# batch_size = 10                          # Default: 10
+
+# =============================================================================
+# Document Processing Configuration
+# =============================================================================
+# Defaults: enabled=false, schedule="0 0 */6 * * *" (every 6 hours)
+# Processing scheduler transforms source data into normalized documents
+
+[processing]
+# enabled = false                # Default: false (opt-in for safety)
+# schedule = "0 0 */6 * * *"     # Default: every 6 hours (cron format)
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+# Defaults: level="info", format="text", output=["stdout", "file"]
+# Env vars: QUAERO_LOG_LEVEL, QUAERO_LOG_FORMAT, QUAERO_LOG_OUTPUT
 
 [logging]
-level = "info"
-format = "text"
-output = ["stdout", "file"]
+# level = "info"                 # Default: info (debug|info|warn|error)
+# format = "text"                # Default: text (text|json)
+# output = ["stdout", "file"]    # Default: stdout and file
