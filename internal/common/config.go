@@ -45,8 +45,20 @@ type GitHubConfig struct {
 }
 
 type StorageConfig struct {
+	Type       string           `toml:"type"` // "sqlite", "ravendb", etc.
+	SQLite     SQLiteConfig     `toml:"sqlite"`
 	RavenDB    RavenDBConfig    `toml:"ravendb"`
 	Filesystem FilesystemConfig `toml:"filesystem"`
+}
+
+type SQLiteConfig struct {
+	Path               string `toml:"path"`                // Database file path
+	EnableFTS5         bool   `toml:"enable_fts5"`         // Enable full-text search
+	EnableVector       bool   `toml:"enable_vector"`       // Enable sqlite-vec extension
+	EmbeddingDimension int    `toml:"embedding_dimension"` // Vector dimension for embeddings
+	CacheSizeMB        int    `toml:"cache_size_mb"`       // Cache size in MB
+	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
+	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
 }
 
 type RavenDBConfig struct {
@@ -81,6 +93,22 @@ func NewDefaultConfig() *Config {
 		Server: ServerConfig{
 			Port: 8080,
 			Host: "localhost",
+		},
+		Storage: StorageConfig{
+			Type: "sqlite",
+			SQLite: SQLiteConfig{
+				Path:               "./data/quaero.db",
+				EnableFTS5:         true,
+				EnableVector:       true,
+				EmbeddingDimension: 1536,
+				CacheSizeMB:        64,
+				WALMode:            true,
+				BusyTimeoutMS:      5000,
+			},
+			Filesystem: FilesystemConfig{
+				Images:      "./data/images",
+				Attachments: "./data/attachments",
+			},
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -127,6 +155,14 @@ func applyEnvOverrides(config *Config) {
 		config.Server.Host = host
 	}
 
+	// Storage configuration
+	if storageType := os.Getenv("QUAERO_STORAGE_TYPE"); storageType != "" {
+		config.Storage.Type = storageType
+	}
+	if sqlitePath := os.Getenv("QUAERO_SQLITE_PATH"); sqlitePath != "" {
+		config.Storage.SQLite.Path = sqlitePath
+	}
+
 	// Logging configuration
 	if level := os.Getenv("QUAERO_LOG_LEVEL"); level != "" {
 		config.Logging.Level = level
@@ -165,9 +201,10 @@ func splitString(s, sep string) []string {
 	result := []string{}
 	start := 0
 	for i := 0; i < len(s); i++ {
-		if s[i:i+len(sep)] == sep {
+		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
 			result = append(result, s[start:i])
 			start = i + len(sep)
+			i = start - 1
 		}
 	}
 	result = append(result, s[start:])

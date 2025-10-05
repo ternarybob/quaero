@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 type DataHandler struct {
@@ -79,7 +82,30 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 
 		// Handle []map[string]interface{} type from GetJiraData()
 		if issueList, ok := issues.([]map[string]interface{}); ok {
-			for _, issue := range issueList {
+			h.logger.Info().Int("issueCount", len(issueList)).Msg("Processing issues as []map[string]interface{}")
+
+			for i, issue := range issueList {
+				// Debug first issue structure
+				if i == 0 {
+					issueJSON, _ := json.Marshal(issue)
+					h.logger.Info().Str("firstIssue", string(issueJSON)).Msg("First issue structure")
+					h.logger.Info().Strs("keys", getMapKeys(issue)).Msg("First issue top-level keys")
+				}
+
+				// Try direct key field first (from database)
+				if issueKey, ok := issue["key"].(string); ok {
+					// Extract project key from issue key (e.g., "BI9LLQNGKQ-1" -> "BI9LLQNGKQ")
+					projectKey := extractProjectKey(issueKey)
+					for _, pk := range projectKeys {
+						if projectKey == pk {
+							filteredIssues = append(filteredIssues, issue)
+							break
+						}
+					}
+					continue
+				}
+
+				// Fallback to nested fields.project.key (from Jira API)
 				if fields, ok := issue["fields"].(map[string]interface{}); ok {
 					if project, ok := fields["project"].(map[string]interface{}); ok {
 						if key, ok := project["key"].(string); ok {
@@ -95,8 +121,43 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 			}
 			issues = filteredIssues
 		} else if issueList, ok := issues.([]interface{}); ok {
-			for _, issue := range issueList {
+			h.logger.Info().Int("issueCount", len(issueList)).Msg("Processing issues as []interface{}")
+
+			for i, issue := range issueList {
+				if i == 0 {
+					h.logger.Info().Str("issueType", fmt.Sprintf("%T", issue)).Msg("First issue type")
+				}
+
+				// Handle *models.JiraIssue (from database)
+				if jiraIssue, ok := issue.(*models.JiraIssue); ok {
+					projectKey := extractProjectKey(jiraIssue.Key)
+					if i == 0 {
+						h.logger.Info().Str("key", jiraIssue.Key).Str("extractedProjectKey", projectKey).Msg("First JiraIssue")
+					}
+					for _, pk := range projectKeys {
+						if projectKey == pk {
+							filteredIssues = append(filteredIssues, issue)
+							break
+						}
+					}
+					continue
+				}
+
+				// Handle map[string]interface{} (from Jira API or other sources)
 				if issueMap, ok := issue.(map[string]interface{}); ok {
+					// Try direct key field first
+					if issueKey, ok := issueMap["key"].(string); ok {
+						projectKey := extractProjectKey(issueKey)
+						for _, pk := range projectKeys {
+							if projectKey == pk {
+								filteredIssues = append(filteredIssues, issue)
+								break
+							}
+						}
+						continue
+					}
+
+					// Fallback to nested fields.project.key
 					if fields, ok := issueMap["fields"].(map[string]interface{}); ok {
 						if project, ok := fields["project"].(map[string]interface{}); ok {
 							if key, ok := project["key"].(string); ok {
@@ -191,6 +252,13 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 		pages = []interface{}{}
 	}
 
+	totalPagesInDB := 0
+	if pageList, ok := pages.([]interface{}); ok {
+		totalPagesInDB = len(pageList)
+	} else if pageList, ok := pages.([]map[string]interface{}); ok {
+		totalPagesInDB = len(pageList)
+	}
+
 	if len(spaceKeys) > 0 {
 		filteredPages := []interface{}{}
 
@@ -209,7 +277,22 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 			}
 			pages = filteredPages
 		} else if pageList, ok := pages.([]interface{}); ok {
-			for _, page := range pageList {
+			for i, page := range pageList {
+				// Handle *models.ConfluencePage (from database)
+				if confluencePage, ok := page.(*models.ConfluencePage); ok {
+					if i == 0 {
+						h.logger.Info().Str("spaceId", confluencePage.SpaceID).Msg("First ConfluencePage from DB")
+					}
+					for _, sk := range spaceKeys {
+						if confluencePage.SpaceID == sk {
+							filteredPages = append(filteredPages, page)
+							break
+						}
+					}
+					continue
+				}
+
+				// Handle map[string]interface{} (from Confluence API or other sources)
 				if pageMap, ok := page.(map[string]interface{}); ok {
 					if space, ok := pageMap["space"].(map[string]interface{}); ok {
 						if key, ok := space["key"].(string); ok {
@@ -225,6 +308,12 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 			}
 			pages = filteredPages
 		}
+
+		h.logger.Info().
+			Int("totalInDB", totalPagesInDB).
+			Int("filtered", len(filteredPages)).
+			Strs("spaceKeys", spaceKeys).
+			Msg("Filtered pages by space")
 	}
 
 	returnCount := 0
@@ -240,4 +329,21 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"pages": pages,
 	})
+}
+
+// extractProjectKey extracts the project key from an issue key (e.g., "BI9LLQNGKQ-1" -> "BI9LLQNGKQ")
+func extractProjectKey(issueKey string) string {
+	if idx := strings.Index(issueKey, "-"); idx > 0 {
+		return issueKey[:idx]
+	}
+	return ""
+}
+
+// getMapKeys returns all keys from a map
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

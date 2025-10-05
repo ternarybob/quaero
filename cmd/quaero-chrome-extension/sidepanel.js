@@ -1,20 +1,19 @@
 // Sidepanel script for Quaero extension
 
-const DEFAULT_SERVER_URL = 'http://localhost:8080';
+const DEFAULT_SERVER_URL = 'http://localhost:8085';
+let ws;
+let reconnectInterval;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
-  await checkServerStatus();
   await updatePageInfo();
+  connectWebSocket();
 
   // Set up event listeners
   document.getElementById('capture-auth-btn').addEventListener('click', captureAuth);
   document.getElementById('refresh-status-btn').addEventListener('click', refreshStatus);
   document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
-
-  // Auto-refresh status every 30 seconds
-  setInterval(checkServerStatus, 30000);
 });
 
 // Load settings from storage
@@ -31,32 +30,80 @@ async function saveSettings() {
   showSuccess('Settings saved successfully');
 }
 
-// Check server status
-async function checkServerStatus() {
+// Connect to WebSocket for real-time status updates
+function connectWebSocket() {
   const serverUrl = document.getElementById('server-url').value;
+  const url = new URL(serverUrl);
+  const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${url.host}/ws`;
+
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = function() {
+    console.log('WebSocket connected to Quaero server');
+    updateServerStatus(true);
+    if (reconnectInterval) {
+      clearInterval(reconnectInterval);
+      reconnectInterval = null;
+    }
+  };
+
+  ws.onmessage = function(event) {
+    const message = JSON.parse(event.data);
+
+    if (message.type === 'status') {
+      updateStatus(message.payload);
+    }
+  };
+
+  ws.onerror = function(error) {
+    console.error('WebSocket error:', error);
+    updateServerStatus(false);
+  };
+
+  ws.onclose = function() {
+    console.log('WebSocket disconnected');
+    updateServerStatus(false);
+
+    // Reconnect after 3 seconds
+    if (!reconnectInterval) {
+      reconnectInterval = setInterval(function() {
+        connectWebSocket();
+      }, 3000);
+    }
+  };
+}
+
+// Update server status indicator
+function updateServerStatus(online) {
   const statusElement = document.getElementById('server-status');
   const versionElement = document.getElementById('version-info');
 
-  try {
-    const response = await fetch(`${serverUrl}/api/health`);
-    if (response.ok) {
-      statusElement.textContent = 'Online';
-      statusElement.className = 'status-value online';
+  if (online) {
+    statusElement.textContent = 'Online';
+    statusElement.className = 'status-value online';
 
-      // Get server version
-      const versionResponse = await fetch(`${serverUrl}/api/version`);
-      if (versionResponse.ok) {
-        const versionData = await versionResponse.json();
-        versionElement.textContent = `Extension: v0.1.0 | Server: v${versionData.version}`;
-      }
-    } else {
-      throw new Error('Server returned error');
-    }
-  } catch (error) {
+    // Fetch version info once connected
+    const serverUrl = document.getElementById('server-url').value;
+    fetch(`${serverUrl}/api/version`)
+      .then(response => response.json())
+      .then(data => {
+        versionElement.textContent = `Extension: v0.1.0 | Server: v${data.version}`;
+      })
+      .catch(() => {
+        versionElement.textContent = 'Extension: v0.1.0 | Server: unknown';
+      });
+  } else {
     statusElement.textContent = 'Offline';
     statusElement.className = 'status-value offline';
     versionElement.textContent = 'Extension: v0.1.0 | Server: offline';
   }
+}
+
+// Update status from WebSocket message
+function updateStatus(status) {
+  // Extension can display additional status info if needed
+  console.log('Status update:', status);
 }
 
 // Update current page info
@@ -142,13 +189,17 @@ async function captureAuth() {
 
 // Refresh status
 async function refreshStatus() {
-  await checkServerStatus();
   await updatePageInfo();
 
   // Update last capture time from storage
   const result = await chrome.storage.sync.get(['lastCapture']);
   if (result.lastCapture) {
     document.getElementById('last-capture').textContent = result.lastCapture;
+  }
+
+  // Reconnect WebSocket if disconnected
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    connectWebSocket();
   }
 
   showSuccess('Status refreshed');

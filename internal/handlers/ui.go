@@ -132,7 +132,7 @@ func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files
 	allowedFiles := map[string]string{
 		"/static/common.css": "static/common.css",
-		"/favicon.ico":       "favicon.ico",
+		"/favicon.ico":       "static/favicon.ico",
 	}
 
 	// Check if the requested path is allowed

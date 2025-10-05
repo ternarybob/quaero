@@ -1,6 +1,6 @@
 // Popup script for Quaero extension
 
-const SERVER_URL = 'http://localhost:8080/api/auth';
+const SERVER_URL = 'http://localhost:8085/api/auth';
 
 document.getElementById('captureBtn').addEventListener('click', async () => {
   const statusDiv = document.getElementById('status');
@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusDiv = document.getElementById('status');
   statusDiv.style.display = 'block';
   statusDiv.className = 'info';
-  statusDiv.textContent = 'Make sure Quaero is running on localhost:8080';
+  statusDiv.textContent = 'Make sure Quaero is running on localhost:8085';
 
   setTimeout(() => {
     statusDiv.style.display = 'none';

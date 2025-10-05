@@ -28,6 +28,14 @@ var rootCmd = &cobra.Command{
 		// Startup sequence: config load -> logging -> banner -> information
 		var err error
 
+		// Auto-discover config file if not specified
+		if configPath == "" {
+			// Try to find quaero.toml in current directory
+			if _, err := os.Stat("quaero.toml"); err == nil {
+				configPath = "quaero.toml"
+			}
+		}
+
 		// 1. Load configuration (default -> file -> env -> CLI)
 		config, err = common.LoadFromFile(configPath)
 		if err != nil {

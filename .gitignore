@@ -27,17 +27,10 @@ data/
 .DS_Store
 Thumbs.db
 
-# Dependencies
-vendor/
-
 # Build artifacts
 build/
 dist/
-
-# Python
-__pycache__/
-venv/
-*.pyc
+bin/
 
 # Node (for potential tooling)
 node_modules/
@@ -45,6 +38,7 @@ node_modules/
 # Config with secrets (use config.yaml.example instead)
 config.yaml
 
-# Temporary files
+# Temporary and Test Output files
 *.tmp
 *.log
+results/

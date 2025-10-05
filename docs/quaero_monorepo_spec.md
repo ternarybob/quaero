@@ -38,9 +38,9 @@ quaero is a self-contained knowledge base system that:
 - Uses browser extension for seamless authentication
 
 ### Technology Stack
-- **Language:** Go 1.21+
+- **Language:** Go 1.25+
 - **CLI Framework:** Cobra (subcommands and flags)
-- **Storage:** RavenDB (document store with vector search)
+- **Storage:** SQLite with FTS5 (full-text search) and sqlite-vec (vector embeddings)
 - **LLM:** Ollama (Qwen2.5-32B for text, Llama3.2-Vision-11B for images)
 - **Browser Automation:** rod (for web scraping)
 - **Authentication:** Chrome extension → HTTP service

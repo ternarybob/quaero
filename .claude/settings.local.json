@@ -1,7 +1,8 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
-      "Bash(taskkill:*)"
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

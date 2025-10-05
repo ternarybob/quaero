@@ -21,9 +21,9 @@ Quaero is a self-contained knowledge base system that:
 
 ### Technology Stack
 
-- **Language:** Go 1.21+
+- **Language:** Go 1.25+
 - **Web UI:** HTML templates, vanilla JavaScript, WebSockets
-- **Storage:** RavenDB (document store with vector search)
+- **Storage:** SQLite with FTS5 (full-text search) and sqlite-vec (vector embeddings)
 - **LLM:** Ollama (Qwen2.5-32B for text, Llama3.2-Vision-11B for images)
 - **Browser Automation:** rod (for web scraping)
 - **Authentication:** Chrome extension → WebSocket → HTTP service
@@ -323,9 +323,16 @@ base_url = "https://yourcompany.atlassian.net"
 base_url = "https://api.github.com"
 token = ""  # Set via environment variable
 
-[ravendb]
-urls = ["http://localhost:8080"]
-database = "quaero"
+[storage]
+type = "sqlite"
+path = "./data/quaero.db"
+
+[storage.sqlite]
+enable_fts5 = true
+enable_vector = true
+embedding_dimension = 1536
+cache_size_mb = 100
+wal_mode = true
 ```
 
 ### Environment Variables

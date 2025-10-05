@@ -1,6 +1,7 @@
 package atlassian
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,34 +11,29 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	bolt "go.etcd.io/bbolt"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 const (
-	authBucketName = "auth"
-	authKeyName    = "current"
+	atlassianServiceName = "atlassian"
 )
 
 // AtlassianAuthService manages authentication for Atlassian services
 type AtlassianAuthService struct {
-	client    *http.Client
-	baseURL   string
-	userAgent string
-	cloudID   string
-	atlToken  string
-	db        *bolt.DB
-	logger    arbor.ILogger
+	client      *http.Client
+	baseURL     string
+	userAgent   string
+	cloudID     string
+	atlToken    string
+	authStorage interfaces.AuthStorage
+	logger      arbor.ILogger
 }
 
 // NewAtlassianAuthService creates a new Atlassian authentication service
-func NewAtlassianAuthService(db *bolt.DB, logger arbor.ILogger) (*AtlassianAuthService, error) {
-	if err := createAuthBucket(db); err != nil {
-		return nil, fmt.Errorf("failed to create auth bucket: %w", err)
-	}
-
+func NewAtlassianAuthService(authStorage interfaces.AuthStorage, logger arbor.ILogger) (*AtlassianAuthService, error) {
 	service := &AtlassianAuthService{
-		db:     db,
-		logger: logger,
+		authStorage: authStorage,
+		logger:      logger,
 	}
 
 	if err := service.loadStoredAuth(); err != nil {
@@ -45,13 +41,6 @@ func NewAtlassianAuthService(db *bolt.DB, logger arbor.ILogger) (*AtlassianAuthS
 	}
 
 	return service, nil
-}
-
-func createAuthBucket(db *bolt.DB) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(authBucketName))
-		return err
-	})
 }
 
 func (s *AtlassianAuthService) loadStoredAuth() error {
@@ -119,19 +108,30 @@ func (s *AtlassianAuthService) extractAuthDetails(authData *interfaces.Atlassian
 }
 
 func (s *AtlassianAuthService) storeAuth(authData *interfaces.AtlassianAuthData) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(authBucketName))
-		if bucket == nil {
-			return fmt.Errorf("auth bucket not found")
-		}
+	ctx := context.Background()
 
-		authJSON, err := json.Marshal(authData)
-		if err != nil {
-			return fmt.Errorf("failed to marshal auth data: %w", err)
-		}
+	cookiesJSON, err := json.Marshal(authData.Cookies)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cookies: %w", err)
+	}
 
-		return bucket.Put([]byte(authKeyName), authJSON)
-	})
+	tokens := make(map[string]string)
+	for k, v := range authData.Tokens {
+		if str, ok := v.(string); ok {
+			tokens[k] = str
+		}
+	}
+
+	credentials := &models.AuthCredentials{
+		Service:   atlassianServiceName,
+		Cookies:   cookiesJSON,
+		Tokens:    tokens,
+		BaseURL:   authData.BaseURL,
+		UserAgent: authData.UserAgent,
+		UpdatedAt: time.Now().Unix(),
+	}
+
+	return s.authStorage.StoreCredentials(ctx, credentials)
 }
 
 // IsAuthenticated checks if valid authentication exists
@@ -141,23 +141,36 @@ func (s *AtlassianAuthService) IsAuthenticated() bool {
 
 // LoadAuth loads authentication from database
 func (s *AtlassianAuthService) LoadAuth() (*interfaces.AtlassianAuthData, error) {
-	var authData interfaces.AtlassianAuthData
+	ctx := context.Background()
 
-	err := s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(authBucketName))
-		if bucket == nil {
-			return fmt.Errorf("auth bucket not found")
-		}
+	credentials, err := s.authStorage.GetCredentials(ctx, atlassianServiceName)
+	if err != nil {
+		return nil, err
+	}
 
-		authJSON := bucket.Get([]byte(authKeyName))
-		if authJSON == nil {
-			return fmt.Errorf("no auth data found")
-		}
+	// No credentials stored yet
+	if credentials == nil {
+		return nil, fmt.Errorf("no credentials found")
+	}
 
-		return json.Unmarshal(authJSON, &authData)
-	})
+	var cookies []*interfaces.AtlassianExtensionCookie
+	if err := json.Unmarshal(credentials.Cookies, &cookies); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cookies: %w", err)
+	}
 
-	return &authData, err
+	tokens := make(map[string]interface{})
+	for k, v := range credentials.Tokens {
+		tokens[k] = v
+	}
+
+	authData := &interfaces.AtlassianAuthData{
+		BaseURL:   credentials.BaseURL,
+		UserAgent: credentials.UserAgent,
+		Cookies:   cookies,
+		Tokens:    tokens,
+	}
+
+	return authData, nil
 }
 
 // GetHTTPClient returns configured HTTP client with cookies

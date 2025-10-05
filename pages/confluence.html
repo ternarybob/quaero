@@ -679,7 +679,7 @@
                         const data = await response.json();
                         if (data.pages && data.pages.length > 0) {
                             const validPages = data.pages.filter(page => {
-                                const spaceKey = page.space?.key;
+                                const spaceKey = page.space?.key || page.spaceId;
                                 return spaceKey && currentPollSpaceKeys.includes(spaceKey);
                             });
 
@@ -767,7 +767,7 @@
             }
 
             tbody.innerHTML = pages.map((page, index) => {
-                const spaceKey = page.space?.key || 'N/A';
+                const spaceKey = page.space?.key || page.spaceId || 'N/A';
                 const pageId = page.id || 'N/A';
                 const title = page.title || 'Untitled';
                 const type = page.type || 'page';

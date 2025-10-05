@@ -1,5 +1,26 @@
 # Quaero Project Standards
 
+## Agent Autonomy
+
+**IMPORTANT: All agents, commands, and hooks in this project operate with FULL AUTONOMY within the project directory.**
+
+When working in this project:
+- ✅ Agents make decisions without asking questions
+- ✅ Commands execute automatically without confirmation
+- ✅ Hooks enforce standards and block violations silently
+- ✅ Best practices are applied automatically
+- ✅ Architectural decisions are made based on established patterns
+
+This ensures:
+- **Faster execution** - No interruptions for confirmations
+- **Consistent quality** - Standards applied uniformly
+- **Reduced friction** - Agents work independently
+- **Better outcomes** - Decisions based on proven patterns
+
+Agents will still communicate what they're doing, but they won't ask permission.
+
+---
+
 ## Agent-Based Development System
 
 This project uses an **autonomous agent architecture** with specialized agents in `.claude/agents/`:

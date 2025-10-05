@@ -15,9 +15,18 @@ enabled = true
 token = "${GITHUB_TOKEN}"
 repos = ["your-org/repo1"]
 
-[storage.ravendb]
-urls = ["http://localhost:8080"]
-database = "quaero"
+# Storage configuration
+[storage]
+type = "sqlite"
+
+[storage.sqlite]
+path = "./data/quaero.db"
+enable_fts5 = true
+enable_vector = true
+embedding_dimension = 1536
+cache_size_mb = 64
+wal_mode = true
+busy_timeout_ms = 5000
 
 [storage.filesystem]
 images = "./data/images"

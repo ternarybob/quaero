@@ -194,8 +194,20 @@ try {
     if ($process) {
         Write-Host "Stopping existing Quaero process..." -ForegroundColor Yellow
         Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
-        Write-Host "Process stopped successfully" -ForegroundColor Green
+
+        # Wait for process to fully exit and release resources
+        $timeout = 5
+        $elapsed = 0
+        while ((Get-Process -Name $processName -ErrorAction SilentlyContinue) -and ($elapsed -lt $timeout)) {
+            Start-Sleep -Milliseconds 500
+            $elapsed += 0.5
+        }
+
+        if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
+            Write-Warning "Process did not terminate within ${timeout}s timeout"
+        } else {
+            Write-Host "Process stopped successfully" -ForegroundColor Green
+        }
     } else {
         Write-Host "No Quaero process found running" -ForegroundColor Gray
     }
@@ -236,6 +248,7 @@ $ldflags = $buildFlags -join " "
 # Build command
 Write-Host "Building quaero..." -ForegroundColor Yellow
 
+# Disable CGO - using pure Go SQLite (modernc.org/sqlite)
 $env:CGO_ENABLED = "0"
 if ($Release) {
     $env:GOOS = "windows"
@@ -293,6 +306,18 @@ if (Test-Path $extensionSourcePath) {
     Write-Host "Deployed Chrome extension: cmd/quaero-chrome-extension -> bin/" -ForegroundColor Green
 }
 
+# Generate favicon if it doesn't exist
+$faviconPath = Join-Path -Path $projectRoot -ChildPath "pages\static\favicon.ico"
+if (-not (Test-Path $faviconPath)) {
+    Write-Host "Generating favicon..." -ForegroundColor Yellow
+    $createFaviconScript = Join-Path -Path $projectRoot -ChildPath "scripts\create-favicon.ps1"
+    if (Test-Path $createFaviconScript) {
+        & $createFaviconScript
+    } else {
+        Write-Warning "Favicon script not found: $createFaviconScript"
+    }
+}
+
 # Copy pages directory to bin
 $pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
 $pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
@@ -342,7 +367,8 @@ if ($Run) {
     $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 
     # Start in a new terminal window with serve command
-    # Use /c to close window when application exits
+    # Use /c to CLOSE window after application exits normally
+    # Errors will be visible in logs, successful runs will auto-close
     $startCommand = "cd /d `"$binDir`" && `"$outputPath`" serve -c `"$configPath`""
 
     Start-Process cmd -ArgumentList "/c", $startCommand
@@ -350,7 +376,8 @@ if ($Run) {
     Write-Host "Application started in new terminal window" -ForegroundColor Green
     Write-Host "Command: quaero.exe serve -c quaero.toml" -ForegroundColor Cyan
     Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
-    Write-Host "Window will close automatically when application exits" -ForegroundColor Gray
+    Write-Host "Window will auto-close when application exits" -ForegroundColor Yellow
+    Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow
     Write-Host "./bin/quaero.exe serve -c deployments/local/quaero.toml" -ForegroundColor White

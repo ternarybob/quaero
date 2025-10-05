@@ -74,7 +74,12 @@ func printCapabilities(config *Config) {
 		fmt.Printf("   • GitHub repository scraping\n")
 	}
 
-	fmt.Printf("   • Local BoltDB storage\n")
+	// Show storage type
+	storageType := config.Storage.Type
+	if storageType == "" {
+		storageType = "sqlite" // default
+	}
+	fmt.Printf("   • %s storage with full-text search\n", storageType)
 	fmt.Printf("   • Rate-limited API requests\n")
 }
 

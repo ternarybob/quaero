@@ -4,11 +4,11 @@
     Run tests for the Quaero project
 
 .DESCRIPTION
-    Executes unit tests, integration tests, or all tests with coverage reporting.
+    Executes integration tests, UI tests, or all tests with coverage reporting.
     Must be run from the test directory.
 
 .PARAMETER Type
-    Type of tests to run: 'unit', 'integration', or 'all' (default: all)
+    Type of tests to run: 'integration', 'ui', or 'all' (default: integration)
 
 .PARAMETER Coverage
     Generate coverage report (default: true)
@@ -17,14 +17,15 @@
     Enable verbose test output
 
 .EXAMPLE
-    ./run-tests.ps1 -Type unit
+    ./run-tests.ps1 -Type integration
+    ./run-tests.ps1 -Type ui
     ./run-tests.ps1 -Type all -Coverage
 #>
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('unit', 'integration', 'all')]
-    [string]$Type = 'all',
+    [ValidateSet('integration', 'ui', 'all')]
+    [string]$Type = 'integration',
 
     [Parameter(Mandatory=$false)]
     [switch]$Coverage = $true,
@@ -39,8 +40,17 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
+# Create timestamped results directory
+$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$resultsDir = Join-Path -Path $scriptDir -ChildPath "results\$Type-$timestamp"
+New-Item -Path $resultsDir -ItemType Directory -Force | Out-Null
+
+# Set environment variable for tests to use
+$env:TEST_RUN_DIR = $resultsDir
+
 Write-Host "=== Quaero Test Runner ===" -ForegroundColor Cyan
 Write-Host "Test Type: $Type" -ForegroundColor Yellow
+Write-Host "Results Dir: $resultsDir" -ForegroundColor Cyan
 Write-Host ""
 
 # Build test flags
@@ -56,14 +66,6 @@ if ($Coverage) {
 
 # Run tests based on type
 switch ($Type) {
-    'unit' {
-        Write-Host "Running unit tests..." -ForegroundColor Green
-        go test $testFlags ./unit/...
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Unit tests failed!" -ForegroundColor Red
-            exit 1
-        }
-    }
     'integration' {
         Write-Host "Running integration tests..." -ForegroundColor Green
         go test $testFlags ./integration/...
@@ -72,8 +74,18 @@ switch ($Type) {
             exit 1
         }
     }
+    'ui' {
+        Write-Host "Running UI tests..." -ForegroundColor Green
+        Write-Host "Note: UI tests require a running Quaero server" -ForegroundColor Yellow
+        go test $testFlags ./ui/...
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "UI tests failed!" -ForegroundColor Red
+            exit 1
+        }
+    }
     'all' {
         Write-Host "Running all tests..." -ForegroundColor Green
+        Write-Host "Note: UI tests require a running Quaero server" -ForegroundColor Yellow
         go test $testFlags ./...
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Tests failed!" -ForegroundColor Red
@@ -95,4 +107,12 @@ if ($Coverage -and (Test-Path "coverage.out")) {
 
 Write-Host ""
 Write-Host "=== Tests Complete ===" -ForegroundColor Green
+Write-Host "Results saved to: $resultsDir" -ForegroundColor Cyan
+
+# Count test artifacts
+$screenshots = @(Get-ChildItem -Path $resultsDir -Filter "*.png" -ErrorAction SilentlyContinue)
+if ($screenshots.Count -gt 0) {
+    Write-Host "  Screenshots: $($screenshots.Count)" -ForegroundColor Gray
+}
+
 exit 0

@@ -2,22 +2,21 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/ternarybob/arbor"
-	bolt "go.etcd.io/bbolt"
 
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
+	"github.com/ternarybob/quaero/internal/storage"
 )
 
 // App holds all application components and dependencies
 type App struct {
 	Config            *common.Config
 	Logger            arbor.ILogger
-	DB                *bolt.DB
+	StorageManager    interfaces.StorageManager
 	AuthService       *atlassian.AtlassianAuthService
 	JiraService       *atlassian.JiraScraperService
 	ConfluenceService *atlassian.ConfluenceScraperService
@@ -63,29 +62,19 @@ func New(config *common.Config, logger arbor.ILogger) (*App, error) {
 	return app, nil
 }
 
-// initDatabase initializes the BoltDB database
+// initDatabase initializes the storage layer (SQLite)
 func (a *App) initDatabase() error {
-	execPath, err := os.Executable()
+	storageManager, err := storage.NewStorageManager(a.Logger, a.Config)
 	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
-	}
-	execDir := filepath.Dir(execPath)
-	dbPath := filepath.Join(execDir, "data", "quaero.db")
-
-	// Create data directory
-	dataDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create data directory: %w", err)
+		return fmt.Errorf("failed to create storage manager: %w", err)
 	}
 
-	// Open database
-	db, err := bolt.Open(dbPath, 0600, nil)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
+	a.StorageManager = storageManager
+	a.Logger.Info().
+		Str("type", a.Config.Storage.Type).
+		Str("path", a.Config.Storage.SQLite.Path).
+		Msg("Storage initialized")
 
-	a.DB = db
-	a.Logger.Info().Str("path", dbPath).Msg("Database opened")
 	return nil
 }
 
@@ -93,23 +82,28 @@ func (a *App) initDatabase() error {
 func (a *App) initServices() error {
 	var err error
 
-	// Initialize auth service
-	a.AuthService, err = atlassian.NewAtlassianAuthService(a.DB, a.Logger)
+	// Initialize auth service with AuthStorage
+	a.AuthService, err = atlassian.NewAtlassianAuthService(
+		a.StorageManager.AuthStorage(),
+		a.Logger,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// Initialize Jira service
-	a.JiraService, err = atlassian.NewJiraScraperService(a.DB, a.AuthService, a.Logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize Jira service: %w", err)
-	}
+	// Initialize Jira service with JiraStorage
+	a.JiraService = atlassian.NewJiraScraperService(
+		a.StorageManager.JiraStorage(),
+		a.AuthService,
+		a.Logger,
+	)
 
-	// Initialize Confluence service
-	a.ConfluenceService, err = atlassian.NewConfluenceScraperService(a.DB, a.AuthService, a.Logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize Confluence service: %w", err)
-	}
+	// Initialize Confluence service with ConfluenceStorage
+	a.ConfluenceService = atlassian.NewConfluenceScraperService(
+		a.StorageManager.ConfluenceStorage(),
+		a.AuthService,
+		a.Logger,
+	)
 
 	return nil
 }
@@ -145,11 +139,11 @@ func (a *App) initHandlers() error {
 
 // Close closes all application resources
 func (a *App) Close() error {
-	if a.DB != nil {
-		if err := a.DB.Close(); err != nil {
-			return fmt.Errorf("failed to close database: %w", err)
+	if a.StorageManager != nil {
+		if err := a.StorageManager.Close(); err != nil {
+			return fmt.Errorf("failed to close storage: %w", err)
 		}
-		a.Logger.Info().Msg("Database closed")
+		a.Logger.Info().Msg("Storage closed")
 	}
 	return nil
 }

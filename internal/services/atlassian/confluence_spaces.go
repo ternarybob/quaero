@@ -1,12 +1,13 @@
 package atlassian
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // GetSpacePageCount returns the total count of pages for a Confluence space
@@ -142,47 +143,66 @@ func (s *ConfluenceScraperService) enrichSpacesWithPageCounts(spaces []map[strin
 }
 
 func (s *ConfluenceScraperService) storeSpaces(spaces []map[string]interface{}) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(spacesBucket))
-		for _, space := range spaces {
-			spaceKey, ok := space["key"].(string)
-			if !ok {
-				continue
-			}
-			value, err := json.Marshal(space)
-			if err != nil {
-				continue
-			}
-			if err := bucket.Put([]byte(spaceKey), value); err != nil {
-				return err
-			}
+	ctx := context.Background()
+
+	for _, space := range spaces {
+		key, ok := space["key"].(string)
+		if !ok {
+			continue
 		}
-		return nil
-	})
+
+		name, _ := space["name"].(string)
+		id, _ := space["id"].(string)
+
+		// If id is empty, use key as the id (for foreign key compatibility)
+		if id == "" {
+			id = key
+		}
+
+		pageCount, _ := space["pageCount"].(int)
+
+		confluenceSpace := &models.ConfluenceSpace{
+			Key:       key,
+			Name:      name,
+			ID:        id,
+			PageCount: pageCount,
+		}
+
+		if err := s.confluenceStorage.StoreSpace(ctx, confluenceSpace); err != nil {
+			s.logger.Error().Err(err).Str("space", key).Msg("Failed to store space")
+			continue
+		}
+	}
+
+	return nil
 }
 
 // ClearSpacesCache deletes all Confluence spaces from the database
 func (s *ConfluenceScraperService) ClearSpacesCache() error {
 	s.logger.Info().Msg("Clearing Confluence spaces cache...")
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket([]byte(spacesBucket)); err != nil && err != bolt.ErrBucketNotFound {
-			return err
-		}
-		_, err := tx.CreateBucket([]byte(spacesBucket))
+	ctx := context.Background()
+	spaces, err := s.confluenceStorage.GetAllSpaces(ctx)
+	if err != nil {
 		return err
-	})
+	}
+
+	for _, space := range spaces {
+		if err := s.confluenceStorage.DeleteSpace(ctx, space.Key); err != nil {
+			s.logger.Error().Err(err).Str("space", space.Key).Msg("Failed to delete space")
+		}
+	}
+
+	return nil
 }
 
 // GetSpaceCount returns the count of Confluence spaces in the database
 func (s *ConfluenceScraperService) GetSpaceCount() int {
-	count := 0
-	s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(spacesBucket))
-		if bucket != nil {
-			count = bucket.Stats().KeyN
-		}
-		return nil
-	})
+	ctx := context.Background()
+	count, err := s.confluenceStorage.CountSpaces(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to count spaces")
+		return 0
+	}
 	return count
 }

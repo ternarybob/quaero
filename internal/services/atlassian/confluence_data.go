@@ -1,90 +1,52 @@
 package atlassian
 
 import (
-	"encoding/json"
-	"fmt"
-
-	bolt "go.etcd.io/bbolt"
+	"context"
 )
 
 // GetConfluenceData returns all Confluence data (spaces and pages)
 func (s *ConfluenceScraperService) GetConfluenceData() (map[string]interface{}, error) {
+	ctx := context.Background()
+
+	spaces, err := s.confluenceStorage.GetAllSpaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Debug().Int("spaceCount", len(spaces)).Msg("Retrieved spaces from storage")
+
 	result := map[string]interface{}{
-		"spaces": make([]map[string]interface{}, 0),
-		"pages":  make([]map[string]interface{}, 0),
+		"spaces": spaces,
+		"pages":  make([]interface{}, 0),
 	}
 
-	err := s.db.View(func(tx *bolt.Tx) error {
-		if err := s.loadSpacesData(tx, result); err != nil {
-			return err
+	for _, space := range spaces {
+		s.logger.Debug().Str("spaceKey", space.Key).Str("spaceID", space.ID).Msg("Looking up pages for space")
+		pages, err := s.confluenceStorage.GetPagesBySpace(ctx, space.ID)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("space", space.Key).Msg("Failed to get pages for space")
+			continue
 		}
-
-		if err := s.loadPagesData(tx, result); err != nil {
-			return err
+		s.logger.Debug().Str("spaceKey", space.Key).Int("pageCount", len(pages)).Msg("Retrieved pages for space")
+		// Append each page individually, not the whole array
+		for _, page := range pages {
+			result["pages"] = append(result["pages"].([]interface{}), page)
 		}
-
-		return nil
-	})
-
-	return result, err
-}
-
-func (s *ConfluenceScraperService) loadSpacesData(tx *bolt.Tx, result map[string]interface{}) error {
-	spaceBucket := tx.Bucket([]byte(spacesBucket))
-	if spaceBucket == nil {
-		return nil
 	}
 
-	return spaceBucket.ForEach(func(k, v []byte) error {
-		var space map[string]interface{}
-		if err := json.Unmarshal(v, &space); err == nil {
-			result["spaces"] = append(result["spaces"].([]map[string]interface{}), space)
-		}
-		return nil
-	})
-}
-
-func (s *ConfluenceScraperService) loadPagesData(tx *bolt.Tx, result map[string]interface{}) error {
-	pageBucket := tx.Bucket([]byte(pagesBucket))
-	if pageBucket == nil {
-		return nil
-	}
-
-	return pageBucket.ForEach(func(k, v []byte) error {
-		var page map[string]interface{}
-		if err := json.Unmarshal(v, &page); err == nil {
-			result["pages"] = append(result["pages"].([]map[string]interface{}), page)
-		}
-		return nil
-	})
+	s.logger.Info().Int("totalPages", len(result["pages"].([]interface{}))).Msg("Total pages loaded from database")
+	return result, nil
 }
 
 // ClearAllData deletes all Confluence data from all buckets
 func (s *ConfluenceScraperService) ClearAllData() error {
 	s.logger.Info().Msg("Clearing all Confluence data from database")
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		if err := s.recreateBucket(tx, spacesBucket); err != nil {
-			return err
-		}
-
-		if err := s.recreateBucket(tx, pagesBucket); err != nil {
-			return err
-		}
-
-		s.logger.Info().Msg("All Confluence data cleared successfully")
-		return nil
-	})
-}
-
-func (s *ConfluenceScraperService) recreateBucket(tx *bolt.Tx, bucketName string) error {
-	if err := tx.DeleteBucket([]byte(bucketName)); err != nil && err != bolt.ErrBucketNotFound {
-		return fmt.Errorf("failed to delete %s bucket: %w", bucketName, err)
+	ctx := context.Background()
+	if err := s.confluenceStorage.ClearAll(ctx); err != nil {
+		return err
 	}
 
-	if _, err := tx.CreateBucketIfNotExists([]byte(bucketName)); err != nil {
-		return fmt.Errorf("failed to recreate %s bucket: %w", bucketName, err)
-	}
-
+	s.logger.Info().Msg("All Confluence data cleared successfully")
 	return nil
 }

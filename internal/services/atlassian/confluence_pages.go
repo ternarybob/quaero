@@ -1,12 +1,13 @@
 package atlassian
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // GetSpacePages fetches pages for a specific Confluence space
@@ -108,61 +109,58 @@ func (s *ConfluenceScraperService) fetchPagesBatch(spaceKey string, start, limit
 }
 
 func (s *ConfluenceScraperService) storePages(pages []map[string]interface{}) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(pagesBucket))
-		for _, page := range pages {
-			id, ok := page["id"].(string)
-			if !ok {
-				continue
-			}
-			value, err := json.Marshal(page)
-			if err != nil {
-				continue
-			}
-			if err := bucket.Put([]byte(id), value); err != nil {
-				return err
+	ctx := context.Background()
+	confluencePages := make([]*models.ConfluencePage, 0, len(pages))
+
+	for _, page := range pages {
+		id, ok := page["id"].(string)
+		if !ok {
+			continue
+		}
+
+		title, _ := page["title"].(string)
+		body, _ := page["body"].(map[string]interface{})
+
+		var spaceID string
+		if space, ok := page["space"].(map[string]interface{}); ok {
+			// Try id first, fallback to key (same as we do for spaces)
+			spaceID, _ = space["id"].(string)
+			if spaceID == "" {
+				spaceID, _ = space["key"].(string)
 			}
 		}
-		return nil
-	})
+
+		confluencePage := &models.ConfluencePage{
+			ID:      id,
+			Title:   title,
+			SpaceID: spaceID,
+			Body:    body,
+		}
+		confluencePages = append(confluencePages, confluencePage)
+	}
+
+	return s.confluenceStorage.StorePages(ctx, confluencePages)
 }
 
 func (s *ConfluenceScraperService) updateSpacePageCount(spaceKey string, totalPages int) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(spacesBucket))
-		if bucket == nil {
-			return nil
-		}
+	ctx := context.Background()
 
-		spaceData := bucket.Get([]byte(spaceKey))
-		if spaceData == nil {
-			return nil
-		}
+	space, err := s.confluenceStorage.GetSpace(ctx, spaceKey)
+	if err != nil {
+		return err
+	}
 
-		var space map[string]interface{}
-		if err := json.Unmarshal(spaceData, &space); err != nil {
-			return err
-		}
-
-		space["pageCount"] = totalPages
-		updatedData, err := json.Marshal(space)
-		if err != nil {
-			return err
-		}
-
-		return bucket.Put([]byte(spaceKey), updatedData)
-	})
+	space.PageCount = totalPages
+	return s.confluenceStorage.StoreSpace(ctx, space)
 }
 
 // GetPageCount returns the count of Confluence pages in the database
 func (s *ConfluenceScraperService) GetPageCount() int {
-	count := 0
-	s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(pagesBucket))
-		if bucket != nil {
-			count = bucket.Stats().KeyN
-		}
-		return nil
-	})
+	ctx := context.Background()
+	count, err := s.confluenceStorage.CountPages(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to count pages")
+		return 0
+	}
 	return count
 }

@@ -44,9 +44,9 @@ func runServe(cmd *cobra.Command, args []string) {
 		}
 	}()
 
-	logger.Info().Msg("Server ready")
-	fmt.Printf("\nServer running on http://%s:%d\n", config.Server.Host, config.Server.Port)
-	fmt.Println("Press Ctrl+C to stop")
+	logger.Info().
+		Str("url", fmt.Sprintf("http://%s:%d", config.Server.Host, config.Server.Port)).
+		Msg("Server ready - Press Ctrl+C to stop")
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -54,8 +54,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	<-sigChan
 
 	// Graceful shutdown
-	logger.Info().Msg("Shutting down server...")
-	fmt.Println("\nShutting down...")
+	logger.Info().Msg("Shutting down server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -64,5 +63,5 @@ func runServe(cmd *cobra.Command, args []string) {
 		logger.Error().Err(err).Msg("Server shutdown failed")
 	}
 
-	fmt.Println("Server stopped")
+	logger.Info().Msg("Server stopped")
 }

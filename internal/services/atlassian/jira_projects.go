@@ -1,13 +1,14 @@
 package atlassian
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"sync"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // GetProjectIssueCount returns the total count of issues for a project
@@ -108,44 +109,60 @@ func (s *JiraScraperService) enrichProjectsWithIssueCounts(projects []map[string
 }
 
 func (s *JiraScraperService) storeProjects(projects []map[string]interface{}) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(projectsBucket))
-		for _, project := range projects {
-			key := project["key"].(string)
-			value, err := json.Marshal(project)
-			if err != nil {
-				continue
-			}
-			if err := bucket.Put([]byte(key), value); err != nil {
-				return err
-			}
+	ctx := context.Background()
+
+	for _, project := range projects {
+		key, ok := project["key"].(string)
+		if !ok {
+			continue
 		}
-		return nil
-	})
+
+		name, _ := project["name"].(string)
+		id, _ := project["id"].(string)
+		issueCount, _ := project["issueCount"].(int)
+
+		jiraProject := &models.JiraProject{
+			Key:        key,
+			Name:       name,
+			ID:         id,
+			IssueCount: issueCount,
+		}
+
+		if err := s.jiraStorage.StoreProject(ctx, jiraProject); err != nil {
+			s.logger.Error().Err(err).Str("project", key).Msg("Failed to store project")
+			continue
+		}
+	}
+
+	return nil
 }
 
 // ClearProjectsCache deletes all projects from the database
 func (s *JiraScraperService) ClearProjectsCache() error {
 	s.logger.Info().Msg("Clearing projects cache...")
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket([]byte(projectsBucket)); err != nil {
-			return err
-		}
-		_, err := tx.CreateBucket([]byte(projectsBucket))
+	ctx := context.Background()
+	projects, err := s.jiraStorage.GetAllProjects(ctx)
+	if err != nil {
 		return err
-	})
+	}
+
+	for _, project := range projects {
+		if err := s.jiraStorage.DeleteProject(ctx, project.Key); err != nil {
+			s.logger.Error().Err(err).Str("project", project.Key).Msg("Failed to delete project")
+		}
+	}
+
+	return nil
 }
 
 // GetProjectCount returns the count of projects in the database
 func (s *JiraScraperService) GetProjectCount() int {
-	count := 0
-	s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(projectsBucket))
-		if bucket != nil {
-			count = bucket.Stats().KeyN
-		}
-		return nil
-	})
+	ctx := context.Background()
+	count, err := s.jiraStorage.CountProjects(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to count projects")
+		return 0
+	}
 	return count
 }

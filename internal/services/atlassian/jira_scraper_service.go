@@ -7,45 +7,23 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	bolt "go.etcd.io/bbolt"
-)
-
-const (
-	projectsBucket = "projects"
-	issuesBucket   = "issues"
 )
 
 // JiraScraperService scrapes Jira projects and issues
 type JiraScraperService struct {
 	authService interfaces.AtlassianAuthService
-	db          *bolt.DB
+	jiraStorage interfaces.JiraStorage
 	logger      arbor.ILogger
 	uiLogger    interface{}
 }
 
 // NewJiraScraperService creates a new Jira scraper service
-func NewJiraScraperService(db *bolt.DB, authService interfaces.AtlassianAuthService, logger arbor.ILogger) (*JiraScraperService, error) {
-	if err := createJiraBuckets(db); err != nil {
-		return nil, err
-	}
-
+func NewJiraScraperService(jiraStorage interfaces.JiraStorage, authService interfaces.AtlassianAuthService, logger arbor.ILogger) *JiraScraperService {
 	return &JiraScraperService{
-		db:          db,
+		jiraStorage: jiraStorage,
 		authService: authService,
 		logger:      logger,
-	}, nil
-}
-
-func createJiraBuckets(db *bolt.DB) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists([]byte(projectsBucket)); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucketIfNotExists([]byte(issuesBucket)); err != nil {
-			return err
-		}
-		return nil
-	})
+	}
 }
 
 // Close closes the scraper and releases resources

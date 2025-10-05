@@ -1,72 +1,26 @@
 package atlassian
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // DeleteProjectIssues deletes all issues for a given project
 func (s *JiraScraperService) DeleteProjectIssues(projectKey string) error {
 	s.logger.Info().Str("project", projectKey).Msg("Deleting issues for project")
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(issuesBucket))
-		if bucket == nil {
-			return nil
-		}
-
-		keysToDelete := s.findProjectIssueKeys(bucket, projectKey)
-
-		for _, k := range keysToDelete {
-			if err := bucket.Delete(k); err != nil {
-				return err
-			}
-		}
-
-		s.logger.Info().
-			Str("project", projectKey).
-			Int("deleted", len(keysToDelete)).
-			Msg("Deleted project issues")
-
-		return nil
-	})
-}
-
-func (s *JiraScraperService) findProjectIssueKeys(bucket *bolt.Bucket, projectKey string) [][]byte {
-	var keysToDelete [][]byte
-	c := bucket.Cursor()
-
-	for k, v := c.First(); k != nil; k, v = c.Next() {
-		var issue map[string]interface{}
-		if err := json.Unmarshal(v, &issue); err != nil {
-			continue
-		}
-
-		if s.issueMatchesProject(issue, projectKey) {
-			keysToDelete = append(keysToDelete, k)
-		}
+	ctx := context.Background()
+	if err := s.jiraStorage.DeleteIssuesByProject(ctx, projectKey); err != nil {
+		return err
 	}
 
-	return keysToDelete
-}
-
-func (s *JiraScraperService) issueMatchesProject(issue map[string]interface{}, projectKey string) bool {
-	fields, ok := issue["fields"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	project, ok := fields["project"].(map[string]interface{})
-	if !ok {
-		return false
-	}
-
-	key, ok := project["key"].(string)
-	return ok && key == projectKey
+	s.logger.Info().Str("project", projectKey).Msg("Deleted project issues")
+	return nil
 }
 
 // GetProjectIssues retrieves all issues for a given project
@@ -143,41 +97,36 @@ func (s *JiraScraperService) fetchIssuesBatch(projectKey string, startAt, maxRes
 }
 
 func (s *JiraScraperService) storeIssues(issues []map[string]interface{}) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(issuesBucket))
-		if bucket == nil {
-			return fmt.Errorf("issues bucket not found")
+	ctx := context.Background()
+	jiraIssues := make([]*models.JiraIssue, 0, len(issues))
+
+	for _, issue := range issues {
+		key, ok := issue["key"].(string)
+		if !ok {
+			continue
 		}
 
-		for _, issue := range issues {
-			key, ok := issue["key"].(string)
-			if !ok {
-				continue
-			}
+		id, _ := issue["id"].(string)
+		fields, _ := issue["fields"].(map[string]interface{})
 
-			value, err := json.Marshal(issue)
-			if err != nil {
-				continue
-			}
-
-			if err := bucket.Put([]byte(key), value); err != nil {
-				return fmt.Errorf("failed to store issue %s: %w", key, err)
-			}
+		jiraIssue := &models.JiraIssue{
+			Key:    key,
+			ID:     id,
+			Fields: fields,
 		}
+		jiraIssues = append(jiraIssues, jiraIssue)
+	}
 
-		return nil
-	})
+	return s.jiraStorage.StoreIssues(ctx, jiraIssues)
 }
 
 // GetIssueCount returns the count of issues in the database
 func (s *JiraScraperService) GetIssueCount() int {
-	count := 0
-	s.db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(issuesBucket))
-		if bucket != nil {
-			count = bucket.Stats().KeyN
-		}
-		return nil
-	})
+	ctx := context.Background()
+	count, err := s.jiraStorage.CountIssues(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to count issues")
+		return 0
+	}
 	return count
 }

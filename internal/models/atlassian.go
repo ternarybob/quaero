@@ -30,3 +30,14 @@ type ConfluencePage struct {
 	SpaceID string                 `json:"spaceId"`
 	Body    map[string]interface{} `json:"body"`
 }
+
+// AuthCredentials represents stored authentication data
+type AuthCredentials struct {
+	Service   string                 `json:"service"`    // "jira", "confluence", "github"
+	Data      map[string]interface{} `json:"data"`       // Service-specific auth data
+	Cookies   []byte                 `json:"cookies"`    // Serialized cookies
+	Tokens    map[string]string      `json:"tokens"`     // Auth tokens
+	BaseURL   string                 `json:"base_url"`   // Service base URL
+	UserAgent string                 `json:"user_agent"` // User agent string
+	UpdatedAt int64                  `json:"updated_at"`
+}
