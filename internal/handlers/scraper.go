@@ -453,3 +453,79 @@ func (h *ScraperHandler) ClearAllDataHandler(w http.ResponseWriter, r *http.Requ
 		"message": "All data cleared successfully",
 	})
 }
+
+// ClearJiraDataHandler clears only Jira data from the database
+func (h *ScraperHandler) ClearJiraDataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.logger.Info().Msg("Clearing Jira data from database")
+
+	type dataClearer interface {
+		ClearAllData() error
+	}
+
+	jiraClearer, ok := h.jiraScraper.(dataClearer)
+	if !ok {
+		http.Error(w, "Clear Jira data not supported", http.StatusNotImplemented)
+		return
+	}
+
+	if err := jiraClearer.ClearAllData(); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to clear Jira data")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Failed to clear Jira data",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Jira data cleared successfully",
+	})
+}
+
+// ClearConfluenceDataHandler clears only Confluence data from the database
+func (h *ScraperHandler) ClearConfluenceDataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.logger.Info().Msg("Clearing Confluence data from database")
+
+	type dataClearer interface {
+		ClearAllData() error
+	}
+
+	confluenceClearer, ok := h.confluenceScraper.(dataClearer)
+	if !ok {
+		http.Error(w, "Clear Confluence data not supported", http.StatusNotImplemented)
+		return
+	}
+
+	if err := confluenceClearer.ClearAllData(); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to clear Confluence data")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Failed to clear Confluence data",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Confluence data cleared successfully",
+	})
+}

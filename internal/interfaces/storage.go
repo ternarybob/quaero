@@ -106,5 +106,6 @@ type StorageManager interface {
 	ConfluenceStorage() ConfluenceStorage
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
+	DB() interface{}
 	Close() error
 }

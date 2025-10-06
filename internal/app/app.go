@@ -11,6 +11,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/embeddings"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/storage"
 )
@@ -22,6 +23,8 @@ type App struct {
 	StorageManager interfaces.StorageManager
 
 	// Document services
+	LLMService          interfaces.LLMService
+	AuditLogger         llm.AuditLogger
 	EmbeddingService    interfaces.EmbeddingService
 	DocumentService     interfaces.DocumentService
 	ProcessingService   *processing.Service
@@ -96,22 +99,38 @@ func (a *App) initDatabase() error {
 func (a *App) initServices() error {
 	var err error
 
-	// 1. Initialize embedding service
+	// 1. Initialize LLM service (required for embeddings)
+	a.LLMService, a.AuditLogger, err = llm.NewLLMService(
+		a.Config,
+		a.StorageManager.DB(),
+		a.Logger,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize LLM service: %w", err)
+	}
+
+	// Log LLM mode
+	mode := a.LLMService.GetMode()
+	a.Logger.Info().
+		Str("mode", string(mode)).
+		Msg("LLM service initialized")
+
+	// 2. Initialize embedding service (now uses LLM abstraction)
 	a.EmbeddingService = embeddings.NewService(
-		a.Config.Embeddings.OllamaURL,
-		a.Config.Embeddings.Model,
+		a.LLMService,
+		a.AuditLogger,
 		a.Config.Embeddings.Dimension,
 		a.Logger,
 	)
 
-	// 2. Initialize document service
+	// 3. Initialize document service
 	a.DocumentService = documents.NewService(
 		a.StorageManager.DocumentStorage(),
 		a.EmbeddingService,
 		a.Logger,
 	)
 
-	// 3. Initialize auth service
+	// 4. Initialize auth service
 	a.AuthService, err = atlassian.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
 		a.Logger,
@@ -120,7 +139,7 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// 4. Initialize Jira service with DocumentService
+	// 5. Initialize Jira service with DocumentService
 	a.JiraService = atlassian.NewJiraScraperService(
 		a.StorageManager.JiraStorage(),
 		a.DocumentService,
@@ -128,7 +147,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 5. Initialize Confluence service with DocumentService
+	// 6. Initialize Confluence service with DocumentService
 	a.ConfluenceService = atlassian.NewConfluenceScraperService(
 		a.StorageManager.ConfluenceStorage(),
 		a.DocumentService,
@@ -136,7 +155,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 6. Initialize processing service
+	// 7. Initialize processing service
 	a.ProcessingService = processing.NewService(
 		a.DocumentService,
 		a.StorageManager.JiraStorage(),
@@ -144,7 +163,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 7. Initialize and start processing scheduler (if enabled)
+	// 8. Initialize and start processing scheduler (if enabled)
 	if a.Config.Processing.Enabled {
 		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
 		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
@@ -193,6 +212,13 @@ func (a *App) Close() error {
 	// Stop processing scheduler
 	if a.ProcessingScheduler != nil {
 		a.ProcessingScheduler.Stop()
+	}
+
+	// Close LLM service
+	if a.LLMService != nil {
+		if err := a.LLMService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close LLM service")
+		}
 	}
 
 	// Close storage

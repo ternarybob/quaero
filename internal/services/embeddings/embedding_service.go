@@ -1,37 +1,31 @@
 package embeddings
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/llm"
 )
 
 // Service implements EmbeddingService interface
 type Service struct {
-	ollamaURL string
-	modelName string
-	dimension int
-	logger    arbor.ILogger
-	client    *http.Client
+	llmService  interfaces.LLMService
+	auditLogger llm.AuditLogger
+	dimension   int
+	logger      arbor.ILogger
 }
 
 // NewService creates a new embedding service
-func NewService(ollamaURL, modelName string, dimension int, logger arbor.ILogger) interfaces.EmbeddingService {
+func NewService(llmService interfaces.LLMService, auditLogger llm.AuditLogger, dimension int, logger arbor.ILogger) interfaces.EmbeddingService {
 	return &Service{
-		ollamaURL: ollamaURL,
-		modelName: modelName,
-		dimension: dimension,
-		logger:    logger,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		llmService:  llmService,
+		auditLogger: auditLogger,
+		dimension:   dimension,
+		logger:      logger,
 	}
 }
 
@@ -41,51 +35,35 @@ func (s *Service) GenerateEmbedding(ctx context.Context, text string) ([]float32
 		return nil, fmt.Errorf("text cannot be empty")
 	}
 
-	reqBody := map[string]interface{}{
-		"model":  s.modelName,
-		"prompt": text,
+	// Generate embedding via LLM service
+	start := time.Now()
+	embedding, err := s.llmService.Embed(ctx, text)
+	duration := time.Since(start)
+
+	// Log to audit trail
+	mode := s.llmService.GetMode()
+	if s.auditLogger != nil {
+		auditErr := s.auditLogger.LogEmbed(mode, err == nil, duration, err, "")
+		if auditErr != nil {
+			s.logger.Warn().Err(auditErr).Msg("Failed to log embedding operation")
+		}
 	}
 
-	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		fmt.Sprintf("%s/api/embeddings", s.ollamaURL),
-		bytes.NewBuffer(jsonData),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("LLM service returned empty embedding")
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	s.logger.Debug().
+		Str("mode", string(mode)).
+		Int("embedding_dim", len(embedding)).
+		Dur("duration", duration).
+		Msg("Generated embedding")
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call ollama: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Embedding []float32 `json:"embedding"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if len(result.Embedding) == 0 {
-		return nil, fmt.Errorf("ollama returned empty embedding")
-	}
-
-	return result.Embedding, nil
+	return embedding, nil
 }
 
 // EmbedDocument generates and sets embedding for a document
@@ -99,7 +77,7 @@ func (s *Service) EmbedDocument(ctx context.Context, doc *models.Document) error
 	}
 
 	doc.Embedding = embedding
-	doc.EmbeddingModel = s.modelName
+	doc.EmbeddingModel = string(s.llmService.GetMode())
 
 	s.logger.Debug().
 		Str("doc_id", doc.ID).
@@ -135,7 +113,7 @@ func (s *Service) GenerateQueryEmbedding(ctx context.Context, query string) ([]f
 
 // ModelName returns the model name
 func (s *Service) ModelName() string {
-	return s.modelName
+	return string(s.llmService.GetMode())
 }
 
 // Dimension returns the embedding dimension
@@ -145,24 +123,17 @@ func (s *Service) Dimension() int {
 
 // IsAvailable checks if the embedding service is available
 func (s *Service) IsAvailable(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"GET",
-		fmt.Sprintf("%s/api/tags", s.ollamaURL),
-		nil,
-	)
-	if err != nil {
+	if s.llmService == nil {
 		return false
 	}
 
-	resp, err := s.client.Do(req)
+	err := s.llmService.HealthCheck(ctx)
 	if err != nil {
-		s.logger.Debug().Err(err).Msg("Ollama not available")
+		s.logger.Debug().Err(err).Msg("LLM service not available")
 		return false
 	}
-	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	return true
 }
 
 // prepareDocumentText combines title and content for embedding

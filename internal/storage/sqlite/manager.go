@@ -53,6 +53,14 @@ func (m *Manager) DocumentStorage() interfaces.DocumentStorage {
 	return m.document
 }
 
+// DB returns the underlying database connection
+func (m *Manager) DB() interface{} {
+	if m.db != nil {
+		return m.db.DB()
+	}
+	return nil
+}
+
 // Close closes the database connection
 func (m *Manager) Close() error {
 	if m.db != nil {

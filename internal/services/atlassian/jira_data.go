@@ -13,8 +13,19 @@ func (s *JiraScraperService) GetJiraData() (map[string]interface{}, error) {
 		return nil, err
 	}
 
+	// Convert projects to maps for JSON serialization
+	projectMaps := make([]map[string]interface{}, 0, len(projects))
+	for _, p := range projects {
+		projectMaps = append(projectMaps, map[string]interface{}{
+			"key":        p.Key,
+			"name":       p.Name,
+			"id":         p.ID,
+			"issueCount": p.IssueCount,
+		})
+	}
+
 	result := map[string]interface{}{
-		"projects": projects,
+		"projects": projectMaps,
 		"issues":   make([]interface{}, 0),
 	}
 

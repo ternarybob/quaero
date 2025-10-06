@@ -35,6 +35,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// API routes - Data management
 	mux.HandleFunc("/api/data/clear-all", s.app.ScraperHandler.ClearAllDataHandler)
+	mux.HandleFunc("/api/data/jira/clear", s.app.ScraperHandler.ClearJiraDataHandler)
+	mux.HandleFunc("/api/data/confluence/clear", s.app.ScraperHandler.ClearConfluenceDataHandler)
 	mux.HandleFunc("/api/data/jira", s.app.DataHandler.GetJiraDataHandler)
 	mux.HandleFunc("/api/data/jira/issues", s.app.DataHandler.GetJiraIssuesHandler)
 	mux.HandleFunc("/api/data/confluence", s.app.DataHandler.GetConfluenceDataHandler)

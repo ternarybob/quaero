@@ -10,239 +10,181 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestJiraIssuesCollection verifies the complete workflow of collecting issues
-// This test ensures that when issues are scraped, they are actually stored in the database
-func TestJiraIssuesCollection(t *testing.T) {
-	serverURL := getServerURL()
+// Helper functions
 
-	t.Log("=== Testing Jira Issues Collection Workflow ===")
+func getServerURL() string {
+	return "http://localhost:8086" // Use port 8086 for tests (avoids conflicts with dev server on 8085)
+}
 
-	// Step 1: Get projects to find one with issues
-	t.Log("Step 1: Getting projects...")
-	projectsResp, err := http.Get(serverURL + "/api/collector/projects")
-	require.NoError(t, err, "Should be able to get projects")
-	defer projectsResp.Body.Close()
+type projectData struct {
+	Key        string `json:"key"`
+	Name       string `json:"name"`
+	IssueCount int    `json:"issueCount"`
+}
 
-	require.Equal(t, http.StatusOK, projectsResp.StatusCode, "Projects endpoint should return 200")
+// clearJiraData clears all Jira data and verifies it's cleared
+func clearJiraData(t *testing.T, serverURL string) {
+	t.Helper()
+	clearResp, err := http.Post(serverURL+"/api/data/jira/clear", "application/json", nil)
+	require.NoError(t, err)
+	defer clearResp.Body.Close()
 
-	var projectsData struct {
-		Data []struct {
-			Key        string `json:"key"`
-			Name       string `json:"name"`
-			IssueCount int    `json:"issueCount"`
-		} `json:"data"`
-	}
+	require.Equal(t, http.StatusOK, clearResp.StatusCode)
 
-	err = json.NewDecoder(projectsResp.Body).Decode(&projectsData)
-	require.NoError(t, err, "Should be able to parse projects response")
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(clearResp.Body).Decode(&result))
+	require.Equal(t, "success", result["status"])
+	t.Logf("✓ Jira data cleared: %s", result["message"])
+}
 
-	// Find a project with issues (prefer smaller projects for faster testing)
-	var testProject struct {
-		Key        string
-		IssueCount int
-	}
+// scrapeAndWaitForProjects scrapes projects and waits for them to be available
+func scrapeAndWaitForProjects(t *testing.T, serverURL string, timeout time.Duration) []projectData {
+	t.Helper()
 
-	for _, project := range projectsData.Data {
-		if project.IssueCount > 0 && project.IssueCount <= 100 {
-			testProject.Key = project.Key
-			testProject.IssueCount = project.IssueCount
-			break
+	// Trigger project scraping
+	scrapeResp, err := http.Post(serverURL+"/api/scrape/projects", "application/json", nil)
+	require.NoError(t, err)
+	defer scrapeResp.Body.Close()
+
+	require.Equal(t, http.StatusOK, scrapeResp.StatusCode)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(scrapeResp.Body).Decode(&result))
+	t.Logf("✓ Project scraping started: %s", result["message"])
+
+	// Wait for projects to be available
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("❌ Timeout: Projects were not scraped within %v", timeout)
+		case <-ticker.C:
+			resp, err := http.Get(serverURL + "/api/collector/projects")
+			if err != nil {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				continue
+			}
+
+			var data struct {
+				Data []projectData `json:"data"`
+			}
+
+			if err := json.Unmarshal(body, &data); err != nil {
+				continue
+			}
+
+			if len(data.Data) > 0 {
+				t.Logf("✓ Projects available: %d projects", len(data.Data))
+				return data.Data
+			}
 		}
 	}
+}
 
-	if testProject.Key == "" {
-		t.Skip("No projects with issues found - run SYNC PROJECTS first")
-	}
+// collectAndWaitForIssues collects issues for a project and waits for them
+func collectAndWaitForIssues(t *testing.T, serverURL string, projectKey string, timeout time.Duration) int {
+	t.Helper()
 
-	t.Logf("✓ Found test project: %s with %d issues", testProject.Key, testProject.IssueCount)
-
-	// Step 2: Get current issue count for this project (before scraping)
-	t.Log("Step 2: Checking current issues in database...")
-	issuesURL := fmt.Sprintf("%s/api/data/jira/issues?projectKey=%s", serverURL, testProject.Key)
-	initialResp, err := http.Get(issuesURL)
-	require.NoError(t, err, "Should be able to get issues")
-	defer initialResp.Body.Close()
-
-	var initialIssuesData struct {
-		Issues []map[string]interface{} `json:"issues"`
-	}
-
-	err = json.NewDecoder(initialResp.Body).Decode(&initialIssuesData)
-	require.NoError(t, err, "Should be able to parse issues response")
-
-	initialCount := len(initialIssuesData.Issues)
-	t.Logf("  Current issues in DB for %s: %d", testProject.Key, initialCount)
-
-	// Step 3: Trigger issue collection for this project
-	t.Log("Step 3: Triggering issue collection via API...")
+	// Trigger issue collection
 	requestBody := map[string]interface{}{
-		"projectKeys": []string{testProject.Key},
+		"projectKeys": []string{projectKey},
 	}
 
 	requestJSON, err := json.Marshal(requestBody)
-	require.NoError(t, err, "Should be able to marshal request")
+	require.NoError(t, err)
 
 	collectResp, err := http.Post(
 		serverURL+"/api/projects/get-issues",
 		"application/json",
 		bytes.NewBuffer(requestJSON),
 	)
-	require.NoError(t, err, "Should be able to call get-issues endpoint")
+	require.NoError(t, err)
 	defer collectResp.Body.Close()
 
-	require.Equal(t, http.StatusOK, collectResp.StatusCode, "Get-issues should return 200")
+	require.Equal(t, http.StatusOK, collectResp.StatusCode)
 
-	var collectResult map[string]string
-	err = json.NewDecoder(collectResp.Body).Decode(&collectResult)
-	require.NoError(t, err, "Should be able to parse collect response")
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(collectResp.Body).Decode(&result))
+	t.Logf("✓ Issue collection started: %s", result["message"])
 
-	t.Logf("✓ Collection started: %s", collectResult["message"])
-
-	// Step 4: Wait for issues to be collected and stored
-	t.Log("Step 4: Waiting for issues to be stored in database...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Wait for issues to be available
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	var finalCount int
-	var issuesStored bool
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	startTime := time.Now()
+	issuesURL := fmt.Sprintf("%s/api/data/jira/issues?projectKey=%s", serverURL, projectKey)
 
 	for {
 		select {
 		case <-ctx.Done():
-			t.Fatalf("❌ Timeout: Issues were not stored within 60 seconds")
+			t.Fatalf("❌ Timeout: Issues were not collected within %v", timeout)
 		case <-ticker.C:
-			// Check current count in database
-			checkResp, err := http.Get(issuesURL)
+			resp, err := http.Get(issuesURL)
 			if err != nil {
-				t.Logf("  Error checking issues: %v", err)
 				continue
 			}
 
-			checkBody, err := io.ReadAll(checkResp.Body)
-			checkResp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
 			if err != nil {
-				t.Logf("  Error reading response: %v", err)
 				continue
 			}
 
-			var checkData struct {
+			var data struct {
 				Issues []map[string]interface{} `json:"issues"`
 			}
 
-			if err := json.Unmarshal(checkBody, &checkData); err != nil {
-				t.Logf("  Error parsing response: %v", err)
+			if err := json.Unmarshal(body, &data); err != nil {
 				continue
 			}
 
-			finalCount = len(checkData.Issues)
-			elapsed := time.Since(startTime).Round(time.Second)
-
-			t.Logf("  Checking... issues in DB: %d/%d (elapsed: %v)",
-				finalCount, testProject.IssueCount, elapsed)
-
-			// Success condition: we have the expected number of issues
-			if finalCount == testProject.IssueCount {
-				issuesStored = true
-				t.Logf("✓ All %d issues stored after %v", finalCount, elapsed)
-				goto done
-			}
-
-			// Also check if we've waited long enough and have some issues
-			// (maybe the count was wrong)
-			if elapsed > 30*time.Second && finalCount > 0 {
-				t.Logf("⚠ After 30s, have %d issues (expected %d)", finalCount, testProject.IssueCount)
-				goto done
+			count := len(data.Issues)
+			if count > 0 {
+				t.Logf("✓ Issues available: %d issues", count)
+				return count
 			}
 		}
-	}
-
-done:
-	if !issuesStored && finalCount == 0 {
-		t.Fatalf("❌ FAIL: No issues were stored in database after collection")
-	}
-
-	// Step 5: Verify the stored issues
-	t.Log("Step 5: Verifying stored issues...")
-
-	verifyResp, err := http.Get(issuesURL)
-	require.NoError(t, err, "Should be able to get issues for verification")
-	defer verifyResp.Body.Close()
-
-	var verifyData struct {
-		Issues []map[string]interface{} `json:"issues"`
-	}
-
-	err = json.NewDecoder(verifyResp.Body).Decode(&verifyData)
-	require.NoError(t, err, "Should be able to parse verification response")
-
-	actualCount := len(verifyData.Issues)
-	t.Logf("\n=== Verification Results ===")
-	t.Logf("  Project: %s", testProject.Key)
-	t.Logf("  Expected Issues: %d", testProject.IssueCount)
-	t.Logf("  Actual Issues in DB: %d", actualCount)
-	t.Logf("  Initial Count: %d", initialCount)
-
-	// Main assertion: we should have the expected number of issues
-	assert.Equal(t, testProject.IssueCount, actualCount,
-		"Database should contain all scraped issues")
-
-	// Verify each issue belongs to the correct project
-	wrongProjectCount := 0
-	for i, issue := range verifyData.Issues {
-		key, hasKey := issue["key"].(string)
-		if !hasKey {
-			t.Errorf("Issue %d missing key field", i)
-			continue
-		}
-
-		fields, hasFields := issue["fields"].(map[string]interface{})
-		if !hasFields {
-			t.Errorf("Issue %s missing fields", key)
-			continue
-		}
-
-		project, hasProject := fields["project"].(map[string]interface{})
-		if !hasProject {
-			t.Errorf("Issue %s missing project in fields", key)
-			continue
-		}
-
-		projectKey, hasProjectKey := project["key"].(string)
-		if !hasProjectKey {
-			t.Errorf("Issue %s project missing key", key)
-			continue
-		}
-
-		if projectKey != testProject.Key {
-			wrongProjectCount++
-			t.Errorf("Issue %s belongs to project %s, expected %s",
-				key, projectKey, testProject.Key)
-		}
-	}
-
-	if wrongProjectCount == 0 && actualCount > 0 {
-		t.Logf("✓ All %d issues belong to project %s", actualCount, testProject.Key)
-	}
-
-	if actualCount == testProject.IssueCount && wrongProjectCount == 0 {
-		t.Log("\n✅ SUCCESS: Issue collection workflow verified")
-	} else {
-		t.Log("\n❌ FAIL: Issue collection has problems")
-		t.Fail()
 	}
 }
 
-func getServerURL() string {
-	// Default to local server
-	return "http://localhost:8085"
+// TestJiraIssuesCollection verifies the complete workflow of collecting issues
+// This test follows the required workflow:
+// 1. Clear all Jira data - test passes if all Jira data is deleted
+// 2. Get projects - test passes if project count > 0
+// 3. Select project and get issues - test passes if issue count > 0
+func TestJiraIssuesCollection(t *testing.T) {
+	serverURL := getServerURL()
+
+	t.Log("=== Testing Jira Issues Collection Workflow ===")
+
+	// Step 1: Clear all Jira data
+	clearJiraData(t, serverURL)
+
+	// Step 2: Scrape projects and verify count > 0
+	projects := scrapeAndWaitForProjects(t, serverURL, 30*time.Second)
+	require.Greater(t, len(projects), 0, "Project count should be > 0")
+
+	// Step 3: Select a project and get issues - verify count > 0
+	project := projects[0]
+	t.Logf("✓ Selected project: %s", project.Key)
+
+	issueCount := collectAndWaitForIssues(t, serverURL, project.Key, 60*time.Second)
+	require.Greater(t, issueCount, 0, "Issue count should be > 0")
+
+	t.Log("\n✅ SUCCESS: Complete Jira workflow verified")
 }

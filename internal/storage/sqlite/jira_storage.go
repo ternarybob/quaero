@@ -72,6 +72,8 @@ func (s *JiraStorage) GetProject(ctx context.Context, key string) (*models.JiraP
 func (s *JiraStorage) GetAllProjects(ctx context.Context) ([]*models.JiraProject, error) {
 	query := "SELECT data FROM jira_projects ORDER BY key"
 
+	s.logger.Info().Msg("Querying all projects from database")
+
 	rows, err := s.db.DB().QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query projects: %w", err)
@@ -92,6 +94,7 @@ func (s *JiraStorage) GetAllProjects(ctx context.Context) ([]*models.JiraProject
 		projects = append(projects, &project)
 	}
 
+	s.logger.Info().Int("count", len(projects)).Msg("Retrieved projects from database")
 	return projects, rows.Err()
 }
 

@@ -15,8 +15,19 @@ func (s *ConfluenceScraperService) GetConfluenceData() (map[string]interface{}, 
 
 	s.logger.Debug().Int("spaceCount", len(spaces)).Msg("Retrieved spaces from storage")
 
+	// Convert spaces to maps for JSON serialization
+	spaceMaps := make([]map[string]interface{}, 0, len(spaces))
+	for _, s := range spaces {
+		spaceMaps = append(spaceMaps, map[string]interface{}{
+			"key":       s.Key,
+			"name":      s.Name,
+			"id":        s.ID,
+			"pageCount": s.PageCount,
+		})
+	}
+
 	result := map[string]interface{}{
-		"spaces": spaces,
+		"spaces": spaceMaps,
 		"pages":  make([]interface{}, 0),
 	}
 

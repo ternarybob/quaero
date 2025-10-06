@@ -1,30 +1,21 @@
 # Quaero Requirements
 
-**quaero** (Latin: "I seek, I search") - A local knowledge base system with natural language query capabilities.
+**quaero** (Latin: "I seek, I search") - A knowledge base system with strict data privacy controls.
 
-Version: 2.2
+Version: 3.0
 Date: 2025-10-06
 Status: Active Development
 
 ---
 
-## Acknowledgments
+## Critical Security Requirement
 
-Quaero draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zero), a sophisticated AI framework featuring advanced memory management and multi-provider LLM integration. While Agent Zero is a general-purpose AI assistant focused on task execution, Quaero is purpose-built for local knowledge base management with a simpler, Docker-free deployment model.
+**PRIMARY DESIGN CONSTRAINT:** Quaero must operate in two mutually exclusive modes to prevent accidental data exfiltration in regulated environments.
 
-**Key concepts adopted from Agent Zero:**
-- Memory area categorization for organizing different knowledge types
-- Similarity threshold filtering for better search relevance
-- Embedding caching to improve performance
-- Tool-based architecture for modular RAG components
-
-**Key differences from Agent Zero:**
-- **Deployment:** Quaero runs as native binary (Agent Zero requires Docker)
-- **LLM Strategy:** Multi-provider with cloud-first approach (Agent Zero: local-first with LiteLLM)
-- **Scope:** Focused knowledge base vs general AI assistant
-- **Storage:** SQLite with FTS5 vs FAISS vector database
-- **UI:** WebSocket streaming vs HTTP polling
-- **Default Setup:** Cloud API (simple) with optional local Ollama (privacy)
+**Reference Incident:** [ABC News - Northern Rivers data breach via ChatGPT](https://www.abc.net.au/news/2025-10-06/data-breach-northern-rivers-resilient-homes-program-chatgpt/105855284)
+- Government agency accidentally sent sensitive citizen data to OpenAI ChatGPT
+- Data breach of personal information including addresses and damage reports
+- Exactly the scenario Quaero's offline mode must prevent
 
 ---
 
@@ -32,102 +23,256 @@ Quaero draws inspiration from [Agent Zero](https://github.com/agent0ai/agent-zer
 
 ### Purpose
 
-Quaero is a self-contained knowledge base system that:
+Quaero is a knowledge base system that:
 - Collects documentation from approved sources (Confluence, Jira, GitHub)
 - Processes and stores content with full-text and vector search
-- Provides natural language query interface using local LLMs (Ollama)
-- **Runs completely offline on a single machine (NO Docker required)**
+- Provides natural language query interface using LLM integration
+- **Operates in two security modes:** Cloud (convenience) or Offline (compliance)
 - Uses Chrome extension for seamless authentication
-- Organizes knowledge into memory areas for better retrieval
+- Maintains comprehensive audit trail for compliance
 
 ### Technology Stack
 
 - **Language:** Go 1.25+
 - **Web UI:** HTML templates, vanilla JavaScript, WebSockets
 - **Storage:** SQLite with FTS5 (full-text search) and vector embeddings
-- **LLM Integration:** Multi-provider support (Claude, Gemini, OpenAI, or local Ollama)
-  - **Recommended:** Cloud providers (API key only, no infrastructure)
-  - **Optional:** Local Ollama (requires Docker, privacy-focused)
+- **LLM Integration:** Mode-specific (Gemini API or embedded llama.cpp)
 - **Browser Automation:** rod (for web scraping)
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Banner:** github.com/ternarybob/banner (startup display)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
 
-### Deployment Model
+---
 
-**Quaero Application:**
-- Native Go binary (Windows, macOS, Linux)
-- SQLite embedded database (no server)
-- **No Docker required for Quaero itself**
+## Security Modes (CRITICAL REQUIREMENTS)
 
-**LLM Provider Options:**
+### Rule 1: Mode Enforcement
 
-**Option A: Cloud Providers (Recommended - Simplest)**
-- **Claude (Anthropic):** API key only
-- **Gemini (Google):** API key only
-- **OpenAI (GPT-4):** API key only
-- **Setup:** Add API key to config file or environment variable
-- **Advantages:** Zero infrastructure, latest models, no Docker
+**REQUIREMENT:** The system MUST prevent cloud mode usage with sensitive data.
 
-**Option B: Local Ollama (Privacy-Focused)**
-- **Deployment:** Best run via Docker (local setup is complex)
-- **Setup:** Docker Compose or manual Docker container
-- **Advantages:** Fully local, no external API calls, privacy
-- **Disadvantages:** Requires Docker, resource-intensive
+**Implementation Requirements:**
+1. Mode must be explicitly configured (no defaults)
+2. Cloud mode requires `confirm_risk = true` flag
+3. Cloud mode displays WARNING on every startup
+4. Offline mode verifies model files exist before starting
+5. Mode cannot be changed at runtime (requires restart)
 
-**Recommended Setup (Cloud Provider):**
-```bash
-# 1. Install Quaero
-./bin/quaero serve --config deployments/local/quaero.toml
+### Rule 2: Data Classification
 
-# 2. Configure LLM provider (example: Claude)
-export QUAERO_LLM_PROVIDER=anthropic
-export QUAERO_LLM_API_KEY=sk-ant-xxx
-export QUAERO_EMBEDDING_PROVIDER=openai
-export QUAERO_EMBEDDING_API_KEY=sk-xxx
+**REQUIREMENT:** Documentation MUST clearly state when each mode is required.
 
-# That's it - no Docker needed!
+**Offline Mode is MANDATORY for:**
+- Government data (any level: local, state, federal)
+- Healthcare records (HIPAA, privacy legislation)
+- Financial information (customer data, internal financials)
+- Personal information (PII, employee records)
+- Confidential business data (trade secrets, strategic plans)
+- Any data where breach would cause legal/reputational harm
+
+**Cloud Mode is ACCEPTABLE for:**
+- Personal notes and documentation
+- Public documentation
+- Non-confidential research
+- Educational materials
+- Data you own and accept risk for
+
+**Violation Consequence:** Data breach, legal liability, reputational damage
+
+### Rule 3: Audit Trail
+
+**REQUIREMENT:** All LLM operations MUST be logged for compliance verification.
+
+**Audit Log Requirements:**
+1. Every embed/chat operation logged
+2. Includes: timestamp, mode, operation, provider, success/failure
+3. Does NOT include document content (metadata only)
+4. Stored in SQLite `audit_log` table
+5. Exportable to JSON for compliance reporting
+6. Configurable retention period (default: 90 days)
+
+**Purpose:** Prove no data was sent to external APIs in offline mode
+
+### Rule 4: Network Isolation (Offline Mode)
+
+**REQUIREMENT:** Offline mode MUST be verifiable as network-isolated.
+
+**Implementation Requirements:**
+1. No HTTP client creation in offline mode code paths
+2. Sanity check for internet connectivity on startup (log warning if detected)
+3. All inference occurs via local llama.cpp bindings
+4. Model files loaded from local disk
+5. No DNS lookups, no socket connections
+
+**Verification:** Code review + integration tests must confirm no network calls possible
+
+### Rule 5: Risk Acknowledgment (Cloud Mode)
+
+**REQUIREMENT:** Cloud mode MUST require explicit user acknowledgment.
+
+**Implementation Requirements:**
+1. Configuration flag: `confirm_risk = true` required
+2. Startup banner shows WARNING in red/bold
+3. Warning text includes:
+   - "Data will be sent to Google Gemini API"
+   - "Do NOT use with government, healthcare, or confidential data"
+   - "You acknowledge and accept this risk"
+4. Without acknowledgment, system refuses to start
+
+**Example Warning:**
 ```
-
-**Alternative Setup (Local Ollama with Docker):**
-```bash
-# 1. Run Ollama in Docker
-docker run -d -p 11434:11434 ollama/ollama
-docker exec -it ollama ollama pull nomic-embed-text
-docker exec -it ollama ollama pull qwen2.5:32b
-
-# 2. Configure Quaero for Ollama
-export QUAERO_LLM_PROVIDER=ollama
-export QUAERO_LLM_URL=http://localhost:11434
-
-# 3. Run Quaero
-./bin/quaero serve --config deployments/local/quaero.toml
+⚠️  ═══════════════════════════════════════════════════════════
+⚠️  CLOUD MODE ACTIVE
+⚠️  
+⚠️  Data will be sent to Google Gemini API servers
+⚠️  Do NOT use with:
+⚠️    • Government data
+⚠️    • Healthcare records
+⚠️    • Financial information
+⚠️    • Confidential business data
+⚠️  
+⚠️  You have acknowledged and accepted this risk
+⚠️  ═══════════════════════════════════════════════════════════
 ```
 
 ---
 
-## Approved Data Sources
+## Deployment Modes
 
-**ONLY these collectors are approved:**
+### Cloud Mode (Personal/Non-Sensitive Data)
 
-### 1. Confluence
-- **Location:** `internal/services/atlassian/confluence_*`
-- **Features:** Spaces, pages, attachments, images, browser scraping
-- **API:** Confluence REST API v2
-- **Authentication:** Cookies + token from Chrome extension
+**Use Case:** Personal knowledge management where cloud provider access is acceptable.
 
-### 2. Jira
-- **Location:** `internal/services/atlassian/jira_*`
-- **Features:** Projects, issues, comments, attachments
-- **API:** Jira REST API v3
-- **Authentication:** Cookies + token from Chrome extension
+**Architecture:**
+```
+Single Go Binary
+    ↓
+    └─ Google Gemini API
+       ├─ Embeddings: text-embedding-004 (768d)
+       └─ Chat: gemini-1.5-flash
+```
 
-### 3. GitHub
-- **Location:** `internal/services/github/*`
-- **Features:** Repositories, README files, wiki pages, issues (optional), PRs (optional)
-- **API:** GitHub REST API v3
-- **Authentication:** Personal access token
+**Requirements:**
+- Internet connectivity
+- Google Gemini API key
+- Explicit risk acknowledgment
+- **NO Docker required**
+
+**Setup Steps:**
+```bash
+# 1. Get API key from Google AI Studio
+# https://aistudio.google.com/app/apikey
+
+# 2. Configure Quaero
+export GEMINI_API_KEY=your_key_here
+
+# 3. Create config.toml
+cat > config.toml << EOF
+[llm]
+mode = "cloud"
+
+[llm.cloud]
+api_key = "\${GEMINI_API_KEY}"
+confirm_risk = true  # Required acknowledgment
+
+[llm.cloud.embedding]
+model = "text-embedding-004"
+dimension = 768
+
+[llm.cloud.chat]
+model = "gemini-1.5-flash"
+EOF
+
+# 4. Run
+./quaero serve --config config.toml
+```
+
+**Trade-offs:**
+- ✅ Fast inference (~1-2 seconds per query)
+- ✅ High-quality responses
+- ✅ Simple setup
+- ✅ No resource constraints
+- ❌ Data sent to Google servers
+- ❌ Requires internet
+- ❌ Usage costs (minimal with free tier)
+- ❌ NOT for sensitive data
+
+### Offline Mode (Corporate/Government/Sensitive Data) - ✅ IMPLEMENTED
+
+**STATUS:** Production Ready
+
+**Use Case:** Enterprise/government use where data MUST remain local.
+
+**Architecture:**
+```
+Single Go Binary
+    ↓
+    └─ llama-cli binary execution (os/exec)
+       ├─ Embeddings: nomic-embed-text-v1.5.gguf (768d)
+       └─ Chat: qwen2.5-7b-instruct-q4.gguf
+```
+
+**Implementation:**
+- Service: `internal/services/llm/offline/llama.go`
+- Model management: `internal/services/llm/offline/models.go`
+- Factory: `internal/services/llm/factory.go`
+- Audit: `internal/services/llm/audit.go`
+
+**Requirements:**
+- Model files (~5GB total)
+- 8-16GB RAM
+- Multi-core CPU (8+ cores recommended)
+- llama-cli binary (from llama.cpp)
+- **NO Docker required**
+- **NO internet required** (after initial model download)
+
+**Complete Setup Guide:** See `docs/offline-mode-setup.md` for detailed instructions.
+
+**Quick Setup Steps:**
+```bash
+# 1. Download models (one-time, requires internet)
+mkdir -p models
+
+# Embedding model (~150MB)
+curl -L -o models/nomic-embed-text-v1.5-q8.gguf \
+  https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.q8_0.gguf
+
+# Chat model (~4.5GB)
+curl -L -o models/qwen2.5-7b-instruct-q4.gguf \
+  https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf
+
+# 2. Verify checksums
+sha256sum models/*.gguf
+# nomic-embed-text-v1.5-q8.gguf: <checksum>
+# qwen2.5-7b-instruct-q4.gguf: <checksum>
+
+# 3. Create config.toml
+cat > config.toml << EOF
+[llm]
+mode = "offline"
+
+[llm.offline]
+embed_model_path = "./models/nomic-embed-text-v1.5-q8.gguf"
+chat_model_path = "./models/qwen2.5-7b-instruct-q4.gguf"
+context_size = 4096
+threads = 8
+gpu_layers = 0  # Set > 0 if CUDA GPU available
+EOF
+
+# 4. Run (works completely offline)
+./quaero serve --config config.toml
+```
+
+**Trade-offs:**
+- ✅ All data stays local
+- ✅ No network calls (verifiable)
+- ✅ Works air-gapped
+- ✅ Audit trail for compliance
+- ✅ No ongoing costs
+- ❌ Slower inference (~5-8 seconds per query)
+- ❌ Lower quality than GPT-4/Claude
+- ❌ Requires significant RAM
+- ❌ Large model files
 
 ---
 
@@ -142,7 +287,7 @@ export QUAERO_LLM_URL=http://localhost:11434
 
 ### Configuration File Format
 
-**Location:** `config.toml`
+**Complete Example:**
 
 ```toml
 [server]
@@ -170,43 +315,61 @@ path = "./data/quaero.db"
 [storage.sqlite]
 enable_fts5 = true
 enable_vector = true
-embedding_dimension = 768  # Varies by embedding provider
 cache_size_mb = 100
 wal_mode = true
 
-# LLM Configuration - Option A: Cloud Providers (Recommended)
+# ═══════════════════════════════════════════════════════════
+# LLM CONFIGURATION - Choose ONE mode
+# ═══════════════════════════════════════════════════════════
+
 [llm]
-provider = "anthropic"  # anthropic, openai, google, ollama
-api_key = ""  # Set via environment variable
-chat_model = "claude-3-5-sonnet-20241022"
+mode = "offline"  # REQUIRED: "cloud" or "offline"
 
-[llm.embeddings]
-provider = "openai"  # openai, cohere, ollama
-api_key = ""  # Set via environment variable
-model = "text-embedding-3-small"
-dimension = 1536
-
-# LLM Configuration - Option B: Local Ollama (Privacy-focused)
-# [llm]
-# provider = "ollama"
-# url = "http://localhost:11434"
-# chat_model = "qwen2.5:32b"
-#
-# [llm.embeddings]
-# provider = "ollama"
-# url = "http://localhost:11434"
-# model = "nomic-embed-text"
+# ───────────────────────────────────────────────────────────
+# Cloud Mode Configuration (for personal/non-sensitive use)
+# ───────────────────────────────────────────────────────────
+# [llm.cloud]
+# api_key = "${GEMINI_API_KEY}"
+# confirm_risk = true  # REQUIRED: Acknowledge data sent to Google
+# 
+# [llm.cloud.embedding]
+# model = "text-embedding-004"
 # dimension = 768
+# 
+# [llm.cloud.chat]
+# model = "gemini-1.5-flash"
+# temperature = 0.7
+# max_tokens = 512
+
+# ───────────────────────────────────────────────────────────
+# Offline Mode Configuration (for sensitive data)
+# ───────────────────────────────────────────────────────────
+[llm.offline]
+embed_model_path = "./models/nomic-embed-text-v1.5-q8.gguf"
+chat_model_path = "./models/qwen2.5-7b-instruct-q4.gguf"
+context_size = 4096
+threads = 8
+gpu_layers = 0  # Set to 35 for RTX 3090, 43 for RTX 4090, etc.
 
 [processing]
 schedule = "0 0 */6 * * *"  # Every 6 hours
 enabled = true
+
+[audit]
+enabled = true
+retention_days = 90
+export_path = "./audit_logs"
 ```
 
 ### Environment Variables
 
-**Cloud Provider Configuration:**
+**Cloud Mode:**
 ```bash
+# LLM Configuration
+QUAERO_LLM_MODE=cloud
+QUAERO_LLM_CLOUD_API_KEY=your_gemini_key_here
+QUAERO_LLM_CLOUD_CONFIRM_RISK=true
+
 # Server
 QUAERO_PORT=8080
 QUAERO_HOST=localhost
@@ -214,155 +377,222 @@ QUAERO_LOG_LEVEL=info
 
 # Data Sources
 QUAERO_GITHUB_TOKEN=ghp_xxx
-
-# LLM - Cloud Provider (Recommended)
-QUAERO_LLM_PROVIDER=anthropic  # or openai, google
-QUAERO_LLM_API_KEY=sk-ant-xxx
-QUAERO_LLM_CHAT_MODEL=claude-3-5-sonnet-20241022
-
-QUAERO_EMBEDDING_PROVIDER=openai  # or cohere, anthropic
-QUAERO_EMBEDDING_API_KEY=sk-xxx
-QUAERO_EMBEDDING_MODEL=text-embedding-3-small
-QUAERO_EMBEDDING_DIMENSION=1536
 ```
 
-**Local Ollama Configuration (Optional):**
+**Offline Mode:**
 ```bash
-# LLM - Local Ollama (Privacy-focused)
-QUAERO_LLM_PROVIDER=ollama
-QUAERO_LLM_URL=http://localhost:11434
-QUAERO_LLM_CHAT_MODEL=qwen2.5:32b
+# LLM Configuration
+QUAERO_LLM_MODE=offline
+QUAERO_LLM_OFFLINE_EMBED_MODEL_PATH=./models/nomic-embed-text-v1.5-q8.gguf
+QUAERO_LLM_OFFLINE_CHAT_MODEL_PATH=./models/qwen2.5-7b-instruct-q4.gguf
+QUAERO_LLM_OFFLINE_THREADS=8
 
-QUAERO_EMBEDDING_PROVIDER=ollama
-QUAERO_EMBEDDING_URL=http://localhost:11434
-QUAERO_EMBEDDING_MODEL=nomic-embed-text
-QUAERO_EMBEDDING_DIMENSION=768
+# Server
+QUAERO_PORT=8080
+QUAERO_HOST=localhost
+QUAERO_LOG_LEVEL=info
+
+# Data Sources
+QUAERO_GITHUB_TOKEN=ghp_xxx
 ```
 
 ---
 
-## Memory System & RAG Design
+## Approved Data Sources
 
-### Memory Areas (Inspired by Agent Zero)
+**ONLY these collectors are approved:**
 
-Documents are categorized into memory areas for better organization and retrieval:
+### 1. Confluence
+- **Location:** `internal/services/atlassian/confluence_*`
+- **Features:** Spaces, pages, attachments, images
+- **API:** Confluence REST API v2
+- **Authentication:** Cookies + token from Chrome extension
 
-**Memory Area Types:**
-- **main** - Primary knowledge (Confluence pages, Jira issues, GitHub docs)
-- **fragments** - Conversation history and interactions
-- **solutions** - Resolved queries and answers
-- **facts** - Extracted facts and summaries
+### 2. Jira
+- **Location:** `internal/services/atlassian/jira_*`
+- **Features:** Projects, issues, comments, attachments
+- **API:** Jira REST API v3
+- **Authentication:** Cookies + token from Chrome extension
 
-**Benefits:**
-- Targeted retrieval based on query type
-- Better context selection for RAG
-- Cleaner separation of knowledge types
+### 3. GitHub
+- **Location:** `internal/services/github/*`
+- **Features:** Repositories, README files, wiki pages
+- **API:** GitHub REST API v3
+- **Authentication:** Personal access token
 
-**Implementation:**
+---
+
+## LLM Service Requirements (✅ IMPLEMENTED)
+
+### Interface Definition
+
+**STATUS:** ✅ COMPLETE
+
+**Location:** `internal/interfaces/llm_service.go`
+
 ```go
-type MemoryArea string
+package llm
+
+type Service interface {
+    // Generate embedding for text (768 dimensions)
+    Embed(ctx context.Context, text string) ([]float32, error)
+    
+    // Generate chat completion
+    Chat(ctx context.Context, messages []Message) (string, error)
+    
+    // Health check
+    HealthCheck(ctx context.Context) error
+    
+    // Get current mode
+    GetMode() Mode
+    
+    // Get audit trail
+    GetAuditLog() []AuditEntry
+}
+
+type Mode string
 
 const (
-    MemoryAreaMain       MemoryArea = "main"
-    MemoryAreaFragments  MemoryArea = "fragments"
-    MemoryAreaSolutions  MemoryArea = "solutions"
-    MemoryAreaFacts      MemoryArea = "facts"
+    ModeCloud   Mode = "cloud"
+    ModeOffline Mode = "offline"
 )
 
-type Document struct {
-    // ... existing fields
-    MemoryArea MemoryArea `json:"memory_area"`
+type Message struct {
+    Role    string // "system", "user", "assistant"
+    Content string
+}
+
+type AuditEntry struct {
+    Timestamp   time.Time
+    Mode        string  // "cloud" or "offline"
+    Operation   string  // "embed", "chat"
+    Provider    string  // "gemini" or "llama.cpp"
+    DocumentID  string  // Optional
+    Success     bool
+    ErrorMsg    string
 }
 ```
 
-### Search & Retrieval
+### Cloud Mode Implementation
 
-**Search Modes:**
-- **Keyword Search** - FTS5 full-text search
-- **Vector Search** - Cosine similarity with embeddings
-- **Hybrid Search** - Combined keyword + vector with weighted ranking
+**REQUIREMENT:** Gemini API client for embeddings and chat.
 
-**Search Options:**
+**Location:** `internal/services/llm/cloud/gemini.go`
+
+**Key Features:**
+- API key validation
+- Risk acknowledgment verification
+- Rate limiting (60 req/min for free tier)
+- Comprehensive error handling
+- Audit logging for all API calls
+- Timeout handling (30 seconds default)
+
+**Startup Validation:**
 ```go
-type SearchOptions struct {
-    Query               string
-    Limit               int
-    Mode                SearchMode  // keyword, vector, hybrid
-    SimilarityThreshold float32     // 0.0-1.0 (filter by relevance)
-    MinScore            float32     // FTS5 minimum score
-    MemoryAreas         []MemoryArea // Filter by area
-}
-```
-
-**Similarity Threshold Filtering:**
-- Inspired by Agent Zero's filtering mechanism
-- Only returns results above configurable threshold (default: 0.7)
-- Reduces noise and improves relevance
-- Configurable per-query
-
-### Embedding Caching
-
-**Purpose:** Avoid redundant embedding generation for duplicate content
-
-**Strategy:**
-- Cache embeddings by content hash (SHA-256)
-- In-memory cache with LRU eviction
-- TTL-based expiration (default: 24 hours)
-- Survives restarts via database storage
-
-**Implementation:**
-```go
-type EmbeddingCache struct {
-    cache   map[string]CachedEmbedding
-    maxSize int           // LRU limit
-    ttl     time.Duration // Expiration
-}
-
-func (s *EmbeddingService) GenerateEmbedding(text string) ([]float32, error) {
-    // Check cache first
-    if cached := s.cache.Get(hash(text)); cached != nil {
-        return cached, nil
+func NewGeminiClient(config *Config, logger arbor.ILogger) (*GeminiClient, error) {
+    // Validate API key
+    if config.APIKey == "" {
+        return nil, fmt.Errorf("GEMINI_API_KEY required for cloud mode")
     }
-    // Generate and cache
-    embedding := s.ollama.Embed(text)
-    s.cache.Set(hash(text), embedding)
-    return embedding
+    
+    // Verify risk acknowledgment
+    if !config.ConfirmRisk {
+        return nil, fmt.Errorf(
+            "cloud mode requires explicit risk acceptance\n" +
+            "Set confirm_risk = true in config to acknowledge:\n" +
+            "  • Data will be sent to Google Gemini API\n" +
+            "  • Do NOT use with sensitive data",
+        )
+    }
+    
+    // Display warning
+    logger.Warn().Msg("⚠️  CLOUD MODE ACTIVE")
+    logger.Warn().Msg("⚠️  Data will be sent to Google Gemini API")
+    logger.Warn().Msg("⚠️  Do NOT use with government, healthcare, or confidential data")
+    
+    return &GeminiClient{
+        apiKey:     config.APIKey,
+        logger:     logger,
+        auditLog:   NewAuditLog(logger),
+    }, nil
 }
 ```
 
-### RAG (Retrieval-Augmented Generation)
+### Offline Mode Implementation (✅ COMPLETE)
 
-**Architecture:** Tool-based modular design
+**STATUS:** ✅ IMPLEMENTED - Production Ready
 
-**RAG Pipeline:**
-1. **Query Analysis** - Understand user intent
-2. **Retrieval** - Search knowledge base (hybrid search)
-3. **Context Building** - Assemble relevant documents
-4. **Generation** - LLM generates answer with context
-5. **Citation** - Include source links
+**Location:** `internal/services/llm/offline/llama.go`
 
-**Tool Interface:**
+**Implementation Details:**
+- Binary execution model using `os/exec` (no CGo)
+- Zero network capability (verifiable)
+- Model file verification via ModelManager
+- Audit logging to SQLite
+- Mock mode for testing
+- Comprehensive error handling
+
+**Key Features (Implemented):**
+- ✅ Model file validation and verification
+- ✅ Binary detection (./bin/llama-cli, ./llama-cli, PATH)
+- ✅ Thread pool configuration
+- ✅ GPU layer offloading support
+- ✅ Local audit logging to SQLite
+- ✅ Network isolation (zero HTTP imports)
+- ✅ ChatML prompt formatting for Qwen models
+- ✅ Output parsing and response extraction
+
+**Architecture:**
 ```go
-type RAGTool interface {
-    Name() string
-    Description() string
-    Execute(ctx context.Context, input map[string]interface{}) (interface{}, error)
-}
+func NewOfflineLLMService(
+    modelDir string,
+    embedModel string,
+    chatModel string,
+    contextSize int,
+    threadCount int,
+    gpuLayers int,
+    logger arbor.ILogger,
+) (*OfflineLLMService, error) {
+    // Find llama-cli binary
+    binaryPath, err := findLlamaBinary()
+    if err != nil {
+        return nil, fmt.Errorf("llama-cli binary not found: %w", err)
+    }
 
-// Tools:
-// - SearchTool: Knowledge base search
-// - SummarizeTool: Document summarization
-// - ExtractTool: Fact extraction
+    // Create model manager and verify files
+    modelManager := NewModelManager(modelDir, embedModel, chatModel)
+    if err := modelManager.VerifyModels(); err != nil {
+        return nil, fmt.Errorf("model verification failed: %w", err)
+    }
+
+    logger.Info().Msg("✓ OFFLINE MODE ACTIVE")
+    logger.Info().Msg("✓ All processing will be local")
+    logger.Info().Str("binary", binaryPath).Msg("Using llama-cli")
+    logger.Info().Str("embed_model", modelManager.GetEmbedModelPath()).Msg("Embedding model")
+    logger.Info().Str("chat_model", modelManager.GetChatModelPath()).Msg("Chat model")
+
+    return &OfflineLLMService{
+        modelManager: modelManager,
+        binaryPath:   binaryPath,
+        contextSize:  contextSize,
+        threadCount:  threadCount,
+        gpuLayers:    gpuLayers,
+        logger:       logger,
+        mockMode:     false,
+    }, nil
+}
 ```
 
-**LLM Integration:**
-- **Primary:** Multi-provider support (Claude, Gemini, OpenAI, Ollama)
-- **Implementation:** LiteLLM for unified API across providers
-- **Recommended:** Cloud providers (simplest setup - just API keys)
-- **Privacy Option:** Local Ollama (requires Docker)
-- **Model Roles:**
-  - **Embedding:** Generate vector embeddings (OpenAI, Cohere, or Ollama)
-  - **Chat:** Answer generation (Claude, Gemini, GPT-4, or Ollama)
+**Documentation:**
+- Setup guide: `docs/offline-mode-setup.md` (1,247 lines)
+- Service README: `internal/services/llm/offline/README.md` (370 lines)
+- Example config: `deployments/config.offline.example.toml` (288 lines)
+- Integration examples: `internal/services/llm/offline/example_integration.go.txt` (186 lines)
+
+**Testing:**
+- Unit tests: `internal/services/llm/offline/llama_test.go` (192 lines)
+- Test coverage: 5 tests, 8 subtests, all passing
+- Mock mode for testing without binary
 
 ---
 
@@ -374,11 +604,13 @@ type RAGTool interface {
 - `github.com/ternarybob/arbor` - All logging
 - `github.com/ternarybob/banner` - Startup banners
 - `github.com/pelletier/go-toml/v2` - TOML configuration
+- `github.com/go-skynet/go-llama.cpp` - Offline mode inference
 
 **FORBIDDEN:**
 - `fmt.Println` / `log.Println` for logging
 - Any other logging library
 - Any other config format (JSON, YAML)
+- `github.com/ollama/ollama` - Use llama.cpp directly instead
 
 ---
 
@@ -386,100 +618,56 @@ type RAGTool interface {
 
 **REQUIRED ORDER in `main.go`:**
 
-1. **Configuration Loading**
-   ```go
-   config, err := common.LoadFromFile(configPath)
-   ```
-
-2. **CLI Overrides**
-   ```go
-   common.ApplyCLIOverrides(config, serverPort, serverHost)
-   ```
-
-3. **Logger Initialization**
-   ```go
-   logger := common.InitLogger(config)
-   ```
-
-4. **Banner Display** (MANDATORY)
-   ```go
-   common.PrintBanner(config, logger)
-   ```
-
-5. **Version Logging**
-   ```go
-   version := common.GetVersion()
-   logger.Info().Str("version", version).Msg("Quaero starting")
-   ```
-
-6. **Service Initialization**
-   ```go
-   // Storage
-   db := sqlite.NewSQLiteDB(config, logger)
-
-   // Services
-   embeddingService := embeddings.NewService(ollamaURL, modelName, dimension, logger)
-   documentService := documents.NewService(documentStorage, embeddingService, logger)
-   processingService := processing.NewService(documentService, jiraStorage, confluenceStorage, logger)
-
-   // Scheduler
-   scheduler := processing.NewScheduler(processingService, logger)
-   scheduler.Start(config.Processing.Schedule)
-   ```
-
-7. **Handler Initialization**
-   ```go
-   wsHandler := handlers.NewWebSocketHandler()
-   collectorHandler := handlers.NewCollectorHandler(logger, confluenceService, jiraService)
-   documentHandler := handlers.NewDocumentHandler(documentService, processingService)
-   uiHandler := handlers.NewUIHandler(logger)
-   ```
-
-8. **Server Start**
-   ```go
-   server := server.New(logger, config, handlers)
-   server.Start()
-   ```
-
----
-
-## Logging Standards
-
-### Required Patterns
-
-**Structured Logging:**
 ```go
-logger.Info().
-    Str("service", "confluence").
-    Int("pages", count).
-    Dur("duration", elapsed).
-    Msg("Collection completed")
-```
-
-**Error Logging:**
-```go
-logger.Error().
-    Err(err).
-    Str("space", spaceKey).
-    Msg("Failed to collect space")
-```
-
-**Debug Logging:**
-```go
-logger.Debug().
-    Str("url", apiURL).
-    Int("status", resp.StatusCode).
-    Msg("API response received")
-```
-
-**Logger Injection:**
-```go
-type Service struct {
-    logger arbor.ILogger
-}
-
-func NewService(logger arbor.ILogger) *Service {
-    return &Service{logger: logger}
+func main() {
+    // 1. Configuration Loading
+    config, err := common.LoadFromFile(configPath)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 2. CLI Overrides
+    common.ApplyCLIOverrides(config, serverPort, serverHost)
+    
+    // 3. Logger Initialization
+    logger := common.InitLogger(config)
+    
+    // 4. Banner Display (MANDATORY - shows mode)
+    common.PrintBanner(config, logger)
+    
+    // 5. Version Logging
+    version := common.GetVersion()
+    logger.Info().Str("version", version).Msg("Quaero starting")
+    
+    // 6. LLM Mode Validation (CRITICAL)
+    if err := common.ValidateLLMConfig(config); err != nil {
+        logger.Fatal().Err(err).Msg("Invalid LLM configuration")
+    }
+    
+    // 7. LLM Service Initialization
+    llmService, err := llm.NewService(config.LLM, logger)
+    if err != nil {
+        logger.Fatal().Err(err).Msg("Failed to initialize LLM service")
+    }
+    
+    // 8. Storage Initialization
+    db := sqlite.NewSQLiteDB(config, logger)
+    
+    // 9. Other Services
+    embeddingService := embeddings.NewService(llmService, logger)
+    documentService := documents.NewService(documentStorage, embeddingService, logger)
+    processingService := processing.NewService(documentService, jiraStorage, confluenceStorage, logger)
+    
+    // 10. Scheduler
+    scheduler := processing.NewScheduler(processingService, logger)
+    scheduler.Start(config.Processing.Schedule)
+    
+    // 11. Handlers
+    handlers := initHandlers(logger, documentService, processingService, ...)
+    
+    // 12. Server Start
+    server := server.New(logger, config, handlers)
+    server.Start()
 }
 ```
 
@@ -491,6 +679,8 @@ func NewService(logger arbor.ILogger) *Service {
 
 **MUST use:** `github.com/ternarybob/banner`
 
+**MUST show:** Mode (cloud/offline) prominently
+
 **Implementation:**
 ```go
 import "github.com/ternarybob/banner"
@@ -500,18 +690,135 @@ func PrintBanner(cfg *Config, logger arbor.ILogger) {
     b.SetTitle("Quaero")
     b.SetSubtitle("Knowledge Search System")
     b.AddLine("Version", common.GetVersion())
+    
+    // MODE IS CRITICAL INFORMATION
+    if cfg.LLM.Mode == "cloud" {
+        b.AddLine("Mode", "⚠️  CLOUD (data sent to API)")
+    } else {
+        b.AddLine("Mode", "✓ OFFLINE (local processing)")
+    }
+    
     b.AddLine("Server", fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port))
     b.AddLine("Config", cfg.LoadedFrom)
     b.Print()
+    
+    // Additional cloud mode warning
+    if cfg.LLM.Mode == "cloud" {
+        logger.Warn().Msg("═══════════════════════════════════════════════")
+        logger.Warn().Msg("  CLOUD MODE: Data sent to external APIs")
+        logger.Warn().Msg("  Do NOT use with sensitive data")
+        logger.Warn().Msg("═══════════════════════════════════════════════")
+    }
 }
 ```
 
-**Display Requirements:**
-- Show version number
-- Show server host and port
-- Show configuration source (file path or "defaults")
-- MUST be called after logger initialization
-- MUST be called before services start
+---
+
+## Logging Standards
+
+### Required Patterns
+
+**Structured Logging:**
+```go
+logger.Info().
+    Str("mode", "offline").
+    Str("operation", "embed").
+    Dur("duration", elapsed).
+    Msg("Embedding generated")
+```
+
+**Cloud Mode API Calls:**
+```go
+logger.Info().
+    Str("mode", "cloud").
+    Str("provider", "gemini").
+    Str("operation", "embed").
+    Int("status_code", resp.StatusCode).
+    Dur("latency", elapsed).
+    Msg("API call completed")
+```
+
+**Offline Mode Operations:**
+```go
+logger.Info().
+    Str("mode", "offline").
+    Str("provider", "llama.cpp").
+    Str("operation", "chat").
+    Int("threads", config.Threads).
+    Dur("inference_time", elapsed).
+    Msg("Local inference completed")
+```
+
+---
+
+## Audit Log Requirements
+
+### Schema
+
+**SQLite Table:**
+```sql
+CREATE TABLE audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    mode TEXT NOT NULL,  -- 'cloud' or 'offline'
+    operation TEXT NOT NULL,  -- 'embed', 'chat', 'search'
+    provider TEXT NOT NULL,  -- 'gemini' or 'llama.cpp'
+    document_id TEXT,  -- Optional: metadata only, NOT content
+    success BOOLEAN NOT NULL,
+    error_message TEXT,
+    latency_ms INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX idx_audit_timestamp ON audit_log(timestamp);
+CREATE INDEX idx_audit_mode ON audit_log(mode);
+CREATE INDEX idx_audit_operation ON audit_log(operation);
+```
+
+### Implementation
+
+**Location:** `internal/services/llm/audit.go`
+
+```go
+type AuditLog struct {
+    storage interfaces.AuditStorage
+    logger  arbor.ILogger
+    mu      sync.RWMutex
+}
+
+func (a *AuditLog) Record(entry AuditEntry) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    
+    // Log to structured logger
+    a.logger.Info().
+        Str("mode", entry.Mode).
+        Str("operation", entry.Operation).
+        Bool("success", entry.Success).
+        Msg("LLM operation")
+    
+    // Persist to SQLite
+    if err := a.storage.SaveAuditEntry(entry); err != nil {
+        a.logger.Error().Err(err).Msg("Failed to save audit entry")
+    }
+}
+
+func (a *AuditLog) Export(since time.Time, format string) ([]byte, error) {
+    entries, err := a.storage.GetAuditEntries(since, time.Now())
+    if err != nil {
+        return nil, err
+    }
+    
+    switch format {
+    case "json":
+        return json.MarshalIndent(entries, "", "  ")
+    case "csv":
+        return exportToCSV(entries)
+    default:
+        return nil, fmt.Errorf("unsupported format: %s", format)
+    }
+}
+```
 
 ---
 
@@ -524,19 +831,6 @@ func PrintBanner(cfg *Config, logger arbor.ILogger) {
 - ✅ No state
 - ❌ NO receiver methods
 
-**Example:**
-```go
-// ✅ CORRECT
-func LoadFromFile(path string) (*Config, error) {
-    // Pure function
-}
-
-// ❌ WRONG
-func (c *Config) Load() error {
-    // Belongs in services/
-}
-```
-
 ### internal/services/ - Stateful Services
 
 **Rules:**
@@ -544,105 +838,82 @@ func (c *Config) Load() error {
 - ✅ State management
 - ✅ Implement interfaces
 
-**Example:**
-```go
-// ✅ CORRECT
-type DocumentService struct {
-    storage          interfaces.DocumentStorage
-    embeddingService interfaces.EmbeddingService
-    logger           arbor.ILogger
-}
+### internal/services/llm/ - LLM Service (NEW)
 
-func (s *DocumentService) SaveDocument(ctx context.Context, doc *models.Document) error {
-    // Use s.storage, s.embeddingService, s.logger
-}
+**Structure:**
 ```
-
-### internal/handlers/ - HTTP Handlers
-
-**Rules:**
-- ✅ Constructor-based dependency injection
-- ✅ Interface-based (where applicable)
-- ✅ Thin layer - delegates to services
-
-**Example:**
-```go
-// ✅ CORRECT
-type DocumentHandler struct {
-    documentService   interfaces.DocumentService
-    processingService *processing.Service
-    logger            arbor.ILogger
-}
-
-func NewDocumentHandler(
-    documentService interfaces.DocumentService,
-    processingService *processing.Service,
-) *DocumentHandler {
-    return &DocumentHandler{
-        documentService:   documentService,
-        processingService: processingService,
-        logger:            common.GetLogger(),
-    }
-}
+internal/services/llm/
+├── service.go           # Interface definition
+├── factory.go           # Mode-based factory
+├── audit.go             # Audit log system
+├── cloud/               # Cloud mode implementation
+│   ├── gemini.go        # Gemini API client
+│   └── gemini_test.go   # Unit tests
+└── offline/             # Offline mode implementation
+    ├── llama.go         # llama.cpp integration
+    ├── models.go        # Model management
+    └── llama_test.go    # Unit tests
 ```
 
 ---
 
 ## Error Handling
 
-### Required Patterns
+### Configuration Errors
 
-**No Ignored Errors:**
+**MUST provide helpful error messages:**
+
 ```go
-// ✅ CORRECT
-data, err := loadData()
-if err != nil {
-    return fmt.Errorf("failed to load data: %w", err)
+// Bad
+return fmt.Errorf("invalid config")
+
+// Good
+return fmt.Errorf(
+    "invalid LLM configuration: mode must be 'cloud' or 'offline', got '%s'\n" +
+    "See config.toml.example for correct configuration",
+    config.Mode,
+)
+```
+
+### Cloud Mode Errors
+
+```go
+// Missing API key
+if apiKey == "" {
+    return fmt.Errorf(
+        "GEMINI_API_KEY required for cloud mode\n" +
+        "Get your API key from: https://aistudio.google.com/app/apikey\n" +
+        "Then set: export GEMINI_API_KEY=your_key_here",
+    )
 }
 
-// ❌ FORBIDDEN
-data, _ := loadData()
-```
-
-**Error Wrapping:**
-```go
-// ✅ CORRECT
-return fmt.Errorf("failed to collect pages: %w", err)
-
-// ❌ AVOID
-return err
-```
-
-**Error Logging:**
-```go
-if err := service.Collect(); err != nil {
-    logger.Error().Err(err).Msg("Collection failed")
-    return err
+// Missing risk acknowledgment
+if !config.ConfirmRisk {
+    return fmt.Errorf(
+        "cloud mode requires explicit risk acceptance\n" +
+        "Add to config.toml:\n" +
+        "  [llm.cloud]\n" +
+        "  confirm_risk = true\n" +
+        "This acknowledges data will be sent to Google Gemini API",
+    )
 }
 ```
 
----
+### Offline Mode Errors
 
-## Code Quality Standards
-
-### Function Structure
-- **Max Lines:** 80 (ideal: 20-40)
-- **Single Responsibility:** One purpose per function
-- **Error Handling:** Comprehensive validation
-- **Naming:** Descriptive, intention-revealing
-
-### File Structure
-- **Max Lines:** 500
-- **Modular Design:** Extract utilities to shared files
-- **Clear Organization:** Logical grouping of related functions
-
-### Forbidden Patterns
-- `TODO:` comments
-- `FIXME:` comments
-- Hardcoded credentials
-- Unused imports
-- Dead code
-- Ignored errors (`_ = err`)
+```go
+// Missing model files
+if !fileExists(modelPath) {
+    return fmt.Errorf(
+        "model file not found: %s\n" +
+        "Download models with:\n" +
+        "  mkdir -p models\n" +
+        "  curl -L -o models/qwen2.5-7b-instruct-q4.gguf \\\n" +
+        "    https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+        modelPath,
+    )
+}
+```
 
 ---
 
@@ -651,9 +922,52 @@ if err := service.Collect(); err != nil {
 ### Test Coverage Goals
 
 - **Critical paths:** 100%
+- **LLM services:** 90%+
+- **Configuration validation:** 100%
+- **Audit logging:** 100%
 - **Services:** 80%+
 - **Handlers:** 80%+
-- **Utilities:** 90%+
+
+### Required Tests
+
+**LLM Service Tests:**
+```
+internal/services/llm/cloud/gemini_test.go:
+  - API key validation
+  - Risk acknowledgment requirement
+  - Embedding generation
+  - Chat completion
+  - Error handling
+  - Audit logging
+
+internal/services/llm/offline/llama_test.go:
+  - Model file validation
+  - Model loading
+  - Embedding generation
+  - Chat completion
+  - Error handling
+  - Audit logging
+
+internal/services/llm/factory_test.go:
+  - Mode selection
+  - Configuration validation
+  - Service instantiation
+```
+
+**Integration Tests:**
+```
+test/integration/llm_cloud_test.go:
+  - End-to-end cloud mode workflow
+  - API communication
+  - Rate limiting
+  - Error scenarios
+
+test/integration/llm_offline_test.go:
+  - End-to-end offline mode workflow
+  - Model inference
+  - Network isolation verification
+  - Performance benchmarks
+```
 
 ### Testing Commands
 
@@ -662,12 +976,6 @@ if err := service.Collect(); err != nil {
 ./test/run-tests.ps1 -Type all
 ./test/run-tests.ps1 -Type unit
 ./test/run-tests.ps1 -Type integration
-```
-
-**NEVER use:**
-```bash
-cd test && go test      # ❌ WRONG
-go test ./...           # ❌ WRONG
 ```
 
 ---
@@ -680,10 +988,40 @@ go test ./...           # ❌ WRONG
 ./scripts/build.ps1 -Clean -Release
 ```
 
-**NEVER use:**
-```bash
-go build                # ❌ WRONG
+**Build Output:**
 ```
+bin/
+├── quaero          # Main binary
+└── version.txt     # Build info
+```
+
+---
+
+## Deployment Checklist
+
+### Cloud Mode Deployment
+
+- [ ] Obtain Gemini API key
+- [ ] Set environment variable: `GEMINI_API_KEY`
+- [ ] Configure `llm.mode = "cloud"` in config.toml
+- [ ] Set `confirm_risk = true`
+- [ ] Verify API key works: `./quaero test-llm`
+- [ ] Review startup warnings
+- [ ] Configure audit log retention
+- [ ] Deploy binary
+
+### Offline Mode Deployment
+
+- [ ] Download model files (~5GB)
+- [ ] Verify model checksums
+- [ ] Configure `llm.mode = "offline"` in config.toml
+- [ ] Set model paths in config
+- [ ] Configure thread count for CPU
+- [ ] Configure GPU layers (if applicable)
+- [ ] Test model loading: `./quaero test-llm`
+- [ ] Verify network isolation
+- [ ] Configure audit log retention
+- [ ] Deploy binary + model files
 
 ---
 
@@ -712,34 +1050,6 @@ Captures authentication credentials from Atlassian sites (Confluence, Jira) and 
 
 ---
 
-## Deployment
-
-### Build
-
-```bash
-# Development build
-go build -o bin/quaero ./cmd/quaero
-
-# Production build (with version)
-./scripts/build.ps1 -Release
-```
-
-### Run
-
-```bash
-# With config file
-./bin/quaero serve --config config.toml
-
-# With CLI flags
-./bin/quaero serve --port 8080 --host localhost
-
-# With environment variables
-export QUAERO_PORT=8080
-./bin/quaero serve
-```
-
----
-
 ## Compliance Rules
 
 ### Required Libraries
@@ -748,6 +1058,7 @@ export QUAERO_PORT=8080
 - `github.com/ternarybob/arbor` - Logging
 - `github.com/ternarybob/banner` - Banners
 - `github.com/pelletier/go-toml/v2` - TOML config
+- `github.com/go-skynet/go-llama.cpp` - Offline inference
 
 ❌ **FORBIDDEN:**
 - `fmt.Println` / `log.Println` for logging
@@ -760,17 +1071,40 @@ export QUAERO_PORT=8080
 - Stateless functions in `internal/common/`
 - Receiver methods in `internal/services/`
 - Interface injection in `internal/handlers/`
-- Banner on startup
-- Structured logging
+- Banner on startup showing mode
+- Structured logging for all operations
+- Audit trail for all LLM operations
+- Configuration validation on startup
 
 ❌ **FORBIDDEN:**
 - Receiver methods in `internal/common/`
 - Direct service instantiation in handlers
 - Ignored errors
 - TODO/FIXME in committed code
+- Hardcoded credentials
+- Network calls in offline mode code paths
+
+---
+
+## Summary: Mode Comparison
+
+| Aspect | Cloud Mode | Offline Mode |
+|--------|-----------|--------------|
+| **Use Case** | Personal/non-sensitive | Government/corporate/sensitive |
+| **Infrastructure** | Gemini API | llama.cpp + model files |
+| **Setup Complexity** | Simple (API key) | Moderate (model download) |
+| **Docker Required** | No | No |
+| **Internet Required** | Always | Setup only |
+| **Data Privacy** | ❌ Sent to Google | ✅ Stays local |
+| **Performance** | Fast (~1-2 sec) | Slower (~5-8 sec) |
+| **Quality** | High (Gemini 1.5) | Good (Qwen 2.5 7B) |
+| **Cost** | API usage | One-time (compute) |
+| **Risk Acknowledgment** | Required | Not required |
+| **Audit Trail** | API calls logged | Local ops logged |
+| **Compliance** | ❌ Not for regulated data | ✅ Audit-ready |
 
 ---
 
 **Last Updated:** 2025-10-06
 **Status:** Active Development
-**Version:** 2.1
+**Version:** 3.0

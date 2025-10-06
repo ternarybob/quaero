@@ -2,7 +2,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": [
-      "Bash(taskkill:*)"
+      "Bash(go vet:*)"
     ],
     "deny": [],
     "ask": []

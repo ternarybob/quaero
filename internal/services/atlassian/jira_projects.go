@@ -71,7 +71,12 @@ func (s *JiraScraperService) ScrapeProjects() error {
 
 	s.enrichProjectsWithIssueCounts(projects)
 
-	return s.storeProjects(projects)
+	if err := s.storeProjects(projects); err != nil {
+		return err
+	}
+
+	s.logger.Info().Int("count", len(projects)).Msg("Projects stored successfully")
+	return nil
 }
 
 func (s *JiraScraperService) enrichProjectsWithIssueCounts(projects []map[string]interface{}) {
@@ -111,9 +116,11 @@ func (s *JiraScraperService) enrichProjectsWithIssueCounts(projects []map[string
 func (s *JiraScraperService) storeProjects(projects []map[string]interface{}) error {
 	ctx := context.Background()
 
+	storedCount := 0
 	for _, project := range projects {
 		key, ok := project["key"].(string)
 		if !ok {
+			s.logger.Warn().Msg("Project missing key field")
 			continue
 		}
 
@@ -128,12 +135,16 @@ func (s *JiraScraperService) storeProjects(projects []map[string]interface{}) er
 			IssueCount: issueCount,
 		}
 
+		s.logger.Debug().Str("key", key).Str("name", name).Int("issueCount", issueCount).Msg("Storing project")
+
 		if err := s.jiraStorage.StoreProject(ctx, jiraProject); err != nil {
 			s.logger.Error().Err(err).Str("project", key).Msg("Failed to store project")
 			continue
 		}
+		storedCount++
 	}
 
+	s.logger.Info().Int("stored", storedCount).Int("total", len(projects)).Msg("Finished storing projects")
 	return nil
 }
 

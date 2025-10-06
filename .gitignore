@@ -31,6 +31,7 @@ Thumbs.db
 build/
 dist/
 bin/
+nul
 
 # Node (for potential tooling)
 node_modules/

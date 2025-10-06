@@ -74,13 +74,33 @@ type FilesystemConfig struct {
 }
 
 type LLMConfig struct {
-	Ollama OllamaConfig `toml:"ollama"`
+	Mode    string           `toml:"mode"` // "offline" or "cloud"
+	Offline OfflineLLMConfig `toml:"offline"`
+	Cloud   CloudLLMConfig   `toml:"cloud"`
+	Audit   AuditConfig      `toml:"audit"`
 }
 
-type OllamaConfig struct {
-	URL         string `toml:"url"`
-	TextModel   string `toml:"text_model"`
-	VisionModel string `toml:"vision_model"`
+type OfflineLLMConfig struct {
+	ModelDir    string `toml:"model_dir"`    // Directory containing model files
+	EmbedModel  string `toml:"embed_model"`  // e.g., "nomic-embed-text-v1.5-q8.gguf"
+	ChatModel   string `toml:"chat_model"`   // e.g., "qwen2.5-7b-instruct-q4.gguf"
+	ContextSize int    `toml:"context_size"` // Context window size
+	ThreadCount int    `toml:"thread_count"` // CPU threads for inference
+	GPULayers   int    `toml:"gpu_layers"`   // Number of layers to offload to GPU
+}
+
+type CloudLLMConfig struct {
+	Provider    string  `toml:"provider"`    // "gemini", "openai", "anthropic"
+	APIKey      string  `toml:"api_key"`     // API key (should use env var)
+	EmbedModel  string  `toml:"embed_model"` // e.g., "text-embedding-004"
+	ChatModel   string  `toml:"chat_model"`  // e.g., "gemini-1.5-flash"
+	MaxTokens   int     `toml:"max_tokens"`  // Max response tokens
+	Temperature float64 `toml:"temperature"` // 0.0-1.0
+}
+
+type AuditConfig struct {
+	Enabled    bool `toml:"enabled"`     // Enable audit logging
+	LogQueries bool `toml:"log_queries"` // Log query text (disable for PII)
 }
 
 type EmbeddingsConfig struct {
@@ -123,6 +143,28 @@ func NewDefaultConfig() *Config {
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",
 				Attachments: "./data/attachments",
+			},
+		},
+		LLM: LLMConfig{
+			Mode: "offline", // Default to secure offline mode
+			Offline: OfflineLLMConfig{
+				ModelDir:    "./models",
+				EmbedModel:  "nomic-embed-text-v1.5-q8.gguf",
+				ChatModel:   "qwen2.5-7b-instruct-q4.gguf",
+				ContextSize: 2048,
+				ThreadCount: 4,
+				GPULayers:   0, // CPU-only by default
+			},
+			Cloud: CloudLLMConfig{
+				Provider:    "gemini",
+				EmbedModel:  "text-embedding-004",
+				ChatModel:   "gemini-1.5-flash",
+				MaxTokens:   2048,
+				Temperature: 0.7,
+			},
+			Audit: AuditConfig{
+				Enabled:    true,
+				LogQueries: false, // Don't log query text by default (PII safety)
 			},
 		},
 		Embeddings: EmbeddingsConfig{
@@ -187,6 +229,67 @@ func applyEnvOverrides(config *Config) {
 	}
 	if sqlitePath := os.Getenv("QUAERO_SQLITE_PATH"); sqlitePath != "" {
 		config.Storage.SQLite.Path = sqlitePath
+	}
+
+	// LLM configuration
+	if llmMode := os.Getenv("QUAERO_LLM_MODE"); llmMode != "" {
+		config.LLM.Mode = llmMode
+	}
+	if modelDir := os.Getenv("QUAERO_LLM_OFFLINE_MODEL_DIR"); modelDir != "" {
+		config.LLM.Offline.ModelDir = modelDir
+	}
+	if embedModel := os.Getenv("QUAERO_LLM_OFFLINE_EMBED_MODEL"); embedModel != "" {
+		config.LLM.Offline.EmbedModel = embedModel
+	}
+	if chatModel := os.Getenv("QUAERO_LLM_OFFLINE_CHAT_MODEL"); chatModel != "" {
+		config.LLM.Offline.ChatModel = chatModel
+	}
+	if contextSize := os.Getenv("QUAERO_LLM_OFFLINE_CONTEXT_SIZE"); contextSize != "" {
+		if cs, err := strconv.Atoi(contextSize); err == nil {
+			config.LLM.Offline.ContextSize = cs
+		}
+	}
+	if threadCount := os.Getenv("QUAERO_LLM_OFFLINE_THREAD_COUNT"); threadCount != "" {
+		if tc, err := strconv.Atoi(threadCount); err == nil {
+			config.LLM.Offline.ThreadCount = tc
+		}
+	}
+	if gpuLayers := os.Getenv("QUAERO_LLM_OFFLINE_GPU_LAYERS"); gpuLayers != "" {
+		if gl, err := strconv.Atoi(gpuLayers); err == nil {
+			config.LLM.Offline.GPULayers = gl
+		}
+	}
+	if provider := os.Getenv("QUAERO_LLM_CLOUD_PROVIDER"); provider != "" {
+		config.LLM.Cloud.Provider = provider
+	}
+	if apiKey := os.Getenv("QUAERO_LLM_CLOUD_API_KEY"); apiKey != "" {
+		config.LLM.Cloud.APIKey = apiKey
+	}
+	if embedModel := os.Getenv("QUAERO_LLM_CLOUD_EMBED_MODEL"); embedModel != "" {
+		config.LLM.Cloud.EmbedModel = embedModel
+	}
+	if chatModel := os.Getenv("QUAERO_LLM_CLOUD_CHAT_MODEL"); chatModel != "" {
+		config.LLM.Cloud.ChatModel = chatModel
+	}
+	if maxTokens := os.Getenv("QUAERO_LLM_CLOUD_MAX_TOKENS"); maxTokens != "" {
+		if mt, err := strconv.Atoi(maxTokens); err == nil {
+			config.LLM.Cloud.MaxTokens = mt
+		}
+	}
+	if temperature := os.Getenv("QUAERO_LLM_CLOUD_TEMPERATURE"); temperature != "" {
+		if temp, err := strconv.ParseFloat(temperature, 64); err == nil {
+			config.LLM.Cloud.Temperature = temp
+		}
+	}
+	if auditEnabled := os.Getenv("QUAERO_LLM_AUDIT_ENABLED"); auditEnabled != "" {
+		if enabled, err := strconv.ParseBool(auditEnabled); err == nil {
+			config.LLM.Audit.Enabled = enabled
+		}
+	}
+	if logQueries := os.Getenv("QUAERO_LLM_AUDIT_LOG_QUERIES"); logQueries != "" {
+		if lq, err := strconv.ParseBool(logQueries); err == nil {
+			config.LLM.Audit.LogQueries = lq
+		}
 	}
 
 	// Logging configuration

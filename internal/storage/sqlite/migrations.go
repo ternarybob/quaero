@@ -20,6 +20,7 @@ func (s *SQLiteDB) migrate() error {
 		{version: 1, name: "initial_schema", up: migrateV1},
 		{version: 2, name: "fts5_indexes", up: migrateV2},
 		{version: 3, name: "documents_table", up: migrateV3},
+		{version: 4, name: "llm_audit_log", up: migrateV4},
 	}
 
 	for _, m := range migrations {
@@ -303,6 +304,34 @@ func migrateV3(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			return fmt.Errorf("failed to execute query: %w\nQuery: %s", err, query)
 		}
+	}
+
+	return nil
+}
+
+// migrateV4 creates llm_audit_log table for LLM operation tracking
+func migrateV4(ctx context.Context, tx *sql.Tx) error {
+	query := `
+	CREATE TABLE IF NOT EXISTS llm_audit_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp TEXT NOT NULL,
+		mode TEXT NOT NULL,
+		operation TEXT NOT NULL,
+		success INTEGER NOT NULL,
+		error TEXT,
+		duration INTEGER NOT NULL,
+		query_text TEXT,
+		created_at INTEGER DEFAULT (strftime('%s', 'now'))
+	)`
+
+	if _, err := tx.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("failed to create llm_audit_log table: %w", err)
+	}
+
+	// Create index for timestamp queries
+	indexQuery := `CREATE INDEX IF NOT EXISTS idx_llm_audit_timestamp ON llm_audit_log(timestamp DESC)`
+	if _, err := tx.ExecContext(ctx, indexQuery); err != nil {
+		return fmt.Errorf("failed to create llm_audit_log index: %w", err)
 	}
 
 	return nil

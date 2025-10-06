@@ -1,4 +1,1671 @@
 {
-  "lastUpdated": "2025-10-04T05:53:02.599Z",
-  "functions": []
+  "lastUpdated": "2025-10-06T00:57:12.195Z",
+  "functions": [
+    {
+      "name": "New",
+      "file": "internal/app/app.go",
+      "line": 46,
+      "isReceiver": false,
+      "signature": "func New(config *common.Config, logger arbor.ILogger) (*App, error) {"
+    },
+    {
+      "name": "Close",
+      "file": "internal/app/app.go",
+      "line": 192,
+      "isReceiver": true,
+      "signature": "func (a *App) Close() error {"
+    },
+    {
+      "name": "PrintBanner",
+      "file": "internal/common/banner.go",
+      "line": 10,
+      "isReceiver": false,
+      "signature": "func PrintBanner(config *Config, logger interface{ GetLogFilePath() string }) {"
+    },
+    {
+      "name": "PrintShutdownBanner",
+      "file": "internal/common/banner.go",
+      "line": 87,
+      "isReceiver": false,
+      "signature": "func PrintShutdownBanner() {"
+    },
+    {
+      "name": "PrintColorizedMessage",
+      "file": "internal/common/banner.go",
+      "line": 103,
+      "isReceiver": false,
+      "signature": "func PrintColorizedMessage(color, message string) {"
+    },
+    {
+      "name": "PrintSuccess",
+      "file": "internal/common/banner.go",
+      "line": 108,
+      "isReceiver": false,
+      "signature": "func PrintSuccess(message string) {"
+    },
+    {
+      "name": "PrintError",
+      "file": "internal/common/banner.go",
+      "line": 113,
+      "isReceiver": false,
+      "signature": "func PrintError(message string) {"
+    },
+    {
+      "name": "PrintWarning",
+      "file": "internal/common/banner.go",
+      "line": 118,
+      "isReceiver": false,
+      "signature": "func PrintWarning(message string) {"
+    },
+    {
+      "name": "PrintInfo",
+      "file": "internal/common/banner.go",
+      "line": 123,
+      "isReceiver": false,
+      "signature": "func PrintInfo(message string) {"
+    },
+    {
+      "name": "NewDefaultConfig",
+      "file": "internal/common/config.go",
+      "line": 126,
+      "isReceiver": false,
+      "signature": "func NewDefaultConfig() *Config {"
+    },
+    {
+      "name": "LoadFromFile",
+      "file": "internal/common/config.go",
+      "line": 191,
+      "isReceiver": false,
+      "signature": "func LoadFromFile(path string) (*Config, error) {"
+    },
+    {
+      "name": "ApplyCLIOverrides",
+      "file": "internal/common/config.go",
+      "line": 318,
+      "isReceiver": false,
+      "signature": "func ApplyCLIOverrides(config *Config, port int, host string) {"
+    },
+    {
+      "name": "GetLogger",
+      "file": "internal/common/logger.go",
+      "line": 19,
+      "isReceiver": false,
+      "signature": "func GetLogger() arbor.ILogger {"
+    },
+    {
+      "name": "InitLogger",
+      "file": "internal/common/logger.go",
+      "line": 43,
+      "isReceiver": false,
+      "signature": "func InitLogger(config *Config) arbor.ILogger {"
+    },
+    {
+      "name": "GetLogFilePath",
+      "file": "internal/common/logger.go",
+      "line": 121,
+      "isReceiver": false,
+      "signature": "func GetLogFilePath(logger arbor.ILogger) string {"
+    },
+    {
+      "name": "GetVersion",
+      "file": "internal/common/version.go",
+      "line": 18,
+      "isReceiver": false,
+      "signature": "func GetVersion() string {"
+    },
+    {
+      "name": "GetBuild",
+      "file": "internal/common/version.go",
+      "line": 23,
+      "isReceiver": false,
+      "signature": "func GetBuild() string {"
+    },
+    {
+      "name": "GetGitCommit",
+      "file": "internal/common/version.go",
+      "line": 28,
+      "isReceiver": false,
+      "signature": "func GetGitCommit() string {"
+    },
+    {
+      "name": "GetFullVersion",
+      "file": "internal/common/version.go",
+      "line": 33,
+      "isReceiver": false,
+      "signature": "func GetFullVersion() string {"
+    },
+    {
+      "name": "LoadVersionFromFile",
+      "file": "internal/common/version.go",
+      "line": 38,
+      "isReceiver": false,
+      "signature": "func LoadVersionFromFile() string {"
+    },
+    {
+      "name": "NewAPIHandler",
+      "file": "internal/handlers/api.go",
+      "line": 15,
+      "isReceiver": false,
+      "signature": "func NewAPIHandler() *APIHandler {"
+    },
+    {
+      "name": "VersionHandler",
+      "file": "internal/handlers/api.go",
+      "line": 22,
+      "isReceiver": true,
+      "signature": "func (h *APIHandler) VersionHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "HealthHandler",
+      "file": "internal/handlers/api.go",
+      "line": 37,
+      "isReceiver": true,
+      "signature": "func (h *APIHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NotFoundHandler",
+      "file": "internal/handlers/api.go",
+      "line": 50,
+      "isReceiver": true,
+      "signature": "func (h *APIHandler) NotFoundHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewCollectorHandler",
+      "file": "internal/handlers/collector.go",
+      "line": 44,
+      "isReceiver": false,
+      "signature": "func NewCollectorHandler(jiraScraper JiraDataProvider, confluenceScraper ConfluenceDataProvider, logger arbor.ILogger) *CollectorHandler {"
+    },
+    {
+      "name": "GetProjectsHandler",
+      "file": "internal/handlers/collector.go",
+      "line": 53,
+      "isReceiver": true,
+      "signature": "func (h *CollectorHandler) GetProjectsHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetSpacesHandler",
+      "file": "internal/handlers/collector.go",
+      "line": 105,
+      "isReceiver": true,
+      "signature": "func (h *CollectorHandler) GetSpacesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetIssuesHandler",
+      "file": "internal/handlers/collector.go",
+      "line": 137,
+      "isReceiver": true,
+      "signature": "func (h *CollectorHandler) GetIssuesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetPagesHandler",
+      "file": "internal/handlers/collector.go",
+      "line": 187,
+      "isReceiver": true,
+      "signature": "func (h *CollectorHandler) GetPagesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewDataHandler",
+      "file": "internal/handlers/data.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewDataHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper) *DataHandler {"
+    },
+    {
+      "name": "GetJiraDataHandler",
+      "file": "internal/handlers/data.go",
+      "line": 30,
+      "isReceiver": true,
+      "signature": "func (h *DataHandler) GetJiraDataHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetJiraIssuesHandler",
+      "file": "internal/handlers/data.go",
+      "line": 48,
+      "isReceiver": true,
+      "signature": "func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetConfluenceDataHandler",
+      "file": "internal/handlers/data.go",
+      "line": 215,
+      "isReceiver": true,
+      "signature": "func (h *DataHandler) GetConfluenceDataHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetConfluencePagesHandler",
+      "file": "internal/handlers/data.go",
+      "line": 233,
+      "isReceiver": true,
+      "signature": "func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewDocumentHandler",
+      "file": "internal/handlers/document_handler.go",
+      "line": 19,
+      "isReceiver": false,
+      "signature": "func NewDocumentHandler(documentService interfaces.DocumentService, processingService *processing.Service) *DocumentHandler {"
+    },
+    {
+      "name": "StatsHandler",
+      "file": "internal/handlers/document_handler.go",
+      "line": 28,
+      "isReceiver": true,
+      "signature": "func (h *DocumentHandler) StatsHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ListHandler",
+      "file": "internal/handlers/document_handler.go",
+      "line": 47,
+      "isReceiver": true,
+      "signature": "func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ProcessHandler",
+      "file": "internal/handlers/document_handler.go",
+      "line": 82,
+      "isReceiver": true,
+      "signature": "func (h *DocumentHandler) ProcessHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewScraperHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewScraperHandler(authService interfaces.AuthService, jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper, ws *WebSocketHandler) *ScraperHandler {"
+    },
+    {
+      "name": "AuthUpdateHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 32,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) AuthUpdateHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ScrapeHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 68,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ScrapeHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ScrapeProjectsHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 93,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ScrapeProjectsHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ScrapeSpacesHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 124,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ScrapeSpacesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "RefreshProjectsCacheHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 155,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) RefreshProjectsCacheHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetProjectIssuesHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 206,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) GetProjectIssuesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "RefreshSpacesCacheHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 277,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) RefreshSpacesCacheHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "GetSpacePagesHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 325,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) GetSpacePagesHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ClearAllDataHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 400,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ClearAllDataHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ClearJiraDataHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 458,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ClearJiraDataHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ClearConfluenceDataHandler",
+      "file": "internal/handlers/scraper.go",
+      "line": 496,
+      "isReceiver": true,
+      "signature": "func (h *ScraperHandler) ClearConfluenceDataHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewUIHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewUIHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper) *UIHandler {"
+    },
+    {
+      "name": "IndexHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 49,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) IndexHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "StatusHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 60,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ParserStatusHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 82,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "JiraPageHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 119,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) JiraPageHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "ConfluencePageHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 125,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) ConfluencePageHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "DocumentsPageHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 131,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) DocumentsPageHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "StaticFileHandler",
+      "file": "internal/handlers/ui.go",
+      "line": 137,
+      "isReceiver": true,
+      "signature": "func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "NewWebSocketHandler",
+      "file": "internal/handlers/websocket.go",
+      "line": 39,
+      "isReceiver": false,
+      "signature": "func NewWebSocketHandler() *WebSocketHandler {"
+    },
+    {
+      "name": "SetAuthLoader",
+      "file": "internal/handlers/websocket.go",
+      "line": 49,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) SetAuthLoader(loader AuthLoader) {"
+    },
+    {
+      "name": "BroadcastUILog",
+      "file": "internal/handlers/websocket.go",
+      "line": 55,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) BroadcastUILog(level, message string) {"
+    },
+    {
+      "name": "HandleWebSocket",
+      "file": "internal/handlers/websocket.go",
+      "line": 89,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {"
+    },
+    {
+      "name": "BroadcastStatus",
+      "file": "internal/handlers/websocket.go",
+      "line": 138,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) BroadcastStatus(status StatusUpdate) {"
+    },
+    {
+      "name": "BroadcastAuth",
+      "file": "internal/handlers/websocket.go",
+      "line": 212,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) BroadcastAuth(authData *interfaces.AuthData) {"
+    },
+    {
+      "name": "BroadcastLog",
+      "file": "internal/handlers/websocket.go",
+      "line": 226,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) BroadcastLog(entry LogEntry) {"
+    },
+    {
+      "name": "StartStatusBroadcaster",
+      "file": "internal/handlers/websocket.go",
+      "line": 299,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) StartStatusBroadcaster() {"
+    },
+    {
+      "name": "SendLog",
+      "file": "internal/handlers/websocket.go",
+      "line": 325,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) SendLog(level, message string) {"
+    },
+    {
+      "name": "StartLogStreamer",
+      "file": "internal/handlers/websocket.go",
+      "line": 335,
+      "isReceiver": true,
+      "signature": "func (h *WebSocketHandler) StartLogStreamer() {"
+    },
+    {
+      "name": "ToHTTPCookie",
+      "file": "internal/interfaces/atlassian.go",
+      "line": 61,
+      "isReceiver": true,
+      "signature": "func (c *AtlassianExtensionCookie) ToHTTPCookie() *http.Cookie {"
+    },
+    {
+      "name": "GetHTTPCookies",
+      "file": "internal/interfaces/atlassian.go",
+      "line": 99,
+      "isReceiver": true,
+      "signature": "func (a *AtlassianAuthData) GetHTTPCookies() []*http.Cookie {"
+    },
+    {
+      "name": "ToMap",
+      "file": "internal/models/document.go",
+      "line": 82,
+      "isReceiver": true,
+      "signature": "func (j *JiraMetadata) ToMap() (map[string]interface{}, error) {"
+    },
+    {
+      "name": "ToMap",
+      "file": "internal/models/document.go",
+      "line": 95,
+      "isReceiver": true,
+      "signature": "func (c *ConfluenceMetadata) ToMap() (map[string]interface{}, error) {"
+    },
+    {
+      "name": "WriteHeader",
+      "file": "internal/server/middleware.go",
+      "line": 92,
+      "isReceiver": true,
+      "signature": "func (rw *responseWriter) WriteHeader(code int) {"
+    },
+    {
+      "name": "Hijack",
+      "file": "internal/server/middleware.go",
+      "line": 98,
+      "isReceiver": true,
+      "signature": "func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {"
+    },
+    {
+      "name": "New",
+      "file": "internal/server/server.go",
+      "line": 20,
+      "isReceiver": false,
+      "signature": "func New(application *app.App) *Server {"
+    },
+    {
+      "name": "Start",
+      "file": "internal/server/server.go",
+      "line": 42,
+      "isReceiver": true,
+      "signature": "func (s *Server) Start() error {"
+    },
+    {
+      "name": "Shutdown",
+      "file": "internal/server/server.go",
+      "line": 62,
+      "isReceiver": true,
+      "signature": "func (s *Server) Shutdown(ctx context.Context) error {"
+    },
+    {
+      "name": "NewAtlassianAuthService",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 33,
+      "isReceiver": false,
+      "signature": "func NewAtlassianAuthService(authStorage interfaces.AuthStorage, logger arbor.ILogger) (*AtlassianAuthService, error) {"
+    },
+    {
+      "name": "UpdateAuth",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 61,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) UpdateAuth(authData *interfaces.AtlassianAuthData) error {"
+    },
+    {
+      "name": "IsAuthenticated",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 138,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) IsAuthenticated() bool {"
+    },
+    {
+      "name": "LoadAuth",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 143,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) LoadAuth() (*interfaces.AtlassianAuthData, error) {"
+    },
+    {
+      "name": "GetHTTPClient",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 177,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) GetHTTPClient() *http.Client {"
+    },
+    {
+      "name": "GetBaseURL",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 182,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) GetBaseURL() string {"
+    },
+    {
+      "name": "GetUserAgent",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 187,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) GetUserAgent() string {"
+    },
+    {
+      "name": "GetCloudID",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 192,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) GetCloudID() string {"
+    },
+    {
+      "name": "GetAtlToken",
+      "file": "internal/services/atlassian/auth_service.go",
+      "line": 197,
+      "isReceiver": true,
+      "signature": "func (s *AtlassianAuthService) GetAtlToken() string {"
+    },
+    {
+      "name": "GetConfluenceData",
+      "file": "internal/services/atlassian/confluence_data.go",
+      "line": 8,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) GetConfluenceData() (map[string]interface{}, error) {"
+    },
+    {
+      "name": "ClearAllData",
+      "file": "internal/services/atlassian/confluence_data.go",
+      "line": 53,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) ClearAllData() error {"
+    },
+    {
+      "name": "GetSpacePages",
+      "file": "internal/services/atlassian/confluence_pages.go",
+      "line": 14,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) GetSpacePages(spaceKey string) error {"
+    },
+    {
+      "name": "GetPageCount",
+      "file": "internal/services/atlassian/confluence_pages.go",
+      "line": 158,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) GetPageCount() int {"
+    },
+    {
+      "name": "NewConfluenceScraperService",
+      "file": "internal/services/atlassian/confluence_scraper_service.go",
+      "line": 26,
+      "isReceiver": false,
+      "signature": "func NewConfluenceScraperService("
+    },
+    {
+      "name": "Close",
+      "file": "internal/services/atlassian/confluence_scraper_service.go",
+      "line": 41,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) Close() error {"
+    },
+    {
+      "name": "SetUILogger",
+      "file": "internal/services/atlassian/confluence_scraper_service.go",
+      "line": 46,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) SetUILogger(logger interface{}) {"
+    },
+    {
+      "name": "ScrapeConfluence",
+      "file": "internal/services/atlassian/confluence_scraper_service.go",
+      "line": 51,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) ScrapeConfluence() error {"
+    },
+    {
+      "name": "ProcessPagesForSpace",
+      "file": "internal/services/atlassian/confluence_scraper_service.go",
+      "line": 142,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) ProcessPagesForSpace(ctx context.Context, spaceKey string) error {"
+    },
+    {
+      "name": "GetSpacePageCount",
+      "file": "internal/services/atlassian/confluence_spaces.go",
+      "line": 14,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) GetSpacePageCount(spaceKey string) (int, error) {"
+    },
+    {
+      "name": "ScrapeSpaces",
+      "file": "internal/services/atlassian/confluence_spaces.go",
+      "line": 53,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) ScrapeSpaces() error {"
+    },
+    {
+      "name": "ClearSpacesCache",
+      "file": "internal/services/atlassian/confluence_spaces.go",
+      "line": 181,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) ClearSpacesCache() error {"
+    },
+    {
+      "name": "GetSpaceCount",
+      "file": "internal/services/atlassian/confluence_spaces.go",
+      "line": 200,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceScraperService) GetSpaceCount() int {"
+    },
+    {
+      "name": "GetJiraData",
+      "file": "internal/services/atlassian/jira_data.go",
+      "line": 8,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) GetJiraData() (map[string]interface{}, error) {"
+    },
+    {
+      "name": "ClearAllData",
+      "file": "internal/services/atlassian/jira_data.go",
+      "line": 48,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) ClearAllData() error {"
+    },
+    {
+      "name": "DeleteProjectIssues",
+      "file": "internal/services/atlassian/jira_issues.go",
+      "line": 14,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) DeleteProjectIssues(projectKey string) error {"
+    },
+    {
+      "name": "GetProjectIssues",
+      "file": "internal/services/atlassian/jira_issues.go",
+      "line": 27,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) GetProjectIssues(projectKey string) error {"
+    },
+    {
+      "name": "GetIssueCount",
+      "file": "internal/services/atlassian/jira_issues.go",
+      "line": 124,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) GetIssueCount() int {"
+    },
+    {
+      "name": "GetProjectIssueCount",
+      "file": "internal/services/atlassian/jira_projects.go",
+      "line": 15,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) GetProjectIssueCount(projectKey string) (int, error) {"
+    },
+    {
+      "name": "ScrapeProjects",
+      "file": "internal/services/atlassian/jira_projects.go",
+      "line": 57,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) ScrapeProjects() error {"
+    },
+    {
+      "name": "ClearProjectsCache",
+      "file": "internal/services/atlassian/jira_projects.go",
+      "line": 152,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) ClearProjectsCache() error {"
+    },
+    {
+      "name": "GetProjectCount",
+      "file": "internal/services/atlassian/jira_projects.go",
+      "line": 171,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) GetProjectCount() int {"
+    },
+    {
+      "name": "NewJiraScraperService",
+      "file": "internal/services/atlassian/jira_scraper_service.go",
+      "line": 26,
+      "isReceiver": false,
+      "signature": "func NewJiraScraperService("
+    },
+    {
+      "name": "Close",
+      "file": "internal/services/atlassian/jira_scraper_service.go",
+      "line": 41,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) Close() error {"
+    },
+    {
+      "name": "SetUILogger",
+      "file": "internal/services/atlassian/jira_scraper_service.go",
+      "line": 46,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) SetUILogger(logger interface{}) {"
+    },
+    {
+      "name": "ProcessIssuesForProject",
+      "file": "internal/services/atlassian/jira_scraper_service.go",
+      "line": 217,
+      "isReceiver": true,
+      "signature": "func (s *JiraScraperService) ProcessIssuesForProject(ctx context.Context, projectKey string) error {"
+    },
+    {
+      "name": "NewService",
+      "file": "internal/services/documents/document_service.go",
+      "line": 20,
+      "isReceiver": false,
+      "signature": "func NewService("
+    },
+    {
+      "name": "SaveDocument",
+      "file": "internal/services/documents/document_service.go",
+      "line": 33,
+      "isReceiver": true,
+      "signature": "func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error {"
+    },
+    {
+      "name": "SaveDocuments",
+      "file": "internal/services/documents/document_service.go",
+      "line": 65,
+      "isReceiver": true,
+      "signature": "func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) error {"
+    },
+    {
+      "name": "UpdateDocument",
+      "file": "internal/services/documents/document_service.go",
+      "line": 103,
+      "isReceiver": true,
+      "signature": "func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) error {"
+    },
+    {
+      "name": "GetDocument",
+      "file": "internal/services/documents/document_service.go",
+      "line": 140,
+      "isReceiver": true,
+      "signature": "func (s *Service) GetDocument(ctx context.Context, id string) (*models.Document, error) {"
+    },
+    {
+      "name": "GetBySource",
+      "file": "internal/services/documents/document_service.go",
+      "line": 145,
+      "isReceiver": true,
+      "signature": "func (s *Service) GetBySource(ctx context.Context, sourceType, sourceID string) (*models.Document, error) {"
+    },
+    {
+      "name": "DeleteDocument",
+      "file": "internal/services/documents/document_service.go",
+      "line": 150,
+      "isReceiver": true,
+      "signature": "func (s *Service) DeleteDocument(ctx context.Context, id string) error {"
+    },
+    {
+      "name": "Search",
+      "file": "internal/services/documents/document_service.go",
+      "line": 169,
+      "isReceiver": true,
+      "signature": "func (s *Service) Search(ctx context.Context, query *interfaces.SearchQuery) ([]*models.Document, error) {"
+    },
+    {
+      "name": "GetStats",
+      "file": "internal/services/documents/document_service.go",
+      "line": 216,
+      "isReceiver": true,
+      "signature": "func (s *Service) GetStats(ctx context.Context) (*models.DocumentStats, error) {"
+    },
+    {
+      "name": "Count",
+      "file": "internal/services/documents/document_service.go",
+      "line": 221,
+      "isReceiver": true,
+      "signature": "func (s *Service) Count(ctx context.Context, sourceType string) (int, error) {"
+    },
+    {
+      "name": "List",
+      "file": "internal/services/documents/document_service.go",
+      "line": 229,
+      "isReceiver": true,
+      "signature": "func (s *Service) List(ctx context.Context, opts *interfaces.ListOptions) ([]*models.Document, error) {"
+    },
+    {
+      "name": "NewService",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 26,
+      "isReceiver": false,
+      "signature": "func NewService(ollamaURL, modelName string, dimension int, logger arbor.ILogger) interfaces.EmbeddingService {"
+    },
+    {
+      "name": "GenerateEmbedding",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 39,
+      "isReceiver": true,
+      "signature": "func (s *Service) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {"
+    },
+    {
+      "name": "EmbedDocument",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 92,
+      "isReceiver": true,
+      "signature": "func (s *Service) EmbedDocument(ctx context.Context, doc *models.Document) error {"
+    },
+    {
+      "name": "EmbedDocuments",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 114,
+      "isReceiver": true,
+      "signature": "func (s *Service) EmbedDocuments(ctx context.Context, docs []*models.Document) error {"
+    },
+    {
+      "name": "GenerateQueryEmbedding",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 130,
+      "isReceiver": true,
+      "signature": "func (s *Service) GenerateQueryEmbedding(ctx context.Context, query string) ([]float32, error) {"
+    },
+    {
+      "name": "ModelName",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 137,
+      "isReceiver": true,
+      "signature": "func (s *Service) ModelName() string {"
+    },
+    {
+      "name": "Dimension",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 142,
+      "isReceiver": true,
+      "signature": "func (s *Service) Dimension() int {"
+    },
+    {
+      "name": "IsAvailable",
+      "file": "internal/services/embeddings/embedding_service.go",
+      "line": 147,
+      "isReceiver": true,
+      "signature": "func (s *Service) IsAvailable(ctx context.Context) bool {"
+    },
+    {
+      "name": "NewSQLiteAuditLogger",
+      "file": "internal/services/llm/audit.go",
+      "line": 43,
+      "isReceiver": false,
+      "signature": "func NewSQLiteAuditLogger(db *sql.DB, logQueries bool, logger arbor.ILogger) *SQLiteAuditLogger {"
+    },
+    {
+      "name": "LogEmbed",
+      "file": "internal/services/llm/audit.go",
+      "line": 52,
+      "isReceiver": true,
+      "signature": "func (l *SQLiteAuditLogger) LogEmbed(mode interfaces.LLMMode, success bool, duration time.Duration, err error, queryText string) error {"
+    },
+    {
+      "name": "LogChat",
+      "file": "internal/services/llm/audit.go",
+      "line": 57,
+      "isReceiver": true,
+      "signature": "func (l *SQLiteAuditLogger) LogChat(mode interfaces.LLMMode, success bool, duration time.Duration, err error, queryText string) error {"
+    },
+    {
+      "name": "GetLogs",
+      "file": "internal/services/llm/audit.go",
+      "line": 103,
+      "isReceiver": true,
+      "signature": "func (l *SQLiteAuditLogger) GetLogs(limit int) ([]AuditLog, error) {"
+    },
+    {
+      "name": "ExportToJSON",
+      "file": "internal/services/llm/audit.go",
+      "line": 167,
+      "isReceiver": true,
+      "signature": "func (l *SQLiteAuditLogger) ExportToJSON(w io.Writer) error {"
+    },
+    {
+      "name": "Close",
+      "file": "internal/services/llm/audit.go",
+      "line": 238,
+      "isReceiver": true,
+      "signature": "func (l *SQLiteAuditLogger) Close() error {"
+    },
+    {
+      "name": "NewOfflineLLMService",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 37,
+      "isReceiver": false,
+      "signature": "func NewOfflineLLMService("
+    },
+    {
+      "name": "Embed",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 115,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, error) {"
+    },
+    {
+      "name": "Chat",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 168,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) Chat(ctx context.Context, messages []interfaces.Message) (string, error) {"
+    },
+    {
+      "name": "HealthCheck",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 270,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {"
+    },
+    {
+      "name": "GetMode",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 307,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) GetMode() interfaces.LLMMode {"
+    },
+    {
+      "name": "Close",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 312,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) Close() error {"
+    },
+    {
+      "name": "SetMockMode",
+      "file": "internal/services/llm/offline/llama.go",
+      "line": 318,
+      "isReceiver": true,
+      "signature": "func (s *OfflineLLMService) SetMockMode(enabled bool) {"
+    },
+    {
+      "name": "NewModelManager",
+      "file": "internal/services/llm/offline/models.go",
+      "line": 27,
+      "isReceiver": false,
+      "signature": "func NewModelManager(modelDir, embedModel, chatModel string, logger arbor.ILogger) *ModelManager {"
+    },
+    {
+      "name": "VerifyModels",
+      "file": "internal/services/llm/offline/models.go",
+      "line": 37,
+      "isReceiver": true,
+      "signature": "func (m *ModelManager) VerifyModels() error {"
+    },
+    {
+      "name": "GetEmbedModelPath",
+      "file": "internal/services/llm/offline/models.go",
+      "line": 86,
+      "isReceiver": true,
+      "signature": "func (m *ModelManager) GetEmbedModelPath() string {"
+    },
+    {
+      "name": "GetChatModelPath",
+      "file": "internal/services/llm/offline/models.go",
+      "line": 91,
+      "isReceiver": true,
+      "signature": "func (m *ModelManager) GetChatModelPath() string {"
+    },
+    {
+      "name": "GetModelInfo",
+      "file": "internal/services/llm/offline/models.go",
+      "line": 96,
+      "isReceiver": true,
+      "signature": "func (m *ModelManager) GetModelInfo(modelPath string) (ModelInfo, error) {"
+    },
+    {
+      "name": "NewService",
+      "file": "internal/services/processing/processing_service.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewService("
+    },
+    {
+      "name": "ProcessAll",
+      "file": "internal/services/processing/processing_service.go",
+      "line": 52,
+      "isReceiver": true,
+      "signature": "func (s *Service) ProcessAll(ctx context.Context) (*ProcessingStats, error) {"
+    },
+    {
+      "name": "ProcessJira",
+      "file": "internal/services/processing/processing_service.go",
+      "line": 105,
+      "isReceiver": true,
+      "signature": "func (s *Service) ProcessJira(ctx context.Context) (*SourceStats, error) {"
+    },
+    {
+      "name": "ProcessConfluence",
+      "file": "internal/services/processing/processing_service.go",
+      "line": 156,
+      "isReceiver": true,
+      "signature": "func (s *Service) ProcessConfluence(ctx context.Context) (*SourceStats, error) {"
+    },
+    {
+      "name": "VectorizeExisting",
+      "file": "internal/services/processing/processing_service.go",
+      "line": 207,
+      "isReceiver": true,
+      "signature": "func (s *Service) VectorizeExisting(ctx context.Context) error {"
+    },
+    {
+      "name": "NewScheduler",
+      "file": "internal/services/processing/scheduler.go",
+      "line": 19,
+      "isReceiver": false,
+      "signature": "func NewScheduler(service *Service, logger arbor.ILogger) *Scheduler {"
+    },
+    {
+      "name": "Start",
+      "file": "internal/services/processing/scheduler.go",
+      "line": 28,
+      "isReceiver": true,
+      "signature": "func (s *Scheduler) Start(schedule string) error {"
+    },
+    {
+      "name": "Stop",
+      "file": "internal/services/processing/scheduler.go",
+      "line": 50,
+      "isReceiver": true,
+      "signature": "func (s *Scheduler) Stop() {"
+    },
+    {
+      "name": "RunNow",
+      "file": "internal/services/processing/scheduler.go",
+      "line": 56,
+      "isReceiver": true,
+      "signature": "func (s *Scheduler) RunNow() {"
+    },
+    {
+      "name": "NewStorageManager",
+      "file": "internal/storage/factory.go",
+      "line": 13,
+      "isReceiver": false,
+      "signature": "func NewStorageManager(logger arbor.ILogger, config *common.Config) (interfaces.StorageManager, error) {"
+    },
+    {
+      "name": "NewJiraStorage",
+      "file": "internal/storage/factory.go",
+      "line": 23,
+      "isReceiver": false,
+      "signature": "func NewJiraStorage(logger arbor.ILogger, config *common.Config) (interfaces.JiraStorage, error) {"
+    },
+    {
+      "name": "NewConfluenceStorage",
+      "file": "internal/storage/factory.go",
+      "line": 32,
+      "isReceiver": false,
+      "signature": "func NewConfluenceStorage(logger arbor.ILogger, config *common.Config) (interfaces.ConfluenceStorage, error) {"
+    },
+    {
+      "name": "NewAuthStorage",
+      "file": "internal/storage/factory.go",
+      "line": 41,
+      "isReceiver": false,
+      "signature": "func NewAuthStorage(logger arbor.ILogger, config *common.Config) (interfaces.AuthStorage, error) {"
+    },
+    {
+      "name": "NewAuthStorage",
+      "file": "internal/storage/sqlite/auth_storage.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewAuthStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.AuthStorage {"
+    },
+    {
+      "name": "StoreCredentials",
+      "file": "internal/storage/sqlite/auth_storage.go",
+      "line": 29,
+      "isReceiver": true,
+      "signature": "func (s *AuthStorage) StoreCredentials(ctx context.Context, credentials *models.AuthCredentials) error {"
+    },
+    {
+      "name": "GetCredentials",
+      "file": "internal/storage/sqlite/auth_storage.go",
+      "line": 64,
+      "isReceiver": true,
+      "signature": "func (s *AuthStorage) GetCredentials(ctx context.Context, service string) (*models.AuthCredentials, error) {"
+    },
+    {
+      "name": "DeleteCredentials",
+      "file": "internal/storage/sqlite/auth_storage.go",
+      "line": 103,
+      "isReceiver": true,
+      "signature": "func (s *AuthStorage) DeleteCredentials(ctx context.Context, service string) error {"
+    },
+    {
+      "name": "ListServices",
+      "file": "internal/storage/sqlite/auth_storage.go",
+      "line": 115,
+      "isReceiver": true,
+      "signature": "func (s *AuthStorage) ListServices(ctx context.Context) ([]string, error) {"
+    },
+    {
+      "name": "NewConfluenceStorage",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 21,
+      "isReceiver": false,
+      "signature": "func NewConfluenceStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.ConfluenceStorage {"
+    },
+    {
+      "name": "StoreSpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 29,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) StoreSpace(ctx context.Context, space *models.ConfluenceSpace) error {"
+    },
+    {
+      "name": "GetSpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 55,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) GetSpace(ctx context.Context, key string) (*models.ConfluenceSpace, error) {"
+    },
+    {
+      "name": "GetAllSpaces",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 75,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) GetAllSpaces(ctx context.Context) ([]*models.ConfluenceSpace, error) {"
+    },
+    {
+      "name": "DeleteSpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 106,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) DeleteSpace(ctx context.Context, key string) error {"
+    },
+    {
+      "name": "CountSpaces",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 113,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) CountSpaces(ctx context.Context) (int, error) {"
+    },
+    {
+      "name": "StorePage",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 121,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) StorePage(ctx context.Context, page *models.ConfluencePage) error {"
+    },
+    {
+      "name": "StorePages",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 143,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) StorePages(ctx context.Context, pages []*models.ConfluencePage) error {"
+    },
+    {
+      "name": "GetPage",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 197,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) GetPage(ctx context.Context, id string) (*models.ConfluencePage, error) {"
+    },
+    {
+      "name": "GetPagesBySpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 217,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) GetPagesBySpace(ctx context.Context, spaceID string) ([]*models.ConfluencePage, error) {"
+    },
+    {
+      "name": "DeletePage",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 247,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) DeletePage(ctx context.Context, id string) error {"
+    },
+    {
+      "name": "DeletePagesBySpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 254,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) DeletePagesBySpace(ctx context.Context, spaceID string) error {"
+    },
+    {
+      "name": "CountPages",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 267,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) CountPages(ctx context.Context) (int, error) {"
+    },
+    {
+      "name": "CountPagesBySpace",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 275,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) CountPagesBySpace(ctx context.Context, spaceID string) (int, error) {"
+    },
+    {
+      "name": "SearchPages",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 283,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) SearchPages(ctx context.Context, query string) ([]*models.ConfluencePage, error) {"
+    },
+    {
+      "name": "ClearAll",
+      "file": "internal/storage/sqlite/confluence_storage.go",
+      "line": 289,
+      "isReceiver": true,
+      "signature": "func (s *ConfluenceStorage) ClearAll(ctx context.Context) error {"
+    },
+    {
+      "name": "NewSQLiteDB",
+      "file": "internal/storage/sqlite/connection.go",
+      "line": 23,
+      "isReceiver": false,
+      "signature": "func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, error) {"
+    },
+    {
+      "name": "DB",
+      "file": "internal/storage/sqlite/connection.go",
+      "line": 82,
+      "isReceiver": true,
+      "signature": "func (s *SQLiteDB) DB() *sql.DB {"
+    },
+    {
+      "name": "Close",
+      "file": "internal/storage/sqlite/connection.go",
+      "line": 87,
+      "isReceiver": true,
+      "signature": "func (s *SQLiteDB) Close() error {"
+    },
+    {
+      "name": "BeginTx",
+      "file": "internal/storage/sqlite/connection.go",
+      "line": 95,
+      "isReceiver": true,
+      "signature": "func (s *SQLiteDB) BeginTx(ctx context.Context) (*sql.Tx, error) {"
+    },
+    {
+      "name": "Ping",
+      "file": "internal/storage/sqlite/connection.go",
+      "line": 100,
+      "isReceiver": true,
+      "signature": "func (s *SQLiteDB) Ping(ctx context.Context) error {"
+    },
+    {
+      "name": "NewDocumentStorage",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 22,
+      "isReceiver": false,
+      "signature": "func NewDocumentStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.DocumentStorage {"
+    },
+    {
+      "name": "SaveDocument",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 30,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) SaveDocument(doc *models.Document) error {"
+    },
+    {
+      "name": "SaveDocuments",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 81,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {"
+    },
+    {
+      "name": "GetDocument",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 145,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {"
+    },
+    {
+      "name": "GetDocumentBySource",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 158,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {"
+    },
+    {
+      "name": "UpdateDocument",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 171,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {"
+    },
+    {
+      "name": "DeleteDocument",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 214,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) DeleteDocument(id string) error {"
+    },
+    {
+      "name": "FullTextSearch",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 220,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {"
+    },
+    {
+      "name": "VectorSearch",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 241,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) VectorSearch(embedding []float32, limit int) ([]*models.Document, error) {"
+    },
+    {
+      "name": "HybridSearch",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 248,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error) {"
+    },
+    {
+      "name": "ListDocuments",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 255,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {"
+    },
+    {
+      "name": "GetDocumentsBySource",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 299,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {"
+    },
+    {
+      "name": "CountDocuments",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 318,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) CountDocuments() (int, error) {"
+    },
+    {
+      "name": "CountDocumentsBySource",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 325,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) CountDocumentsBySource(sourceType string) (int, error) {"
+    },
+    {
+      "name": "CountVectorized",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 332,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) CountVectorized() (int, error) {"
+    },
+    {
+      "name": "GetStats",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 339,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {"
+    },
+    {
+      "name": "SaveChunk",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 390,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) SaveChunk(chunk *models.DocumentChunk) error {"
+    },
+    {
+      "name": "GetChunks",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 419,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) GetChunks(documentID string) ([]*models.DocumentChunk, error) {"
+    },
+    {
+      "name": "DeleteChunks",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 446,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) DeleteChunks(documentID string) error {"
+    },
+    {
+      "name": "ClearAll",
+      "file": "internal/storage/sqlite/document_storage.go",
+      "line": 452,
+      "isReceiver": true,
+      "signature": "func (d *DocumentStorage) ClearAll() error {"
+    },
+    {
+      "name": "NewJiraStorage",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 23,
+      "isReceiver": false,
+      "signature": "func NewJiraStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.JiraStorage {"
+    },
+    {
+      "name": "StoreProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 31,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) StoreProject(ctx context.Context, project *models.JiraProject) error {"
+    },
+    {
+      "name": "GetProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 51,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) GetProject(ctx context.Context, key string) (*models.JiraProject, error) {"
+    },
+    {
+      "name": "GetAllProjects",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 72,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) GetAllProjects(ctx context.Context) ([]*models.JiraProject, error) {"
+    },
+    {
+      "name": "DeleteProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 102,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) DeleteProject(ctx context.Context, key string) error {"
+    },
+    {
+      "name": "CountProjects",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 114,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) CountProjects(ctx context.Context) (int, error) {"
+    },
+    {
+      "name": "StoreIssue",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 125,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) StoreIssue(ctx context.Context, issue *models.JiraIssue) error {"
+    },
+    {
+      "name": "StoreIssues",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 163,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) StoreIssues(ctx context.Context, issues []*models.JiraIssue) error {"
+    },
+    {
+      "name": "GetIssue",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 229,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) GetIssue(ctx context.Context, key string) (*models.JiraIssue, error) {"
+    },
+    {
+      "name": "GetIssuesByProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 249,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) GetIssuesByProject(ctx context.Context, projectKey string) ([]*models.JiraIssue, error) {"
+    },
+    {
+      "name": "DeleteIssue",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 277,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) DeleteIssue(ctx context.Context, key string) error {"
+    },
+    {
+      "name": "DeleteIssuesByProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 288,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) DeleteIssuesByProject(ctx context.Context, projectKey string) error {"
+    },
+    {
+      "name": "CountIssues",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 300,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) CountIssues(ctx context.Context) (int, error) {"
+    },
+    {
+      "name": "CountIssuesByProject",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 310,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) CountIssuesByProject(ctx context.Context, projectKey string) (int, error) {"
+    },
+    {
+      "name": "SearchIssues",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 320,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) SearchIssues(ctx context.Context, query string) ([]*models.JiraIssue, error) {"
+    },
+    {
+      "name": "ClearAll",
+      "file": "internal/storage/sqlite/jira_storage.go",
+      "line": 356,
+      "isReceiver": true,
+      "signature": "func (s *JiraStorage) ClearAll(ctx context.Context) error {"
+    },
+    {
+      "name": "NewManager",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 20,
+      "isReceiver": false,
+      "signature": "func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.StorageManager, error) {"
+    },
+    {
+      "name": "JiraStorage",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 37,
+      "isReceiver": true,
+      "signature": "func (m *Manager) JiraStorage() interfaces.JiraStorage {"
+    },
+    {
+      "name": "ConfluenceStorage",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 42,
+      "isReceiver": true,
+      "signature": "func (m *Manager) ConfluenceStorage() interfaces.ConfluenceStorage {"
+    },
+    {
+      "name": "AuthStorage",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 47,
+      "isReceiver": true,
+      "signature": "func (m *Manager) AuthStorage() interfaces.AuthStorage {"
+    },
+    {
+      "name": "DocumentStorage",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 52,
+      "isReceiver": true,
+      "signature": "func (m *Manager) DocumentStorage() interfaces.DocumentStorage {"
+    },
+    {
+      "name": "Close",
+      "file": "internal/storage/sqlite/manager.go",
+      "line": 57,
+      "isReceiver": true,
+      "signature": "func (m *Manager) Close() error {"
+    },
+    {
+      "name": "TestConfluencePagesCollection",
+      "file": "test/integration/confluence_pages_collection_test.go",
+      "line": 166,
+      "isReceiver": false,
+      "signature": "func TestConfluencePagesCollection(t *testing.T) {"
+    },
+    {
+      "name": "TestJiraIssuesCollection",
+      "file": "test/integration/jira_issues_collection_test.go",
+      "line": 170,
+      "isReceiver": false,
+      "signature": "func TestJiraIssuesCollection(t *testing.T) {"
+    },
+    {
+      "name": "TestPlaceholder",
+      "file": "test/integration/storage_integration_test.go",
+      "line": 9,
+      "isReceiver": false,
+      "signature": "func TestPlaceholder(t *testing.T) {"
+    },
+    {
+      "name": "LoadTestConfig",
+      "file": "test/ui/config.go",
+      "line": 15,
+      "isReceiver": false,
+      "signature": "func LoadTestConfig() (*TestConfig, error) {"
+    },
+    {
+      "name": "TestConfluence_CascadingWorkflow",
+      "file": "test/ui/confluence_cascade_test.go",
+      "line": 17,
+      "isReceiver": false,
+      "signature": "func TestConfluence_CascadingWorkflow(t *testing.T) {"
+    },
+    {
+      "name": "TestConfluence_CompleteWorkflow",
+      "file": "test/ui/confluence_complete_workflow_test.go",
+      "line": 14,
+      "isReceiver": false,
+      "signature": "func TestConfluence_CompleteWorkflow(t *testing.T) {"
+    },
+    {
+      "name": "TestJira_CompleteWorkflow",
+      "file": "test/ui/jira_complete_workflow_test.go",
+      "line": 14,
+      "isReceiver": false,
+      "signature": "func TestJira_CompleteWorkflow(t *testing.T) {"
+    },
+    {
+      "name": "TestJira_GetIssues",
+      "file": "test/ui/jira_get_issues_test.go",
+      "line": 13,
+      "isReceiver": false,
+      "signature": "func TestJira_GetIssues(t *testing.T) {"
+    }
+  ]
 }
