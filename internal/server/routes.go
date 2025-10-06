@@ -50,6 +50,11 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/collector/issues", s.app.CollectorHandler.GetIssuesHandler)
 	mux.HandleFunc("/api/collector/pages", s.app.CollectorHandler.GetPagesHandler)
 
+	// API routes - Collection (manual data sync)
+	mux.HandleFunc("/api/collection/jira/sync", s.app.CollectionHandler.SyncJiraHandler)
+	mux.HandleFunc("/api/collection/confluence/sync", s.app.CollectionHandler.SyncConfluenceHandler)
+	mux.HandleFunc("/api/collection/sync-all", s.app.CollectionHandler.SyncAllHandler)
+
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)

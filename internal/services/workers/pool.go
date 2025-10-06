@@ -21,6 +21,7 @@ type Pool struct {
 	errors     []error
 	errorsMu   sync.Mutex
 	logger     arbor.ILogger
+	closeOnce  sync.Once
 }
 
 // NewPool creates a new worker pool
@@ -65,7 +66,9 @@ func (p *Pool) Submit(job Job) error {
 
 // Wait waits for all jobs to complete
 func (p *Pool) Wait() {
-	close(p.jobs)
+	p.closeOnce.Do(func() {
+		close(p.jobs)
+	})
 	p.wg.Wait()
 }
 

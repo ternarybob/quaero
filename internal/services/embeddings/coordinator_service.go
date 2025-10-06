@@ -44,64 +44,159 @@ func (s *CoordinatorService) Start() error {
 
 // handleEmbeddingEvent processes embedding triggered events
 func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event interfaces.Event) error {
-	s.logger.Info().Msg("Embedding event triggered")
+	// Panic recovery to prevent service crash
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Msg("PANIC RECOVERED in embedding event handler")
+		}
+	}()
 
+	s.logger.Debug().Msg("@@@ EMBEDDING COORDINATOR START @@@")
+	s.logger.Info().Msg("@@@ Step 1: Embedding event triggered")
+
+	// Validate dependencies
+	s.logger.Debug().Msg("@@@ Step 2: Validating embedding service")
+	if s.embeddingService == nil {
+		s.logger.Error().Msg("@@@ FAILED: embeddingService is nil")
+		return fmt.Errorf("embedding service is nil - cannot process embedding event")
+	}
+	s.logger.Debug().Msg("@@@ Step 3: Embedding service OK")
+
+	s.logger.Debug().Msg("@@@ Step 4: Validating document storage")
+	if s.documentStorage == nil {
+		s.logger.Error().Msg("@@@ FAILED: documentStorage is nil")
+		return fmt.Errorf("document storage is nil - cannot process embedding event")
+	}
+	s.logger.Debug().Msg("@@@ Step 5: Document storage OK")
+
+	s.logger.Debug().Msg("@@@ Step 6: Creating worker pool for embeddings")
 	pool := workers.NewPool(10, s.logger)
+	s.logger.Debug().Msg("@@@ Step 7: Starting worker pool")
 	pool.Start()
-	defer pool.Shutdown()
+	defer func() {
+		s.logger.Debug().Msg("@@@ Shutting down worker pool")
+		pool.Shutdown()
+		s.logger.Debug().Msg("@@@ Worker pool shutdown complete")
+	}()
+	s.logger.Debug().Msg("@@@ Step 8: Worker pool started")
 
+	s.logger.Debug().Msg("@@@ Step 9: Fetching force embed documents from storage")
 	forceEmbedDocs, err := s.documentStorage.GetDocumentsForceEmbed()
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to get force embed documents")
-	} else {
+		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying force embed documents")
+		return fmt.Errorf("failed to get force embed documents: %w", err)
+	}
+	s.logger.Debug().
+		Int("count", len(forceEmbedDocs)).
+		Msg("@@@ Step 10: Found force embed documents")
+
+	if len(forceEmbedDocs) > 0 {
 		s.logger.Info().
 			Int("count", len(forceEmbedDocs)).
-			Msg("Processing force embed documents")
+			Msg("@@@ Step 11: Processing force embed documents")
 
-		for _, doc := range forceEmbedDocs {
+		for i, doc := range forceEmbedDocs {
 			doc := doc
+			s.logger.Debug().
+				Int("job_index", i).
+				Str("doc_id", doc.ID).
+				Msg("@@@ Step 11.a: Submitting force embed job")
+
 			job := func(ctx context.Context) error {
 				return s.embedDocument(ctx, doc, true)
 			}
 			if err := pool.Submit(job); err != nil {
-				s.logger.Error().Err(err).Str("doc_id", doc.ID).Msg("Failed to submit embed job")
+				s.logger.Error().
+					Err(err).
+					Str("doc_id", doc.ID).
+					Int("job_index", i).
+					Msg("@@@ FAILED: Error submitting force embed job to pool")
 			}
 		}
+		s.logger.Debug().Msg("@@@ Step 12: All force embed jobs submitted")
+	} else {
+		s.logger.Debug().Msg("@@@ Step 11: No force embed documents found")
 	}
 
+	s.logger.Debug().Msg("@@@ Step 13: Fetching unvectorized documents from storage")
 	unvectorizedDocs, err := s.documentStorage.GetUnvectorizedDocuments()
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to get unvectorized documents")
-	} else {
+		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying unvectorized documents")
+		return fmt.Errorf("failed to get unvectorized documents: %w", err)
+	}
+	s.logger.Debug().
+		Int("count", len(unvectorizedDocs)).
+		Msg("@@@ Step 14: Found unvectorized documents")
+
+	if len(unvectorizedDocs) > 0 {
 		s.logger.Info().
 			Int("count", len(unvectorizedDocs)).
-			Msg("Processing unvectorized documents")
+			Msg("@@@ Step 15: Processing unvectorized documents")
 
-		for _, doc := range unvectorizedDocs {
+		for i, doc := range unvectorizedDocs {
 			doc := doc
+			s.logger.Debug().
+				Int("job_index", i).
+				Str("doc_id", doc.ID).
+				Msg("@@@ Step 15.a: Submitting embed job")
+
 			job := func(ctx context.Context) error {
 				return s.embedDocument(ctx, doc, false)
 			}
 			if err := pool.Submit(job); err != nil {
-				s.logger.Error().Err(err).Str("doc_id", doc.ID).Msg("Failed to submit embed job")
+				s.logger.Error().
+					Err(err).
+					Str("doc_id", doc.ID).
+					Int("job_index", i).
+					Msg("@@@ FAILED: Error submitting embed job to pool")
 			}
 		}
+		s.logger.Debug().Msg("@@@ Step 16: All unvectorized jobs submitted")
+	} else {
+		s.logger.Debug().Msg("@@@ Step 15: No unvectorized documents found")
 	}
 
+	s.logger.Debug().Msg("@@@ Step 17: Waiting for all embedding jobs to complete")
 	pool.Wait()
+	s.logger.Debug().Msg("@@@ Step 18: All jobs completed")
 
 	errors := pool.Errors()
+	s.logger.Debug().
+		Int("error_count", len(errors)).
+		Msg("@@@ Step 19: Checked for errors")
+
 	if len(errors) > 0 {
-		s.logger.Warn().Int("error_count", len(errors)).Msg("Some embedding jobs failed")
+		s.logger.Warn().
+			Int("error_count", len(errors)).
+			Msg("@@@ WARNING: Some embedding jobs failed")
+		for i, err := range errors {
+			s.logger.Error().
+				Int("error_index", i).
+				Err(err).
+				Msg("@@@ Job error detail")
+		}
 		return fmt.Errorf("embedding completed with %d errors", len(errors))
 	}
 
-	s.logger.Info().Msg("Embedding event completed successfully")
+	s.logger.Info().Msg("@@@ EMBEDDING COORDINATOR END - Success")
 	return nil
 }
 
 // embedDocument generates embedding for a single document
 func (s *CoordinatorService) embedDocument(ctx context.Context, doc *models.Document, isForceEmbed bool) error {
+	// Validate inputs
+	if doc == nil {
+		return fmt.Errorf("document is nil - cannot embed")
+	}
+	if s.embeddingService == nil {
+		return fmt.Errorf("embedding service is nil - cannot embed document")
+	}
+	if s.documentStorage == nil {
+		return fmt.Errorf("document storage is nil - cannot save embedded document")
+	}
+
 	s.logger.Info().
 		Str("doc_id", doc.ID).
 		Str("force_embed", fmt.Sprintf("%v", isForceEmbed)).

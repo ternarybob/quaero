@@ -45,14 +45,15 @@ type App struct {
 	ConfluenceService *atlassian.ConfluenceScraperService
 
 	// HTTP handlers
-	APIHandler       *handlers.APIHandler
-	UIHandler        *handlers.UIHandler
-	WSHandler        *handlers.WebSocketHandler
-	ScraperHandler   *handlers.ScraperHandler
-	DataHandler      *handlers.DataHandler
-	CollectorHandler *handlers.CollectorHandler
-	DocumentHandler  *handlers.DocumentHandler
-	SchedulerHandler *handlers.SchedulerHandler
+	APIHandler        *handlers.APIHandler
+	UIHandler         *handlers.UIHandler
+	WSHandler         *handlers.WebSocketHandler
+	ScraperHandler    *handlers.ScraperHandler
+	DataHandler       *handlers.DataHandler
+	CollectorHandler  *handlers.CollectorHandler
+	CollectionHandler *handlers.CollectionHandler
+	DocumentHandler   *handlers.DocumentHandler
+	SchedulerHandler  *handlers.SchedulerHandler
 }
 
 // New initializes the application with all dependencies
@@ -140,7 +141,10 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 4. Initialize auth service
+	// 4. Initialize event service (must be early for subscriptions)
+	a.EventService = events.NewService(a.Logger)
+
+	// 5. Initialize auth service
 	a.AuthService, err = atlassian.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
 		a.Logger,
@@ -149,23 +153,25 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// 5. Initialize Jira service with DocumentService
+	// 6. Initialize Jira service with EventService (auto-subscribes to events)
 	a.JiraService = atlassian.NewJiraScraperService(
 		a.StorageManager.JiraStorage(),
 		a.DocumentService,
 		a.AuthService,
+		a.EventService,
 		a.Logger,
 	)
 
-	// 6. Initialize Confluence service with DocumentService
+	// 7. Initialize Confluence service with EventService (auto-subscribes to events)
 	a.ConfluenceService = atlassian.NewConfluenceScraperService(
 		a.StorageManager.ConfluenceStorage(),
 		a.DocumentService,
 		a.AuthService,
+		a.EventService,
 		a.Logger,
 	)
 
-	// 7. Initialize processing service
+	// 8. Initialize processing service
 	a.ProcessingService = processing.NewService(
 		a.DocumentService,
 		a.StorageManager.JiraStorage(),
@@ -173,7 +179,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 8. Initialize and start processing scheduler (if enabled)
+	// 9. Initialize and start processing scheduler (if enabled)
 	if a.Config.Processing.Enabled {
 		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
 		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
@@ -181,13 +187,10 @@ func (a *App) initServices() error {
 		}
 	}
 
-	// 9. Initialize event service
-	a.EventService = events.NewService(a.Logger)
-
-	// 10. Initialize collection coordinator
+	// 10. Initialize collection coordinator (handles force sync only)
 	a.CollectionCoordinator = collection.NewCoordinatorService(
-		a.StorageManager.JiraStorage(),
-		a.StorageManager.ConfluenceStorage(),
+		a.JiraService,
+		a.ConfluenceService,
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
 		a.Logger,
@@ -234,6 +237,11 @@ func (a *App) initHandlers() error {
 	a.CollectorHandler = handlers.NewCollectorHandler(
 		a.JiraService,
 		a.ConfluenceService,
+		a.Logger,
+	)
+	a.CollectionHandler = handlers.NewCollectionHandler(
+		a.CollectionCoordinator,
+		a.EventService,
 		a.Logger,
 	)
 	a.DocumentHandler = handlers.NewDocumentHandler(

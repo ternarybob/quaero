@@ -96,51 +96,126 @@ func (s *Service) Publish(ctx context.Context, event interfaces.Event) error {
 
 // PublishSync sends an event to all subscribers synchronously
 func (s *Service) PublishSync(ctx context.Context, event interfaces.Event) error {
+	s.logger.Debug().
+		Str("event_type", string(event.Type)).
+		Msg("*** EVENT SERVICE: PublishSync START")
+
+	s.logger.Debug().Msg("*** EVENT SERVICE: Acquiring read lock for subscribers")
 	s.mu.RLock()
 	handlers := s.subscribers[event.Type]
 	s.mu.RUnlock()
+	s.logger.Debug().
+		Int("handler_count", len(handlers)).
+		Msg("*** EVENT SERVICE: Read lock released, handlers retrieved")
 
 	if len(handlers) == 0 {
 		s.logger.Debug().
 			Str("event_type", string(event.Type)).
-			Msg("No subscribers for event")
+			Msg("*** EVENT SERVICE: No subscribers for event - returning")
 		return nil
 	}
 
 	s.logger.Info().
 		Str("event_type", string(event.Type)).
 		Int("subscriber_count", len(handlers)).
-		Msg("Publishing event synchronously")
+		Msg("*** EVENT SERVICE: Publishing event synchronously to all handlers")
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(handlers))
+	panicChan := make(chan interface{}, len(handlers))
 
-	for _, handler := range handlers {
+	s.logger.Debug().
+		Int("handler_count", len(handlers)).
+		Msg("*** EVENT SERVICE: Starting goroutines for all handlers")
+
+	for i, handler := range handlers {
 		wg.Add(1)
-		go func(h interfaces.EventHandler) {
+		handlerIndex := i
+		s.logger.Debug().
+			Int("handler_index", handlerIndex).
+			Str("event_type", string(event.Type)).
+			Msg("*** EVENT SERVICE: Launching handler goroutine")
+
+		go func(h interfaces.EventHandler, idx int) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error().
+						Str("panic", fmt.Sprintf("%v", r)).
+						Str("event_type", string(event.Type)).
+						Int("handler_index", idx).
+						Msg("*** EVENT SERVICE: PANIC RECOVERED in event handler")
+					panicChan <- r
+				}
+			}()
+
+			s.logger.Debug().
+				Int("handler_index", idx).
+				Str("event_type", string(event.Type)).
+				Msg("*** EVENT SERVICE: Calling handler")
+
 			if err := h(ctx, event); err != nil {
 				s.logger.Error().
 					Err(err).
 					Str("event_type", string(event.Type)).
-					Msg("Event handler failed")
+					Int("handler_index", idx).
+					Msg("*** EVENT SERVICE: Handler returned error")
 				errChan <- err
+			} else {
+				s.logger.Debug().
+					Int("handler_index", idx).
+					Str("event_type", string(event.Type)).
+					Msg("*** EVENT SERVICE: Handler completed successfully")
 			}
-		}(handler)
+		}(handler, handlerIndex)
 	}
 
+	s.logger.Debug().Msg("*** EVENT SERVICE: Waiting for all handlers to complete")
 	wg.Wait()
+	s.logger.Debug().Msg("*** EVENT SERVICE: All handlers completed")
+
 	close(errChan)
+	close(panicChan)
 
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
 
+	// Check for panics
+	var panics []interface{}
+	for p := range panicChan {
+		panics = append(panics, p)
+	}
+
+	s.logger.Debug().
+		Int("panic_count", len(panics)).
+		Int("error_count", len(errs)).
+		Msg("*** EVENT SERVICE: Checked channels for panics and errors")
+
+	if len(panics) > 0 {
+		s.logger.Error().
+			Int("panic_count", len(panics)).
+			Msg("*** EVENT SERVICE: FAILED - Handlers panicked")
+		return fmt.Errorf("event handlers panicked: %d panics", len(panics))
+	}
+
 	if len(errs) > 0 {
+		s.logger.Error().
+			Int("error_count", len(errs)).
+			Msg("*** EVENT SERVICE: FAILED - Handlers returned errors")
+		for i, err := range errs {
+			s.logger.Error().
+				Int("error_index", i).
+				Err(err).
+				Msg("*** EVENT SERVICE: Handler error detail")
+		}
 		return fmt.Errorf("event handlers failed: %d errors", len(errs))
 	}
 
+	s.logger.Debug().
+		Str("event_type", string(event.Type)).
+		Msg("*** EVENT SERVICE: PublishSync END - Success")
 	return nil
 }
 

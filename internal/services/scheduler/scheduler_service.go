@@ -100,50 +100,77 @@ func (s *Service) IsRunning() bool {
 
 // runScheduledTask executes the scheduled collection and embedding pipeline
 func (s *Service) runScheduledTask() {
+	// Panic recovery to prevent service crash
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Msg("PANIC RECOVERED in scheduled task")
+		}
+	}()
+
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 1 - Acquiring mutex lock")
 	s.mu.Lock()
 	if s.isProcessing {
-		s.logger.Debug().Msg("Previous task still running, skipping this cycle")
+		s.logger.Debug().Msg(">>> SCHEDULER: Mutex already locked, skipping this cycle")
 		s.mu.Unlock()
 		return
 	}
 	s.isProcessing = true
 	s.mu.Unlock()
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 2 - Mutex acquired, processing started")
 
 	defer func() {
 		s.mu.Lock()
 		s.isProcessing = false
 		s.mu.Unlock()
+		s.logger.Debug().Msg(">>> SCHEDULER: Processing flag cleared")
 	}()
 
-	s.logger.Info().Msg("Starting scheduled collection and embedding cycle")
+	s.logger.Info().Msg(">>> SCHEDULER: Starting scheduled collection and embedding cycle")
 
 	ctx := context.Background()
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 3 - Context created")
 
+	// Step 1: Publish collection event
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 4 - Creating collection event")
 	collectionEvent := interfaces.Event{
 		Type:    interfaces.EventCollectionTriggered,
 		Payload: nil,
 	}
+	s.logger.Debug().
+		Str("event_type", string(collectionEvent.Type)).
+		Msg(">>> SCHEDULER: Step 5 - Collection event created")
 
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 6 - Publishing collection event synchronously")
 	if err := s.eventService.PublishSync(ctx, collectionEvent); err != nil {
 		s.logger.Error().
 			Err(err).
-			Msg("Collection event failed")
+			Msg(">>> SCHEDULER: FAILED - Collection event publish error")
 		return
 	}
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
-	s.logger.Info().Msg("Collection completed, starting embedding")
+	s.logger.Info().Msg(">>> SCHEDULER: Collection completed, starting embedding")
 
+	// Step 3: Publish embedding event
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 8 - Creating embedding event")
 	embeddingEvent := interfaces.Event{
 		Type:    interfaces.EventEmbeddingTriggered,
 		Payload: nil,
 	}
+	s.logger.Debug().
+		Str("event_type", string(embeddingEvent.Type)).
+		Msg(">>> SCHEDULER: Step 9 - Embedding event created")
 
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 10 - Publishing embedding event synchronously")
 	if err := s.eventService.PublishSync(ctx, embeddingEvent); err != nil {
 		s.logger.Error().
 			Err(err).
-			Msg("Embedding event failed")
+			Msg(">>> SCHEDULER: FAILED - Embedding event publish error")
 		return
 	}
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 11 - Embedding event published successfully")
 
-	s.logger.Info().Msg("Scheduled cycle completed successfully")
+	s.logger.Info().Msg(">>> SCHEDULER: Scheduled cycle completed successfully")
 }

@@ -18,6 +18,7 @@ type JiraScraperService struct {
 	authService     interfaces.AtlassianAuthService
 	jiraStorage     interfaces.JiraStorage
 	documentService interfaces.DocumentService
+	eventService    interfaces.EventService
 	logger          arbor.ILogger
 	uiLogger        interface{}
 }
@@ -27,14 +28,28 @@ func NewJiraScraperService(
 	jiraStorage interfaces.JiraStorage,
 	documentService interfaces.DocumentService,
 	authService interfaces.AtlassianAuthService,
+	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *JiraScraperService {
-	return &JiraScraperService{
+	service := &JiraScraperService{
 		jiraStorage:     jiraStorage,
 		documentService: documentService,
 		authService:     authService,
+		eventService:    eventService,
 		logger:          logger,
 	}
+
+	// Subscribe to collection events
+	if eventService != nil {
+		handler := func(ctx context.Context, event interfaces.Event) error {
+			return service.handleCollectionEvent(ctx, event)
+		}
+		if err := eventService.Subscribe(interfaces.EventCollectionTriggered, handler); err != nil {
+			logger.Error().Err(err).Msg("Failed to subscribe Jira service to collection events")
+		}
+	}
+
+	return service
 }
 
 // Close closes the scraper and releases resources
@@ -48,6 +63,10 @@ func (s *JiraScraperService) SetUILogger(logger interface{}) {
 }
 
 func (s *JiraScraperService) makeRequest(method, path string) ([]byte, error) {
+	if !s.authService.IsAuthenticated() {
+		return nil, fmt.Errorf("not authenticated: please authenticate using Chrome extension")
+	}
+
 	reqURL := s.authService.GetBaseURL() + path
 
 	req, err := http.NewRequest(method, reqURL, nil)
@@ -59,7 +78,12 @@ func (s *JiraScraperService) makeRequest(method, path string) ([]byte, error) {
 	req.Header.Set("Accept", "application/json, text/html")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
-	resp, err := s.authService.GetHTTPClient().Do(req)
+	httpClient := s.authService.GetHTTPClient()
+	if httpClient == nil {
+		return nil, fmt.Errorf("HTTP client not initialized: authentication required")
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +235,26 @@ func (s *JiraScraperService) getStringField(m map[string]interface{}, field stri
 		}
 	}
 	return ""
+}
+
+// handleCollectionEvent processes collection triggered events
+func (s *JiraScraperService) handleCollectionEvent(ctx context.Context, event interfaces.Event) error {
+	s.logger.Info().Msg(">>> JIRA SERVICE: Collection event received")
+
+	// Run scraping in goroutine for async execution
+	go func() {
+		s.logger.Debug().Msg(">>> JIRA SERVICE: Starting data scrape")
+
+		err := s.ScrapeProjects()
+		if err != nil {
+			s.logger.Error().Err(err).Msg(">>> JIRA SERVICE: Failed to scrape projects")
+			return
+		}
+
+		s.logger.Info().Msg(">>> JIRA SERVICE: Data scrape completed successfully")
+	}()
+
+	return nil
 }
 
 // ProcessIssuesForProject transforms and saves Jira issues as documents

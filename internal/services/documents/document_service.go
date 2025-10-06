@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -31,6 +32,11 @@ func NewService(
 
 // SaveDocument saves a document and generates its embedding
 func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error {
+	// Generate ID if not present
+	if doc.ID == "" {
+		doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
+	}
+
 	// Generate embedding if not present
 	if doc.Embedding == nil || len(doc.Embedding) == 0 {
 		if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
@@ -67,11 +73,16 @@ func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) er
 		return nil
 	}
 
-	// Generate embeddings for documents that don't have them
+	// Generate IDs and embeddings for documents
 	embeddedCount := 0
 	failedCount := 0
 
 	for _, doc := range docs {
+		// Generate ID if not present
+		if doc.ID == "" {
+			doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
+		}
+
 		if doc.Embedding == nil || len(doc.Embedding) == 0 {
 			if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
 				s.logger.Warn().
