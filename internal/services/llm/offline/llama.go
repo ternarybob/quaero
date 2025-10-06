@@ -79,6 +79,24 @@ func NewOfflineLLMService(
 	return service, nil
 }
 
+// NewMockOfflineLLMService creates an offline LLM service in mock mode for testing
+// This bypasses llama-cli binary and model file requirements
+func NewMockOfflineLLMService(logger arbor.ILogger) *OfflineLLMService {
+	service := &OfflineLLMService{
+		modelManager: nil, // Not needed in mock mode
+		contextSize:  2048,
+		threadCount:  4,
+		gpuLayers:    0,
+		logger:       logger,
+		llamaCLIPath: "",
+		mockMode:     true,
+	}
+
+	logger.Warn().Msg("Created offline LLM service in MOCK mode - using fake responses")
+
+	return service
+}
+
 // findLlamaCLI locates the llama-cli binary in standard locations
 func findLlamaCLI(logger arbor.ILogger) (string, error) {
 	// Check standard locations in order of preference

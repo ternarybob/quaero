@@ -197,9 +197,7 @@ EOF
 - ❌ Usage costs (minimal with free tier)
 - ❌ NOT for sensitive data
 
-### Offline Mode (Corporate/Government/Sensitive Data) - ✅ IMPLEMENTED
-
-**STATUS:** Production Ready
+### Offline Mode (Corporate/Government/Sensitive Data)
 
 **Use Case:** Enterprise/government use where data MUST remain local.
 
@@ -207,28 +205,19 @@ EOF
 ```
 Single Go Binary
     ↓
-    └─ llama-cli binary execution (os/exec)
+    └─ Embedded llama.cpp
        ├─ Embeddings: nomic-embed-text-v1.5.gguf (768d)
        └─ Chat: qwen2.5-7b-instruct-q4.gguf
 ```
-
-**Implementation:**
-- Service: `internal/services/llm/offline/llama.go`
-- Model management: `internal/services/llm/offline/models.go`
-- Factory: `internal/services/llm/factory.go`
-- Audit: `internal/services/llm/audit.go`
 
 **Requirements:**
 - Model files (~5GB total)
 - 8-16GB RAM
 - Multi-core CPU (8+ cores recommended)
-- llama-cli binary (from llama.cpp)
 - **NO Docker required**
 - **NO internet required** (after initial model download)
 
-**Complete Setup Guide:** See `docs/offline-mode-setup.md` for detailed instructions.
-
-**Quick Setup Steps:**
+**Setup Steps:**
 ```bash
 # 1. Download models (one-time, requires internet)
 mkdir -p models
@@ -359,6 +348,30 @@ enabled = true
 enabled = true
 retention_days = 90
 export_path = "./audit_logs"
+
+# ═══════════════════════════════════════════════════════════
+# PROCESSING ENGINE CONFIGURATION
+# ═══════════════════════════════════════════════════════════
+
+[processing]
+# Enable/disable the background processing engine
+enabled = true
+
+# CRON expression for automated batch processing
+# Format: second minute hour day month weekday
+# Examples:
+#   "0 0 */6 * * *"   - Every 6 hours
+#   "0 0 0 * * *"     - Daily at midnight
+#   "0 0 2 * * SUN"   - Sunday 2am
+schedule = "0 0 */6 * * *"
+
+# Maximum concurrent processing jobs
+max_concurrent = 4
+
+# Retry configuration for failed documents
+retry_failed = true
+max_retries = 3
+retry_delay_minutes = 30
 ```
 
 ### Environment Variables
@@ -422,13 +435,13 @@ QUAERO_GITHUB_TOKEN=ghp_xxx
 
 ---
 
-## LLM Service Requirements (✅ IMPLEMENTED)
+## LLM Service Requirements
 
 ### Interface Definition
 
-**STATUS:** ✅ COMPLETE
+**REQUIREMENT:** All LLM implementations must conform to this interface.
 
-**Location:** `internal/interfaces/llm_service.go`
+**Location:** `internal/services/llm/service.go`
 
 ```go
 package llm
@@ -518,81 +531,82 @@ func NewGeminiClient(config *Config, logger arbor.ILogger) (*GeminiClient, error
 }
 ```
 
-### Offline Mode Implementation (✅ COMPLETE)
+### Offline Mode Implementation
 
-**STATUS:** ✅ IMPLEMENTED - Production Ready
+**REQUIREMENT:** llama.cpp integration for local inference.
 
 **Location:** `internal/services/llm/offline/llama.go`
 
-**Implementation Details:**
-- Binary execution model using `os/exec` (no CGo)
-- Zero network capability (verifiable)
-- Model file verification via ModelManager
-- Audit logging to SQLite
-- Mock mode for testing
-- Comprehensive error handling
+**Key Features:**
+- Model file validation (checksum verification)
+- Memory management (models stay loaded)
+- Thread pool for parallelism
+- GPU support (optional, via gpu_layers config)
+- Local audit logging
+- Network isolation verification
 
-**Key Features (Implemented):**
-- ✅ Model file validation and verification
-- ✅ Binary detection (./bin/llama-cli, ./llama-cli, PATH)
-- ✅ Thread pool configuration
-- ✅ GPU layer offloading support
-- ✅ Local audit logging to SQLite
-- ✅ Network isolation (zero HTTP imports)
-- ✅ ChatML prompt formatting for Qwen models
-- ✅ Output parsing and response extraction
-
-**Architecture:**
+**Startup Validation:**
 ```go
-func NewOfflineLLMService(
-    modelDir string,
-    embedModel string,
-    chatModel string,
-    contextSize int,
-    threadCount int,
-    gpuLayers int,
-    logger arbor.ILogger,
-) (*OfflineLLMService, error) {
-    // Find llama-cli binary
-    binaryPath, err := findLlamaBinary()
-    if err != nil {
-        return nil, fmt.Errorf("llama-cli binary not found: %w", err)
+func NewEmbeddedLLM(config *Config, logger arbor.ILogger) (*EmbeddedLLM, error) {
+    // Verify model files exist
+    if !fileExists(config.EmbedModelPath) {
+        return nil, fmt.Errorf("embedding model not found: %s", config.EmbedModelPath)
     }
-
-    // Create model manager and verify files
-    modelManager := NewModelManager(modelDir, embedModel, chatModel)
-    if err := modelManager.VerifyModels(); err != nil {
-        return nil, fmt.Errorf("model verification failed: %w", err)
+    if !fileExists(config.ChatModelPath) {
+        return nil, fmt.Errorf("chat model not found: %s", config.ChatModelPath)
     }
-
+    
+    // Verify checksums
+    if err := verifyChecksum(config.EmbedModelPath, config.EmbedModelChecksum); err != nil {
+        logger.Warn().Err(err).Msg("Embedding model checksum mismatch")
+    }
+    if err := verifyChecksum(config.ChatModelPath, config.ChatModelChecksum); err != nil {
+        logger.Warn().Err(err).Msg("Chat model checksum mismatch")
+    }
+    
     logger.Info().Msg("✓ OFFLINE MODE ACTIVE")
     logger.Info().Msg("✓ All processing will be local")
-    logger.Info().Str("binary", binaryPath).Msg("Using llama-cli")
-    logger.Info().Str("embed_model", modelManager.GetEmbedModelPath()).Msg("Embedding model")
-    logger.Info().Str("chat_model", modelManager.GetChatModelPath()).Msg("Chat model")
-
-    return &OfflineLLMService{
-        modelManager: modelManager,
-        binaryPath:   binaryPath,
-        contextSize:  contextSize,
-        threadCount:  threadCount,
-        gpuLayers:    gpuLayers,
-        logger:       logger,
-        mockMode:     false,
+    logger.Info().Str("embed_model", config.EmbedModelPath).Msg("Loading embedding model")
+    logger.Info().Str("chat_model", config.ChatModelPath).Msg("Loading chat model")
+    
+    // Load models (this takes 10-30 seconds)
+    embedModel, err := llama.New(
+        config.EmbedModelPath,
+        llama.SetContext(512),
+        llama.SetEmbeddings(true),
+        llama.SetThreads(config.Threads),
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to load embedding model: %w", err)
+    }
+    
+    chatModel, err := llama.New(
+        config.ChatModelPath,
+        llama.SetContext(config.ContextSize),
+        llama.SetThreads(config.Threads),
+        llama.SetGPULayers(config.GPULayers),
+    )
+    if err != nil {
+        embedModel.Close()
+        return nil, fmt.Errorf("failed to load chat model: %w", err)
+    }
+    
+    // Verify network isolation (sanity check)
+    if err := verifyOfflineCapability(); err != nil {
+        logger.Warn().Err(err).Msg("Network detected but offline mode active")
+    }
+    
+    logger.Info().Msg("✓ Models loaded successfully")
+    
+    return &EmbeddedLLM{
+        embedModel: embedModel,
+        chatModel:  chatModel,
+        logger:     logger,
+        auditLog:   NewAuditLog(logger),
+        config:     config,
     }, nil
 }
 ```
-
-**Documentation:**
-- Setup guide: `docs/offline-mode-setup.md` (1,247 lines)
-- Service README: `internal/services/llm/offline/README.md` (370 lines)
-- Example config: `deployments/config.offline.example.toml` (288 lines)
-- Integration examples: `internal/services/llm/offline/example_integration.go.txt` (186 lines)
-
-**Testing:**
-- Unit tests: `internal/services/llm/offline/llama_test.go` (192 lines)
-- Test coverage: 5 tests, 8 subtests, all passing
-- Mock mode for testing without binary
 
 ---
 

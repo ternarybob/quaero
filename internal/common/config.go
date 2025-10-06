@@ -87,6 +87,7 @@ type OfflineLLMConfig struct {
 	ContextSize int    `toml:"context_size"` // Context window size
 	ThreadCount int    `toml:"thread_count"` // CPU threads for inference
 	GPULayers   int    `toml:"gpu_layers"`   // Number of layers to offload to GPU
+	MockMode    bool   `toml:"mock_mode"`    // Enable mock mode for testing (bypasses binary/model requirements)
 }
 
 type CloudLLMConfig struct {

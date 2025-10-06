@@ -159,40 +159,29 @@ Document → Quaero → llama.cpp (local inference) → Embedding/Response → Q
 - Documents UI for browsing vectorized content
 - API endpoints for document management
 
-### ✅ Phase 1.2 - Dual Mode LLM (COMPLETE)
+### 🚧 Phase 1.2 - Dual Mode LLM (IN PROGRESS)
 
-**Offline Mode Implementation (COMPLETE):**
-- ✅ LLM service interface (`internal/interfaces/llm_service.go`)
-- ✅ Offline service using llama-cli binary execution (`internal/services/llm/offline/llama.go`)
-- ✅ Model file management and verification (`internal/services/llm/offline/models.go`)
-- ✅ Service factory with mode selection (`internal/services/llm/factory.go`)
-- ✅ Audit logging system (`internal/services/llm/audit.go`)
-- ✅ SQLite audit log storage (migration v4)
-- ✅ Network isolation verification (zero network calls)
-- ✅ Configuration structures with env overrides
-- ✅ Health checks on startup
-- ✅ Comprehensive error handling
-- ✅ Performance benchmarks and testing
-- ✅ Complete documentation (setup guide, API docs)
-
-**Security Guarantees:**
-- ✅ 100% local processing (no HTTP client in offline code)
-- ✅ Binary execution model (os/exec, no CGo)
-- ✅ Audit trail in SQLite
-- ✅ Mode enforcement at startup
-
-**Cloud Mode Implementation (PLANNED):**
+**Cloud Mode Implementation:**
 - [ ] Gemini API client (embeddings + chat)
 - [ ] Configuration validation for API key
 - [ ] Warning system for cloud mode usage
 - [ ] Risk acknowledgment requirement
 - [ ] API call logging for audit
 
-**Documentation:**
-- ✅ Setup guide: `docs/offline-mode-setup.md`
-- ✅ Service documentation: `internal/services/llm/offline/README.md`
-- ✅ Example config: `deployments/config.offline.example.toml`
-- ✅ Architecture updated with offline mode details
+**Offline Mode Implementation:**
+- [ ] llama.cpp Go bindings integration
+- [ ] Model file management (download, verify, load)
+- [ ] Embedded inference for embeddings
+- [ ] Embedded inference for chat
+- [ ] Network isolation verification
+- [ ] Local-only audit trail
+
+**Common Requirements:**
+- [ ] Mode selection and validation
+- [ ] Health checks on startup
+- [ ] Graceful degradation
+- [ ] Error handling with helpful messages
+- [ ] Performance monitoring
 
 ### 🚧 Phase 1.3 - RAG Pipeline (PLANNED)
 - Memory area categorization (Main, Fragments, Solutions, Facts)
@@ -398,132 +387,127 @@ func (c *GeminiClient) Chat(ctx context.Context, messages []Message) (string, er
 }
 ```
 
-### 3. Offline Mode Implementation (IMPLEMENTED)
+### 3. Offline Mode Implementation
 
 **Location:** `internal/services/llm/offline/`
 
-**Architecture:** Binary execution model (os/exec) instead of CGo bindings
+**Embedded llama.cpp integration:**
 
 ```go
 package offline
 
 import (
-    "os/exec"
-    "context"
+    llama "github.com/go-skynet/go-llama.cpp"
 )
 
-type OfflineLLMService struct {
-    modelManager *ModelManager
-    binaryPath   string
-    contextSize  int
-    threadCount  int
-    gpuLayers    int
-    logger       arbor.ILogger
-    auditLogger  AuditLogger
-    mockMode     bool
+type EmbeddedLLM struct {
+    embedModel  *llama.LLama
+    chatModel   *llama.LLama
+    logger      arbor.ILogger
+    auditLog    *AuditLog
+    config      *Config
 }
 
-func NewOfflineLLMService(
-    modelDir string,
-    embedModel string,
-    chatModel string,
-    contextSize int,
-    threadCount int,
-    gpuLayers int,
-    logger arbor.ILogger,
-) (*OfflineLLMService, error) {
-    // Find llama-cli binary
-    binaryPath, err := findLlamaBinary()
-    if err != nil {
-        return nil, fmt.Errorf("llama-cli binary not found: %w", err)
-    }
-
-    // Create model manager
-    modelManager := NewModelManager(modelDir, embedModel, chatModel)
-
+func NewEmbeddedLLM(config *Config, logger arbor.ILogger) (*EmbeddedLLM, error) {
     // Verify model files exist
-    if err := modelManager.VerifyModels(); err != nil {
-        return nil, fmt.Errorf("model verification failed: %w", err)
+    if !fileExists(config.EmbedModelPath) {
+        return nil, fmt.Errorf("embedding model not found: %s", config.EmbedModelPath)
     }
-
+    if !fileExists(config.ChatModelPath) {
+        return nil, fmt.Errorf("chat model not found: %s", config.ChatModelPath)
+    }
+    
     logger.Info().Msg("✓ OFFLINE MODE: All processing will be local")
-    logger.Info().Str("binary", binaryPath).Msg("Using llama-cli")
-    logger.Info().Str("embed_model", modelManager.GetEmbedModelPath()).Msg("Embedding model")
-    logger.Info().Str("chat_model", modelManager.GetChatModelPath()).Msg("Chat model")
-
-    return &OfflineLLMService{
-        modelManager: modelManager,
-        binaryPath:   binaryPath,
-        contextSize:  contextSize,
-        threadCount:  threadCount,
-        gpuLayers:    gpuLayers,
-        logger:       logger,
-        mockMode:     false,
+    logger.Info().Str("embed_model", config.EmbedModelPath).Msg("Loading embedding model")
+    logger.Info().Str("chat_model", config.ChatModelPath).Msg("Loading chat model")
+    
+    // Load embedding model
+    embedModel, err := llama.New(
+        config.EmbedModelPath,
+        llama.SetContext(512),
+        llama.SetEmbeddings(true),
+        llama.SetThreads(config.Threads),
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to load embedding model: %w", err)
+    }
+    
+    // Load chat model
+    chatModel, err := llama.New(
+        config.ChatModelPath,
+        llama.SetContext(config.ContextSize),
+        llama.SetThreads(config.Threads),
+        llama.SetGPULayers(config.GPULayers),
+    )
+    if err != nil {
+        embedModel.Close()
+        return nil, fmt.Errorf("failed to load chat model: %w", err)
+    }
+    
+    // Verify network isolation (sanity check)
+    if err := verifyOfflineCapability(); err != nil {
+        logger.Warn().Err(err).Msg("Network detected but offline mode active")
+    }
+    
+    return &EmbeddedLLM{
+        embedModel: embedModel,
+        chatModel:  chatModel,
+        logger:     logger,
+        auditLog:   NewAuditLog(logger),
+        config:     config,
     }, nil
 }
 
-func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, error) {
-    start := time.Now()
-
-    if s.mockMode {
-        // Mock mode for testing
-        return generateMockEmbedding(text), nil
-    }
-
-    // Execute llama-cli for embeddings
-    cmd := exec.CommandContext(ctx, s.binaryPath,
-        "-m", s.modelManager.GetEmbedModelPath(),
-        "-p", text,
-        "--embedding",
-        "-t", fmt.Sprintf("%d", s.threadCount),
-    )
-
-    output, err := cmd.Output()
+func (e *EmbeddedLLM) Embed(ctx context.Context, text string) ([]float32, error) {
+    // Log operation locally
+    e.auditLog.Record(AuditEntry{
+        Timestamp: time.Now(),
+        Mode:      "offline",
+        Operation: "embed",
+        Provider:  "llama.cpp",
+    })
+    
+    // Generate embedding using llama.cpp
+    embeddings, err := e.embedModel.Embeddings(text)
     if err != nil {
-        s.auditLogger.LogEmbed(false, time.Since(start), err.Error())
         return nil, fmt.Errorf("embedding generation failed: %w", err)
     }
-
-    embedding := parseEmbeddingOutput(output)
-    s.auditLogger.LogEmbed(true, time.Since(start), "")
-
-    return embedding, nil
+    
+    return embeddings, nil
 }
 
-func (s *OfflineLLMService) Chat(ctx context.Context, messages []Message) (string, error) {
-    start := time.Now()
-
-    if s.mockMode {
-        // Mock mode for testing
-        return "This is a mock response for testing.", nil
-    }
-
-    // Format messages using ChatML format
-    prompt := formatPrompt(messages)
-
-    // Execute llama-cli for chat
-    cmd := exec.CommandContext(ctx, s.binaryPath,
-        "-m", s.modelManager.GetChatModelPath(),
-        "-p", prompt,
-        "-c", fmt.Sprintf("%d", s.contextSize),
-        "-t", fmt.Sprintf("%d", s.threadCount),
-        "-ngl", fmt.Sprintf("%d", s.gpuLayers),
+func (e *EmbeddedLLM) Chat(ctx context.Context, messages []Message) (string, error) {
+    // Log operation locally
+    e.auditLog.Record(AuditEntry{
+        Timestamp: time.Now(),
+        Mode:      "offline",
+        Operation: "chat",
+        Provider:  "llama.cpp",
+    })
+    
+    // Format messages for model
+    prompt := formatMessagesForLlama(messages)
+    
+    // Generate response
+    response, err := e.chatModel.Predict(
+        prompt,
+        llama.SetTokens(512),
+        llama.SetTemperature(0.7),
     )
-
-    output, err := cmd.Output()
     if err != nil {
-        s.auditLogger.LogChat(false, time.Since(start), err.Error(), "")
         return "", fmt.Errorf("chat generation failed: %w", err)
     }
-
-    response := extractResponse(output)
-    s.auditLogger.LogChat(true, time.Since(start), "", response)
-
+    
     return response, nil
 }
 
-func (s *OfflineLLMService) Close() error {
-    // No resources to close with binary execution
+func (e *EmbeddedLLM) Close() error {
+    if err := e.embedModel.Close(); err != nil {
+        return err
+    }
+    if err := e.chatModel.Close(); err != nil {
+        return err
+    }
     return nil
 }
 ```
@@ -751,21 +735,16 @@ quaero/
 │   │   ├── banner.go                # Startup banner
 │   │   └── version.go               # Version management
 │   │
-│   ├── interfaces/                  # Service interfaces
-│   │   ├── llm_service.go           # LLM service interface (NEW)
-│   │   └── ... other interfaces
-│   │
 │   ├── services/
-│   │   ├── llm/                     # LLM service (IMPLEMENTED)
-│   │   │   ├── factory.go           # Mode-based factory (COMPLETE)
-│   │   │   ├── audit.go             # Audit log system (COMPLETE)
-│   │   │   ├── cloud/               # Cloud mode implementation (PLANNED)
-│   │   │   │   └── gemini.go        # Gemini API client (TBD)
-│   │   │   └── offline/             # Offline mode implementation (COMPLETE)
-│   │   │       ├── llama.go         # llama-cli binary execution
-│   │   │       ├── models.go        # Model file management
-│   │   │       ├── README.md        # Service documentation
-│   │   │       └── llama_test.go    # Unit tests
+│   │   ├── llm/                     # LLM service (NEW)
+│   │   │   ├── service.go           # Interface definition
+│   │   │   ├── factory.go           # Mode-based factory
+│   │   │   ├── audit.go             # Audit log system
+│   │   │   ├── cloud/               # Cloud mode implementation
+│   │   │   │   └── gemini.go        # Gemini API client
+│   │   │   └── offline/             # Offline mode implementation
+│   │   │       ├── llama.go         # llama.cpp integration
+│   │   │       └── models.go        # Model management
 │   │   │
 │   │   ├── embeddings/              # Embedding service (uses LLM service)
 │   │   │   └── embedding_service.go
@@ -857,12 +836,87 @@ GET  /api/documents/stats           - Document statistics
 GET  /api/documents                 - List documents with filtering
 POST /api/documents/process         - Trigger document processing
 
+# Processing Engine Operational Control (NEW)
+GET  /api/processing/status         - Get processing engine status
+POST /api/documents/{id}/reprocess  - Force reprocess single document
+DELETE /api/documents/{id}/embedding - Wipe single document embedding
+DELETE /api/embeddings              - Wipe all embeddings (destructive)
+
 GET  /api/llm/mode                  - Get current LLM mode
-GET  /api/llm/audit                 - Get audit log entries (NEW)
-GET  /api/llm/health                - LLM health check (NEW)
+GET  /api/llm/audit                 - Get audit log entries
+GET  /api/llm/health                - LLM health check
 
 GET  /health                        - Health check
 ```
+
+### Processing Status Response
+
+```json
+{
+  "total_documents": 1250,
+  "processed_count": 1205,
+  "pending_count": 42,
+  "failed_count": 3,
+  "last_run_timestamp": "2025-10-06T12:00:00Z",
+  "next_run_timestamp": "2025-10-06T18:00:00Z",
+  "engine_status": "IDLE"  // or "RUNNING"
+}
+```
+
+### Operational Control Endpoints
+
+**Wipe All Embeddings:**
+```bash
+DELETE /api/embeddings
+
+Response:
+{
+  "message": "All embeddings cleared",
+  "documents_affected": 1250,
+  "status": "All documents marked PENDING"
+}
+```
+
+**Use Cases:**
+- Switching from Cloud to Offline mode (different embedding dimensions)
+- Upgrading to a new embedding model
+- Recovering from data corruption
+- Fresh start / reset
+
+**Wipe Single Document Embedding:**
+```bash
+DELETE /api/documents/{id}/embedding
+
+Response:
+{
+  "message": "Embedding cleared for document",
+  "document_id": "doc_123",
+  "status": "PENDING"
+}
+```
+
+**Use Cases:**
+- Document content was updated
+- Old embedding is stale
+- Troubleshooting specific document issues
+
+**Force Reprocess Document:**
+```bash
+POST /api/documents/{id}/reprocess
+
+Response:
+{
+  "message": "Document reprocessing initiated",
+  "document_id": "doc_123",
+  "status": "PENDING",
+  "note": "Processing will occur on next engine run or immediately if triggered"
+}
+```
+
+**Use Cases:**
+- Immediate re-vectorization after document edit
+- Testing changes to processing logic
+- Bypassing scheduled run for urgent updates
 
 ---
 
@@ -973,89 +1027,48 @@ GET  /health                        - Health check
 
 ---
 
-## Offline Mode Architecture (IMPLEMENTED)
-
-### Binary Execution Model
-
-Quaero's offline mode uses **binary execution** of llama-cli instead of CGo bindings:
-
-**Benefits:**
-- **No CGo dependencies** - Simpler builds, better cross-platform support
-- **Process isolation** - Clear security boundary
-- **Zero network capability** - Verifiable through code review
-- **Easy testing** - Mock mode for testing without binary
-
-**Binary Detection:**
-1. `./bin/llama-cli` (or `.exe` on Windows)
-2. `./llama-cli` (or `.exe` on Windows)
-3. `llama-cli` in PATH
-
-### Security Verification
-
-**Network Isolation Checklist:**
-- ✅ No `net/http` imports in offline code paths
-- ✅ No `net` package usage
-- ✅ Only `os/exec` for binary execution
-- ✅ Only local file I/O
-- ✅ All inference via llama-cli local binary
-
-**Audit Trail:**
-- All operations logged to SQLite `llm_audit_log` table
-- Timestamp, mode, operation, success/failure, duration
-- No document content (metadata only)
-- Exportable to JSON for compliance
-
-**Verification Commands:**
-```bash
-# Check no HTTP imports in offline code
-grep -r "net/http" internal/services/llm/offline/
-# Expected: no results
-
-# Verify audit log
-sqlite3 ./data/quaero.db "SELECT mode, COUNT(*) FROM llm_audit_log GROUP BY mode;"
-# Expected: Only 'offline' mode
-```
-
-### Setup Instructions
-
-**Complete guide:** `docs/offline-mode-setup.md` (1,247 lines)
-
-**Quick setup:**
-1. Build llama-cli from llama.cpp
-2. Download models (nomic-embed + qwen2.5-7b)
-3. Configure Quaero with model paths
-4. Run in offline mode
-
-### Performance Characteristics
-
-**Embeddings (768-dimension):**
-- CPU-only: 2-3 seconds per document
-- GPU (CUDA/Metal): 0.5-1 second per document
-
-**Chat Completions:**
-- CPU-only: 5-10 seconds for 500 tokens
-- GPU (CUDA/Metal): 1-2 seconds for 500 tokens
-
-**Memory Usage:**
-- Base application: ~200 MB
-- Embed model: ~150 MB (nomic-embed-text-v1.5-q8)
-- Chat model: ~4.5 GB (qwen2.5-7b-instruct-q4)
-- **Total:** ~5 GB RAM minimum
-
----
-
 ## Remaining Work
 
-### Phase 1.2 - Cloud Mode (Future)
+### Phase 1.2 - Dual Mode LLM (Current Focus)
 
-**Cloud Mode Implementation (PLANNED):**
-- [ ] Gemini API client (embeddings + chat)
-- [ ] Configuration validation for API key
-- [ ] Warning system for cloud mode usage
-- [ ] Risk acknowledgment requirement
-- [ ] API call audit logging
+**Cloud Mode:**
+- [ ] Implement Gemini API client for embeddings
+- [ ] Implement Gemini API client for chat
+- [ ] Add API key validation
+- [ ] Add risk acknowledgment requirement
+- [ ] Add startup warnings
+- [ ] Add API call audit logging
+
+**Offline Mode:**
+- [ ] Integrate go-llama.cpp bindings
+- [ ] Implement model file management
+- [ ] Implement embedding generation via llama.cpp
+- [ ] Implement chat generation via llama.cpp
+- [ ] Add model file verification (checksums)
+- [ ] Add network isolation checks
+- [ ] Add local audit logging
+
+**Common:**
+- [ ] Create LLM service interface
+- [ ] Implement mode-based factory
+- [ ] Add configuration validation
+- [ ] Add health check endpoints
 - [ ] Update UI to show current mode
-- [ ] Add mode switcher in settings
+- [ ] Add audit log viewer in UI
+- [ ] Update documentation
+
+**Processing Engine Enhancements:**
+- [ ] Add document processing status field
+- [ ] Implement FindUnprocessedDocuments()
+- [ ] Add processing state management (PENDING/PROCESSED/FAILED)
+- [ ] Create operational control endpoints:
+  - [ ] GET /api/processing/status
+  - [ ] DELETE /api/embeddings
+  - [ ] DELETE /api/documents/{id}/embedding
+  - [ ] POST /api/documents/{id}/reprocess
+- [ ] Update UI to show processing status
+- [ ] Add failed document viewer
+- [ ] Implement retry logic for failed documents
 
 ### Phase 1.3 - RAG Pipeline
 - [ ] Memory area categorization

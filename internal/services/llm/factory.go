@@ -51,6 +51,13 @@ func createOfflineService(
 	auditLogger AuditLogger,
 	logger arbor.ILogger,
 ) (interfaces.LLMService, AuditLogger, error) {
+	// Check for mock mode (used in tests)
+	if cfg.LLM.Offline.MockMode {
+		logger.Warn().Msg("Creating offline LLM service in MOCK mode (for testing only)")
+		service := offline.NewMockOfflineLLMService(logger)
+		return service, auditLogger, nil
+	}
+
 	// Validate offline configuration
 	if err := validateOfflineConfig(&cfg.LLM.Offline); err != nil {
 		return nil, nil, fmt.Errorf("invalid offline configuration: %w", err)
