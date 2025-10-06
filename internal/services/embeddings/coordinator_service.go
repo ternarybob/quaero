@@ -3,6 +3,7 @@ package embeddings
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -16,6 +17,8 @@ type CoordinatorService struct {
 	documentStorage  interfaces.DocumentStorage
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
+	isProcessing     bool
+	mu               sync.Mutex
 }
 
 // NewCoordinatorService creates a new embedding coordinator
@@ -53,6 +56,23 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 		}
 	}()
 
+	// Check if already processing (prevent concurrent runs)
+	s.mu.Lock()
+	if s.isProcessing {
+		s.mu.Unlock()
+		s.logger.Warn().Msg("@@@ EMBEDDING ALREADY IN PROGRESS - Skipping concurrent run")
+		return nil
+	}
+	s.isProcessing = true
+	s.mu.Unlock()
+
+	// Ensure we reset processing flag when done
+	defer func() {
+		s.mu.Lock()
+		s.isProcessing = false
+		s.mu.Unlock()
+	}()
+
 	s.logger.Debug().Msg("@@@ EMBEDDING COORDINATOR START @@@")
 	s.logger.Info().Msg("@@@ Step 1: Embedding event triggered")
 
@@ -72,7 +92,7 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 	s.logger.Debug().Msg("@@@ Step 5: Document storage OK")
 
 	s.logger.Debug().Msg("@@@ Step 6: Creating worker pool for embeddings")
-	pool := workers.NewPool(10, s.logger)
+	pool := workers.NewPool(1, s.logger) // Single worker to eliminate SQLite concurrency issues
 	s.logger.Debug().Msg("@@@ Step 7: Starting worker pool")
 	pool.Start()
 	defer func() {
@@ -82,8 +102,8 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 	}()
 	s.logger.Debug().Msg("@@@ Step 8: Worker pool started")
 
-	s.logger.Debug().Msg("@@@ Step 9: Fetching force embed documents from storage")
-	forceEmbedDocs, err := s.documentStorage.GetDocumentsForceEmbed()
+	s.logger.Debug().Msg("@@@ Step 9: Fetching force embed documents from storage (limit 100)")
+	forceEmbedDocs, err := s.documentStorage.GetDocumentsForceEmbed(100)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying force embed documents")
 		return fmt.Errorf("failed to get force embed documents: %w", err)
@@ -120,8 +140,8 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 		s.logger.Debug().Msg("@@@ Step 11: No force embed documents found")
 	}
 
-	s.logger.Debug().Msg("@@@ Step 13: Fetching unvectorized documents from storage")
-	unvectorizedDocs, err := s.documentStorage.GetUnvectorizedDocuments()
+	s.logger.Debug().Msg("@@@ Step 13: Fetching unvectorized documents from storage (limit 100)")
+	unvectorizedDocs, err := s.documentStorage.GetUnvectorizedDocuments(100)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying unvectorized documents")
 		return fmt.Errorf("failed to get unvectorized documents: %w", err)

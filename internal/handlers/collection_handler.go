@@ -7,22 +7,18 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/services/collection"
 )
 
 type CollectionHandler struct {
-	coordinator  *collection.CoordinatorService
 	eventService interfaces.EventService
 	logger       arbor.ILogger
 }
 
 func NewCollectionHandler(
-	coordinator *collection.CoordinatorService,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *CollectionHandler {
 	return &CollectionHandler{
-		coordinator:  coordinator,
 		eventService: eventService,
 		logger:       logger,
 	}

@@ -82,7 +82,7 @@ func (l *SQLiteAuditLogger) logOperation(operation string, mode interfaces.LLMMo
 		Msg("Logging LLM operation")
 
 	insertSQL := `
-		INSERT INTO llm_audit_log (timestamp, mode, operation, success, error, duration_ms, query_text)
+		INSERT INTO llm_audit_log (timestamp, mode, operation, success, error, duration, query_text)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
@@ -102,7 +102,7 @@ func (l *SQLiteAuditLogger) logOperation(operation string, mode interfaces.LLMMo
 // GetLogs retrieves recent audit logs with the specified limit
 func (l *SQLiteAuditLogger) GetLogs(limit int) ([]AuditLog, error) {
 	query := `
-		SELECT id, timestamp, mode, operation, success, error, duration_ms, query_text
+		SELECT id, timestamp, mode, operation, success, error, duration, query_text
 		FROM llm_audit_log
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -166,7 +166,7 @@ func (l *SQLiteAuditLogger) GetLogs(limit int) ([]AuditLog, error) {
 // ExportToJSON exports all audit logs to JSON format
 func (l *SQLiteAuditLogger) ExportToJSON(w io.Writer) error {
 	query := `
-		SELECT id, timestamp, mode, operation, success, error, duration_ms, query_text
+		SELECT id, timestamp, mode, operation, success, error, duration, query_text
 		FROM llm_audit_log
 		ORDER BY timestamp ASC
 	`
@@ -236,5 +236,39 @@ func (l *SQLiteAuditLogger) ExportToJSON(w io.Writer) error {
 
 // Close cleans up resources (no-op for SQLite)
 func (l *SQLiteAuditLogger) Close() error {
+	return nil
+}
+
+// NullAuditLogger is a no-op implementation of AuditLogger used when auditing is disabled
+type NullAuditLogger struct{}
+
+// NewNullAuditLogger creates a new null audit logger
+func NewNullAuditLogger() *NullAuditLogger {
+	return &NullAuditLogger{}
+}
+
+// LogEmbed does nothing (no-op)
+func (l *NullAuditLogger) LogEmbed(mode interfaces.LLMMode, success bool, duration time.Duration, err error, queryText string) error {
+	return nil
+}
+
+// LogChat does nothing (no-op)
+func (l *NullAuditLogger) LogChat(mode interfaces.LLMMode, success bool, duration time.Duration, err error, queryText string) error {
+	return nil
+}
+
+// GetLogs returns an empty slice (no-op)
+func (l *NullAuditLogger) GetLogs(limit int) ([]AuditLog, error) {
+	return []AuditLog{}, nil
+}
+
+// ExportToJSON writes empty JSON array (no-op)
+func (l *NullAuditLogger) ExportToJSON(w io.Writer) error {
+	_, err := w.Write([]byte("[]"))
+	return err
+}
+
+// Close does nothing (no-op)
+func (l *NullAuditLogger) Close() error {
 	return nil
 }

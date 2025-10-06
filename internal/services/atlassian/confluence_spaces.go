@@ -174,27 +174,9 @@ func (s *ConfluenceScraperService) storeSpaces(spaces []map[string]interface{}) 
 			continue
 		}
 
-		// Create document record for vectorization
-		doc := &models.Document{
-			Title:      name,
-			Content:    fmt.Sprintf("Confluence Space: %s\nKey: %s\nPages: %d", name, key, pageCount),
-			SourceType: "confluence_space",
-			SourceID:   key,
-			URL:        fmt.Sprintf("/wiki/spaces/%s", key),
-			Metadata: map[string]interface{}{
-				"space_key":  key,
-				"space_id":   id,
-				"page_count": pageCount,
-				"space_name": name,
-			},
-		}
-
-		if err := s.documentService.SaveDocument(ctx, doc); err != nil {
-			s.logger.Error().Err(err).Str("space", key).Msg("Failed to create document record")
-			continue
-		}
-
-		s.logger.Debug().Str("space", key).Msg("Created document record for space")
+		// NOTE: Spaces are metadata only - actual searchable content comes from pages
+		// Pages contain space_key in metadata and are the source of truth for search
+		s.logger.Debug().Str("space", key).Msg("Stored space metadata (pages will be indexed separately)")
 	}
 
 	return nil

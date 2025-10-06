@@ -100,8 +100,11 @@ type DocumentStorage interface {
 	SetForceSyncPending(id string, pending bool) error
 	SetForceEmbedPending(id string, pending bool) error
 	GetDocumentsForceSync() ([]*models.Document, error)
-	GetDocumentsForceEmbed() ([]*models.Document, error)
-	GetUnvectorizedDocuments() ([]*models.Document, error)
+	GetDocumentsForceEmbed(limit int) ([]*models.Document, error)
+	GetUnvectorizedDocuments(limit int) ([]*models.Document, error)
+
+	// Embedding operations
+	ClearAllEmbeddings() (int, error)
 
 	// Bulk operations
 	ClearAll() error

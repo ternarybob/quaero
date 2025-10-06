@@ -75,6 +75,20 @@ func (s *SQLiteDB) configure() error {
 		}
 	}
 
+	// Verify WAL mode is active
+	if s.config.WALMode {
+		var journalMode string
+		if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to verify journal mode")
+		} else {
+			s.logger.Info().
+				Str("journal_mode", journalMode).
+				Int("busy_timeout_ms", s.config.BusyTimeoutMS).
+				Int("cache_size_mb", s.config.CacheSizeMB).
+				Msg("SQLite configuration applied")
+		}
+	}
+
 	return nil
 }
 

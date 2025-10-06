@@ -30,87 +30,56 @@ func NewService(
 	}
 }
 
-// SaveDocument saves a document and generates its embedding
+// SaveDocument saves a document WITHOUT embedding
+// NOTE: Embedding is handled by independent embedding coordinator
 func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error {
 	// Generate ID if not present
 	if doc.ID == "" {
 		doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
 	}
 
-	// Generate embedding if not present
-	if doc.Embedding == nil || len(doc.Embedding) == 0 {
-		if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
-			s.logger.Warn().
-				Err(err).
-				Str("doc_id", doc.ID).
-				Msg("Failed to generate embedding, saving without it")
-			// Continue without embedding - we can backfill later
-		}
-	}
-
-	// Save to storage
+	// Save to storage without embedding
 	if err := s.storage.SaveDocument(doc); err != nil {
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
-	embeddedStatus := "no"
-	if doc.Embedding != nil && len(doc.Embedding) > 0 {
-		embeddedStatus = "yes"
-	}
 	s.logger.Info().
 		Str("doc_id", doc.ID).
 		Str("source", doc.SourceType).
 		Str("source_id", doc.SourceID).
-		Str("embedded", embeddedStatus).
-		Msg("Document saved")
+		Msg("Document saved (embedding will be processed independently)")
 
 	return nil
 }
 
-// SaveDocuments saves multiple documents in batch
+// SaveDocuments saves multiple documents in batch WITHOUT embedding
+// NOTE: Embedding is handled by independent embedding coordinator
 func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) error {
 	if len(docs) == 0 {
 		return nil
 	}
 
-	// Generate IDs and embeddings for documents
-	embeddedCount := 0
-	failedCount := 0
-
+	// Generate IDs for documents
 	for _, doc := range docs {
-		// Generate ID if not present
 		if doc.ID == "" {
 			doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
 		}
-
-		if doc.Embedding == nil || len(doc.Embedding) == 0 {
-			if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
-				s.logger.Warn().
-					Err(err).
-					Str("doc_id", doc.ID).
-					Msg("Failed to generate embedding")
-				failedCount++
-				continue
-			}
-			embeddedCount++
-		}
 	}
 
-	// Save all documents (even those without embeddings)
+	// Save all documents without embedding
 	if err := s.storage.SaveDocuments(docs); err != nil {
 		return fmt.Errorf("failed to save documents: %w", err)
 	}
 
 	s.logger.Info().
 		Int("total", len(docs)).
-		Int("embedded", embeddedCount).
-		Int("failed_embedding", failedCount).
-		Msg("Documents saved")
+		Msg("Documents saved (embedding will be processed independently)")
 
 	return nil
 }
 
-// UpdateDocument updates an existing document
+// UpdateDocument updates an existing document WITHOUT re-embedding
+// NOTE: Embedding is handled by independent embedding coordinator
 func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) error {
 	// Check if document exists
 	existing, err := s.storage.GetDocument(doc.ID)
@@ -118,18 +87,10 @@ func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) erro
 		return fmt.Errorf("document not found: %w", err)
 	}
 
-	// Regenerate embedding if content changed
+	// Check if content changed (for logging only)
 	contentChanged := existing.Content != doc.Content || existing.Title != doc.Title
-	if contentChanged {
-		if err := s.embeddingService.EmbedDocument(ctx, doc); err != nil {
-			s.logger.Warn().
-				Err(err).
-				Str("doc_id", doc.ID).
-				Msg("Failed to regenerate embedding")
-		}
-	}
 
-	// Update in storage
+	// Update in storage without re-embedding
 	if err := s.storage.UpdateDocument(doc); err != nil {
 		return fmt.Errorf("failed to update document: %w", err)
 	}
@@ -141,8 +102,7 @@ func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) erro
 	s.logger.Info().
 		Str("doc_id", doc.ID).
 		Str("content_changed", changedStatus).
-		Str("re_embedded", changedStatus).
-		Msg("Document updated")
+		Msg("Document updated (re-embedding will be handled independently)")
 
 	return nil
 }

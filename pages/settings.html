@@ -59,13 +59,13 @@
                     <div style="padding: 20px;">
                         <div class="danger-zone-section">
                             <div>
-                                <div class="danger-zone-title">Remove All Embeddings</div>
+                                <div class="danger-zone-title">Clear All Documents</div>
                                 <div class="danger-zone-description">
-                                    Wipes all vector embeddings from the database. Documents will remain but need to be reprocessed.
-                                    Use when switching LLM modes or upgrading embedding models.
+                                    Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                                    Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
                                 </div>
                             </div>
-                            <button class="btn-danger" onclick="confirmRemoveEmbeddings()">REMOVE ALL</button>
+                            <button class="btn-danger" onclick="confirmRemoveEmbeddings()">CLEAR ALL</button>
                         </div>
                     </div>
                 </div>
@@ -423,25 +423,13 @@
         // Confirm and remove all embeddings
         async function confirmRemoveEmbeddings() {
             const confirmed = confirm(
-                '⚠ WARNING: This will remove ALL vector embeddings from the database.\n\n' +
-                'Documents will NOT be deleted but will need to be reprocessed.\n\n' +
-                'This operation cannot be undone. Continue?'
+                '⚠ WARNING: This will delete ALL documents from the collection database.\n\n' +
+                'This will remove all indexed content from Jira and Confluence.\n' +
+                'Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.\n\n' +
+                'Continue?'
             );
 
             if (!confirmed) return;
-
-            const doubleConfirm = confirm(
-                'Are you ABSOLUTELY sure?\n\n' +
-                'Type YES in the next prompt to confirm.'
-            );
-
-            if (!doubleConfirm) return;
-
-            const finalConfirm = prompt('Type YES to confirm:');
-            if (finalConfirm !== 'YES') {
-                alert('Operation cancelled');
-                return;
-            }
 
             try {
                 const response = await fetch('/api/embeddings', {
@@ -449,14 +437,14 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to remove embeddings');
+                    throw new Error('Failed to clear documents');
                 }
 
                 const result = await response.json();
-                alert(`Success: ${result.message}\n\nDocuments affected: ${result.documents_affected}`);
+                alert(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`);
             } catch (error) {
-                console.error('Error removing embeddings:', error);
-                alert('Failed to remove embeddings: ' + error.message);
+                console.error('Error clearing documents:', error);
+                alert('Failed to clear documents: ' + error.message);
             }
         }
 

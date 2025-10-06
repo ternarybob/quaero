@@ -487,6 +487,27 @@ func (d *DocumentStorage) ClearAll() error {
 	return err
 }
 
+// ClearAllEmbeddings clears all embeddings from documents without deleting the documents
+func (d *DocumentStorage) ClearAllEmbeddings() (int, error) {
+	result, err := d.db.db.Exec(`
+		UPDATE documents
+		SET embedding = NULL,
+			embedding_model = '',
+			force_embed_pending = 0
+		WHERE embedding IS NOT NULL OR embedding != ''
+	`)
+	if err != nil {
+		return 0, err
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(count), nil
+}
+
 // SetForceSyncPending sets the force sync pending flag for a document
 func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
 	_, err := d.db.db.Exec("UPDATE documents SET force_sync_pending = ? WHERE id = ?", pending, id)
@@ -519,16 +540,17 @@ func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 }
 
 // GetDocumentsForceEmbed gets documents with force embed pending or not vectorized
-func (d *DocumentStorage) GetDocumentsForceEmbed() ([]*models.Document, error) {
+func (d *DocumentStorage) GetDocumentsForceEmbed(limit int) ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
 			   embedding, embedding_model, metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending, force_embed_pending
 		FROM documents
 		WHERE force_embed_pending = 1
+		LIMIT ?
 	`
 
-	rows, err := d.db.db.Query(query)
+	rows, err := d.db.db.Query(query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -538,16 +560,17 @@ func (d *DocumentStorage) GetDocumentsForceEmbed() ([]*models.Document, error) {
 }
 
 // GetUnvectorizedDocuments gets documents that haven't been vectorized yet
-func (d *DocumentStorage) GetUnvectorizedDocuments() ([]*models.Document, error) {
+func (d *DocumentStorage) GetUnvectorizedDocuments(limit int) ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
 			   embedding, embedding_model, metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending, force_embed_pending
 		FROM documents
 		WHERE embedding IS NULL OR embedding = ''
+		LIMIT ?
 	`
 
-	rows, err := d.db.db.Query(query)
+	rows, err := d.db.db.Query(query, limit)
 	if err != nil {
 		return nil, err
 	}

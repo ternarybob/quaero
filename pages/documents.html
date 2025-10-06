@@ -400,11 +400,11 @@
                 const matchesSearch = !searchTerm ||
                     (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
                     (doc.content && doc.content.toLowerCase().includes(searchTerm)) ||
-                    (doc.sourceID && doc.sourceID.toLowerCase().includes(searchTerm));
+                    (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
 
                 // Source filter
                 const matchesSource = !sourceFilter ||
-                    (doc.sourceType && doc.sourceType.toLowerCase() === sourceFilter.toLowerCase());
+                    (doc.source_type && doc.source_type.toLowerCase() === sourceFilter.toLowerCase());
 
                 // Vectorized filter
                 const hasEmbedding = doc.embedding && doc.embedding.length > 0;
@@ -445,8 +445,8 @@
                 return `
                     <tr style="background-color: ${isSelected ? '#e3f2fd' : 'transparent'};"
                         class="${isSelected ? 'selected-document' : ''}">
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.sourceType || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.sourceID || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
                         <td onclick="selectDocument(${index})" style="text-align: center; color: ${vectorizedColor}; font-weight: bold; cursor: pointer;">${vectorizedIcon}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>

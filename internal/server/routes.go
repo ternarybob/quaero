@@ -62,6 +62,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/force-embed", s.app.SchedulerHandler.ForceEmbedDocumentHandler)
 
+	// API routes - Embeddings (testing)
+	mux.HandleFunc("/api/embeddings/generate", s.app.EmbeddingHandler.GenerateEmbeddingHandler)
+	mux.HandleFunc("/api/embeddings", s.app.EmbeddingHandler.ClearEmbeddingsHandler)
+
 	// API routes - Processing
 	mux.HandleFunc("/api/processing/status", s.app.DocumentHandler.ProcessingStatusHandler)
 

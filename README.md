@@ -115,21 +115,85 @@ enable_wal = true
 ```
 quaero/
 ├── cmd/
-│   ├── quaero/                      # Main application
-│   └── quaero-chrome-extension/     # Chrome extension
+│   ├── quaero/                      # Main application entry point
+│   └── quaero-chrome-extension/     # Chrome extension for auth
 ├── internal/
-│   ├── common/                      # Utilities (config, logging, banner)
-│   ├── app/                         # Application orchestration
-│   ├── services/atlassian/          # Jira & Confluence services
+│   ├── app/                         # Application orchestration & DI
+│   ├── common/                      # Stateless utilities (config, logging, banner)
+│   ├── server/                      # HTTP server & routing
 │   ├── handlers/                    # HTTP & WebSocket handlers
-│   ├── storage/sqlite/              # SQLite storage layer
-│   ├── server/                      # HTTP server
+│   │   ├── api.go                   # System API (version, health)
+│   │   ├── ui.go                    # UI page handlers
+│   │   ├── websocket.go             # WebSocket & log streaming
+│   │   ├── scraper.go               # Scraper triggers
+│   │   ├── collector.go             # Paginated data endpoints
+│   │   ├── collection.go            # Manual sync endpoints
+│   │   ├── document.go              # Document management
+│   │   ├── scheduler.go             # Event triggers
+│   │   └── embedding_handler.go     # Embedding API (testing)
+│   ├── services/                    # Stateful business services
+│   │   ├── atlassian/               # Jira & Confluence collectors
+│   │   │   ├── jira_*.go            # Jira scraping services
+│   │   │   └── confluence_*.go      # Confluence scraping services
+│   │   ├── collection/              # Collection coordinator
+│   │   │   └── coordinator_service.go
+│   │   ├── embeddings/              # Embedding services
+│   │   │   ├── embedding_service.go   # Core embedding logic
+│   │   │   └── coordinator_service.go # Embedding coordinator
+│   │   ├── events/                  # Pub/sub event service
+│   │   │   └── event_service.go
+│   │   ├── scheduler/               # Cron scheduler
+│   │   │   └── scheduler_service.go
+│   │   ├── llm/                     # LLM abstraction layer
+│   │   │   ├── factory.go           # LLM service factory
+│   │   │   ├── audit.go             # Audit logging
+│   │   │   └── offline/             # Offline llama.cpp implementation
+│   │   ├── documents/               # Document service
+│   │   ├── processing/              # Processing service
+│   │   └── workers/                 # Worker pool pattern
+│   ├── storage/                     # Data persistence layer
+│   │   └── sqlite/                  # SQLite implementation
+│   │       ├── migrations.go        # Database migrations
+│   │       ├── document_storage.go  # Document CRUD
+│   │       ├── jira_storage.go      # Jira data storage
+│   │       └── confluence_storage.go # Confluence data storage
 │   ├── interfaces/                  # Service interfaces
+│   │   ├── llm_service.go           # LLM abstraction
+│   │   ├── event_service.go         # Event pub/sub
+│   │   ├── embedding_service.go     # Embedding generation
+│   │   └── ...                      # Other interfaces
 │   └── models/                      # Data models
+│       ├── document.go              # Document model
+│       ├── jira.go                  # Jira models
+│       └── confluence.go            # Confluence models
 ├── pages/                           # Web UI templates
-├── test/                            # Tests
-├── scripts/                         # Build scripts
-└── docs/                            # Documentation
+│   ├── index.html                   # Dashboard
+│   ├── jira.html                    # Jira UI
+│   ├── confluence.html              # Confluence UI
+│   ├── documents.html               # Documents browser
+│   ├── embeddings.html              # Embeddings test UI
+│   ├── partials/                    # Reusable components
+│   └── static/                      # CSS, JS
+├── test/                            # Test suites
+│   ├── unit/                        # Unit tests
+│   │   └── embedding_service_test.go
+│   ├── integration/                 # Integration tests
+│   │   ├── embedding_api_test.go
+│   │   ├── app_startup_test.go
+│   │   └── collection_test.go
+│   ├── ui/                          # UI automation tests
+│   └── run-tests.ps1                # Test runner
+├── scripts/                         # Build & deployment
+│   └── build.ps1                    # Build script
+├── docs/                            # Documentation
+│   ├── architecture.md
+│   ├── requirements.md
+│   └── remaining-requirements.md
+├── bin/                             # Build output
+│   ├── quaero.exe                   # Compiled binary
+│   ├── quaero.toml                  # Runtime config
+│   └── data/                        # SQLite database
+└── CLAUDE.md                        # Development standards
 ```
 
 ## Commands
@@ -156,6 +220,107 @@ quaero version
 
 ## Architecture
 
+### Core Services
+
+#### 1. Collectors (Jira & Confluence)
+The collector services (`internal/services/atlassian/`) scrape data from Atlassian APIs:
+
+**Jira Collector** (`jira_*.go`):
+- Scrapes projects, issues, and metadata
+- Uses Atlassian REST API v3
+- Stores data as documents with `source_type=jira`
+- Auto-subscribes to collection events
+
+**Confluence Collector** (`confluence_*.go`):
+- Scrapes spaces, pages, and content
+- Uses Confluence REST API
+- Stores data as documents with `source_type=confluence`
+- Auto-subscribes to collection events
+
+Both collectors:
+- Load authentication from database
+- Support pagination for large datasets
+- Stream real-time logs via WebSocket
+- Create document records for vector search
+
+#### 2. Collection Coordinator
+The collection coordinator (`internal/services/collection/coordinator_service.go`) orchestrates data synchronization:
+
+**Responsibilities:**
+- Subscribes to `EventCollectionTriggered` events
+- Queries documents marked with `force_sync_pending=true`
+- Dispatches sync jobs to worker pool (max 10 concurrent)
+- Delegates to appropriate collector (Jira/Confluence) based on `source_type`
+- Updates `last_synced` timestamp on completion
+- Clears `force_sync_pending` flag
+
+**Worker Pool:**
+- Bounded concurrency (10 workers)
+- Parallel processing of sync jobs
+- Error collection and aggregation
+- Panic recovery per worker
+
+#### 3. Embedding Services
+The embedding system generates vector embeddings for semantic search:
+
+**Embedding Service** (`internal/services/embeddings/embedding_service.go`):
+- Generates 768-dimension embeddings via LLM service
+- Supports offline mode (local models) and cloud mode (APIs)
+- Combines document title + content for embedding
+- Logs operations to audit trail
+- Currently using mock mode for testing
+
+**Embedding Coordinator** (`internal/services/embeddings/coordinator_service.go`):
+- Subscribes to `EventEmbeddingTriggered` events
+- Processes documents with `force_embed_pending=true` (forced)
+- Processes unvectorized documents (missing embeddings)
+- Uses worker pool for parallel embedding generation
+- Updates document with embedding vector and model name
+
+**LLM Service Modes:**
+- **Offline:** Local llama.cpp models (nomic-embed-text, qwen2.5)
+- **Cloud:** OpenAI/Anthropic APIs (planned)
+- **Mock:** Fake embeddings for testing (current default)
+
+#### 4. Event-Driven Architecture
+The event service (`internal/services/events/event_service.go`) implements pub/sub pattern:
+
+**Event Types:**
+- `EventCollectionTriggered` - Triggers data collection from sources
+- `EventEmbeddingTriggered` - Triggers embedding generation
+
+**Features:**
+- Asynchronous publishing (`Publish`) - fire-and-forget
+- Synchronous publishing (`PublishSync`) - wait for all handlers
+- Multiple subscribers per event type
+- Panic recovery in event handlers
+- Error aggregation and reporting
+
+**Flow:**
+```
+Scheduler (cron) → Publish Event → Event Service → All Subscribers
+                                                    ├─ Jira Collector
+                                                    ├─ Confluence Collector
+                                                    ├─ Collection Coordinator
+                                                    └─ Embedding Coordinator
+```
+
+#### 5. Scheduler Service
+The scheduler (`internal/services/scheduler/scheduler_service.go`) triggers automated workflows:
+
+**Capabilities:**
+- Cron-based scheduling (default: every 1 minute)
+- Publishes `EventCollectionTriggered` events
+- Publishes `EventEmbeddingTriggered` events
+- Manual trigger support via API
+- Prevents concurrent execution with mutex
+
+**Workflow Cascade:**
+```
+Scheduler → Collection Event → Collectors scrape data → Documents created
+         → Embedding Event → Coordinator generates embeddings → Vectors stored
+```
+
 ### Authentication Flow
 
 ```
@@ -167,7 +332,7 @@ quaero version
    ↓
 4. Extension sends auth data
    ↓
-5. Server stores credentials
+5. Server stores credentials in SQLite
    ↓
 6. Collectors use credentials for API calls
 ```
@@ -175,19 +340,37 @@ quaero version
 ### Collection Flow
 
 ```
-1. User clicks "Collect" in Web UI
+1. Scheduler triggers collection event (cron: */1 * * * *)
    ↓
-2. Handler triggers service
+2. Event service publishes to all subscribers
    ↓
-3. Service loads auth from database
+3. Jira/Confluence collectors scrape their sources
    ↓
-4. Service fetches data from Atlassian API
+4. Collectors create document records in SQLite
    ↓
-5. Service stores in SQLite
+5. Collection coordinator processes force_sync documents
    ↓
-6. Service streams logs via WebSocket
+6. Worker pool executes sync jobs in parallel (10 workers)
    ↓
-7. UI updates in real-time
+7. WebSocket streams real-time logs to UI
+```
+
+### Embedding Flow
+
+```
+1. Scheduler triggers embedding event
+   ↓
+2. Embedding coordinator queries documents
+   ├─ Documents with force_embed_pending=true
+   └─ Unvectorized documents (no embedding)
+   ↓
+3. Worker pool generates embeddings in parallel
+   ↓
+4. LLM service (offline/cloud/mock) creates 768-dim vectors
+   ↓
+5. Documents updated with embedding + model name
+   ↓
+6. Vectors ready for semantic search (future: sqlite-vec)
 ```
 
 ## Web UI
@@ -211,26 +394,100 @@ quaero version
 
 ### HTTP Endpoints
 
+#### UI Routes
 ```
-GET  /                          - Dashboard
-GET  /confluence                - Confluence UI
-GET  /jira                      - Jira UI
+GET  /                           - Dashboard
+GET  /jira                       - Jira UI
+GET  /confluence                 - Confluence UI
+GET  /documents                  - Documents browser
+GET  /embeddings                 - Embeddings test page
+GET  /settings                   - Settings page
+GET  /static/common.css          - Shared styles
+GET  /ui/status                  - UI status endpoint
+GET  /ui/parser-status           - Parser status
+```
 
-POST /api/collect/jira          - Trigger Jira collection
-POST /api/collect/confluence    - Trigger Confluence collection
+#### Authentication
+```
+POST /api/auth                   - Update authentication credentials
+```
 
-GET  /api/data/jira/projects    - Get Jira projects
-GET  /api/data/jira/issues      - Get Jira issues
-GET  /api/data/confluence/spaces - Get Confluence spaces
-GET  /api/data/confluence/pages - Get Confluence pages
+#### Collection (UI-triggered)
+```
+POST /api/scrape                 - Trigger collection
+POST /api/scrape/projects        - Scrape Jira projects
+POST /api/scrape/spaces          - Scrape Confluence spaces
+```
 
-GET  /health                    - Health check
+#### Cache Management
+```
+POST /api/projects/refresh-cache     - Refresh Jira projects cache
+POST /api/projects/get-issues        - Get project issues
+POST /api/spaces/refresh-cache       - Refresh Confluence spaces cache
+POST /api/spaces/get-pages           - Get space pages
+```
+
+#### Data Access
+```
+POST /api/data/clear-all             - Clear all data
+POST /api/data/jira/clear            - Clear Jira data
+POST /api/data/confluence/clear      - Clear Confluence data
+GET  /api/data/jira                  - Get Jira data summary
+GET  /api/data/jira/issues           - Get Jira issues
+GET  /api/data/confluence            - Get Confluence data summary
+GET  /api/data/confluence/pages      - Get Confluence pages
+```
+
+#### Collector (Paginated Data)
+```
+GET  /api/collector/projects         - Get projects (paginated)
+GET  /api/collector/spaces           - Get spaces (paginated)
+GET  /api/collector/issues           - Get issues (paginated)
+GET  /api/collector/pages            - Get pages (paginated)
+```
+
+#### Collection Sync (Manual)
+```
+POST /api/collection/jira/sync       - Manual Jira sync
+POST /api/collection/confluence/sync - Manual Confluence sync
+POST /api/collection/sync-all        - Sync all sources
+```
+
+#### Documents
+```
+GET  /api/documents/stats            - Document statistics
+GET  /api/documents                  - List documents
+POST /api/documents/process          - Process documents
+POST /api/documents/force-sync       - Force sync document
+POST /api/documents/force-embed      - Force embed document
+```
+
+#### Embeddings
+```
+POST /api/embeddings/generate        - Generate embedding (testing)
+```
+
+#### Processing
+```
+GET  /api/processing/status          - Processing status
+```
+
+#### Scheduler
+```
+POST /api/scheduler/trigger-collection - Trigger collection event
+POST /api/scheduler/trigger-embedding  - Trigger embedding event
+```
+
+#### System
+```
+GET  /api/version                    - API version
+GET  /api/health                     - Health check
 ```
 
 ### WebSocket
 
 ```
-WS   /ws                        - Real-time updates
+WS   /ws                             - Real-time updates & log streaming
 ```
 
 ## Development
@@ -254,12 +511,27 @@ WS   /ws                        - Real-time updates
 # Run all tests
 ./test/run-tests.ps1 -Type all
 
-# Unit tests only
-./test/run-tests.ps1 -Type unit
-
-# Integration tests only
+# Integration tests
 ./test/run-tests.ps1 -Type integration
+
+# UI tests
+./test/run-tests.ps1 -Type ui
+
+# Run specific test
+go test -v ./test/unit -run TestGenerateEmbedding
+go test -v ./test/integration -run TestEmbeddingAPI
 ```
+
+**Test Coverage:**
+- **Unit Tests** (`test/unit/`): Service-level logic testing with mocks
+  - Embedding service (9 tests)
+- **Integration Tests** (`test/integration/`): End-to-end API testing
+  - Embedding API (5 tests)
+  - App startup validation
+  - Collection workflows
+- **UI Tests** (`test/ui/`): Browser automation tests
+  - Jira workflows
+  - Confluence workflows
 
 ### Code Quality
 
@@ -291,11 +563,41 @@ QUAERO_LOG_LEVEL=info
 ```toml
 [server]
 host = "localhost"
-port = 8080
+port = 8085
+llama_dir = "./llama"
+
+[sources.confluence]
+enabled = true
+spaces = ["TEAM", "DOCS"]
+
+[sources.jira]
+enabled = true
+projects = ["DATA", "ENG"]
+
+[sources.github]
+enabled = false
+token = "${GITHUB_TOKEN}"
+repos = ["your-org/repo1"]
+
+[llm]
+mode = "offline"  # "offline", "cloud", or "mock"
+
+[llm.offline]
+model_dir = "./models"
+embed_model = "nomic-embed-text-v1.5.Q8_0.gguf"
+chat_model = "qwen2.5-7b-instruct-q4_k_m.gguf"
+context_size = 2048
+thread_count = 4
+gpu_layers = 0
+mock_mode = true  # Set to false to use actual models
+
+[llm.audit]
+enabled = true
+log_queries = false  # PII protection
 
 [logging]
-level = "info"
-format = "json"
+level = "debug"
+output = ["console", "file"]
 
 [storage]
 type = "sqlite"
@@ -341,25 +643,49 @@ netstat -an | grep 8080
 - [Remaining Requirements](docs/remaining-requirements.md) - Future work
 - [CLAUDE.md](CLAUDE.md) - Development standards
 
-## Current Limitations
+## Current Status
 
-- ✅ Confluence and Jira only (no GitHub, Slack, etc.)
-- ✅ No natural language query (coming soon)
-- ✅ No vector embeddings yet (planned)
-- ✅ Web UI only (no CLI collection commands)
-- ✅ Single-user only (no multi-user support)
+**✅ Working:**
+- Jira and Confluence collectors with event-driven architecture
+- Document storage with force sync support
+- Vector embeddings (mock mode) - 768-dimension
+- Embedding API endpoint for testing
+- Worker pool pattern for parallel processing
+- LLM audit logging and monitoring
+- Real-time WebSocket log streaming
+- Cron-based scheduler for automated workflows
+
+**⚠️ In Development:**
+- Offline LLM integration (llama.cpp models)
+- Vector search (sqlite-vec integration)
+- Natural language query interface
+- RAG pipeline
+
+**❌ Not Yet Implemented:**
+- GitHub collector
+- Cloud LLM mode (OpenAI/Anthropic APIs)
+- Multi-user support
+- Semantic search UI
 
 ## Roadmap
 
 See [docs/remaining-requirements.md](docs/remaining-requirements.md) for detailed roadmap.
 
-**Near Term:**
-- [ ] Vector embeddings (sqlite-vec)
+**Current Sprint:**
+- [x] Vector embeddings (mock mode working)
+- [x] Embedding API endpoint
+- [x] Unit and integration tests for embeddings
+- [ ] Offline LLM integration (llama-server)
+- [ ] sqlite-vec integration for vector search
+
+**Next Sprint:**
 - [ ] Natural language query interface
-- [ ] RAG pipeline integration
+- [ ] RAG pipeline with context retrieval
+- [ ] Semantic search UI
 
 **Future:**
 - [ ] GitHub collector
+- [ ] Cloud LLM mode (OpenAI, Anthropic)
 - [ ] Additional data sources (Slack, Linear)
 - [ ] Multi-user support
 - [ ] Cloud deployment option

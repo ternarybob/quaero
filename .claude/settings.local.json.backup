@@ -2,21 +2,19 @@
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": [
-      "Bash(pwsh.exe:*)"
-    ]
+      "Bash(./llama-cli.exe --help)"
+    ],
+    "deny": [],
+    "ask": []
   },
   "hooks": {
-    "UserPromptSubmit": [
+    "userPromptSubmit": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/remind-standards.js"
-          }
-        ]
+        "type": "command",
+        "command": "node .claude/hooks/remind-standards.js"
       }
     ],
-    "PreToolUse": [
+    "preToolUse": [
       {
         "matcher": "Write",
         "hooks": [

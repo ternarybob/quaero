@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/ternarybob/arbor"
@@ -151,7 +152,11 @@ func (s *Service) runScheduledTask() {
 	}
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
-	s.logger.Info().Msg(">>> SCHEDULER: Collection completed, starting embedding")
+	s.logger.Info().Msg(">>> SCHEDULER: Collection completed, waiting before embedding")
+
+	// Wait 10 seconds to allow collection writes to complete and reduce database contention
+	time.Sleep(10 * time.Second)
+	s.logger.Debug().Msg(">>> SCHEDULER: Step 7.5 - Delay complete, starting embedding")
 
 	// Step 3: Publish embedding event
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 8 - Creating embedding event")

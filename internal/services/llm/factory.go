@@ -30,7 +30,14 @@ func NewLLMService(
 	logger.Info().Str("mode", cfg.LLM.Mode).Msg("Initializing LLM service")
 
 	// Create audit logger from database and audit config
-	auditLogger := NewSQLiteAuditLogger(sqlDB, cfg.LLM.Audit.LogQueries, logger)
+	var auditLogger AuditLogger
+	if cfg.LLM.Audit.Enabled {
+		auditLogger = NewSQLiteAuditLogger(sqlDB, cfg.LLM.Audit.LogQueries, logger)
+		logger.Info().Msg("LLM audit logging enabled")
+	} else {
+		auditLogger = NewNullAuditLogger()
+		logger.Info().Msg("LLM audit logging disabled (using NullAuditLogger)")
+	}
 
 	// Create appropriate service based on mode
 	switch cfg.LLM.Mode {

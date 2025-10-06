@@ -163,21 +163,54 @@ func (s *ConfluenceScraperService) transformToDocument(page *models.ConfluencePa
 }
 
 // handleCollectionEvent processes collection triggered events
+// NOTE: This does NOT scrape/download data - scraping is user-driven
+// This event triggers processing of already-scraped data (pages → documents)
 func (s *ConfluenceScraperService) handleCollectionEvent(ctx context.Context, event interfaces.Event) error {
-	s.logger.Info().Msg(">>> CONFLUENCE SERVICE: Collection event received")
+	s.logger.Info().Msg(">>> CONFLUENCE SERVICE: Collection push event received")
 
-	// Run scraping in goroutine for async execution
-	go func() {
-		s.logger.Debug().Msg(">>> CONFLUENCE SERVICE: Starting data scrape")
+	// Run processing synchronously (not in goroutine) to prevent overlap with embedding
+	s.logger.Debug().Msg(">>> CONFLUENCE SERVICE: Starting collection push (pages → documents)")
 
-		err := s.ScrapeSpaces()
+	// Get all spaces from storage
+	spaces, err := s.confluenceStorage.GetAllSpaces(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg(">>> CONFLUENCE SERVICE: Failed to get spaces")
+		return err
+	}
+
+	if len(spaces) == 0 {
+		s.logger.Info().Msg(">>> CONFLUENCE SERVICE: No spaces found - nothing to process")
+		return nil
+	}
+
+	// Process pages for each space
+	totalPages := 0
+	totalDocuments := 0
+	for _, space := range spaces {
+		s.logger.Debug().
+			Str("space", space.Key).
+			Msg(">>> CONFLUENCE SERVICE: Processing space pages")
+
+		err := s.ProcessPagesForSpace(ctx, space.Key)
 		if err != nil {
-			s.logger.Error().Err(err).Msg(">>> CONFLUENCE SERVICE: Failed to scrape spaces")
-			return
+			s.logger.Error().
+				Err(err).
+				Str("space", space.Key).
+				Msg(">>> CONFLUENCE SERVICE: Failed to process space")
+			continue
 		}
 
-		s.logger.Info().Msg(">>> CONFLUENCE SERVICE: Data scrape completed successfully")
-	}()
+		// Get count for logging
+		count, _ := s.confluenceStorage.CountPagesBySpace(ctx, space.Key)
+		totalPages += count
+		totalDocuments += count
+	}
+
+	s.logger.Info().
+		Int("spaces", len(spaces)).
+		Int("pages", totalPages).
+		Int("documents", totalDocuments).
+		Msg(">>> CONFLUENCE SERVICE: Collection push completed successfully")
 
 	return nil
 }
@@ -209,7 +242,7 @@ func (s *ConfluenceScraperService) ProcessPagesForSpace(ctx context.Context, spa
 		documents = append(documents, doc)
 	}
 
-	// Save via DocumentService (which handles embedding)
+	// Save documents (embedding handled independently by coordinator)
 	if err := s.documentService.SaveDocuments(ctx, documents); err != nil {
 		return fmt.Errorf("failed to save documents: %w", err)
 	}

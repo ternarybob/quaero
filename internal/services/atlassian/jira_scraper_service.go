@@ -238,21 +238,54 @@ func (s *JiraScraperService) getStringField(m map[string]interface{}, field stri
 }
 
 // handleCollectionEvent processes collection triggered events
+// NOTE: This does NOT scrape/download data - scraping is user-driven
+// This event triggers processing of already-scraped data (issues → documents)
 func (s *JiraScraperService) handleCollectionEvent(ctx context.Context, event interfaces.Event) error {
-	s.logger.Info().Msg(">>> JIRA SERVICE: Collection event received")
+	s.logger.Info().Msg(">>> JIRA SERVICE: Collection push event received")
 
-	// Run scraping in goroutine for async execution
-	go func() {
-		s.logger.Debug().Msg(">>> JIRA SERVICE: Starting data scrape")
+	// Run processing synchronously (not in goroutine) to prevent overlap with embedding
+	s.logger.Debug().Msg(">>> JIRA SERVICE: Starting collection push (issues → documents)")
 
-		err := s.ScrapeProjects()
+	// Get all projects from storage
+	projects, err := s.jiraStorage.GetAllProjects(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg(">>> JIRA SERVICE: Failed to get projects")
+		return err
+	}
+
+	if len(projects) == 0 {
+		s.logger.Info().Msg(">>> JIRA SERVICE: No projects found - nothing to process")
+		return nil
+	}
+
+	// Process issues for each project
+	totalIssues := 0
+	totalDocuments := 0
+	for _, project := range projects {
+		s.logger.Debug().
+			Str("project", project.Key).
+			Msg(">>> JIRA SERVICE: Processing project issues")
+
+		err := s.ProcessIssuesForProject(ctx, project.Key)
 		if err != nil {
-			s.logger.Error().Err(err).Msg(">>> JIRA SERVICE: Failed to scrape projects")
-			return
+			s.logger.Error().
+				Err(err).
+				Str("project", project.Key).
+				Msg(">>> JIRA SERVICE: Failed to process project")
+			continue
 		}
 
-		s.logger.Info().Msg(">>> JIRA SERVICE: Data scrape completed successfully")
-	}()
+		// Get count for logging
+		count, _ := s.jiraStorage.CountIssuesByProject(ctx, project.Key)
+		totalIssues += count
+		totalDocuments += count
+	}
+
+	s.logger.Info().
+		Int("projects", len(projects)).
+		Int("issues", totalIssues).
+		Int("documents", totalDocuments).
+		Msg(">>> JIRA SERVICE: Collection push completed successfully")
 
 	return nil
 }
@@ -284,7 +317,7 @@ func (s *JiraScraperService) ProcessIssuesForProject(ctx context.Context, projec
 		documents = append(documents, doc)
 	}
 
-	// Save via DocumentService (which handles embedding)
+	// Save documents (embedding handled independently by coordinator)
 	if err := s.documentService.SaveDocuments(ctx, documents); err != nil {
 		return fmt.Errorf("failed to save documents: %w", err)
 	}

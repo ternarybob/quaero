@@ -143,27 +143,9 @@ func (s *JiraScraperService) storeProjects(projects []map[string]interface{}) er
 			continue
 		}
 
-		// Create document record for vectorization
-		doc := &models.Document{
-			Title:      name,
-			Content:    fmt.Sprintf("Jira Project: %s\nKey: %s\nIssues: %d", name, key, issueCount),
-			SourceType: "jira_project",
-			SourceID:   key,
-			URL:        fmt.Sprintf("/browse/%s", key),
-			Metadata: map[string]interface{}{
-				"project_key":  key,
-				"project_id":   id,
-				"issue_count":  issueCount,
-				"project_name": name,
-			},
-		}
-
-		if err := s.documentService.SaveDocument(ctx, doc); err != nil {
-			s.logger.Error().Err(err).Str("project", key).Msg("Failed to create document record")
-			continue
-		}
-
-		s.logger.Debug().Str("project", key).Msg("Created document record for project")
+		// NOTE: Projects are metadata only - actual searchable content comes from issues
+		// Issues contain project_key in metadata and are the source of truth for search
+		s.logger.Debug().Str("project", key).Msg("Stored project metadata (issues will be indexed separately)")
 		storedCount++
 	}
 
