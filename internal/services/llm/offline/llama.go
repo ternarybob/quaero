@@ -33,6 +33,7 @@ type llamaEmbeddingResponse struct {
 // NewOfflineLLMService creates a new offline LLM service instance
 // Returns error if llama-cli binary not found or models missing
 func NewOfflineLLMService(
+	llamaDir string,
 	modelDir string,
 	embedModel string,
 	chatModel string,
@@ -42,7 +43,7 @@ func NewOfflineLLMService(
 	logger arbor.ILogger,
 ) (*OfflineLLMService, error) {
 	// Find llama-cli binary
-	llamaCLIPath, err := findLlamaCLI(logger)
+	llamaCLIPath, err := findLlamaCLI(llamaDir, logger)
 	if err != nil {
 		return nil, fmt.Errorf("llama-cli binary not found: %w", err)
 	}
@@ -97,16 +98,25 @@ func NewMockOfflineLLMService(logger arbor.ILogger) *OfflineLLMService {
 	return service
 }
 
-// findLlamaCLI locates the llama-cli binary in standard locations
-func findLlamaCLI(logger arbor.ILogger) (string, error) {
-	// Check standard locations in order of preference
-	locations := []string{
+// findLlamaCLI locates the llama-cli binary in configured directory or standard locations
+func findLlamaCLI(llamaDir string, logger arbor.ILogger) (string, error) {
+	// Build search locations in order of preference
+	locations := []string{}
+
+	// 1. Configured llama directory (highest priority)
+	if llamaDir != "" {
+		locations = append(locations, llamaDir+"/llama-cli")
+		locations = append(locations, llamaDir+"/llama-cli.exe")
+	}
+
+	// 2. Legacy fallback locations (for backwards compatibility)
+	locations = append(locations,
 		"./bin/llama-cli",
 		"./bin/llama-cli.exe",
 		"./llama-cli",
 		"./llama-cli.exe",
 		"llama-cli", // Will search PATH
-	}
+	)
 
 	for _, location := range locations {
 		path, err := exec.LookPath(location)

@@ -20,8 +20,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int    `toml:"port"`
-	Host string `toml:"host"`
+	Port     int    `toml:"port"`
+	Host     string `toml:"host"`
+	LlamaDir string `toml:"llama_dir"` // Directory containing llama-cli binary
 }
 
 type SourcesConfig struct {
@@ -127,8 +128,9 @@ type LoggingConfig struct {
 func NewDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port: 8080,
-			Host: "localhost",
+			Port:     8080,
+			Host:     "localhost",
+			LlamaDir: "./llama",
 		},
 		Storage: StorageConfig{
 			Type: "sqlite",
@@ -222,6 +224,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if host := os.Getenv("QUAERO_SERVER_HOST"); host != "" {
 		config.Server.Host = host
+	}
+	if llamaDir := os.Getenv("QUAERO_SERVER_LLAMA_DIR"); llamaDir != "" {
+		config.Server.LlamaDir = llamaDir
 	}
 
 	// Storage configuration

@@ -9,10 +9,13 @@ import (
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
+	"github.com/ternarybob/quaero/internal/services/collection"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/embeddings"
+	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/processing"
+	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/storage"
 )
 
@@ -30,6 +33,12 @@ type App struct {
 	ProcessingService   *processing.Service
 	ProcessingScheduler *processing.Scheduler
 
+	// Event-driven services
+	EventService          interfaces.EventService
+	SchedulerService      interfaces.SchedulerService
+	CollectionCoordinator *collection.CoordinatorService
+	EmbeddingCoordinator  *embeddings.CoordinatorService
+
 	// Atlassian services
 	AuthService       *atlassian.AtlassianAuthService
 	JiraService       *atlassian.JiraScraperService
@@ -43,6 +52,7 @@ type App struct {
 	DataHandler      *handlers.DataHandler
 	CollectorHandler *handlers.CollectorHandler
 	DocumentHandler  *handlers.DocumentHandler
+	SchedulerHandler *handlers.SchedulerHandler
 }
 
 // New initializes the application with all dependencies
@@ -171,6 +181,40 @@ func (a *App) initServices() error {
 		}
 	}
 
+	// 9. Initialize event service
+	a.EventService = events.NewService(a.Logger)
+
+	// 10. Initialize collection coordinator
+	a.CollectionCoordinator = collection.NewCoordinatorService(
+		a.StorageManager.JiraStorage(),
+		a.StorageManager.ConfluenceStorage(),
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	if err := a.CollectionCoordinator.Start(); err != nil {
+		return fmt.Errorf("failed to start collection coordinator: %w", err)
+	}
+
+	// 11. Initialize embedding coordinator
+	a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
+		a.EmbeddingService,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	if err := a.EmbeddingCoordinator.Start(); err != nil {
+		return fmt.Errorf("failed to start embedding coordinator: %w", err)
+	}
+
+	// 12. Initialize scheduler service
+	a.SchedulerService = scheduler.NewService(a.EventService, a.Logger)
+	if err := a.SchedulerService.Start("*/1 * * * *"); err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
+	} else {
+		a.Logger.Info().Msg("Scheduler service started (runs every 1 minute)")
+	}
+
 	return nil
 }
 
@@ -196,6 +240,10 @@ func (a *App) initHandlers() error {
 		a.DocumentService,
 		a.ProcessingService,
 	)
+	a.SchedulerHandler = handlers.NewSchedulerHandler(
+		a.SchedulerService,
+		a.StorageManager.DocumentStorage(),
+	)
 
 	// Set UI logger for services
 	a.JiraService.SetUILogger(a.WSHandler)
@@ -209,9 +257,23 @@ func (a *App) initHandlers() error {
 
 // Close closes all application resources
 func (a *App) Close() error {
+	// Stop scheduler service
+	if a.SchedulerService != nil {
+		if err := a.SchedulerService.Stop(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to stop scheduler service")
+		}
+	}
+
 	// Stop processing scheduler
 	if a.ProcessingScheduler != nil {
 		a.ProcessingScheduler.Stop()
+	}
+
+	// Close event service
+	if a.EventService != nil {
+		if err := a.EventService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close event service")
+		}
 	}
 
 	// Close LLM service

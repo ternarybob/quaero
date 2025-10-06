@@ -25,6 +25,12 @@ type Document struct {
 	Metadata map[string]interface{} `json:"metadata"`
 	URL      string                 `json:"url"` // Link to original
 
+	// Sync tracking
+	LastSynced        *time.Time `json:"last_synced,omitempty"`         // When document was last synced from source
+	SourceVersion     string     `json:"source_version,omitempty"`      // Version/etag from source to detect changes
+	ForceSyncPending  bool       `json:"force_sync_pending,omitempty"`  // Flag for manual force sync
+	ForceEmbedPending bool       `json:"force_embed_pending,omitempty"` // Flag for re-vectorization
+
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

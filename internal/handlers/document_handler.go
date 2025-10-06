@@ -108,3 +108,23 @@ func (h *DocumentHandler) ProcessHandler(w http.ResponseWriter, r *http.Request)
 		"message": "Document processing started in background",
 	})
 }
+
+// ProcessingStatusHandler returns processing engine status
+func (h *DocumentHandler) ProcessingStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	status, err := h.processingService.GetStatus(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get processing status")
+		http.Error(w, "Failed to get processing status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}

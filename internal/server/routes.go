@@ -11,6 +11,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/jira", s.app.UIHandler.JiraPageHandler)
 	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler)
 	mux.HandleFunc("/documents", s.app.UIHandler.DocumentsPageHandler)
+	mux.HandleFunc("/embeddings", s.app.UIHandler.EmbeddingsPageHandler)
+	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/ui/status", s.app.UIHandler.StatusHandler)
@@ -52,6 +54,15 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/process", s.app.DocumentHandler.ProcessHandler)
+	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
+	mux.HandleFunc("/api/documents/force-embed", s.app.SchedulerHandler.ForceEmbedDocumentHandler)
+
+	// API routes - Processing
+	mux.HandleFunc("/api/processing/status", s.app.DocumentHandler.ProcessingStatusHandler)
+
+	// API routes - Scheduler
+	mux.HandleFunc("/api/scheduler/trigger-collection", s.app.SchedulerHandler.TriggerCollectionHandler)
+	mux.HandleFunc("/api/scheduler/trigger-embedding", s.app.SchedulerHandler.TriggerEmbeddingHandler)
 
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)

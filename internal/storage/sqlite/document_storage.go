@@ -43,11 +43,18 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		}
 	}
 
+	var lastSyncedUnix *int64
+	if doc.LastSynced != nil {
+		unix := doc.LastSynced.Unix()
+		lastSyncedUnix = &unix
+	}
+
 	query := `
 		INSERT INTO documents (
 			id, source_type, source_id, title, content, content_markdown,
-			embedding, embedding_model, metadata, url, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			embedding, embedding_model, metadata, url, created_at, updated_at,
+			last_synced, source_version, force_sync_pending, force_embed_pending
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content = excluded.content,
@@ -56,7 +63,11 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 			embedding_model = excluded.embedding_model,
 			metadata = excluded.metadata,
 			url = excluded.url,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			last_synced = excluded.last_synced,
+			source_version = excluded.source_version,
+			force_sync_pending = excluded.force_sync_pending,
+			force_embed_pending = excluded.force_embed_pending
 	`
 
 	_, err = d.db.db.Exec(query,
@@ -72,6 +83,10 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		doc.URL,
 		doc.CreatedAt.Unix(),
 		doc.UpdatedAt.Unix(),
+		lastSyncedUnix,
+		doc.SourceVersion,
+		doc.ForceSyncPending,
+		doc.ForceEmbedPending,
 	)
 
 	return err
@@ -88,8 +103,9 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO documents (
 			id, source_type, source_id, title, content, content_markdown,
-			embedding, embedding_model, metadata, url, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			embedding, embedding_model, metadata, url, created_at, updated_at,
+			last_synced, source_version, force_sync_pending, force_embed_pending
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content = excluded.content,
@@ -98,7 +114,11 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			embedding_model = excluded.embedding_model,
 			metadata = excluded.metadata,
 			url = excluded.url,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			last_synced = excluded.last_synced,
+			source_version = excluded.source_version,
+			force_sync_pending = excluded.force_sync_pending,
+			force_embed_pending = excluded.force_embed_pending
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -119,6 +139,12 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			}
 		}
 
+		var lastSyncedUnix *int64
+		if doc.LastSynced != nil {
+			unix := doc.LastSynced.Unix()
+			lastSyncedUnix = &unix
+		}
+
 		_, err = stmt.Exec(
 			doc.ID,
 			doc.SourceType,
@@ -132,6 +158,10 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			doc.URL,
 			doc.CreatedAt.Unix(),
 			doc.UpdatedAt.Unix(),
+			lastSyncedUnix,
+			doc.SourceVersion,
+			doc.ForceSyncPending,
+			doc.ForceEmbedPending,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to save document %s: %w", doc.ID, err)
@@ -145,7 +175,8 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
 		FROM documents
 		WHERE id = ?
 	`
@@ -158,7 +189,8 @@ func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 func (d *DocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
 		FROM documents
 		WHERE source_type = ? AND source_id = ?
 	`
@@ -273,7 +305,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		opts.Limit = 50
 	}
 
-	query := "SELECT id, source_type, source_id, title, content, content_markdown, embedding, embedding_model, metadata, url, created_at, updated_at FROM documents"
+	query := "SELECT id, source_type, source_id, title, content, content_markdown, embedding, embedding_model, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending, force_embed_pending FROM documents"
 
 	// Add WHERE clause if filtering by source
 	if opts.SourceType != "" {
@@ -299,7 +331,8 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 func (d *DocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
 		FROM documents
 		WHERE source_type = ?
 		ORDER BY updated_at DESC
@@ -454,6 +487,75 @@ func (d *DocumentStorage) ClearAll() error {
 	return err
 }
 
+// SetForceSyncPending sets the force sync pending flag for a document
+func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
+	_, err := d.db.db.Exec("UPDATE documents SET force_sync_pending = ? WHERE id = ?", pending, id)
+	return err
+}
+
+// SetForceEmbedPending sets the force embed pending flag for a document
+func (d *DocumentStorage) SetForceEmbedPending(id string, pending bool) error {
+	_, err := d.db.db.Exec("UPDATE documents SET force_embed_pending = ? WHERE id = ?", pending, id)
+	return err
+}
+
+// GetDocumentsForceSync gets documents with force sync pending
+func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
+	query := `
+		SELECT id, source_type, source_id, title, content, content_markdown,
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
+		FROM documents
+		WHERE force_sync_pending = 1
+	`
+
+	rows, err := d.db.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return d.scanDocuments(rows)
+}
+
+// GetDocumentsForceEmbed gets documents with force embed pending or not vectorized
+func (d *DocumentStorage) GetDocumentsForceEmbed() ([]*models.Document, error) {
+	query := `
+		SELECT id, source_type, source_id, title, content, content_markdown,
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
+		FROM documents
+		WHERE force_embed_pending = 1
+	`
+
+	rows, err := d.db.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return d.scanDocuments(rows)
+}
+
+// GetUnvectorizedDocuments gets documents that haven't been vectorized yet
+func (d *DocumentStorage) GetUnvectorizedDocuments() ([]*models.Document, error) {
+	query := `
+		SELECT id, source_type, source_id, title, content, content_markdown,
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
+		FROM documents
+		WHERE embedding IS NULL OR embedding = ''
+	`
+
+	rows, err := d.db.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return d.scanDocuments(rows)
+}
+
 // Helper functions
 
 func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
@@ -461,7 +563,9 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	var embeddingData []byte
 	var metadataJSON string
 	var createdAt, updatedAt int64
-	var contentMarkdown, embeddingModel, url sql.NullString
+	var lastSynced sql.NullInt64
+	var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
+	var forceSyncPending, forceEmbedPending sql.NullBool
 
 	err := row.Scan(
 		&doc.ID,
@@ -476,6 +580,10 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		&url,
 		&createdAt,
 		&updatedAt,
+		&lastSynced,
+		&sourceVersion,
+		&forceSyncPending,
+		&forceEmbedPending,
 	)
 	if err != nil {
 		return nil, err
@@ -490,6 +598,19 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	}
 	if url.Valid {
 		doc.URL = url.String
+	}
+	if sourceVersion.Valid {
+		doc.SourceVersion = sourceVersion.String
+	}
+	if forceSyncPending.Valid {
+		doc.ForceSyncPending = forceSyncPending.Bool
+	}
+	if forceEmbedPending.Valid {
+		doc.ForceEmbedPending = forceEmbedPending.Bool
+	}
+	if lastSynced.Valid {
+		t := time.Unix(lastSynced.Int64, 0)
+		doc.LastSynced = &t
 	}
 
 	// Deserialize embedding
@@ -521,7 +642,9 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 		var embeddingData []byte
 		var metadataJSON string
 		var createdAt, updatedAt int64
-		var contentMarkdown, embeddingModel, url sql.NullString
+		var lastSynced sql.NullInt64
+		var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
+		var forceSyncPending, forceEmbedPending sql.NullBool
 
 		err := rows.Scan(
 			&doc.ID,
@@ -536,6 +659,10 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			&url,
 			&createdAt,
 			&updatedAt,
+			&lastSynced,
+			&sourceVersion,
+			&forceSyncPending,
+			&forceEmbedPending,
 		)
 		if err != nil {
 			return nil, err
@@ -549,6 +676,19 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 		}
 		if url.Valid {
 			doc.URL = url.String
+		}
+		if sourceVersion.Valid {
+			doc.SourceVersion = sourceVersion.String
+		}
+		if forceSyncPending.Valid {
+			doc.ForceSyncPending = forceSyncPending.Bool
+		}
+		if forceEmbedPending.Valid {
+			doc.ForceEmbedPending = forceEmbedPending.Bool
+		}
+		if lastSynced.Valid {
+			t := time.Unix(lastSynced.Int64, 0)
+			doc.LastSynced = &t
 		}
 
 		if len(embeddingData) > 0 {

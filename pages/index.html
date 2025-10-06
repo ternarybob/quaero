@@ -10,23 +10,7 @@
 </head>
 
 <body>
-    <!-- Top Navbar -->
-    <nav class="navbar">
-        <a href="/" class="navbar-brand">
-            <span class="navbar-brand-title">QUAERO</span>
-            <span class="navbar-brand-subtitle">DATA COLLECTION SERVICE</span>
-        </a>
-        <div class="navbar-menu">
-            <a href="/" class="navbar-link active">HOME</a>
-            <a href="/jira" class="navbar-link">JIRA DATA</a>
-            <a href="/confluence" class="navbar-link">CONFLUENCE DATA</a>
-            <a href="/documents" class="navbar-link">DOCUMENTS</a>
-        </div>
-        <div class="navbar-status">
-            <div class="status-indicator"></div>
-            <span class="status-text">ONLINE</span>
-        </div>
-    </nav>
+    {{template "navbar" .}}
 
     <div class="main-container">
         <!-- Content Area (60%) -->
@@ -35,8 +19,8 @@
             <div class="hero-section">
                 <h1 class="hero-title">QUAERO</h1>
                 <p class="hero-subtitle">
-                    Automated Jira and Confluence data extraction using Chrome extension authentication.
-                    Industrial-grade scraping system with local BoltDB storage and real-time monitoring.
+                    Knowledge collection and semantic search system with vector embeddings and offline LLM support.
+                    Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.
                 </p>
             </div>
 
@@ -90,7 +74,6 @@
         <div class="right-panel">
             <!-- Service Status Monitor -->
             <div class="terminal-section">
-                <div class="terminal-header">Service Status Monitor</div>
                 <table class="status-table" id="service-status-table" hx-get="/ui/status" hx-trigger="load, every 60s" hx-swap="innerHTML">
                     <tr>
                         <td class="status-label">Parser Service</td>
@@ -119,9 +102,24 @@
     </div>
 
     <!-- Footer -->
-    <div class="system-footer" id="footer-version" hx-get="/api/version" hx-trigger="load" hx-swap="innerHTML">
+    <div class="system-footer" id="footer-version">
         Quaero // Version Loading...
     </div>
+
+    <script>
+        // Load and format version info
+        fetch('/api/version')
+            .then(response => response.json())
+            .then(data => {
+                const footerEl = document.getElementById('footer-version');
+                if (footerEl && data.version) {
+                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load version:', error);
+            });
+    </script>
 
     <script>
         let ws;

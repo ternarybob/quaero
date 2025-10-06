@@ -21,6 +21,7 @@ func (s *SQLiteDB) migrate() error {
 		{version: 2, name: "fts5_indexes", up: migrateV2},
 		{version: 3, name: "documents_table", up: migrateV3},
 		{version: 4, name: "llm_audit_log", up: migrateV4},
+		{version: 5, name: "document_sync_fields", up: migrateV5},
 	}
 
 	for _, m := range migrations {
@@ -332,6 +333,27 @@ func migrateV4(ctx context.Context, tx *sql.Tx) error {
 	indexQuery := `CREATE INDEX IF NOT EXISTS idx_llm_audit_timestamp ON llm_audit_log(timestamp DESC)`
 	if _, err := tx.ExecContext(ctx, indexQuery); err != nil {
 		return fmt.Errorf("failed to create llm_audit_log index: %w", err)
+	}
+
+	return nil
+}
+
+// migrateV5 adds sync tracking fields to documents table
+func migrateV5(ctx context.Context, tx *sql.Tx) error {
+	queries := []string{
+		`ALTER TABLE documents ADD COLUMN last_synced INTEGER`,
+		`ALTER TABLE documents ADD COLUMN source_version TEXT`,
+		`ALTER TABLE documents ADD COLUMN force_sync_pending INTEGER DEFAULT 0`,
+		`ALTER TABLE documents ADD COLUMN force_embed_pending INTEGER DEFAULT 0`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_force_sync ON documents(force_sync_pending) WHERE force_sync_pending = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_force_embed ON documents(force_embed_pending) WHERE force_embed_pending = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_last_synced ON documents(last_synced)`,
+	}
+
+	for _, query := range queries {
+		if _, err := tx.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("failed to execute query: %w\nQuery: %s", err, query)
+		}
 	}
 
 	return nil

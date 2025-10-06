@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Quaero</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/common.css">
+</head>
+<body>
+    {{template "navbar" .}}
+
+    <div class="main-container">
+        <!-- Content Area (60%) -->
+        <div class="content-area">
+            <!-- Hero Section -->
+            <div class="hero-section">
+                <h1 class="hero-title">Settings</h1>
+                <p class="hero-subtitle">
+                    System configuration and operational controls
+                </p>
+            </div>
+
+            <!-- Configuration Section -->
+            <div class="dashboard-grid">
+                <!-- Full Configuration Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">System Configuration (Read-Only)</div>
+                        <button class="menu-btn" onclick="loadConfig()">REFRESH</button>
+                    </div>
+                    <div style="padding: 20px;">
+                        <div class="table-container">
+                            <table class="config-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 30%;">Section</th>
+                                        <th style="width: 35%;">Setting</th>
+                                        <th style="width: 35%;">Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="config-table-body">
+                                    <tr>
+                                        <td colspan="3" style="text-align: center; padding: 20px; color: #6a6a6a;">
+                                            Loading configuration...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Danger Zone -->
+                <div class="card danger-zone-card">
+                    <div class="card-header">
+                        <div class="card-title" style="color: #cc0000;">⚠ Danger Zone</div>
+                    </div>
+                    <div style="padding: 20px;">
+                        <div class="danger-zone-section">
+                            <div>
+                                <div class="danger-zone-title">Remove All Embeddings</div>
+                                <div class="danger-zone-description">
+                                    Wipes all vector embeddings from the database. Documents will remain but need to be reprocessed.
+                                    Use when switching LLM modes or upgrading embedding models.
+                                </div>
+                            </div>
+                            <button class="btn-danger" onclick="confirmRemoveEmbeddings()">REMOVE ALL</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel (40%) - Service Logs -->
+        <div class="right-panel">
+            <div class="terminal-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
+                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
+                </div>
+                <div id="service-logs" class="service-logs-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="system-footer" id="footer-version">
+        Quaero // Version Loading...
+    </div>
+
+    <style>
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .config-item {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        .config-label {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-value {
+            font-family: monospace;
+            font-size: 13px;
+            color: #2c3e50;
+            font-weight: bold;
+        }
+
+        .stat-card {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-family: monospace;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .danger-zone-card {
+            border: 2px solid #ffebee;
+        }
+
+        .danger-zone-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .danger-zone-title {
+            font-family: monospace;
+            font-size: 14px;
+            font-weight: bold;
+            color: #cc0000;
+            margin-bottom: 8px;
+        }
+
+        .danger-zone-description {
+            font-family: monospace;
+            font-size: 12px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .btn-danger {
+            background: #cc0000;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-family: monospace;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .btn-danger:hover {
+            background: #aa0000;
+        }
+
+        .btn-danger:active {
+            background: #880000;
+        }
+
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .config-table thead {
+            background: #f5f5f5;
+        }
+
+        .config-table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: bold;
+            color: #2c3e50;
+            border-bottom: 2px solid #e0e0e0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+
+        .config-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f0f0f0;
+            color: #4a4a4a;
+        }
+
+        .config-table tbody tr:hover {
+            background: #fafafa;
+        }
+
+        .config-table .section-cell {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .config-table .value-cell {
+            color: #0066cc;
+            font-weight: 600;
+        }
+    </style>
+
+    <script>
+        let ws;
+        let reconnectInterval;
+        let displayedLogs = new Set();
+
+        // WebSocket connection
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                updateSystemStatus(true);
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'log') {
+                    handleLogMessage(message.payload);
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateSystemStatus(false);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket disconnected');
+                updateSystemStatus(false);
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(connectWebSocket, 3000);
+                }
+            };
+        }
+
+        function updateSystemStatus(online) {
+            const statusIndicator = document.querySelector('.status-indicator');
+            const statusText = document.querySelector('.status-text');
+
+            if (statusIndicator && statusText) {
+                if (online) {
+                    statusIndicator.style.background = '#00cc00';
+                    statusText.style.color = '#00cc00';
+                    statusText.textContent = 'ONLINE';
+                } else {
+                    statusIndicator.style.background = '#cc0000';
+                    statusText.style.color = '#cc0000';
+                    statusText.textContent = 'OFFLINE';
+                }
+            }
+        }
+
+        function handleLogMessage(logData) {
+            const logsContainer = document.getElementById('service-logs');
+            if (!logsContainer) return;
+
+            const logLine = `${logData.timestamp}|${logData.level}|${logData.message}`;
+            if (displayedLogs.has(logLine)) return;
+            displayedLogs.add(logLine);
+
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+
+            const timestamp = logData.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false });
+            const level = logData.level || 'info';
+            const message = logData.message || '';
+
+            let levelClass = 'log-level-info';
+            let levelText = 'INFO';
+            if (level.toLowerCase() === 'error') {
+                levelClass = 'log-level-error';
+                levelText = 'ERROR';
+            } else if (level.toLowerCase() === 'warn') {
+                levelClass = 'log-level-warn';
+                levelText = 'WARN';
+            } else if (level.toLowerCase() === 'debug') {
+                levelClass = 'log-level-debug';
+                levelText = 'DEBUG';
+            }
+
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="${levelClass}">[${levelText}]</span>
+                <span class="log-message">${escapeHtml(message)}</span>
+            `;
+
+            logsContainer.appendChild(logEntry);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+
+            while (logsContainer.children.length > 100) {
+                const removed = logsContainer.removeChild(logsContainer.firstChild);
+                displayedLogs.delete(removed.textContent);
+            }
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function clearServiceLogs() {
+            const logsContainer = document.getElementById('service-logs');
+            if (logsContainer) {
+                logsContainer.innerHTML = '';
+                displayedLogs.clear();
+            }
+        }
+
+        // Load system configuration (placeholder - needs backend endpoint)
+        async function loadConfig() {
+            // TODO: Implement /api/config endpoint
+            // Mock configuration data matching TOML structure
+            const config = {
+                server: {
+                    host: 'localhost',
+                    port: 8085,
+                    llama_dir: './llama'
+                },
+                'sources.confluence': {
+                    enabled: true,
+                    spaces: ['TEAM', 'DOCS']
+                },
+                'sources.jira': {
+                    enabled: true,
+                    projects: ['DATA', 'ENG']
+                },
+                llm: {
+                    mode: 'offline'
+                },
+                'llm.offline': {
+                    model_dir: './models',
+                    embed_model: 'nomic-embed-text-v1.5.Q8_0.gguf',
+                    chat_model: 'qwen2.5-7b-instruct-q4_k_m.gguf',
+                    context_size: 2048,
+                    thread_count: 4,
+                    gpu_layers: 0
+                },
+                'llm.audit': {
+                    enabled: true,
+                    log_queries: false
+                }
+            };
+
+            // Populate configuration table
+            const tbody = document.getElementById('config-table-body');
+            tbody.innerHTML = '';
+
+            for (const [section, values] of Object.entries(config)) {
+                if (typeof values === 'object' && !Array.isArray(values)) {
+                    let firstRow = true;
+                    for (const [key, value] of Object.entries(values)) {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td class="section-cell">${firstRow ? '[' + section + ']' : ''}</td>
+                            <td>${key}</td>
+                            <td class="value-cell">${Array.isArray(value) ? JSON.stringify(value) : value}</td>
+                        `;
+                        tbody.appendChild(row);
+                        firstRow = false;
+                    }
+                } else {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="section-cell">[${section}]</td>
+                        <td>-</td>
+                        <td class="value-cell">${values}</td>
+                    `;
+                    tbody.appendChild(row);
+                }
+            }
+
+        }
+
+        // Confirm and remove all embeddings
+        async function confirmRemoveEmbeddings() {
+            const confirmed = confirm(
+                '⚠ WARNING: This will remove ALL vector embeddings from the database.\n\n' +
+                'Documents will NOT be deleted but will need to be reprocessed.\n\n' +
+                'This operation cannot be undone. Continue?'
+            );
+
+            if (!confirmed) return;
+
+            const doubleConfirm = confirm(
+                'Are you ABSOLUTELY sure?\n\n' +
+                'Type YES in the next prompt to confirm.'
+            );
+
+            if (!doubleConfirm) return;
+
+            const finalConfirm = prompt('Type YES to confirm:');
+            if (finalConfirm !== 'YES') {
+                alert('Operation cancelled');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/embeddings', {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to remove embeddings');
+                }
+
+                const result = await response.json();
+                alert(`Success: ${result.message}\n\nDocuments affected: ${result.documents_affected}`);
+            } catch (error) {
+                console.error('Error removing embeddings:', error);
+                alert('Failed to remove embeddings: ' + error.message);
+            }
+        }
+
+        // Load and format version info
+        fetch('/api/version')
+            .then(response => response.json())
+            .then(data => {
+                const footerEl = document.getElementById('footer-version');
+                if (footerEl && data.version) {
+                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load version:', error);
+            });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+            loadConfig();
+        });
+    </script>
+</body>
+</html>

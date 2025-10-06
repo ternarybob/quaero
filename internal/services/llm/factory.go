@@ -73,6 +73,7 @@ func createOfflineService(
 
 	// Create offline service
 	service, err := offline.NewOfflineLLMService(
+		cfg.Server.LlamaDir,
 		cfg.LLM.Offline.ModelDir,
 		cfg.LLM.Offline.EmbedModel,
 		cfg.LLM.Offline.ChatModel,
@@ -82,7 +83,9 @@ func createOfflineService(
 		logger,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create offline LLM service: %w", err)
+		logger.Warn().Err(err).Msg("Failed to create offline LLM service, falling back to MOCK mode. Please install llama-cli for full functionality.")
+		mockService := offline.NewMockOfflineLLMService(logger)
+		return mockService, auditLogger, nil
 	}
 
 	return service, auditLogger, nil

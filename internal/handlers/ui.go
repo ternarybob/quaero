@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,14 +17,22 @@ type UIHandler struct {
 	staticDir         string
 	jiraScraper       interfaces.JiraScraper
 	confluenceScraper interfaces.ConfluenceScraper
+	templates         *template.Template
 }
 
 func NewUIHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper) *UIHandler {
+	staticDir := getStaticDir()
+
+	// Parse all HTML templates including partials
+	templates := template.Must(template.ParseGlob(filepath.Join(staticDir, "*.html")))
+	template.Must(templates.ParseGlob(filepath.Join(staticDir, "partials", "*.html")))
+
 	return &UIHandler{
 		logger:            common.GetLogger(),
-		staticDir:         getStaticDir(),
+		staticDir:         staticDir,
 		jiraScraper:       jira,
 		confluenceScraper: confluence,
+		templates:         templates,
 	}
 }
 
@@ -52,8 +61,14 @@ func (h *UIHandler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	indexPath := filepath.Join(h.staticDir, "index.html")
-	http.ServeFile(w, r, indexPath)
+	data := map[string]interface{}{
+		"Page": "home",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "index.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render index")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 // StatusHandler returns HTML for service status
@@ -117,20 +132,62 @@ func (h *UIHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) 
 
 // JiraPageHandler serves the Jira data page
 func (h *UIHandler) JiraPageHandler(w http.ResponseWriter, r *http.Request) {
-	jiraPath := filepath.Join(h.staticDir, "jira.html")
-	http.ServeFile(w, r, jiraPath)
+	data := map[string]interface{}{
+		"Page": "jira",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "jira.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render jira")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 // ConfluencePageHandler serves the Confluence data page
 func (h *UIHandler) ConfluencePageHandler(w http.ResponseWriter, r *http.Request) {
-	confluencePath := filepath.Join(h.staticDir, "confluence.html")
-	http.ServeFile(w, r, confluencePath)
+	data := map[string]interface{}{
+		"Page": "confluence",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "confluence.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render confluence")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 // DocumentsPageHandler serves the Documents page
 func (h *UIHandler) DocumentsPageHandler(w http.ResponseWriter, r *http.Request) {
-	documentsPath := filepath.Join(h.staticDir, "documents.html")
-	http.ServeFile(w, r, documentsPath)
+	data := map[string]interface{}{
+		"Page": "documents",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "documents.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render documents")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// SettingsPageHandler serves the Settings page
+func (h *UIHandler) SettingsPageHandler(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Page": "settings",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "settings.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render settings")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// EmbeddingsPageHandler serves the Embeddings page
+func (h *UIHandler) EmbeddingsPageHandler(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Page": "embeddings",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "embeddings.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render embeddings")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 // StaticFileHandler serves static files (CSS, favicon) from the pages/static directory

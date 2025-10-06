@@ -11,23 +11,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 </head>
 <body>
-    <!-- Top Navbar -->
-    <nav class="navbar">
-        <a href="/" class="navbar-brand">
-            <div class="navbar-brand-title">QUAERO</div>
-            <div class="navbar-brand-subtitle">DATA COLLECTION SERVICE</div>
-        </a>
-        <div class="navbar-menu">
-            <a href="/" class="navbar-link">HOME</a>
-            <a href="/jira" class="navbar-link">JIRA DATA</a>
-            <a href="/confluence" class="navbar-link">CONFLUENCE DATA</a>
-            <a href="/documents" class="navbar-link active">DOCUMENTS</a>
-        </div>
-        <div class="navbar-status">
-            <div class="status-indicator"></div>
-            <span class="status-text">ONLINE</span>
-        </div>
-    </nav>
+    {{template "navbar" .}}
 
     <div class="main-container">
         <!-- Content Area (60%) -->
@@ -45,14 +29,9 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">Document Statistics</div>
-                        <div class="action-buttons-header">
-                            <button id="refresh-stats-btn" class="menu-btn" onclick="loadStats()">
-                                REFRESH
-                            </button>
-                            <button id="process-all-btn" class="menu-btn" onclick="processAll()">
-                                PROCESS ALL
-                            </button>
-                        </div>
+                        <button id="refresh-stats-btn" class="menu-btn" onclick="loadStats()">
+                            REFRESH
+                        </button>
                     </div>
 
                     <!-- Stats Grid -->
@@ -113,11 +92,12 @@
                                     <th>Title</th>
                                     <th style="width: 100px;">Vectorized</th>
                                     <th style="width: 150px;">Updated</th>
+                                    <th style="width: 180px;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
                                 <tr>
-                                    <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                                    <td colspan="6" style="text-align: center; padding: 15px; color: #6a6a6a;">
                                         Loading documents...
                                     </td>
                                 </tr>
@@ -132,7 +112,7 @@
                         <div class="card-title">Document Detail</div>
                         <span id="selected-document-id" class="selection-count"></span>
                     </div>
-                    <pre id="document-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 500px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+                    <pre id="document-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
                 </div>
             </div>
         </div>
@@ -150,9 +130,24 @@
     </div>
 
     <!-- Footer -->
-    <div class="system-footer">
-        Quaero // Document Management
+    <div class="system-footer" id="footer-version">
+        Quaero // Version Loading...
     </div>
+
+    <script>
+        // Load and format version info
+        fetch('/api/version')
+            .then(response => response.json())
+            .then(data => {
+                const footerEl = document.getElementById('footer-version');
+                if (footerEl && data.version) {
+                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load version:', error);
+            });
+    </script>
 
     <style>
         .filter-select {
@@ -186,6 +181,29 @@
             font-size: 24px;
             font-weight: bold;
             color: #2c3e50;
+        }
+
+        .action-btn {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #0052a3;
+        }
+
+        .action-btn-danger {
+            background: #cc0000;
+        }
+
+        .action-btn-danger:hover {
+            background: #aa0000;
         }
     </style>
 
@@ -361,7 +379,7 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: #ff4444;">
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #ff4444;">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
@@ -408,7 +426,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                        <td colspan="6" style="text-align: center; padding: 15px; color: #6a6a6a;">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -425,14 +443,19 @@
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
 
                 return `
-                    <tr onclick="selectDocument(${index})"
-                        style="cursor: pointer; background-color: ${isSelected ? '#e3f2fd' : 'transparent'};"
+                    <tr style="background-color: ${isSelected ? '#e3f2fd' : 'transparent'};"
                         class="${isSelected ? 'selected-document' : ''}">
-                        <td>${doc.sourceType || 'N/A'}</td>
-                        <td>${doc.sourceID || 'N/A'}</td>
-                        <td>${doc.title || 'Untitled'}</td>
-                        <td style="text-align: center; color: ${vectorizedColor}; font-weight: bold;">${vectorizedIcon}</td>
-                        <td>${updatedDate}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.sourceType || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.sourceID || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
+                        <td onclick="selectDocument(${index})" style="text-align: center; color: ${vectorizedColor}; font-weight: bold; cursor: pointer;">${vectorizedIcon}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
+                        <td style="padding: 8px;">
+                            <div style="display: flex; gap: 5px; justify-content: center;">
+                                <button class="action-btn" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">↻</button>
+                                <button class="action-btn action-btn-danger" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">✗</button>
+                            </div>
+                        </td>
                     </tr>
                 `;
             }).join('');
@@ -499,6 +522,77 @@
             }
         }
 
+        // Load processing engine status
+        async function loadProcessingStatus() {
+            try {
+                const response = await fetch('/api/processing/status');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch processing status');
+                }
+
+                const status = await response.json();
+                document.getElementById('engine-status').textContent = status.engine_status || 'UNKNOWN';
+                document.getElementById('pending-count').textContent = status.pending_count || 0;
+                document.getElementById('processed-count').textContent = status.processed_count || 0;
+                document.getElementById('failed-count').textContent = status.failed_count || 0;
+            } catch (error) {
+                console.error('Error loading processing status:', error);
+                document.getElementById('engine-status').textContent = 'ERROR';
+            }
+        }
+
+        // Reprocess a single document
+        async function reprocessDocument(docId) {
+            if (!confirm(`Reprocess document ${docId}?\n\nThis will queue the document for re-vectorization.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/documents/${docId}/reprocess`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to reprocess document');
+                }
+
+                alert('Document queued for reprocessing');
+                setTimeout(() => {
+                    loadProcessingStatus();
+                    loadDocuments();
+                }, 1000);
+            } catch (error) {
+                console.error('Error reprocessing document:', error);
+                alert('Failed to reprocess document: ' + error.message);
+            }
+        }
+
+        // Clear embedding for a single document
+        async function clearEmbedding(docId) {
+            if (!confirm(`Clear embedding for document ${docId}?\n\nThe document will need to be reprocessed.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/documents/${docId}/embedding`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to clear embedding');
+                }
+
+                alert('Embedding cleared successfully');
+                setTimeout(() => {
+                    loadProcessingStatus();
+                    loadDocuments();
+                }, 1000);
+            } catch (error) {
+                console.error('Error clearing embedding:', error);
+                alert('Failed to clear embedding: ' + error.message);
+            }
+        }
+
         // Search box event listener
         document.getElementById('search-box').addEventListener('input', filterDocuments);
 
@@ -507,6 +601,7 @@
             connectWebSocket();
             loadStats();
             loadDocuments();
+            loadProcessingStatus();
         });
     </script>
 </body>

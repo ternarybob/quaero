@@ -96,6 +96,13 @@ type DocumentStorage interface {
 	GetChunks(documentID string) ([]*models.DocumentChunk, error)
 	DeleteChunks(documentID string) error
 
+	// Force sync/embed operations
+	SetForceSyncPending(id string, pending bool) error
+	SetForceEmbedPending(id string, pending bool) error
+	GetDocumentsForceSync() ([]*models.Document, error)
+	GetDocumentsForceEmbed() ([]*models.Document, error)
+	GetUnvectorizedDocuments() ([]*models.Document, error)
+
 	// Bulk operations
 	ClearAll() error
 }

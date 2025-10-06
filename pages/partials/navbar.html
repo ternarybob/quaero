@@ -1,3 +1,4 @@
+{{define "navbar"}}
 <nav class="navbar">
     <a href="/" class="navbar-brand">
         <div class="navbar-brand-title">QUAERO</div>
@@ -7,9 +8,13 @@
         <a href="/" class="navbar-link{{if eq .Page "home"}} active{{end}}">HOME</a>
         <a href="/jira" class="navbar-link{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
         <a href="/confluence" class="navbar-link{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
+        <a href="/documents" class="navbar-link{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
+        <a href="/embeddings" class="navbar-link{{if eq .Page "embeddings"}} active{{end}}">EMBEDDINGS</a>
+        <a href="/settings" class="navbar-link{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
     </div>
     <div class="navbar-status">
         <div class="status-indicator"></div>
         <span class="status-text">ONLINE</span>
     </div>
 </nav>
+{{end}}

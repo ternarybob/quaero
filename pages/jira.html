@@ -11,23 +11,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 </head>
 <body>
-    <!-- Top Navbar -->
-    <nav class="navbar">
-        <a href="/" class="navbar-brand">
-            <div class="navbar-brand-title">QUAERO</div>
-            <div class="navbar-brand-subtitle">DATA COLLECTION SERVICE</div>
-        </a>
-        <div class="navbar-menu">
-            <a href="/" class="navbar-link">HOME</a>
-            <a href="/jira" class="navbar-link active">JIRA DATA</a>
-            <a href="/confluence" class="navbar-link">CONFLUENCE DATA</a>
-            <a href="/documents" class="navbar-link">DOCUMENTS</a>
-        </div>
-        <div class="navbar-status">
-            <div class="status-indicator"></div>
-            <span class="status-text">ONLINE</span>
-        </div>
-    </nav>
+    {{template "navbar" .}}
 
     <div class="main-container">
         <!-- Content Area (60%) -->
@@ -75,7 +59,7 @@
 
                     <!-- Project List -->
                     <div id="project-list" class="project-list-container">
-                        <div style="text-align: center; padding: 40px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
+                        <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
                             Loading projects...
                         </div>
                     </div>
@@ -105,7 +89,7 @@
                             </thead>
                             <tbody id="issues-table-body">
                                 <tr>
-                                    <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                                    <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
                                         No issues loaded. Select projects and click "GET ISSUES".
                                     </td>
                                 </tr>
@@ -120,7 +104,7 @@
                         <div class="card-title">Issue Detail</div>
                         <span id="selected-issue-key" class="selection-count"></span>
                     </div>
-                    <pre id="issue-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 500px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+                    <pre id="issue-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
                 </div>
             </div>
         </div>
@@ -138,9 +122,24 @@
     </div>
 
     <!-- Footer -->
-    <div class="system-footer">
-        Quaero // Jira Project Management
+    <div class="system-footer" id="footer-version">
+        Quaero // Version Loading...
     </div>
+
+    <script>
+        // Load and format version info
+        fetch('/api/version')
+            .then(response => response.json())
+            .then(data => {
+                const footerEl = document.getElementById('footer-version');
+                if (footerEl && data.version) {
+                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to load version:', error);
+            });
+    </script>
 
     <script>
         // State management
@@ -377,7 +376,7 @@
                     ? 'No projects in cache. Click "SYNC PROJECTS" to load from Jira.'
                     : 'No projects match your search criteria.';
                 container.innerHTML = `
-                    <div style="text-align: center; padding: 40px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
+                    <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
                         ${message}
                     </div>
                 `;
@@ -577,7 +576,7 @@
                     const tbody = document.getElementById('issues-table-body');
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                            <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
                                 No issues loaded. Select projects and click "GET ISSUES".
                             </td>
                         </tr>
@@ -614,7 +613,7 @@
             // Show loading message in table
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                    <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
                         <div style="display: inline-block; margin-right: 10px; width: 16px; height: 16px; border: 2px solid #f3f3f3; border-top: 2px solid #2980b9; border-radius: 50%; animation: spin 1s linear infinite;"></div>
                         Loading issues...
                     </td>
@@ -649,7 +648,7 @@
                 issuesLoader.style.display = 'none';
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: #ff4444;">
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #ff4444;">
                             Failed to fetch issues. Please try again.
                         </td>
                     </tr>
@@ -736,7 +735,7 @@
             if (selectedProjects.size === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
                             No issues loaded. Select projects and click "GET ISSUES".
                         </td>
                     </tr>
@@ -784,7 +783,7 @@
                 console.log('Showing empty state');
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" style="text-align: center; padding: 40px; color: #6a6a6a;">
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
                             No issues found for selected projects. Click "GET ISSUES" to fetch from server.
                         </td>
                     </tr>

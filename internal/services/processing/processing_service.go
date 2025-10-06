@@ -15,6 +15,9 @@ type Service struct {
 	jiraStorage       interfaces.JiraStorage
 	confluenceStorage interfaces.ConfluenceStorage
 	logger            arbor.ILogger
+	isRunning         bool
+	lastRunTime       *time.Time
+	lastRunError      error
 }
 
 // NewService creates a new processing service
@@ -48,8 +51,60 @@ type ProcessingStats struct {
 	Errors           []string
 }
 
+// ProcessingStatus represents the current state of the processing engine
+type ProcessingStatus struct {
+	IsRunning        bool       `json:"is_running"`
+	LastRunTime      *time.Time `json:"last_run_time"`
+	LastRunError     string     `json:"last_run_error,omitempty"`
+	EngineStatus     string     `json:"engine_status"`
+	TotalDocuments   int        `json:"total_documents"`
+	ProcessedCount   int        `json:"processed_count"`
+	PendingCount     int        `json:"pending_count"`
+	FailedCount      int        `json:"failed_count"`
+	LastRunTimestamp string     `json:"last_run_timestamp,omitempty"`
+}
+
+// GetStatus returns the current processing engine status
+func (s *Service) GetStatus(ctx context.Context) (*ProcessingStatus, error) {
+	status := &ProcessingStatus{
+		IsRunning: s.isRunning,
+	}
+
+	if s.isRunning {
+		status.EngineStatus = "RUNNING"
+	} else {
+		status.EngineStatus = "IDLE"
+	}
+
+	if s.lastRunTime != nil {
+		status.LastRunTime = s.lastRunTime
+		status.LastRunTimestamp = s.lastRunTime.Format(time.RFC3339)
+	}
+
+	if s.lastRunError != nil {
+		status.LastRunError = s.lastRunError.Error()
+	}
+
+	stats, err := s.documentService.GetStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document stats: %w", err)
+	}
+
+	status.TotalDocuments = stats.TotalDocuments
+	status.ProcessedCount = stats.VectorizedCount
+	status.PendingCount = stats.PendingVectorize
+	status.FailedCount = 0
+
+	return status, nil
+}
+
 // ProcessAll extracts and vectorizes documents from all sources
 func (s *Service) ProcessAll(ctx context.Context) (*ProcessingStats, error) {
+	s.isRunning = true
+	defer func() {
+		s.isRunning = false
+	}()
+
 	stats := &ProcessingStats{
 		StartTime: time.Now(),
 		Errors:    make([]string, 0),
@@ -81,6 +136,15 @@ func (s *Service) ProcessAll(ctx context.Context) (*ProcessingStats, error) {
 
 	stats.EndTime = time.Now()
 	stats.Duration = stats.EndTime.Sub(stats.StartTime)
+
+	now := time.Now()
+	s.lastRunTime = &now
+
+	if len(stats.Errors) > 0 {
+		s.lastRunError = fmt.Errorf("processing completed with %d errors", stats.TotalErrors)
+	} else {
+		s.lastRunError = nil
+	}
 
 	s.logger.Info().
 		Int("total_processed", stats.TotalProcessed).
