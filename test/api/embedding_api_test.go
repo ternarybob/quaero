@@ -22,7 +22,7 @@ func TestEmbeddingAPI_GenerateEmbedding(t *testing.T) {
 	t.Log("=== Testing Embedding API - Generate Embedding ===")
 
 	// Step 1: Initialize application
-	configPath := filepath.Join("..", "..", "bin", "quaero-test.toml")
+	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
 	t.Logf("✓ Configuration loaded from: %s", configPath)
@@ -75,7 +75,7 @@ func TestEmbeddingAPI_EmptyText(t *testing.T) {
 	t.Log("=== Testing Embedding API - Empty Text ===")
 
 	// Step 1: Initialize application
-	configPath := filepath.Join("..", "..", "bin", "quaero-test.toml")
+	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
 
@@ -122,7 +122,7 @@ func TestEmbeddingAPI_InvalidMethod(t *testing.T) {
 	t.Log("=== Testing Embedding API - Invalid Method ===")
 
 	// Step 1: Initialize application
-	configPath := filepath.Join("..", "..", "bin", "quaero-test.toml")
+	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
 
@@ -151,7 +151,7 @@ func TestEmbeddingAPI_InvalidJSON(t *testing.T) {
 	t.Log("=== Testing Embedding API - Invalid JSON ===")
 
 	// Step 1: Initialize application
-	configPath := filepath.Join("..", "..", "bin", "quaero-test.toml")
+	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
 
@@ -191,7 +191,7 @@ func TestEmbeddingAPI_LongText(t *testing.T) {
 	t.Log("=== Testing Embedding API - Long Text ===")
 
 	// Step 1: Initialize application
-	configPath := filepath.Join("..", "..", "bin", "quaero-test.toml")
+	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
 

@@ -8,133 +8,35 @@
     <!-- Beer CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
     <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
 
     <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <!-- Quaero Theme -->
+    <link rel="stylesheet" href="/static/common.css">
 
     <style>
-        /* Quaero Brand Colors Only */
-        :root {
-            --brand-green: #00cc00;
-            --brand-dark: #1a1a1a;
-        }
-
-        /* Monospace font for technical content */
-        body {
-            font-family: 'Courier New', Consolas, Monaco, monospace;
-        }
-
-        /* Brand color overrides */
-        .primary, button.primary {
-            background-color: var(--brand-dark) !important;
-            color: white !important;
-            border: 1px solid white !important;
-        }
-
-        .secondary {
-            background-color: var(--brand-green) !important;
-        }
-
-        .success {
-            background-color: var(--brand-green) !important;
-        }
-
-        a.active {
-            border-bottom: 2px solid var(--brand-green);
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            background: var(--brand-green);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Global fixes for layout issues */
-
-        /* Compact navbar spacing */
-        nav.top {
-            padding: 0 40px;
-            height: 70px;
-        }
-
-        nav.top .row {
-            gap: 20px;
-            align-items: center;
-        }
-
-        /* Navbar brand styling */
+        /* Force navbar title styling */
         nav.top a:first-child {
-            display: flex;
-            flex-direction: column;
-            text-decoration: none;
-            font-size: 14px;
-            letter-spacing: 3px;
-        }
-
-        nav.top a:first-child small {
-            font-size: 11px;
-            letter-spacing: 1px;
-            opacity: 0.7;
-        }
-
-        /* Navbar links */
-        nav.top a {
-            font-size: 13px;
-            letter-spacing: 1.5px;
-        }
-
-        /* Horizontal action buttons in table */
-        td button {
-            display: inline-flex;
-            margin: 0 4px;
-        }
-
-        /* Compact buttons in table */
-        button.small-round {
-            width: 32px;
-            height: 32px;
-            min-width: 32px;
-            padding: 0;
-        }
-
-        /* Smaller table font and tighter spacing */
-        table {
-            font-size: 11px;
-        }
-
-        table td,
-        table th {
-            padding: 8px 12px;
-            font-size: 11px;
-        }
-
-        /* Keep action buttons on one line and center them */
-        td.no-wrap {
-            white-space: nowrap;
-            text-align: center;
-        }
-
-        /* Compact main content */
-        main.responsive {
-            padding: 20px 40px;
-        }
-
-        /* Reduce card spacing */
-        article {
-            margin-bottom: 20px;
+            display: flex !important;
+            flex-direction: column !important;
         }
     </style>
+    
+    <script>
+        // Ensure navbar styling is applied after BeerCSS loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const navTitle = document.querySelector('nav.top a:first-child');
+            if (navTitle) {
+                navTitle.style.display = 'flex';
+                navTitle.style.flexDirection = 'column';
+            }
+        });
+    </script>
 </head>
-<body>
+<body class="light">
     {{template "navbar" .}}
     {{template "snackbar" .}}
 
@@ -145,6 +47,8 @@
             <h3>Document Management</h3>
             <p>Normalized documents with vector embeddings for semantic search</p>
         </header>
+        
+        {{template "service-status" .}}
 
         <!-- Document Statistics -->
         <article class="border">
@@ -259,159 +163,15 @@
         </article>
     </main>
 
-    <!-- Right Panel - Service Logs -->
-    <div class="log-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
-            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
-                <i>delete</i>
-            </button>
-        </div>
-        <div id="service-logs"></div>
-    </div>
+    {{template "service-logs" .}}
 
-    <!-- Footer -->
-    <footer class="center-align small-padding">
-        <small id="footer-version">Quaero // Version Loading...</small>
-    </footer>
+    {{template "footer" .}}
 
     <script>
-        // Load and format version info
-        fetch('/api/version')
-            .then(response => response.json())
-            .then(data => {
-                const footerEl = document.getElementById('footer-version');
-                if (footerEl && data.version) {
-                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
-                }
-            })
-            .catch(error => {
-                console.error('Failed to load version:', error);
-            });
-
         // State management
         let allDocuments = [];
         let filteredDocuments = [];
         let selectedDocument = null;
-        let ws;
-        let reconnectInterval;
-        let displayedLogs = new Set();
-
-        // WebSocket connection
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = function() {
-                console.log('WebSocket connected');
-                updateSystemStatus(true);
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
-                }
-            };
-
-            ws.onmessage = function(event) {
-                const message = JSON.parse(event.data);
-                if (message.type === 'log') {
-                    handleLogMessage(message.payload);
-                }
-            };
-
-            ws.onerror = function(error) {
-                console.error('WebSocket error:', error);
-                updateSystemStatus(false);
-            };
-
-            ws.onclose = function() {
-                console.log('WebSocket disconnected');
-                updateSystemStatus(false);
-                if (!reconnectInterval) {
-                    reconnectInterval = setInterval(connectWebSocket, 3000);
-                }
-            };
-        }
-
-        function updateSystemStatus(online) {
-            const statusIndicator = document.querySelector('.status-indicator');
-            const statusText = document.querySelector('.status-text');
-
-            if (online) {
-                statusIndicator.style.background = '#00cc00';
-                statusText.style.color = '#00cc00';
-                statusText.textContent = 'ONLINE';
-            } else {
-                statusIndicator.style.background = '#cc0000';
-                statusText.style.color = '#cc0000';
-                statusText.textContent = 'OFFLINE';
-            }
-        }
-
-        function handleLogMessage(logData) {
-            const logsContainer = document.getElementById('service-logs');
-            if (!logsContainer) return;
-
-            const logLine = `${logData.timestamp}|${logData.level}|${logData.message}`;
-
-            if (displayedLogs.has(logLine)) return;
-            displayedLogs.add(logLine);
-
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-
-            const timestamp = logData.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false });
-            const level = logData.level || 'info';
-            const message = logData.message || '';
-
-            let levelClass = 'log-level-info';
-            let levelText = 'INFO';
-            if (level.toLowerCase() === 'error') {
-                levelClass = 'log-level-error';
-                levelText = 'ERROR';
-            } else if (level.toLowerCase() === 'warn') {
-                levelClass = 'log-level-warn';
-                levelText = 'WARN';
-            } else if (level.toLowerCase() === 'debug') {
-                levelClass = 'log-level-debug';
-                levelText = 'DEBUG';
-            }
-
-            logEntry.innerHTML = `
-                <span class="log-timestamp">[${timestamp}]</span>
-                <span class="${levelClass}">[${levelText}]</span>
-                <span class="log-message">${escapeHtml(message)}</span>
-            `;
-
-            logsContainer.appendChild(logEntry);
-            logsContainer.scrollTop = logsContainer.scrollHeight;
-
-            // Limit to last 100 entries
-            while (logsContainer.children.length > 100) {
-                const removed = logsContainer.removeChild(logsContainer.firstChild);
-                displayedLogs.delete(removed.textContent);
-            }
-        }
-
-        function escapeHtml(text) {
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return text.replace(/[&<>"']/g, m => map[m]);
-        }
-
-        function clearServiceLogs() {
-            const logsContainer = document.getElementById('service-logs');
-            if (logsContainer) {
-                logsContainer.innerHTML = '';
-                displayedLogs.clear();
-            }
-        }
 
         // Load document statistics
         async function loadStats() {
@@ -625,7 +385,6 @@
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
-            connectWebSocket();
             loadStats();
             loadDocuments();
         });

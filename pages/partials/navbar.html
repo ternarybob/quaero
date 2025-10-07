@@ -1,28 +1,34 @@
 {{define "navbar"}}
 <nav class="top">
-    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 40px;">
+
+    <div class="row">
+
         <!-- Left: Site Title -->
-        <div style="flex: 0 0 auto;">
+        <div class="min center-align">
             <a href="/">
                 <div>QUAERO</div>
                 <small>DATA COLLECTION SERVICE</small>
             </a>
         </div>
 
+        <div class="max"></div>
+
         <!-- Center: Main Menu -->
-        <div style="flex: 0 0 auto;">
+        <div class="min center-align">
             <div class="row">
-                <a href="/" class="min{{if eq .Page "home"}} active{{end}}">HOME</a>
-                <a href="/jira" class="min{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
-                <a href="/confluence" class="min{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
-                <a href="/documents" class="min{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
-                <a href="/chat" class="min{{if eq .Page "chat"}} active{{end}}">CHAT</a>
-                <a href="/settings" class="min{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
+                <a href="/" class="min{{if eq .Page " home"}} active{{end}}">HOME</a>
+                <a href="/jira" class="min{{if eq .Page " jira"}} active{{end}}">JIRA DATA</a>
+                <a href="/confluence" class="min{{if eq .Page " confluence"}} active{{end}}">CONFLUENCE DATA</a>
+                <a href="/documents" class="min{{if eq .Page " documents"}} active{{end}}">DOCUMENTS</a>
+                <a href="/chat" class="min{{if eq .Page " chat"}} active{{end}}">CHAT</a>
+                <a href="/settings" class="min{{if eq .Page " settings"}} active{{end}}">SETTINGS</a>
             </div>
         </div>
 
+        <div class="max"></div>
+
         <!-- Right: Status -->
-        <div style="flex: 0 0 auto;">
+        <div class="min">
             <div class="row">
                 <div class="status-indicator"></div>
                 <span class="small status-text">ONLINE</span>
@@ -30,4 +36,67 @@
         </div>
     </div>
 </nav>
+
+<script>
+    // Navbar status indicator WebSocket connection
+    let navbarWs;
+    let navbarReconnectInterval;
+
+    function connectNavbarWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+        navbarWs = new WebSocket(wsUrl);
+
+        navbarWs.onopen = function () {
+            console.log('Navbar WebSocket connected');
+            updateNavbarStatus(true);
+            if (navbarReconnectInterval) {
+                clearInterval(navbarReconnectInterval);
+                navbarReconnectInterval = null;
+            }
+        };
+
+        navbarWs.onmessage = function (event) {
+            const message = JSON.parse(event.data);
+            // Navbar only cares about system status, not specific data
+            // Log messages are handled by service-logs template
+        };
+
+        navbarWs.onerror = function (error) {
+            console.error('Navbar WebSocket error:', error);
+            updateNavbarStatus(false);
+        };
+
+        navbarWs.onclose = function () {
+            console.log('Navbar WebSocket disconnected');
+            updateNavbarStatus(false);
+            if (!navbarReconnectInterval) {
+                navbarReconnectInterval = setInterval(connectNavbarWebSocket, 3000);
+            }
+        };
+    }
+
+    function updateNavbarStatus(online) {
+        const statusIndicator = document.querySelector('.status-indicator');
+        const statusText = document.querySelector('.status-text');
+
+        if (statusIndicator && statusText) {
+            if (online) {
+                statusIndicator.style.background = '#00cc00';
+                statusText.style.color = '#00cc00';
+                statusText.textContent = 'ONLINE';
+            } else {
+                statusIndicator.style.background = '#cc0000';
+                statusText.style.color = '#cc0000';
+                statusText.textContent = 'OFFLINE';
+            }
+        }
+    }
+
+    // Connect navbar WebSocket when DOM is ready
+    document.addEventListener('DOMContentLoaded', function () {
+        connectNavbarWebSocket();
+    });
+</script>
 {{end}}

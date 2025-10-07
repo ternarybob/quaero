@@ -432,5 +432,5 @@ if ($Run) {
     Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow
-    Write-Host "./bin/quaero.exe serve -c deployments/local/quaero.toml" -ForegroundColor White
+    Write-Host "./bin/quaero.exe serve -c quaero.toml" -ForegroundColor White
 }

@@ -1,140 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Document Management</title>
 
     <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet" />
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+
+    <!-- Quaero Light Theme -->
+    <link rel="stylesheet" href="../pages/static/common.css">
 
     <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
     <style>
-        /* Quaero Brand Colors Only */
-        :root {
-            --brand-green: #00cc00;
-            --brand-dark: #1a1a1a;
+        /* Documentation-specific overrides */
+        .hljs {
+            background-color: var(--surface-container) !important;
+            color: var(--on-surface) !important;
+            border-radius: 8px;
         }
 
-        /* Monospace font for technical content */
-        body {
-            font-family: 'Courier New', Consolas, Monaco, monospace;
-        }
-
-        /* Brand color overrides */
-        .primary, button.primary {
-            background-color: var(--brand-dark) !important;
-            color: white !important;
-            border: 1px solid white !important;
-        }
-
-        .secondary {
-            background-color: var(--brand-green) !important;
-        }
-
-        .success {
-            background-color: var(--brand-green) !important;
-        }
-
-        a.active {
-            border-bottom: 2px solid var(--brand-green);
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            background: var(--brand-green);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Global fixes for layout issues */
-
-        /* Compact navbar spacing */
-        nav.top {
-            padding: 0 40px;
-            height: 70px;
-        }
-
-        nav.top .row {
-            gap: 20px;
-            align-items: center;
-        }
-
-        /* Navbar brand styling */
-        nav.top a:first-child {
-            display: flex;
-            flex-direction: column;
-            text-decoration: none;
-            font-size: 14px;
-            letter-spacing: 3px;
-        }
-
-        nav.top a:first-child small {
-            font-size: 11px;
-            letter-spacing: 1px;
-            opacity: 0.7;
-        }
-
-        /* Navbar links */
-        nav.top a {
-            font-size: 13px;
-            letter-spacing: 1.5px;
-        }
-
-        /* Horizontal action buttons in table */
-        td button {
-            display: inline-flex;
-            margin: 0 4px;
-        }
-
-        /* Compact buttons in table */
-        button.small-round {
-            width: 32px;
-            height: 32px;
-            min-width: 32px;
-            padding: 0;
-        }
-
-        /* Smaller table font and tighter spacing */
-        table {
-            font-size: 11px;
-        }
-
-        table td,
-        table th {
-            padding: 8px 12px;
-            font-size: 11px;
-        }
-
-        /* Keep action buttons on one line and center them */
-        td.no-wrap {
-            white-space: nowrap;
-            text-align: center;
-        }
-
-        /* Compact main content */
-        main.responsive {
-            padding: 20px 40px;
-        }
-
-        /* Reduce card spacing */
-        article {
-            margin-bottom: 20px;
+        pre code {
+            background-color: var(--surface-container) !important;
+            color: var(--on-surface) !important;
+            padding: var(--card-spacing);
+            border-radius: 8px;
+            border: 1px solid var(--outline-variant);
         }
     </style>
 </head>
-<body>
+
+<body class="light">
     <!-- Top Navigation -->
     <nav class="top">
         <div class="row">
@@ -173,6 +75,7 @@
 
     <!-- Main Content -->
     <main class="responsive">
+
         <!-- Hero Section -->
         <header class="center-align">
             <h3>Document Management</h3>
@@ -180,16 +83,28 @@
         </header>
 
         <!-- Document Statistics -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Document Statistics</h5>
-                    <div class="max"></div>
-                    <button class="primary">REFRESH</button>
+        <article class="border no-padding">
+
+            <header class="fill">
+
+                <nav class="fill">
+                    <h5 class="max">Headline</h5>
+
+                    <button class="circle transparent">
+                        <i>attach_file</i>
+                    </button>
+                    <button class="circle transparent">
+                        <i>today</i>
+                    </button>
+                    <button class="circle transparent">
+                        <i>more_vert</i>
+                    </button>
                 </nav>
+
             </header>
 
-            <div class="grid">
+            <div class="grid padding">
+
                 <div class="s12 m6 l3">
                     <article class="border center-align">
                         <div class="small-text">TOTAL DOCUMENTS</div>
@@ -215,27 +130,35 @@
                     </article>
                 </div>
             </div>
+
         </article>
 
         <!-- Documents Table -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Documents</h5>
-                    <span class="small-text">156 documents</span>
+        <article class="border no-padding">
+
+            <header class="fill">
+
+                <nav class="fill">
+
+                    <h5 class="max">Documents</h5>
+                    <span>156 documents</span>
+
                 </nav>
+
             </header>
 
             <!-- Filter Controls -->
-            <div class="grid">
+            <div class="grid small-padding">
+
                 <div class="s12 m6 l6">
-                    <div class="field border">
+                    <div class="field border small">
                         <input type="search" placeholder="Search documents...">
                         <i>search</i>
                     </div>
                 </div>
+
                 <div class="s12 m3 l3">
-                    <div class="field border suffix">
+                    <div class="field border suffix small">
                         <select>
                             <option>All Sources</option>
                             <option>Jira</option>
@@ -245,7 +168,7 @@
                     </div>
                 </div>
                 <div class="s12 m3 l3">
-                    <div class="field border suffix">
+                    <div class="field border suffix small">
                         <select>
                             <option>All Documents</option>
                             <option>Vectorized Only</option>
@@ -257,7 +180,8 @@
             </div>
 
             <!-- Documents Table -->
-            <div class="scroll">
+            <div class="scroll small-padding">
+
                 <table class="border">
                     <thead>
                         <tr>
@@ -274,55 +198,55 @@
                             <td>jira</td>
                             <td>C6SO55E7YX-49</td>
                             <td>[C6SO55E7YX-49] Enhance deployment pipeline</td>
-                            <td class="center-align"><span class="chip success">✓</span></td>
+                            <td class="center-align"><i class="success">check_circle</i></td>
                             <td>07/10/2025, 06:50:10</td>
-                            <td class="no-wrap">
-                                <button class="small-round"><i>refresh</i></button>
-                                <button class="small-round"><i>delete</i></button>
+                            <td class="text-center">
+                                <button class="transparent circle "><i>refresh</i></button>
+                                <button class="transparent circle "><i>delete</i></button>
                             </td>
                         </tr>
                         <tr>
                             <td>jira</td>
                             <td>C6SO55E7YX-48</td>
                             <td>[C6SO55E7YX-48] Add configuration management</td>
-                            <td class="center-align"><span class="chip success">✓</span></td>
+                            <td class="center-align"><i class="success">check_circle</i></td>
                             <td>07/10/2025, 06:50:10</td>
-                            <td class="no-wrap">
-                                <button class="small-round"><i>refresh</i></button>
-                                <button class="small-round"><i>delete</i></button>
+                            <td class="text-center">
+                                <button class="transparent square"><i>refresh</i></button>
+                                <button class="transparent square"><i>delete</i></button>
                             </td>
                         </tr>
                         <tr>
                             <td>confluence</td>
                             <td>PAGE-123</td>
                             <td>Architecture Overview</td>
-                            <td class="center-align"><span class="chip error">✗</span></td>
+                            <td class="center-align"><i class="error">cancel</i></td>
                             <td>07/10/2025, 06:50:10</td>
-                            <td class="no-wrap">
-                                <button class="small-round"><i>refresh</i></button>
-                                <button class="small-round"><i>delete</i></button>
+                            <td class="text-center">
+                                <button class="transparent square"><i>refresh</i></button>
+                                <button class="transparent square"><i>delete</i></button>
                             </td>
                         </tr>
                         <tr>
                             <td>jira</td>
                             <td>C6SO55E7YX-47</td>
                             <td>[C6SO55E7YX-47] Add real-time notifications</td>
-                            <td class="center-align"><span class="chip success">✓</span></td>
+                            <td class="center-align"><i class="success">check_circle</i></td>
                             <td>07/10/2025, 06:50:10</td>
-                            <td class="no-wrap">
-                                <button class="small-round"><i>refresh</i></button>
-                                <button class="small-round"><i>delete</i></button>
+                            <td class="text-center">
+                                <button class="transparent square"><i>refresh</i></button>
+                                <button class="transparent square"><i>delete</i></button>
                             </td>
                         </tr>
                         <tr>
                             <td>jira</td>
                             <td>C6SO55E7YX-46</td>
                             <td>[C6SO55E7YX-46] Resolve memory leak in processor</td>
-                            <td class="center-align"><span class="chip success">✓</span></td>
+                            <td class="center-align"><i class="success">check_circle</i></td>
                             <td>07/10/2025, 06:50:10</td>
-                            <td class="no-wrap">
-                                <button class="small-round"><i>refresh</i></button>
-                                <button class="small-round"><i>delete</i></button>
+                            <td class="text-center">
+                                <button class="transparent square"><i>refresh</i></button>
+                                <button class="transparent square"><i>delete</i></button>
                             </td>
                         </tr>
                     </tbody>
@@ -331,13 +255,20 @@
         </article>
 
         <!-- Document Detail -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Document Detail</h5>
+        <!-- Documents Table -->
+        <article class="border no-padding">
+
+            <header class="fill">
+
+                <nav class="fill">
+
+                    <h5 class="max">Document Detail</h5>
                     <span class="small-text">doc_e4931b57-2ec7-405c-8b4a-ff6bf29a5293</span>
+
                 </nav>
+
             </header>
+
             <pre><code class="language-json">{
   "id": "doc_e4931b57-2ec7-405c-8b4a-ff6bf29a5293",
   "source_type": "jira",
@@ -353,13 +284,20 @@
     </main>
 
     <!-- Footer -->
-    <footer class="center-align small-padding">
-        <small>Quaero // Version 0.1.199 // Build 10-07-07-25-50</small>
-    </footer>
+    <nav class="bottom">
+
+        <div class="center-align middle-align">
+
+            <small>Quaero // Version 0.1.199 // Build 10-07-07-25-50</small>
+
+        </div>
+
+    </nav>
 
     <script>
         // Initialize highlight.js
         hljs.highlightAll();
     </script>
 </body>
+
 </html>

@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Tuesday, 7th October 2025 4:23:27 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package handlers
 
 import (
@@ -6,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -106,26 +112,35 @@ func (h *UIHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) 
 	spaceCount := h.confluenceScraper.GetSpaceCount()
 	pageCount := h.confluenceScraper.GetPageCount()
 
+	// Get current timestamp for "Last Updated" column
+	currentTime := time.Now().Format("15:04:05")
+
 	html := fmt.Sprintf(`
-		<table class="status-table">
-			<tr>
-				<td class="status-label">Projects Scraped</td>
-				<td class="status-value">%d</td>
-			</tr>
-			<tr>
-				<td class="status-label">Issues Scraped</td>
-				<td class="status-value">%d</td>
-			</tr>
-			<tr>
-				<td class="status-label">Confluence Spaces</td>
-				<td class="status-value">%d</td>
-			</tr>
-			<tr>
-				<td class="status-label">Confluence Pages</td>
-				<td class="status-value">%d</td>
-			</tr>
-		</table>
-	`, projectCount, issueCount, spaceCount, pageCount)
+		<tr>
+			<td><strong>JIRA PROJECTS</strong></td>
+			<td><span class="chip success">%d</span></td>
+			<td>%s</td>
+			<td>Scraped and stored</td>
+		</tr>
+		<tr>
+			<td><strong>JIRA ISSUES</strong></td>
+			<td><span class="chip success">%d</span></td>
+			<td>%s</td>
+			<td>Scraped and stored</td>
+		</tr>
+		<tr>
+			<td><strong>CONFLUENCE SPACES</strong></td>
+			<td><span class="chip success">%d</span></td>
+			<td>%s</td>
+			<td>Scraped and stored</td>
+		</tr>
+		<tr>
+			<td><strong>CONFLUENCE PAGES</strong></td>
+			<td><span class="chip success">%d</span></td>
+			<td>%s</td>
+			<td>Scraped and stored</td>
+		</tr>
+	`, projectCount, currentTime, issueCount, currentTime, spaceCount, currentTime, pageCount, currentTime)
 
 	fmt.Fprint(w, html)
 }

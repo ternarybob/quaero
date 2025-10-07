@@ -24,13 +24,22 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// getTestServerURL returns the server URL from environment, failing if not set
+func getTestServerURL(t *testing.T) string {
+	url := os.Getenv("TEST_SERVER_URL")
+	if url == "" {
+		t.Fatal("TEST_SERVER_URL environment variable is required for API tests")
+	}
+	return url
+}
+
 // setupTestApp creates a test application instance
 func setupTestApp(t *testing.T) (*app.App, func()) {
 	// Create test configuration
 	config := common.NewDefaultConfig()
 	config.Storage.SQLite.Path = ":memory:" // Use in-memory database for tests
 	config.LLM.Mode = "offline"
-	config.LLM.Offline.MockMode = true // Enable mock mode for testing
+	// Remove mock mode - using real offline LLM for testing
 	config.Processing.Enabled = false  // Disable background processing
 
 	// Create logger
@@ -409,7 +418,7 @@ func BenchmarkChatAPI_SimpleRequest(b *testing.B) {
 	config := common.NewDefaultConfig()
 	config.Storage.SQLite.Path = ":memory:"
 	config.LLM.Mode = "offline"
-	config.LLM.Offline.MockMode = true
+	// Remove mock mode - using real offline LLM for benchmarking
 	config.Processing.Enabled = false
 
 	logger := arbor.NewLogger()

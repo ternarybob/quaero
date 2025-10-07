@@ -4,13 +4,14 @@
 
 ```
 test/
-  ├── integration/          # Integration tests (component interaction)
-  ├── ui/                   # UI/browser tests (end-to-end workflows)
-  │   ├── config.go         # Test configuration
-  │   ├── test_config.toml  # Server URL configuration
-  │   └── *.go              # ChromeDP-based UI tests
-  ├── results/              # Test results (timestamped directories)
-  └── run-tests.ps1         # Test runner script (USE THIS)
+  ├── api/                   # API integration tests
+  ├── ui/                    # UI/browser tests (end-to-end workflows)
+  │   ├── config.go          # Test configuration
+  │   ├── *_test.go          # ChromeDP-based UI tests
+  │   └── ui_test.go         # Test utilities and helpers
+  ├── unit/                  # Unit tests
+  ├── results/               # Test results (timestamped directories)
+  └── run-tests.ps1          # Test runner script (USE THIS)
 ```
 
 ## Running Tests
@@ -20,28 +21,33 @@ test/
 ### Basic Usage
 
 ```powershell
-# Run integration tests (default)
+# Run all tests (default)
 cd test
 ./run-tests.ps1
 
-# Run UI tests (requires server running)
-./run-tests.ps1 -Type ui
+# Run specific test type
+./run-tests.ps1 -type unit
+./run-tests.ps1 -type api
+./run-tests.ps1 -type ui
+./run-tests.ps1 -type all
 
-# Run all tests
-./run-tests.ps1 -Type all
+# Run specific test with pattern matching
+./run-tests.ps1 -type ui -script PageLayout
+./run-tests.ps1 -script navbar
 
 # Run with verbose output
-./run-tests.ps1 -Type integration -VerboseOutput
+./run-tests.ps1 -type ui -verboseoutput
 
 # Run without coverage
-./run-tests.ps1 -Type integration -Coverage:$false
+./run-tests.ps1 -type ui -coverage:$false
 ```
 
 ### Test Types
 
-- **`integration`** - Component interaction tests (fast, no server required)
-- **`ui`** - Browser-based end-to-end tests (requires server running)
-- **`all`** - All test types
+- **`unit`** - Fast unit tests for individual components
+- **`api`** - API integration tests with database interactions
+- **`ui`** - Browser-based end-to-end tests (builds and starts server automatically)
+- **`all`** - All test types (default)
 
 ## Test Results
 
@@ -49,53 +55,57 @@ Results are automatically organized in timestamped directories:
 
 ```
 results/
-  ├── integration-2025-10-05_14-30-15/
+  ├── unit-2025-10-07_14-30-15/
+  │   ├── test-output.log
   │   └── coverage.out
-  ├── ui-2025-10-05_14-35-22/
-  │   ├── 01_page_loaded.png
-  │   ├── 02_button_clicked.png
+  ├── api-2025-10-07_14-35-22/
+  │   ├── test-output.log
+  │   └── coverage.out
+  ├── ui-2025-10-07_14-40-10/
+  │   ├── test-output.log
+  │   ├── coverage.out
+  │   ├── 01_navbar_home.png
+  │   ├── 02_navbar_jira_data.png
   │   └── ...
-  └── all-2025-10-05_14-40-10/
-      └── ...
+  └── ui-PageLayout-2025-10-07_14-57-36/
+      ├── test-output.log
+      ├── coverage.out
+      └── 06_navbar_settings.png
 ```
 
-**Format:** `{test-type}-{yyyy-MM-dd_HH-mm-ss}/`
+**Format:** `{test-type}-{script-filter}-{yyyy-MM-dd_HH-mm-ss}/`
 
 ## UI Tests
 
 UI tests use ChromeDP to automate browser interactions and verify the web interface.
 
-### Prerequisites
+### Automatic Server Management
 
-1. **Start the Quaero server:**
-   ```powershell
-   cd bin
-   ./quaero.exe serve -c ../deployments/local/quaero.toml
-   ```
+**The test runner automatically:**
+1. Builds the application using `./scripts/build.ps1`
+2. Reads configuration from `bin/quaero.toml` to get the server port
+3. Starts the Quaero server in the background
+4. Waits for the server to be ready
+5. Runs the tests
+6. Stops the server when tests complete
 
-2. **Configure server URL** (optional):
-   Edit `test/ui/test_config.toml`:
-   ```toml
-   server_url = "http://localhost:8080"
-   ```
-
-   Or set environment variable:
-   ```powershell
-   $env:TEST_SERVER_URL = "http://localhost:8080"
-   ```
+**No manual server setup required!**
 
 ### Available UI Tests
 
-- **Jira Workflow** - Complete Jira data collection workflow
-- **Confluence Workflow** - Complete Confluence data collection workflow
+- **PageLayoutConsistency** - Tests navbar, footer, and service status consistency across all pages
+- **JiraCompleteWorkflow** - Complete Jira data collection workflow
+- **ConfluenceCompleteWorkflow** - Complete Confluence data collection workflow
+- **ConfluenceCascade** - Tests cascading Confluence operations
+- **JiraGetIssues** - Tests Jira issue retrieval
 
 ### Screenshots
 
-UI tests automatically capture screenshots at key steps. Screenshots are saved to the timestamped results directory with numbered prefixes for sequential ordering.
+UI tests automatically capture screenshots at key steps. Screenshots are saved to the timestamped results directory with numbered prefixes (e.g., `01_navbar_home.png`, `02_navbar_jira_data.png`) for sequential ordering.
 
-## Integration Tests
+## API Tests
 
-Integration tests verify component interactions without requiring a running server. They use in-memory databases and mock HTTP servers.
+API tests verify server endpoints and database interactions. They test the REST API functionality without requiring browser automation.
 
 ## Writing Tests
 
@@ -111,23 +121,24 @@ internal/services/atlassian/
 
 Run with: `go test ./internal/services/atlassian/`
 
-### Integration Tests
+### API Tests
 
-Add to `test/integration/`:
+Add to `test/api/`:
 
 ```go
-package integration
+package api
 
 import "testing"
 
-func TestFeature(t *testing.T) {
+func TestAPIFeature(t *testing.T) {
     // Test setup
-    // Component interaction tests
+    // HTTP request/response testing
+    // Database interaction verification
     // Assertions
 }
 ```
 
-Run with: `./run-tests.ps1 -Type integration`
+Run with: `./run-tests.ps1 -type api`
 
 ### UI Tests
 
@@ -141,49 +152,77 @@ import (
     "github.com/chromedp/chromedp"
 )
 
-func TestFeature(t *testing.T) {
+func TestUIFeature(t *testing.T) {
     config, _ := LoadTestConfig()
     serverURL := config.ServerURL
 
     // ChromeDP test logic
     // Use takeScreenshot() helper for screenshots
+    // Test navigation, form interactions, etc.
 }
 ```
 
-Run with: `./run-tests.ps1 -Type ui`
+Run with: `./run-tests.ps1 -type ui`
 
 ## Best Practices
 
 1. **Always use run-tests.ps1** - Never run `go test` directly
-2. **Check results directory** - Review screenshots and logs after UI tests
-3. **Clean up regularly** - Old result directories can be deleted
-4. **Server must be running** - UI tests require a live server
-5. **Use descriptive test names** - Follow Go naming conventions
+2. **Use specific test types** - Run `-type ui` for UI tests, `-type api` for API tests
+3. **Filter with -script** - Use pattern matching to run specific tests
+4. **Check results directory** - Review screenshots and logs after tests
+5. **Clean up regularly** - Old result directories can be deleted
+6. **Use descriptive test names** - Follow Go naming conventions
+
+## Common Test Commands
+
+```powershell
+# Run all UI tests
+./run-tests.ps1 -type ui
+
+# Run only page layout tests
+./run-tests.ps1 -type ui -script PageLayout
+
+# Run navbar-related tests across all types
+./run-tests.ps1 -script navbar
+
+# Run API tests with verbose output
+./run-tests.ps1 -type api -verboseoutput
+```
 
 ## Troubleshooting
 
-### UI Tests Fail with Connection Refused
+### Build Fails
 
-**Problem:** Server isn't running or wrong port
+**Problem:** Build script fails during test setup
 
 **Solution:**
 ```powershell
-# Check server is running
-curl http://localhost:8080
+# Check build manually
+cd ..
+./scripts/build.ps1
+```
 
-# Start server if needed
-cd bin
-./quaero.exe serve
+### UI Tests Fail with "Server not ready"
+
+**Problem:** Server failed to start or took too long
+
+**Solution:** Check if port is already in use:
+```powershell
+# Check what's using port 8085
+netstat -an | findstr :8085
+
+# Kill existing quaero process
+Get-Process quaero -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
 ### Screenshots Not Captured
 
-**Problem:** `TEST_RUN_DIR` not set
+**Problem:** `TEST_RUN_DIR` not set or ChromeDP issues
 
-**Solution:** Always use `run-tests.ps1` - it sets this automatically
+**Solution:** Always use `run-tests.ps1` - it sets environment variables automatically
 
 ### Tests Pass But No Results
 
 **Problem:** Running `go test` directly instead of through script
 
-**Solution:** Use `./run-tests.ps1 -Type ui`
+**Solution:** Use `./run-tests.ps1 -type ui`

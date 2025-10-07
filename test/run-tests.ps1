@@ -7,33 +7,42 @@
     Executes integration tests, UI tests, or all tests with coverage reporting.
     Must be run from the test directory.
 
-.PARAMETER Type
-    Type of tests to run: 'unit', 'api', 'integration', 'ui', or 'all' (default: integration)
+.PARAMETER type
+    Type of tests to run: 'unit', 'api', 'ui', or 'all' (default: all)
 
-.PARAMETER Coverage
+.PARAMETER script
+    Filter tests by test function name pattern (case-insensitive, e.g., 'navbar' matches TestNavbar*)
+    When used alone, searches all test directories. Combine with -type to limit to specific directory.
+
+.PARAMETER coverage
     Generate coverage report (default: true)
 
-.PARAMETER Verbose
+.PARAMETER verboseoutput
     Enable verbose test output
 
 .EXAMPLE
-    ./run-tests.ps1 -Type unit
-    ./run-tests.ps1 -Type api
-    ./run-tests.ps1 -Type integration
-    ./run-tests.ps1 -Type ui
-    ./run-tests.ps1 -Type all -Coverage
+    ./run-tests.ps1
+    ./run-tests.ps1 -type unit
+    ./run-tests.ps1 -type api
+    ./run-tests.ps1 -type ui
+    ./run-tests.ps1 -type all -coverage
+    ./run-tests.ps1 -script navbar
+    ./run-tests.ps1 -type ui -script navbar
 #>
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('unit', 'api', 'integration', 'ui', 'all')]
-    [string]$Type = 'integration',
+    [ValidateSet('unit', 'api', 'ui', 'all')]
+    [string]$type = 'all',
 
     [Parameter(Mandatory=$false)]
-    [switch]$Coverage = $true,
+    [string]$script = '',
 
     [Parameter(Mandatory=$false)]
-    [switch]$VerboseOutput
+    [switch]$coverage = $true,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$verboseoutput
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,15 +53,18 @@ Set-Location $scriptDir
 
 # Create timestamped results directory
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$resultsDir = Join-Path -Path $scriptDir -ChildPath "results\$Type-$timestamp"
+$testLabel = if ($script) { "$type-$script" } else { $type }
+$resultsDir = Join-Path -Path $scriptDir -ChildPath "results\$testLabel-$timestamp"
 New-Item -Path $resultsDir -ItemType Directory -Force | Out-Null
 
-# Set environment variables for tests to use
+# Set environment variables for tests to use (port will be set after reading config)
 $env:TEST_RUN_DIR = $resultsDir
-$env:TEST_SERVER_URL = "http://localhost:8086"
 
 Write-Host "=== Quaero Test Runner ===" -ForegroundColor Cyan
-Write-Host "Test Type: $Type" -ForegroundColor Yellow
+Write-Host "Test Type: $type" -ForegroundColor Yellow
+if ($script) {
+    Write-Host "Script Filter: $script" -ForegroundColor Yellow
+}
 Write-Host "Results Dir: $resultsDir" -ForegroundColor Cyan
 Write-Host ""
 
@@ -67,29 +79,47 @@ if ($LASTEXITCODE -ne 0) {
 }
 Set-Location $scriptDir
 
-# Start the test server on port 8086 (avoids conflicts with dev server on 8085)
+# Start the test server using the standard configuration
 Write-Host ""
-Write-Host "Starting Quaero test server on port 8086..." -ForegroundColor Yellow
+Write-Host "Reading configuration for server port..." -ForegroundColor Yellow
 $projectRoot = (Get-Item $scriptDir).Parent.FullName
 $binDir = Join-Path -Path $projectRoot -ChildPath "bin"
-$configPath = Join-Path -Path $binDir -ChildPath "quaero-test.toml"
+$configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 $exePath = Join-Path -Path $binDir -ChildPath "quaero.exe"
+
+# Read port from config file
+$serverPort = 8085  # Default port
+if (Test-Path $configPath) {
+    $configContent = Get-Content $configPath
+    foreach ($line in $configContent) {
+        if ($line -match '^port\s*=\s*(\d+)') {
+            $serverPort = [int]$matches[1]
+            break
+        }
+    }
+}
+
+Write-Host "Starting Quaero test server on port $serverPort..." -ForegroundColor Yellow
 
 # Start server in hidden window (stays running until explicitly killed)
 $startCommand = "cd /d `"$projectRoot`" && `"$exePath`" serve -c `"$configPath`""
 $serverProcess = Start-Process cmd -ArgumentList "/k", $startCommand -WindowStyle Hidden -PassThru
 
-# Wait for server to be ready on port 8086
+# Set the server URL environment variable now that we know the port
+$env:TEST_SERVER_URL = "http://localhost:$serverPort"
+Write-Host "Test server URL: $env:TEST_SERVER_URL" -ForegroundColor Cyan
+
+# Wait for server to be ready
 Write-Host "Waiting for server to be ready..." -ForegroundColor Yellow
 $maxRetries = 30
 $serverReady = $false
 for ($i = 0; $i -lt $maxRetries; $i++) {
     # Use curl to check if server is responding (more reliable than Invoke-WebRequest)
-    $curlOutput = & curl -s -o nul -w "%{http_code}" http://localhost:8086/ 2>&1 | Out-String
+    $curlOutput = & curl -s -o nul -w "%{http_code}" "http://localhost:$serverPort/" 2>&1 | Out-String
     $curlOutput = $curlOutput.Trim()
     if ($curlOutput -eq "200") {
         $serverReady = $true
-        Write-Host "Server is ready on port 8086!" -ForegroundColor Green
+        Write-Host "Server is ready on port $serverPort!" -ForegroundColor Green
         break
     }
     Start-Sleep -Seconds 1
@@ -105,49 +135,49 @@ Write-Host ""
 
 # Build test flags
 $testFlags = @()
-if ($VerboseOutput) {
+if ($verboseoutput) {
     $testFlags += "-v"
 }
 
-if ($Coverage) {
+if ($coverage) {
     $testFlags += "-coverprofile=coverage.out"
     $testFlags += "-covermode=atomic"
+}
+
+# Add script pattern filter if specified (case-insensitive)
+if ($script) {
+    $testFlags += "-run"
+    $testFlags += "(?i)$script"
 }
 
 # Define output file
 $testOutputFile = Join-Path -Path $resultsDir -ChildPath "test-output.log"
 
-# Run tests based on type
-switch ($Type) {
-    'unit' {
-        Write-Host "Running unit tests..." -ForegroundColor Green
-        go test $testFlags ./unit/... 2>&1 | Tee-Object -FilePath $testOutputFile
-        $testResult = $LASTEXITCODE
+# Determine test path based on script parameter
+if ($script -and $type -eq 'all') {
+    # When script is specified with default type, search all directories
+    $testPath = "./..."
+    $testDescription = "tests matching '$script'"
+} else {
+    # Use type to determine path
+    switch ($type) {
+        'unit' { $testPath = "./unit/..."; $testDescription = "unit tests" }
+        'api' { $testPath = "./api/..."; $testDescription = "API tests" }
+        'ui' { $testPath = "./ui/..."; $testDescription = "UI tests" }
+        'all' { $testPath = "./..."; $testDescription = "all tests" }
     }
-    'api' {
-        Write-Host "Running API tests..." -ForegroundColor Green
-        go test $testFlags ./api/... 2>&1 | Tee-Object -FilePath $testOutputFile
-        $testResult = $LASTEXITCODE
-    }
-    'integration' {
-        Write-Host "Running integration tests..." -ForegroundColor Green
-        go test $testFlags ./integration/... 2>&1 | Tee-Object -FilePath $testOutputFile
-        $testResult = $LASTEXITCODE
-    }
-    'ui' {
-        Write-Host "Running UI tests..." -ForegroundColor Green
-        go test $testFlags ./ui/... 2>&1 | Tee-Object -FilePath $testOutputFile
-        $testResult = $LASTEXITCODE
-    }
-    'all' {
-        Write-Host "Running all tests..." -ForegroundColor Green
-        go test $testFlags ./... 2>&1 | Tee-Object -FilePath $testOutputFile
-        $testResult = $LASTEXITCODE
+    if ($script) {
+        $testDescription += " matching '$script'"
     }
 }
 
+# Run tests
+Write-Host "Running $testDescription..." -ForegroundColor Green
+go test $testFlags $testPath 2>&1 | Tee-Object -FilePath $testOutputFile
+$testResult = $LASTEXITCODE
+
 # Display coverage if generated
-if ($Coverage -and (Test-Path "coverage.out")) {
+if ($coverage -and (Test-Path "coverage.out")) {
     # Copy coverage to results directory
     $coverageFile = Join-Path -Path $resultsDir -ChildPath "coverage.out"
     Copy-Item "coverage.out" $coverageFile -Force

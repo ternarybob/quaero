@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -15,8 +16,12 @@ import (
 
 // Helper functions
 
-func getServerURL() string {
-	return "http://localhost:8086" // Use port 8086 for tests (avoids conflicts with dev server on 8085)
+func getServerURL(t *testing.T) string {
+	url := os.Getenv("TEST_SERVER_URL")
+	if url == "" {
+		t.Fatal("TEST_SERVER_URL environment variable is required for API tests")
+	}
+	return url
 }
 
 type projectData struct {
@@ -168,7 +173,7 @@ func collectAndWaitForIssues(t *testing.T, serverURL string, projectKey string, 
 // 2. Get projects - test passes if project count > 0
 // 3. Select project and get issues - test passes if issue count > 0
 func TestJiraIssuesCollection(t *testing.T) {
-	serverURL := getServerURL()
+	serverURL := getServerURL(t)
 
 	t.Log("=== Testing Jira Issues Collection Workflow ===")
 

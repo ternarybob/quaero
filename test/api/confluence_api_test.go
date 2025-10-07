@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -163,8 +164,17 @@ func collectAndWaitForPages(t *testing.T, serverURL string, spaceKey string, tim
 // 1. Clear all Confluence data - test passes if all Confluence data is deleted
 // 2. Get spaces - test passes if space count > 0
 // 3. Select space and get pages - test passes if page count > 0
+// getConfluenceServerURL returns the server URL from environment, failing if not set
+func getConfluenceServerURL(t *testing.T) string {
+	url := os.Getenv("TEST_SERVER_URL")
+	if url == "" {
+		t.Fatal("TEST_SERVER_URL environment variable is required for API tests")
+	}
+	return url
+}
+
 func TestConfluencePagesCollection(t *testing.T) {
-	serverURL := getServerURL()
+	serverURL := getConfluenceServerURL(t)
 
 	t.Log("=== Testing Confluence Pages Collection Workflow ===")
 

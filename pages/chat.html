@@ -6,29 +6,38 @@
     <title>Chat - Quaero</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
     <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <!-- Quaero Theme -->
+    <link rel="stylesheet" href="/static/common.css">
+
     <style>
-        body {
-            font-family: 'Courier New', Consolas, Monaco, monospace;
-            background: #0a0a0a;
-            color: #e0e0e0;
-        }
-        .primary {
-            background-color: #1a1a1a !important;
-            color: white !important;
-            border: 1px solid white !important;
-        }
-        a.active {
-            border-bottom: 2px solid #00cc00;
+        /* Force navbar title styling */
+        nav.top a:first-child {
+            display: flex !important;
+            flex-direction: column !important;
         }
     </style>
+    
+    <script>
+        // Ensure navbar styling is applied after BeerCSS loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const navTitle = document.querySelector('nav.top a:first-child');
+            if (navTitle) {
+                navTitle.style.display = 'flex';
+                navTitle.style.flexDirection = 'column';
+            }
+        });
+    </script>
 </head>
-<body>
+<body class="light">
 
 {{template "navbar" .}}
 {{template "snackbar" .}}
 
 <main class="responsive" style="padding: 1rem;">
+    {{template "service-status" .}}
+    
     <article>
         <h5 style="margin: 0 0 1rem 0; font-size: 1.2rem;">Chat</h5>
 
@@ -66,6 +75,59 @@
 </main>
 
 <script>
+// Status update functionality
+function updateSystemStatus(online) {
+    const statusIndicator = document.querySelector('.status-indicator');
+    const statusText = document.querySelector('.status-text');
+
+    if (online) {
+        statusIndicator.style.background = '#00cc00';
+        statusText.style.color = '#00cc00';
+        statusText.textContent = 'ONLINE';
+    } else {
+        statusIndicator.style.background = '#cc0000';
+        statusText.style.color = '#cc0000';
+        statusText.textContent = 'OFFLINE';
+    }
+}
+
+// WebSocket connection for system status
+let ws;
+let reconnectInterval;
+
+function connectWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function() {
+        console.log('WebSocket connected');
+        updateSystemStatus(true);
+        if (reconnectInterval) {
+            clearInterval(reconnectInterval);
+            reconnectInterval = null;
+        }
+    };
+
+    ws.onerror = function(error) {
+        console.error('WebSocket error:', error);
+        updateSystemStatus(false);
+    };
+
+    ws.onclose = function() {
+        console.log('WebSocket disconnected');
+        updateSystemStatus(false);
+
+        // Reconnect after 3 seconds
+        if (!reconnectInterval) {
+            reconnectInterval = setInterval(function() {
+                connectWebSocket();
+            }, 3000);
+        }
+    };
+}
+
 // Chat functionality
 const chatMessages = document.getElementById('chat-messages');
 const userMessageInput = document.getElementById('user-message');
@@ -176,6 +238,9 @@ userMessageInput.addEventListener('keydown', (e) => {
     }
 });
 
+// Connect WebSocket for status updates
+connectWebSocket();
+
 // Check service health on load
 fetch('/api/chat/health')
     .then(r => r.json())
@@ -192,6 +257,8 @@ fetch('/api/chat/health')
         statusDiv.textContent = 'Connection error';
     });
 </script>
+
+{{template "footer" .}}
 
 </body>
 </html>

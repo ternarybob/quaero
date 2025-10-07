@@ -1,166 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Monitoring Dashboard</title>
 
     <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
 
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
 
+    <!-- Quaero Theme -->
+    <link rel="stylesheet" href="/static/common.css">
+
     <style>
-        /* Quaero Brand Colors Only */
-        :root {
-            --brand-green: #00cc00;
-            --brand-dark: #1a1a1a;
-        }
-
-        /* Monospace font for technical content */
-        body {
-            font-family: 'Courier New', Consolas, Monaco, monospace;
-        }
-
-        /* Brand color overrides */
-        .primary, button.primary {
-            background-color: var(--brand-dark) !important;
-            color: white !important;
-            border: 1px solid white !important;
-        }
-
-        .secondary {
-            background-color: var(--brand-green) !important;
-        }
-
-        .success {
-            background-color: var(--brand-green) !important;
-        }
-
-        a.active {
-            border-bottom: 2px solid var(--brand-green);
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            background: var(--brand-green);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Global fixes for layout issues */
-
-        /* Compact navbar spacing */
-        nav.top {
-            padding: 0 40px;
-            height: 70px;
-        }
-
-        nav.top .row {
-            gap: 20px;
-            align-items: center;
-        }
-
-        /* Navbar brand styling */
+        /* Force navbar title styling */
         nav.top a:first-child {
-            display: flex;
-            flex-direction: column;
-            text-decoration: none;
-            font-size: 14px;
-            letter-spacing: 3px;
-        }
-
-        nav.top a:first-child small {
-            font-size: 11px;
-            letter-spacing: 1px;
-            opacity: 0.7;
-        }
-
-        /* Navbar links */
-        nav.top a {
-            font-size: 13px;
-            letter-spacing: 1.5px;
-        }
-
-        /* Horizontal action buttons in table */
-        td button {
-            display: inline-flex;
-            margin: 0 4px;
-        }
-
-        /* Compact buttons in table */
-        button.small-round {
-            width: 32px;
-            height: 32px;
-            min-width: 32px;
-            padding: 0;
-        }
-
-        /* Smaller table font and tighter spacing */
-        table {
-            font-size: 11px;
-        }
-
-        table td,
-        table th {
-            padding: 8px 12px;
-            font-size: 11px;
-        }
-
-        /* Keep action buttons on one line and center them */
-        td.no-wrap {
-            white-space: nowrap;
-            text-align: center;
-        }
-
-        /* Compact main content */
-        main.responsive {
-            padding: 20px 40px;
-        }
-
-        /* Reduce card spacing */
-        article {
-            margin-bottom: 20px;
-        }
-
-        /* Page-specific styles */
-        .status-label {
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .status-value {
-            color: #00cc00;
-            text-align: right;
-            font-weight: bold;
-        }
-
-        .status-online {
-            color: #00cc00;
-        }
-
-        /* Status table dark background */
-        article .border {
-            background: #1a1a1a;
-        }
-
-        article .border td {
-            color: #ccc;
-            border-bottom: 1px solid #333;
+            display: flex !important;
+            flex-direction: column !important;
         }
     </style>
+
+    <script>
+        // Force light theme after material-dynamic-colors loads
+        document.addEventListener('DOMContentLoaded', function () {
+            // Set light theme immediately
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.body.setAttribute('data-theme', 'light');
+
+            // Force light theme colors
+            document.documentElement.style.setProperty('--background', '#fdfcf5');
+            document.documentElement.style.setProperty('--on-background', '#1b1c18');
+            document.documentElement.style.setProperty('--surface', '#fafaf2');
+            document.documentElement.style.setProperty('--on-surface', '#1b1c18');
+
+            // Ensure navbar styling is applied
+            const navTitle = document.querySelector('nav.top a:first-child');
+            if (navTitle) {
+                navTitle.style.display = 'flex';
+                navTitle.style.flexDirection = 'column';
+            }
+        });
+
+        // Also force theme after a short delay to override any dynamic loading
+        setTimeout(function () {
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.body.setAttribute('data-theme', 'light');
+            document.documentElement.style.setProperty('--background', '#fdfcf5');
+            document.documentElement.style.setProperty('--on-background', '#1b1c18');
+        }, 100);
+    </script>
 </head>
 
-<body>
+<body class="light">
     {{template "navbar" .}}
     {{template "snackbar" .}}
 
@@ -172,27 +66,29 @@
             <p>Knowledge collection and semantic search system with vector embeddings and offline LLM support. Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.</p>
         </header>
 
-        <!-- Service Status Monitor -->
         <article class="border">
             <header>
                 <nav>
-                    <h5>Service Status</h5>
+                    <h5>Section Title Goes Here</h5>
+
+                    <div class="max"></div>
+
+                    <button class="small-round primary">
+                        <i>edit</i>
+                    </button>
+                    <button class="small-round secondary">
+                        <i>settings</i>
+                    </button>
                 </nav>
             </header>
-            <table class="border" id="service-status-table" hx-get="/ui/status" hx-trigger="load, every 60s" hx-swap="innerHTML">
-                <tr>
-                    <td class="status-label">Parser Service</td>
-                    <td class="status-value">ONLINE</td>
-                </tr>
-                <tr>
-                    <td class="status-label">Database</td>
-                    <td class="status-value">CONNECTED</td>
-                </tr>
-                <tr>
-                    <td class="status-label">Extension Auth</td>
-                    <td class="status-value">WAITING</td>
-                </tr>
-            </table>
+
+            <div class="padding-20">
+                <p>This is the content area of the section. It can hold forms, text, or other components.</p>
+                <div class="field border suffix">
+                    <input type="text" placeholder="Example Input">
+                    <i>check</i>
+                </div>
+            </div>
         </article>
 
         <!-- Parser Status Section -->
@@ -201,26 +97,34 @@
                 <nav>
                     <h5>Parser Status</h5>
                     <div class="max"></div>
-                    <button
-                        id="refresh-parser-status"
-                        class="primary"
-                        hx-get="/ui/parser-status"
-                        hx-target="#parser-status"
-                        hx-swap="innerHTML"
-                        hx-trigger="click, load, every 60s"
-                        hx-sync="this:abort">
+                    <button id="refresh-parser-status" class="primary" hx-get="/ui/parser-status" hx-target="#parser-status-table" hx-swap="innerHTML" hx-trigger="click, load, every 60s" hx-sync="this:abort">
                         REFRESH
                     </button>
                 </nav>
             </header>
 
-            <div style="padding: 20px; text-align: center;">
-                <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; margin-bottom: 20px;">
+            <div class="padding-20">
+                <p class="font-mono font-large text-secondary mb-20 text-center">
                     Install Chrome extension and click icon when logged into Jira/Confluence<br>
                     Extension will capture authentication and trigger scraping automatically
                 </p>
-                <div id="parser-status">
-                    <p>Loading parser status...</p>
+
+                <div class="scroll">
+                    <table class="border">
+                        <thead>
+                            <tr>
+                                <th>COMPONENT</th>
+                                <th>STATUS</th>
+                                <th>LAST UPDATED</th>
+                                <th>DETAILS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="parser-status-table">
+                            <tr>
+                                <td colspan="4" class="status-loading">Loading parser status...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </article>
@@ -233,115 +137,52 @@
                 </nav>
             </header>
 
-            <div id="auth-details" style="padding: 20px;">
-                <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
-                    No authentication data captured yet
-                </p>
+            <div id="auth-details" class="padding-20">
+                <div class="scroll">
+                    <table class="border">
+                        <thead>
+                            <tr>
+                                <th>PROPERTY</th>
+                                <th>VALUE</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auth-summary-table">
+                            <tr>
+                                <td colspan="2" class="status-loading">No authentication data captured yet</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="auth-cookies-section" style="margin-top: var(--card-spacing); display: none;">
+                    <h6 style="margin-bottom: 10px;">Authentication Cookies</h6>
+                    <div class="scroll">
+                        <table class="border">
+                            <thead>
+                                <tr>
+                                    <th>NAME</th>
+                                    <th>DOMAIN</th>
+                                    <th>PATH</th>
+                                    <th>SECURE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auth-cookies-table">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </article>
+
+        {{template "service-logs" .}}
+
     </main>
 
-    <!-- Service Logs at Bottom -->
-    <div class="log-panel-bottom">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
-            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
-                <i>delete</i>
-            </button>
-        </div>
-        <div id="service-logs"></div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="center-align small-padding">
-        <small id="footer-version">Quaero // Version Loading...</small>
-    </footer>
+    {{template "footer" .}}
 
     <script>
-        // Load and format version info
-        fetch('/api/version')
-            .then(response => response.json())
-            .then(data => {
-                const footerEl = document.getElementById('footer-version');
-                if (footerEl && data.version) {
-                    footerEl.textContent = `Quaero // Version ${data.version} // Build ${data.build}`;
-                }
-            })
-            .catch(error => {
-                console.error('Failed to load version:', error);
-            });
-    </script>
-
-    <script>
-        let ws;
-        let reconnectInterval;
-
-        function clearServiceLogs() {
-            const serviceLogsContainer = document.getElementById('service-logs');
-            if (serviceLogsContainer) {
-                serviceLogsContainer.innerHTML = '';
-            }
-        }
-
-        function updateSystemStatus(online) {
-            const statusIndicator = document.querySelector('.status-indicator');
-            const statusText = document.querySelector('.status-text');
-
-            if (online) {
-                statusIndicator.style.background = '#00cc00';
-                statusText.style.color = '#00cc00';
-                statusText.textContent = 'SYSTEM ONLINE';
-            } else {
-                statusIndicator.style.background = '#cc0000';
-                statusText.style.color = '#cc0000';
-                statusText.textContent = 'SYSTEM OFFLINE';
-            }
-        }
-
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = function() {
-                console.log('WebSocket connected');
-                updateSystemStatus(true);
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
-                }
-            };
-
-            ws.onmessage = function(event) {
-                const message = JSON.parse(event.data);
-
-                if (message.type === 'status') {
-                    updateStatus(message.payload);
-                } else if (message.type === 'log') {
-                    addLogEntry(message.payload.timestamp, message.payload.level, message.payload.message);
-                } else if (message.type === 'auth') {
-                    updateAuthDetails(message.payload);
-                }
-            };
-
-            ws.onerror = function(error) {
-                console.error('WebSocket error:', error);
-                updateSystemStatus(false);
-            };
-
-            ws.onclose = function() {
-                console.log('WebSocket disconnected');
-                updateSystemStatus(false);
-
-                // Reconnect after 3 seconds
-                if (!reconnectInterval) {
-                    reconnectInterval = setInterval(function() {
-                        connectWebSocket();
-                    }, 3000);
-                }
-            };
-        }
+        // Index page specific functions for auth and status updates
+        // WebSocket connections are handled by navbar and service-logs partials
 
         function updateStatus(status) {
             const statusTable = document.getElementById('service-status-table');
@@ -366,106 +207,105 @@
             // No need to update parser-status div from WebSocket
         }
 
-        function addLogEntry(timestamp, level, message) {
-            const logsContainer = document.getElementById('service-logs');
-            if (!logsContainer) return;
-
-            // Handle local messages that don't have timestamp
-            if (typeof timestamp !== 'string' || !timestamp.match(/\d+:\d+:\d+/)) {
-                message = level;
-                level = timestamp;
-                timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
-            }
-
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-
-            let levelClass = 'log-level-info';
-            let levelText = 'INFO';
-            if (level.toLowerCase() === 'error') {
-                levelClass = 'log-level-error';
-                levelText = 'ERROR';
-            } else if (level.toLowerCase() === 'warn') {
-                levelClass = 'log-level-warn';
-                levelText = 'WARN';
-            } else if (level.toLowerCase() === 'debug') {
-                levelClass = 'log-level-debug';
-                levelText = 'DEBUG';
-            }
-
-            logEntry.innerHTML = `
-                <span class="log-timestamp">[${timestamp}]</span>
-                <span class="${levelClass}">[${levelText}]</span>
-                <span class="log-message">${message}</span>
-            `;
-
-            logsContainer.appendChild(logEntry);
-
-            // Auto-scroll to bottom
-            logsContainer.scrollTop = logsContainer.scrollHeight;
-
-            // Keep only last 100 log entries
-            while (logsContainer.children.length > 100) {
-                logsContainer.removeChild(logsContainer.firstChild);
-            }
-        }
 
         function updateAuthDetails(authData) {
-            const authContainer = document.getElementById('auth-details');
-            if (!authContainer) return;
+            const authSummaryTable = document.getElementById('auth-summary-table');
+            const authCookiesTable = document.getElementById('auth-cookies-table');
+            const authCookiesSection = document.getElementById('auth-cookies-section');
+
+            if (!authSummaryTable) return;
 
             if (!authData || !authData.cookies || authData.cookies.length === 0) {
-                authContainer.innerHTML = `
-                    <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
-                        No authentication data captured yet
-                    </p>
+                authSummaryTable.innerHTML = `
+                    <tr>
+                        <td colspan="2" class="status-loading">No authentication data captured yet</td>
+                    </tr>
                 `;
+                if (authCookiesSection) {
+                    authCookiesSection.style.display = 'none';
+                }
                 return;
             }
 
-            let html = `
-                <div style="margin-bottom: 15px;">
-                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 8px;">
-                        <strong>Base URL:</strong> ${authData.baseUrl || 'N/A'}
-                    </p>
-                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 8px;">
-                        <strong>Cloud ID:</strong> ${authData.cloudId || 'N/A'}
-                    </p>
-                    <p style="font-family: monospace; font-size: 11px; color: #6a6a6a; margin-bottom: 15px;">
-                        <strong>Cookies:</strong> ${authData.cookies.length}
-                    </p>
-                </div>
-                <table class="border" style="font-size: 10px;">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Domain</th>
-                            <th>Path</th>
-                            <th>Secure</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+            // Update summary table
+            authSummaryTable.innerHTML = `
+                <tr>
+                    <td><strong>BASE URL</strong></td>
+                    <td>${authData.baseUrl || 'N/A'}</td>
+                </tr>
+                <tr>
+                    <td><strong>CLOUD ID</strong></td>
+                    <td>${authData.cloudId || 'N/A'}</td>
+                </tr>
+                <tr>
+                    <td><strong>COOKIES COUNT</strong></td>
+                    <td>${authData.cookies.length}</td>
+                </tr>
             `;
 
-            authData.cookies.forEach(cookie => {
-                html += `
-                    <tr>
-                        <td style="word-break: break-all;">${cookie.name}</td>
-                        <td>${cookie.domain}</td>
-                        <td>${cookie.path}</td>
-                        <td>${cookie.secure ? '✓' : '-'}</td>
-                    </tr>
-                `;
-            });
+            // Update cookies table
+            if (authCookiesTable && authCookiesSection) {
+                let cookiesHtml = '';
+                authData.cookies.forEach(cookie => {
+                    cookiesHtml += `
+                        <tr>
+                            <td style="word-break: break-all;">${cookie.name}</td>
+                            <td>${cookie.domain}</td>
+                            <td>${cookie.path}</td>
+                            <td class="center-align">${cookie.secure ? '<span class="chip success">✓</span>' : '<span class="chip error">✗</span>'}</td>
+                        </tr>
+                    `;
+                });
+                authCookiesTable.innerHTML = cookiesHtml;
+                authCookiesSection.style.display = 'block';
+            }
+        }
 
-            html += `</tbody></table>`;
-            authContainer.innerHTML = html;
+        // WebSocket for index page specific data (status table and auth details)
+        let indexDataWs;
+        let indexDataReconnectInterval;
+
+        function connectIndexDataWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            indexDataWs = new WebSocket(wsUrl);
+
+            indexDataWs.onopen = function () {
+                console.log('Index data WebSocket connected');
+                if (indexDataReconnectInterval) {
+                    clearInterval(indexDataReconnectInterval);
+                    indexDataReconnectInterval = null;
+                }
+            };
+
+            indexDataWs.onmessage = function (event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'status') {
+                    updateStatus(message.payload);
+                } else if (message.type === 'auth') {
+                    updateAuthDetails(message.payload);
+                }
+                // Note: navbar handles system status, service-logs handles log messages
+            };
+
+            indexDataWs.onerror = function (error) {
+                console.error('Index data WebSocket error:', error);
+            };
+
+            indexDataWs.onclose = function () {
+                console.log('Index data WebSocket disconnected');
+                if (!indexDataReconnectInterval) {
+                    indexDataReconnectInterval = setInterval(connectIndexDataWebSocket, 3000);
+                }
+            };
         }
 
         // Connect on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            connectWebSocket();
+        document.addEventListener('DOMContentLoaded', function () {
+            connectIndexDataWebSocket();
         });
     </script>
 </body>
+
 </html>
