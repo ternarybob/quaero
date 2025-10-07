@@ -236,6 +236,12 @@ enabled = false
 #   "0 30 */4 * * *"  - Every 4 hours at :30
 schedule = "0 0 */6 * * *"
 
+# Maximum documents to process per embedding run
+# Limits memory usage and processing time per cycle
+# Higher values = faster processing but more memory
+# Lower values = slower but more conservative
+limit = 1000
+
 # ───────────────────────────────────────────────────────────────────────────────
 # Logging Configuration
 # ───────────────────────────────────────────────────────────────────────────────

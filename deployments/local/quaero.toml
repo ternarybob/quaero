@@ -112,12 +112,13 @@ log_queries = false # Don't log query text (PII protection)
 # =============================================================================
 # Document Processing Configuration
 # =============================================================================
-# Defaults: enabled=false, schedule="0 0 */6 * * *" (every 6 hours)
+# Defaults: enabled=false, schedule="0 0 */6 * * *" (every 6 hours), limit=1000
 # Processing scheduler transforms source data into normalized documents
 
 [processing]
 # enabled = false                # Default: false (opt-in for safety)
 # schedule = "0 0 */6 * * *"     # Default: every 6 hours (cron format)
+# limit = 1000                   # Default: 1000 (max documents per embedding run)
 
 # =============================================================================
 # Logging Configuration

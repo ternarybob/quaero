@@ -69,3 +69,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.app.Logger.Info().Msg("HTTP server stopped")
 	return nil
 }
+
+// Handler returns the HTTP handler for testing
+func (s *Server) Handler() http.Handler {
+	return s.server.Handler
+}

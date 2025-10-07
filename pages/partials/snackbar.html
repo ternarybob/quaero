@@ -1,0 +1,51 @@
+{{define "snackbar"}}
+<!-- Snackbar for notifications -->
+<div class="snackbar top" id="app-snackbar">
+    <i id="snackbar-icon">info</i>
+    <span id="snackbar-message"></span>
+</div>
+
+<script>
+    // Global notification function using Beer CSS snackbar
+    function showNotification(message, type = 'info') {
+        const snackbar = document.getElementById('app-snackbar');
+        const icon = document.getElementById('snackbar-icon');
+        const messageEl = document.getElementById('snackbar-message');
+
+        // Set message
+        messageEl.textContent = message;
+
+        // Set icon based on type
+        const iconMap = {
+            'success': 'check_circle',
+            'error': 'error',
+            'warning': 'warning',
+            'info': 'info'
+        };
+        icon.textContent = iconMap[type] || 'info';
+
+        // Use Beer CSS default colors with classes
+        // Only keep custom colors for 'primary' (brand dark)
+        snackbar.className = 'snackbar top';
+        snackbar.style.background = '';  // Clear custom background
+
+        if (type === 'error') {
+            // Use Beer CSS default error color (salmon/pink)
+            snackbar.classList.add('error');
+        } else if (type === 'success') {
+            // Use Beer CSS default success color
+            snackbar.classList.add('secondary');
+        } else if (type === 'warning') {
+            // Use Beer CSS default warning color
+            snackbar.classList.add('tertiary');
+        } else if (type === 'primary') {
+            // Use our brand dark color
+            snackbar.classList.add('primary');
+        }
+        // Default (info) uses Beer CSS default snackbar color
+
+        // Show snackbar using Beer CSS ui() method (5000ms timeout)
+        ui('#app-snackbar', 5000);
+    }
+</script>
+{{end}}

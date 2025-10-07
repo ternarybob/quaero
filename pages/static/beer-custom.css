@@ -1,0 +1,219 @@
+/* Quaero Beer CSS Customizations */
+
+/* Brand Colors */
+:root {
+    --brand-green: #00cc00;
+    --brand-dark: #1a1a1a;
+}
+
+/* Monospace font for technical content */
+body {
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+}
+
+/* Brand color overrides */
+.primary,
+button.primary,
+a.primary,
+.button.primary,
+input[type="button"].primary,
+input[type="submit"].primary {
+    background-color: var(--brand-dark) !important;
+    color: white !important;
+    border: 1px solid white !important;
+}
+
+.secondary,
+button.secondary {
+    background-color: var(--brand-green) !important;
+    color: white !important;
+}
+
+.success,
+button.success,
+.chip.success {
+    background-color: var(--brand-green) !important;
+    color: white !important;
+}
+
+a.active {
+    border-bottom: 2px solid var(--brand-green);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    background: var(--brand-green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Navbar spacing */
+nav.top {
+    padding: 0 40px;
+    height: 70px;
+}
+
+nav.top .row {
+    gap: 20px;
+    align-items: center;
+}
+
+/* Navbar brand styling */
+nav.top a:first-child {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 3px;
+}
+
+nav.top a:first-child small {
+    font-size: 11px;
+    letter-spacing: 1px;
+    opacity: 0.7;
+}
+
+/* Navbar links */
+nav.top a {
+    font-size: 13px;
+    letter-spacing: 1.5px;
+}
+
+/* Table styling - Beer CSS standard */
+table.border {
+    font-size: 11px;
+    width: 100%;
+}
+
+table.border td,
+table.border th {
+    padding: 8px 12px;
+    font-size: 11px;
+}
+
+table.border th {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: bold;
+}
+
+/* Legacy table class aliases for backward compatibility */
+.data-table,
+.config-table,
+.status-table {
+    font-size: 11px;
+    width: 100%;
+}
+
+.data-table td,
+.data-table th,
+.config-table td,
+.config-table th,
+.status-table td,
+.status-table th {
+    padding: 8px 12px;
+    font-size: 11px;
+}
+
+/* Table container compatibility */
+.table-container {
+    overflow-x: auto;
+}
+
+/* Action buttons in tables */
+td button {
+    display: inline-flex;
+    margin: 0 4px;
+}
+
+button.small-round {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    padding: 0;
+}
+
+td.no-wrap {
+    white-space: nowrap;
+    text-align: center;
+}
+
+/* Main content spacing */
+main.responsive {
+    padding: 20px 40px;
+}
+
+/* Reduce card spacing */
+article {
+    margin-bottom: 20px;
+}
+
+/* Logs at bottom of page */
+.log-panel-bottom {
+    background: #1a1a1a;
+    color: #00cc00;
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+    font-size: 11px;
+    padding: 10px;
+    margin: 20px 40px;
+    border-radius: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Right panel for documents page only */
+.log-panel {
+    position: fixed;
+    right: 0;
+    top: 70px;
+    width: 40%;
+    height: calc(100vh - 70px - 50px);
+    background: #1a1a1a;
+    color: #00cc00;
+    font-family: 'Courier New', Consolas, Monaco, monospace;
+    font-size: 11px;
+    overflow-y: auto;
+    border-left: 1px solid #333;
+    padding: 10px;
+}
+
+/* Main content area adjusted for right panel (documents page only) */
+main.with-panel {
+    margin-right: 40%;
+}
+
+/* Log entry styling */
+.log-entry {
+    margin: 2px 0;
+    line-height: 1.4;
+}
+
+.log-timestamp {
+    color: #666;
+}
+
+.log-level-info {
+    color: #00cc00;
+}
+
+.log-level-warn {
+    color: #ffcc00;
+}
+
+.log-level-error {
+    color: #cc0000;
+}
+
+.log-level-debug {
+    color: #6699cc;
+}
+
+.log-message {
+    color: #ccc;
+}

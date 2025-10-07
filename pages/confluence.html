@@ -3,127 +3,265 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Confluence Data - Quaero</title>
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/common.css">
+    <title>Quaero - Confluence Space Management</title>
+
+    <!-- Beer CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+
+    <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+    <style>
+        /* Quaero Brand Colors Only */
+        :root {
+            --brand-green: #00cc00;
+            --brand-dark: #1a1a1a;
+        }
+
+        /* Monospace font for technical content */
+        body {
+            font-family: 'Courier New', Consolas, Monaco, monospace;
+        }
+
+        /* Brand color overrides */
+        .primary, button.primary {
+            background-color: var(--brand-dark) !important;
+            color: white !important;
+            border: 1px solid white !important;
+        }
+
+        .secondary {
+            background-color: var(--brand-green) !important;
+        }
+
+        .success {
+            background-color: var(--brand-green) !important;
+        }
+
+        a.active {
+            border-bottom: 2px solid var(--brand-green);
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--brand-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Global fixes for layout issues */
+
+        /* Compact navbar spacing */
+        nav.top {
+            padding: 0 40px;
+            height: 70px;
+        }
+
+        nav.top .row {
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Navbar brand styling */
+        nav.top a:first-child {
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            font-size: 14px;
+            letter-spacing: 3px;
+        }
+
+        nav.top a:first-child small {
+            font-size: 11px;
+            letter-spacing: 1px;
+            opacity: 0.7;
+        }
+
+        /* Navbar links */
+        nav.top a {
+            font-size: 13px;
+            letter-spacing: 1.5px;
+        }
+
+        /* Horizontal action buttons in table */
+        td button {
+            display: inline-flex;
+            margin: 0 4px;
+        }
+
+        /* Compact buttons in table */
+        button.small-round {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+        }
+
+        /* Smaller table font and tighter spacing */
+        table {
+            font-size: 11px;
+        }
+
+        table td,
+        table th {
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+
+        /* Keep action buttons on one line and center them */
+        td.no-wrap {
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* Compact main content */
+        main.responsive {
+            padding: 20px 40px;
+        }
+
+        /* Reduce card spacing */
+        article {
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
     {{template "navbar" .}}
+    {{template "snackbar" .}}
 
-    <div class="main-container">
-        <!-- Content Area (60%) -->
-        <div class="content-area">
-            <!-- Hero Section -->
-            <div class="hero-section">
-                <h1 class="hero-title">Confluence Space Management</h1>
-                <p class="hero-subtitle">
-                    Select spaces to scrape pages from authenticated Confluence instance
-                </p>
-            </div>
+    <!-- Main Content -->
+    <main class="responsive">
+        <!-- Hero Section -->
+        <header class="center-align">
+            <h3>Confluence Space Management</h3>
+            <p>Select spaces to scrape pages from authenticated Confluence instance</p>
+        </header>
 
-            <!-- Space Management Section -->
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Spaces</div>
-                        <div class="action-buttons-header">
-                            <button id="sync-btn" class="menu-btn" onclick="syncSpaces()">
-                                <span id="sync-text">GET SPACES</span>
-                            </button>
-                            <button id="get-pages-menu-btn" class="menu-btn" onclick="getPages()" disabled>
-                                GET PAGES
-                            </button>
-                            <button id="clear-data-btn" class="menu-btn menu-btn-danger" onclick="clearAllData()">
-                                CLEAR ALL DATA
-                            </button>
-                        </div>
-                        <div id="sync-notification" class="menu-notification-inline"></div>
-                    </div>
+        <!-- Space Management Section -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>Spaces</h5>
+                    <div class="max"></div>
+                    <button id="sync-btn" class="primary" onclick="syncSpaces()">
+                        <span id="sync-text">GET SPACES</span>
+                    </button>
+                    <button id="get-pages-menu-btn" class="primary" onclick="getPages()" disabled>
+                        GET PAGES
+                    </button>
+                    <button id="clear-data-btn" class="primary" onclick="clearAllData()" style="background: #cc0000;">
+                        CLEAR ALL DATA
+                    </button>
+                </nav>
+            </header>
+            <div id="sync-notification" class="menu-notification-inline"></div>
 
                     <!-- Search Box -->
                     <div style="padding: 15px; background: #fafafa; border-bottom: 1px solid #e0e0e0;">
                         <input type="text" id="search-box" class="search-box" placeholder="Search spaces by key, name, or description...">
                     </div>
 
-                    <!-- Select All Header -->
-                    <div class="select-all-container">
-                        <label class="select-all-label">
-                            <input type="checkbox" id="select-all-checkbox">
-                            <span>SELECT ALL</span>
-                        </label>
-                        <span id="selection-count" class="selection-count">0/0</span>
-                    </div>
-
-                    <!-- Space List -->
-                    <div id="space-list" class="project-list-container">
-                        <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
-                            Loading spaces...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Pages Table Section -->
-                <div class="card" id="pages-section">
-                    <div class="card-header">
-                        <div class="card-title">Pages</div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <span id="pages-count" class="selection-count">0 pages</span>
-                            <div id="pages-loader" class="spinner" style="display: none;"></div>
-                        </div>
-                    </div>
-
-                    <!-- Pages Table -->
-                    <div class="table-container">
-                        <table id="pages-table" class="data-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 100px;">Space</th>
-                                    <th style="width: 80px;">ID</th>
-                                    <th>Title</th>
-                                    <th style="width: 120px;">Type</th>
-                                </tr>
-                            </thead>
-                            <tbody id="pages-table-body">
-                                <tr>
-                                    <td colspan="4" style="text-align: center; padding: 15px; color: #6a6a6a;">
-                                        No pages loaded. Select spaces and click "GET PAGES".
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Page Detail Section -->
-                <div class="card" id="page-detail-section">
-                    <div class="card-header">
-                        <div class="card-title">Page Detail</div>
-                        <span id="selected-page-id" class="selection-count"></span>
-                    </div>
-                    <pre id="page-detail-json" style="margin: 0; padding: 10px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
-                </div>
+            <!-- Space List Table -->
+            <div class="scroll">
+                <table class="border">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">
+                                <input type="checkbox" id="select-all-checkbox">
+                            </th>
+                            <th style="width: 100px;">KEY</th>
+                            <th>NAME</th>
+                            <th>DESCRIPTION</th>
+                            <th style="width: 100px;" class="right-align">PAGES</th>
+                        </tr>
+                    </thead>
+                    <tbody id="space-list">
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 15px;">
+                                Loading spaces...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </div>
 
-        <!-- Right Panel (40%) - Service Logs -->
-        <div class="right-panel">
-            <div class="terminal-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
-                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
-                </div>
-                <div id="service-logs" class="service-logs-container"></div>
+            <!-- Selection Count Display -->
+            <div style="padding: 15px; background: #fafafa; border-top: 1px solid #e0e0e0;">
+                <span id="selection-count" class="selection-count">0/0 selected</span>
             </div>
+        </article>
+
+        <!-- Pages Table Section -->
+        <article class="border" id="pages-section">
+            <header>
+                <nav>
+                    <h5>Pages</h5>
+                    <div class="max"></div>
+                    <span id="pages-count" class="selection-count">0 pages</span>
+                    <div id="pages-loader" class="spinner" style="display: none;"></div>
+                </nav>
+            </header>
+
+            <!-- Pages Table -->
+            <div class="scroll">
+                <table id="pages-table" class="border">
+                    <thead>
+                        <tr>
+                            <th style="width: 100px;">Space</th>
+                            <th style="width: 80px;">ID</th>
+                            <th>Title</th>
+                            <th style="width: 120px;">Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pages-table-body">
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 15px; color: #6a6a6a;">
+                                No pages loaded. Select spaces and click "GET PAGES".
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <!-- Page Detail Section -->
+        <article class="border" id="page-detail-section">
+            <header>
+                <nav>
+                    <h5>Page Detail</h5>
+                    <div class="max"></div>
+                    <span id="selected-page-id" class="selection-count"></span>
+                </nav>
+            </header>
+            <pre id="page-detail-json" style="margin: 0; padding: 10px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+        </article>
+    </main>
+
+    <!-- Service Logs at Bottom -->
+    <div class="log-panel-bottom">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
+            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
+                <i>delete</i>
+            </button>
         </div>
+        <div id="service-logs"></div>
     </div>
 
     <!-- Footer -->
-    <div class="system-footer" id="footer-version">
-        Quaero // Version Loading...
-    </div>
+    <footer class="center-align small-padding">
+        <small id="footer-version">Quaero // Version Loading...</small>
+    </footer>
 
     <script>
         // Load and format version info
@@ -370,9 +508,11 @@
                     ? 'No spaces in cache. Click "GET SPACES" to load from Confluence.'
                     : 'No spaces match your search criteria.';
                 container.innerHTML = `
-                    <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
-                        ${message}
-                    </div>
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
+                            ${message}
+                        </td>
+                    </tr>
                 `;
                 return;
             }
@@ -387,18 +527,18 @@
             });
 
             container.innerHTML = sortedSpaces.map(space => `
-                <div class="project-item ${selectedSpaces.has(space.key) ? 'selected' : ''}" onclick="toggleSpace('${space.key}', event)">
-                    <input type="checkbox"
-                           id="space-${space.key}"
-                           value="${space.key}"
-                           ${selectedSpaces.has(space.key) ? 'checked' : ''}>
-                    <span class="project-key">${space.key}</span>
-                    <div class="project-info">
-                        <div class="project-name">${space.name}</div>
-                        <div class="project-description">${space.description}</div>
-                    </div>
-                    <span class="project-issues">${space.pageCount} pages</span>
-                </div>
+                <tr onclick="toggleSpace('${space.key}', event)" style="cursor: pointer; ${selectedSpaces.has(space.key) ? 'background: #2a2a2a;' : ''}">
+                    <td class="center-align">
+                        <input type="checkbox"
+                               id="space-${space.key}"
+                               value="${space.key}"
+                               ${selectedSpaces.has(space.key) ? 'checked' : ''}>
+                    </td>
+                    <td>${space.key}</td>
+                    <td>${space.name}</td>
+                    <td>${space.description || ''}</td>
+                    <td class="right-align">${space.pageCount}</td>
+                </tr>
             `).join('');
         }
 

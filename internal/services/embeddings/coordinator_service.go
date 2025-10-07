@@ -17,6 +17,7 @@ type CoordinatorService struct {
 	documentStorage  interfaces.DocumentStorage
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
+	processingLimit  int
 	isProcessing     bool
 	mu               sync.Mutex
 }
@@ -27,12 +28,17 @@ func NewCoordinatorService(
 	documentStorage interfaces.DocumentStorage,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
+	processingLimit int,
 ) *CoordinatorService {
+	if processingLimit <= 0 {
+		processingLimit = 1000 // Default to 1000 if not specified
+	}
 	return &CoordinatorService{
 		embeddingService: embeddingService,
 		documentStorage:  documentStorage,
 		eventService:     eventService,
 		logger:           logger,
+		processingLimit:  processingLimit,
 	}
 }
 
@@ -102,8 +108,10 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 	}()
 	s.logger.Debug().Msg("@@@ Step 8: Worker pool started")
 
-	s.logger.Debug().Msg("@@@ Step 9: Fetching force embed documents from storage (limit 100)")
-	forceEmbedDocs, err := s.documentStorage.GetDocumentsForceEmbed(100)
+	s.logger.Debug().
+		Int("limit", s.processingLimit).
+		Msg("@@@ Step 9: Fetching force embed documents from storage")
+	forceEmbedDocs, err := s.documentStorage.GetDocumentsForceEmbed(s.processingLimit)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying force embed documents")
 		return fmt.Errorf("failed to get force embed documents: %w", err)
@@ -140,8 +148,10 @@ func (s *CoordinatorService) handleEmbeddingEvent(ctx context.Context, event int
 		s.logger.Debug().Msg("@@@ Step 11: No force embed documents found")
 	}
 
-	s.logger.Debug().Msg("@@@ Step 13: Fetching unvectorized documents from storage (limit 100)")
-	unvectorizedDocs, err := s.documentStorage.GetUnvectorizedDocuments(100)
+	s.logger.Debug().
+		Int("limit", s.processingLimit).
+		Msg("@@@ Step 13: Fetching unvectorized documents from storage")
+	unvectorizedDocs, err := s.documentStorage.GetUnvectorizedDocuments(s.processingLimit)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("@@@ FAILED: Error querying unvectorized documents")
 		return fmt.Errorf("failed to get unvectorized documents: %w", err)

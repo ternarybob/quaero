@@ -3,108 +3,259 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QUAERO - Monitoring Dashboard</title>
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/common.css">
+    <title>Quaero - Monitoring Dashboard</title>
+
+    <!-- Beer CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+
+    <style>
+        /* Quaero Brand Colors Only */
+        :root {
+            --brand-green: #00cc00;
+            --brand-dark: #1a1a1a;
+        }
+
+        /* Monospace font for technical content */
+        body {
+            font-family: 'Courier New', Consolas, Monaco, monospace;
+        }
+
+        /* Brand color overrides */
+        .primary, button.primary {
+            background-color: var(--brand-dark) !important;
+            color: white !important;
+            border: 1px solid white !important;
+        }
+
+        .secondary {
+            background-color: var(--brand-green) !important;
+        }
+
+        .success {
+            background-color: var(--brand-green) !important;
+        }
+
+        a.active {
+            border-bottom: 2px solid var(--brand-green);
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--brand-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Global fixes for layout issues */
+
+        /* Compact navbar spacing */
+        nav.top {
+            padding: 0 40px;
+            height: 70px;
+        }
+
+        nav.top .row {
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Navbar brand styling */
+        nav.top a:first-child {
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            font-size: 14px;
+            letter-spacing: 3px;
+        }
+
+        nav.top a:first-child small {
+            font-size: 11px;
+            letter-spacing: 1px;
+            opacity: 0.7;
+        }
+
+        /* Navbar links */
+        nav.top a {
+            font-size: 13px;
+            letter-spacing: 1.5px;
+        }
+
+        /* Horizontal action buttons in table */
+        td button {
+            display: inline-flex;
+            margin: 0 4px;
+        }
+
+        /* Compact buttons in table */
+        button.small-round {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+        }
+
+        /* Smaller table font and tighter spacing */
+        table {
+            font-size: 11px;
+        }
+
+        table td,
+        table th {
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+
+        /* Keep action buttons on one line and center them */
+        td.no-wrap {
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* Compact main content */
+        main.responsive {
+            padding: 20px 40px;
+        }
+
+        /* Reduce card spacing */
+        article {
+            margin-bottom: 20px;
+        }
+
+        /* Page-specific styles */
+        .status-label {
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .status-value {
+            color: #00cc00;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .status-online {
+            color: #00cc00;
+        }
+
+        /* Status table dark background */
+        article .border {
+            background: #1a1a1a;
+        }
+
+        article .border td {
+            color: #ccc;
+            border-bottom: 1px solid #333;
+        }
+    </style>
 </head>
 
 <body>
     {{template "navbar" .}}
+    {{template "snackbar" .}}
 
-    <div class="main-container">
-        <!-- Content Area (60%) -->
-        <div class="content-area">
-            <!-- Hero Section -->
-            <div class="hero-section">
-                <h1 class="hero-title">QUAERO</h1>
-                <p class="hero-subtitle">
-                    Knowledge collection and semantic search system with vector embeddings and offline LLM support.
-                    Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.
+    <!-- Main Content -->
+    <main class="responsive">
+        <!-- Hero Section -->
+        <header class="center-align">
+            <h3>QUAERO</h3>
+            <p>Knowledge collection and semantic search system with vector embeddings and offline LLM support. Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.</p>
+        </header>
+
+        <!-- Service Status Monitor -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>Service Status</h5>
+                </nav>
+            </header>
+            <table class="border" id="service-status-table" hx-get="/ui/status" hx-trigger="load, every 60s" hx-swap="innerHTML">
+                <tr>
+                    <td class="status-label">Parser Service</td>
+                    <td class="status-value">ONLINE</td>
+                </tr>
+                <tr>
+                    <td class="status-label">Database</td>
+                    <td class="status-value">CONNECTED</td>
+                </tr>
+                <tr>
+                    <td class="status-label">Extension Auth</td>
+                    <td class="status-value">WAITING</td>
+                </tr>
+            </table>
+        </article>
+
+        <!-- Parser Status Section -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>Parser Status</h5>
+                    <div class="max"></div>
+                    <button
+                        id="refresh-parser-status"
+                        class="primary"
+                        hx-get="/ui/parser-status"
+                        hx-target="#parser-status"
+                        hx-swap="innerHTML"
+                        hx-trigger="click, load, every 60s"
+                        hx-sync="this:abort">
+                        REFRESH
+                    </button>
+                </nav>
+            </header>
+
+            <div style="padding: 20px; text-align: center;">
+                <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; margin-bottom: 20px;">
+                    Install Chrome extension and click icon when logged into Jira/Confluence<br>
+                    Extension will capture authentication and trigger scraping automatically
+                </p>
+                <div id="parser-status">
+                    <p>Loading parser status...</p>
+                </div>
+            </div>
+        </article>
+
+        <!-- Authentication Details Section -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>Authentication Details</h5>
+                </nav>
+            </header>
+
+            <div id="auth-details" style="padding: 20px;">
+                <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
+                    No authentication data captured yet
                 </p>
             </div>
+        </article>
+    </main>
 
-            <!-- Parser Status Section -->
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Parser Status</div>
-                        <button
-                            id="refresh-parser-status"
-                            class="btn-clear-logs"
-                            hx-get="/ui/parser-status"
-                            hx-target="#parser-status"
-                            hx-swap="innerHTML"
-                            hx-trigger="click, load, every 60s"
-                            hx-sync="this:abort"
-                            style="padding: 4px 12px; font-size: 11px;">
-                            Refresh
-                        </button>
-                    </div>
-
-                    <div style="padding: 20px; text-align: center;">
-                        <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; margin-bottom: 20px;">
-                            Install Chrome extension and click icon when logged into Jira/Confluence<br>
-                            Extension will capture authentication and trigger scraping automatically
-                        </p>
-                        <div id="parser-status">
-                            <p>Loading parser status...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Authentication Details Section -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Authentication Details</div>
-                    </div>
-
-                    <div id="auth-details" style="padding: 20px;">
-                        <p style="font-family: monospace; font-size: 12px; color: #6a6a6a; text-align: center;">
-                            No authentication data captured yet
-                        </p>
-                    </div>
-                </div>
-
-            </div>
-
+    <!-- Service Logs at Bottom -->
+    <div class="log-panel-bottom">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
+            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
+                <i>delete</i>
+            </button>
         </div>
-
-        <!-- Right Panel (40%) - Service Status & Logs -->
-        <div class="right-panel">
-            <!-- Service Status Monitor -->
-            <div class="terminal-section">
-                <table class="status-table" id="service-status-table" hx-get="/ui/status" hx-trigger="load, every 60s" hx-swap="innerHTML">
-                    <tr>
-                        <td class="status-label">Parser Service</td>
-                        <td class="status-value">ONLINE</td>
-                    </tr>
-                    <tr>
-                        <td class="status-label">Database</td>
-                        <td class="status-value">CONNECTED</td>
-                    </tr>
-                    <tr>
-                        <td class="status-label">Extension Auth</td>
-                        <td class="status-value">WAITING</td>
-                    </tr>
-                </table>
-            </div>
-
-            <!-- Service Logs -->
-            <div class="terminal-section" style="margin-top: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
-                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
-                </div>
-                <div id="service-logs" class="service-logs-container"></div>
-            </div>
-        </div>
+        <div id="service-logs"></div>
     </div>
 
     <!-- Footer -->
-    <div class="system-footer" id="footer-version">
-        Quaero // Version Loading...
-    </div>
+    <footer class="center-align small-padding">
+        <small id="footer-version">Quaero // Version Loading...</small>
+    </footer>
 
     <script>
         // Load and format version info
@@ -284,27 +435,30 @@
                         <strong>Cookies:</strong> ${authData.cookies.length}
                     </p>
                 </div>
-                <table class="status-table" style="font-size: 10px;">
-                    <tr style="background: #f8f8f8;">
-                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Name</th>
-                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Domain</th>
-                        <th style="padding: 8px; text-align: left; border-right: 1px solid #e0e0e0;">Path</th>
-                        <th style="padding: 8px; text-align: left;">Secure</th>
-                    </tr>
+                <table class="border" style="font-size: 10px;">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Domain</th>
+                            <th>Path</th>
+                            <th>Secure</th>
+                        </tr>
+                    </thead>
+                    <tbody>
             `;
 
             authData.cookies.forEach(cookie => {
                 html += `
                     <tr>
-                        <td style="padding: 8px; border-right: 1px solid #e0e0e0; word-break: break-all;">${cookie.name}</td>
-                        <td style="padding: 8px; border-right: 1px solid #e0e0e0;">${cookie.domain}</td>
-                        <td style="padding: 8px; border-right: 1px solid #e0e0e0;">${cookie.path}</td>
-                        <td style="padding: 8px;">${cookie.secure ? '✓' : '-'}</td>
+                        <td style="word-break: break-all;">${cookie.name}</td>
+                        <td>${cookie.domain}</td>
+                        <td>${cookie.path}</td>
+                        <td>${cookie.secure ? '✓' : '-'}</td>
                     </tr>
                 `;
             });
 
-            html += `</table>`;
+            html += `</tbody></table>`;
             authContainer.innerHTML = html;
         }
 

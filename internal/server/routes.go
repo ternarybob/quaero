@@ -12,6 +12,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler)
 	mux.HandleFunc("/documents", s.app.UIHandler.DocumentsPageHandler)
 	mux.HandleFunc("/embeddings", s.app.UIHandler.EmbeddingsPageHandler)
+	mux.HandleFunc("/chat", s.app.UIHandler.ChatPageHandler)
 	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
@@ -65,6 +66,14 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Embeddings (testing)
 	mux.HandleFunc("/api/embeddings/generate", s.app.EmbeddingHandler.GenerateEmbeddingHandler)
 	mux.HandleFunc("/api/embeddings", s.app.EmbeddingHandler.ClearEmbeddingsHandler)
+
+	// API routes - Chat (RAG-enabled chat)
+	mux.HandleFunc("/api/chat", s.app.ChatHandler.ChatHandler)
+	mux.HandleFunc("/api/chat/health", s.app.ChatHandler.HealthHandler)
+
+	// MCP (Model Context Protocol) endpoints
+	mux.HandleFunc("/mcp", s.app.MCPHandler.HandleRPC)
+	mux.HandleFunc("/mcp/info", s.app.MCPHandler.InfoHandler)
 
 	// API routes - Processing
 	mux.HandleFunc("/api/processing/status", s.app.DocumentHandler.ProcessingStatusHandler)

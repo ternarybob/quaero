@@ -252,7 +252,8 @@ func (d *DocumentStorage) DeleteDocument(id string) error {
 func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	sqlQuery := `
 		SELECT d.id, d.source_type, d.source_id, d.title, d.content, d.content_markdown,
-			   d.embedding, d.embedding_model, d.metadata, d.url, d.created_at, d.updated_at
+			   d.embedding, d.embedding_model, d.metadata, d.url, d.created_at, d.updated_at,
+			   d.last_synced, d.source_version, d.force_sync_pending, d.force_embed_pending
 		FROM documents d
 		INNER JOIN documents_fts fts ON d.rowid = fts.rowid
 		WHERE documents_fts MATCH ?
@@ -390,6 +391,9 @@ func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 
 	stats.PendingVectorize = stats.TotalDocuments - stats.VectorizedCount
 
+	// Populate VectorizedDocuments (alias for VectorizedCount)
+	stats.VectorizedDocuments = stats.VectorizedCount
+
 	// Count by source
 	rows, err := d.db.db.Query("SELECT source_type, COUNT(*) FROM documents GROUP BY source_type")
 	if err != nil {
@@ -405,6 +409,10 @@ func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 		}
 		stats.DocumentsBySource[sourceType] = count
 	}
+
+	// Populate individual source counts from DocumentsBySource
+	stats.JiraDocuments = stats.DocumentsBySource["jira"]
+	stats.ConfluenceDocuments = stats.DocumentsBySource["confluence"]
 
 	// Get embedding model (from any document that has one)
 	d.db.db.QueryRow("SELECT embedding_model FROM documents WHERE embedding_model IS NOT NULL LIMIT 1").Scan(&stats.EmbeddingModel)

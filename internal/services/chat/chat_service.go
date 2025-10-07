@@ -1,0 +1,238 @@
+package chat
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
+)
+
+// ChatService implements RAG-enabled chat functionality
+type ChatService struct {
+	llmService       interfaces.LLMService
+	documentService  interfaces.DocumentService
+	embeddingService interfaces.EmbeddingService
+	logger           arbor.ILogger
+}
+
+// NewChatService creates a new chat service
+func NewChatService(
+	llmService interfaces.LLMService,
+	documentService interfaces.DocumentService,
+	embeddingService interfaces.EmbeddingService,
+	logger arbor.ILogger,
+) *ChatService {
+	return &ChatService{
+		llmService:       llmService,
+		documentService:  documentService,
+		embeddingService: embeddingService,
+		logger:           logger,
+	}
+}
+
+// Chat implements the ChatService interface
+func (s *ChatService) Chat(ctx context.Context, req *interfaces.ChatRequest) (*interfaces.ChatResponse, error) {
+	ragEnabled := req.RAGConfig != nil && req.RAGConfig.Enabled
+	s.logger.Debug().
+		Str("message", req.Message).
+		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
+		Msg("Processing chat request")
+
+	// Set default RAG config if not provided
+	ragConfig := req.RAGConfig
+	if ragConfig == nil {
+		ragConfig = &interfaces.RAGConfig{
+			Enabled:       true,
+			MaxDocuments:  5,
+			MinSimilarity: 0.7,
+			SearchMode:    interfaces.SearchModeVector,
+		}
+	}
+
+	var contextDocs []*models.Document
+	var contextText string
+
+	// Retrieve relevant documents if RAG is enabled
+	if ragConfig.Enabled {
+		docs, err := s.retrieveContext(ctx, req.Message, ragConfig)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to retrieve context documents")
+			// Continue without context rather than failing
+		} else {
+			contextDocs = docs
+			contextText = s.buildContextText(docs)
+		}
+	}
+
+	// Build messages for LLM
+	messages := s.buildMessages(req, contextText)
+
+	// Generate response
+	response, err := s.llmService.Chat(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate response: %w", err)
+	}
+
+	// Build response
+	chatResponse := &interfaces.ChatResponse{
+		Message:     response,
+		ContextDocs: contextDocs,
+		TokenUsage:  nil, // TODO: Implement token counting
+		Model:       s.embeddingService.ModelName(),
+		Mode:        s.llmService.GetMode(),
+	}
+
+	s.logger.Info().
+		Int("context_docs", len(contextDocs)).
+		Str("mode", string(chatResponse.Mode)).
+		Msg("Chat request completed")
+
+	return chatResponse, nil
+}
+
+// retrieveContext retrieves relevant documents for RAG
+func (s *ChatService) retrieveContext(
+	ctx context.Context,
+	query string,
+	config *interfaces.RAGConfig,
+) ([]*models.Document, error) {
+	// Generate query embedding
+	embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
+	}
+
+	// Build search query
+	searchQuery := &interfaces.SearchQuery{
+		Text:       query,
+		Embedding:  embedding,
+		Limit:      config.MaxDocuments,
+		Mode:       config.SearchMode,
+		SourceType: "",
+	}
+
+	// Filter by source types if specified
+	if len(config.SourceTypes) > 0 {
+		// Note: Current DocumentService only supports single SourceType
+		// If multiple types requested, use the first one or consider hybrid search
+		searchQuery.SourceType = config.SourceTypes[0]
+	}
+
+	// Search documents
+	docs, err := s.documentService.Search(ctx, searchQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search documents: %w", err)
+	}
+
+	s.logger.Debug().
+		Int("retrieved", len(docs)).
+		Int("requested", config.MaxDocuments).
+		Msg("Retrieved context documents")
+
+	return docs, nil
+}
+
+// buildContextText builds a formatted context string from documents
+func (s *ChatService) buildContextText(docs []*models.Document) string {
+	if len(docs) == 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, "RELEVANT CONTEXT:")
+	parts = append(parts, "")
+
+	for i, doc := range docs {
+		parts = append(parts, fmt.Sprintf("Document %d:", i+1))
+		parts = append(parts, fmt.Sprintf("Source: %s", doc.SourceType))
+		if doc.Title != "" {
+			parts = append(parts, fmt.Sprintf("Title: %s", doc.Title))
+		}
+		if doc.URL != "" {
+			parts = append(parts, fmt.Sprintf("URL: %s", doc.URL))
+		}
+		parts = append(parts, fmt.Sprintf("Content: %s", truncateContent(doc.Content, 500)))
+		parts = append(parts, "")
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// buildMessages constructs the message array for the LLM
+func (s *ChatService) buildMessages(req *interfaces.ChatRequest, contextText string) []interfaces.Message {
+	messages := []interfaces.Message{}
+
+	// Add system prompt
+	systemPrompt := req.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = getDefaultSystemPrompt()
+	}
+
+	// If we have context, augment the system prompt
+	if contextText != "" {
+		systemPrompt = fmt.Sprintf("%s\n\n%s", systemPrompt, contextText)
+	}
+
+	messages = append(messages, interfaces.Message{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+
+	// Add conversation history
+	if req.History != nil {
+		messages = append(messages, req.History...)
+	}
+
+	// Add current user message
+	messages = append(messages, interfaces.Message{
+		Role:    "user",
+		Content: req.Message,
+	})
+
+	return messages
+}
+
+// GetMode returns the current LLM mode
+func (s *ChatService) GetMode() interfaces.LLMMode {
+	return s.llmService.GetMode()
+}
+
+// HealthCheck verifies the chat service is operational
+func (s *ChatService) HealthCheck(ctx context.Context) error {
+	// Check LLM service
+	if err := s.llmService.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("LLM service unhealthy: %w", err)
+	}
+
+	// Check embedding service
+	if !s.embeddingService.IsAvailable(ctx) {
+		return fmt.Errorf("embedding service unavailable")
+	}
+
+	return nil
+}
+
+// getDefaultSystemPrompt returns the default system prompt
+func getDefaultSystemPrompt() string {
+	return `You are a helpful AI assistant with access to a knowledge base of documents from Jira, Confluence, and GitHub.
+
+When answering questions:
+1. Use the provided context documents when relevant
+2. Cite your sources by mentioning the document title or URL
+3. If the context doesn't contain relevant information, say so clearly
+4. Be concise and accurate in your responses
+5. Format your responses in clear, readable Markdown
+
+If you're unsure about something, acknowledge it rather than making assumptions.`
+}
+
+// truncateContent truncates content to the specified length
+func truncateContent(content string, maxLength int) string {
+	if len(content) <= maxLength {
+		return content
+	}
+	return content[:maxLength] + "..."
+}

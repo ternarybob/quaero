@@ -116,6 +116,7 @@ type EmbeddingsConfig struct {
 type ProcessingConfig struct {
 	Enabled  bool   `toml:"enabled"`
 	Schedule string `toml:"schedule"` // Cron schedule format
+	Limit    int    `toml:"limit"`    // Max documents to process per embedding run
 }
 
 type LoggingConfig struct {
@@ -180,6 +181,7 @@ func NewDefaultConfig() *Config {
 		Processing: ProcessingConfig{
 			Enabled:  false,           // Disabled by default, user must opt-in
 			Schedule: "0 0 */6 * * *", // Every 6 hours
+			Limit:    1000,            // Max documents per embedding run
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

@@ -3,128 +3,260 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jira Project Management - Quaero</title>
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/common.css">
+    <title>Quaero - Jira Project Management</title>
+
+    <!-- Beer CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+
+    <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+    <style>
+        /* Quaero Brand Colors Only */
+        :root {
+            --brand-green: #00cc00;
+            --brand-dark: #1a1a1a;
+        }
+
+        /* Monospace font for technical content */
+        body {
+            font-family: 'Courier New', Consolas, Monaco, monospace;
+        }
+
+        /* Brand color overrides */
+        .primary, button.primary {
+            background-color: var(--brand-dark) !important;
+            color: white !important;
+            border: 1px solid white !important;
+        }
+
+        .secondary {
+            background-color: var(--brand-green) !important;
+        }
+
+        .success {
+            background-color: var(--brand-green) !important;
+        }
+
+        a.active {
+            border-bottom: 2px solid var(--brand-green);
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--brand-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Global fixes for layout issues */
+
+        /* Compact navbar spacing */
+        nav.top {
+            padding: 0 40px;
+            height: 70px;
+        }
+
+        nav.top .row {
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Navbar brand styling */
+        nav.top a:first-child {
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            font-size: 14px;
+            letter-spacing: 3px;
+        }
+
+        nav.top a:first-child small {
+            font-size: 11px;
+            letter-spacing: 1px;
+            opacity: 0.7;
+        }
+
+        /* Navbar links */
+        nav.top a {
+            font-size: 13px;
+            letter-spacing: 1.5px;
+        }
+
+        /* Horizontal action buttons in table */
+        td button {
+            display: inline-flex;
+            margin: 0 4px;
+        }
+
+        /* Compact buttons in table */
+        button.small-round {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+        }
+
+        /* Smaller table font and tighter spacing */
+        table {
+            font-size: 11px;
+        }
+
+        table td,
+        table th {
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+
+        /* Keep action buttons on one line and center them */
+        td.no-wrap {
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* Compact main content */
+        main.responsive {
+            padding: 20px 40px;
+        }
+
+        /* Reduce card spacing */
+        article {
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
     {{template "navbar" .}}
+    {{template "snackbar" .}}
 
-    <div class="main-container">
-        <!-- Content Area (60%) -->
-        <div class="content-area">
-            <!-- Hero Section -->
-            <div class="hero-section">
-                <h1 class="hero-title">Jira Project Management</h1>
-                <p class="hero-subtitle">
-                    Select projects to scrape issues from authenticated Jira instance
-                </p>
+    <!-- Main Content -->
+    <main class="responsive">
+        <!-- Hero Section -->
+        <header class="center-align">
+            <h3>Jira Project Management</h3>
+            <p>Select projects to scrape issues from authenticated Jira instance</p>
+        </header>
+
+        <!-- Project Management Section -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>Projects</h5>
+                    <div class="max"></div>
+                    <button id="sync-btn" class="primary" onclick="syncProjects()">
+                        <span id="sync-text">GET PROJECTS</span>
+                    </button>
+                    <button id="get-issues-menu-btn" class="primary" onclick="getIssues()" disabled>
+                        GET ISSUES
+                    </button>
+                    <button id="clear-data-btn" class="primary" onclick="clearAllData()" style="color: #cc0000 !important;">
+                        CLEAR ALL DATA
+                    </button>
+                </nav>
+            </header>
+
+            <!-- Search Box -->
+            <div style="padding: 15px;">
+                <input type="text" id="search-box" placeholder="Search projects by key, name, or description..." style="width: 100%; background: transparent; border: none; border-bottom: 1px solid #444; padding: 8px 0; color: #ccc; font-family: 'Courier New', Consolas, Monaco, monospace;">
             </div>
 
-            <!-- Project Management Section -->
-            <div class="dashboard-grid">
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">Projects</div>
-                        <div class="action-buttons-header">
-                            <button id="sync-btn" class="menu-btn" onclick="syncProjects()">
-                                <span id="sync-text">GET PROJECTS</span>
-                            </button>
-                            <button id="get-issues-menu-btn" class="menu-btn" onclick="getIssues()" disabled>
-                                GET ISSUES
-                            </button>
-                            <button id="clear-data-btn" class="menu-btn menu-btn-danger" onclick="clearAllData()">
-                                CLEAR ALL DATA
-                            </button>
-                        </div>
-                        <div id="sync-notification" class="menu-notification-inline"></div>
-                    </div>
-
-                    <!-- Search Box -->
-                    <div style="padding: 15px; background: #fafafa; border-bottom: 1px solid #e0e0e0;">
-                        <input type="text" id="search-box" class="search-box" placeholder="Search projects by key, name, or description...">
-                    </div>
-
-                    <!-- Select All Header -->
-                    <div class="select-all-container">
-                        <label class="select-all-label">
-                            <input type="checkbox" id="select-all-checkbox">
-                            <span>SELECT ALL</span>
-                        </label>
-                        <span id="selection-count" class="selection-count">0/0</span>
-                    </div>
-
-                    <!-- Project List -->
-                    <div id="project-list" class="project-list-container">
-                        <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
-                            Loading projects...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Issues Table Section -->
-                <div class="card" id="issues-section">
-                    <div class="card-header">
-                        <div class="card-title">Issues</div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <span id="issues-count" class="selection-count">0 issues</span>
-                            <div id="issues-loader" class="spinner" style="display: none;"></div>
-                        </div>
-                    </div>
-
-                    <!-- Issues Table -->
-                    <div class="table-container">
-                        <table id="issues-table" class="data-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 100px;">Project</th>
-                                    <th style="width: 120px;">Key</th>
-                                    <th style="width: 100px;">Type</th>
-                                    <th style="width: 100px;">Status</th>
-                                    <th>Summary</th>
-                                </tr>
-                            </thead>
-                            <tbody id="issues-table-body">
-                                <tr>
-                                    <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
-                                        No issues loaded. Select projects and click "GET ISSUES".
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Issue Detail Section -->
-                <div class="card" id="issue-detail-section">
-                    <div class="card-header">
-                        <div class="card-title">Issue Detail</div>
-                        <span id="selected-issue-key" class="selection-count"></span>
-                    </div>
-                    <pre id="issue-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
-                </div>
+            <!-- Project List Table -->
+            <div class="scroll">
+                <table class="border">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">
+                                <input type="checkbox" id="select-all-checkbox">
+                            </th>
+                            <th style="width: 100px;">KEY</th>
+                            <th>NAME</th>
+                            <th>DESCRIPTION</th>
+                            <th style="width: 100px;" class="right-align">ISSUES</th>
+                        </tr>
+                    </thead>
+                    <tbody id="project-list">
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 15px;">
+                                Loading projects...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
+        </article>
+
+        <!-- Issues Table Section -->
+        <article class="border" id="issues-section">
+            <header>
+                <nav>
+                    <h5>Issues</h5>
+                    <div class="max"></div>
+                    <span id="issues-count" class="selection-count">0 issues</span>
+                    <div id="issues-loader" class="spinner" style="display: none;"></div>
+                </nav>
+            </header>
+
+            <!-- Issues Table -->
+            <div class="scroll">
+                <table id="issues-table" class="border">
+                    <thead>
+                        <tr>
+                            <th style="width: 100px;">Project</th>
+                            <th style="width: 120px;">Key</th>
+                            <th style="width: 100px;">Type</th>
+                            <th style="width: 100px;">Status</th>
+                            <th>Summary</th>
+                        </tr>
+                    </thead>
+                    <tbody id="issues-table-body">
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
+                                No issues loaded. Select projects and click "GET ISSUES".
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <!-- Issue Detail Section -->
+        <article class="border" id="issue-detail-section">
+            <header>
+                <nav>
+                    <h5>Issue Detail</h5>
+                    <div class="max"></div>
+                    <span id="selected-issue-key" class="selection-count"></span>
+                </nav>
+            </header>
+            <pre id="issue-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+        </article>
+    </main>
+
+    <!-- Service Logs at Bottom -->
+    <div class="log-panel-bottom">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
+            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
+                <i>delete</i>
+            </button>
         </div>
-
-        <!-- Right Panel (40%) - Service Logs -->
-        <div class="right-panel">
-            <div class="terminal-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
-                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
-                </div>
-                <div id="service-logs" class="service-logs-container"></div>
-            </div>
-        </div>
+        <div id="service-logs"></div>
     </div>
 
     <!-- Footer -->
-    <div class="system-footer" id="footer-version">
-        Quaero // Version Loading...
-    </div>
+    <footer class="center-align small-padding">
+        <small id="footer-version">Quaero // Version Loading...</small>
+    </footer>
 
     <script>
         // Load and format version info
@@ -376,9 +508,11 @@
                     ? 'No projects in cache. Click "SYNC PROJECTS" to load from Jira.'
                     : 'No projects match your search criteria.';
                 container.innerHTML = `
-                    <div style="text-align: center; padding: 15px; color: #6a6a6a; font-family: monospace; font-size: 12px;">
-                        ${message}
-                    </div>
+                    <tr>
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #6a6a6a;">
+                            ${message}
+                        </td>
+                    </tr>
                 `;
                 return;
             }
@@ -394,18 +528,18 @@
             });
 
             container.innerHTML = sortedProjects.map(project => `
-                <div class="project-item ${selectedProjects.has(project.key) ? 'selected' : ''}" onclick="toggleProject('${project.key}', event)">
-                    <input type="checkbox"
-                           id="project-${project.key}"
-                           value="${project.key}"
-                           ${selectedProjects.has(project.key) ? 'checked' : ''}>
-                    <span class="project-key">${project.key}</span>
-                    <div class="project-info">
-                        <div class="project-name">${project.name}</div>
-                        <div class="project-description">${project.description}</div>
-                    </div>
-                    <span class="project-issues">${project.issueCount} issues</span>
-                </div>
+                <tr onclick="toggleProject('${project.key}', event)" style="cursor: pointer; ${selectedProjects.has(project.key) ? 'background: #2a2a2a;' : ''}">
+                    <td class="center-align">
+                        <input type="checkbox"
+                               id="project-${project.key}"
+                               value="${project.key}"
+                               ${selectedProjects.has(project.key) ? 'checked' : ''}>
+                    </td>
+                    <td>${project.key}</td>
+                    <td>${project.name}</td>
+                    <td>${project.description || ''}</td>
+                    <td class="right-align">${project.issueCount}</td>
+                </tr>
             `).join('');
         }
 
@@ -885,15 +1019,6 @@
             selectedKey.textContent = '';
             codeBlock.textContent = '';
             selectedIssue = null;
-        }
-
-        function showNotification(message, type) {
-            const notification = document.getElementById('sync-notification');
-            notification.innerHTML = `<div class="sync-message ${type}">${message}</div>`;
-
-            setTimeout(() => {
-                notification.innerHTML = '';
-            }, 5000);
         }
 
         // Initialize on page load

@@ -190,6 +190,18 @@ func (h *UIHandler) EmbeddingsPageHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ChatPageHandler serves the Chat page
+func (h *UIHandler) ChatPageHandler(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Page": "chat",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "chat.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render chat")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
 // StaticFileHandler serves static files (CSS, favicon) from the pages/static directory
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files

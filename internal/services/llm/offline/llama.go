@@ -296,6 +296,12 @@ func (s *OfflineLLMService) extractResponse(output string) string {
 func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {
 	s.logger.Debug().Msg("Running health check")
 
+	// Mock mode always healthy
+	if s.mockMode {
+		s.logger.Debug().Msg("Mock mode - health check passed")
+		return nil
+	}
+
 	// Check llama-cli binary exists and is executable
 	info, err := os.Stat(s.llamaCLIPath)
 	if err != nil {

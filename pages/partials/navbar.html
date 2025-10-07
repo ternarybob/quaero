@@ -1,20 +1,33 @@
 {{define "navbar"}}
-<nav class="navbar">
-    <a href="/" class="navbar-brand">
-        <div class="navbar-brand-title">QUAERO</div>
-        <div class="navbar-brand-subtitle">DATA COLLECTION SERVICE</div>
-    </a>
-    <div class="navbar-menu">
-        <a href="/" class="navbar-link{{if eq .Page "home"}} active{{end}}">HOME</a>
-        <a href="/jira" class="navbar-link{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
-        <a href="/confluence" class="navbar-link{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
-        <a href="/documents" class="navbar-link{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
-        <a href="/embeddings" class="navbar-link{{if eq .Page "embeddings"}} active{{end}}">EMBEDDINGS</a>
-        <a href="/settings" class="navbar-link{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
-    </div>
-    <div class="navbar-status">
-        <div class="status-indicator"></div>
-        <span class="status-text">ONLINE</span>
+<nav class="top">
+    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 40px;">
+        <!-- Left: Site Title -->
+        <div style="flex: 0 0 auto;">
+            <a href="/">
+                <div>QUAERO</div>
+                <small>DATA COLLECTION SERVICE</small>
+            </a>
+        </div>
+
+        <!-- Center: Main Menu -->
+        <div style="flex: 0 0 auto;">
+            <div class="row">
+                <a href="/" class="min{{if eq .Page "home"}} active{{end}}">HOME</a>
+                <a href="/jira" class="min{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
+                <a href="/confluence" class="min{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
+                <a href="/documents" class="min{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
+                <a href="/chat" class="min{{if eq .Page "chat"}} active{{end}}">CHAT</a>
+                <a href="/settings" class="min{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
+            </div>
+        </div>
+
+        <!-- Right: Status -->
+        <div style="flex: 0 0 auto;">
+            <div class="row">
+                <div class="status-indicator"></div>
+                <span class="small status-text">ONLINE</span>
+            </div>
+        </div>
     </div>
 </nav>
 {{end}}

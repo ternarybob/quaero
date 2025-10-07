@@ -330,6 +330,58 @@ if (Test-Path $pagesSourcePath) {
     Write-Host "Deployed web pages: pages -> bin/" -ForegroundColor Green
 }
 
+# Copy MCP client to bin
+$mcpSourcePath = Join-Path -Path $projectRoot -ChildPath "mcp-client"
+$mcpDestPath = Join-Path -Path $binDir -ChildPath "mcp-client"
+
+if (Test-Path $mcpSourcePath) {
+    if (Test-Path $mcpDestPath) {
+        Remove-Item -Path $mcpDestPath -Recurse -Force
+    }
+    Copy-Item -Path $mcpSourcePath -Destination $mcpDestPath -Recurse
+    Write-Host "Deployed MCP client: mcp-client -> bin/" -ForegroundColor Green
+
+    # Generate MCP configuration files
+    $proxyPath = Join-Path -Path $mcpDestPath -ChildPath "proxy.js"
+    $proxyPath = $proxyPath -replace '\\', '/'
+
+    # LM Studio configuration
+    $lmStudioConfig = @{
+        mcpServers = @{
+            quaero = @{
+                command = "node"
+                args = @($proxyPath)
+                env = @{
+                    QUAERO_URL = "http://localhost:8085"
+                }
+            }
+        }
+    } | ConvertTo-Json -Depth 10
+
+    $lmStudioConfigPath = Join-Path -Path $mcpDestPath -ChildPath "lmstudio-config.json"
+    $lmStudioConfig | Set-Content -Path $lmStudioConfigPath -Encoding UTF8
+
+    # Claude Desktop configuration
+    $claudeConfig = @{
+        mcpServers = @{
+            quaero = @{
+                command = "node"
+                args = @($proxyPath)
+                env = @{
+                    QUAERO_URL = "http://localhost:8085"
+                }
+            }
+        }
+    } | ConvertTo-Json -Depth 10
+
+    $claudeConfigPath = Join-Path -Path $mcpDestPath -ChildPath "claude-desktop-config.json"
+    $claudeConfig | Set-Content -Path $claudeConfigPath -Encoding UTF8
+
+    Write-Host "Generated MCP configurations:" -ForegroundColor Green
+    Write-Host "  - lmstudio-config.json" -ForegroundColor Gray
+    Write-Host "  - claude-desktop-config.json" -ForegroundColor Gray
+}
+
 # Verify executable was created
 if (-not (Test-Path $outputPath)) {
     Write-Error "Build completed but executable not found: $outputPath"

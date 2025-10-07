@@ -1,4 +1,4 @@
 # UI Test Configuration
 
 # Server URL for testing
-server_url = "http://localhost:8080"
+server_url = "http://localhost:8086"

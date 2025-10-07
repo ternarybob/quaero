@@ -9,10 +9,12 @@ import (
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
+	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/embeddings"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/llm"
+	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/storage"
@@ -29,6 +31,7 @@ type App struct {
 	AuditLogger         llm.AuditLogger
 	EmbeddingService    interfaces.EmbeddingService
 	DocumentService     interfaces.DocumentService
+	ChatService         interfaces.ChatService
 	ProcessingService   *processing.Service
 	ProcessingScheduler *processing.Scheduler
 
@@ -53,6 +56,8 @@ type App struct {
 	DocumentHandler   *handlers.DocumentHandler
 	SchedulerHandler  *handlers.SchedulerHandler
 	EmbeddingHandler  *handlers.EmbeddingHandler
+	ChatHandler       *handlers.ChatHandler
+	MCPHandler        *handlers.MCPHandler
 }
 
 // New initializes the application with all dependencies
@@ -140,10 +145,18 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 4. Initialize event service (must be early for subscriptions)
+	// 4. Initialize chat service (RAG-enabled chat with LLM)
+	a.ChatService = chat.NewChatService(
+		a.LLMService,
+		a.DocumentService,
+		a.EmbeddingService,
+		a.Logger,
+	)
+
+	// 5. Initialize event service (must be early for subscriptions)
 	a.EventService = events.NewService(a.Logger)
 
-	// 5. Initialize auth service
+	// 6. Initialize auth service
 	a.AuthService, err = atlassian.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
 		a.Logger,
@@ -152,7 +165,7 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// 6. Initialize Jira service with EventService (auto-subscribes to events)
+	// 7. Initialize Jira service with EventService (auto-subscribes to events)
 	a.JiraService = atlassian.NewJiraScraperService(
 		a.StorageManager.JiraStorage(),
 		a.DocumentService,
@@ -161,7 +174,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 7. Initialize Confluence service with EventService (auto-subscribes to events)
+	// 8. Initialize Confluence service with EventService (auto-subscribes to events)
 	a.ConfluenceService = atlassian.NewConfluenceScraperService(
 		a.StorageManager.ConfluenceStorage(),
 		a.DocumentService,
@@ -170,7 +183,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 8. Initialize processing service
+	// 9. Initialize processing service
 	a.ProcessingService = processing.NewService(
 		a.DocumentService,
 		a.StorageManager.JiraStorage(),
@@ -178,7 +191,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 9. Initialize and start processing scheduler (if enabled)
+	// 10. Initialize and start processing scheduler (if enabled)
 	if a.Config.Processing.Enabled {
 		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
 		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
@@ -186,18 +199,19 @@ func (a *App) initServices() error {
 		}
 	}
 
-	// 10. Initialize embedding coordinator
+	// 11. Initialize embedding coordinator
 	a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
 		a.EmbeddingService,
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
 		a.Logger,
+		a.Config.Processing.Limit,
 	)
 	if err := a.EmbeddingCoordinator.Start(); err != nil {
 		return fmt.Errorf("failed to start embedding coordinator: %w", err)
 	}
 
-	// 11. Initialize scheduler service
+	// 12. Initialize scheduler service
 	a.SchedulerService = scheduler.NewService(a.EventService, a.Logger)
 	// NOTE: Scheduler triggers event-driven processing:
 	// - EventCollectionTriggered: Transforms scraped data (issues/pages → documents)
@@ -247,6 +261,14 @@ func (a *App) initHandlers() error {
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 	)
+	a.ChatHandler = handlers.NewChatHandler(
+		a.ChatService,
+		a.Logger,
+	)
+
+	// Initialize MCP handler
+	mcpService := mcp.NewDocumentService(a.StorageManager.DocumentStorage(), a.Logger)
+	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Set UI logger for services
 	a.JiraService.SetUILogger(a.WSHandler)

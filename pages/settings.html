@@ -3,91 +3,213 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - Quaero</title>
-    <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/common.css">
+    <title>Quaero - Settings</title>
+
+    <!-- Beer CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
+
+    <style>
+        /* Quaero Brand Colors Only */
+        :root {
+            --brand-green: #00cc00;
+            --brand-dark: #1a1a1a;
+        }
+
+        /* Monospace font for technical content */
+        body {
+            font-family: 'Courier New', Consolas, Monaco, monospace;
+        }
+
+        /* Brand color overrides */
+        .primary, button.primary {
+            background-color: var(--brand-dark) !important;
+            color: white !important;
+            border: 1px solid white !important;
+        }
+
+        .secondary {
+            background-color: var(--brand-green) !important;
+        }
+
+        .success {
+            background-color: var(--brand-green) !important;
+        }
+
+        a.active {
+            border-bottom: 2px solid var(--brand-green);
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            background: var(--brand-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Global fixes for layout issues */
+
+        /* Compact navbar spacing */
+        nav.top {
+            padding: 0 40px;
+            height: 70px;
+        }
+
+        nav.top .row {
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Navbar brand styling */
+        nav.top a:first-child {
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            font-size: 14px;
+            letter-spacing: 3px;
+        }
+
+        nav.top a:first-child small {
+            font-size: 11px;
+            letter-spacing: 1px;
+            opacity: 0.7;
+        }
+
+        /* Navbar links */
+        nav.top a {
+            font-size: 13px;
+            letter-spacing: 1.5px;
+        }
+
+        /* Horizontal action buttons in table */
+        td button {
+            display: inline-flex;
+            margin: 0 4px;
+        }
+
+        /* Compact buttons in table */
+        button.small-round {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+        }
+
+        /* Smaller table font and tighter spacing */
+        table {
+            font-size: 11px;
+        }
+
+        table td,
+        table th {
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+
+        /* Keep action buttons on one line and center them */
+        td.no-wrap {
+            white-space: nowrap;
+            text-align: center;
+        }
+
+        /* Compact main content */
+        main.responsive {
+            padding: 20px 40px;
+        }
+
+        /* Reduce card spacing */
+        article {
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
     {{template "navbar" .}}
+    {{template "snackbar" .}}
 
-    <div class="main-container">
-        <!-- Content Area (60%) -->
-        <div class="content-area">
-            <!-- Hero Section -->
-            <div class="hero-section">
-                <h1 class="hero-title">Settings</h1>
-                <p class="hero-subtitle">
-                    System configuration and operational controls
-                </p>
+    <!-- Main Content -->
+    <main class="responsive">
+        <!-- Hero Section -->
+        <header class="center-align">
+            <h3>Settings</h3>
+            <p>System configuration and operational controls</p>
+        </header>
+
+        <!-- Full Configuration Table -->
+        <article class="border">
+            <header>
+                <nav>
+                    <h5>System Configuration (Read-Only)</h5>
+                    <div class="max"></div>
+                    <button class="primary" onclick="loadConfig()">REFRESH</button>
+                </nav>
+            </header>
+            <div style="padding: 20px;">
+                <div class="scroll">
+                    <table class="border">
+                        <thead>
+                            <tr>
+                                <th style="width: 30%;">Section</th>
+                                <th style="width: 35%;">Setting</th>
+                                <th style="width: 35%;">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="config-table-body">
+                            <tr>
+                                <td colspan="3" style="text-align: center; padding: 20px; color: #6a6a6a;">
+                                    Loading configuration...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
+        </article>
 
-            <!-- Configuration Section -->
-            <div class="dashboard-grid">
-                <!-- Full Configuration Table -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">System Configuration (Read-Only)</div>
-                        <button class="menu-btn" onclick="loadConfig()">REFRESH</button>
-                    </div>
-                    <div style="padding: 20px;">
-                        <div class="table-container">
-                            <table class="config-table">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 30%;">Section</th>
-                                        <th style="width: 35%;">Setting</th>
-                                        <th style="width: 35%;">Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="config-table-body">
-                                    <tr>
-                                        <td colspan="3" style="text-align: center; padding: 20px; color: #6a6a6a;">
-                                            Loading configuration...
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+        <!-- Danger Zone -->
+        <article class="border danger-zone-card">
+            <header>
+                <nav>
+                    <h5 style="color: #cc0000;">⚠ Danger Zone</h5>
+                </nav>
+            </header>
+            <div style="padding: 20px;">
+                <div class="danger-zone-section">
+                    <div>
+                        <div class="danger-zone-title">Clear All Documents</div>
+                        <div class="danger-zone-description">
+                            Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                            Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
                         </div>
                     </div>
-                </div>
-
-                <!-- Danger Zone -->
-                <div class="card danger-zone-card">
-                    <div class="card-header">
-                        <div class="card-title" style="color: #cc0000;">⚠ Danger Zone</div>
-                    </div>
-                    <div style="padding: 20px;">
-                        <div class="danger-zone-section">
-                            <div>
-                                <div class="danger-zone-title">Clear All Documents</div>
-                                <div class="danger-zone-description">
-                                    Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                                    Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
-                                </div>
-                            </div>
-                            <button class="btn-danger" onclick="confirmRemoveEmbeddings()">CLEAR ALL</button>
-                        </div>
-                    </div>
+                    <button class="btn-danger" onclick="confirmRemoveEmbeddings()">CLEAR ALL</button>
                 </div>
             </div>
-        </div>
+        </article>
+    </main>
 
-        <!-- Right Panel (40%) - Service Logs -->
-        <div class="right-panel">
-            <div class="terminal-section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
-                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
-                </div>
-                <div id="service-logs" class="service-logs-container"></div>
-            </div>
+    <!-- Service Logs at Bottom -->
+    <div class="log-panel-bottom">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
+            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
+            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
+                <i>delete</i>
+            </button>
         </div>
+        <div id="service-logs"></div>
     </div>
 
     <!-- Footer -->
-    <div class="system-footer" id="footer-version">
-        Quaero // Version Loading...
-    </div>
+    <footer class="center-align small-padding">
+        <small id="footer-version">Quaero // Version Loading...</small>
+    </footer>
 
     <style>
         .config-grid {
@@ -191,44 +313,13 @@
             background: #880000;
         }
 
-        .config-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: monospace;
-            font-size: 12px;
-        }
-
-        .config-table thead {
-            background: #f5f5f5;
-        }
-
-        .config-table th {
-            padding: 12px;
-            text-align: left;
-            font-weight: bold;
-            color: #2c3e50;
-            border-bottom: 2px solid #e0e0e0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-size: 11px;
-        }
-
-        .config-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid #f0f0f0;
-            color: #4a4a4a;
-        }
-
-        .config-table tbody tr:hover {
-            background: #fafafa;
-        }
-
-        .config-table .section-cell {
+        /* Config table cell styles */
+        .section-cell {
             font-weight: bold;
             color: #2c3e50;
         }
 
-        .config-table .value-cell {
+        .value-cell {
             color: #0066cc;
             font-weight: 600;
         }

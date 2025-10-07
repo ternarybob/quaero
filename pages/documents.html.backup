@@ -3,277 +3,136 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quaero - Document Management</title>
-
-    <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"></script>
-
-    <!-- Highlight.js for code syntax -->
+    <title>Document Management - Quaero</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/common.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
-    <style>
-        /* Quaero Brand Colors Only */
-        :root {
-            --brand-green: #00cc00;
-            --brand-dark: #1a1a1a;
-        }
-
-        /* Monospace font for technical content */
-        body {
-            font-family: 'Courier New', Consolas, Monaco, monospace;
-        }
-
-        /* Brand color overrides */
-        .primary, button.primary {
-            background-color: var(--brand-dark) !important;
-            color: white !important;
-            border: 1px solid white !important;
-        }
-
-        .secondary {
-            background-color: var(--brand-green) !important;
-        }
-
-        .success {
-            background-color: var(--brand-green) !important;
-        }
-
-        a.active {
-            border-bottom: 2px solid var(--brand-green);
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            background: var(--brand-green);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        /* Global fixes for layout issues */
-
-        /* Compact navbar spacing */
-        nav.top {
-            padding: 0 40px;
-            height: 70px;
-        }
-
-        nav.top .row {
-            gap: 20px;
-            align-items: center;
-        }
-
-        /* Navbar brand styling */
-        nav.top a:first-child {
-            display: flex;
-            flex-direction: column;
-            text-decoration: none;
-            font-size: 14px;
-            letter-spacing: 3px;
-        }
-
-        nav.top a:first-child small {
-            font-size: 11px;
-            letter-spacing: 1px;
-            opacity: 0.7;
-        }
-
-        /* Navbar links */
-        nav.top a {
-            font-size: 13px;
-            letter-spacing: 1.5px;
-        }
-
-        /* Horizontal action buttons in table */
-        td button {
-            display: inline-flex;
-            margin: 0 4px;
-        }
-
-        /* Compact buttons in table */
-        button.small-round {
-            width: 32px;
-            height: 32px;
-            min-width: 32px;
-            padding: 0;
-        }
-
-        /* Smaller table font and tighter spacing */
-        table {
-            font-size: 11px;
-        }
-
-        table td,
-        table th {
-            padding: 8px 12px;
-            font-size: 11px;
-        }
-
-        /* Keep action buttons on one line and center them */
-        td.no-wrap {
-            white-space: nowrap;
-            text-align: center;
-        }
-
-        /* Compact main content */
-        main.responsive {
-            padding: 20px 40px;
-        }
-
-        /* Reduce card spacing */
-        article {
-            margin-bottom: 20px;
-        }
-    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 </head>
 <body>
     {{template "navbar" .}}
-    {{template "snackbar" .}}
 
-    <!-- Main Content -->
-    <main class="responsive with-panel">
-        <!-- Hero Section -->
-        <header class="center-align">
-            <h3>Document Management</h3>
-            <p>Normalized documents with vector embeddings for semantic search</p>
-        </header>
-
-        <!-- Document Statistics -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Document Statistics</h5>
-                    <div class="max"></div>
-                    <button class="primary" onclick="loadStats()">REFRESH</button>
-                </nav>
-            </header>
-
-            <div class="grid">
-                <div class="s12 m6 l3">
-                    <article class="border center-align">
-                        <div class="small-text">TOTAL DOCUMENTS</div>
-                        <h4 id="stat-total">-</h4>
-                    </article>
-                </div>
-                <div class="s12 m6 l3">
-                    <article class="border center-align">
-                        <div class="small-text">VECTORIZED</div>
-                        <h4 id="stat-vectorized">-</h4>
-                    </article>
-                </div>
-                <div class="s12 m6 l3">
-                    <article class="border center-align">
-                        <div class="small-text">JIRA DOCUMENTS</div>
-                        <h4 id="stat-jira">-</h4>
-                    </article>
-                </div>
-                <div class="s12 m6 l3">
-                    <article class="border center-align">
-                        <div class="small-text">CONFLUENCE DOCUMENTS</div>
-                        <h4 id="stat-confluence">-</h4>
-                    </article>
-                </div>
+    <div class="main-container">
+        <!-- Content Area (60%) -->
+        <div class="content-area">
+            <!-- Hero Section -->
+            <div class="hero-section">
+                <h1 class="hero-title">Document Management</h1>
+                <p class="hero-subtitle">
+                    Normalized documents with vector embeddings for semantic search
+                </p>
             </div>
-        </article>
 
-        <!-- Documents Table -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Documents</h5>
-                    <span id="document-count" class="small-text">0 documents</span>
-                </nav>
-            </header>
+            <!-- Statistics Section -->
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Document Statistics</div>
+                        <button id="refresh-stats-btn" class="menu-btn" onclick="loadStats()">
+                            REFRESH
+                        </button>
+                    </div>
 
-            <!-- Filter Controls -->
-            <div class="grid">
-                <div class="s12 m6 l6">
-                    <div class="field border">
-                        <input type="search" id="search-box" placeholder="Search documents...">
-                        <i>search</i>
+                    <!-- Stats Grid -->
+                    <div style="padding: 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                            <div class="stat-card">
+                                <div class="stat-label">Total Documents</div>
+                                <div class="stat-value" id="stat-total">-</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Vectorized</div>
+                                <div class="stat-value" id="stat-vectorized">-</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Jira Documents</div>
+                                <div class="stat-value" id="stat-jira">-</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Confluence Documents</div>
+                                <div class="stat-value" id="stat-confluence">-</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="s12 m3 l3">
-                    <div class="field border suffix">
-                        <select id="source-filter" onchange="filterDocuments()">
+
+                <!-- Documents Table Section -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Documents</div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span id="document-count" class="selection-count">0 documents</span>
+                            <div id="documents-loader" class="spinner" style="display: none;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Filter Controls -->
+                    <div style="padding: 15px; background: #fafafa; border-bottom: 1px solid #e0e0e0; display: flex; gap: 10px;">
+                        <input type="text" id="search-box" class="search-box" placeholder="Search documents by title, content, or source ID..." style="flex: 1;">
+                        <select id="source-filter" class="filter-select" onchange="filterDocuments()">
                             <option value="">All Sources</option>
                             <option value="jira">Jira</option>
                             <option value="confluence">Confluence</option>
                         </select>
-                        <i>arrow_drop_down</i>
-                    </div>
-                </div>
-                <div class="s12 m3 l3">
-                    <div class="field border suffix">
-                        <select id="vectorized-filter" onchange="filterDocuments()">
+                        <select id="vectorized-filter" class="filter-select" onchange="filterDocuments()">
                             <option value="">All Documents</option>
                             <option value="true">Vectorized Only</option>
                             <option value="false">Not Vectorized</option>
                         </select>
-                        <i>arrow_drop_down</i>
+                    </div>
+
+                    <!-- Documents Table -->
+                    <div class="table-container">
+                        <table id="documents-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 100px;">Source</th>
+                                    <th style="width: 120px;">Source ID</th>
+                                    <th>Title</th>
+                                    <th style="width: 100px;">Vectorized</th>
+                                    <th style="width: 150px;">Updated</th>
+                                    <th style="width: 180px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="documents-table-body">
+                                <tr>
+                                    <td colspan="6" style="text-align: center; padding: 15px; color: #6a6a6a;">
+                                        Loading documents...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
+
+                <!-- Document Detail Section -->
+                <div class="card" id="document-detail-section">
+                    <div class="card-header">
+                        <div class="card-title">Document Detail</div>
+                        <span id="selected-document-id" class="selection-count"></span>
+                    </div>
+                    <pre id="document-detail-json" style="margin: 0; padding: 15px; background: #ffffff; color: #333333; font-family: 'Courier New', monospace; font-size: 12px; max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
+                </div>
             </div>
-
-            <!-- Documents Table -->
-            <div class="scroll">
-                <table class="border">
-                    <thead>
-                        <tr>
-                            <th>SOURCE</th>
-                            <th>SOURCE ID</th>
-                            <th>TITLE</th>
-                            <th class="center-align">VECTORIZED</th>
-                            <th>UPDATED</th>
-                            <th class="center-align">ACTIONS</th>
-                        </tr>
-                    </thead>
-                    <tbody id="documents-table-body">
-                        <tr>
-                            <td colspan="6" style="text-align: center; padding: 15px;">
-                                Loading documents...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </article>
-
-        <!-- Document Detail -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Document Detail</h5>
-                    <span id="selected-document-id" class="small-text"></span>
-                </nav>
-            </header>
-            <pre id="document-detail-json"><code class="language-json"></code></pre>
-        </article>
-    </main>
-
-    <!-- Right Panel - Service Logs -->
-    <div class="log-panel">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">
-            <span style="color: #00cc00; font-weight: bold;">SERVICE LOGS</span>
-            <button class="small-round" onclick="clearServiceLogs()" title="Clear logs">
-                <i>delete</i>
-            </button>
         </div>
-        <div id="service-logs"></div>
+
+        <!-- Right Panel (40%) - Service Logs -->
+        <div class="right-panel">
+            <div class="terminal-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
+                    <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
+                </div>
+                <div id="service-logs" class="service-logs-container"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Footer -->
-    <footer class="center-align small-padding">
-        <small id="footer-version">Quaero // Version Loading...</small>
-    </footer>
+    <div class="system-footer" id="footer-version">
+        Quaero // Version Loading...
+    </div>
 
     <script>
         // Load and format version info
@@ -288,7 +147,69 @@
             .catch(error => {
                 console.error('Failed to load version:', error);
             });
+    </script>
 
+    <style>
+        .filter-select {
+            padding: 10px 15px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+            cursor: pointer;
+            line-height: normal;
+            box-sizing: border-box;
+        }
+
+        .stat-card {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-family: monospace;
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-family: monospace;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .action-btn {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #0052a3;
+        }
+
+        .action-btn-danger {
+            background: #cc0000;
+        }
+
+        .action-btn-danger:hover {
+            background: #aa0000;
+        }
+    </style>
+
+    <script>
         // State management
         let allDocuments = [];
         let filteredDocuments = [];
@@ -439,7 +360,10 @@
 
         // Load all documents
         async function loadDocuments() {
+            const loader = document.getElementById('documents-loader');
             const tbody = document.getElementById('documents-table-body');
+
+            loader.style.display = 'inline-block';
 
             try {
                 const response = await fetch('/api/documents');
@@ -457,11 +381,13 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" style="text-align: center; padding: 15px; color: #cc0000;">
+                        <td colspan="5" style="text-align: center; padding: 15px; color: #ff4444;">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
                 `;
+            } finally {
+                loader.style.display = 'none';
             }
         }
 
@@ -502,7 +428,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" style="text-align: center; padding: 15px;">
+                        <td colspan="6" style="text-align: center; padding: 15px; color: #6a6a6a;">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -513,26 +439,24 @@
 
             tbody.innerHTML = filteredDocuments.map((doc, index) => {
                 const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
-                const vectorizedBadge = hasEmbedding
-                    ? '<span class="chip success">✓</span>'
-                    : '<span class="chip error">✗</span>';
+                const vectorizedIcon = hasEmbedding ? '✓' : '✗';
+                const vectorizedColor = hasEmbedding ? '#00cc00' : '#cc0000';
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
 
                 return `
-                    <tr style="${isSelected ? 'background: #e3f2fd;' : ''}">
+                    <tr style="background-color: ${isSelected ? '#e3f2fd' : 'transparent'};"
+                        class="${isSelected ? 'selected-document' : ''}">
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${index})" class="center-align" style="cursor: pointer;">${vectorizedBadge}</td>
+                        <td onclick="selectDocument(${index})" style="text-align: center; color: ${vectorizedColor}; font-weight: bold; cursor: pointer;">${vectorizedIcon}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
-                        <td class="no-wrap">
-                            <button class="small-round" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
-                                <i>refresh</i>
-                            </button>
-                            <button class="small-round" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
-                                <i>delete</i>
-                            </button>
+                        <td style="padding: 8px;">
+                            <div style="display: flex; gap: 5px; justify-content: center;">
+                                <button class="action-btn" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">↻</button>
+                                <button class="action-btn action-btn-danger" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">✗</button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -568,6 +492,57 @@
             }
         }
 
+        // Process all documents
+        async function processAll() {
+            const processBtn = document.getElementById('process-all-btn');
+            processBtn.disabled = true;
+            processBtn.textContent = 'PROCESSING...';
+
+            try {
+                const response = await fetch('/api/documents/process', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to start processing');
+                }
+
+                // Reload stats and documents after processing
+                setTimeout(() => {
+                    loadStats();
+                    loadDocuments();
+                }, 2000);
+
+            } catch (error) {
+                console.error('Error processing documents:', error);
+                alert('Failed to start document processing');
+            } finally {
+                setTimeout(() => {
+                    processBtn.disabled = false;
+                    processBtn.textContent = 'PROCESS ALL';
+                }, 3000);
+            }
+        }
+
+        // Load processing engine status
+        async function loadProcessingStatus() {
+            try {
+                const response = await fetch('/api/processing/status');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch processing status');
+                }
+
+                const status = await response.json();
+                document.getElementById('engine-status').textContent = status.engine_status || 'UNKNOWN';
+                document.getElementById('pending-count').textContent = status.pending_count || 0;
+                document.getElementById('processed-count').textContent = status.processed_count || 0;
+                document.getElementById('failed-count').textContent = status.failed_count || 0;
+            } catch (error) {
+                console.error('Error loading processing status:', error);
+                document.getElementById('engine-status').textContent = 'ERROR';
+            }
+        }
+
         // Reprocess a single document
         async function reprocessDocument(docId) {
             if (!confirm(`Reprocess document ${docId}?\n\nThis will queue the document for re-vectorization.`)) {
@@ -585,7 +560,7 @@
 
                 alert('Document queued for reprocessing');
                 setTimeout(() => {
-                    loadStats();
+                    loadProcessingStatus();
                     loadDocuments();
                 }, 1000);
             } catch (error) {
@@ -611,7 +586,7 @@
 
                 alert('Embedding cleared successfully');
                 setTimeout(() => {
-                    loadStats();
+                    loadProcessingStatus();
                     loadDocuments();
                 }, 1000);
             } catch (error) {
@@ -628,12 +603,8 @@
             connectWebSocket();
             loadStats();
             loadDocuments();
+            loadProcessingStatus();
         });
-
-        // Initialize highlight.js
-        if (typeof hljs !== 'undefined') {
-            hljs.highlightAll();
-        }
     </script>
 </body>
 </html>

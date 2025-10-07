@@ -53,6 +53,7 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 	}
 	t.Log("✓ Jira page loaded")
 	takeScreenshot(ctx, t, "01_page_loaded")
+	validateStyles(ctx, t, "Page Loaded")
 
 	// STEP 2: Clear all data
 	t.Log("\n=== STEP 2: Clear all Jira data ===")
@@ -72,16 +73,30 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 	}
 	t.Log("✓ Clicked CLEAR ALL DATA and accepted confirmation")
 	takeScreenshot(ctx, t, "02_clear_data_clicked")
+	validateStyles(ctx, t, "After Clear Data")
 
 	// Wait for clear to complete (projects should be empty)
 	time.Sleep(3 * time.Second)
 
 	var projectCount int
 	chromedp.Run(ctx, chromedp.Evaluate(`
-		document.querySelectorAll('.project-item').length
+		(() => {
+			const tbody = document.getElementById('project-list');
+			if (!tbody) return 0;
+			const rows = tbody.querySelectorAll('tr');
+			let count = 0;
+			for (const row of rows) {
+				// Count only data rows, not "no projects" messages
+				if (row.querySelectorAll('td').length >= 5) {
+					count++;
+				}
+			}
+			return count;
+		})()
 	`, &projectCount))
 	t.Logf("Projects after clear: %d", projectCount)
 	takeScreenshot(ctx, t, "03_after_clear")
+	validateStyles(ctx, t, "After Clear Verified")
 
 	// STEP 3: Sync projects
 	t.Log("\n=== STEP 3: Sync projects from Jira ===")
@@ -98,7 +113,19 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		var count int
 		chromedp.Run(ctx, chromedp.Evaluate(`
-			document.querySelectorAll('.project-item').length
+			(() => {
+				const tbody = document.getElementById('project-list');
+				if (!tbody) return 0;
+				const rows = tbody.querySelectorAll('tr');
+				let count = 0;
+				for (const row of rows) {
+					// Count only data rows, not "no projects" messages
+					if (row.querySelectorAll('td').length >= 5) {
+						count++;
+					}
+				}
+				return count;
+			})()
 		`, &count))
 
 		t.Logf("  Waiting... projects loaded: %d", count)
@@ -116,6 +143,7 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 	}
 	t.Logf("✓ Projects synced: %d projects", projectCount)
 	takeScreenshot(ctx, t, "05_projects_synced")
+	validateStyles(ctx, t, "After Projects Synced")
 
 	// STEP 4: Find a project with issues
 	t.Log("\n=== STEP 4: Select project with issues ===")
@@ -123,17 +151,23 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 	var result map[string]interface{}
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`
 		(() => {
-			const projects = Array.from(document.querySelectorAll('.project-item'));
-			for (const project of projects) {
-				const checkbox = project.querySelector('input[type="checkbox"]');
-				const issueCountText = project.querySelector('.project-issues')?.textContent || '0 issues';
-				const issueCount = parseInt(issueCountText);
+			const tbody = document.getElementById('project-list');
+			if (!tbody) return null;
+			const rows = tbody.querySelectorAll('tr');
 
-				if (issueCount > 0 && issueCount <= 100) {
-					return {
-						key: checkbox.value,
-						count: issueCount
-					};
+			for (const row of rows) {
+				const cells = row.querySelectorAll('td');
+				if (cells.length >= 5) {
+					const checkbox = cells[0].querySelector('input[type="checkbox"]');
+					const issueCountText = cells[4]?.textContent || '0';
+					const issueCount = parseInt(issueCountText);
+
+					if (checkbox && issueCount > 0 && issueCount <= 100) {
+						return {
+							key: checkbox.value,
+							count: issueCount
+						};
+					}
 				}
 			}
 			return null;
@@ -260,6 +294,7 @@ func TestJira_CompleteWorkflow(t *testing.T) {
 
 	t.Logf("✓ Issues loaded after %v", time.Since(startTime).Round(time.Second))
 	takeScreenshot(ctx, t, "08_issues_loaded")
+	validateStyles(ctx, t, "After Issues Loaded")
 
 	// STEP 7: Verify issue count
 	t.Log("\n=== STEP 7: Verify issue count ===")
