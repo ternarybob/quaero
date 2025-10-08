@@ -1,3 +1,8 @@
+# -----------------------------------------------------------------------
+# Last Modified: Wednesday, 8th October 2025 5:34:11 pm
+# Modified By: Bob McAllan
+# -----------------------------------------------------------------------
+
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
@@ -68,6 +73,95 @@ if ($script) {
 Write-Host "Results Dir: $resultsDir" -ForegroundColor Cyan
 Write-Host ""
 
+# Stop any existing Quaero processes before building (graceful shutdown with fallback)
+Write-Host ""
+Write-Host "Checking for existing Quaero processes..." -ForegroundColor Yellow
+try {
+    $processName = "quaero"
+    $existingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+
+    if ($existingProcesses) {
+        Write-Host "Stopping existing Quaero process(es)..." -ForegroundColor Yellow
+        
+        # Try HTTP shutdown first
+        $httpShutdownSucceeded = $false
+        $projectRoot = (Get-Item $scriptDir).Parent.FullName
+        $binDir = Join-Path -Path $projectRoot -ChildPath "bin"
+        $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
+        $serverPort = 8085  # Default
+        
+        if (Test-Path $configPath) {
+            $configContent = Get-Content $configPath
+            foreach ($line in $configContent) {
+                if ($line -match '^port\s*=\s*(\d+)') {
+                    $serverPort = [int]$matches[1]
+                    break
+                }
+            }
+        }
+        
+        Write-Host "  Attempting HTTP graceful shutdown on port $serverPort..." -ForegroundColor Gray
+        
+        # Try multiple times with short delays (server might still be starting)
+        $maxAttempts = 3
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://localhost:$serverPort/api/shutdown" -Method POST -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Write-Host "  HTTP shutdown request sent successfully" -ForegroundColor Gray
+                    $httpShutdownSucceeded = $true
+                    break
+                }
+            }
+            catch {
+                if ($attempt -lt $maxAttempts) {
+                    Start-Sleep -Milliseconds 500
+                } else {
+                    Write-Host "  HTTP shutdown not available (server may not be responding)" -ForegroundColor Gray
+                }
+            }
+        }
+
+        # Wait for graceful shutdown
+        $timeout = if ($httpShutdownSucceeded) { 12 } else { 5 }
+        $elapsed = 0
+        $checkInterval = 0.5
+        
+        while ((Get-Process -Name $processName -ErrorAction SilentlyContinue) -and ($elapsed -lt $timeout)) {
+            Start-Sleep -Seconds $checkInterval
+            $elapsed += $checkInterval
+            
+            if ($httpShutdownSucceeded -and $elapsed -eq 5) {
+                Write-Host "  Still waiting for graceful shutdown..." -ForegroundColor Gray
+            }
+        }
+
+        # Check if processes exited gracefully
+        $remainingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        
+        if ($remainingProcesses) {
+            if ($httpShutdownSucceeded) {
+                Write-Warning "Process(es) did not exit gracefully, forcing termination..."
+            }
+            Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+            
+            if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
+                Write-Warning "Some processes may still be running"
+            } else {
+                Write-Host "Process(es) force-stopped" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "Process(es) stopped gracefully" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "No existing Quaero processes found" -ForegroundColor Gray
+    }
+}
+catch {
+    Write-Warning "Could not check/stop Quaero processes: $($_.Exception.Message)"
+}
+
 # Build the application
 Write-Host ""
 Write-Host "Building application..." -ForegroundColor Yellow
@@ -101,9 +195,10 @@ if (Test-Path $configPath) {
 
 Write-Host "Starting Quaero test server on port $serverPort..." -ForegroundColor Yellow
 
-# Start server in hidden window (stays running until explicitly killed)
+# Start server in new visible CMD window (like build.ps1 -Run does)
+# Using /c so window closes when server stops, making it clear when tests are done
 $startCommand = "cd /d `"$projectRoot`" && `"$exePath`" serve -c `"$configPath`""
-$serverProcess = Start-Process cmd -ArgumentList "/k", $startCommand -WindowStyle Hidden -PassThru
+$serverProcess = Start-Process cmd -ArgumentList "/c", $startCommand -PassThru
 
 # Set the server URL environment variable now that we know the port
 $env:TEST_SERVER_URL = "http://localhost:$serverPort"
@@ -208,11 +303,91 @@ if ($coverage -and (Test-Path "coverage.out")) {
     }
 }
 
-# Stop the server
+# Stop the server and any quaero processes (graceful shutdown with fallback)
 Write-Host ""
 Write-Host "Stopping Quaero server..." -ForegroundColor Yellow
-Stop-Process $serverProcess -Force -ErrorAction SilentlyContinue
-Write-Host "Server stopped" -ForegroundColor Green
+
+# Try graceful shutdown first
+try {
+    if ($serverProcess -and !$serverProcess.HasExited) {
+        Write-Host "  Attempting HTTP graceful shutdown..." -ForegroundColor Gray
+        
+        # Use HTTP shutdown endpoint
+        $httpShutdownSucceeded = $false
+        try {
+            $response = Invoke-WebRequest -Uri $env:TEST_SERVER_URL/api/shutdown -Method POST -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
+            if ($response.StatusCode -eq 200) {
+                Write-Host "  HTTP shutdown request sent successfully" -ForegroundColor Gray
+                $httpShutdownSucceeded = $true
+            }
+        }
+        catch {
+            Write-Host "  HTTP shutdown failed, will force termination" -ForegroundColor Gray
+        }
+        
+        # Wait for graceful shutdown
+        $timeout = if ($httpShutdownSucceeded) { 12 } else { 2 }
+        $elapsed = 0
+        $checkInterval = 0.5
+        
+        while (!$serverProcess.HasExited -and ($elapsed -lt $timeout)) {
+            Start-Sleep -Seconds $checkInterval
+            $elapsed += $checkInterval
+            $serverProcess.Refresh()
+        }
+        
+        if ($serverProcess.HasExited) {
+            Write-Host "Server stopped gracefully" -ForegroundColor Green
+        } else {
+            Write-Warning "Server did not exit gracefully, forcing termination..."
+            Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "Server force-stopped" -ForegroundColor Yellow
+        }
+    }
+}
+catch {
+    Write-Warning "Could not stop server by PID: $($_.Exception.Message)"
+}
+
+# Belt-and-suspenders: ensure all quaero processes are stopped
+try {
+    Start-Sleep -Milliseconds 500
+    $remainingProcesses = Get-Process -Name "quaero" -ErrorAction SilentlyContinue
+    
+    if ($remainingProcesses) {
+        Write-Host "Stopping remaining quaero processes by name..." -ForegroundColor Yellow
+        
+        # Try HTTP shutdown for remaining processes
+        foreach ($proc in $remainingProcesses) {
+            try {
+                Invoke-WebRequest -Uri $env:TEST_SERVER_URL/api/shutdown -Method POST -TimeoutSec 1 -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+            }
+            catch {
+                # Fallback to force kill
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        
+        Start-Sleep -Seconds 2
+        $stillRunning = Get-Process -Name "quaero" -ErrorAction SilentlyContinue
+        
+        if ($stillRunning) {
+            Write-Warning "Forcing remaining processes..."
+            Stop-Process -Name "quaero" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+        }
+        
+        $finalCheck = Get-Process -Name "quaero" -ErrorAction SilentlyContinue
+        if ($finalCheck) {
+            Write-Warning "Some quaero processes may still be running"
+        } else {
+            Write-Host "All quaero processes stopped" -ForegroundColor Green
+        }
+    }
+}
+catch {
+    Write-Warning "Could not verify all processes stopped: $($_.Exception.Message)"
+}
 
 Write-Host ""
 Write-Host "=== Tests Complete ===" -ForegroundColor Green

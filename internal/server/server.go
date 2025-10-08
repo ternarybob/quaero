@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 5:36:23 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package server
 
 import (
@@ -11,9 +16,10 @@ import (
 
 // Server manages the HTTP server and routes
 type Server struct {
-	app    *app.App
-	router *http.ServeMux
-	server *http.Server
+	app          *app.App
+	router       *http.ServeMux
+	server       *http.Server
+	shutdownChan chan struct{}
 }
 
 // New creates a new HTTP server with the given app
@@ -25,17 +31,22 @@ func New(application *app.App) *Server {
 	// Setup routes
 	s.router = s.setupRoutes()
 
-	// Create HTTP server
+	// Create HTTP server with middleware, but bypass for WebSocket
 	addr := fmt.Sprintf("%s:%d", application.Config.Server.Host, application.Config.Server.Port)
 	s.server = &http.Server{
 		Addr:         addr,
-		Handler:      s.withMiddleware(s.router),
+		Handler:      s.withConditionalMiddleware(s.router),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
 	return s
+}
+
+// SetShutdownChannel sets the channel that will be signaled when HTTP shutdown is requested
+func (s *Server) SetShutdownChannel(ch chan struct{}) {
+	s.shutdownChan = ch
 }
 
 // Start starts the HTTP server
@@ -73,4 +84,32 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // Handler returns the HTTP handler for testing
 func (s *Server) Handler() http.Handler {
 	return s.server.Handler
+}
+
+// ShutdownHandler handles HTTP shutdown requests (dev mode only)
+func (s *Server) ShutdownHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST requests
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.app.Logger.Info().Msg("Shutdown requested via HTTP endpoint")
+
+	// Send response before shutting down
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Shutting down gracefully...\n"))
+
+	// Flush response to ensure client receives it
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	// Trigger shutdown if channel is set (with small delay to ensure response sent)
+	if s.shutdownChan != nil {
+		go func() {
+			time.Sleep(100 * time.Millisecond) // Allow response to be sent
+			s.shutdownChan <- struct{}{}
+		}()
+	}
 }

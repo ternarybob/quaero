@@ -5,9 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Jira Project Management</title>
 
+    <!-- Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    
     <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
 
     <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
@@ -15,59 +18,12 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
     
+    <!-- WebSocket Manager -->
+    <script src="/static/websocket-manager.js"></script>
+    
     <!-- Quaero Theme -->
     <link rel="stylesheet" href="/static/common.css">
 
-    <style>
-        /* Force navbar title styling */
-        nav.top a:first-child {
-            display: flex !important;
-            flex-direction: column !important;
-        }
-        
-        /* Jira-specific overrides */
-        .selected-issue {
-            background-color: var(--surface-container) !important;
-        }
-        
-        #issue-detail-json {
-            margin: 0;
-            padding: var(--card-spacing);
-            background: var(--surface);
-            color: var(--on-surface);
-            font-family: var(--font-family);
-            font-size: var(--font-size-large);
-            max-height: 200px;
-            overflow: auto;
-            border: none;
-        }
-        
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid var(--outline-variant);
-            border-top: 2px solid var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-    
-    <script>
-        // Ensure navbar styling is applied after BeerCSS loads
-        document.addEventListener('DOMContentLoaded', function() {
-            const navTitle = document.querySelector('nav.top a:first-child');
-            if (navTitle) {
-                navTitle.style.display = 'flex';
-                navTitle.style.flexDirection = 'column';
-            }
-        });
-    </script>
 </head>
 <body class="light">
     {{template "navbar" .}}
@@ -84,18 +40,18 @@
         {{template "service-status" .}}
 
         <!-- Project Management Section -->
-        <article class="border">
+        <article class="border no-padding">
             <header>
                 <nav>
-                    <h5>Projects</h5>
-                    <div class="max"></div>
-                    <button id="sync-btn" class="primary" onclick="syncProjects()">
-                        <span id="sync-text">GET PROJECTS</span>
+                    <h5 class="max">Projects</h5>
+                    <span id="selection-count" class="selection-count">0/0</span>
+                    <button id="sync-btn" class="circle transparent" onclick="syncProjects()" title="Refresh Projects">
+                        <i class="material-icons">refresh</i>
                     </button>
-                    <button id="get-issues-menu-btn" class="primary" onclick="getIssues()" disabled>
+                    <button id="get-issues-menu-btn" class="small primary" onclick="getIssues()" disabled>
                         GET ISSUES
                     </button>
-                    <button id="clear-data-btn" class="primary" onclick="clearAllData()" style="color: var(--error) !important;">
+                    <button id="clear-data-btn" class="small primary" onclick="clearAllData()" style="color: var(--error) !important;">
                         CLEAR ALL DATA
                     </button>
                 </nav>
@@ -177,9 +133,10 @@
             </header>
             <pre id="issue-detail-json" style="margin: 0; padding: var(--card-spacing); background: var(--surface); color: var(--on-surface); font-family: var(--font-family); font-size: var(--font-size-large); max-height: 200px; overflow: auto; border: none;"><code class="language-json"></code></pre>
         </article>
-    </main>
 
-    {{template "service-logs" .}}
+        {{template "service-logs" .}}
+
+    </main>
 
     {{template "footer" .}}
 
@@ -417,10 +374,9 @@
 
             isSyncing = true;
             const syncBtn = document.getElementById('sync-btn');
-            const syncText = document.getElementById('sync-text');
 
             syncBtn.disabled = true;
-            syncText.innerHTML = '<span class="spinner"></span> SYNCING...';
+            syncBtn.classList.add('loading');
             showNotification('Clearing cache and syncing projects from Jira...', 'info');
 
             try {
@@ -466,7 +422,7 @@
                 setTimeout(() => {
                     isSyncing = false;
                     syncBtn.disabled = false;
-                    syncText.textContent = 'SYNC PROJECTS';
+                    syncBtn.classList.remove('loading');
                 }, 15000); // Match the max wait time
             }
         }

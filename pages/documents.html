@@ -5,36 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Document Management</title>
 
+    <!-- Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    
     <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
 
     <!-- Highlight.js for code syntax -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
     
+    <!-- WebSocket Manager -->
+    <script src="/static/websocket-manager.js"></script>
+    
     <!-- Quaero Theme -->
     <link rel="stylesheet" href="/static/common.css">
 
-    <style>
-        /* Force navbar title styling */
-        nav.top a:first-child {
-            display: flex !important;
-            flex-direction: column !important;
-        }
-    </style>
-    
-    <script>
-        // Ensure navbar styling is applied after BeerCSS loads
-        document.addEventListener('DOMContentLoaded', function() {
-            const navTitle = document.querySelector('nav.top a:first-child');
-            if (navTitle) {
-                navTitle.style.display = 'flex';
-                navTitle.style.flexDirection = 'column';
-            }
-        });
-    </script>
 </head>
 <body class="light">
     {{template "navbar" .}}
@@ -56,7 +44,7 @@
                 <nav>
                     <h5>Document Statistics</h5>
                     <div class="max"></div>
-                    <button class="primary" onclick="loadStats()">REFRESH</button>
+                    <button class="circle transparent" onclick="loadStats()"><i class="material-icons">refresh</i></button>
                 </nav>
             </header>
 
@@ -107,7 +95,7 @@
                 </div>
                 <div class="s12 m3 l3">
                     <div class="field border suffix">
-                        <select id="source-filter" onchange="filterDocuments()">
+                        <select id="source-filter" class="small" onchange="filterDocuments()">
                             <option value="">All Sources</option>
                             <option value="jira">Jira</option>
                             <option value="confluence">Confluence</option>
@@ -117,7 +105,7 @@
                 </div>
                 <div class="s12 m3 l3">
                     <div class="field border suffix">
-                        <select id="vectorized-filter" onchange="filterDocuments()">
+                        <select id="vectorized-filter" class="small" onchange="filterDocuments()">
                             <option value="">All Documents</option>
                             <option value="true">Vectorized Only</option>
                             <option value="false">Not Vectorized</option>
@@ -161,9 +149,10 @@
             </header>
             <pre id="document-detail-json"><code class="language-json"></code></pre>
         </article>
-    </main>
 
-    {{template "service-logs" .}}
+        {{template "service-logs" .}}
+
+    </main>
 
     {{template "footer" .}}
 
@@ -288,7 +277,7 @@
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                         <td class="no-wrap">
                             <button class="small-round" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
-                                <i>refresh</i>
+                                <i class="material-icons">refresh</i>
                             </button>
                             <button class="small-round" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
                                 <i>delete</i>

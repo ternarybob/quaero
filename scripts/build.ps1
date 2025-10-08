@@ -186,27 +186,83 @@ if ($Test) {
     Write-Host "Tests passed!" -ForegroundColor Green
 }
 
-# Stop executing process if it's running
+# Stop executing process if it's running (graceful shutdown with fallback)
 try {
     $processName = "quaero"
-    $process = Get-Process -Name $processName -ErrorAction SilentlyContinue
+    $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
 
-    if ($process) {
-        Write-Host "Stopping existing Quaero process..." -ForegroundColor Yellow
-        Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
-
-        # Wait for process to fully exit and release resources
-        $timeout = 5
+    if ($processes) {
+        Write-Host "Stopping existing Quaero process(es)..." -ForegroundColor Yellow
+        
+        # Try HTTP shutdown first (most reliable on Windows)
+        $httpShutdownSucceeded = $false
+        
+        # Read port from config
+        $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
+        $serverPort = 8085  # Default
+        if (Test-Path $configPath) {
+            $configContent = Get-Content $configPath
+            foreach ($line in $configContent) {
+                if ($line -match '^port\s*=\s*(\d+)') {
+                    $serverPort = [int]$matches[1]
+                    break
+                }
+            }
+        }
+        
+        Write-Host "  Attempting HTTP graceful shutdown on port $serverPort..." -ForegroundColor Gray
+        
+        # Try multiple times with short delays (server might still be starting)
+        $maxAttempts = 3
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+                $response = Invoke-WebRequest -Uri "http://localhost:$serverPort/api/shutdown" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Write-Host "  HTTP shutdown request sent successfully" -ForegroundColor Gray
+                    $httpShutdownSucceeded = $true
+                    break
+                }
+            }
+            catch {
+                if ($attempt -lt $maxAttempts) {
+                    Start-Sleep -Milliseconds 500
+                } else {
+                    Write-Host "  HTTP shutdown not available (server may not be responding)" -ForegroundColor Gray
+                }
+            }
+        }
+        
+        # Wait for graceful shutdown
+        $timeout = if ($httpShutdownSucceeded) { 12 } else { 5 }
         $elapsed = 0
+        $checkInterval = 0.5
+        
         while ((Get-Process -Name $processName -ErrorAction SilentlyContinue) -and ($elapsed -lt $timeout)) {
-            Start-Sleep -Milliseconds 500
-            $elapsed += 0.5
+            Start-Sleep -Seconds $checkInterval
+            $elapsed += $checkInterval
+            
+            if ($httpShutdownSucceeded -and $elapsed -eq 5) {
+                Write-Host "  Still waiting for graceful shutdown..." -ForegroundColor Gray
+            }
         }
 
-        if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
-            Write-Warning "Process did not terminate within ${timeout}s timeout"
+        # Check if processes exited gracefully
+        $remainingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        
+        if ($remainingProcesses) {
+            if ($httpShutdownSucceeded) {
+                Write-Warning "Process(es) did not exit gracefully within ${timeout}s, forcing termination..."
+            }
+            Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 500
+            
+            if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
+                Write-Warning "Some processes may still be running"
+            } else {
+                Write-Host "Process(es) force-stopped" -ForegroundColor Yellow
+            }
         } else {
-            Write-Host "Process stopped successfully" -ForegroundColor Green
+            Write-Host "Process(es) stopped gracefully" -ForegroundColor Green
         }
     } else {
         Write-Host "No Quaero process found running" -ForegroundColor Gray

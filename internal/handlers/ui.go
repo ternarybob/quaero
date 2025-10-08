@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Tuesday, 7th October 2025 4:23:27 pm
+// Last Modified: Wednesday, 8th October 2025 12:12:51 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -112,35 +112,50 @@ func (h *UIHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) 
 	spaceCount := h.confluenceScraper.GetSpaceCount()
 	pageCount := h.confluenceScraper.GetPageCount()
 
-	// Get current timestamp for "Last Updated" column
-	currentTime := time.Now().Format("15:04:05")
+	// Get status information (last updated time and details)
+	projectLastUpdated, projectDetails, _ := h.jiraScraper.GetProjectStatus()
+	issueLastUpdated, issueDetails, _ := h.jiraScraper.GetIssueStatus()
+	spaceLastUpdated, spaceDetails, _ := h.confluenceScraper.GetSpaceStatus()
+	pageLastUpdated, pageDetails, _ := h.confluenceScraper.GetPageStatus()
+
+	// Helper function to format timestamp
+	formatTime := func(timestamp int64) string {
+		if timestamp == 0 {
+			return "Never"
+		}
+		return time.Unix(timestamp, 0).Format("15:04:05")
+	}
 
 	html := fmt.Sprintf(`
 		<tr>
-			<td><strong>JIRA PROJECTS</strong></td>
-			<td><span class="chip success">%d</span></td>
+			<td>JIRA PROJECTS</td>
+			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
 			<td>%s</td>
-			<td>Scraped and stored</td>
+			<td>%s</td>
 		</tr>
 		<tr>
-			<td><strong>JIRA ISSUES</strong></td>
-			<td><span class="chip success">%d</span></td>
+			<td>JIRA ISSUES</td>
+			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
 			<td>%s</td>
-			<td>Scraped and stored</td>
+			<td>%s</td>
 		</tr>
 		<tr>
-			<td><strong>CONFLUENCE SPACES</strong></td>
-			<td><span class="chip success">%d</span></td>
+			<td>CONFLUENCE SPACES</td>
+			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
 			<td>%s</td>
-			<td>Scraped and stored</td>
+			<td>%s</td>
 		</tr>
 		<tr>
-			<td><strong>CONFLUENCE PAGES</strong></td>
-			<td><span class="chip success">%d</span></td>
+			<td>CONFLUENCE PAGES</td>
+			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
 			<td>%s</td>
-			<td>Scraped and stored</td>
+			<td>%s</td>
 		</tr>
-	`, projectCount, currentTime, issueCount, currentTime, spaceCount, currentTime, pageCount, currentTime)
+	`,
+		projectCount, formatTime(projectLastUpdated), projectDetails,
+		issueCount, formatTime(issueLastUpdated), issueDetails,
+		spaceCount, formatTime(spaceLastUpdated), spaceDetails,
+		pageCount, formatTime(pageLastUpdated), pageDetails)
 
 	fmt.Fprint(w, html)
 }
@@ -217,12 +232,13 @@ func (h *UIHandler) ChatPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// StaticFileHandler serves static files (CSS, favicon) from the pages/static directory
+// StaticFileHandler serves static files (CSS, JS, favicon) from the pages/static directory
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files
 	allowedFiles := map[string]string{
-		"/static/common.css": "static/common.css",
-		"/favicon.ico":       "static/favicon.ico",
+		"/static/common.css":           "static/common.css",
+		"/static/websocket-manager.js": "static/websocket-manager.js",
+		"/favicon.ico":                 "static/favicon.ico",
 	}
 
 	// Check if the requested path is allowed
@@ -246,6 +262,8 @@ func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	switch ext {
 	case ".css":
 		w.Header().Set("Content-Type", "text/css")
+	case ".js":
+		w.Header().Set("Content-Type", "application/javascript")
 	case ".ico":
 		w.Header().Set("Content-Type", "image/x-icon")
 	}

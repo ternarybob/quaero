@@ -6,51 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Monitoring Dashboard</title>
 
+    <!-- Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    
     <!-- Beer CSS -->
     <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
     <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
 
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
 
+    <!-- WebSocket Manager -->
+    <script src="/static/websocket-manager.js"></script>
+
     <!-- Quaero Theme -->
     <link rel="stylesheet" href="/static/common.css">
 
-    <style>
-        /* Force navbar title styling */
-        nav.top a:first-child {
-            display: flex !important;
-            flex-direction: column !important;
-        }
-    </style>
-
+    <!-- Ensure Material Icons font loads before content renders -->
     <script>
-        // Force light theme after material-dynamic-colors loads
-        document.addEventListener('DOMContentLoaded', function () {
-            // Set light theme immediately
-            document.documentElement.setAttribute('data-theme', 'light');
-            document.body.setAttribute('data-theme', 'light');
-
-            // Force light theme colors
-            document.documentElement.style.setProperty('--background', '#fdfcf5');
-            document.documentElement.style.setProperty('--on-background', '#1b1c18');
-            document.documentElement.style.setProperty('--surface', '#fafaf2');
-            document.documentElement.style.setProperty('--on-surface', '#1b1c18');
-
-            // Ensure navbar styling is applied
-            const navTitle = document.querySelector('nav.top a:first-child');
-            if (navTitle) {
-                navTitle.style.display = 'flex';
-                navTitle.style.flexDirection = 'column';
-            }
+        document.fonts.ready.then(() => {
+            console.log('Material Icons font loaded');
         });
-
-        // Also force theme after a short delay to override any dynamic loading
-        setTimeout(function () {
-            document.documentElement.setAttribute('data-theme', 'light');
-            document.body.setAttribute('data-theme', 'light');
-            document.documentElement.style.setProperty('--background', '#fdfcf5');
-            document.documentElement.style.setProperty('--on-background', '#1b1c18');
-        }, 100);
     </script>
 </head>
 
@@ -62,83 +37,62 @@
     <main class="responsive">
         <!-- Hero Section -->
         <header class="center-align">
-            <h3>QUAERO</h3>
-            <p>Knowledge collection and semantic search system with vector embeddings and offline LLM support. Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.</p>
+            <h3>Quaero</h3>
+            <p>Knowledge collection and semantic search system with vector embeddings and offline LLM support.<br>Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.</p>
         </header>
 
-        <article class="border">
+        <!-- Parser Status Section -->
+        <article class="border no-padding">
             <header>
                 <nav>
-                    <h5>Section Title Goes Here</h5>
-
-                    <div class="max"></div>
-
-                    <button class="small-round primary">
-                        <i>edit</i>
-                    </button>
-                    <button class="small-round secondary">
-                        <i>settings</i>
+                    <h5 class="max">Parser Status</h5>
+                    <button id="refresh-parser-status" class="circle transparent" hx-get="/ui/parser-status" hx-target="#parser-status-table" hx-swap="innerHTML" hx-trigger="click, load, every 60s" hx-sync="this:abort">
+                        <i class="material-icons">refresh</i>
                     </button>
                 </nav>
             </header>
 
-            <div class="padding-20">
-                <p>This is the content area of the section. It can hold forms, text, or other components.</p>
-                <div class="field border suffix">
-                    <input type="text" placeholder="Example Input">
-                    <i>check</i>
+            <div class="grid small-padding">
+                <div class="s12">
+                    <p class="font-mono font-large text-secondary text-center">
+                        Install Chrome extension and click icon when logged into Jira/Confluence<br>
+                        Extension will capture authentication and trigger scraping automatically
+                    </p>
                 </div>
             </div>
-        </article>
 
-        <!-- Parser Status Section -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>Parser Status</h5>
-                    <div class="max"></div>
-                    <button id="refresh-parser-status" class="primary" hx-get="/ui/parser-status" hx-target="#parser-status-table" hx-swap="innerHTML" hx-trigger="click, load, every 60s" hx-sync="this:abort">
-                        REFRESH
-                    </button>
-                </nav>
-            </header>
-
-            <div class="padding-20">
-                <p class="font-mono font-large text-secondary mb-20 text-center">
-                    Install Chrome extension and click icon when logged into Jira/Confluence<br>
-                    Extension will capture authentication and trigger scraping automatically
-                </p>
-
-                <div class="scroll">
-                    <table class="border">
-                        <thead>
-                            <tr>
-                                <th>COMPONENT</th>
-                                <th>STATUS</th>
-                                <th>LAST UPDATED</th>
-                                <th>DETAILS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="parser-status-table">
-                            <tr>
-                                <td colspan="4" class="status-loading">Loading parser status...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div class="scroll small-padding">
+                <table class="border">
+                    <thead>
+                        <tr>
+                            <th>COMPONENT</th>
+                            <th>STATUS</th>
+                            <th>LAST UPDATED</th>
+                            <th>DETAILS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="parser-status-table">
+                        <tr>
+                            <td colspan="4" class="status-loading">Loading parser status...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </article>
 
         <!-- Authentication Details Section -->
-        <article class="border">
+        <article class="border no-padding">
             <header>
                 <nav>
-                    <h5>Authentication Details</h5>
+                    <h5 class="max">Authentication Details</h5>
+                    <button id="refresh-auth-details" class="circle transparent" onclick="refreshAuthDetails()">
+                        <i class="material-icons">refresh</i>
+                    </button>
                 </nav>
             </header>
 
-            <div id="auth-details" class="padding-20">
-                <div class="scroll">
+            <div id="auth-details">
+                <div class="scroll small-padding">
                     <table class="border">
                         <thead>
                             <tr>
@@ -155,8 +109,8 @@
                 </div>
 
                 <div id="auth-cookies-section" style="margin-top: var(--card-spacing); display: none;">
-                    <h6 style="margin-bottom: 10px;">Authentication Cookies</h6>
-                    <div class="scroll">
+                    <h6 style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); margin: 0 0 8px 0; padding: 0 8px;">Authentication Cookies</h6>
+                    <div class="scroll small-padding">
                         <table class="border">
                             <thead>
                                 <tr>
@@ -208,6 +162,16 @@
         }
 
 
+        function refreshAuthDetails() {
+            // Manually trigger auth refresh by fetching from API
+            fetch('/api/auth/status')
+                .then(response => response.json())
+                .then(data => updateAuthDetails(data))
+                .catch(error => {
+                    console.error('Failed to refresh auth details:', error);
+                });
+        }
+
         function updateAuthDetails(authData) {
             const authSummaryTable = document.getElementById('auth-summary-table');
             const authCookiesTable = document.getElementById('auth-cookies-table');
@@ -230,15 +194,15 @@
             // Update summary table
             authSummaryTable.innerHTML = `
                 <tr>
-                    <td><strong>BASE URL</strong></td>
+                    <td>BASE URL</td>
                     <td>${authData.baseUrl || 'N/A'}</td>
                 </tr>
                 <tr>
-                    <td><strong>CLOUD ID</strong></td>
+                    <td>CLOUD ID</td>
                     <td>${authData.cloudId || 'N/A'}</td>
                 </tr>
                 <tr>
-                    <td><strong>COOKIES COUNT</strong></td>
+                    <td>COOKIES COUNT</td>
                     <td>${authData.cookies.length}</td>
                 </tr>
             `;
@@ -252,7 +216,7 @@
                             <td style="word-break: break-all;">${cookie.name}</td>
                             <td>${cookie.domain}</td>
                             <td>${cookie.path}</td>
-                            <td class="center-align">${cookie.secure ? '<span class="chip success">✓</span>' : '<span class="chip error">✗</span>'}</td>
+                            <td class="center-align">${cookie.secure ? '<i class="small" style="color: var(--success);">check_small</i>' : ''}</td>
                         </tr>
                     `;
                 });
@@ -261,49 +225,20 @@
             }
         }
 
-        // WebSocket for index page specific data (status table and auth details)
-        let indexDataWs;
-        let indexDataReconnectInterval;
-
-        function connectIndexDataWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-            indexDataWs = new WebSocket(wsUrl);
-
-            indexDataWs.onopen = function () {
-                console.log('Index data WebSocket connected');
-                if (indexDataReconnectInterval) {
-                    clearInterval(indexDataReconnectInterval);
-                    indexDataReconnectInterval = null;
-                }
-            };
-
-            indexDataWs.onmessage = function (event) {
-                const message = JSON.parse(event.data);
-                if (message.type === 'status') {
-                    updateStatus(message.payload);
-                } else if (message.type === 'auth') {
-                    updateAuthDetails(message.payload);
-                }
-                // Note: navbar handles system status, service-logs handles log messages
-            };
-
-            indexDataWs.onerror = function (error) {
-                console.error('Index data WebSocket error:', error);
-            };
-
-            indexDataWs.onclose = function () {
-                console.log('Index data WebSocket disconnected');
-                if (!indexDataReconnectInterval) {
-                    indexDataReconnectInterval = setInterval(connectIndexDataWebSocket, 3000);
-                }
-            };
-        }
-
-        // Connect on page load
+        // Subscribe to WebSocket messages for index page specific data
         document.addEventListener('DOMContentLoaded', function () {
-            connectIndexDataWebSocket();
+            if (typeof WebSocketManager !== 'undefined') {
+                // Subscribe to status updates
+                WebSocketManager.subscribe('status', updateStatus);
+                
+                // Subscribe to auth updates
+                WebSocketManager.subscribe('auth', updateAuthDetails);
+            } else {
+                console.error('[Index] WebSocketManager not loaded');
+            }
+            
+            // Load auth details on page load
+            refreshAuthDetails();
         });
     </script>
 </body>

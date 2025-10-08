@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:10:32 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package interfaces
 
 import (
@@ -14,6 +19,7 @@ type JiraStorage interface {
 	GetAllProjects(ctx context.Context) ([]*models.JiraProject, error)
 	DeleteProject(ctx context.Context, key string) error
 	CountProjects(ctx context.Context) (int, error)
+	GetMostRecentProject(ctx context.Context) (*models.JiraProject, int64, error)
 
 	// Issue operations
 	StoreIssue(ctx context.Context, issue *models.JiraIssue) error
@@ -24,6 +30,7 @@ type JiraStorage interface {
 	DeleteIssuesByProject(ctx context.Context, projectKey string) error
 	CountIssues(ctx context.Context) (int, error)
 	CountIssuesByProject(ctx context.Context, projectKey string) (int, error)
+	GetMostRecentIssue(ctx context.Context) (*models.JiraIssue, int64, error)
 
 	// Search operations
 	SearchIssues(ctx context.Context, query string) ([]*models.JiraIssue, error) // FTS5
@@ -40,6 +47,7 @@ type ConfluenceStorage interface {
 	GetAllSpaces(ctx context.Context) ([]*models.ConfluenceSpace, error)
 	DeleteSpace(ctx context.Context, key string) error
 	CountSpaces(ctx context.Context) (int, error)
+	GetMostRecentSpace(ctx context.Context) (*models.ConfluenceSpace, int64, error)
 
 	// Page operations
 	StorePage(ctx context.Context, page *models.ConfluencePage) error
@@ -50,6 +58,7 @@ type ConfluenceStorage interface {
 	DeletePagesBySpace(ctx context.Context, spaceID string) error
 	CountPages(ctx context.Context) (int, error)
 	CountPagesBySpace(ctx context.Context, spaceID string) (int, error)
+	GetMostRecentPage(ctx context.Context) (*models.ConfluencePage, int64, error)
 
 	// Search operations
 	SearchPages(ctx context.Context, query string) ([]*models.ConfluencePage, error) // FTS5

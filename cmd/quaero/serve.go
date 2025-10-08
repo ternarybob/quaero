@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 5:03:03 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package main
 
 import (
@@ -34,8 +39,12 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	defer application.Close()
 
+	// Create shutdown channel for HTTP endpoint to trigger shutdown
+	shutdownChan := make(chan struct{})
+
 	// Create HTTP server
 	srv := server.New(application)
+	srv.SetShutdownChannel(shutdownChan)
 
 	// Start server in goroutine
 	go func() {
@@ -48,10 +57,16 @@ func runServe(cmd *cobra.Command, args []string) {
 		Str("url", fmt.Sprintf("http://%s:%d", config.Server.Host, config.Server.Port)).
 		Msg("Server ready - Press Ctrl+C to stop")
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal or HTTP shutdown request
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
+
+	select {
+	case <-sigChan:
+		logger.Info().Msg("Interrupt signal received")
+	case <-shutdownChan:
+		logger.Info().Msg("Shutdown requested via HTTP")
+	}
 
 	// Graceful shutdown
 	logger.Info().Msg("Shutting down server")

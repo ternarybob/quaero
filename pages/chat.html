@@ -4,31 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat - Quaero</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    
+    <!-- Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <!-- WebSocket Manager -->
+    <script src="/static/websocket-manager.js"></script>
     
     <!-- Quaero Theme -->
     <link rel="stylesheet" href="/static/common.css">
 
-    <style>
-        /* Force navbar title styling */
-        nav.top a:first-child {
-            display: flex !important;
-            flex-direction: column !important;
-        }
-    </style>
-    
-    <script>
-        // Ensure navbar styling is applied after BeerCSS loads
-        document.addEventListener('DOMContentLoaded', function() {
-            const navTitle = document.querySelector('nav.top a:first-child');
-            if (navTitle) {
-                navTitle.style.display = 'flex';
-                navTitle.style.flexDirection = 'column';
-            }
-        });
-    </script>
 </head>
 <body class="light">
 
@@ -72,6 +61,9 @@
         <!-- Status -->
         <div id="status" style="margin-top: 1rem; font-size: 0.9rem; color: #888;"></div>
     </article>
+
+    {{template "service-logs" .}}
+
 </main>
 
 <script>
@@ -91,42 +83,8 @@ function updateSystemStatus(online) {
     }
 }
 
-// WebSocket connection for system status
-let ws;
-let reconnectInterval;
-
-function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = function() {
-        console.log('WebSocket connected');
-        updateSystemStatus(true);
-        if (reconnectInterval) {
-            clearInterval(reconnectInterval);
-            reconnectInterval = null;
-        }
-    };
-
-    ws.onerror = function(error) {
-        console.error('WebSocket error:', error);
-        updateSystemStatus(false);
-    };
-
-    ws.onclose = function() {
-        console.log('WebSocket disconnected');
-        updateSystemStatus(false);
-
-        // Reconnect after 3 seconds
-        if (!reconnectInterval) {
-            reconnectInterval = setInterval(function() {
-                connectWebSocket();
-            }, 3000);
-        }
-    };
-}
+// System status is now handled by navbar partial using WebSocketManager
+// No need for separate WebSocket connection in chat page
 
 // Chat functionality
 const chatMessages = document.getElementById('chat-messages');
@@ -238,8 +196,7 @@ userMessageInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Connect WebSocket for status updates
-connectWebSocket();
+// WebSocket connection is handled by WebSocketManager (loaded in navbar and service-logs)
 
 // Check service health on load
 fetch('/api/chat/health')

@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:11:19 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package interfaces
 
 import (
@@ -27,6 +32,8 @@ type JiraScraperService interface {
 	GetJiraData() (map[string]interface{}, error)
 	GetProjectCount() int
 	GetIssueCount() int
+	GetProjectStatus() (lastUpdated int64, details string, err error)
+	GetIssueStatus() (lastUpdated int64, details string, err error)
 	ClearAllData() error
 	Close() error
 }
@@ -41,6 +48,8 @@ type ConfluenceScraperService interface {
 	GetConfluenceData() (map[string]interface{}, error)
 	GetSpaceCount() int
 	GetPageCount() int
+	GetSpaceStatus() (lastUpdated int64, details string, err error)
+	GetPageStatus() (lastUpdated int64, details string, err error)
 	ClearAllData() error
 	Close() error
 }

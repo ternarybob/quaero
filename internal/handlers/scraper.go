@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 9:22:30 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package handlers
 
 import (
@@ -26,6 +31,29 @@ func NewScraperHandler(authService interfaces.AuthService, jira interfaces.JiraS
 		logger:            common.GetLogger(),
 		wsHandler:         ws,
 	}
+}
+
+// AuthStatusHandler returns the current authentication status
+func (h *ScraperHandler) AuthStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authData, err := h.authService.LoadAuth()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil || authData == nil || !h.authService.IsAuthenticated() {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated": false,
+			"cookies":       []interface{}{},
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(authData)
 }
 
 // AuthUpdateHandler handles authentication updates from Chrome extension

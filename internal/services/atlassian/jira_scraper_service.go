@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:12:11 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package atlassian
 
 import (
@@ -329,4 +334,36 @@ func (s *JiraScraperService) ProcessIssuesForProject(ctx context.Context, projec
 		Msg("Processed Jira issues to documents")
 
 	return nil
+}
+
+// GetProjectStatus returns the last updated time and details for Jira projects
+func (s *JiraScraperService) GetProjectStatus() (lastUpdated int64, details string, err error) {
+	ctx := context.Background()
+	project, timestamp, err := s.jiraStorage.GetMostRecentProject(ctx)
+	if err != nil {
+		// No projects found or error
+		return 0, "No projects found", nil
+	}
+
+	details = fmt.Sprintf("Project %s (%s) was scanned and added to the database", project.Key, project.Name)
+	return timestamp, details, nil
+}
+
+// GetIssueStatus returns the last updated time and details for Jira issues
+func (s *JiraScraperService) GetIssueStatus() (lastUpdated int64, details string, err error) {
+	ctx := context.Background()
+	issue, timestamp, err := s.jiraStorage.GetMostRecentIssue(ctx)
+	if err != nil {
+		// No issues found or error
+		return 0, "No issues found", nil
+	}
+
+	// Extract summary from fields
+	summary := s.getStringField(issue.Fields, "summary")
+	if summary == "" {
+		summary = issue.Key
+	}
+
+	details = fmt.Sprintf("Issue %s (%s) was scanned and added to the database", issue.Key, summary)
+	return timestamp, details, nil
 }

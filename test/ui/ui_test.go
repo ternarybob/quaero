@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 10:52:47 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
@@ -6,19 +11,37 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
 var screenshotCounter int
+var cachedRunDir string
+
+// getOrCreateRunDir returns the test run directory, creating it if needed.
+// This ensures all screenshots and videos from a single test run go to the same directory.
+func getOrCreateRunDir() string {
+	if cachedRunDir != "" {
+		return cachedRunDir
+	}
+
+	runDir := os.Getenv("TEST_RUN_DIR")
+	if runDir == "" {
+		// Create timestamped subdirectory if TEST_RUN_DIR not set
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		runDir = filepath.Join("..", "results", fmt.Sprintf("ui-manual-%s", timestamp))
+		os.MkdirAll(runDir, 0755)
+	}
+
+	cachedRunDir = runDir
+	return runDir
+}
 
 func takeScreenshot(ctx context.Context, t *testing.T, name string) {
 	screenshotCounter++
-	runDir := os.Getenv("TEST_RUN_DIR")
-	if runDir == "" {
-		runDir = filepath.Join("..", "results")
-	}
+	runDir := getOrCreateRunDir()
 
 	filename := fmt.Sprintf("%02d_%s.png", screenshotCounter, name)
 	screenshotPath := filepath.Join(runDir, filename)
@@ -35,15 +58,15 @@ func takeScreenshot(ctx context.Context, t *testing.T, name string) {
 // validateStyles checks if the page follows Beer CSS minimal styling guidelines
 func validateStyles(ctx context.Context, t *testing.T, stepName string) {
 	var styleCheck struct {
-		BodyBgColor        string
-		BodyFontFamily     string
-		PrimaryBtnBgColor  string
-		PrimaryBtnColor    string
-		PrimaryBtnBorder   string
-		TableFontSize      string
-		NavbarExists       bool
-		ArticlesExist      bool
-		HasDarkBackground  bool
+		BodyBgColor       string
+		BodyFontFamily    string
+		PrimaryBtnBgColor string
+		PrimaryBtnColor   string
+		PrimaryBtnBorder  string
+		TableFontSize     string
+		NavbarExists      bool
+		ArticlesExist     bool
+		HasDarkBackground bool
 	}
 
 	err := chromedp.Run(ctx, chromedp.Evaluate(`
@@ -107,15 +130,15 @@ func validateStyles(ctx context.Context, t *testing.T, stepName string) {
 
 	// Should use monospace font
 	if !contains(styleCheck.BodyFontFamily, "Courier") &&
-	   !contains(styleCheck.BodyFontFamily, "monospace") &&
-	   !contains(styleCheck.BodyFontFamily, "Consolas") {
+		!contains(styleCheck.BodyFontFamily, "monospace") &&
+		!contains(styleCheck.BodyFontFamily, "Consolas") {
 		issues = append(issues, "❌ Body font should be monospace")
 	}
 
 	// Primary button should have dark background (rgb(26, 26, 26))
 	if styleCheck.PrimaryBtnBgColor != "N/A" {
 		if !contains(styleCheck.PrimaryBtnBgColor, "rgb(26, 26, 26)") &&
-		   !contains(styleCheck.PrimaryBtnBgColor, "rgba(26, 26, 26") {
+			!contains(styleCheck.PrimaryBtnBgColor, "rgba(26, 26, 26") {
 			issues = append(issues, "❌ Primary button background should be rgb(26, 26, 26)")
 		}
 	}
@@ -123,7 +146,7 @@ func validateStyles(ctx context.Context, t *testing.T, stepName string) {
 	// Primary button should have white text
 	if styleCheck.PrimaryBtnColor != "N/A" {
 		if !contains(styleCheck.PrimaryBtnColor, "rgb(255, 255, 255)") &&
-		   !contains(styleCheck.PrimaryBtnColor, "rgba(255, 255, 255") {
+			!contains(styleCheck.PrimaryBtnColor, "rgba(255, 255, 255") {
 			issues = append(issues, "❌ Primary button text should be white")
 		}
 	}
@@ -155,7 +178,7 @@ func validateStyles(ctx context.Context, t *testing.T, stepName string) {
 // Helper function for string contains check
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 &&
-	       (s == substr || len(s) >= len(substr) && findSubstring(s, substr))
+		(s == substr || len(s) >= len(substr) && findSubstring(s, substr))
 }
 
 func findSubstring(s, substr string) bool {
@@ -168,10 +191,7 @@ func findSubstring(s, substr string) bool {
 }
 
 func startVideoRecording(ctx context.Context, t *testing.T) (func(), error) {
-	runDir := os.Getenv("TEST_RUN_DIR")
-	if runDir == "" {
-		runDir = filepath.Join("..", "results")
-	}
+	runDir := getOrCreateRunDir()
 
 	videoPath := filepath.Join(runDir, "test_recording.webm")
 	os.MkdirAll(filepath.Dir(videoPath), 0755)

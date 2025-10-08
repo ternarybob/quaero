@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:12:24 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package atlassian
 
 import (
@@ -254,4 +259,30 @@ func (s *ConfluenceScraperService) ProcessPagesForSpace(ctx context.Context, spa
 		Msg("Processed Confluence pages to documents")
 
 	return nil
+}
+
+// GetSpaceStatus returns the last updated time and details for Confluence spaces
+func (s *ConfluenceScraperService) GetSpaceStatus() (lastUpdated int64, details string, err error) {
+	ctx := context.Background()
+	space, timestamp, err := s.confluenceStorage.GetMostRecentSpace(ctx)
+	if err != nil {
+		// No spaces found or error
+		return 0, "No spaces found", nil
+	}
+
+	details = fmt.Sprintf("Space %s (%s) was scanned and added to the database", space.Key, space.Name)
+	return timestamp, details, nil
+}
+
+// GetPageStatus returns the last updated time and details for Confluence pages
+func (s *ConfluenceScraperService) GetPageStatus() (lastUpdated int64, details string, err error) {
+	ctx := context.Background()
+	page, timestamp, err := s.confluenceStorage.GetMostRecentPage(ctx)
+	if err != nil {
+		// No pages found or error
+		return 0, "No pages found", nil
+	}
+
+	details = fmt.Sprintf("Page '%s' was scanned and added to the database", page.Title)
+	return timestamp, details, nil
 }

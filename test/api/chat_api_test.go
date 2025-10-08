@@ -40,7 +40,7 @@ func setupTestApp(t *testing.T) (*app.App, func()) {
 	config.Storage.SQLite.Path = ":memory:" // Use in-memory database for tests
 	config.LLM.Mode = "offline"
 	// Remove mock mode - using real offline LLM for testing
-	config.Processing.Enabled = false  // Disable background processing
+	config.Processing.Enabled = false // Disable background processing
 
 	// Create logger
 	logger := arbor.NewLogger()

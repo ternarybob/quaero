@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:10:47 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package sqlite
 
 import (
@@ -119,6 +124,25 @@ func (s *JiraStorage) CountProjects(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("failed to count projects: %w", err)
 	}
 	return count, nil
+}
+
+// GetMostRecentProject returns the most recently updated project with its timestamp
+func (s *JiraStorage) GetMostRecentProject(ctx context.Context) (*models.JiraProject, int64, error) {
+	var data []byte
+	var updatedAt int64
+	query := "SELECT data, updated_at FROM jira_projects ORDER BY updated_at DESC LIMIT 1"
+
+	err := s.db.DB().QueryRowContext(ctx, query).Scan(&data, &updatedAt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get most recent project: %w", err)
+	}
+
+	var project models.JiraProject
+	if err := json.Unmarshal(data, &project); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal project: %w", err)
+	}
+
+	return &project, updatedAt, nil
 }
 
 // StoreIssue stores a Jira issue
@@ -315,6 +339,26 @@ func (s *JiraStorage) CountIssuesByProject(ctx context.Context, projectKey strin
 		return 0, fmt.Errorf("failed to count issues: %w", err)
 	}
 	return count, nil
+}
+
+// GetMostRecentIssue returns the most recently updated issue with its timestamp
+func (s *JiraStorage) GetMostRecentIssue(ctx context.Context) (*models.JiraIssue, int64, error) {
+	var fields []byte
+	var updatedAt int64
+	var issue models.JiraIssue
+
+	query := "SELECT key, id, fields, updated_at FROM jira_issues ORDER BY updated_at DESC LIMIT 1"
+
+	err := s.db.DB().QueryRowContext(ctx, query).Scan(&issue.Key, &issue.ID, &fields, &updatedAt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get most recent issue: %w", err)
+	}
+
+	if err := json.Unmarshal(fields, &issue.Fields); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal issue fields: %w", err)
+	}
+
+	return &issue, updatedAt, nil
 }
 
 func (s *JiraStorage) SearchIssues(ctx context.Context, query string) ([]*models.JiraIssue, error) {

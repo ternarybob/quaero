@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 5:03:35 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package server
 
 import "net/http"
@@ -15,6 +20,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/chat", s.app.UIHandler.ChatPageHandler)
 	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/static/websocket-manager.js", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/ui/status", s.app.UIHandler.StatusHandler)
 	mux.HandleFunc("/ui/parser-status", s.app.UIHandler.ParserStatusHandler)
@@ -23,6 +29,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
 
 	// API routes - Authentication
+	mux.HandleFunc("/api/auth/status", s.app.ScraperHandler.AuthStatusHandler)
 	mux.HandleFunc("/api/auth", s.app.ScraperHandler.AuthUpdateHandler)
 
 	// API routes - Scraping (UI-triggered collection)
@@ -62,6 +69,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents/process", s.app.DocumentHandler.ProcessHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/force-embed", s.app.SchedulerHandler.ForceEmbedDocumentHandler)
+	mux.HandleFunc("/api/documents/", s.app.DocumentHandler.ReprocessDocumentHandler) // Handles /api/documents/{id}/reprocess
 
 	// API routes - Embeddings (testing)
 	mux.HandleFunc("/api/embeddings/generate", s.app.EmbeddingHandler.GenerateEmbeddingHandler)
@@ -82,9 +90,13 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/scheduler/trigger-collection", s.app.SchedulerHandler.TriggerCollectionHandler)
 	mux.HandleFunc("/api/scheduler/trigger-embedding", s.app.SchedulerHandler.TriggerEmbeddingHandler)
 
+	// API routes - Logs
+	mux.HandleFunc("/api/logs/recent", s.app.WSHandler.GetRecentLogsHandler)
+
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
+	mux.HandleFunc("/api/shutdown", s.ShutdownHandler) // Graceful shutdown endpoint (dev mode)
 
 	// 404 handler for unmatched API routes
 	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)

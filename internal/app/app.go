@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:57:30 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package app
 
 import (
@@ -250,6 +255,7 @@ func (a *App) initHandlers() error {
 	)
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
+		a.StorageManager.DocumentStorage(),
 		a.ProcessingService,
 	)
 	a.SchedulerHandler = handlers.NewSchedulerHandler(

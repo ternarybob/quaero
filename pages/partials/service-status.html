@@ -1,0 +1,60 @@
+{{define "service-status"}}
+<!-- Service Status Section -->
+<article class="border no-padding">
+    <header>
+        <nav>
+            <h5 class="max">Service Status</h5>
+            <button class="circle transparent" onclick="refreshServiceStatus()">
+                <i class="material-icons">refresh</i>
+            </button>
+        </nav>
+    </header>
+
+    <div class="scroll small-padding">
+        <table class="border">
+            <thead>
+                <tr>
+                    <th>SERVICE</th>
+                    <th>STATUS</th>
+                    <th>DETAILS</th>
+                </tr>
+            </thead>
+            <tbody id="service-status-table">
+                <tr>
+                    <td class="status-label">PARSER SERVICE</td>
+                    <td class="status-value status-online">ONLINE</td>
+                    <td>Ready</td>
+                </tr>
+                <tr>
+                    <td class="status-label">DATABASE</td>
+                    <td class="status-value status-online">CONNECTED</td>
+                    <td>SQLite</td>
+                </tr>
+                <tr>
+                    <td class="status-label">EXTENSION AUTH</td>
+                    <td class="status-value">WAITING</td>
+                    <td>Install Chrome extension</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</article>
+
+<script>
+// Refresh service status function
+function refreshServiceStatus() {
+    // Fetch current service status
+    fetch('/ui/status')
+        .then(response => response.text())
+        .then(html => {
+            const tbody = document.getElementById('service-status-table');
+            if (tbody) {
+                tbody.innerHTML = html;
+            }
+        })
+        .catch(error => {
+            console.error('Failed to refresh service status:', error);
+        });
+}
+</script>
+{{end}}

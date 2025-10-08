@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:11:01 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package sqlite
 
 import (
@@ -115,6 +120,27 @@ func (s *ConfluenceStorage) CountSpaces(ctx context.Context) (int, error) {
 	query := "SELECT COUNT(*) FROM confluence_spaces"
 	err := s.db.DB().QueryRowContext(ctx, query).Scan(&count)
 	return count, err
+}
+
+// GetMostRecentSpace returns the most recently updated space with its timestamp
+func (s *ConfluenceStorage) GetMostRecentSpace(ctx context.Context) (*models.ConfluenceSpace, int64, error) {
+	query := "SELECT key, name, id, page_count, data, updated_at FROM confluence_spaces ORDER BY updated_at DESC LIMIT 1"
+	row := s.db.DB().QueryRowContext(ctx, query)
+
+	var space models.ConfluenceSpace
+	var dataJSON string
+	var updatedAt int64
+
+	err := row.Scan(&space.Key, &space.Name, &space.ID, &space.PageCount, &dataJSON, &updatedAt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get most recent space: %w", err)
+	}
+
+	if err := json.Unmarshal([]byte(dataJSON), &space); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal space data: %w", err)
+	}
+
+	return &space, updatedAt, nil
 }
 
 // StorePage stores a Confluence page
@@ -269,6 +295,27 @@ func (s *ConfluenceStorage) CountPages(ctx context.Context) (int, error) {
 	query := "SELECT COUNT(*) FROM confluence_pages"
 	err := s.db.DB().QueryRowContext(ctx, query).Scan(&count)
 	return count, err
+}
+
+// GetMostRecentPage returns the most recently updated page with its timestamp
+func (s *ConfluenceStorage) GetMostRecentPage(ctx context.Context) (*models.ConfluencePage, int64, error) {
+	query := "SELECT id, space_id, title, body, updated_at FROM confluence_pages ORDER BY updated_at DESC LIMIT 1"
+	row := s.db.DB().QueryRowContext(ctx, query)
+
+	var page models.ConfluencePage
+	var bodyJSON string
+	var updatedAt int64
+
+	err := row.Scan(&page.ID, &page.SpaceID, &page.Title, &bodyJSON, &updatedAt)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get most recent page: %w", err)
+	}
+
+	if err := json.Unmarshal([]byte(bodyJSON), &page.Body); err != nil {
+		return nil, 0, fmt.Errorf("failed to unmarshal page body: %w", err)
+	}
+
+	return &page, updatedAt, nil
 }
 
 // CountPagesBySpace returns the number of pages for a space

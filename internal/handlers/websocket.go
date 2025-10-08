@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 9:38:41 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package handlers
 
 import (
@@ -452,4 +457,84 @@ func (h *WebSocketHandler) parseAndBroadcastLog(logLine string) {
 		Message:   messageWithFields, // Include the full message with structured fields
 	}
 	h.BroadcastLog(entry)
+}
+
+// GetRecentLogsHandler returns recent logs from the last 5 minutes as JSON
+func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get recent logs from memory writer
+	memWriter := arbor.GetRegisteredMemoryWriter(arbor.WRITER_MEMORY)
+	var logs []LogEntry
+
+	if memWriter != nil {
+		entries, err := memWriter.GetEntriesWithLimit(100)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to get log entries")
+			http.Error(w, "Failed to retrieve logs", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse and filter logs
+		for _, logLine := range entries {
+			// Skip internal handler logs
+			if strings.Contains(logLine, "WebSocket client connected") ||
+				strings.Contains(logLine, "WebSocket client disconnected") ||
+				strings.Contains(logLine, "DEBUG: Memory writer entry") {
+				continue
+			}
+
+			// Parse log line
+			parts := strings.SplitN(logLine, "|", 3)
+			if len(parts) != 3 {
+				continue
+			}
+
+			levelStr := strings.TrimSpace(parts[0])
+			dateTime := strings.TrimSpace(parts[1])
+			messageWithFields := strings.TrimSpace(parts[2])
+
+			// Parse timestamp from "Oct  2 16:27:13" format
+			timeParts := strings.Fields(dateTime)
+			var timestamp string
+			if len(timeParts) >= 3 {
+				timestamp = timeParts[len(timeParts)-1]
+			} else {
+				timestamp = time.Now().Format("15:04:05")
+			}
+
+			// Map level
+			level := "info"
+			switch levelStr {
+			case "ERR", "ERROR", "FATAL", "PANIC":
+				level = "error"
+			case "WRN", "WARN":
+				level = "warn"
+			case "INF", "INFO", "DBG", "DEBUG":
+				level = "info"
+			}
+
+			entry := LogEntry{
+				Timestamp: timestamp,
+				Level:     level,
+				Message:   messageWithFields,
+			}
+
+			logs = append(logs, entry)
+		}
+	}
+
+	// Return empty array if no logs
+	if logs == nil {
+		logs = []LogEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"logs":  logs,
+		"count": len(logs),
+	})
 }

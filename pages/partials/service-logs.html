@@ -1,93 +1,27 @@
 {{define "service-logs"}}
 
 <!-- Service Logs -->
-
-<article class="border">
+<article class="border no-padding">
     <header>
-
-        <div class="row">
-            <div class="max">max</div>
-            <div>min</div>
-            <div>min</div>
-        </div>
-
+        <nav>
+            <h5 class="max">Service Logs</h5>
+            <button class="circle transparent" onclick="refreshServiceLogs()" title="Refresh Logs">
+                <i class="material-icons">refresh</i>
+            </button>
+            <button class="circle transparent" onclick="clearServiceLogs()" title="Clear Logs">
+                <i class="material-icons">delete</i>
+            </button>
+        </nav>
     </header>
 
-    <div class="padding-20">
-        <p>This is the content area of the section. It can hold forms, text, or other components.</p>
-        <div class="field border suffix">
-            <input type="text" placeholder="Example Input">
-            <i>check</i>
-        </div>
+    <div class="small-padding">
+        <div id="service-logs" class="service-logs-container"></div>
     </div>
 </article>
 
-<section class="container m">
-
-    <div class="box border thin">
-
-        <!-- Navbar -->
-        <nav class="row middle between p">
-            <h5 class="no-margin">Service Logs</h5>
-            <div class="row gap-s">
-                <button class="chip" onclick="clearServiceLogs()">Clear</button>
-            </div>
-        </nav>
-
-        <div class="divider"></div>
-
-        <!-- 
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div class="terminal-header" style="margin-bottom: 0;">Service Logs</div>
-        <button class="btn-clear-logs" onclick="clearServiceLogs()">Clear</button>
-    </div> -->
-
-        <div id="service-logs" class="service-logs-container"></div>
-
-    </div>
-
-</section>
-
 <script>
-    // WebSocket connection for service logs
-    let serviceLogsWs;
-    let serviceLogsReconnectInterval;
+    // Service logs using shared WebSocket manager
     let displayedLogs = new Set();
-
-    function connectServiceLogsWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-        serviceLogsWs = new WebSocket(wsUrl);
-
-        serviceLogsWs.onopen = function () {
-            console.log('Service Logs WebSocket connected');
-            if (serviceLogsReconnectInterval) {
-                clearInterval(serviceLogsReconnectInterval);
-                serviceLogsReconnectInterval = null;
-            }
-        };
-
-        serviceLogsWs.onmessage = function (event) {
-            const message = JSON.parse(event.data);
-            if (message.type === 'log') {
-                handleLogMessage(message.payload);
-            }
-            // Other message types are handled by page-specific WebSocket connections
-        };
-
-        serviceLogsWs.onerror = function (error) {
-            console.error('Service Logs WebSocket error:', error);
-        };
-
-        serviceLogsWs.onclose = function () {
-            console.log('Service Logs WebSocket disconnected');
-            if (!serviceLogsReconnectInterval) {
-                serviceLogsReconnectInterval = setInterval(connectServiceLogsWebSocket, 3000);
-            }
-        };
-    }
-
 
     function handleLogMessage(logData) {
         const logsContainer = document.getElementById('service-logs');
@@ -153,9 +87,40 @@
         }
     }
 
-    // Connect on page load
+    function refreshServiceLogs() {
+        // Fetch recent logs from API (last 5 minutes)
+        fetch('/api/logs/recent')
+            .then(response => response.json())
+            .then(data => {
+                if (data.logs && Array.isArray(data.logs)) {
+                    // Clear existing logs
+                    clearServiceLogs();
+                    // Add fetched logs
+                    data.logs.forEach(logData => handleLogMessage(logData));
+                }
+            })
+            .catch(error => {
+                console.error('Failed to refresh service logs:', error);
+            });
+    }
+
+
+    // Subscribe to log messages on page load
     document.addEventListener('DOMContentLoaded', function () {
-        connectServiceLogsWebSocket();
+        if (typeof WebSocketManager !== 'undefined') {
+            // Subscribe to log messages
+            WebSocketManager.subscribe('log', handleLogMessage);
+
+            // Subscribe to connection status changes
+            // This will immediately call updateLogsWSStatus with current connection state
+
+            console.log('[Service Logs] WebSocket subscriptions established');
+        } else {
+            console.error('[Service Logs] WebSocketManager not loaded');
+        }
+
+        // Load service logs on page load (past 5 minutes)
+        refreshServiceLogs();
     });
 </script>
 {{end}}

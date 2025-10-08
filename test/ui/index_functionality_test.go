@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 10:49:15 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
@@ -22,8 +27,8 @@ func TestIndexPageFunctionality(t *testing.T) {
 		chromedp.WindowSize(1280, 720),
 	)
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
@@ -63,7 +68,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 	var navbarStatusColor string
 	err = chromedp.Run(ctx,
 		chromedp.Text(`.status-text`, &navbarStatusText),
-	chromedp.Evaluate(`(() => {
+		chromedp.Evaluate(`(() => {
 			const statusText = document.querySelector('.status-text');
 			if (!statusText) return 'NOT_FOUND';
 			const styles = window.getComputedStyle(statusText);
@@ -74,18 +79,18 @@ func TestIndexPageFunctionality(t *testing.T) {
 	assert.Equal(t, "ONLINE", navbarStatusText, "Navbar status should show 'ONLINE'")
 	t.Logf("📊 Navbar status: %s (color: %s)", navbarStatusText, navbarStatusColor)
 
-	// Check if status indicator (dot) is green
-	var statusIndicatorColor string
+	// Check if status has proper CSS pseudo-element (dot with animation)
+	var hasPseudoElement bool
 	err = chromedp.Run(ctx,
-	chromedp.Evaluate(`(() => {
-			const indicator = document.querySelector('.status-indicator');
-			if (!indicator) return 'NOT_FOUND';
-			const styles = window.getComputedStyle(indicator);
-			return styles.backgroundColor;
-		})()`, &statusIndicatorColor),
+		chromedp.Evaluate(`(() => {
+			const statusText = document.querySelector('.status-text');
+			if (!statusText) return false;
+			const styles = window.getComputedStyle(statusText, '::before');
+			return styles.content !== 'none' && styles.content !== '';
+		})()`, &hasPseudoElement),
 	)
-	require.NoError(t, err, "Failed to check status indicator color")
-	t.Logf("🔴 Status indicator color: %s", statusIndicatorColor)
+	require.NoError(t, err, "Failed to check status pseudo-element")
+	t.Logf("🔴 Status has pulsing dot indicator: %v", hasPseudoElement)
 
 	t.Log("🔍 Testing Service Logs Section...")
 
@@ -94,7 +99,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 	var serviceLogsContainer string
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`document.getElementById('service-logs') !== null`, &serviceLogsExists),
-	chromedp.Evaluate(`(() => {
+		chromedp.Evaluate(`(() => {
 			const logsContainer = document.getElementById('service-logs');
 			return logsContainer ? logsContainer.className : 'NOT_FOUND';
 		})()`, &serviceLogsContainer),
@@ -105,7 +110,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 
 	// Test 4: Wait for and verify log content appears (wait up to 30 seconds)
 	t.Log("⏳ Waiting for service logs to populate...")
-	
+
 	var logsContent string
 	var logsCount int
 	maxWaitTime := 30 * time.Second
@@ -140,7 +145,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 
 	// Test 5: Verify WebSocket connections are working
 	t.Log("🔍 Testing WebSocket Connections...")
-	
+
 	// Check for WebSocket connection messages
 	var wsConnections int
 	err = chromedp.Run(ctx,
@@ -154,7 +159,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 		})()`, &wsConnections),
 	)
 	require.NoError(t, err, "Failed to check WebSocket connections")
-	
+
 	t.Logf("🔌 Active WebSocket connections: %d", wsConnections)
 
 	// Test 6: Trigger some activity to generate logs
@@ -163,7 +168,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 		// Click the refresh button to trigger activity
 		chromedp.Click(`#refresh-parser-status`),
 		chromedp.Sleep(3*time.Second),
-		
+
 		// Check logs again after activity
 		chromedp.Text(`#service-logs`, &logsContent),
 		chromedp.Evaluate(`(() => {
@@ -177,7 +182,7 @@ func TestIndexPageFunctionality(t *testing.T) {
 	t.Log("📊 Final Results:")
 	t.Logf("   Service Status: ✅ Exists and contains required sections")
 	t.Logf("   Navbar Status: %s (color: %s)", navbarStatusText, navbarStatusColor)
-	t.Logf("   Status Indicator: %s", statusIndicatorColor)
+	t.Logf("   Status Indicator: Has pulsing dot = %v", hasPseudoElement)
 	t.Logf("   Service Logs: %d entries", logsCount)
 	t.Logf("   WebSocket Connections: %d", wsConnections)
 
@@ -185,10 +190,10 @@ func TestIndexPageFunctionality(t *testing.T) {
 	assert.True(t, serviceStatusExists, "Service Status section must exist")
 	assert.True(t, serviceLogsExists, "Service Logs section must exist")
 	assert.Equal(t, "ONLINE", navbarStatusText, "System should show as ONLINE")
-	
+
 	// WebSocket connections should be established (we expect 3: navbar, service-logs, index)
 	assert.GreaterOrEqual(t, wsConnections, 1, "At least one WebSocket connection should be active")
-	
+
 	// If no logs appear after triggering activity, that's a warning but not a failure
 	if logsCount == 0 {
 		t.Log("⚠️  WARNING: No service logs appeared after triggering activity")
@@ -212,8 +217,8 @@ func TestServiceLogsWebSocketMessages(t *testing.T) {
 		chromedp.WindowSize(1280, 720),
 	)
 
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
 
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
@@ -229,10 +234,10 @@ func TestServiceLogsWebSocketMessages(t *testing.T) {
 
 	// Test WebSocket message simulation
 	t.Log("🧪 Simulating WebSocket log message...")
-	
+
 	var result bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`
+		chromedp.Evaluate(`(() => {
 			// Simulate a log message as if it came from WebSocket
 			const mockLogData = {
 				timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
@@ -246,13 +251,13 @@ func TestServiceLogsWebSocketMessages(t *testing.T) {
 				return true;
 			}
 			return false;
-		`, &result),
+		})()`, &result),
 	)
 	require.NoError(t, err, "Failed to simulate WebSocket message")
 
 	if result {
 		t.Log("✅ Successfully simulated WebSocket log message")
-		
+
 		// Check if the message appeared
 		var logsContent string
 		var logsCount int
@@ -262,10 +267,10 @@ func TestServiceLogsWebSocketMessages(t *testing.T) {
 			chromedp.Evaluate(`document.getElementById('service-logs').children.length`, &logsCount),
 		)
 		require.NoError(t, err, "Failed to check log content after simulation")
-		
+
 		assert.Greater(t, logsCount, 0, "Simulated log message should appear in service logs")
 		assert.Contains(t, logsContent, "Test log message", "Service logs should contain the test message")
-		
+
 		t.Logf("📝 Log entries after simulation: %d", logsCount)
 		t.Log("✅ WebSocket log message handling is working correctly")
 	} else {

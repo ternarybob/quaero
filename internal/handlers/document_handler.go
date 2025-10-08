@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 12:57:01 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package handlers
 
 import (
@@ -12,13 +17,15 @@ import (
 
 type DocumentHandler struct {
 	documentService   interfaces.DocumentService
+	documentStorage   interfaces.DocumentStorage
 	processingService *processing.Service
 	logger            arbor.ILogger
 }
 
-func NewDocumentHandler(documentService interfaces.DocumentService, processingService *processing.Service) *DocumentHandler {
+func NewDocumentHandler(documentService interfaces.DocumentService, documentStorage interfaces.DocumentStorage, processingService *processing.Service) *DocumentHandler {
 	return &DocumentHandler{
 		documentService:   documentService,
+		documentStorage:   documentStorage,
 		processingService: processingService,
 		logger:            common.GetLogger(),
 	}
@@ -127,4 +134,46 @@ func (h *DocumentHandler) ProcessingStatusHandler(w http.ResponseWriter, r *http
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+// ReprocessDocumentHandler handles POST /api/documents/{id}/reprocess
+// This marks a document for re-vectorization (force embed)
+func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract document ID from path: /api/documents/{id}/reprocess
+	path := r.URL.Path
+	docID := ""
+	if len(path) > len("/api/documents/") {
+		endIdx := len(path) - len("/reprocess")
+		if endIdx > len("/api/documents/") {
+			docID = path[len("/api/documents/"):endIdx]
+		}
+	}
+
+	if docID == "" {
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
+
+	h.logger.Info().Str("doc_id", docID).Msg("Marking document for reprocessing")
+
+	// Mark document for force embed (re-vectorization)
+	if err := h.documentStorage.SetForceEmbedPending(docID, true); err != nil {
+		h.logger.Error().Err(err).Str("doc_id", docID).Msg("Failed to mark document for reprocessing")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("doc_id", docID).Msg("Document marked for reprocessing")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Document marked for reprocessing",
+		"doc_id":  docID,
+	})
 }

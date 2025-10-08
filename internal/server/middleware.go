@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Wednesday, 8th October 2025 11:48:25 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package server
 
 import (
@@ -15,6 +20,26 @@ func (s *Server) withMiddleware(handler http.Handler) http.Handler {
 	handler = s.corsMiddleware(handler)
 	handler = s.loggingMiddleware(handler)
 	return handler
+}
+
+// withConditionalMiddleware applies middleware but bypasses it for WebSocket routes
+func (s *Server) withConditionalMiddleware(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bypass middleware for WebSocket upgrade requests
+		if r.URL.Path == "/ws" {
+			// Only apply CORS for WebSocket (needed for cross-origin)
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+			// Skip logging and other middleware that might interfere
+			handler.ServeHTTP(w, r)
+			return
+		}
+
+		// Apply full middleware chain for all other routes
+		s.withMiddleware(handler).ServeHTTP(w, r)
+	})
 }
 
 // loggingMiddleware logs HTTP requests and responses

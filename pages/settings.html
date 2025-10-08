@@ -5,32 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quaero - Settings</title>
 
+    <!-- Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    
     <!-- Beer CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.css">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.7.10/dist/cdn/beer.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
+    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
     <script src="https://unpkg.com/htmx.org@1.9.6"></script>
+    
+    <!-- WebSocket Manager -->
+    <script src="/static/websocket-manager.js"></script>
     
     <!-- Quaero Theme -->
     <link rel="stylesheet" href="/static/common.css">
 
-    <style>
-        /* Force navbar title styling */
-        nav.top a:first-child {
-            display: flex !important;
-            flex-direction: column !important;
-        }
-    </style>
-    
-    <script>
-        // Ensure navbar styling is applied after BeerCSS loads
-        document.addEventListener('DOMContentLoaded', function() {
-            const navTitle = document.querySelector('nav.top a:first-child');
-            if (navTitle) {
-                navTitle.style.display = 'flex';
-                navTitle.style.flexDirection = 'column';
-            }
-        });
-    </script>
 </head>
 <body class="light">
     {{template "navbar" .}}
@@ -52,7 +40,7 @@
                 <nav>
                     <h5>System Configuration (Read-Only)</h5>
                     <div class="max"></div>
-                    <button class="primary" onclick="loadConfig()">REFRESH</button>
+                    <button class="circle transparent" onclick="loadConfig()"><i class="material-icons">refresh</i></button>
                 </nav>
             </header>
             <div style="padding: 20px;">
@@ -97,9 +85,10 @@
                 </div>
             </div>
         </article>
-    </main>
 
-    {{template "service-logs" .}}
+        {{template "service-logs" .}}
+
+    </main>
 
     {{template "footer" .}}
 

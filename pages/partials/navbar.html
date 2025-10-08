@@ -1,27 +1,25 @@
 {{define "navbar"}}
 <nav class="top">
-
     <div class="row">
-
         <!-- Left: Site Title -->
-        <div class="min center-align">
-            <a href="/">
+        <div class="min">
+            <div class="brand">
                 <div>QUAERO</div>
                 <small>DATA COLLECTION SERVICE</small>
-            </a>
+            </div>
         </div>
 
         <div class="max"></div>
 
         <!-- Center: Main Menu -->
-        <div class="min center-align">
+        <div class="min">
             <div class="row">
-                <a href="/" class="min{{if eq .Page " home"}} active{{end}}">HOME</a>
-                <a href="/jira" class="min{{if eq .Page " jira"}} active{{end}}">JIRA DATA</a>
-                <a href="/confluence" class="min{{if eq .Page " confluence"}} active{{end}}">CONFLUENCE DATA</a>
-                <a href="/documents" class="min{{if eq .Page " documents"}} active{{end}}">DOCUMENTS</a>
-                <a href="/chat" class="min{{if eq .Page " chat"}} active{{end}}">CHAT</a>
-                <a href="/settings" class="min{{if eq .Page " settings"}} active{{end}}">SETTINGS</a>
+                <a href="/" class="min{{if eq .Page "home"}} active{{end}}">HOME</a>
+                <a href="/jira" class="min{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
+                <a href="/confluence" class="min{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
+                <a href="/documents" class="min{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
+                <a href="/chat" class="min{{if eq .Page "chat"}} active{{end}}">CHAT</a>
+                <a href="/settings" class="min{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
             </div>
         </div>
 
@@ -29,74 +27,44 @@
 
         <!-- Right: Status -->
         <div class="min">
-            <div class="row">
-                <div class="status-indicator"></div>
-                <span class="small status-text">ONLINE</span>
-            </div>
+            <span class="status-text online" style="display: flex; align-items: center; gap: 4px;">
+                <i class="material-icons" style="font-size: 12px;">circle</i>
+                <span>ONLINE</span>
+            </span>
         </div>
     </div>
 </nav>
 
 <script>
-    // Navbar status indicator WebSocket connection
-    let navbarWs;
-    let navbarReconnectInterval;
-
-    function connectNavbarWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-        navbarWs = new WebSocket(wsUrl);
-
-        navbarWs.onopen = function () {
-            console.log('Navbar WebSocket connected');
-            updateNavbarStatus(true);
-            if (navbarReconnectInterval) {
-                clearInterval(navbarReconnectInterval);
-                navbarReconnectInterval = null;
-            }
-        };
-
-        navbarWs.onmessage = function (event) {
-            const message = JSON.parse(event.data);
-            // Navbar only cares about system status, not specific data
-            // Log messages are handled by service-logs template
-        };
-
-        navbarWs.onerror = function (error) {
-            console.error('Navbar WebSocket error:', error);
-            updateNavbarStatus(false);
-        };
-
-        navbarWs.onclose = function () {
-            console.log('Navbar WebSocket disconnected');
-            updateNavbarStatus(false);
-            if (!navbarReconnectInterval) {
-                navbarReconnectInterval = setInterval(connectNavbarWebSocket, 3000);
-            }
-        };
-    }
-
+    // Navbar status indicator using shared WebSocket manager
     function updateNavbarStatus(online) {
-        const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.querySelector('.status-text');
 
-        if (statusIndicator && statusText) {
+        if (statusText) {
             if (online) {
-                statusIndicator.style.background = '#00cc00';
-                statusText.style.color = '#00cc00';
-                statusText.textContent = 'ONLINE';
+                statusText.classList.remove('offline');
+                statusText.classList.add('online');
+                statusText.innerHTML = '<i class="material-icons" style="font-size: 12px;">circle</i><span>ONLINE</span>';
             } else {
-                statusIndicator.style.background = '#cc0000';
-                statusText.style.color = '#cc0000';
-                statusText.textContent = 'OFFLINE';
+                statusText.classList.remove('online');
+                statusText.classList.add('offline');
+                statusText.innerHTML = '<i style="font-size: 12px;">circle</i><span>OFFLINE</span>';
             }
         }
     }
 
-    // Connect navbar WebSocket when DOM is ready
+    // Subscribe to connection changes when DOM is ready
     document.addEventListener('DOMContentLoaded', function () {
-        connectNavbarWebSocket();
+        // Wait for WebSocketManager to be available
+        if (typeof WebSocketManager !== 'undefined') {
+            // Subscribe to connection state changes
+            // This will immediately call updateNavbarStatus with current connection state
+            WebSocketManager.onConnectionChange(updateNavbarStatus);
+            
+            console.log('[Navbar] WebSocket subscription established');
+        } else {
+            console.error('[Navbar] WebSocketManager not loaded');
+        }
     });
 </script>
 {{end}}
