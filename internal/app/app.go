@@ -235,7 +235,7 @@ func (a *App) initServices() error {
 func (a *App) initHandlers() error {
 	// Initialize handlers
 	a.APIHandler = handlers.NewAPIHandler()
-	a.UIHandler = handlers.NewUIHandler(a.JiraService, a.ConfluenceService)
+	a.UIHandler = handlers.NewUIHandler(a.JiraService, a.ConfluenceService, a.AuthService)
 	a.WSHandler = handlers.NewWebSocketHandler()
 	a.ScraperHandler = handlers.NewScraperHandler(
 		a.AuthService,

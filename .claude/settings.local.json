@@ -1,9 +1,15 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions",
     "allow": [
-      "Bash(pwsh.exe:*)"
-    ]
+      "Bash(pwsh.exe:*)",
+      "Bash(./scripts/build.ps1)",
+      "Bash(timeout:*)",
+      "Bash(go test:*)",
+      "Bash(cat:*)",
+      "Bash(test:*)",
+      "Bash(git add:*)"
+    ],
+    "defaultMode": "bypassPermissions"
   },
   "hooks": {
     "UserPromptSubmit": [

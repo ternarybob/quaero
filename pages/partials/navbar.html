@@ -1,70 +1,80 @@
-{{define "navbar"}}
-<nav class="top">
-    <div class="row">
-        <!-- Left: Site Title -->
-        <div class="min">
-            <div class="brand">
-                <div>QUAERO</div>
-                <small>DATA COLLECTION SERVICE</small>
-            </div>
-        </div>
+<nav class="navbar is-light is-fixed-top" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a class="navbar-item" href="/">
+      <strong>Quaero</strong>
+    </a>
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
 
-        <div class="max"></div>
-
-        <!-- Center: Main Menu -->
-        <div class="min">
-            <div class="row">
-                <a href="/" class="min{{if eq .Page "home"}} active{{end}}">HOME</a>
-                <a href="/jira" class="min{{if eq .Page "jira"}} active{{end}}">JIRA DATA</a>
-                <a href="/confluence" class="min{{if eq .Page "confluence"}} active{{end}}">CONFLUENCE DATA</a>
-                <a href="/documents" class="min{{if eq .Page "documents"}} active{{end}}">DOCUMENTS</a>
-                <a href="/chat" class="min{{if eq .Page "chat"}} active{{end}}">CHAT</a>
-                <a href="/settings" class="min{{if eq .Page "settings"}} active{{end}}">SETTINGS</a>
-            </div>
-        </div>
-
-        <div class="max"></div>
-
-        <!-- Right: Status -->
-        <div class="min">
-            <span class="status-text online" style="display: flex; align-items: center; gap: 4px;">
-                <i class="material-icons" style="font-size: 12px;">circle</i>
-                <span>ONLINE</span>
-            </span>
-        </div>
+  <div id="navbarMenu" class="navbar-menu">
+    <div class="navbar-start">
+      <a class="navbar-item" href="/">
+        HOME
+      </a>
+      <a class="navbar-item" href="/jira">
+        JIRA DATA
+      </a>
+      <a class="navbar-item" href="/confluence">
+        CONFLUENCE DATA
+      </a>
+      <a class="navbar-item" href="/documents">
+        DOCUMENTS
+      </a>
+      <a class="navbar-item" href="/chat">
+        CHAT
+      </a>
+      <a class="navbar-item" href="/settings">
+        SETTINGS
+      </a>
     </div>
+
+    <div class="navbar-end">
+      <div class="navbar-item">
+        <span class="tag is-success status-text">ONLINE</span>
+      </div>
+    </div>
+  </div>
 </nav>
 
 <script>
-    // Navbar status indicator using shared WebSocket manager
-    function updateNavbarStatus(online) {
-        const statusText = document.querySelector('.status-text');
+  // Navbar burger menu toggle
+  document.addEventListener('DOMContentLoaded', function () {
+    const burger = document.querySelector('.navbar-burger');
+    const menu = document.getElementById('navbarMenu');
 
-        if (statusText) {
-            if (online) {
-                statusText.classList.remove('offline');
-                statusText.classList.add('online');
-                statusText.innerHTML = '<i class="material-icons" style="font-size: 12px;">circle</i><span>ONLINE</span>';
-            } else {
-                statusText.classList.remove('online');
-                statusText.classList.add('offline');
-                statusText.innerHTML = '<i style="font-size: 12px;">circle</i><span>OFFLINE</span>';
-            }
-        }
+    if (burger && menu) {
+      burger.addEventListener('click', function () {
+        burger.classList.toggle('is-active');
+        menu.classList.toggle('is-active');
+      });
     }
 
-    // Subscribe to connection changes when DOM is ready
-    document.addEventListener('DOMContentLoaded', function () {
-        // Wait for WebSocketManager to be available
-        if (typeof WebSocketManager !== 'undefined') {
-            // Subscribe to connection state changes
-            // This will immediately call updateNavbarStatus with current connection state
-            WebSocketManager.onConnectionChange(updateNavbarStatus);
-            
-            console.log('[Navbar] WebSocket subscription established');
+    // Navbar status indicator using shared WebSocket manager
+    function updateNavbarStatus(online) {
+      const statusText = document.querySelector('.status-text');
+      if (statusText) {
+        if (online) {
+          statusText.classList.remove('is-danger');
+          statusText.classList.add('is-success');
+          statusText.textContent = 'ONLINE';
         } else {
-            console.error('[Navbar] WebSocketManager not loaded');
+          statusText.classList.remove('is-success');
+          statusText.classList.add('is-danger');
+          statusText.textContent = 'OFFLINE';
         }
-    });
+      }
+    }
+
+    // Subscribe to connection changes
+    if (typeof WebSocketManager !== 'undefined') {
+      WebSocketManager.onConnectionChange(updateNavbarStatus);
+      console.log('[Navbar] WebSocket subscription established');
+    } else {
+      console.error('[Navbar] WebSocketManager not loaded');
+    }
+  });
 </script>
-{{end}}

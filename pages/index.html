@@ -2,245 +2,48 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quaero - Monitoring Dashboard</title>
-
-    <!-- Material Icons -->
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-    
-    <!-- Beer CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
-
-    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-
-    <!-- WebSocket Manager -->
-    <script src="/static/websocket-manager.js"></script>
-
-    <!-- Quaero Theme -->
-    <link rel="stylesheet" href="/static/common.css">
-
-    <!-- Ensure Material Icons font loads before content renders -->
-    <script>
-        document.fonts.ready.then(() => {
-            console.log('Material Icons font loaded');
-        });
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quaero - Home</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="stylesheet" href="/static/common.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 
-<body class="light">
-    {{template "navbar" .}}
-    {{template "snackbar" .}}
+<body class="has-navbar-fixed-top">
+  <div class="wrapper">
+    {{template "navbar.html" .}}
+
+    <!-- Hero Section -->
+    <section class="hero is-light">
+      <div class="hero-body">
+        <div class="container">
+          <h1 class="title">Quaero</h1>
+          <p class="subtitle">Atlassian Data Collection and Analysis Platform</p>
+        </div>
+      </div>
+    </section>
 
     <!-- Main Content -->
-    <main class="responsive">
-        <!-- Hero Section -->
-        <header class="center-align">
-            <h3>Quaero</h3>
-            <p>Knowledge collection and semantic search system with vector embeddings and offline LLM support.<br>Secure data extraction from Jira, Confluence, and GitHub with local-first architecture.</p>
-        </header>
+    <section class="section">
+      <div class="container">
 
-        <!-- Parser Status Section -->
-        <article class="border no-padding">
-            <header>
-                <nav>
-                    <h5 class="max">Parser Status</h5>
-                    <button id="refresh-parser-status" class="circle transparent" hx-get="/ui/parser-status" hx-target="#parser-status-table" hx-swap="innerHTML" hx-trigger="click, load, every 60s" hx-sync="this:abort">
-                        <i class="material-icons">refresh</i>
-                    </button>
-                </nav>
-            </header>
+        {{template "service-status.html" .}}
 
-            <div class="grid small-padding">
-                <div class="s12">
-                    <p class="font-mono font-large text-secondary text-center">
-                        Install Chrome extension and click icon when logged into Jira/Confluence<br>
-                        Extension will capture authentication and trigger scraping automatically
-                    </p>
-                </div>
-            </div>
+        {{template "service-logs.html" .}}
 
-            <div class="scroll small-padding">
-                <table class="border">
-                    <thead>
-                        <tr>
-                            <th>COMPONENT</th>
-                            <th>STATUS</th>
-                            <th>LAST UPDATED</th>
-                            <th>DETAILS</th>
-                        </tr>
-                    </thead>
-                    <tbody id="parser-status-table">
-                        <tr>
-                            <td colspan="4" class="status-loading">Loading parser status...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </article>
+      </div>
+    </section>
+  </div>
 
-        <!-- Authentication Details Section -->
-        <article class="border no-padding">
-            <header>
-                <nav>
-                    <h5 class="max">Authentication Details</h5>
-                    <button id="refresh-auth-details" class="circle transparent" onclick="refreshAuthDetails()">
-                        <i class="material-icons">refresh</i>
-                    </button>
-                </nav>
-            </header>
+  {{template "footer.html" .}}
 
-            <div id="auth-details">
-                <div class="scroll small-padding">
-                    <table class="border">
-                        <thead>
-                            <tr>
-                                <th>PROPERTY</th>
-                                <th>VALUE</th>
-                            </tr>
-                        </thead>
-                        <tbody id="auth-summary-table">
-                            <tr>
-                                <td colspan="2" class="status-loading">No authentication data captured yet</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+  {{template "snackbar.html" .}}
 
-                <div id="auth-cookies-section" style="margin-top: var(--card-spacing); display: none;">
-                    <h6 style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); margin: 0 0 8px 0; padding: 0 8px;">Authentication Cookies</h6>
-                    <div class="scroll small-padding">
-                        <table class="border">
-                            <thead>
-                                <tr>
-                                    <th>NAME</th>
-                                    <th>DOMAIN</th>
-                                    <th>PATH</th>
-                                    <th>SECURE</th>
-                                </tr>
-                            </thead>
-                            <tbody id="auth-cookies-table">
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </article>
+  <script src="/static/websocket-manager.js"></script>
+  <script src="/static/alpine-components.js"></script>
 
-        {{template "service-logs" .}}
-
-    </main>
-
-    {{template "footer" .}}
-
-    <script>
-        // Index page specific functions for auth and status updates
-        // WebSocket connections are handled by navbar and service-logs partials
-
-        function updateStatus(status) {
-            const statusTable = document.getElementById('service-status-table');
-            if (statusTable) {
-                statusTable.innerHTML = `
-                    <tr>
-                        <td class="status-label">Parser Service</td>
-                        <td class="status-value status-online">${status.status}</td>
-                    </tr>
-                    <tr>
-                        <td class="status-label">Database</td>
-                        <td class="status-value status-online">${status.database}</td>
-                    </tr>
-                    <tr>
-                        <td class="status-label">Extension Auth</td>
-                        <td class="status-value">${status.extensionAuth}</td>
-                    </tr>
-                `;
-            }
-
-            // Parser status updates are now handled by HTMX refresh button
-            // No need to update parser-status div from WebSocket
-        }
-
-
-        function refreshAuthDetails() {
-            // Manually trigger auth refresh by fetching from API
-            fetch('/api/auth/status')
-                .then(response => response.json())
-                .then(data => updateAuthDetails(data))
-                .catch(error => {
-                    console.error('Failed to refresh auth details:', error);
-                });
-        }
-
-        function updateAuthDetails(authData) {
-            const authSummaryTable = document.getElementById('auth-summary-table');
-            const authCookiesTable = document.getElementById('auth-cookies-table');
-            const authCookiesSection = document.getElementById('auth-cookies-section');
-
-            if (!authSummaryTable) return;
-
-            if (!authData || !authData.cookies || authData.cookies.length === 0) {
-                authSummaryTable.innerHTML = `
-                    <tr>
-                        <td colspan="2" class="status-loading">No authentication data captured yet</td>
-                    </tr>
-                `;
-                if (authCookiesSection) {
-                    authCookiesSection.style.display = 'none';
-                }
-                return;
-            }
-
-            // Update summary table
-            authSummaryTable.innerHTML = `
-                <tr>
-                    <td>BASE URL</td>
-                    <td>${authData.baseUrl || 'N/A'}</td>
-                </tr>
-                <tr>
-                    <td>CLOUD ID</td>
-                    <td>${authData.cloudId || 'N/A'}</td>
-                </tr>
-                <tr>
-                    <td>COOKIES COUNT</td>
-                    <td>${authData.cookies.length}</td>
-                </tr>
-            `;
-
-            // Update cookies table
-            if (authCookiesTable && authCookiesSection) {
-                let cookiesHtml = '';
-                authData.cookies.forEach(cookie => {
-                    cookiesHtml += `
-                        <tr>
-                            <td style="word-break: break-all;">${cookie.name}</td>
-                            <td>${cookie.domain}</td>
-                            <td>${cookie.path}</td>
-                            <td class="center-align">${cookie.secure ? '<i class="small" style="color: var(--success);">check_small</i>' : ''}</td>
-                        </tr>
-                    `;
-                });
-                authCookiesTable.innerHTML = cookiesHtml;
-                authCookiesSection.style.display = 'block';
-            }
-        }
-
-        // Subscribe to WebSocket messages for index page specific data
-        document.addEventListener('DOMContentLoaded', function () {
-            if (typeof WebSocketManager !== 'undefined') {
-                // Subscribe to status updates
-                WebSocketManager.subscribe('status', updateStatus);
-                
-                // Subscribe to auth updates
-                WebSocketManager.subscribe('auth', updateAuthDetails);
-            } else {
-                console.error('[Index] WebSocketManager not loaded');
-            }
-            
-            // Load auth details on page load
-            refreshAuthDetails();
-        });
-    </script>
 </body>
 
 </html>

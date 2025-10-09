@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 9:22:30 am
+// Last Modified: Thursday, 9th October 2025 8:52:24 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -555,5 +555,121 @@ func (h *ScraperHandler) ClearConfluenceDataHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Confluence data cleared successfully",
+	})
+}
+
+// ParserStatusHandler returns the status of parser/scraper services
+func (h *ScraperHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get Jira project status
+	jiraProjectLastUpdated, jiraProjectDetails, err := h.jiraScraper.GetProjectStatus()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get Jira project status")
+		jiraProjectLastUpdated = 0
+		jiraProjectDetails = "Error fetching status"
+	}
+
+	// Get Jira issue status
+	jiraIssueLastUpdated, jiraIssueDetails, err := h.jiraScraper.GetIssueStatus()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get Jira issue status")
+		jiraIssueLastUpdated = 0
+		jiraIssueDetails = "Error fetching status"
+	}
+
+	// Get Confluence space status
+	confluenceSpaceLastUpdated, confluenceSpaceDetails, err := h.confluenceScraper.GetSpaceStatus()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get Confluence space status")
+		confluenceSpaceLastUpdated = 0
+		confluenceSpaceDetails = "Error fetching status"
+	}
+
+	// Get Confluence page status
+	confluencePageLastUpdated, confluencePageDetails, err := h.confluenceScraper.GetPageStatus()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get Confluence page status")
+		confluencePageLastUpdated = 0
+		confluencePageDetails = "Error fetching status"
+	}
+
+	// Get counts
+	jiraProjectCount := h.jiraScraper.GetProjectCount()
+	jiraIssueCount := h.jiraScraper.GetIssueCount()
+	confluenceSpaceCount := h.confluenceScraper.GetSpaceCount()
+	confluencePageCount := h.confluenceScraper.GetPageCount()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"jiraProjects": map[string]interface{}{
+			"count":       jiraProjectCount,
+			"lastUpdated": jiraProjectLastUpdated,
+			"details":     jiraProjectDetails,
+		},
+		"jiraIssues": map[string]interface{}{
+			"count":       jiraIssueCount,
+			"lastUpdated": jiraIssueLastUpdated,
+			"details":     jiraIssueDetails,
+		},
+		"confluenceSpaces": map[string]interface{}{
+			"count":       confluenceSpaceCount,
+			"lastUpdated": confluenceSpaceLastUpdated,
+			"details":     confluenceSpaceDetails,
+		},
+		"confluencePages": map[string]interface{}{
+			"count":       confluencePageCount,
+			"lastUpdated": confluencePageLastUpdated,
+			"details":     confluencePageDetails,
+		},
+	})
+}
+
+// AuthDetailsHandler returns authentication details for services
+func (h *ScraperHandler) AuthDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authData, err := h.authService.LoadAuth()
+
+	services := []map[string]interface{}{}
+
+	if err == nil && authData != nil && h.authService.IsAuthenticated() {
+		// Both services use same Atlassian auth
+		services = append(services,
+			map[string]interface{}{
+				"name":   "Jira",
+				"status": "authenticated",
+				"user":   authData.BaseURL,
+			},
+			map[string]interface{}{
+				"name":   "Confluence",
+				"status": "authenticated",
+				"user":   authData.BaseURL,
+			},
+		)
+	} else {
+		services = append(services,
+			map[string]interface{}{
+				"name":   "Jira",
+				"status": "not authenticated",
+				"user":   "-",
+			},
+			map[string]interface{}{
+				"name":   "Confluence",
+				"status": "not authenticated",
+				"user":   "-",
+			},
+		)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"services": services,
 	})
 }

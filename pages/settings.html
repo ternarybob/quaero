@@ -3,101 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quaero - Settings</title>
-
-    <!-- Material Icons -->
-    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
-    
-    <!-- Beer CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.css" rel="stylesheet">
-    <script type="module" src="https://cdn.jsdelivr.net/npm/beercss@3.12.11/dist/cdn/beer.min.js"></script>
-    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-    
-    <!-- WebSocket Manager -->
-    <script src="/static/websocket-manager.js"></script>
-    
-    <!-- Quaero Theme -->
-    <link rel="stylesheet" href="/static/common.css">
-
+    <title>Settings - Quaero</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="static/common.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body class="light">
-    {{template "navbar" .}}
-    {{template "snackbar" .}}
+<body class="has-navbar-fixed-top">
+    <div class="wrapper">
+        {{template "navbar.html" .}}
 
-    <!-- Main Content -->
-    <main class="responsive">
-        <!-- Hero Section -->
-        <header class="center-align">
-            <h3>Settings</h3>
-            <p>System configuration and operational controls</p>
-        </header>
-        
-        {{template "service-status" .}}
-
-        <!-- Full Configuration Table -->
-        <article class="border">
-            <header>
-                <nav>
-                    <h5>System Configuration (Read-Only)</h5>
-                    <div class="max"></div>
-                    <button class="circle transparent" onclick="loadConfig()"><i class="material-icons">refresh</i></button>
-                </nav>
-            </header>
-            <div style="padding: 20px;">
-                <div class="scroll">
-                    <table class="border">
-                        <thead>
-                            <tr>
-                                <th style="width: 30%;">Section</th>
-                                <th style="width: 35%;">Setting</th>
-                                <th style="width: 35%;">Value</th>
-                            </tr>
-                        </thead>
-                        <tbody id="config-table-body">
-                            <tr>
-                                <td colspan="3" style="text-align: center; padding: 20px; color: #6a6a6a;">
-                                    Loading configuration...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+        <section class="section" style="min-height: calc(100vh - 200px);">
+        <div class="container">
+            <!-- Hero Section -->
+            <section class="hero is-primary is-bold">
+                <div class="hero-body">
+                    <div class="container has-text-centered">
+                        <h1 class="title">Settings</h1>
+                        <h2 class="subtitle">System configuration and operational controls</h2>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Full Configuration Table -->
+            <div class="card mt-5">
+                <header class="card-header">
+                    <p class="card-header-title">System Configuration (Read-Only)</p>
+                    <div class="card-header-icon">
+                        <button class="button is-info is-small" onclick="loadConfig()">
+                            <span class="icon"><i class="fas fa-sync-alt"></i></span>
+                        </button>
+                    </div>
+                </header>
+                <div class="card-content">
+                    <div class="table-container">
+                        <table class="table is-fullwidth is-striped is-hoverable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%;">Section</th>
+                                    <th style="width: 35%;">Setting</th>
+                                    <th style="width: 35%;">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="config-table-body">
+                                <tr>
+                                    <td colspan="3" class="has-text-centered has-text-grey">
+                                        Loading configuration...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </article>
 
-        <!-- Danger Zone -->
-        <article class="border danger-zone-card">
-            <header>
-                <nav>
-                    <h5 style="color: #cc0000;">⚠ Danger Zone</h5>
-                </nav>
-            </header>
-            <div style="padding: 20px;">
-                <div class="danger-zone-section">
-                    <div>
-                        <div class="danger-zone-title">Clear All Documents</div>
-                        <div class="danger-zone-description">
-                            Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                            Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+            <!-- Danger Zone -->
+            <div class="card mt-5">
+                <header class="card-header">
+                    <p class="card-header-title has-text-danger">
+                        <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
+                        <span>Danger Zone</span>
+                    </p>
+                </header>
+                <div class="card-content">
+                    <div class="columns is-vcentered">
+                        <div class="column">
+                            <p class="title is-5">Clear All Documents</p>
+                            <p class="subtitle is-6">
+                                Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                                Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+                            </p>
+                        </div>
+                        <div class="column is-narrow">
+                            <button class="button is-danger" onclick="confirmRemoveEmbeddings()">
+                                <span class="icon"><i class="fas fa-trash"></i></span>
+                                <span>CLEAR ALL</span>
+                            </button>
                         </div>
                     </div>
-                    <button class="btn-danger" onclick="confirmRemoveEmbeddings()">CLEAR ALL</button>
                 </div>
             </div>
-        </article>
 
-        {{template "service-logs" .}}
+            {{template "service-logs.html" .}}
+        </div>
+    </section>
+    </div>
 
-    </main>
+    {{template "footer.html" .}}
 
-    {{template "footer" .}}
+    {{template "snackbar.html" .}}
 
+    <script src="static/websocket-manager.js"></script>
 
+    <script src="/static/alpine-components.js"></script>
     <script>
-
-        // Load system configuration (placeholder - needs backend endpoint)
+        // Load system configuration
         async function loadConfig() {
-            // TODO: Implement /api/config endpoint
             // Mock configuration data matching TOML structure
             const config = {
                 server: {
@@ -157,7 +158,6 @@
                     tbody.appendChild(row);
                 }
             }
-
         }
 
         // Confirm and remove all embeddings
@@ -181,13 +181,12 @@
                 }
 
                 const result = await response.json();
-                alert(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`);
+                showNotification(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`, 'success');
             } catch (error) {
                 console.error('Error clearing documents:', error);
-                alert('Failed to clear documents: ' + error.message);
+                showNotification('Failed to clear documents: ' + error.message, 'error');
             }
         }
-
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {

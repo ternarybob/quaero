@@ -122,21 +122,39 @@ internal/
   ├── handlers/                  HTTP handlers (dependency injection)
   │   ├── websocket.go          WebSocket for real-time updates
   │   ├── collector.go          Collector endpoints
-  │   └── ui.go                 Web UI handler
+  │   └── ui.go                 Web UI handler (Go templates)
   ├── models/                    Data models
   ├── interfaces/                Service interfaces
   └── server/                    HTTP server
-pages/                           Web UI templates (NOT CLI)
-  ├── index.html                Main dashboard
-  ├── confluence.html           Confluence UI
-  ├── jira.html                 Jira UI
-  ├── partials/                 Reusable components
-  └── static/                   CSS, JS
+pages/                           Go template files
+  ├── index.html                Main dashboard (Go template)
+  ├── confluence.html           Confluence UI (Go template)
+  ├── jira.html                 Jira UI (Go template)
+  ├── partials/                 Reusable template components
+  └── static/                   CSS, JS (Alpine.js)
 test/                            Integration tests
 docs/                            Documentation
 scripts/                         Build scripts
 .github/workflows/               CI/CD
 ```
+
+### Frontend Architecture
+
+**Server-Side Rendering:**
+- Go's `html/template` package for all page rendering
+- Templates in `pages/*.html`
+- Server renders complete HTML pages
+- Template composition with `{{template "name" .}}`
+
+**Client-Side Interactivity:**
+- **Alpine.js** for reactive data binding and UI interactions
+- Declarative attribute-based syntax (`x-data`, `x-on`, `x-show`)
+- Lightweight, no build step required
+- Handles form interactions, dynamic content updates
+- Works with WebSocket for real-time updates
+
+**NO client-side routing or SPA framework**
+**NO htmx** - removed from architecture
 
 ### Quaero-Specific Requirements
 
@@ -146,7 +164,8 @@ scripts/                         Build scripts
 3. **GitHub** (`internal/services/github/*`)
 
 **Web UI (NOT CLI):**
-- Templates in `pages/*.html`
+- Go templates render server-side in `pages/*.html`
+- Alpine.js handles client-side interactivity
 - NO CLI commands for collection
 - WebSocket for real-time updates
 - Log streaming to browser
@@ -259,6 +278,26 @@ type SearchService interface {
 }
 ```
 
+**Template Rendering:**
+```go
+// internal/handlers/ui.go
+func (h *UIHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
+    data := struct {
+        Title string
+        Items []Item
+    }{
+        Title: "Dashboard",
+        Items: h.service.GetItems(),
+    }
+    
+    err := h.templates.ExecuteTemplate(w, "index.html", data)
+    if err != nil {
+        h.logger.Error("Template render failed", "error", err)
+        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+    }
+}
+```
+
 ### Code Quality Rules
 - Single Responsibility Principle
 - Proper error handling (return errors, don't ignore)
@@ -287,8 +326,8 @@ go test ./...           # ❌ WRONG
 
 **ALWAYS use the build script:**
 ```bash
-./scripts/build.ps1
-./scripts/build.ps1 -Clean -Release
+./scripts/build.ps1 
+./scripts/build.ps1 -Run
 ```
 
 **NEVER use:**

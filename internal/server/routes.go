@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 5:03:35 pm
+// Last Modified: Thursday, 9th October 2025 8:53:55 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -21,9 +21,13 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/static/websocket-manager.js", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/static/alpine-components.js", s.app.UIHandler.StaticFileHandler)
 	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/ui/status", s.app.UIHandler.StatusHandler)
-	mux.HandleFunc("/ui/parser-status", s.app.UIHandler.ParserStatusHandler)
+	mux.HandleFunc("/partials/navbar.html", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/partials/footer.html", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/partials/service-status.html", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/partials/service-logs.html", s.app.UIHandler.StaticFileHandler)
+	mux.HandleFunc("/partials/snackbar.html", s.app.UIHandler.StaticFileHandler)
 
 	// WebSocket route
 	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
@@ -31,6 +35,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Authentication
 	mux.HandleFunc("/api/auth/status", s.app.ScraperHandler.AuthStatusHandler)
 	mux.HandleFunc("/api/auth", s.app.ScraperHandler.AuthUpdateHandler)
+	mux.HandleFunc("/api/auth/details", s.app.ScraperHandler.AuthDetailsHandler)
+
+	// API routes - Status
+	mux.HandleFunc("/api/status/parser", s.app.ScraperHandler.ParserStatusHandler)
 
 	// API routes - Scraping (UI-triggered collection)
 	mux.HandleFunc("/api/scrape", s.app.ScraperHandler.ScrapeHandler)

@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 12:38:29 pm
+// Last Modified: Wednesday, 8th October 2025 6:18:01 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -192,6 +192,7 @@ func (s *OfflineLLMService) startEmbeddingServer() error {
 		"--port", "8086",
 		"-t", strconv.Itoa(s.threadCount),
 		"-ngl", strconv.Itoa(s.gpuLayers),
+		"-b", "2048", // Increase physical batch size to handle larger inputs
 		"--log-disable", // Disable server logs to reduce noise
 	}
 
@@ -348,6 +349,8 @@ func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, 
 	}
 
 	// Parse JSON response
+	// The llama-server /embedding endpoint returns a JSON object with a single "embedding" field,
+	// which is an array of floats.
 	var response llamaServerEmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		s.logger.Error().

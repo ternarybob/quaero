@@ -1,17 +1,15 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 12:12:51 pm
+// Last Modified: Thursday, 9th October 2025 8:05:44 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
 package handlers
 
 import (
-	"fmt"
 	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -23,10 +21,11 @@ type UIHandler struct {
 	staticDir         string
 	jiraScraper       interfaces.JiraScraper
 	confluenceScraper interfaces.ConfluenceScraper
+	authService       interfaces.AuthService
 	templates         *template.Template
 }
 
-func NewUIHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper) *UIHandler {
+func NewUIHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper, auth interfaces.AuthService) *UIHandler {
 	staticDir := getStaticDir()
 
 	// Parse all HTML templates including partials
@@ -38,6 +37,7 @@ func NewUIHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceS
 		staticDir:         staticDir,
 		jiraScraper:       jira,
 		confluenceScraper: confluence,
+		authService:       auth,
 		templates:         templates,
 	}
 }
@@ -75,89 +75,6 @@ func (h *UIHandler) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error().Err(err).Msg("Failed to render index")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
-}
-
-// StatusHandler returns HTML for service status
-func (h *UIHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-
-	html := `
-		<tr>
-			<td class="status-label">Parser Service</td>
-			<td class="status-value status-online">ONLINE</td>
-		</tr>
-		<tr>
-			<td class="status-label">Database</td>
-			<td class="status-value status-online">CONNECTED</td>
-		</tr>
-		<tr>
-			<td class="status-label">Extension Auth</td>
-			<td class="status-value">WAITING</td>
-		</tr>
-	`
-
-	fmt.Fprint(w, html)
-}
-
-// ParserStatusHandler returns HTML for parser status with database counts
-func (h *UIHandler) ParserStatusHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Expires", "0")
-
-	// Get database counts directly from efficient count methods
-	projectCount := h.jiraScraper.GetProjectCount()
-	issueCount := h.jiraScraper.GetIssueCount()
-	spaceCount := h.confluenceScraper.GetSpaceCount()
-	pageCount := h.confluenceScraper.GetPageCount()
-
-	// Get status information (last updated time and details)
-	projectLastUpdated, projectDetails, _ := h.jiraScraper.GetProjectStatus()
-	issueLastUpdated, issueDetails, _ := h.jiraScraper.GetIssueStatus()
-	spaceLastUpdated, spaceDetails, _ := h.confluenceScraper.GetSpaceStatus()
-	pageLastUpdated, pageDetails, _ := h.confluenceScraper.GetPageStatus()
-
-	// Helper function to format timestamp
-	formatTime := func(timestamp int64) string {
-		if timestamp == 0 {
-			return "Never"
-		}
-		return time.Unix(timestamp, 0).Format("15:04:05")
-	}
-
-	html := fmt.Sprintf(`
-		<tr>
-			<td>JIRA PROJECTS</td>
-			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
-			<td>%s</td>
-			<td>%s</td>
-		</tr>
-		<tr>
-			<td>JIRA ISSUES</td>
-			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
-			<td>%s</td>
-			<td>%s</td>
-		</tr>
-		<tr>
-			<td>CONFLUENCE SPACES</td>
-			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
-			<td>%s</td>
-			<td>%s</td>
-		</tr>
-		<tr>
-			<td>CONFLUENCE PAGES</td>
-			<td><i class="small" style="color: var(--success); vertical-align: middle;">check_small</i> <span class="chip success">%d</span></td>
-			<td>%s</td>
-			<td>%s</td>
-		</tr>
-	`,
-		projectCount, formatTime(projectLastUpdated), projectDetails,
-		issueCount, formatTime(issueLastUpdated), issueDetails,
-		spaceCount, formatTime(spaceLastUpdated), spaceDetails,
-		pageCount, formatTime(pageLastUpdated), pageDetails)
-
-	fmt.Fprint(w, html)
 }
 
 // JiraPageHandler serves the Jira data page
@@ -236,9 +153,15 @@ func (h *UIHandler) ChatPageHandler(w http.ResponseWriter, r *http.Request) {
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files
 	allowedFiles := map[string]string{
-		"/static/common.css":           "static/common.css",
-		"/static/websocket-manager.js": "static/websocket-manager.js",
-		"/favicon.ico":                 "static/favicon.ico",
+		"/static/common.css":              "static/common.css",
+		"/static/websocket-manager.js":    "static/websocket-manager.js",
+		"/static/alpine-components.js":    "static/alpine-components.js",
+		"/favicon.ico":                    "static/favicon.ico",
+		"/partials/navbar.html":           "partials/navbar.html",
+		"/partials/footer.html":           "partials/footer.html",
+		"/partials/service-status.html":   "partials/service-status.html",
+		"/partials/service-logs.html":     "partials/service-logs.html",
+		"/partials/snackbar.html":         "partials/snackbar.html",
 	}
 
 	// Check if the requested path is allowed
@@ -266,6 +189,8 @@ func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
 	case ".ico":
 		w.Header().Set("Content-Type", "image/x-icon")
+	case ".html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	}
 
 	// Serve the file

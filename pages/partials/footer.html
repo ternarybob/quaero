@@ -1,23 +1,20 @@
-{{define "footer"}}
-<!-- Footer -->
-<nav class="bottom">
-    <div class="center-align middle-align">
-        <small id="footer-version">Quaero • Version Loading...</small>
-    </div>
-</nav>
+<footer class="footer">
+  <div class="content has-text-centered" id="footer-version">
+    Quaero
+  </div>
+</footer>
 
 <script>
-    // Load and format version info
-    fetch('/api/version')
-        .then(response => response.json())
-        .then(data => {
-            const footerEl = document.getElementById('footer-version');
-            if (footerEl && data.version) {
-                footerEl.textContent = `Quaero • Version ${data.version} • Build ${data.build}`;
-            }
-        })
-        .catch(error => {
-            console.error('Failed to load version:', error);
-        });
+  // Load and format version info
+  fetch('/api/version')
+    .then(response => response.json())
+    .then(data => {
+      const footerEl = document.getElementById('footer-version');
+      if (footerEl && data.version) {
+        footerEl.innerHTML = `Quaero • Version ${data.version} • Build ${data.build}`;
+      }
+    })
+    .catch(error => {
+      console.error('Failed to load version:', error);
+    });
 </script>
-{{end}}

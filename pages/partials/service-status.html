@@ -1,60 +1,113 @@
-{{define "service-status"}}
-<!-- Service Status Section -->
-<article class="border no-padding">
-    <header>
-        <nav>
-            <h5 class="max">Service Status</h5>
-            <button class="circle transparent" onclick="refreshServiceStatus()">
-                <i class="material-icons">refresh</i>
-            </button>
-        </nav>
-    </header>
-
-    <div class="scroll small-padding">
-        <table class="border">
+<div class="columns">
+  <div class="column is-half">
+    <div class="card" x-data="parserStatus">
+      <header class="card-header">
+        <p class="card-header-title">Parser Status</p>
+        <button class="card-header-icon" aria-label="refresh" @click="refresh()" title="Refresh">
+          <span class="icon"><i class="fas fa-sync-alt"></i></span>
+        </button>
+      </header>
+      <div class="card-content">
+        <div class="table-container">
+          <table class="table is-fullwidth is-striped">
             <thead>
-                <tr>
-                    <th>SERVICE</th>
-                    <th>STATUS</th>
-                    <th>DETAILS</th>
-                </tr>
+              <tr>
+                <th>Component</th>
+                <th>Status</th>
+                <th>Last Updated</th>
+                <th>Details</th>
+              </tr>
             </thead>
-            <tbody id="service-status-table">
+            <tbody>
+              <template x-if="loading && items.length === 0">
                 <tr>
-                    <td class="status-label">PARSER SERVICE</td>
-                    <td class="status-value status-online">ONLINE</td>
-                    <td>Ready</td>
+                  <td colspan="4" class="has-text-centered">Loading...</td>
                 </tr>
+              </template>
+              <template x-if="error && items.length === 0">
                 <tr>
-                    <td class="status-label">DATABASE</td>
-                    <td class="status-value status-online">CONNECTED</td>
-                    <td>SQLite</td>
+                  <td colspan="4" class="has-text-centered has-text-danger" x-text="error"></td>
                 </tr>
+              </template>
+              <template x-if="items.length > 0">
+                <template x-for="item in items" :key="item.component">
+                  <tr>
+                    <td x-text="item.component"></td>
+                    <td><span class="tag is-success" x-text="item.status"></span></td>
+                    <td x-text="item.lastUpdated"></td>
+                    <td x-text="item.details"></td>
+                  </tr>
+                </template>
+              </template>
+              <template x-if="error && items.length > 0">
                 <tr>
-                    <td class="status-label">EXTENSION AUTH</td>
-                    <td class="status-value">WAITING</td>
-                    <td>Install Chrome extension</td>
+                  <td colspan="4" class="has-text-centered">
+                    <span class="tag is-warning is-light">
+                      <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
+                      <span x-text="'Last refresh failed: ' + error"></span>
+                    </span>
+                  </td>
                 </tr>
+              </template>
             </tbody>
-        </table>
+          </table>
+        </div>
+      </div>
     </div>
-</article>
+  </div>
 
-<script>
-// Refresh service status function
-function refreshServiceStatus() {
-    // Fetch current service status
-    fetch('/ui/status')
-        .then(response => response.text())
-        .then(html => {
-            const tbody = document.getElementById('service-status-table');
-            if (tbody) {
-                tbody.innerHTML = html;
-            }
-        })
-        .catch(error => {
-            console.error('Failed to refresh service status:', error);
-        });
-}
-</script>
-{{end}}
+  <div class="column is-half">
+    <div class="card" x-data="authDetails">
+      <header class="card-header">
+        <p class="card-header-title">Authentication Details</p>
+        <button class="card-header-icon" aria-label="refresh" @click="refresh()" title="Refresh">
+          <span class="icon"><i class="fas fa-sync-alt"></i></span>
+        </button>
+      </header>
+      <div class="card-content">
+        <div class="table-container">
+          <table class="table is-fullwidth is-striped">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Status</th>
+                <th>User</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-if="loading && services.length === 0">
+                <tr>
+                  <td colspan="3" class="has-text-centered">Loading...</td>
+                </tr>
+              </template>
+              <template x-if="error && services.length === 0">
+                <tr>
+                  <td colspan="3" class="has-text-centered has-text-danger" x-text="error"></td>
+                </tr>
+              </template>
+              <template x-if="services.length > 0">
+                <template x-for="service in services" :key="service.name">
+                  <tr>
+                    <td x-text="service.name"></td>
+                    <td><span :class="getStatusClass(service.authenticated)" x-text="getStatusText(service.authenticated)"></span></td>
+                    <td x-text="service.user"></td>
+                  </tr>
+                </template>
+              </template>
+              <template x-if="error && services.length > 0">
+                <tr>
+                  <td colspan="3" class="has-text-centered">
+                    <span class="tag is-warning is-light">
+                      <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
+                      <span x-text="'Last refresh failed: ' + error"></span>
+                    </span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

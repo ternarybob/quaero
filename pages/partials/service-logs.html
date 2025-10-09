@@ -1,126 +1,26 @@
-{{define "service-logs"}}
-
-<!-- Service Logs -->
-<article class="border no-padding">
-    <header>
-        <nav>
-            <h5 class="max">Service Logs</h5>
-            <button class="circle transparent" onclick="refreshServiceLogs()" title="Refresh Logs">
-                <i class="material-icons">refresh</i>
-            </button>
-            <button class="circle transparent" onclick="clearServiceLogs()" title="Clear Logs">
-                <i class="material-icons">delete</i>
-            </button>
-        </nav>
-    </header>
-
-    <div class="small-padding">
-        <div id="service-logs" class="service-logs-container"></div>
+<div class="columns">
+  <div class="column">
+    <div class="card" x-data="serviceLogs">
+      <header class="card-header">
+        <p class="card-header-title">Service Logs</p>
+        <span class="card-header-icon live-indicator" x-show="autoScroll">
+          <span class="live-dot"></span>
+          <span class="live-text">LIVE</span>
+        </span>
+        <button class="card-header-icon" aria-label="toggle auto-scroll" @click="toggleAutoScroll()"
+                :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+          <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
+        </button>
+        <button class="card-header-icon" aria-label="refresh" @click="refresh()" title="Refresh Logs">
+          <span class="icon"><i class="fas fa-sync-alt"></i></span>
+        </button>
+        <button class="card-header-icon" aria-label="clear" @click="clearLogs()" title="Clear Logs">
+          <span class="icon"><i class="fas fa-trash"></i></span>
+        </button>
+      </header>
+      <div class="card-content">
+        <pre class="log-container" x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="has-text-centered has-text-grey">No logs available</div></template><template x-for="(log, index) in logs" :key="index"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
+      </div>
     </div>
-</article>
-
-<script>
-    // Service logs using shared WebSocket manager
-    let displayedLogs = new Set();
-
-    function handleLogMessage(logData) {
-        const logsContainer = document.getElementById('service-logs');
-        if (!logsContainer) return;
-
-        const logLine = `${logData.timestamp}|${logData.level}|${logData.message}`;
-
-        if (displayedLogs.has(logLine)) return;
-        displayedLogs.add(logLine);
-
-        const logEntry = document.createElement('div');
-        logEntry.className = 'log-entry';
-
-        const timestamp = logData.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false });
-        const level = logData.level || 'info';
-        const message = logData.message || '';
-
-        let levelClass = 'log-level-info';
-        let levelText = 'INFO';
-        if (level.toLowerCase() === 'error') {
-            levelClass = 'log-level-error';
-            levelText = 'ERROR';
-        } else if (level.toLowerCase() === 'warn') {
-            levelClass = 'log-level-warn';
-            levelText = 'WARN';
-        } else if (level.toLowerCase() === 'debug') {
-            levelClass = 'log-level-debug';
-            levelText = 'DEBUG';
-        }
-
-        logEntry.innerHTML = `
-            <span class="log-timestamp">[${timestamp}]</span>
-            <span class="${levelClass}">[${levelText}]</span>
-            <span class="log-message">${escapeHtml(message)}</span>
-        `;
-
-        logsContainer.appendChild(logEntry);
-        logsContainer.scrollTop = logsContainer.scrollHeight;
-
-        // Limit to last 100 entries
-        while (logsContainer.children.length > 100) {
-            const removed = logsContainer.removeChild(logsContainer.firstChild);
-            displayedLogs.delete(removed.textContent);
-        }
-    }
-
-    function escapeHtml(text) {
-        const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, m => map[m]);
-    }
-
-    function clearServiceLogs() {
-        const logsContainer = document.getElementById('service-logs');
-        if (logsContainer) {
-            logsContainer.innerHTML = '';
-            displayedLogs.clear();
-        }
-    }
-
-    function refreshServiceLogs() {
-        // Fetch recent logs from API (last 5 minutes)
-        fetch('/api/logs/recent')
-            .then(response => response.json())
-            .then(data => {
-                if (data.logs && Array.isArray(data.logs)) {
-                    // Clear existing logs
-                    clearServiceLogs();
-                    // Add fetched logs
-                    data.logs.forEach(logData => handleLogMessage(logData));
-                }
-            })
-            .catch(error => {
-                console.error('Failed to refresh service logs:', error);
-            });
-    }
-
-
-    // Subscribe to log messages on page load
-    document.addEventListener('DOMContentLoaded', function () {
-        if (typeof WebSocketManager !== 'undefined') {
-            // Subscribe to log messages
-            WebSocketManager.subscribe('log', handleLogMessage);
-
-            // Subscribe to connection status changes
-            // This will immediately call updateLogsWSStatus with current connection state
-
-            console.log('[Service Logs] WebSocket subscriptions established');
-        } else {
-            console.error('[Service Logs] WebSocketManager not loaded');
-        }
-
-        // Load service logs on page load (past 5 minutes)
-        refreshServiceLogs();
-    });
-</script>
-{{end}}
+  </div>
+</div>
