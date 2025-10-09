@@ -18,7 +18,7 @@ Quaero collects documentation from Atlassian (Confluence, Jira) using browser ex
 
 - **Language:** Go 1.25+
 - **Storage:** SQLite with FTS5 (full-text search)
-- **Web UI:** HTML templates, vanilla JavaScript, WebSockets
+- **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2

@@ -1,345 +1,718 @@
-# Quaero Project Standards
+# CLAUDE.md
 
-## Agent Autonomy
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**IMPORTANT: All agents, commands, and hooks in this project operate with FULL AUTONOMY within the project directory.**
+## CRITICAL RULES
 
-When working in this project:
-- ✅ Agents make decisions without asking questions
-- ✅ Commands execute automatically without confirmation
-- ✅ Hooks enforce standards and block violations silently
-- ✅ Best practices are applied automatically
-- ✅ Architectural decisions are made based on established patterns
+### Build Commands
 
-This ensures:
-- **Faster execution** - No interruptions for confirmations
-- **Consistent quality** - Standards applied uniformly
-- **Reduced friction** - Agents work independently
-- **Better outcomes** - Decisions based on proven patterns
+**ALWAYS use the build script:**
+```powershell
+.\scripts\build.ps1
+.\scripts\build.ps1 -Run
+```
 
-Agents will still communicate what they're doing, but they won't ask permission.
+**NEVER use:**
+```bash
+go build                # ❌ WRONG - bypasses version management
+```
 
----
+### Testing Commands
 
-## Agent-Based Development System
+**ALWAYS use the test script:**
+```powershell
+.\test\run-tests.ps1 -Type all
+.\test\run-tests.ps1 -Type unit
+.\test\run-tests.ps1 -Type api
+.\test\run-tests.ps1 -Type ui
+```
 
-This project uses an **autonomous agent architecture** with specialized agents in `.claude/agents/`:
+**NEVER use:**
+```bash
+go test ./...           # ❌ WRONG - missing test harness
+cd test && go test      # ❌ WRONG - server not started
+go test -v ./test/ui    # ❌ WRONG - breaks screenshot capture
+```
 
-- **overwatch.md** - Guardian (always active, reviews all changes, delegates)
-- **go-refactor.md** - Code quality (consolidates duplicates, optimizes structure)
-- **go-compliance.md** - Standards enforcement (logging, startup, configuration)
-- **test-engineer.md** - Testing (writes tests, ensures coverage)
-- **collector-impl.md** - Collectors (Jira, Confluence, GitHub only)
-- **doc-writer.md** - Documentation (maintains docs, requirements)
+**Why:** The test script handles server lifecycle, environment setup, result directories, and screenshot capture.
 
-**Usage:** Overwatch reviews all Write/Edit automatically. Explicitly invoke: `> Use go-refactor to consolidate duplicates`
+## Build & Development Commands
 
----
+### Building
 
-## Code Quality Enforcement System
+```powershell
+# Development build
+.\scripts\build.ps1
 
-This project includes an automated code quality enforcement system integrated with the agent architecture.
+# Clean build
+.\scripts\build.ps1 -Clean
 
-**Language-Specific Enforcement:**
-- **Go**: Clean architecture patterns, receiver methods, directory structure compliance
+# Release build (optimized)
+.\scripts\build.ps1 -Release
 
-### Automated Checks
+# Build and run
+.\scripts\build.ps1 -Run
+```
 
-#### Pre-Write Validation
-Before any `Write` operation:
-- File length validation (max 500 lines)
-- Function length validation (max 80 lines)
-- Forbidden pattern detection (TODO, FIXME)
-- Error handling validation
-- Directory structure compliance
+### Running
 
-#### Pre-Edit Duplicate Detection
-Before any `Edit` operation:
-- Scans entire codebase for existing functions
-- Detects duplicate function names and signatures
-- **BLOCKS** operation if duplicate found
-- Provides exact file:line location of existing function
+```bash
+# Start server
+.\bin\quaero serve
 
-#### Post-Operation Indexing
-After `Write` or `Edit`:
-- Updates function index (.claude/go-function-index.json)
-- Maintains registry of all functions with signatures
-- Enables fast duplicate detection
+# Start with custom port
+.\bin\quaero serve --port 8080
 
-### Code Standards
+# Start with custom config
+.\bin\quaero serve --config path/to/quaero.toml
+```
 
-#### Function Structure
-- **Max Lines**: 80 (ideal: 20-40)
-- **Single Responsibility**: One purpose per function
-- **Error Handling**: Comprehensive validation
-- **Naming**: Descriptive, intention-revealing
+### Testing
 
-#### File Structure
-- **Max Lines**: 500
-- **Modular Design**: Extract utilities to shared files
-- **Clear Organization**: Logical grouping of related functions
+**IMPORTANT: Always use run-tests.ps1, never run `go test` directly**
 
-### Compliance Enforcement
+```powershell
+# Run all tests
+.\test\run-tests.ps1
 
-The hooks are **mandatory** and will:
-- ❌ **BLOCK** operations that create duplicates
-- ⚠️  **WARN** about quality issues
-- ✅ **APPROVE** compliant code changes
+# Run specific test types
+.\test\run-tests.ps1 -type unit
+.\test\run-tests.ps1 -type api
+.\test\run-tests.ps1 -type ui
 
-This ensures:
-- No duplicate function implementations
-- Consistent code structure
-- Maintainable codebase
-- Professional code quality
+# Run specific test
+.\test\run-tests.ps1 -type ui -script PageLayout
 
----
+# Run with verbose output
+.\test\run-tests.ps1 -type api -verboseoutput
+```
+
+**UI tests automatically:**
+- Build the application
+- Start the server
+- Wait for readiness
+- Run tests
+- Stop the server
+- Save results to timestamped directories in `test/results/`
+
+## Architecture Overview
+
+### Layered Architecture
+
+Quaero follows a clean architecture pattern with clear separation of concerns:
+
+```
+┌─────────────────────────────────────────┐
+│  cmd/quaero/                            │  Entry point, CLI commands
+│  └─ Uses: internal/app                 │
+└─────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│  internal/app/                          │  Dependency injection & orchestration
+│  └─ Initializes: all services          │
+└─────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│  internal/server/                       │  HTTP server & routing
+│  └─ Uses: handlers/                    │
+└─────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│  internal/handlers/                     │  HTTP/WebSocket handlers
+│  └─ Uses: services/                    │
+└─────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│  internal/services/                     │  Business logic
+│  └─ Uses: storage/, interfaces/        │
+└─────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────┐
+│  internal/storage/sqlite/               │  Data persistence
+│  └─ Uses: interfaces/                  │
+└─────────────────────────────────────────┘
+```
+
+### Key Architectural Patterns
+
+**Dependency Injection:**
+- Constructor-based DI throughout
+- All dependencies passed explicitly via constructors
+- `internal/app/app.go` is the composition root
+- No global state or service locators
+
+**Event-Driven Architecture:**
+- `EventService` implements pub/sub pattern
+- Services subscribe to events during initialization
+- Two main events:
+  - `EventCollectionTriggered` - Triggers document collection/sync
+  - `EventEmbeddingTriggered` - Triggers embedding generation
+- Scheduler publishes events on cron schedule (every 5 minutes)
+
+**Interface-Based Design:**
+- All service dependencies use interfaces from `internal/interfaces/`
+- Enables testing with mocks
+- Allows swapping implementations
+
+### Service Initialization Flow
+
+The app initialization sequence in `internal/app/app.go` is critical:
+
+1. **Storage Layer** - SQLite with migrations
+2. **LLM Service** - Required for embeddings (offline/mock mode)
+3. **Embedding Service** - Uses LLM service
+4. **Document Service** - Uses embedding service
+5. **Chat Service** - RAG-enabled chat with LLM
+6. **Event Service** - Pub/sub for system events
+7. **Auth Service** - Atlassian authentication
+8. **Jira/Confluence Services** - Auto-subscribe to collection events
+9. **Processing Service** - Document processing
+10. **Embedding Coordinator** - Auto-subscribes to embedding events
+11. **Scheduler Service** - Triggers events on cron (every 5 minutes)
+12. **Handlers** - HTTP/WebSocket handlers
+
+**Important:** Services that subscribe to events must be initialized after the EventService but before any events are published.
+
+### Data Flow: Collection → Processing → Embedding
+
+```
+1. User clicks "Collect" in UI
+   ↓
+2. Handler triggers Jira/Confluence scraper
+   ↓
+3. Scraper stores raw data (jira_issues, confluence_pages)
+   ↓
+4. Scheduler publishes EventCollectionTriggered (every 5 minutes)
+   ↓
+5. Jira/Confluence services transform raw data → documents table
+   ↓
+6. Scheduler publishes EventEmbeddingTriggered
+   ↓
+7. EmbeddingCoordinator processes unembedded documents
+   ↓
+8. Documents ready for search/RAG
+```
+
+### LLM Service Architecture
+
+The LLM service provides a unified interface for embeddings and chat:
+
+**Modes:**
+- **Offline** - Local llama.cpp inference (production default)
+- **Mock** - Fake responses for testing (no models required)
+- **Cloud** - Future: OpenAI/Anthropic APIs
+
+**Current Implementation:**
+- `internal/services/llm/offline/llama.go` - llama.cpp integration
+- Uses `llama-server` subprocess with HTTP API
+- Embedding model: nomic-embed-text-v1.5 (768 dimensions)
+- Chat model: qwen2.5-7b-instruct-q4
+
+**Configuration:**
+```toml
+[llm]
+mode = "offline"  # or "mock"
+
+[llm.offline]
+llama_dir = "./llama.cpp"
+model_dir = "./models"
+embed_model = "nomic-embed-text-v1.5-q8.gguf"
+chat_model = "qwen2.5-7b-instruct-q4.gguf"
+context_size = 2048
+thread_count = 4
+gpu_layers = 0
+mock_mode = false  # Set to true for testing
+```
+
+### Storage Schema
+
+**Documents Table** (`documents`):
+- Central unified storage for all source types
+- Fields: id, source_id, source_type, title, content, embedding, embedding_model, last_synced, created_at, updated_at
+- FTS5 index: documents_fts (title + content)
+- Force sync flags: force_sync_pending, force_embed_pending
+
+**Source Tables:**
+- `jira_projects`, `jira_issues` - Raw Jira data
+- `confluence_spaces`, `confluence_pages` - Raw Confluence data
+- Scrapers populate these, then transform to documents
+
+**Auth Table:**
+- `auth_credentials` - Atlassian authentication tokens
 
 ## Go Structure Standards
 
-### Required Libraries
-- `github.com/ternarybob/arbor` - All logging
-- `github.com/ternarybob/banner` - Startup banners
-- `github.com/pelletier/go-toml/v2` - TOML config
+### Directory Structure & Rules
+
+**Critical Distinction:**
+
+#### `internal/common/` - Stateless Utilities (NO Receiver Methods)
+```go
+// ✅ CORRECT: Stateless pure function
+package common
+
+func LoadFromFile(path string) (*Config, error) {
+    // No receiver, no state
+    return loadConfig(path)
+}
+
+func InitLogger(config *Config) arbor.ILogger {
+    // Pure function, no state
+    return arbor.NewLogger()
+}
+```
+
+**❌ BLOCKED: Receiver methods in common/**
+```go
+// internal/common/config.go
+func (c *Config) Load() error {  // ❌ ERROR - Move to services/
+    return nil
+}
+```
+
+#### `internal/services/` - Stateful Services (WITH Receiver Methods)
+```go
+// ✅ CORRECT: Service with receiver methods
+package atlassian
+
+type JiraScraperService struct {
+    db     *sql.DB
+    logger arbor.ILogger
+}
+
+func (s *JiraScraperService) ScrapeProjects(ctx context.Context) error {
+    s.logger.Info().Msg("Scraping projects")
+    return s.db.Query(...)
+}
+```
+
+**⚠️ WARNING: Stateless function in services/**
+```go
+// internal/services/jira_service.go
+func ScrapeProjects(db *sql.DB) error {  // Should use receiver
+    return nil
+}
+```
 
 ### Startup Sequence (main.go)
+
+**REQUIRED ORDER:**
 1. Configuration loading (`common.LoadFromFile`)
 2. Logger initialization (`common.InitLogger`)
 3. Banner display (`common.PrintBanner`)
-4. Version management (`common.GetVersion`)
+4. Version logging
 5. Service initialization
 6. Handler initialization
-7. Information logging
+7. Server start
 
-### Directory Structure
+**Example:**
+```go
+// cmd/quaero/main.go
+func main() {
+    // 1. Load config
+    config, err := common.LoadFromFile(configPath)
+
+    // 2. Init logger
+    logger := common.InitLogger(config)
+
+    // 3. Display banner
+    common.PrintBanner(config, logger)
+
+    // 4. Initialize app
+    app, err := app.New(config, logger)
+
+    // 5. Start server
+    server.Start(app)
+}
 ```
-cmd/quaero/                      Main entry point
-cmd/quaero-chrome-extension/     Chrome extension for authentication
-internal/
-  ├── common/                    Stateless utilities - NO receiver methods
-  ├── services/                  Stateful services WITH receiver methods
-  │   ├── atlassian/            Jira & Confluence collectors
-  │   └── github/               GitHub collector
-  ├── handlers/                  HTTP handlers (dependency injection)
-  │   ├── websocket.go          WebSocket for real-time updates
-  │   ├── collector.go          Collector endpoints
-  │   └── ui.go                 Web UI handler (Go templates)
-  ├── models/                    Data models
-  ├── interfaces/                Service interfaces
-  └── server/                    HTTP server
-pages/                           Go template files
-  ├── index.html                Main dashboard (Go template)
-  ├── confluence.html           Confluence UI (Go template)
-  ├── jira.html                 Jira UI (Go template)
-  ├── partials/                 Reusable template components
-  └── static/                   CSS, JS (Alpine.js)
-test/                            Integration tests
-docs/                            Documentation
-scripts/                         Build scripts
-.github/workflows/               CI/CD
-```
-
-### Frontend Architecture
-
-**Server-Side Rendering:**
-- Go's `html/template` package for all page rendering
-- Templates in `pages/*.html`
-- Server renders complete HTML pages
-- Template composition with `{{template "name" .}}`
-
-**Client-Side Interactivity:**
-- **Alpine.js** for reactive data binding and UI interactions
-- Declarative attribute-based syntax (`x-data`, `x-on`, `x-show`)
-- Lightweight, no build step required
-- Handles form interactions, dynamic content updates
-- Works with WebSocket for real-time updates
-
-**NO client-side routing or SPA framework**
-**NO htmx** - removed from architecture
 
 ### Quaero-Specific Requirements
 
 **Collectors (ONLY These):**
 1. **Jira** (`internal/services/atlassian/jira_*`)
 2. **Confluence** (`internal/services/atlassian/confluence_*`)
-3. **GitHub** (`internal/services/github/*`)
+3. **GitHub** (`internal/services/github/*`) - Future
+
+**DO NOT create:**
+- Generic document collectors
+- File system crawlers
+- Other data sources without explicit requirement
 
 **Web UI (NOT CLI):**
-- Go templates render server-side in `pages/*.html`
-- Alpine.js handles client-side interactivity
+- Server-side rendering with Go templates
+- Alpine.js for client-side interactivity
 - NO CLI commands for collection
 - WebSocket for real-time updates
-- Log streaming to browser
 
-**Chrome Extension:**
-- Location: `cmd/quaero-chrome-extension/`
-- Captures authentication from Atlassian
-- WebSocket communication with server
+## Code Conventions
 
-**Configuration Priority:**
+### Logging
+
+**REQUIRED:** Use `github.com/ternarybob/arbor` for all logging
+
+```go
+logger.Info().Str("field", value).Msg("Message")
+logger.Error().Err(err).Msg("Error occurred")
+logger.Debug().Int("count", n).Msg("Debug info")
+```
+
+**Never:**
+- `fmt.Println()` in production code
+- `log.Printf()` from standard library
+- Unstructured logging
+
+**❌ BLOCKED Examples:**
+```go
+fmt.Println("Starting service")     // ❌ Use logger.Info()
+log.Printf("Error: %v", err)        // ❌ Use logger.Error().Err(err)
+```
+
+### Error Handling
+
+```go
+// Wrap errors with context
+if err != nil {
+    return fmt.Errorf("failed to process document: %w", err)
+}
+
+// Log and return errors in handlers
+if err != nil {
+    logger.Error().Err(err).Msg("Failed to save document")
+    http.Error(w, "Internal server error", http.StatusInternalServerError)
+    return
+}
+```
+
+**❌ NEVER ignore errors:**
+```go
+_ = someFunction()  // ❌ BLOCKED - All errors must be handled
+```
+
+**✅ CORRECT:**
+```go
+if err := someFunction(); err != nil {
+    logger.Warn().Err(err).Msg("Non-critical error")
+    // Or handle appropriately
+}
+```
+
+### Configuration
+
+**Use:** `github.com/pelletier/go-toml/v2` for TOML config
+
+**Priority order:**
 1. CLI flags (highest)
 2. Environment variables
-3. Config file (`config.toml`)
+3. Config file (quaero.toml)
 4. Defaults (lowest)
 
-**Banner Requirement:**
-- MUST display on startup using `ternarybob/banner`
-- MUST show version, host, port
-- MUST log configuration source
+Configuration loading happens in `internal/common/config.go`
 
-### Critical Distinctions
+### Required Libraries
 
-#### `internal/services/` - Stateful Services (Receiver Methods)
+**REQUIRED (do not replace):**
+- `github.com/ternarybob/arbor` - Structured logging
+- `github.com/ternarybob/banner` - Startup banners
+- `github.com/pelletier/go-toml/v2` - TOML config parsing
+
+**Core dependencies:**
+- `github.com/spf13/cobra` - CLI framework
+- `github.com/gorilla/websocket` - WebSocket support
+- `modernc.org/sqlite` - Pure Go SQLite driver
+- `github.com/robfig/cron/v3` - Cron scheduler
+- `github.com/chromedp/chromedp` - UI testing
+
+## Frontend Architecture
+
+**Framework:** Vanilla JavaScript with Alpine.js and Bulma CSS
+
+**Important:** The project has migrated from HTMX to Alpine.js and from BeerCSS to Bulma CSS framework.
+
+**Structure:**
+```
+pages/
+├── *.html              # Page templates
+├── partials/           # Reusable components
+│   ├── navbar.html
+│   ├── footer.html
+│   └── service-*.html
+└── static/
+    ├── common.css      # Global styles (Bulma customization)
+    └── alpine-components.js  # Alpine.js components
+```
+
+**Alpine.js Usage:**
+- Use Alpine.js for interactive UI components
+- Component definitions in `pages/static/alpine-components.js`
+- Data binding and reactivity via Alpine directives
+
+**Bulma CSS:**
+- Use Bulma CSS classes for styling
+- Component-based styling approach
+- Responsive design patterns
+
+**WebSocket Integration:**
+- Real-time log streaming via `/ws`
+- Status updates broadcast to all connected clients
+- Used for live collection progress
+
+**Server-Side Rendering:**
+- Go's `html/template` package for all page rendering
+- Templates in `pages/*.html`
+- Template composition with `{{template "name" .}}`
+- Server renders complete HTML pages
+
+**NO:**
+- Client-side routing
+- SPA frameworks (React, Vue, etc.)
+- HTMX (removed from architecture)
+
+## Code Quality Rules
+
+### File & Function Limits
+
+- **Max file size:** 500 lines
+- **Max function size:** 80 lines (ideal: 20-40)
+- **Single Responsibility:** One purpose per function
+- **Descriptive naming:** Intention-revealing names
+
+### Design Principles
+
+- **DRY:** Don't Repeat Yourself - consolidate duplicate code
+- **Dependency Injection:** Constructor-based DI only
+- **Interface-Based Design:** All service dependencies use interfaces
+- **No Global State:** No service locators or global variables
+- **Table-Driven Tests:** Use test tables for multiple test cases
+
+### Forbidden Patterns
+
+**❌ BLOCKED:**
 ```go
-// ✅ CORRECT: Service with receiver methods
-type SearchService struct {
-    db     *sql.DB
-    logger *arbor.Logger
-}
+// TODO comments without immediate action
+// TODO: fix this later
 
-func (s *SearchService) Search(ctx context.Context, query string) (*Result, error) {
-    s.logger.Info("Searching", "query", query)
-    return s.db.Query(query)
-}
+// FIXME comments
+// FIXME: this is broken
+
+// Ignored errors
+_ = service.DoSomething()
+
+// fmt/log instead of arbor logger
+fmt.Println("message")
+log.Printf("message")
+
+// Receiver methods in internal/common/
+func (c *Config) Load() error { }
+
+// Wrong startup sequence
+logger := common.InitLogger()  // Before config load
+config := common.LoadConfig()
 ```
 
-#### `internal/common/` - Stateless Utilities (Pure Functions)
+## Testing Guidelines
+
+### Test Organization
+
+```
+test/
+├── unit/              # Fast unit tests with mocks
+├── api/               # API integration tests (database interactions)
+└── ui/                # Browser automation tests (ChromeDP)
+```
+
+### Writing Tests
+
+**Unit Tests:**
 ```go
-// ✅ CORRECT: Stateless pure function
-func LoadFromFile(path string) (*Config, error) {
-    // No receiver, no state
-    return loadConfig(path)
-}
-
-// ❌ WRONG: Receiver method in common/
-func (c *Config) LoadFromFile(path string) error {
-    // This belongs in internal/services/
-}
+// Colocate with implementation
+internal/services/chat/
+├── chat_service.go
+└── chat_service_test.go
 ```
 
-### Go-Specific Enforcement
-
-#### Pre-Write/Edit Checks
-- **Directory Rules**: Validates correct usage of `internal/common/` (no receivers) vs `internal/services/` (receivers required)
-- **Duplicate Functions**: Prevents duplicate function names across codebase
-- **Error Handling**: No ignored errors (`_ =`)
-- **Logging Standards**: Must use `arbor` logger, no `fmt.Println`/`log.Println`
-- **Startup Sequence**: Validates correct order in `main.go`
-- **Interface Definitions**: Should be in `internal/interfaces/`
-
-#### Example Violations
-
-**❌ BLOCKED: Receiver method in internal/common/**
+**API Tests:**
 ```go
-// internal/common/config.go
-func (c *Config) Load() error {  // ❌ ERROR
-    // Common must be stateless!
+package api
+
+func TestAPIEndpoint(t *testing.T) {
+    // Test HTTP endpoints with actual database
+    // Verify request/response handling
 }
 ```
 
-**❌ BLOCKED: Stateless function in internal/services/**
+**UI Tests:**
 ```go
-// internal/services/search_service.go
-func Search(query string) error {  // ⚠️ WARNING
-    // Services should use receiver methods!
+package ui
+
+func TestUIWorkflow(t *testing.T) {
+    config, _ := LoadTestConfig()
+
+    // Use ChromeDP for browser automation
+    // Use takeScreenshot() helper for visual verification
+    // Results saved to test/results/{type}-{timestamp}/
 }
 ```
 
-**❌ BLOCKED: Using fmt.Println instead of logger**
-```go
-fmt.Println("Search completed")  // ❌ ERROR
-logger.Info("Search completed")  // ✅ CORRECT
-```
+### Test Runner Features
 
-**❌ BLOCKED: Wrong startup sequence**
-```go
-common.InitLogger()      // ❌ ERROR
-common.LoadFromFile()    // Must be first!
-```
+The `run-tests.ps1` script:
+- Automatically builds the application for UI tests
+- Starts and stops the server
+- Manages test result directories
+- Captures screenshots in UI tests
+- Provides coverage reports
 
-### Design Patterns
+## Common Development Tasks
 
-**Dependency Injection:**
+### Adding a New Data Source
+
+1. Create storage interface in `internal/interfaces/`
+2. Implement SQLite storage in `internal/storage/sqlite/`
+3. Add migration in `internal/storage/sqlite/migrations.go`
+4. Create scraper service in `internal/services/`
+5. Subscribe to `EventCollectionTriggered` in service constructor
+6. Initialize in `internal/app/app.go` (after EventService)
+7. Add handler in `internal/handlers/`
+8. Register routes in `internal/server/routes.go`
+9. Add UI page in `pages/`
+
+### Adding a New API Endpoint
+
+1. Add handler method in appropriate handler file
+2. Register route in `internal/server/routes.go`
+3. Test with API integration test in `test/api/`
+4. Document in README.md API section
+
+### Modifying LLM Behavior
+
+**Important:** LLM service is abstracted via `internal/interfaces/llm_service.go`
+
+To change embedding/chat behavior:
+1. Modify implementation in `internal/services/llm/offline/`
+2. Ensure interface compliance
+3. Update tests in `test/unit/`
+4. Consider mock mode for testing
+
+### Database Migrations
+
+**Location:** `internal/storage/sqlite/migrations.go`
+
+**Process:**
+1. Add new migration to `migrations` array
+2. Increment version number
+3. Run tests to verify migration
+4. Migrations run automatically on app startup
+
+## Important Implementation Notes
+
+### WebSocket Log Streaming
+
+The WebSocket handler (`internal/handlers/websocket.go`) maintains:
+- Connected clients registry
+- Status broadcaster goroutine
+- Log streamer goroutine
+
+Services call `WSHandler.StreamLog()` to send real-time updates to UI.
+
+### Event-Driven Processing
+
+The scheduler service runs every 5 minutes and publishes:
+1. `EventCollectionTriggered` - Transforms scraped data to documents
+2. `EventEmbeddingTriggered` - Generates embeddings for new documents
+
+**Note:** Scraping (downloading from APIs) is user-triggered via UI, not automatic.
+
+### Document Processing Workflow
+
+Documents go through stages:
+1. **Raw** - Stored in source tables (jira_issues, confluence_pages)
+2. **Document** - Transformed to documents table
+3. **Embedded** - Vector embedding generated
+4. **Searchable** - Available for RAG queries
+
+Use `force_sync_pending` and `force_embed_pending` flags to manually trigger processing.
+
+### RAG Implementation
+
+Chat service (`internal/services/chat/chat_service.go`) implements RAG:
+1. User sends message
+2. Generate query embedding
+3. Search documents by vector similarity
+4. Inject top-k documents into prompt context
+5. Generate response with LLM
+6. Return response with document citations
+
+**Configuration:**
 ```go
-type SearchHandler struct {
-    searchService interfaces.SearchService  // Interface, not concrete type
+RAGConfig{
+    Enabled:       true,
+    MaxDocuments:  5,
+    MinSimilarity: 0.7,  // 0-1 range
+    SearchMode:    "vector",
 }
-
-func NewSearchHandler(searchService interfaces.SearchService) *SearchHandler {
-    return &SearchHandler{searchService: searchService}
-}
 ```
 
-**Interface-Based Design:**
-```go
-// internal/interfaces/search_service.go
-type SearchService interface {
-    Search(ctx context.Context, query string) (*Result, error)
-    Index(ctx context.Context, data *Data) error
-}
+## Security & Data Privacy
+
+**Critical:** Quaero is designed for local-only operation:
+- All data stored locally in SQLite
+- LLM inference runs locally (offline mode)
+- No external API calls in offline mode
+- Audit logging for compliance
+
+**Offline Mode Guarantees:**
+- Data never leaves the machine
+- Network isolation verifiable
+- Suitable for government/healthcare/confidential data
+
+**Future Cloud Mode:**
+- Explicit warnings required
+- Risk acknowledgment in config
+- API call audit logging
+- NOT for sensitive data
+
+## Version Management
+
+Version tracked in `.version` file:
+```
+version: 0.1.0
+build: 10-04-16-30-15
 ```
 
-**Template Rendering:**
-```go
-// internal/handlers/ui.go
-func (h *UIHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
-    data := struct {
-        Title string
-        Items []Item
-    }{
-        Title: "Dashboard",
-        Items: h.service.GetItems(),
-    }
-    
-    err := h.templates.ExecuteTemplate(w, "index.html", data)
-    if err != nil {
-        h.logger.Error("Template render failed", "error", err)
-        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-    }
-}
-```
+Updated automatically by build scripts.
 
-### Code Quality Rules
-- Single Responsibility Principle
-- Proper error handling (return errors, don't ignore)
-- Interface-based design
-- Table-driven tests
-- DRY principle - consolidate duplicate code
-- Remove unused/redundant functions
-- Use receiver methods on services
-- Keep common utilities stateless
+## Troubleshooting
 
-### Testing Standards
+### Server Won't Start
 
-**ALWAYS use the test script:**
-```bash
-./test/run-tests.ps1 -Type all
-./test/run-tests.ps1 -Type unit
-```
+Check:
+1. Port availability: `netstat -an | findstr :8080`
+2. Config file exists and is valid
+3. Database path is writable
+4. Logs in console output
 
-**NEVER use:**
-```bash
-cd test && go test      # ❌ WRONG
-go test ./...           # ❌ WRONG
-```
+### UI Tests Fail
 
-### Building Standards
+Check:
+1. Server started correctly (automatic via run-tests.ps1)
+2. Port matches config (default: 8085)
+3. ChromeDP browser installed
+4. Test results in `test/results/` for screenshots
 
-**ALWAYS use the build script:**
-```bash
-./scripts/build.ps1 
-./scripts/build.ps1 -Run
-```
+### Embeddings Not Generated
 
-**NEVER use:**
-```bash
-go build                # ❌ WRONG
-```
+Check:
+1. LLM service mode (offline/mock)
+2. Model files exist if offline mode
+3. Scheduler is running (logs every 5 minutes)
+4. Documents have `force_embed_pending=true` flag
+5. Embedding coordinator started successfully
 
-### Function Index
+### llama-server Issues
 
-The hooks maintain `.claude/go-function-index.json` to track all functions and prevent duplicates.
-
-**Rebuild index manually:**
-```bash
-node .claude/hooks/index-go-functions.js
-```
+Check:
+1. `llama-server` binary exists in configured llama_dir
+2. Model files exist and are valid GGUF format
+3. Sufficient RAM available (8-16GB)
+4. Check logs for subprocess errors
+5. Try mock_mode=true for testing without models

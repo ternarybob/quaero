@@ -178,41 +178,6 @@ footer.footer {
     padding: 1.5rem 1.5rem;
 }
 
-/* Live Indicator */
-.live-indicator {
-    display: flex !important;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem !important;
-    cursor: default !important;
-}
-
-.live-dot {
-    width: 10px;
-    height: 10px;
-    background-color: #48c774;
-    border-radius: 50%;
-    animation: pulse-dot 2s infinite;
-}
-
-.live-text {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #48c774 !important;
-    letter-spacing: 0.05em;
-}
-
-@keyframes pulse-dot {
-    0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.5;
-        transform: scale(0.9);
-    }
-}
-
 /* Snackbar */
 #snackbar {
     visibility: hidden;

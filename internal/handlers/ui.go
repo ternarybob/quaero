@@ -153,15 +153,15 @@ func (h *UIHandler) ChatPageHandler(w http.ResponseWriter, r *http.Request) {
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files
 	allowedFiles := map[string]string{
-		"/static/common.css":              "static/common.css",
-		"/static/websocket-manager.js":    "static/websocket-manager.js",
-		"/static/alpine-components.js":    "static/alpine-components.js",
-		"/favicon.ico":                    "static/favicon.ico",
-		"/partials/navbar.html":           "partials/navbar.html",
-		"/partials/footer.html":           "partials/footer.html",
-		"/partials/service-status.html":   "partials/service-status.html",
-		"/partials/service-logs.html":     "partials/service-logs.html",
-		"/partials/snackbar.html":         "partials/snackbar.html",
+		"/static/common.css":            "static/common.css",
+		"/static/websocket-manager.js":  "static/websocket-manager.js",
+		"/static/alpine-components.js":  "static/alpine-components.js",
+		"/favicon.ico":                  "static/favicon.ico",
+		"/partials/navbar.html":         "partials/navbar.html",
+		"/partials/footer.html":         "partials/footer.html",
+		"/partials/service-status.html": "partials/service-status.html",
+		"/partials/service-logs.html":   "partials/service-logs.html",
+		"/partials/snackbar.html":       "partials/snackbar.html",
 	}
 
 	// Check if the requested path is allowed
