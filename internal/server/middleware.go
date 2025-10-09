@@ -47,12 +47,18 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Log request
-		s.app.Logger.Debug().
+		// Log request with query parameters
+		logEvent := s.app.Logger.Debug().
 			Str("method", r.Method).
 			Str("path", r.URL.Path).
-			Str("remote", r.RemoteAddr).
-			Msg("HTTP request")
+			Str("remote", r.RemoteAddr)
+
+		// Add query parameters if present
+		if r.URL.RawQuery != "" {
+			logEvent.Str("query", r.URL.RawQuery)
+		}
+
+		logEvent.Msg("HTTP request")
 
 		// Create response writer wrapper to capture status code
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}

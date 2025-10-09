@@ -125,11 +125,12 @@ func (h *ScraperHandler) ScrapeProjectsHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if !h.authService.IsAuthenticated() {
+		h.logger.Warn().Msg("ScrapeProjectsHandler called without authentication")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
-			"message": "Not authenticated. Please capture authentication first.",
+			"message": "Not authenticated. Please capture authentication first using the Chrome extension.",
 		})
 		return
 	}
@@ -156,11 +157,12 @@ func (h *ScraperHandler) ScrapeSpacesHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if !h.authService.IsAuthenticated() {
+		h.logger.Warn().Msg("ScrapeSpacesHandler called without authentication")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
-			"message": "Not authenticated. Please capture authentication first.",
+			"message": "Not authenticated. Please capture authentication first using the Chrome extension.",
 		})
 		return
 	}
@@ -187,11 +189,12 @@ func (h *ScraperHandler) RefreshProjectsCacheHandler(w http.ResponseWriter, r *h
 	}
 
 	if !h.authService.IsAuthenticated() {
+		h.logger.Warn().Msg("RefreshProjectsCacheHandler called without authentication")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
-			"message": "Not authenticated. Please capture authentication first.",
+			"message": "Not authenticated. Please capture authentication first using the Chrome extension.",
 		})
 		return
 	}
@@ -238,11 +241,12 @@ func (h *ScraperHandler) GetProjectIssuesHandler(w http.ResponseWriter, r *http.
 	}
 
 	if !h.authService.IsAuthenticated() {
+		h.logger.Warn().Msg("GetProjectIssuesHandler called without authentication")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
-			"message": "Not authenticated. Please capture authentication first.",
+			"message": "Not authenticated. Please capture authentication first using the Chrome extension.",
 		})
 		return
 	}

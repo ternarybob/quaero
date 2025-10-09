@@ -1,16 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head.html" .}}
     <title>Jira Project Management - Quaero</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-    <link rel="stylesheet" href="static/common.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 </head>
 <body class="has-navbar-fixed-top">
     <div class="wrapper">
@@ -35,12 +27,12 @@
                     <div class="card-header-icon">
                         <span id="selection-count" class="tag is-info">0/0</span>
                         <div class="buttons ml-2">
-                            <button id="sync-btn" class="button is-info is-small" onclick="syncProjects()" title="Refresh Projects">
+                            <button id="sync-btn" class="button is-info is-small is-outlined" onclick="syncProjects()" title="Refresh Projects">
                                 <span class="icon"><i class="fas fa-sync-alt"></i></span>
                             </button>
-                            <button id="get-projects-btn" class="button is-primary is-small" onclick="syncProjects()">Get Projects</button>
-                            <button id="get-issues-menu-btn" class="button is-primary is-small" onclick="getIssues()" disabled>Get Issues</button>
-                            <button id="clear-data-btn" class="button is-danger is-small" onclick="clearAllData()">Clear Jira Data</button>
+                            <button id="get-projects-btn" class="button is-primary is-small is-outlined" onclick="syncProjects()">Get Projects</button>
+                            <button id="get-issues-menu-btn" class="button is-primary is-small is-outlined" onclick="getIssues()" disabled>Get Issues</button>
+                            <button id="clear-data-btn" class="button is-danger is-small is-outlined" onclick="clearAllData()">Clear Jira Data</button>
                         </div>
                     </div>
                 </header>
@@ -135,9 +127,6 @@
         {{template "footer.html" .}}
     </footer>
     {{template "snackbar.html" .}}
-
-    <script src="static/websocket-manager.js"></script>
-    <script src="static/alpine-components.js"></script>
 
     <script>
         // State management
@@ -236,7 +225,7 @@
 
             } catch (error) {
                 console.error('Error loading projects:', error);
-                showNotification('Failed to load projects', 'error');
+                window.showNotification('Failed to load projects', 'error');
                 allProjects = [];
                 filteredProjects = [];
                 renderProjects();
@@ -366,10 +355,31 @@
 
             isSyncing = true;
             const syncBtn = document.getElementById('sync-btn');
+            const getProjectsBtn = document.getElementById('get-projects-btn');
 
-            syncBtn.disabled = true;
-            syncBtn.classList.add('is-loading');
-            showNotification('Clearing cache and syncing projects from Jira...', 'info');
+            // Function to re-enable buttons
+            const enableButtons = () => {
+                isSyncing = false;
+                if (syncBtn) {
+                    syncBtn.disabled = false;
+                    syncBtn.classList.remove('is-loading');
+                }
+                if (getProjectsBtn) {
+                    getProjectsBtn.disabled = false;
+                    getProjectsBtn.classList.remove('is-loading');
+                }
+            };
+
+            // Disable both buttons
+            if (syncBtn) {
+                syncBtn.disabled = true;
+                syncBtn.classList.add('is-loading');
+            }
+            if (getProjectsBtn) {
+                getProjectsBtn.disabled = true;
+                getProjectsBtn.classList.add('is-loading');
+            }
+            window.showNotification('Clearing cache and syncing projects from Jira...', 'info');
 
             try {
                 const response = await fetch('/api/projects/refresh-cache', {
@@ -377,10 +387,11 @@
                 });
 
                 if (!response.ok) {
+                    enableButtons();
                     throw new Error('Failed to sync projects');
                 }
 
-                showNotification('Project sync started (fetching issue counts)...', 'success');
+                window.showNotification('Project sync started (fetching issue counts)...', 'success');
 
                 const pollInterval = setInterval(async () => {
                     try {
@@ -390,7 +401,8 @@
                             if (data.projects && data.projects.length > 0) {
                                 clearInterval(pollInterval);
                                 loadProjects();
-                                showNotification(`Successfully loaded ${data.projects.length} projects`, 'success');
+                                window.showNotification(`Successfully loaded ${data.projects.length} projects`, 'success');
+                                enableButtons(); // Re-enable immediately when projects are found
                             }
                         }
                     } catch (e) {
@@ -398,20 +410,17 @@
                     }
                 }, 1000);
 
+                // Timeout after 15 seconds - load whatever we have and re-enable buttons
                 setTimeout(() => {
                     clearInterval(pollInterval);
                     loadProjects();
+                    enableButtons();
                 }, 15000);
 
             } catch (error) {
                 console.error('Error syncing projects:', error);
-                showNotification('Failed to sync projects', 'error');
-            } finally {
-                setTimeout(() => {
-                    isSyncing = false;
-                    syncBtn.disabled = false;
-                    syncBtn.classList.remove('is-loading');
-                }, 15000);
+                window.showNotification('Failed to sync projects', 'error');
+                enableButtons();
             }
         }
 
@@ -431,7 +440,7 @@
                 });
 
                 if (response.ok) {
-                    showNotification('All data cleared successfully', 'success');
+                    window.showNotification('All data cleared successfully', 'success');
 
                     allProjects = [];
                     filteredProjects = [];
@@ -450,11 +459,11 @@
                     `;
                     document.getElementById('issues-count').textContent = '0 issues';
                 } else {
-                    showNotification('Failed to clear data', 'error');
+                    window.showNotification('Failed to clear data', 'error');
                 }
             } catch (error) {
                 console.error('Error clearing data:', error);
-                showNotification('Failed to clear data', 'error');
+                window.showNotification('Failed to clear data', 'error');
             } finally {
                 clearBtn.disabled = false;
                 clearBtn.textContent = 'CLEAR ALL DATA';
@@ -464,7 +473,7 @@
         // Get issues for selected projects
         async function getIssues() {
             if (selectedProjects.size === 0) {
-                showNotification('Please select at least one project', 'error');
+                window.showNotification('Please select at least one project', 'error');
                 return;
             }
 
@@ -485,7 +494,7 @@
                 </tr>
             `;
 
-            showNotification(`Fetching issues for ${selectedProjects.size} project(s)...`, 'info');
+            window.showNotification(`Fetching issues for ${selectedProjects.size} project(s)...`, 'info');
 
             try {
                 const projectKeys = Array.from(selectedProjects);
@@ -501,13 +510,13 @@
                     throw new Error('Failed to fetch issues');
                 }
 
-                showNotification('Issue fetching started...', 'info');
+                window.showNotification('Issue fetching started...', 'info');
 
                 startPollingIssues(projectKeys);
 
             } catch (error) {
                 console.error('Error fetching issues:', error);
-                showNotification('Failed to fetch issues', 'error');
+                window.showNotification('Failed to fetch issues', 'error');
                 issuesLoader.classList.add('is-hidden');
                 tbody.innerHTML = `
                     <tr>
@@ -559,7 +568,7 @@
                                 currentPollInterval = null;
                                 issuesLoader.classList.add('is-hidden');
                                 displayIssues(validIssues);
-                                showNotification(`Loaded ${validIssues.length} issues`, 'success');
+                                window.showNotification(`Loaded ${validIssues.length} issues`, 'success');
                             }
                         }
                     }
@@ -571,7 +580,7 @@
                     clearInterval(currentPollInterval);
                     currentPollInterval = null;
                     issuesLoader.classList.add('is-hidden');
-                    showNotification('Issue loading timed out', 'error');
+                    window.showNotification('Issue loading timed out', 'error');
                 }
             }, 1000);
         }
@@ -721,13 +730,6 @@
             selectedKey.textContent = '';
             codeBlock.textContent = '';
             selectedIssue = null;
-        }
-
-        function showNotification(message, type) {
-            // Use global snackbar notification
-            if (typeof window.showNotification === 'function') {
-                window.showNotification(message, type);
-            }
         }
 
         // Initialize on page load

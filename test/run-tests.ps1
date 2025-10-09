@@ -197,7 +197,8 @@ Write-Host "Starting Quaero test server on port $serverPort..." -ForegroundColor
 
 # Start server in new visible CMD window (like build.ps1 -Run does)
 # Using /c so window closes when server stops, making it clear when tests are done
-$startCommand = "cd /d `"$projectRoot`" && `"$exePath`" serve -c `"$configPath`""
+# IMPORTANT: Start from bin directory so database path resolves correctly
+$startCommand = "cd /d `"$binDir`" && `"$exePath`" serve -c `"$configPath`""
 $serverProcess = Start-Process cmd -ArgumentList "/c", $startCommand -PassThru
 
 # Set the server URL environment variable now that we know the port

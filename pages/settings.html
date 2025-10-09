@@ -1,13 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head.html" .}}
     <title>Settings - Quaero</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="static/common.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="has-navbar-fixed-top">
     <div class="wrapper">
@@ -30,7 +25,7 @@
                 <header class="card-header">
                     <p class="card-header-title">System Configuration (Read-Only)</p>
                     <div class="card-header-icon">
-                        <button class="button is-info is-small" onclick="loadConfig()">
+                        <button class="button is-info is-small is-outlined" onclick="loadConfig()">
                             <span class="icon"><i class="fas fa-sync-alt"></i></span>
                         </button>
                     </div>
@@ -75,7 +70,7 @@
                             </p>
                         </div>
                         <div class="column is-narrow">
-                            <button class="button is-danger" onclick="confirmRemoveEmbeddings()">
+                            <button class="button is-danger is-small is-outlined" onclick="confirmRemoveEmbeddings()">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
                                 <span>CLEAR ALL</span>
                             </button>
@@ -93,9 +88,6 @@
 
     {{template "snackbar.html" .}}
 
-    <script src="static/websocket-manager.js"></script>
-
-    <script src="/static/alpine-components.js"></script>
     <script>
         // Load system configuration
         async function loadConfig() {

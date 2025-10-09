@@ -23,6 +23,10 @@ func TestApplicationStartup(t *testing.T) {
 	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
+
+	// Override database path to use in-memory for this test
+	config.Storage.SQLite.Path = ":memory:"
+
 	t.Logf("✓ Configuration loaded from: %s", configPath)
 
 	// Step 2: Initialize logger
@@ -111,6 +115,9 @@ func TestAPIHandlerDependencies(t *testing.T) {
 	configPath := filepath.Join("..", "..", "bin", "quaero.toml")
 	config, err := common.LoadFromFile(configPath)
 	require.NoError(t, err, "Failed to load test configuration")
+
+	// Override database path to use in-memory for this test
+	config.Storage.SQLite.Path = ":memory:"
 
 	logger := arbor.NewLogger()
 	application, err := app.New(config, logger)

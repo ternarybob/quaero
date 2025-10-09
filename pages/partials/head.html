@@ -1,0 +1,29 @@
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Bulma CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
+
+<!-- Theme (loads after Bulma, overrides defaults) -->
+<!-- Available themes: theme-sandstone.css, theme-yeti.css -->
+<link rel="stylesheet" href="/static/theme-yeti.css">
+
+<!-- Font Awesome -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+<!-- Highlight.js (for code syntax highlighting) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+
+<!-- Custom Styles (loads last, can override theme) -->
+<link rel="stylesheet" href="/static/common.css">
+
+<!-- Highlight.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+<!-- Custom Scripts - Load BEFORE Alpine so components are registered first -->
+<script src="/static/websocket-manager.js"></script>
+<script src="/static/common.js"></script>
+
+<!-- Alpine.js - Load AFTER component definitions -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>

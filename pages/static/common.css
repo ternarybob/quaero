@@ -55,11 +55,13 @@ footer.footer {
 .table {
     background-color: #ffffff !important;
     color: #363636 !important;
+    font-size: 0.875rem !important; /* Reduced from default 1rem */
 }
 
 .table thead th {
     color: #363636 !important;
     background-color: #f5f5f5 !important;
+    font-size: 0.875rem !important;
 }
 
 .table tbody tr {
@@ -73,6 +75,8 @@ footer.footer {
 .table td, .table th {
     border-color: #dbdbdb !important;
     color: #363636 !important;
+    font-size: 0.875rem !important;
+    padding: 0.5rem 0.75rem !important; /* Reduced padding */
 }
 
 /* Log Container */
@@ -168,6 +172,12 @@ footer.footer {
     border-bottom: 1px solid #dbdbdb;
 }
 
+/* Active navbar item underline */
+.navbar-item.is-active {
+    border-bottom: 2px solid #3273dc;
+    font-weight: 600;
+}
+
 /* Reduce section padding */
 .section {
     padding: 1.5rem 1.5rem;
@@ -176,6 +186,16 @@ footer.footer {
 /* Reduce hero padding */
 .hero.is-light .hero-body {
     padding: 1.5rem 1.5rem;
+}
+
+/* Hero title and subtitle spacing */
+.hero .hero-body .title {
+    margin-bottom: 0.75rem !important;
+}
+
+.hero .hero-body .subtitle {
+    margin-top: 0.5rem !important;
+    line-height: 1.5 !important;
 }
 
 /* Snackbar */

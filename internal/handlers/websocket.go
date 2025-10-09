@@ -415,7 +415,9 @@ func (h *WebSocketHandler) parseAndBroadcastLog(logLine string) {
 	// Filter out internal handler logs (WebSocket, UI handler, etc.)
 	if strings.Contains(logLine, "WebSocket client connected") ||
 		strings.Contains(logLine, "WebSocket client disconnected") ||
-		strings.Contains(logLine, "DEBUG: Memory writer entry") {
+		strings.Contains(logLine, "DEBUG: Memory writer entry") ||
+		strings.Contains(logLine, "HTTP request") ||
+		strings.Contains(logLine, "HTTP response") {
 		return
 	}
 
@@ -483,7 +485,9 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 			// Skip internal handler logs
 			if strings.Contains(logLine, "WebSocket client connected") ||
 				strings.Contains(logLine, "WebSocket client disconnected") ||
-				strings.Contains(logLine, "DEBUG: Memory writer entry") {
+				strings.Contains(logLine, "DEBUG: Memory writer entry") ||
+				strings.Contains(logLine, "HTTP request") ||
+				strings.Contains(logLine, "HTTP response") {
 				continue
 			}
 

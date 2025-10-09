@@ -12,22 +12,22 @@
 
   <div id="navbarMenu" class="navbar-menu">
     <div class="navbar-start">
-      <a class="navbar-item" href="/">
+      <a class="navbar-item{{if eq .Page "home"}} is-active{{end}}" href="/">
         HOME
       </a>
-      <a class="navbar-item" href="/jira">
+      <a class="navbar-item{{if eq .Page "jira"}} is-active{{end}}" href="/jira">
         JIRA DATA
       </a>
-      <a class="navbar-item" href="/confluence">
+      <a class="navbar-item{{if eq .Page "confluence"}} is-active{{end}}" href="/confluence">
         CONFLUENCE DATA
       </a>
-      <a class="navbar-item" href="/documents">
+      <a class="navbar-item{{if eq .Page "documents"}} is-active{{end}}" href="/documents">
         DOCUMENTS
       </a>
-      <a class="navbar-item" href="/chat">
+      <a class="navbar-item{{if eq .Page "chat"}} is-active{{end}}" href="/chat">
         CHAT
       </a>
-      <a class="navbar-item" href="/settings">
+      <a class="navbar-item{{if eq .Page "settings"}} is-active{{end}}" href="/settings">
         SETTINGS
       </a>
     </div>

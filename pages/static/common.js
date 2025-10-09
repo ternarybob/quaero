@@ -170,8 +170,9 @@ document.addEventListener('alpine:init', () => {
   // Service Logs Component
   Alpine.data('serviceLogs', () => ({
     logs: [],
-    maxLogs: 100,
+    maxLogs: 200,
     autoScroll: true,
+    logIdCounter: 0,
 
     init() {
       this.loadRecentLogs();
@@ -185,7 +186,11 @@ document.addEventListener('alpine:init', () => {
 
         const data = await response.json();
         if (data.logs && Array.isArray(data.logs)) {
-          this.logs = data.logs.map(log => this._parseLogEntry(log));
+          this.logs = data.logs.map(log => {
+            const entry = this._parseLogEntry(log);
+            entry.id = ++this.logIdCounter;
+            return entry;
+          });
           // Scroll to bottom after loading recent logs
           this.$nextTick(() => {
             const container = this.$refs.logContainer;
@@ -212,10 +217,13 @@ document.addEventListener('alpine:init', () => {
 
     addLog(logData) {
       const logEntry = this._parseLogEntry(logData);
+      logEntry.id = ++this.logIdCounter;
       this.logs.push(logEntry);
 
+      // Use splice to remove from beginning - more memory efficient than slice
       if (this.logs.length > this.maxLogs) {
-        this.logs = this.logs.slice(-this.maxLogs);
+        const removeCount = this.logs.length - this.maxLogs;
+        this.logs.splice(0, removeCount);
       }
 
       if (this.autoScroll) {

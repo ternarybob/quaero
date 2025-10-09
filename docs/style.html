@@ -2,203 +2,170 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quaero - Style Guide</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-  <style>
-    body {
-      background-color: #f5f5f5;
-    }
-    
-    .log-container {
-      background-color: #1e1e1e;
-      color: #d4d4d4;
-      padding: 1rem;
-      border-radius: 4px;
-      max-height: 300px;
-      overflow-y: auto;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 0.875rem;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quaero - Style Guide</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
 
-    .status-chip {
-      padding: 0.25rem 0.75rem;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
+    <!-- Theme (loads after Bulma, overrides defaults) -->
+    <!-- Available themes: theme-sandstone.css, theme-yeti.css -->
+    <link rel="stylesheet" href="../pages/static/theme-yeti.css">
 
-    .status-idle {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-    }
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
-    .status-failed {
-      background-color: #ffebee;
-      color: #c62828;
-    }
+    <!-- Highlight.js (for code syntax highlighting) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 
-    .status-running {
-      background-color: #e3f2fd;
-      color: #1565c0;
-    }
-
-    .status-authenticated {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-    }
-
-    .status-online {
-      display: inline-block;
-      padding: 0.25rem 0.75rem;
-      background-color: #4caf50;
-      color: white;
-      border-radius: 4px;
-      font-size: 0.875rem;
-      font-weight: 600;
-    }
-  </style>
+    <!-- Custom Styles (loads last, can override theme) -->
+    <link rel="stylesheet" href="../pages/static/common.css">
 </head>
 
 <body>
 
-  <!-- Bulma Navbar -->
-  <nav class="navbar" role="navigation" aria-label="main navigation">
-    <div class="navbar-brand">
-      <a class="navbar-item" href="#">
-        <strong>Quaero</strong>
-      </a>
-    </div>
-
-    <div class="navbar-menu">
-      <div class="navbar-start">
-        <a class="navbar-item is-active" href="#">
-          HOME
-        </a>
-        <a class="navbar-item" href="#">
-          JIRA DATA
-        </a>
-        <a class="navbar-item" href="#">
-          CONFLUENCE DATA
-        </a>
-        <a class="navbar-item" href="#">
-          DOCUMENTS
-        </a>
-        <a class="navbar-item" href="#">
-          SETTINGS
-        </a>
-      </div>
-
-      <div class="navbar-end">
-        <div class="navbar-item">
-          <span class="status-online">ONLINE</span>
+    <!-- Bulma Navbar -->
+    <nav class="navbar" role="navigation" aria-label="main navigation">
+        <div class="navbar-brand">
+            <a class="navbar-item" href="#">
+                <strong>Quaero</strong>
+            </a>
         </div>
-      </div>
-    </div>
-  </nav>
 
-  <!-- Main Content -->
-  <section class="section">
-    <div class="container">
-      
-      <!-- First Row: Parser Status & Authentication Details -->
-      <div class="columns">
-        <div class="column is-half">
-          <div class="card">
-            <header class="card-header">
-              <p class="card-header-title">
-                Parser Status
-              </p>
-            </header>
-            <div class="card-content">
-              <table class="table is-fullwidth is-striped">
-                <thead>
-                  <tr>
-                    <th>Service</th>
-                    <th>Status</th>
-                    <th>Last Run</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Jira</td>
-                    <td><span class="status-chip status-idle">Idle</span></td>
-                    <td>2025-10-08 08:15:00</td>
-                  </tr>
-                  <tr>
-                    <td>Confluence</td>
-                    <td><span class="status-chip status-failed">Failed</span></td>
-                    <td>2025-10-08 08:10:00</td>
-                  </tr>
-                  <tr>
-                    <td>Documents</td>
-                    <td><span class="status-chip status-running">Running</span></td>
-                    <td>-</td>
-                  </tr>
-                </tbody>
-              </table>
+        <div class="navbar-menu">
+            <div class="navbar-start">
+                <a class="navbar-item is-active" href="#">
+                    HOME
+                </a>
+                <a class="navbar-item" href="#">
+                    JIRA DATA
+                </a>
+                <a class="navbar-item" href="#">
+                    CONFLUENCE DATA
+                </a>
+                <a class="navbar-item" href="#">
+                    DOCUMENTS
+                </a>
+                <a class="navbar-item" href="#">
+                    SETTINGS
+                </a>
             </div>
-          </div>
-        </div>
 
-        <div class="column is-half">
-          <div class="card">
-            <header class="card-header">
-              <p class="card-header-title">
-                Authentication Details
-              </p>
-            </header>
-            <div class="card-content">
-              <table class="table is-fullwidth is-striped">
-                <thead>
-                  <tr>
-                    <th>Service</th>
-                    <th>Status</th>
-                    <th>User</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Jira</td>
-                    <td><span class="status-chip status-authenticated">Authenticated</span></td>
-                    <td>user@example.com</td>
-                  </tr>
-                  <tr>
-                    <td>Confluence</td>
-                    <td><span class="status-chip status-authenticated">Authenticated</span></td>
-                    <td>user@example.com</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="navbar-end">
+                <div class="navbar-item">
+                    <span class="status-online">ONLINE</span>
+                </div>
             </div>
-          </div>
         </div>
-      </div>
+    </nav>
 
-      <!-- Second Row: Service Logs -->
-      <div class="columns">
-        <div class="column">
-          <div class="card">
-            <header class="card-header">
-              <p class="card-header-title">
-                Service Logs
-              </p>
-            </header>
-            <div class="card-content">
-              <pre class="log-container"><code>[2025-10-08 08:15:00] INFO: Jira service started
+    <!-- Main Content -->
+    <section class="section">
+        <div class="container">
+
+            <!-- Hero Section -->
+            <section class="hero is-light">
+                <div class="hero-body">
+                    <p class="title is-3">Quaero</p>
+                    <p class="subtitle is-5">Atlassian Data Collection and Analysis Platform</p>
+                </div>
+            </section>
+
+            <!-- First Row: Parser Status & Authentication Details -->
+            <div class="columns">
+                <div class="column is-half">
+                    <div class="card">
+                        <header class="card-header">
+                            <p class="card-header-title">
+                                Parser Status
+                            </p>
+                        </header>
+                        <div class="card-content">
+                            <table class="table is-fullwidth is-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Service</th>
+                                        <th>Status</th>
+                                        <th>Last Run</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>Jira</td>
+                                        <td><span class="status-chip status-idle">Idle</span></td>
+                                        <td>2025-10-08 08:15:00</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Confluence</td>
+                                        <td><span class="status-chip status-failed">Failed</span></td>
+                                        <td>2025-10-08 08:10:00</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Documents</td>
+                                        <td><span class="status-chip status-running">Running</span></td>
+                                        <td>-</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="column is-half">
+                    <div class="card">
+                        <header class="card-header">
+                            <p class="card-header-title">
+                                Authentication Details
+                            </p>
+                        </header>
+                        <div class="card-content">
+                            <table class="table is-fullwidth is-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Service</th>
+                                        <th>Status</th>
+                                        <th>User</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>Jira</td>
+                                        <td><span class="status-chip status-authenticated">Authenticated</span></td>
+                                        <td>user@example.com</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Confluence</td>
+                                        <td><span class="status-chip status-authenticated">Authenticated</span></td>
+                                        <td>user@example.com</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Second Row: Service Logs -->
+            <div class="columns">
+                <div class="column">
+                    <div class="card">
+                        <header class="card-header">
+                            <p class="card-header-title">
+                                Service Logs
+                            </p>
+                        </header>
+                        <div class="card-content">
+                            <pre class="log-container"><code>[2025-10-08 08:15:00] INFO: Jira service started
 [2025-10-08 08:15:01] INFO: Fetching Jira projects...
 [2025-10-08 08:15:05] INFO: Found 10 projects
 [2025-10-08 08:10:00] ERROR: Confluence authentication failed
 [2025-10-08 08:10:00] INFO: Retrying Confluence connection...</code></pre>
+                        </div>
+                    </div>
+                </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-    </div>
-  </section>
+        </div>
+    </section>
 
 </body>
 

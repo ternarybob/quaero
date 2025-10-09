@@ -1,15 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head.html" .}}
     <title>Document Management - Quaero</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-    <link rel="stylesheet" href="static/common.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body class="has-navbar-fixed-top">
     <div class="wrapper">
@@ -32,7 +25,7 @@
                 <header class="card-header">
                     <p class="card-header-title">Document Statistics</p>
                     <div class="card-header-icon">
-                        <button class="button is-info is-small" onclick="loadStats()">
+                        <button class="button is-info is-small is-outlined" onclick="loadStats()">
                             <span class="icon"><i class="fas fa-sync-alt"></i></span>
                         </button>
                     </div>
@@ -165,9 +158,6 @@
 
     {{template "snackbar.html" .}}
 
-    <script src="static/websocket-manager.js"></script>
-    <script src="static/alpine-components.js"></script>
-
     <script>
         // State management
         let allDocuments = [];
@@ -288,10 +278,10 @@
                         <td onclick="selectDocument(${index})" class="has-text-centered" style="cursor: pointer;">${vectorizedBadge}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                         <td class="has-text-centered">
-                            <button class="button is-small is-info" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
+                            <button class="button is-small is-info is-outlined" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
                                 <span class="icon"><i class="fas fa-sync-alt"></i></span>
                             </button>
-                            <button class="button is-small is-danger" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
+                            <button class="button is-small is-danger is-outlined" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
                             </button>
                         </td>

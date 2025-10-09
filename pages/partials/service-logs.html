@@ -15,7 +15,7 @@
         </button>
       </header>
       <div class="card-content">
-        <pre class="log-container" x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="has-text-centered has-text-grey">No logs available</div></template><template x-for="(log, index) in logs" :key="index"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
+        <pre class="log-container" x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="has-text-centered has-text-grey">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
       </div>
     </div>
   </div>

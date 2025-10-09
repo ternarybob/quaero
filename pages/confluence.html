@@ -2,16 +2,8 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{template "head.html" .}}
     <title>Confluence Space Management - Quaero</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-    <link rel="stylesheet" href="static/common.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 </head>
 
 <body class="has-navbar-fixed-top">
@@ -41,13 +33,13 @@
                             Spaces
                         </p>
                         <div class="card-header-icon">
-                            <button id="sync-btn" class="button is-info is-small" onclick="syncSpaces()" title="Refresh Spaces">
+                            <button id="sync-btn" class="button is-info is-small is-outlined" onclick="syncSpaces()" title="Refresh Spaces">
                                 <span class="icon"><i class="fas fa-sync-alt"></i></span>
                             </button>
-                            <button id="get-pages-menu-btn" class="button is-primary is-small ml-2" onclick="getPages()" disabled>
+                            <button id="get-pages-menu-btn" class="button is-primary is-small is-outlined ml-2" onclick="getPages()" disabled>
                                 GET PAGES
                             </button>
-                            <button id="clear-data-btn" class="button is-danger is-small ml-2" onclick="clearAllData()">
+                            <button id="clear-data-btn" class="button is-danger is-small is-outlined ml-2" onclick="clearAllData()">
                                 CLEAR ALL DATA
                             </button>
                         </div>
@@ -153,10 +145,7 @@
 
     {{template "snackbar.html" .}}
 
-    <script src="static/websocket-manager.js"></script>
-    <script src="static/alpine-components.js"></script>
-
-        <script>
+    <script>
             // State management
             let allSpaces = [];
             let filteredSpaces = [];

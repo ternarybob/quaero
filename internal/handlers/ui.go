@@ -154,11 +154,14 @@ func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files
 	allowedFiles := map[string]string{
 		"/static/common.css":            "static/common.css",
+		"/static/theme-sandstone.css":   "static/theme-sandstone.css",
+		"/static/theme-yeti.css":        "static/theme-yeti.css",
+		"/static/common.js":             "static/common.js",
 		"/static/websocket-manager.js":  "static/websocket-manager.js",
-		"/static/alpine-components.js":  "static/alpine-components.js",
 		"/favicon.ico":                  "static/favicon.ico",
 		"/partials/navbar.html":         "partials/navbar.html",
 		"/partials/footer.html":         "partials/footer.html",
+		"/partials/head.html":           "partials/head.html",
 		"/partials/service-status.html": "partials/service-status.html",
 		"/partials/service-logs.html":   "partials/service-logs.html",
 		"/partials/snackbar.html":       "partials/snackbar.html",
