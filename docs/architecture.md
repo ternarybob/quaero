@@ -245,7 +245,7 @@ Document → Quaero → llama.cpp (local inference) → Embedding/Response → Q
 │                     │                                        │
 │  ┌──────────────────▼───────────────────────────────────┐   │
 │  │  Storage (internal/storage/sqlite/)                 │   │
-│  │  • SQLite DB, Migrations, Persistence               │   │
+│  │  • SQLite DB, Persistence               │   │
 │  └──────────────────┬───────────────────────────────────┘   │
 └────────────────────┼────────────────────────────────────────┘
                      │

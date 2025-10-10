@@ -110,6 +110,24 @@ enable_wal = true
    - Browse pages/issues
    - Real-time log updates
 
+## Build and Test Instructions
+
+**IMPORTANT:** The following instructions are critical for maintaining a stable development environment.
+
+### Build and Run Instructions (Windows ONLY)
+
+-   **Building, compiling, and running the application MUST be done using the following scripts:**
+    -   `./scripts/build.ps1`
+    -   `./scripts/build.ps1 -Run`
+-   **The ONLY exception** is using `go build` for a compile test, with no output binary.
+
+### Testing Instructions
+
+-   **ALL testing MUST be performed using the test harness:**
+    -   `./test/run-tests.ps1`
+-   **ALL test output MUST be directed to the following path:**
+    -   `./test/results/{testname}-{datetime}`
+
 ## Project Structure
 
 ```
@@ -153,7 +171,7 @@ quaero/
 │   │   └── workers/                 # Worker pool pattern
 │   ├── storage/                     # Data persistence layer
 │   │   └── sqlite/                  # SQLite implementation
-│   │       ├── migrations.go        # Database migrations
+
 │   │       ├── document_storage.go  # Document CRUD
 │   │       ├── jira_storage.go      # Jira data storage
 │   │       └── confluence_storage.go # Confluence data storage

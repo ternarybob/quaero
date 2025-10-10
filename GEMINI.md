@@ -1,6 +1,6 @@
-# CLAUDE.md
+# GEMINI.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Gemini when working with code in this repository.
 
 ## MOST IMPORTANT INSTRUCTIONS: BUILD AND TEST
 
@@ -27,12 +27,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```powershell
 # Development build
 .\scripts\build.ps1
-
-# Clean build
-.\scripts\build.ps1 -Clean
-
-# Release build (optimized)
-.\scripts\build.ps1 -Release
 
 # Build and run
 .\scripts\build.ps1 -Run
@@ -198,7 +192,7 @@ The LLM service provides a unified interface for embeddings and chat:
 mode = "offline"  # or "mock"
 
 [llm.offline]
-llama_dir = "./llama.cpp"
+lama_dir = "./llama.cpp"
 model_dir = "./models"
 embed_model = "nomic-embed-text-v1.5-q8.gguf"
 chat_model = "qwen2.5-7b-instruct-q4.gguf"
