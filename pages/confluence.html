@@ -30,18 +30,16 @@
                 <div class="card mt-5">
                     <header class="card-header">
                         <p class="card-header-title">
-                            Spaces
+                            <span id="selection-count" class="has-text-grey mr-2">0/0</span>Spaces
                         </p>
                         <div class="card-header-icon">
-                            <button id="sync-btn" class="button is-small is-outlined" onclick="syncSpaces()" title="Refresh Spaces">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                            </button>
-                            <button id="get-pages-menu-btn" class="button is-primary is-small is-outlined ml-2" onclick="getPages()" disabled>
-                                GET PAGES
-                            </button>
-                            <button id="clear-data-btn" class="button is-danger is-small is-outlined ml-2" onclick="clearAllData()">
-                                CLEAR ALL DATA
-                            </button>
+                            <div class="buttons">
+                                <button id="get-pages-menu-btn" class="button is-primary is-small is-outlined" onclick="getPages()" disabled>GET Pages</button>
+                                <button id="clear-data-btn" class="button is-danger is-small is-outlined" onclick="clearAllData()">Clear Confluence Data</button>
+                                <button id="sync-btn" class="button is-small is-outlined" onclick="syncSpaces()" title="Refresh Spaces">
+                                    <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                                </button>
+                            </div>
                         </div>
                     </header>
                     <div class="card-content">
@@ -82,18 +80,16 @@
                         </div>
 
                         <!-- Selection Count Display -->
-                        <div class="is-flex is-justify-content-flex-end">
-                            <span id="selection-count" class="tag is-info">0/0 selected</span>
-                        </div>
                     </div>
                 </div>
 
                 <!-- Pages Table Section -->
                 <div class="card mt-5" id="pages-section">
                     <header class="card-header">
-                        <p class="card-header-title">Pages</p>
+                        <p class="card-header-title">
+                            <span id="pages-count" class="has-text-grey mr-2">0</span>Pages
+                        </p>
                         <div class="card-header-icon">
-                            <span id="pages-count" class="tag is-info">0 pages</span>
                             <div id="pages-loader" class="loader is-hidden ml-2"></div>
                         </div>
                     </header>
@@ -320,7 +316,7 @@
 
             function updateSelectionCount() {
                 const countElement = document.getElementById('selection-count');
-                countElement.textContent = `${selectedSpaces.size}/${filteredSpaces.length} selected`;
+                countElement.textContent = `${selectedSpaces.size}/${filteredSpaces.length}`;
 
                 const selectAllCheckbox = document.getElementById('select-all-checkbox');
                 selectAllCheckbox.checked = selectedSpaces.size === filteredSpaces.length && filteredSpaces.length > 0;
@@ -454,7 +450,7 @@
                             </td>
                         </tr>
                     `;
-                        document.getElementById('pages-count').textContent = '0 pages';
+                        document.getElementById('pages-count').textContent = '0';
                     } else {
                         showNotification('Failed to clear data', 'error');
                     }
@@ -614,7 +610,7 @@
                         </td>
                     </tr>
                 `;
-                    pagesCount.textContent = '0 pages';
+                    pagesCount.textContent = '0';
                     return;
                 }
 
@@ -649,7 +645,7 @@
                         </td>
                     </tr>
                 `;
-                    pagesCount.textContent = '0 pages';
+                    pagesCount.textContent = '0';
                     _clearPageDetail();
                     return;
                 }
@@ -673,7 +669,7 @@
                 `;
                 }).join('');
 
-                pagesCount.textContent = `${pages.length} page${pages.length !== 1 ? 's' : ''}`;
+                pagesCount.textContent = `${pages.length}`;
 
                 const urlPageId = _getPageFromUrl();
                 if (urlPageId) {
