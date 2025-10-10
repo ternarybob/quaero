@@ -176,7 +176,14 @@
 
         // Load document statistics
         async function loadStats(button) {
-            const statsBtn = button || event?.target?.closest('button');
+            let statsBtn = null;
+
+            // Only try to get button from event if button param not provided and event exists with a valid target
+            if (button) {
+                statsBtn = button;
+            } else if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
+                statsBtn = event.target.closest('button');
+            }
 
             if (statsBtn) {
                 statsBtn.disabled = true;
@@ -385,7 +392,10 @@
                 return;
             }
 
-            const button = event?.target?.closest('button');
+            let button = null;
+            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
+                button = event.target.closest('button');
+            }
 
             if (button) {
                 button.disabled = true;
@@ -423,7 +433,10 @@
                 return;
             }
 
-            const button = event?.target?.closest('button');
+            let button = null;
+            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
+                button = event.target.closest('button');
+            }
 
             if (button) {
                 button.disabled = true;
