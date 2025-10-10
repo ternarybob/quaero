@@ -63,10 +63,9 @@
             <!-- Documents Table -->
             <div class="card mt-5">
                 <header class="card-header">
-                    <p class="card-header-title">Documents</p>
-                    <div class="card-header-icon">
-                        <span id="document-count" class="tag is-info">0 documents</span>
-                    </div>
+                    <p class="card-header-title">
+                        <span id="document-count" class="has-text-grey mr-2">0</span>Documents
+                    </p>
                 </header>
                 <div class="card-content">
                     <!-- Filter Controls -->
@@ -131,6 +130,15 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- Pagination Controls -->
+                    <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
+                        <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
+                        <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
+                        <ul class="pagination-list">
+                            <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
+                        </ul>
+                    </nav>
                 </div>
             </div>
 
@@ -163,6 +171,8 @@
         let allDocuments = [];
         let filteredDocuments = [];
         let selectedDocument = null;
+        let currentPage = 1;
+        const pageSize = 100;
 
         // Load document statistics
         async function loadStats() {
@@ -242,6 +252,7 @@
                 return matchesSearch && matchesSource && matchesVectorized;
             });
 
+            currentPage = 1; // Reset to first page when filtering
             renderDocuments();
         }
 
@@ -249,6 +260,29 @@
         function renderDocuments() {
             const tbody = document.getElementById('documents-table-body');
             const countElement = document.getElementById('document-count');
+            const totalDocuments = filteredDocuments.length;
+            const totalPages = Math.max(1, Math.ceil(totalDocuments / pageSize));
+
+            // Ensure currentPage is within valid range
+            if (currentPage > totalPages) {
+                currentPage = totalPages;
+            }
+            if (currentPage < 1) {
+                currentPage = 1;
+            }
+
+            // Calculate pagination
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, totalDocuments);
+            const pageDocuments = filteredDocuments.slice(startIndex, endIndex);
+
+            // Update count display
+            countElement.textContent = `${totalDocuments}`;
+
+            // Update pagination controls
+            document.getElementById('prev-page').disabled = currentPage === 1;
+            document.getElementById('next-page').disabled = currentPage === totalPages;
+            document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
 
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
@@ -258,11 +292,11 @@
                         </td>
                     </tr>
                 `;
-                countElement.textContent = '0 documents';
                 return;
             }
 
-            tbody.innerHTML = filteredDocuments.map((doc, index) => {
+            tbody.innerHTML = pageDocuments.map((doc, pageIndex) => {
+                const globalIndex = startIndex + pageIndex; // Index in filteredDocuments
                 const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
                 const vectorizedBadge = hasEmbedding
                     ? '<span class="tag is-success">✓</span>'
@@ -272,11 +306,11 @@
 
                 return `
                     <tr class="${isSelected ? 'is-selected' : ''}">
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${index})" class="has-text-centered" style="cursor: pointer;">${vectorizedBadge}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
+                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
+                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
+                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
+                        <td onclick="selectDocument(${globalIndex})" class="has-text-centered" style="cursor: pointer;">${vectorizedBadge}</td>
+                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${updatedDate}</td>
                         <td class="has-text-centered">
                             <button class="button is-small is-outlined" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
                                 <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
@@ -288,8 +322,22 @@
                     </tr>
                 `;
             }).join('');
+        }
 
-            countElement.textContent = `${filteredDocuments.length} document${filteredDocuments.length !== 1 ? 's' : ''}`;
+        // Pagination functions
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderDocuments();
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.max(1, Math.ceil(filteredDocuments.length / pageSize));
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderDocuments();
+            }
         }
 
         // Select and display document details
