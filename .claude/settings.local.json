@@ -7,7 +7,12 @@
       "Bash(Select-String -Pattern '/api/projects/refresh-cache|RefreshProjectsCacheHandler|ScrapeProjectsHandler|GET /api/scrape/projects' })",
       "Bash(findstr:*)",
       "Bash(dir:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(powershell:*)",
+      "Bash(git commit:*)",
+      "Bash(node:*)",
+      "Bash(start cmd /c:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []
