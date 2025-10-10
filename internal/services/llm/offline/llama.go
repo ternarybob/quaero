@@ -45,10 +45,8 @@ type llamaServerEmbeddingRequest struct {
 	Content string `json:"content"`
 }
 
-// llamaServerEmbeddingResponse represents the JSON output from llama-server /embedding
-type llamaServerEmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
-}
+// NOTE: llama-server /embedding endpoint returns a direct array of floats []float32,
+// not an object with an "embedding" field
 
 // NewOfflineLLMService creates a new offline LLM service instance
 // Returns error if llama-cli binary not found or models missing
@@ -349,25 +347,24 @@ func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, 
 	}
 
 	// Parse JSON response
-	// The llama-server /embedding endpoint returns a JSON object with a single "embedding" field,
-	// which is an array of floats.
-	var response llamaServerEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	// llama-server /embedding endpoint returns a direct array of floats
+	var embedding []float32
+	if err := json.NewDecoder(resp.Body).Decode(&embedding); err != nil {
 		s.logger.Error().
 			Err(err).
 			Msg("Failed to parse embedding response")
 		return nil, fmt.Errorf("failed to parse embedding JSON: %w", err)
 	}
 
-	if len(response.Embedding) == 0 {
+	if len(embedding) == 0 {
 		return nil, fmt.Errorf("embedding vector is empty")
 	}
 
 	s.logger.Debug().
-		Int("dimension", len(response.Embedding)).
+		Int("dimension", len(embedding)).
 		Msg("Embedding generated successfully")
 
-	return response.Embedding, nil
+	return embedding, nil
 }
 
 // Chat generates a completion response based on conversation history
