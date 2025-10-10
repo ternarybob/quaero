@@ -26,7 +26,7 @@
                     <p class="card-header-title">Document Statistics</p>
                     <div class="card-header-icon">
                         <button class="button is-info is-small is-outlined" onclick="loadStats()">
-                            <span class="icon"><i class="fas fa-sync-alt"></i></span>
+                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                         </button>
                     </div>
                 </header>
@@ -279,7 +279,7 @@
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                         <td class="has-text-centered">
                             <button class="button is-small is-info is-outlined" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
-                                <span class="icon"><i class="fas fa-sync-alt"></i></span>
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                             </button>
                             <button class="button is-small is-danger is-outlined" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
