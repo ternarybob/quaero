@@ -24,7 +24,7 @@
             <div class="card mt-5">
                 <header class="card-header">
                     <p class="card-header-title">
-                        <span id="selection-count">0/0</span> Projects
+                        <span id="selection-count" class="has-text-grey">0/0</span> Projects
                     </p>
                     <div class="card-header-icon">
                         <div class="buttons">
@@ -75,9 +75,10 @@
             <!-- Issues Table Section -->
             <div class="card mt-5" id="issues-section">
                 <header class="card-header">
-                    <p class="card-header-title">Issues</p>
+                    <p class="card-header-title">
+                        <span id="issues-count" class="has-text-grey">0</span> Issues
+                    </p>
                     <div class="card-header-icon">
-                        <span id="issues-count" class="tag is-info">0 issues</span>
                         <div id="issues-loader" class="loader is-hidden ml-2"></div>
                     </div>
                 </header>
@@ -464,7 +465,7 @@
                             </td>
                         </tr>
                     `;
-                    document.getElementById('issues-count').textContent = '0 issues';
+                    document.getElementById('issues-count').textContent = '0';
                 } else {
                     window.showNotification('Failed to clear data', 'error');
                 }
@@ -610,7 +611,7 @@
                         </td>
                     </tr>
                 `;
-                issuesCount.textContent = '0 issues';
+                issuesCount.textContent = '0';
                 return;
             }
 
@@ -645,7 +646,7 @@
                         </td>
                     </tr>
                 `;
-                issuesCount.textContent = '0 issues';
+                issuesCount.textContent = '0';
                 _clearIssueDetail();
                 return;
             }
@@ -671,7 +672,7 @@
                 `;
             }).join('');
 
-            issuesCount.textContent = `${issues.length} issue${issues.length !== 1 ? 's' : ''}`;
+            issuesCount.textContent = `${issues.length}`;
 
             const urlIssueKey = _getIssueFromUrl();
             if (urlIssueKey) {
