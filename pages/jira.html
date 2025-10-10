@@ -23,16 +23,17 @@
             <!-- Project Management Section -->
             <div class="card mt-5">
                 <header class="card-header">
-                    <p class="card-header-title">Projects</p>
+                    <p class="card-header-title">
+                        <span id="selection-count">0/0</span> Projects
+                    </p>
                     <div class="card-header-icon">
-                        <span id="selection-count" class="tag is-info">0/0</span>
-                        <div class="buttons ml-2">
-                            <button id="sync-btn" class="button is-info is-small is-outlined" onclick="syncProjects()" title="Refresh Projects">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                            </button>
+                        <div class="buttons">
                             <button id="get-projects-btn" class="button is-primary is-small is-outlined" onclick="syncProjects()">Get Projects</button>
                             <button id="get-issues-menu-btn" class="button is-primary is-small is-outlined" onclick="getIssues()" disabled>Get Issues</button>
                             <button id="clear-data-btn" class="button is-danger is-small is-outlined" onclick="clearAllData()">Clear Jira Data</button>
+                            <button id="sync-btn" class="button is-info is-small is-outlined" onclick="syncProjects()" title="Refresh Projects">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
                         </div>
                     </div>
                 </header>
@@ -363,6 +364,9 @@
                 if (syncBtn) {
                     syncBtn.disabled = false;
                     syncBtn.classList.remove('is-loading');
+                    // Restore icon visibility
+                    const icon = syncBtn.querySelector('.icon');
+                    if (icon) icon.style.display = '';
                 }
                 if (getProjectsBtn) {
                     getProjectsBtn.disabled = false;
@@ -370,10 +374,13 @@
                 }
             };
 
-            // Disable both buttons
+            // Disable both buttons and show loading state
             if (syncBtn) {
                 syncBtn.disabled = true;
                 syncBtn.classList.add('is-loading');
+                // Hide icon when loading (Bulma spinner will show)
+                const icon = syncBtn.querySelector('.icon');
+                if (icon) icon.style.display = 'none';
             }
             if (getProjectsBtn) {
                 getProjectsBtn.disabled = true;
