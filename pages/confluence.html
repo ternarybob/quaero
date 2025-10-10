@@ -34,9 +34,10 @@
                         </p>
                         <div class="card-header-icon">
                             <div class="buttons">
-                                <button id="get-pages-menu-btn" class="button is-primary is-small is-outlined" onclick="getPages()" disabled>GET Pages</button>
+                                <button id="get-spaces-btn" class="button is-primary is-small is-outlined" onclick="syncSpaces()">Get Spaces</button>
+                                <button id="get-pages-menu-btn" class="button is-primary is-small is-outlined" onclick="getPages()" disabled>Get Pages</button>
                                 <button id="clear-data-btn" class="button is-danger is-small is-outlined" onclick="clearAllData()">Clear Confluence Data</button>
-                                <button id="sync-btn" class="button is-small is-outlined" onclick="syncSpaces()" title="Refresh Spaces">
+                                <button id="sync-btn" class="button is-small is-outlined" onclick="loadSpaces()" title="Refresh Spaces">
                                     <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                                 </button>
                             </div>
