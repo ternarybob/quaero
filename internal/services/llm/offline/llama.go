@@ -50,6 +50,11 @@ type llamaServerEmbeddingResponse struct {
 	Embedding []float32 `json:"embedding"`
 }
 
+type llamaServerBatchEmbeddingResponse struct {
+	Index     int         `json:"index"`
+	Embedding [][]float32 `json:"embedding"` // Nested array format
+}
+
 // NewOfflineLLMService creates a new offline LLM service instance
 // Returns error if llama-cli binary not found or models missing
 func NewOfflineLLMService(
@@ -361,23 +366,36 @@ func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, 
 
 	var embedding []float32
 
-	// Try parsing as object first
+	// Try parsing as object first: {"embedding": [...]}
 	var objResponse llamaServerEmbeddingResponse
 	if err := json.Unmarshal(bodyBytes, &objResponse); err == nil && len(objResponse.Embedding) > 0 {
 		embedding = objResponse.Embedding
 	} else {
-		// Try parsing as array directly
-		if err := json.Unmarshal(bodyBytes, &embedding); err != nil {
-			// Preview first 200 bytes of response for debugging
-			previewLen := 200
-			if len(bodyBytes) < previewLen {
-				previewLen = len(bodyBytes)
+		// Try parsing as array directly: [...]
+		if err := json.Unmarshal(bodyBytes, &embedding); err == nil && len(embedding) > 0 {
+			// Successfully parsed as flat array
+		} else {
+			// Try parsing as batch response: [{"index":0,"embedding":[[...]]}]
+			var batchResponse []llamaServerBatchEmbeddingResponse
+			if err := json.Unmarshal(bodyBytes, &batchResponse); err == nil && len(batchResponse) > 0 {
+				// Extract first embedding from batch (flatten nested array)
+				if len(batchResponse[0].Embedding) > 0 && len(batchResponse[0].Embedding[0]) > 0 {
+					embedding = batchResponse[0].Embedding[0]
+				} else {
+					return nil, fmt.Errorf("batch embedding response has empty embedding array")
+				}
+			} else {
+				// Preview first 200 bytes of response for debugging
+				previewLen := 200
+				if len(bodyBytes) < previewLen {
+					previewLen = len(bodyBytes)
+				}
+				s.logger.Error().
+					Err(err).
+					Str("response_preview", string(bodyBytes[:previewLen])).
+					Msg("Failed to parse embedding response in any known format")
+				return nil, fmt.Errorf("failed to parse embedding JSON: %w", err)
 			}
-			s.logger.Error().
-				Err(err).
-				Str("response_preview", string(bodyBytes[:previewLen])).
-				Msg("Failed to parse embedding response as object or array")
-			return nil, fmt.Errorf("failed to parse embedding JSON: %w", err)
 		}
 	}
 
