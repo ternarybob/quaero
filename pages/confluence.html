@@ -424,7 +424,7 @@
 
                 const clearBtn = document.getElementById('clear-data-btn');
                 clearBtn.disabled = true;
-                clearBtn.textContent = 'CLEARING...';
+                clearBtn.classList.add('is-loading');
 
                 try {
                     const response = await fetch('/api/data/clear-all', {
@@ -458,7 +458,7 @@
                     showNotification('Failed to clear data', 'error');
                 } finally {
                     clearBtn.disabled = false;
-                    clearBtn.textContent = 'CLEAR ALL DATA';
+                    clearBtn.classList.remove('is-loading');
                 }
             }
 
@@ -477,7 +477,7 @@
                 const tbody = document.getElementById('pages-table-body');
 
                 getPagesBtn.disabled = true;
-                getPagesBtn.innerHTML = '<span>FETCHING...</span>';
+                getPagesBtn.classList.add('is-loading');
                 pagesLoader.classList.remove('is-hidden');
 
                 tbody.innerHTML = `
@@ -531,7 +531,7 @@
                 } finally {
                     setTimeout(() => {
                         getPagesBtn.disabled = false;
-                        getPagesBtn.textContent = 'GET PAGES';
+                        getPagesBtn.classList.remove('is-loading');
                         updateButtonStates();
                     }, 2000);
                 }

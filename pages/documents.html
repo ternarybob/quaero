@@ -175,7 +175,14 @@
         const pageSize = 100;
 
         // Load document statistics
-        async function loadStats() {
+        async function loadStats(button) {
+            const statsBtn = button || event?.target?.closest('button');
+
+            if (statsBtn) {
+                statsBtn.disabled = true;
+                statsBtn.classList.add('is-loading');
+            }
+
             try {
                 const response = await fetch('/api/documents/stats');
                 if (!response.ok) {
@@ -195,6 +202,11 @@
                 document.getElementById('stat-vectorized').textContent = 'Error';
                 document.getElementById('stat-jira').textContent = 'Error';
                 document.getElementById('stat-confluence').textContent = 'Error';
+            } finally {
+                if (statsBtn) {
+                    statsBtn.disabled = false;
+                    statsBtn.classList.remove('is-loading');
+                }
             }
         }
 
@@ -373,6 +385,13 @@
                 return;
             }
 
+            const button = event?.target?.closest('button');
+
+            if (button) {
+                button.disabled = true;
+                button.classList.add('is-loading');
+            }
+
             try {
                 const response = await fetch(`/api/documents/${docId}/reprocess`, {
                     method: 'POST'
@@ -390,6 +409,11 @@
             } catch (error) {
                 console.error('Error reprocessing document:', error);
                 alert('Failed to reprocess document: ' + error.message);
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.classList.remove('is-loading');
+                }
             }
         }
 
@@ -397,6 +421,13 @@
         async function clearEmbedding(docId) {
             if (!confirm(`Clear embedding for document ${docId}?\n\nThe document will need to be reprocessed.`)) {
                 return;
+            }
+
+            const button = event?.target?.closest('button');
+
+            if (button) {
+                button.disabled = true;
+                button.classList.add('is-loading');
             }
 
             try {
@@ -416,6 +447,11 @@
             } catch (error) {
                 console.error('Error clearing embedding:', error);
                 alert('Failed to clear embedding: ' + error.message);
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.classList.remove('is-loading');
+                }
             }
         }
 
