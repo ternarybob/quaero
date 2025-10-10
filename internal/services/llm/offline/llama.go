@@ -349,24 +349,47 @@ func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, 
 	}
 
 	// Parse JSON response
-	// llama-server /embedding endpoint returns an object with "embedding" field
-	var response llamaServerEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	// Try to parse as object first {"embedding": [...]}
+	// If that fails, try parsing as array directly [...]
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
 		s.logger.Error().
 			Err(err).
-			Msg("Failed to parse embedding response")
-		return nil, fmt.Errorf("failed to parse embedding JSON: %w", err)
+			Msg("Failed to read embedding response body")
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	if len(response.Embedding) == 0 {
+	var embedding []float32
+
+	// Try parsing as object first
+	var objResponse llamaServerEmbeddingResponse
+	if err := json.Unmarshal(bodyBytes, &objResponse); err == nil && len(objResponse.Embedding) > 0 {
+		embedding = objResponse.Embedding
+	} else {
+		// Try parsing as array directly
+		if err := json.Unmarshal(bodyBytes, &embedding); err != nil {
+			// Preview first 200 bytes of response for debugging
+			previewLen := 200
+			if len(bodyBytes) < previewLen {
+				previewLen = len(bodyBytes)
+			}
+			s.logger.Error().
+				Err(err).
+				Str("response_preview", string(bodyBytes[:previewLen])).
+				Msg("Failed to parse embedding response as object or array")
+			return nil, fmt.Errorf("failed to parse embedding JSON: %w", err)
+		}
+	}
+
+	if len(embedding) == 0 {
 		return nil, fmt.Errorf("embedding vector is empty")
 	}
 
 	s.logger.Debug().
-		Int("dimension", len(response.Embedding)).
+		Int("dimension", len(embedding)).
 		Msg("Embedding generated successfully")
 
-	return response.Embedding, nil
+	return embedding, nil
 }
 
 // Chat generates a completion response based on conversation history
