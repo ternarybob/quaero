@@ -3,9 +3,11 @@
     <div class="card" x-data="parserStatus">
       <header class="card-header">
         <p class="card-header-title">Parser Status</p>
-        <button class="card-header-icon" aria-label="refresh" @click="refresh()" title="Refresh">
-          <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-        </button>
+        <div class="card-header-icon">
+          <button class="button is-small is-outlined" aria-label="refresh" @click="refresh()" title="Refresh">
+            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+          </button>
+        </div>
       </header>
       <div class="card-content">
         <div class="table-container">
@@ -60,9 +62,11 @@
     <div class="card" x-data="authDetails">
       <header class="card-header">
         <p class="card-header-title">Authentication Details</p>
-        <button class="card-header-icon" aria-label="refresh" @click="refresh()" title="Refresh">
-          <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-        </button>
+        <div class="card-header-icon">
+          <button class="button is-small is-outlined" aria-label="refresh" @click="refresh()" title="Refresh">
+            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+          </button>
+        </div>
       </header>
       <div class="card-content">
         <div class="table-container">
