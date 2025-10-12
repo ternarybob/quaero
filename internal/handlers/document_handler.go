@@ -76,9 +76,18 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get total count for pagination
+	totalCount, err := h.documentService.Count(ctx, sourceType)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get document count")
+		// Fallback to returned document count if total count fails
+		totalCount = len(documents)
+	}
+
 	response := map[string]interface{}{
 		"documents": documents,
-		"count":     len(documents),
+		"count":     len(documents), // Number of documents in current response
+		"total":     totalCount,     // Total number of documents in database
 	}
 
 	w.Header().Set("Content-Type", "application/json")

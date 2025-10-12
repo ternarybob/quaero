@@ -172,6 +172,7 @@
         let filteredDocuments = [];
         let selectedDocument = null;
         let currentPage = 1;
+        let totalDocuments = 0; // Total documents from API
         const pageSize = 100;
 
         // Load document statistics
@@ -229,6 +230,7 @@
 
                 const data = await response.json();
                 allDocuments = data.documents || [];
+                totalDocuments = data.total || allDocuments.length; // Use API total, fallback to count
                 filteredDocuments = [...allDocuments];
 
                 renderDocuments();
@@ -295,7 +297,7 @@
             const endIndex = Math.min(startIndex + pageSize, totalDocuments);
             const pageDocuments = filteredDocuments.slice(startIndex, endIndex);
 
-            // Update count display
+            // Update count display - show API total count
             countElement.textContent = `${totalDocuments}`;
 
             // Update pagination controls
