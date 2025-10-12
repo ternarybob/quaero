@@ -281,8 +281,8 @@
         function renderDocuments() {
             const tbody = document.getElementById('documents-table-body');
             const countElement = document.getElementById('document-count');
-            const totalDocuments = filteredDocuments.length;
-            const totalPages = Math.max(1, Math.ceil(totalDocuments / pageSize));
+            const filteredCount = filteredDocuments.length;
+            const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
 
             // Ensure currentPage is within valid range
             if (currentPage > totalPages) {
@@ -294,10 +294,10 @@
 
             // Calculate pagination
             const startIndex = (currentPage - 1) * pageSize;
-            const endIndex = Math.min(startIndex + pageSize, totalDocuments);
+            const endIndex = Math.min(startIndex + pageSize, filteredCount);
             const pageDocuments = filteredDocuments.slice(startIndex, endIndex);
 
-            // Update count display - show API total count
+            // Update count display - show API total count (not filtered count)
             countElement.textContent = `${totalDocuments}`;
 
             // Update pagination controls
