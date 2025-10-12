@@ -77,4 +77,7 @@ type ChatService interface {
 
 	// HealthCheck verifies the chat service is operational
 	HealthCheck(ctx context.Context) error
+
+	// GetServiceStatus returns detailed service status information
+	GetServiceStatus(ctx context.Context) map[string]interface{}
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 	"unsafe"
 
@@ -276,11 +277,163 @@ func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Doc
 	return d.scanDocuments(rows)
 }
 
-// VectorSearch performs vector similarity search
+// VectorSearch performs vector similarity search using cosine similarity
 func (d *DocumentStorage) VectorSearch(embedding []float32, limit int) ([]*models.Document, error) {
-	// TODO: Implement with sqlite-vec when available
-	// For now, return error indicating not implemented
-	return nil, fmt.Errorf("vector search not yet implemented - requires sqlite-vec extension")
+	// Get all documents with embeddings
+	query := `
+		SELECT id, source_type, source_id, title, content, content_markdown,
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
+		FROM documents
+		WHERE embedding IS NOT NULL AND embedding != ''
+	`
+
+	rows, err := d.db.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query documents: %w", err)
+	}
+	defer rows.Close()
+
+	// Scan all documents and calculate similarity scores
+	type docWithScore struct {
+		doc   *models.Document
+		score float32
+	}
+
+	docsWithScores := make([]docWithScore, 0)
+
+	for rows.Next() {
+		var doc models.Document
+		var embeddingData []byte
+		var metadataJSON string
+		var createdAt, updatedAt int64
+		var lastSynced sql.NullInt64
+		var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
+		var forceSyncPending, forceEmbedPending sql.NullBool
+
+		err := rows.Scan(
+			&doc.ID,
+			&doc.SourceType,
+			&doc.SourceID,
+			&doc.Title,
+			&doc.Content,
+			&contentMarkdown,
+			&embeddingData,
+			&embeddingModel,
+			&metadataJSON,
+			&url,
+			&createdAt,
+			&updatedAt,
+			&lastSynced,
+			&sourceVersion,
+			&forceSyncPending,
+			&forceEmbedPending,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan document: %w", err)
+		}
+
+		// Parse optional fields
+		if contentMarkdown.Valid {
+			doc.ContentMarkdown = contentMarkdown.String
+		}
+		if embeddingModel.Valid {
+			doc.EmbeddingModel = embeddingModel.String
+		}
+		if url.Valid {
+			doc.URL = url.String
+		}
+		if sourceVersion.Valid {
+			doc.SourceVersion = sourceVersion.String
+		}
+		if forceSyncPending.Valid {
+			doc.ForceSyncPending = forceSyncPending.Bool
+		}
+		if forceEmbedPending.Valid {
+			doc.ForceEmbedPending = forceEmbedPending.Bool
+		}
+		if lastSynced.Valid {
+			t := time.Unix(lastSynced.Int64, 0)
+			doc.LastSynced = &t
+		}
+
+		// Deserialize embedding
+		if len(embeddingData) > 0 {
+			doc.Embedding, err = deserializeEmbedding(embeddingData)
+			if err != nil {
+				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to deserialize embedding")
+				continue
+			}
+		} else {
+			continue
+		}
+
+		// Parse metadata
+		if metadataJSON != "" {
+			if err := json.Unmarshal([]byte(metadataJSON), &doc.Metadata); err != nil {
+				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to unmarshal metadata")
+				doc.Metadata = make(map[string]interface{})
+			}
+		} else {
+			doc.Metadata = make(map[string]interface{})
+		}
+
+		doc.CreatedAt = time.Unix(createdAt, 0)
+		doc.UpdatedAt = time.Unix(updatedAt, 0)
+
+		// Calculate cosine similarity
+		similarity := cosineSimilarity(embedding, doc.Embedding)
+
+		docsWithScores = append(docsWithScores, docWithScore{
+			doc:   &doc,
+			score: similarity,
+		})
+	}
+
+	// Sort by similarity score (descending)
+	for i := 0; i < len(docsWithScores); i++ {
+		for j := i + 1; j < len(docsWithScores); j++ {
+			if docsWithScores[j].score > docsWithScores[i].score {
+				docsWithScores[i], docsWithScores[j] = docsWithScores[j], docsWithScores[i]
+			}
+		}
+	}
+
+	// Return top N documents
+	results := make([]*models.Document, 0, limit)
+	for i := 0; i < len(docsWithScores) && i < limit; i++ {
+		results = append(results, docsWithScores[i].doc)
+	}
+
+	return results, nil
+}
+
+// cosineSimilarity calculates the cosine similarity between two vectors
+func cosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) {
+		return 0
+	}
+
+	var dotProduct float32
+	var normA float32
+	var normB float32
+
+	for i := 0; i < len(a); i++ {
+		dotProduct += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	// Calculate magnitudes using sqrt
+	magnitudeA := float32(math.Sqrt(float64(normA)))
+	magnitudeB := float32(math.Sqrt(float64(normB)))
+
+	// Return cosine similarity
+	return dotProduct / (magnitudeA * magnitudeB)
 }
 
 // HybridSearch combines keyword and vector search

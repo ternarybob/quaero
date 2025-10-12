@@ -34,7 +34,7 @@
                         <div class="field is-grouped">
                             <div class="control is-expanded">
                                 <label class="checkbox">
-                                    <input type="checkbox" id="rag-enabled">
+                                    <input type="checkbox" id="rag-enabled" checked>
                                     Enable RAG (Document Retrieval) - Requires embedding support
                                 </label>
                             </div>
@@ -53,7 +53,15 @@
                         </div>
 
                         <!-- Status -->
-                        <div id="status" class="mt-3 has-text-grey"></div>
+                        <div class="mt-3">
+                            <div id="status" class="has-text-grey mb-2"></div>
+                            <div id="live-status" class="has-text-grey-light is-size-7">
+                                <span class="icon-text">
+                                    <span class="icon"><i class="fas fa-circle-notch fa-spin"></i></span>
+                                    <span>Checking service status...</span>
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -84,10 +92,12 @@ function addMessage(role, content) {
 
     const roleSpan = document.createElement('strong');
     roleSpan.textContent = role === 'user' ? 'You: ' : 'Assistant: ';
+    roleSpan.style.color = '#ffffff';
 
     const contentSpan = document.createElement('span');
     contentSpan.textContent = content;
     contentSpan.style.whiteSpace = 'pre-wrap';
+    contentSpan.style.color = '#e0e0e0';
 
     messageDiv.appendChild(roleSpan);
     messageDiv.appendChild(contentSpan);
@@ -117,20 +127,31 @@ async function sendMessage() {
     statusDiv.textContent = 'Thinking...';
 
     try {
+        const requestBody = {
+            message: message,
+            history: conversationHistory.slice(0, -1),
+            rag_config: {
+                enabled: ragEnabled.checked,
+                max_documents: 5,
+                min_similarity: 0.7,
+                search_mode: 'vector'
+            }
+        };
+        console.log('[Chat] Sending request:', JSON.stringify(requestBody, null, 2));
+        console.log('[Chat] RAG checkbox checked:', ragEnabled.checked);
+
+        // Create AbortController for timeout handling
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout (2 minutes)
+
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: message,
-                history: conversationHistory.slice(0, -1),
-                rag_config: {
-                    enabled: ragEnabled.checked,
-                    max_documents: 5,
-                    min_similarity: 0.7,
-                    search_mode: 'vector'
-                }
-            })
+            body: JSON.stringify(requestBody),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         const data = await response.json();
 
@@ -147,8 +168,13 @@ async function sendMessage() {
             statusDiv.textContent = 'Error occurred';
         }
     } catch (error) {
-        showNotification('Failed to send message: ' + error.message, 'error');
-        statusDiv.textContent = 'Connection error';
+        if (error.name === 'AbortError') {
+            showNotification('Request timed out after 2 minutes. The LLM may need more time to process your request.', 'error');
+            statusDiv.textContent = 'Request timed out';
+        } else {
+            showNotification('Failed to send message: ' + error.message, 'error');
+            statusDiv.textContent = 'Connection error';
+        }
     } finally {
         sendBtn.disabled = false;
     }
@@ -162,6 +188,17 @@ function clearChat() {
     showNotification('Chat cleared', 'info');
 }
 
+// Load saved RAG preference from localStorage
+const savedRagEnabled = localStorage.getItem('rag-enabled');
+if (savedRagEnabled !== null) {
+    ragEnabled.checked = savedRagEnabled === 'true';
+}
+
+// Save RAG preference when changed
+ragEnabled.addEventListener('change', () => {
+    localStorage.setItem('rag-enabled', ragEnabled.checked);
+});
+
 // Event listeners
 sendBtn.addEventListener('click', sendMessage);
 clearBtn.addEventListener('click', clearChat);
@@ -173,21 +210,85 @@ userMessageInput.addEventListener('keydown', (e) => {
     }
 });
 
-// Check service health on load
-fetch('/api/chat/health')
-    .then(r => r.json())
-    .then(data => {
-        if (data.healthy) {
-            statusDiv.textContent = `Chat service ready (${data.mode} mode)`;
-        } else {
-            showNotification('Chat service unhealthy: ' + data.error, 'error');
-            statusDiv.textContent = 'Service unavailable';
-        }
-    })
-    .catch(err => {
-        showNotification('Failed to check service health', 'error');
-        statusDiv.textContent = 'Connection error';
-    });
+// Live status monitoring
+const liveStatusDiv = document.getElementById('live-status');
+let lastHealthCheck = null;
+
+function updateLiveStatus() {
+    fetch('/api/chat/health')
+        .then(r => r.json())
+        .then(data => {
+            lastHealthCheck = data;
+
+            // Build status HTML with visual indicators
+            let statusHTML = '<span class="icon-text is-flex-wrap-wrap">';
+
+            // Mode indicator
+            statusHTML += `<span class="mr-3"><strong>Mode:</strong> ${data.mode}</span>`;
+
+            // For offline mode, show server statuses
+            if (data.mode === 'offline') {
+                // Embed server status
+                const embedActive = data.embed_server === 'active';
+                const embedColor = embedActive ? 'has-text-success' : 'has-text-danger';
+                const embedIcon = embedActive ? 'fa-circle' : 'fa-circle';
+                statusHTML += `<span class="icon-text mr-3">
+                    <span class="icon ${embedColor}"><i class="fas ${embedIcon}"></i></span>
+                    <span><strong>Embed:</strong> ${data.embed_server}</span>
+                </span>`;
+
+                // Chat server status
+                const chatActive = data.chat_server === 'active';
+                const chatColor = chatActive ? 'has-text-success' : 'has-text-danger';
+                const chatIcon = chatActive ? 'fa-circle' : 'fa-circle';
+                statusHTML += `<span class="icon-text mr-3">
+                    <span class="icon ${chatColor}"><i class="fas ${chatIcon}"></i></span>
+                    <span><strong>Chat:</strong> ${data.chat_server}</span>
+                </span>`;
+
+                // Model loaded indicator
+                const modelColor = data.model_loaded ? 'has-text-success' : 'has-text-warning';
+                const modelIcon = data.model_loaded ? 'fa-check-circle' : 'fa-exclamation-triangle';
+                statusHTML += `<span class="icon-text">
+                    <span class="icon ${modelColor}"><i class="fas ${modelIcon}"></i></span>
+                    <span><strong>Models:</strong> ${data.model_loaded ? 'loaded' : 'not loaded'}</span>
+                </span>`;
+            } else {
+                // For mock/online mode, just show health
+                const healthColor = data.healthy ? 'has-text-success' : 'has-text-danger';
+                const healthIcon = data.healthy ? 'fa-check-circle' : 'fa-times-circle';
+                statusHTML += `<span class="icon-text">
+                    <span class="icon ${healthColor}"><i class="fas ${healthIcon}"></i></span>
+                    <span><strong>Status:</strong> ${data.healthy ? 'healthy' : 'unhealthy'}</span>
+                </span>`;
+            }
+
+            statusHTML += '</span>';
+            liveStatusDiv.innerHTML = statusHTML;
+
+            // Update main status if not showing message response
+            if (!statusDiv.textContent || statusDiv.textContent === 'Checking service status...' || statusDiv.textContent.includes('service ready')) {
+                if (data.healthy) {
+                    statusDiv.textContent = `Chat service ready (${data.mode} mode)`;
+                } else {
+                    statusDiv.textContent = 'Service unavailable';
+                }
+            }
+        })
+        .catch(err => {
+            liveStatusDiv.innerHTML = `<span class="icon-text">
+                <span class="icon has-text-danger"><i class="fas fa-times-circle"></i></span>
+                <span>Connection error - retrying...</span>
+            </span>`;
+            console.error('Health check failed:', err);
+        });
+}
+
+// Initial health check
+updateLiveStatus();
+
+// Poll health endpoint every 30 seconds (personal service - no need for frequent checks)
+setInterval(updateLiveStatus, 30000);
     </script>
 </body>
 </html>

@@ -3,7 +3,9 @@ package chat
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -99,11 +101,16 @@ func (s *ChatService) retrieveContext(
 	query string,
 	config *interfaces.RAGConfig,
 ) ([]*models.Document, error) {
+	s.logger.Debug().Msg("Starting RAG context retrieval")
+
 	// Generate query embedding
+	s.logger.Debug().Msg("Generating query embedding")
 	embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query)
 	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to generate query embedding for RAG")
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
+	s.logger.Debug().Int("embedding_dim", len(embedding)).Msg("Query embedding generated")
 
 	// Build search query
 	searchQuery := &interfaces.SearchQuery{
@@ -235,4 +242,67 @@ func truncateContent(content string, maxLength int) string {
 		return content
 	}
 	return content[:maxLength] + "..."
+}
+
+// GetServiceStatus returns detailed service status information
+// This includes LLM server states, model loading status, and health check time
+// Note: Does NOT perform health checks - caller should do that separately to avoid redundant checks
+func (s *ChatService) GetServiceStatus(ctx context.Context) map[string]interface{} {
+	status := make(map[string]interface{})
+
+	// Get LLM mode
+	mode := string(s.llmService.GetMode())
+	status["mode"] = mode
+
+	// Get embedding model name
+	status["embedding_model"] = s.embeddingService.ModelName()
+
+	// Default values for mock mode
+	status["embed_server"] = "N/A (mock mode)"
+	status["chat_server"] = "N/A (mock mode)"
+	status["model_loaded"] = true
+	status["last_check_time"] = "N/A"
+
+	// For offline mode, check if servers are running
+	if mode == "offline" {
+		// Check embed server (port 8086)
+		embedStatus := checkServerHealth("http://127.0.0.1:8086/health")
+		if embedStatus {
+			status["embed_server"] = "active"
+		} else {
+			status["embed_server"] = "inactive"
+		}
+
+		// Check chat server (port 8087)
+		chatStatus := checkServerHealth("http://127.0.0.1:8087/health")
+		if chatStatus {
+			status["chat_server"] = "active"
+		} else {
+			status["chat_server"] = "inactive"
+		}
+
+		status["model_loaded"] = embedStatus && chatStatus
+	}
+
+	return status
+}
+
+// checkServerHealth checks if a server is responding
+func checkServerHealth(url string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return false
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
 }

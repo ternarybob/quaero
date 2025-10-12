@@ -55,9 +55,16 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hasHistory := len(req.History) > 0
+	ragConfigPresent := req.RAGConfig != nil
+	ragEnabled := false
+	if req.RAGConfig != nil {
+		ragEnabled = req.RAGConfig.Enabled
+	}
 	h.logger.Info().
 		Int("message_length", len(req.Message)).
 		Str("has_history", fmt.Sprintf("%v", hasHistory)).
+		Str("rag_config_present", fmt.Sprintf("%v", ragConfigPresent)).
+		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
 		Msg("Processing chat request")
 
 	ctx := context.Background()
@@ -85,6 +92,7 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // HealthHandler handles GET /api/chat/health requests
+// Returns detailed service status including LLM mode and server states
 func (h *ChatHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -92,24 +100,32 @@ func (h *ChatHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := context.Background()
+
+	// Perform single health check
 	err := h.chatService.HealthCheck(ctx)
+	healthy := err == nil
+
+	// Get detailed status (does NOT perform additional health checks)
+	status := h.chatService.GetServiceStatus(ctx)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	if err != nil {
-		h.logger.Warn().Err(err).Msg("Chat service health check failed")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"healthy": false,
-			"mode":    h.chatService.GetMode(),
-			"error":   err.Error(),
-		})
-		return
+	// Build response
+	response := map[string]interface{}{
+		"healthy":      healthy,
+		"mode":         status["mode"],
+		"embed_server": status["embed_server"],
+		"chat_server":  status["chat_server"],
+		"model_loaded": status["model_loaded"],
 	}
 
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"healthy": true,
-		"mode":    h.chatService.GetMode(),
-	})
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("Chat service health check failed")
+		response["error"] = err.Error()
+		w.WriteHeader(http.StatusServiceUnavailable)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	json.NewEncoder(w).Encode(response)
 }

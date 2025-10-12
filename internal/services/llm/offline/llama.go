@@ -25,18 +25,20 @@ import (
 
 // OfflineLLMService provides local LLM operations using llama binaries
 // SECURITY: Guarantees 100% local operation with NO external network calls
-// Uses llama-server for embeddings (localhost HTTP) and llama-cli for chat
+// Uses llama-server for both embeddings and chat (localhost HTTP)
 type OfflineLLMService struct {
 	modelManager     *ModelManager
 	contextSize      int
 	threadCount      int
 	gpuLayers        int
 	logger           arbor.ILogger
-	llamaCLIPath     string
 	llamaServerPath  string
 	embedServerCmd   *exec.Cmd
 	embedServerURL   string
 	embedServerReady bool
+	chatServerCmd    *exec.Cmd
+	chatServerURL    string
+	chatServerReady  bool
 	mockMode         bool
 }
 
@@ -55,8 +57,31 @@ type llamaServerBatchEmbeddingResponse struct {
 	Embedding [][]float32 `json:"embedding"` // Nested array format
 }
 
+// llamaServerChatRequest represents chat request to llama-server
+type llamaServerChatRequest struct {
+	Messages    []llamaServerMessage `json:"messages"`
+	Temperature float32              `json:"temperature,omitempty"`
+	MaxTokens   int                  `json:"max_tokens,omitempty"`
+	Stream      bool                 `json:"stream"`
+}
+
+// llamaServerMessage represents a single message in chat request
+type llamaServerMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// llamaServerChatResponse represents chat response from llama-server
+type llamaServerChatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
 // NewOfflineLLMService creates a new offline LLM service instance
-// Returns error if llama-cli binary not found or models missing
+// Returns error if llama-server binary not found or models missing
 func NewOfflineLLMService(
 	llamaDir string,
 	modelDir string,
@@ -67,22 +92,15 @@ func NewOfflineLLMService(
 	gpuLayers int,
 	logger arbor.ILogger,
 ) (*OfflineLLMService, error) {
-	// Find llama-cli binary (for chat)
-	llamaCLIPath, err := findLlamaBinary(llamaDir, "llama-cli", logger)
-	if err != nil {
-		return nil, fmt.Errorf("llama-cli binary not found: %w", err)
-	}
-
-	// Find llama-server binary (for embeddings)
+	// Find llama-server binary (for both embeddings and chat)
 	llamaServerPath, err := findLlamaBinary(llamaDir, "llama-server", logger)
 	if err != nil {
 		return nil, fmt.Errorf("llama-server binary not found: %w", err)
 	}
 
 	logger.Info().
-		Str("cli_path", llamaCLIPath).
 		Str("server_path", llamaServerPath).
-		Msg("Found llama binaries")
+		Msg("Found llama-server binary")
 
 	// Create model manager
 	modelManager := NewModelManager(modelDir, embedModel, chatModel, logger)
@@ -98,16 +116,29 @@ func NewOfflineLLMService(
 		threadCount:      threadCount,
 		gpuLayers:        gpuLayers,
 		logger:           logger,
-		llamaCLIPath:     llamaCLIPath,
 		llamaServerPath:  llamaServerPath,
-		embedServerURL:   "http://127.0.0.1:8086", // Local-only, different from main server
+		embedServerURL:   "http://127.0.0.1:8086", // Local-only, for embeddings
 		embedServerReady: false,
+		chatServerURL:    "http://127.0.0.1:8087", // Local-only, for chat
+		chatServerReady:  false,
 		mockMode:         false,
+	}
+
+	// Clean up any orphaned llama-server processes from previous runs
+	logger.Info().Msg("Checking for orphaned llama-server processes")
+	if err := service.cleanupOrphanedProcesses(); err != nil {
+		logger.Warn().Err(err).Msg("Failed to cleanup orphaned processes (non-critical)")
 	}
 
 	// Start llama-server for embeddings
 	if err := service.startEmbeddingServer(); err != nil {
 		return nil, fmt.Errorf("failed to start embedding server: %w", err)
+	}
+
+	// Start llama-server for chat
+	if err := service.startChatServer(); err != nil {
+		service.stopEmbeddingServer() // Clean up embedding server on failure
+		return nil, fmt.Errorf("failed to start chat server: %w", err)
 	}
 
 	logger.Info().
@@ -116,13 +147,14 @@ func NewOfflineLLMService(
 		Int("threads", threadCount).
 		Int("gpu_layers", gpuLayers).
 		Str("embed_server_url", service.embedServerURL).
+		Str("chat_server_url", service.chatServerURL).
 		Msg("Offline LLM service initialized")
 
 	return service, nil
 }
 
 // NewMockOfflineLLMService creates an offline LLM service in mock mode for testing
-// This bypasses llama-cli binary and model file requirements
+// This bypasses llama-server binary and model file requirements
 func NewMockOfflineLLMService(logger arbor.ILogger) *OfflineLLMService {
 	service := &OfflineLLMService{
 		modelManager:     nil, // Not needed in mock mode
@@ -130,10 +162,11 @@ func NewMockOfflineLLMService(logger arbor.ILogger) *OfflineLLMService {
 		threadCount:      4,
 		gpuLayers:        0,
 		logger:           logger,
-		llamaCLIPath:     "",
 		llamaServerPath:  "",
 		embedServerURL:   "",
 		embedServerReady: false,
+		chatServerURL:    "",
+		chatServerReady:  false,
 		mockMode:         true,
 	}
 
@@ -261,32 +294,205 @@ func (s *OfflineLLMService) checkEmbeddingServerHealth() bool {
 }
 
 // stopEmbeddingServer stops the background embedding server
-func (s *OfflineLLMService) stopEmbeddingServer() {
-	if s.embedServerCmd != nil && s.embedServerCmd.Process != nil {
-		s.logger.Info().
-			Int("pid", s.embedServerCmd.Process.Pid).
-			Msg("Stopping embedding server")
-
-		// Try graceful shutdown first
-		s.embedServerCmd.Process.Signal(os.Interrupt)
-
-		// Wait up to 5 seconds for graceful shutdown
-		done := make(chan error, 1)
-		go func() {
-			done <- s.embedServerCmd.Wait()
-		}()
-
-		select {
-		case <-time.After(5 * time.Second):
-			// Force kill if not stopped
-			s.logger.Warn().Msg("Embedding server did not stop gracefully, forcing kill")
-			s.embedServerCmd.Process.Kill()
-		case <-done:
-			s.logger.Info().Msg("Embedding server stopped gracefully")
-		}
-
-		s.embedServerReady = false
+func (s *OfflineLLMService) stopEmbeddingServer() error {
+	if s.embedServerCmd == nil || s.embedServerCmd.Process == nil {
+		s.logger.Debug().Msg("Embedding server not running, nothing to stop")
+		return nil
 	}
+
+	pid := s.embedServerCmd.Process.Pid
+	s.logger.Info().
+		Int("pid", pid).
+		Msg("Stopping embedding server")
+
+	// Try graceful shutdown first
+	if err := s.embedServerCmd.Process.Signal(os.Interrupt); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Int("pid", pid).
+			Msg("Failed to send interrupt signal to embedding server")
+	}
+
+	// Wait up to 5 seconds for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		done <- s.embedServerCmd.Wait()
+	}()
+
+	var shutdownErr error
+	select {
+	case <-time.After(5 * time.Second):
+		// Force kill if not stopped
+		s.logger.Warn().
+			Int("pid", pid).
+			Msg("Embedding server did not stop gracefully, forcing kill")
+		if err := s.embedServerCmd.Process.Kill(); err != nil {
+			s.logger.Error().
+				Err(err).
+				Int("pid", pid).
+				Msg("Failed to force kill embedding server")
+			shutdownErr = fmt.Errorf("failed to kill embedding server (pid %d): %w", pid, err)
+		} else {
+			s.logger.Info().
+				Int("pid", pid).
+				Msg("Embedding server force-killed successfully")
+		}
+	case err := <-done:
+		if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Int("pid", pid).
+				Msg("Embedding server exited with error")
+			shutdownErr = fmt.Errorf("embedding server exit error (pid %d): %w", pid, err)
+		} else {
+			s.logger.Info().
+				Int("pid", pid).
+				Msg("Embedding server stopped gracefully")
+		}
+	}
+
+	s.embedServerReady = false
+	return shutdownErr
+}
+
+// startChatServer starts llama-server in chat mode
+// SECURITY: Server binds to 127.0.0.1 only - no external access possible
+func (s *OfflineLLMService) startChatServer() error {
+	s.logger.Info().
+		Str("model", s.modelManager.GetChatModelPath()).
+		Str("url", s.chatServerURL).
+		Msg("Starting chat server")
+
+	// Build command: llama-server -m <model> --host 127.0.0.1 --port 8087
+	args := []string{
+		"-m", s.modelManager.GetChatModelPath(),
+		"--host", "127.0.0.1", // SECURITY: localhost only
+		"--port", "8087",
+		"-c", strconv.Itoa(s.contextSize),
+		"-t", strconv.Itoa(s.threadCount),
+		"-ngl", strconv.Itoa(s.gpuLayers),
+		"--log-disable", // Disable server logs to reduce noise
+	}
+
+	// Create command
+	cmd := exec.Command(s.llamaServerPath, args...)
+
+	// Start server in background
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start chat server: %w", err)
+	}
+
+	s.chatServerCmd = cmd
+	s.logger.Info().
+		Int("pid", cmd.Process.Pid).
+		Msg("Chat server started, waiting for ready")
+
+	// Wait for server to be ready (with timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.stopChatServer()
+			return fmt.Errorf("chat server did not become ready within 60 seconds")
+		case <-ticker.C:
+			if s.checkChatServerHealth() {
+				s.chatServerReady = true
+				s.logger.Info().Msg("Chat server is ready")
+				return nil
+			}
+		}
+	}
+}
+
+// checkChatServerHealth checks if chat server is responding
+func (s *OfflineLLMService) checkChatServerHealth() bool {
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+		Transport: &http.Transport{
+			// SECURITY: Only allow connections to localhost
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if !strings.HasPrefix(addr, "127.0.0.1:") && !strings.HasPrefix(addr, "localhost:") {
+					return nil, fmt.Errorf("security violation: attempt to connect to non-localhost address: %s", addr)
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
+	}
+
+	resp, err := client.Get(s.chatServerURL + "/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
+}
+
+// stopChatServer stops the background chat server
+func (s *OfflineLLMService) stopChatServer() error {
+	if s.chatServerCmd == nil || s.chatServerCmd.Process == nil {
+		s.logger.Debug().Msg("Chat server not running, nothing to stop")
+		return nil
+	}
+
+	pid := s.chatServerCmd.Process.Pid
+	s.logger.Info().
+		Int("pid", pid).
+		Msg("Stopping chat server")
+
+	// Try graceful shutdown first
+	if err := s.chatServerCmd.Process.Signal(os.Interrupt); err != nil {
+		s.logger.Warn().
+			Err(err).
+			Int("pid", pid).
+			Msg("Failed to send interrupt signal to chat server")
+	}
+
+	// Wait up to 5 seconds for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		done <- s.chatServerCmd.Wait()
+	}()
+
+	var shutdownErr error
+	select {
+	case <-time.After(5 * time.Second):
+		// Force kill if not stopped
+		s.logger.Warn().
+			Int("pid", pid).
+			Msg("Chat server did not stop gracefully, forcing kill")
+		if err := s.chatServerCmd.Process.Kill(); err != nil {
+			s.logger.Error().
+				Err(err).
+				Int("pid", pid).
+				Msg("Failed to force kill chat server")
+			shutdownErr = fmt.Errorf("failed to kill chat server (pid %d): %w", pid, err)
+		} else {
+			s.logger.Info().
+				Int("pid", pid).
+				Msg("Chat server force-killed successfully")
+		}
+	case err := <-done:
+		if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Int("pid", pid).
+				Msg("Chat server exited with error")
+			shutdownErr = fmt.Errorf("chat server exit error (pid %d): %w", pid, err)
+		} else {
+			s.logger.Info().
+				Int("pid", pid).
+				Msg("Chat server stopped gracefully")
+		}
+	}
+
+	s.chatServerReady = false
+	return shutdownErr
 }
 
 // Embed generates a 768-dimension embedding vector for the given text
@@ -411,44 +617,104 @@ func (s *OfflineLLMService) Embed(ctx context.Context, text string) ([]float32, 
 }
 
 // Chat generates a completion response based on conversation history
-// SECURITY: Uses only local binary execution, no network calls
+// SECURITY: Uses llama-server on localhost:8087 ONLY - no external network access
 func (s *OfflineLLMService) Chat(ctx context.Context, messages []interfaces.Message) (string, error) {
 	if s.mockMode {
 		return s.generateMockResponse(messages), nil
+	}
+
+	if !s.chatServerReady {
+		return "", fmt.Errorf("chat server not ready")
 	}
 
 	s.logger.Debug().
 		Int("message_count", len(messages)).
 		Msg("Generating chat completion")
 
-	// Convert messages to Qwen 2.5 prompt format
-	prompt := s.formatPrompt(messages)
-
-	// Build command
-	args := []string{
-		"-m", s.modelManager.GetChatModelPath(),
-		"-p", prompt,
-		"-n", "2048", // Max tokens to generate
-		"-c", strconv.Itoa(s.contextSize),
-		"-t", strconv.Itoa(s.threadCount),
-		"-ngl", strconv.Itoa(s.gpuLayers),
-		"--no-display-prompt", // Don't echo the prompt
+	// Convert messages to llama-server format
+	llamaMessages := make([]llamaServerMessage, len(messages))
+	for i, msg := range messages {
+		llamaMessages[i] = llamaServerMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
 	}
 
-	// Create command with context
-	cmd := exec.CommandContext(ctx, s.llamaCLIPath, args...)
+	// Create request body
+	reqBody := llamaServerChatRequest{
+		Messages:    llamaMessages,
+		Temperature: 0.8,
+		MaxTokens:   2048,
+		Stream:      false,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
 
-	// Capture output
-	output, err := cmd.CombinedOutput()
+	// Create HTTP client with localhost-only transport
+	// SECURITY: Transport enforces localhost-only connections
+	client := &http.Client{
+		Timeout: 120 * time.Second, // Chat can take longer than embeddings
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// SECURITY: Reject any non-localhost connections
+				if !strings.HasPrefix(addr, "127.0.0.1:") && !strings.HasPrefix(addr, "localhost:") {
+					return nil, fmt.Errorf("security violation: attempt to connect to non-localhost address: %s", addr)
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		},
+	}
+
+	// Make request to local chat server
+	req, err := http.NewRequestWithContext(ctx, "POST", s.chatServerURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		s.logger.Error().
 			Err(err).
-			Str("output", string(output)).
 			Msg("Chat completion failed")
-		return "", fmt.Errorf("llama-cli execution failed: %w", err)
+		return "", fmt.Errorf("llama-server request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		s.logger.Error().
+			Int("status_code", resp.StatusCode).
+			Str("response", string(body)).
+			Msg("Chat server returned error")
+		return "", fmt.Errorf("llama-server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	response := s.extractResponse(string(output))
+	// Parse JSON response
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Msg("Failed to read chat response body")
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var chatResponse llamaServerChatResponse
+	if err := json.Unmarshal(bodyBytes, &chatResponse); err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("response", string(bodyBytes[:min(200, len(bodyBytes))])).
+			Msg("Failed to parse chat response")
+		return "", fmt.Errorf("failed to parse chat JSON: %w", err)
+	}
+
+	if len(chatResponse.Choices) == 0 {
+		return "", fmt.Errorf("no choices in chat response")
+	}
+
+	response := chatResponse.Choices[0].Message.Content
 
 	s.logger.Debug().
 		Int("response_length", len(response)).
@@ -457,63 +723,8 @@ func (s *OfflineLLMService) Chat(ctx context.Context, messages []interfaces.Mess
 	return response, nil
 }
 
-// formatPrompt converts messages to Qwen 2.5 chat template format
-func (s *OfflineLLMService) formatPrompt(messages []interfaces.Message) string {
-	var builder strings.Builder
-
-	for _, msg := range messages {
-		switch msg.Role {
-		case "system":
-			builder.WriteString("<|im_start|>system\n")
-			builder.WriteString(msg.Content)
-			builder.WriteString("<|im_end|>\n")
-		case "user":
-			builder.WriteString("<|im_start|>user\n")
-			builder.WriteString(msg.Content)
-			builder.WriteString("<|im_end|>\n")
-		case "assistant":
-			builder.WriteString("<|im_start|>assistant\n")
-			builder.WriteString(msg.Content)
-			builder.WriteString("<|im_end|>\n")
-		}
-	}
-
-	// Add final assistant prompt
-	builder.WriteString("<|im_start|>assistant\n")
-
-	return builder.String()
-}
-
-// extractResponse extracts the generated text from llama-cli output
-func (s *OfflineLLMService) extractResponse(output string) string {
-	// llama-cli outputs the generated text directly
-	// Clean up any control sequences or extra whitespace
-	lines := strings.Split(output, "\n")
-	var response strings.Builder
-
-	for _, line := range lines {
-		// Skip empty lines and debug output
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		// Skip lines that look like debug output
-		if strings.HasPrefix(trimmed, "llama_") || strings.HasPrefix(trimmed, "ggml_") {
-			continue
-		}
-		if strings.Contains(trimmed, "perplexity:") || strings.Contains(trimmed, "tokens per second") {
-			continue
-		}
-
-		response.WriteString(trimmed)
-		response.WriteString("\n")
-	}
-
-	return strings.TrimSpace(response.String())
-}
-
 // HealthCheck verifies the LLM service is operational
-// SECURITY: Only checks local file system, no network calls
+// SECURITY: Only checks local file system and localhost servers
 func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {
 	s.logger.Debug().Msg("Running health check")
 
@@ -523,13 +734,13 @@ func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {
 		return nil
 	}
 
-	// Check llama-cli binary exists and is executable
-	info, err := os.Stat(s.llamaCLIPath)
+	// Check llama-server binary exists and is executable
+	info, err := os.Stat(s.llamaServerPath)
 	if err != nil {
-		return fmt.Errorf("llama-cli binary not accessible: %w", err)
+		return fmt.Errorf("llama-server binary not accessible: %w", err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("llama-cli path is a directory: %s", s.llamaCLIPath)
+		return fmt.Errorf("llama-server path is a directory: %s", s.llamaServerPath)
 	}
 
 	// Verify models exist
@@ -537,15 +748,15 @@ func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("model verification failed: %w", err)
 	}
 
-	// Try running llama-cli --version to confirm it works
-	cmd := exec.CommandContext(ctx, s.llamaCLIPath, "--version")
+	// Try running llama-server --version to confirm it works
+	cmd := exec.CommandContext(ctx, s.llamaServerPath, "--version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		s.logger.Warn().
 			Err(err).
 			Str("output", string(output)).
-			Msg("Failed to get llama-cli version")
-		return fmt.Errorf("llama-cli binary not functional: %w", err)
+			Msg("Failed to get llama-server version")
+		return fmt.Errorf("llama-server binary not functional: %w", err)
 	}
 
 	version := strings.TrimSpace(string(output))
@@ -561,10 +772,38 @@ func (s *OfflineLLMService) GetMode() interfaces.LLMMode {
 	return interfaces.LLMModeOffline
 }
 
-// Close releases resources and stops embedding server
+// Close releases resources and stops both servers
 func (s *OfflineLLMService) Close() error {
 	s.logger.Info().Msg("Closing offline LLM service")
-	s.stopEmbeddingServer()
+
+	var errors []error
+
+	// Stop embedding server
+	if err := s.stopEmbeddingServer(); err != nil {
+		s.logger.Error().Err(err).Msg("Error stopping embedding server")
+		errors = append(errors, fmt.Errorf("embedding server shutdown: %w", err))
+	}
+
+	// Stop chat server
+	if err := s.stopChatServer(); err != nil {
+		s.logger.Error().Err(err).Msg("Error stopping chat server")
+		errors = append(errors, fmt.Errorf("chat server shutdown: %w", err))
+	}
+
+	// Belt-and-suspenders: cleanup any remaining llama-server processes
+	s.logger.Info().Msg("Performing final llama-server process cleanup")
+	if err := s.cleanupOrphanedProcesses(); err != nil {
+		s.logger.Warn().Err(err).Msg("Error during final cleanup (non-critical)")
+	}
+
+	if len(errors) > 0 {
+		s.logger.Error().
+			Int("error_count", len(errors)).
+			Msg("LLM service closed with errors")
+		return fmt.Errorf("llm service shutdown had %d errors: %v", len(errors), errors)
+	}
+
+	s.logger.Info().Msg("Offline LLM service closed successfully")
 	return nil
 }
 
@@ -574,7 +813,7 @@ func (s *OfflineLLMService) SetMockMode(enabled bool) {
 	if enabled {
 		s.logger.Warn().Msg("Mock mode enabled - using fake responses")
 	} else {
-		s.logger.Info().Msg("Mock mode disabled - using real llama-cli")
+		s.logger.Info().Msg("Mock mode disabled - using real llama-server")
 	}
 }
 
@@ -603,4 +842,75 @@ func (s *OfflineLLMService) generateMockResponse(messages []interfaces.Message) 
 
 	lastMsg := messages[len(messages)-1]
 	return fmt.Sprintf("Mock response to: %s", lastMsg.Content)
+}
+
+// cleanupOrphanedProcesses finds and kills any orphaned llama-server processes
+// This ensures a clean environment before starting new servers
+func (s *OfflineLLMService) cleanupOrphanedProcesses() error {
+	s.logger.Debug().Msg("Searching for orphaned llama-server processes")
+
+	// Platform-specific process detection
+	var cmd *exec.Cmd
+	var processList string
+
+	// Windows: Use tasklist to find llama-server processes
+	if isWindows() {
+		cmd = exec.Command("tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH")
+		output, err := cmd.Output()
+		if err != nil {
+			s.logger.Debug().Err(err).Msg("Failed to list processes (non-critical)")
+			return nil
+		}
+		processList = string(output)
+
+		// Parse tasklist output and kill processes
+		lines := strings.Split(processList, "\n")
+		killedCount := 0
+		for _, line := range lines {
+			if strings.Contains(line, "llama-server.exe") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					pidStr := fields[1]
+					s.logger.Warn().
+						Str("pid", pidStr).
+						Msg("Found orphaned llama-server process, killing")
+
+					killCmd := exec.Command("taskkill", "/F", "/PID", pidStr)
+					if err := killCmd.Run(); err != nil {
+						s.logger.Warn().
+							Err(err).
+							Str("pid", pidStr).
+							Msg("Failed to kill orphaned process")
+					} else {
+						killedCount++
+					}
+				}
+			}
+		}
+
+		if killedCount > 0 {
+			s.logger.Info().
+				Int("count", killedCount).
+				Msg("Cleaned up orphaned llama-server processes")
+		} else {
+			s.logger.Debug().Msg("No orphaned llama-server processes found")
+		}
+	} else {
+		// Unix-like: Use pkill to kill llama-server processes
+		cmd = exec.Command("pkill", "-9", "llama-server")
+		if err := cmd.Run(); err != nil {
+			// pkill returns error if no processes found (exit code 1)
+			// This is expected and not a real error
+			s.logger.Debug().Msg("No orphaned llama-server processes found")
+		} else {
+			s.logger.Info().Msg("Cleaned up orphaned llama-server processes")
+		}
+	}
+
+	return nil
+}
+
+// isWindows returns true if running on Windows
+func isWindows() bool {
+	return os.PathSeparator == '\\' && os.PathListSeparator == ';'
 }

@@ -6,6 +6,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ternarybob/arbor"
@@ -22,6 +23,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
+	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/storage"
 )
 
@@ -44,6 +46,7 @@ type App struct {
 	EventService         interfaces.EventService
 	SchedulerService     interfaces.SchedulerService
 	EmbeddingCoordinator *embeddings.CoordinatorService
+	SummaryService       *summary.Service
 
 	// Atlassian services
 	AuthService       *atlassian.AtlassianAuthService
@@ -214,6 +217,19 @@ func (a *App) initServices() error {
 	)
 	if err := a.EmbeddingCoordinator.Start(); err != nil {
 		return fmt.Errorf("failed to start embedding coordinator: %w", err)
+	}
+
+	// 11.5 Initialize summary service (subscribes to embedding events)
+	a.SummaryService = summary.NewService(
+		a.StorageManager.DocumentStorage(),
+		a.DocumentService,
+		a.EventService,
+		a.Logger,
+	)
+	// Generate initial summary document at startup
+	a.Logger.Info().Msg("Generating initial corpus summary document at startup")
+	if err := a.SummaryService.GenerateSummaryDocument(context.Background()); err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to generate initial summary document (non-critical)")
 	}
 
 	// 12. Initialize scheduler service

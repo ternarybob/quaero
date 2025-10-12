@@ -272,6 +272,42 @@ catch {
     Write-Warning "Could not stop Quaero process: $($_.Exception.Message)"
 }
 
+# Clean up any llama-server processes (spawned by quaero)
+try {
+    Write-Host "Checking for llama-server processes..." -ForegroundColor Yellow
+    $llamaProcesses = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+
+    if ($llamaProcesses) {
+        Write-Host "  Found $($llamaProcesses.Count) llama-server process(es), stopping..." -ForegroundColor Gray
+
+        foreach ($proc in $llamaProcesses) {
+            try {
+                $proc.Kill()
+                Write-Host "  Stopped llama-server (PID: $($proc.Id))" -ForegroundColor Gray
+            }
+            catch {
+                Write-Warning "  Failed to stop llama-server (PID: $($proc.Id)): $($_.Exception.Message)"
+            }
+        }
+
+        # Wait briefly for processes to exit
+        Start-Sleep -Milliseconds 500
+
+        # Verify cleanup
+        $remainingLlama = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+        if ($remainingLlama) {
+            Write-Warning "Some llama-server processes may still be running"
+        } else {
+            Write-Host "  All llama-server processes stopped successfully" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  No llama-server processes found" -ForegroundColor Gray
+    }
+}
+catch {
+    Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
+}
+
 # Tidy and download dependencies
 Write-Host "Tidying dependencies..." -ForegroundColor Yellow
 go mod tidy
@@ -475,16 +511,16 @@ if ($Run) {
     $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 
     # Start in a new terminal window with serve command
-    # Use /c to CLOSE window after application exits normally
-    # Errors will be visible in logs, successful runs will auto-close
+    # Use /k to KEEP window open so Ctrl+C signal propagates correctly
+    # This allows proper graceful shutdown via Ctrl+C
     $startCommand = "cd /d `"$binDir`" && `"$outputPath`" serve -c `"$configPath`""
 
-    Start-Process cmd -ArgumentList "/c", $startCommand
+    Start-Process cmd -ArgumentList "/k", $startCommand
 
     Write-Host "Application started in new terminal window" -ForegroundColor Green
     Write-Host "Command: quaero.exe serve -c quaero.toml" -ForegroundColor Cyan
     Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
-    Write-Host "Window will auto-close when application exits" -ForegroundColor Yellow
+    Write-Host "Press Ctrl+C in the server window to stop gracefully" -ForegroundColor Yellow
     Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow

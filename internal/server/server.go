@@ -36,9 +36,9 @@ func New(application *app.App) *Server {
 	s.server = &http.Server{
 		Addr:         addr,
 		Handler:      s.withConditionalMiddleware(s.router),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,  // Increased to handle large request bodies
+		WriteTimeout: 90 * time.Second,  // Increased to handle slow LLM responses (30-60s typical)
+		IdleTimeout:  120 * time.Second, // Increased for long-polling connections
 	}
 
 	return s

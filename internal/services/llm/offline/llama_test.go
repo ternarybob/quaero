@@ -10,36 +10,13 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
+// Note: os and path/filepath still needed by TestModelManager_VerifyModels
+
 func TestNewOfflineLLMService_MockMode(t *testing.T) {
 	logger := arbor.NewLogger()
 
-	// Create temporary model directory
-	tmpDir := t.TempDir()
-
-	// Create dummy model files
-	embedModelPath := filepath.Join(tmpDir, "embed.gguf")
-	chatModelPath := filepath.Join(tmpDir, "chat.gguf")
-
-	if err := os.WriteFile(embedModelPath, []byte("dummy model"), 0644); err != nil {
-		t.Fatalf("Failed to create dummy embed model: %v", err)
-	}
-	if err := os.WriteFile(chatModelPath, []byte("dummy model"), 0644); err != nil {
-		t.Fatalf("Failed to create dummy chat model: %v", err)
-	}
-
-	// Create service (will fail to find llama-cli, but that's ok for mock testing)
-	service := &OfflineLLMService{
-		modelManager: NewModelManager(tmpDir, "embed.gguf", "chat.gguf", logger),
-		contextSize:  2048,
-		threadCount:  4,
-		gpuLayers:    0,
-		logger:       logger,
-		llamaCLIPath: "/fake/path/llama-cli", // Won't be used in mock mode
-		mockMode:     false,
-	}
-
-	// Enable mock mode
-	service.SetMockMode(true)
+	// Create mock service - no binary or model files required!
+	service := NewMockOfflineLLMService(logger)
 
 	// Test Embed in mock mode
 	ctx := context.Background()
@@ -118,94 +95,9 @@ func TestModelManager_VerifyModels(t *testing.T) {
 	}
 }
 
-func TestFormatPrompt(t *testing.T) {
-	logger := arbor.NewLogger()
-	service := &OfflineLLMService{
-		logger: logger,
-	}
-
-	tests := []struct {
-		name     string
-		messages []interfaces.Message
-		want     string
-	}{
-		{
-			name: "system and user",
-			messages: []interfaces.Message{
-				{Role: "system", Content: "You are helpful"},
-				{Role: "user", Content: "Hello"},
-			},
-			want: "<|im_start|>system\nYou are helpful<|im_end|>\n<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n",
-		},
-		{
-			name: "conversation with assistant",
-			messages: []interfaces.Message{
-				{Role: "user", Content: "Hi"},
-				{Role: "assistant", Content: "Hello!"},
-				{Role: "user", Content: "How are you?"},
-			},
-			want: "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\nHello!<|im_end|>\n<|im_start|>user\nHow are you?<|im_end|>\n<|im_start|>assistant\n",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := service.formatPrompt(tt.messages)
-			if got != tt.want {
-				t.Errorf("formatPrompt() mismatch\nGot:\n%s\nWant:\n%s", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtractResponse(t *testing.T) {
-	logger := arbor.NewLogger()
-	service := &OfflineLLMService{
-		logger: logger,
-	}
-
-	tests := []struct {
-		name   string
-		output string
-		want   string
-	}{
-		{
-			name:   "simple response",
-			output: "This is the response",
-			want:   "This is the response",
-		},
-		{
-			name: "response with debug output",
-			output: `llama_model_loader: loaded meta data
-ggml_backend_metal_init: loaded Metal kernel
-This is the actual response
-llama_perf_context_print: tokens per second = 25.3`,
-			want: "This is the actual response",
-		},
-		{
-			name: "multiline response",
-			output: `Here is a response
-that spans multiple lines
-with useful information`,
-			want: "Here is a response\nthat spans multiple lines\nwith useful information",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := service.extractResponse(tt.output)
-			if got != tt.want {
-				t.Errorf("extractResponse() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGenerateMockEmbedding(t *testing.T) {
 	logger := arbor.NewLogger()
-	service := &OfflineLLMService{
-		logger: logger,
-	}
+	service := NewMockOfflineLLMService(logger)
 
 	// Test that same text produces same embedding
 	text := "test text"

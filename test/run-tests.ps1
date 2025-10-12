@@ -210,8 +210,8 @@ Write-Host "Waiting for server to be ready..." -ForegroundColor Yellow
 $maxRetries = 30
 $serverReady = $false
 for ($i = 0; $i -lt $maxRetries; $i++) {
-    # Use curl to check if server is responding (more reliable than Invoke-WebRequest)
-    $curlOutput = & curl -s -o nul -w "%{http_code}" "http://localhost:$serverPort/" 2>&1 | Out-String
+    # Use curl.exe to check if server is responding (curl is aliased to Invoke-WebRequest in PowerShell)
+    $curlOutput = & curl.exe -s -o nul -w "%{http_code}" "http://localhost:$serverPort/" 2>&1 | Out-String
     $curlOutput = $curlOutput.Trim()
     if ($curlOutput -eq "200") {
         $serverReady = $true
@@ -388,6 +388,42 @@ try {
 }
 catch {
     Write-Warning "Could not verify all processes stopped: $($_.Exception.Message)"
+}
+
+# Clean up any llama-server processes (spawned by quaero)
+try {
+    Write-Host "Checking for llama-server processes..." -ForegroundColor Yellow
+    $llamaProcesses = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+
+    if ($llamaProcesses) {
+        Write-Host "  Found $($llamaProcesses.Count) llama-server process(es), stopping..." -ForegroundColor Gray
+
+        foreach ($proc in $llamaProcesses) {
+            try {
+                $proc.Kill()
+                Write-Host "  Stopped llama-server (PID: $($proc.Id))" -ForegroundColor Gray
+            }
+            catch {
+                Write-Warning "  Failed to stop llama-server (PID: $($proc.Id)): $($_.Exception.Message)"
+            }
+        }
+
+        # Wait briefly for processes to exit
+        Start-Sleep -Milliseconds 500
+
+        # Verify cleanup
+        $remainingLlama = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
+        if ($remainingLlama) {
+            Write-Warning "Some llama-server processes may still be running"
+        } else {
+            Write-Host "  All llama-server processes stopped successfully" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  No llama-server processes found" -ForegroundColor Gray
+    }
+}
+catch {
+    Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
 }
 
 Write-Host ""
