@@ -479,9 +479,17 @@
             loadDocuments();
         });
 
-        // Initialize highlight.js
+        // Ensure Alpine.js is fully initialized
+        document.addEventListener('alpine:init', function() {
+            console.log('[Documents] Alpine.js initialized');
+        });
+
+        // Initialize highlight.js - only for document detail, not service logs
         if (typeof hljs !== 'undefined') {
-            hljs.highlightAll();
+            const codeBlock = document.querySelector('#document-detail-json code');
+            if (codeBlock) {
+                hljs.highlightElement(codeBlock);
+            }
         }
     </script>
 </body>

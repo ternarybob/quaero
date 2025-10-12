@@ -175,22 +175,31 @@ document.addEventListener('alpine:init', () => {
     logIdCounter: 0,
 
     init() {
+      console.log('[ServiceLogs] Initializing component');
       this.loadRecentLogs();
       this.subscribeToWebSocket();
     },
 
     async loadRecentLogs() {
+      console.log('[ServiceLogs] Loading recent logs...');
       try {
         const response = await fetch('/api/logs/recent');
-        if (!response.ok) return;
+        console.log('[ServiceLogs] API response status:', response.status);
+        if (!response.ok) {
+          console.warn('[ServiceLogs] API returned non-OK status:', response.status);
+          return;
+        }
 
         const data = await response.json();
+        console.log('[ServiceLogs] Received data:', data);
         if (data.logs && Array.isArray(data.logs)) {
+          console.log('[ServiceLogs] Processing', data.logs.length, 'log entries');
           this.logs = data.logs.map(log => {
             const entry = this._parseLogEntry(log);
             entry.id = ++this.logIdCounter;
             return entry;
           });
+          console.log('[ServiceLogs] Logs array now contains', this.logs.length, 'entries');
           // Scroll to bottom after loading recent logs
           this.$nextTick(() => {
             const container = this.$refs.logContainer;
@@ -198,6 +207,8 @@ document.addEventListener('alpine:init', () => {
               container.scrollTop = container.scrollHeight;
             }
           });
+        } else {
+          console.warn('[ServiceLogs] No logs in response or invalid format');
         }
       } catch (err) {
         console.error('[ServiceLogs] Error loading recent logs:', err);

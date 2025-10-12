@@ -12,7 +12,15 @@
       "Bash(git commit:*)",
       "Bash(node:*)",
       "Bash(start cmd /c:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(go build:*)",
+      "Bash(wc:*)",
+      "Bash(.testrun-tests.ps1 -type api)",
+      "Bash(TEST_SERVER_URL=http://localhost:8085 go test -v)",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__list_console_messages",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__evaluate_script"
     ],
     "deny": [],
     "ask": []
