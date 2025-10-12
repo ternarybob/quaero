@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"encoding/json"
-	"math"
 	"net/http"
-	"strconv"
 
 	"github.com/ternarybob/arbor"
 )
@@ -51,17 +48,16 @@ func NewCollectorHandler(jiraScraper JiraDataProvider, confluenceScraper Conflue
 
 // GetProjectsHandler returns paginated list of projects with counts
 func (h *CollectorHandler) GetProjectsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
-	page, pageSize := h.getPaginationParams(r)
+	page, pageSize := GetPaginationParams(r)
 
 	data, err := h.jiraScraper.GetJiraData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get Jira data")
-		http.Error(w, "Failed to get projects", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get projects")
 		return
 	}
 
@@ -90,30 +86,28 @@ func (h *CollectorHandler) GetProjectsHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	paginatedData, pagination := h.paginate(projects, page, pageSize)
+	paginatedData, pagination := Paginate(projects, page, pageSize)
 
 	response := CollectorResponse{
 		Data:       paginatedData,
 		Pagination: pagination,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // GetSpacesHandler returns paginated list of Confluence spaces with page counts
 func (h *CollectorHandler) GetSpacesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
-	page, pageSize := h.getPaginationParams(r)
+	page, pageSize := GetPaginationParams(r)
 
 	data, err := h.confluenceScraper.GetConfluenceData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get Confluence data")
-		http.Error(w, "Failed to get spaces", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get spaces")
 		return
 	}
 
@@ -122,36 +116,34 @@ func (h *CollectorHandler) GetSpacesHandler(w http.ResponseWriter, r *http.Reque
 		spaces = []map[string]interface{}{}
 	}
 
-	paginatedData, pagination := h.paginate(spaces, page, pageSize)
+	paginatedData, pagination := Paginate(spaces, page, pageSize)
 
 	response := CollectorResponse{
 		Data:       paginatedData,
 		Pagination: pagination,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // GetIssuesHandler returns paginated list of issues for a project
 func (h *CollectorHandler) GetIssuesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
 	projectKey := r.URL.Query().Get("projectKey")
 	if projectKey == "" {
-		http.Error(w, "projectKey parameter required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "projectKey parameter required")
 		return
 	}
 
-	page, pageSize := h.getPaginationParams(r)
+	page, pageSize := GetPaginationParams(r)
 
 	data, err := h.jiraScraper.GetJiraData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get Jira data")
-		http.Error(w, "Failed to get issues", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get issues")
 		return
 	}
 
@@ -172,36 +164,34 @@ func (h *CollectorHandler) GetIssuesHandler(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	paginatedData, pagination := h.paginate(filteredIssues, page, pageSize)
+	paginatedData, pagination := Paginate(filteredIssues, page, pageSize)
 
 	response := CollectorResponse{
 		Data:       paginatedData,
 		Pagination: pagination,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	WriteJSON(w, http.StatusOK, response)
 }
 
 // GetPagesHandler returns paginated list of pages for a space
 func (h *CollectorHandler) GetPagesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
 	spaceKey := r.URL.Query().Get("spaceKey")
 	if spaceKey == "" {
-		http.Error(w, "spaceKey parameter required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "spaceKey parameter required")
 		return
 	}
 
-	page, pageSize := h.getPaginationParams(r)
+	page, pageSize := GetPaginationParams(r)
 
 	data, err := h.confluenceScraper.GetConfluenceData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to get Confluence data")
-		http.Error(w, "Failed to get pages", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get pages")
 		return
 	}
 
@@ -220,66 +210,12 @@ func (h *CollectorHandler) GetPagesHandler(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	paginatedData, pagination := h.paginate(filteredPages, page, pageSize)
+	paginatedData, pagination := Paginate(filteredPages, page, pageSize)
 
 	response := CollectorResponse{
 		Data:       paginatedData,
 		Pagination: pagination,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-}
-
-// getPaginationParams extracts page and pageSize from query params
-func (h *CollectorHandler) getPaginationParams(r *http.Request) (int, int) {
-	page := 0
-	pageSize := 10
-
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p >= 0 {
-			page = p
-		}
-	}
-
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
-		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 && ps <= 100 {
-			pageSize = ps
-		}
-	}
-
-	return page, pageSize
-}
-
-// paginate applies pagination to a slice of data
-func (h *CollectorHandler) paginate(data []map[string]interface{}, page, pageSize int) ([]map[string]interface{}, PaginationResponse) {
-	totalItems := len(data)
-	totalPages := int(math.Ceil(float64(totalItems) / float64(pageSize)))
-
-	start := page * pageSize
-	end := start + pageSize
-
-	if start >= totalItems {
-		return []map[string]interface{}{}, PaginationResponse{
-			Page:       page,
-			PageSize:   pageSize,
-			TotalItems: totalItems,
-			TotalPages: totalPages,
-		}
-	}
-
-	if end > totalItems {
-		end = totalItems
-	}
-
-	paginatedData := data[start:end]
-
-	pagination := PaginationResponse{
-		Page:       page,
-		PageSize:   pageSize,
-		TotalItems: totalItems,
-		TotalPages: totalPages,
-	}
-
-	return paginatedData, pagination
+	WriteJSON(w, http.StatusOK, response)
 }
