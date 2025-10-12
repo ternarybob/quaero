@@ -85,14 +85,6 @@ func GetPaginationParams(r *http.Request) (page, pageSize int) {
 	return page, pageSize
 }
 
-// PaginationResponse contains pagination metadata.
-type PaginationResponse struct {
-	Page       int `json:"page"`
-	PageSize   int `json:"pageSize"`
-	TotalItems int `json:"totalItems"`
-	TotalPages int `json:"totalPages"`
-}
-
 // Paginate applies pagination to a slice of data.
 func Paginate(data []map[string]interface{}, page, pageSize int) ([]map[string]interface{}, PaginationResponse) {
 	totalItems := len(data)
