@@ -110,8 +110,14 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			title = excluded.title,
 			content = excluded.content,
 			content_markdown = excluded.content_markdown,
-			embedding = excluded.embedding,
-			embedding_model = excluded.embedding_model,
+			embedding = CASE
+				WHEN excluded.embedding IS NOT NULL AND excluded.embedding != '' THEN excluded.embedding
+				ELSE documents.embedding
+			END,
+			embedding_model = CASE
+				WHEN excluded.embedding IS NOT NULL AND excluded.embedding != '' THEN excluded.embedding_model
+				ELSE documents.embedding_model
+			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
 			updated_at = excluded.updated_at,
