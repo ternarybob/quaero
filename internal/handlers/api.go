@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/ternarybob/arbor"
@@ -20,13 +19,11 @@ func NewAPIHandler() *APIHandler {
 
 // VersionHandler returns version information
 func (h *APIHandler) VersionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	WriteJSON(w, http.StatusOK, map[string]string{
 		"version":    common.GetVersion(),
 		"build":      common.GetBuild(),
 		"git_commit": common.GetGitCommit(),
@@ -35,22 +32,18 @@ func (h *APIHandler) VersionHandler(w http.ResponseWriter, r *http.Request) {
 
 // HealthHandler returns health check status
 func (h *APIHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	WriteJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 	})
 }
 
 // NotFoundHandler handles 404 errors with JSON response
 func (h *APIHandler) NotFoundHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	WriteJSON(w, http.StatusNotFound, map[string]interface{}{
 		"error":   "Not Found",
 		"path":    r.URL.Path,
 		"message": "The requested endpoint does not exist",
