@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -28,26 +27,23 @@ func NewDataHandler(jira interfaces.JiraScraper, confluence interfaces.Confluenc
 
 // GetJiraDataHandler returns all Jira data (projects and issues)
 func (h *DataHandler) GetJiraDataHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
 	data, err := h.jiraScraper.GetJiraData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch Jira data")
-		http.Error(w, "Failed to fetch Jira data", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to fetch Jira data")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	WriteJSON(w, http.StatusOK, data)
 }
 
 // GetJiraIssuesHandler returns issues optionally filtered by project keys
 func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
@@ -59,7 +55,7 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 	data, err := h.jiraScraper.GetJiraData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch Jira data")
-		http.Error(w, "Failed to fetch Jira data", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to fetch Jira data")
 		return
 	}
 
@@ -95,7 +91,7 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 				// Try direct key field first (from database)
 				if issueKey, ok := issue["key"].(string); ok {
 					// Extract project key from issue key (e.g., "BI9LLQNGKQ-1" -> "BI9LLQNGKQ")
-					projectKey := extractProjectKey(issueKey)
+					projectKey := ExtractProjectKey(issueKey)
 					for _, pk := range projectKeys {
 						if projectKey == pk {
 							filteredIssues = append(filteredIssues, issue)
@@ -130,7 +126,7 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 
 				// Handle *models.JiraIssue (from database)
 				if jiraIssue, ok := issue.(*models.JiraIssue); ok {
-					projectKey := extractProjectKey(jiraIssue.Key)
+					projectKey := ExtractProjectKey(jiraIssue.Key)
 					if i == 0 {
 						h.logger.Info().Str("key", jiraIssue.Key).Str("extractedProjectKey", projectKey).Msg("First JiraIssue")
 					}
@@ -147,7 +143,7 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 				if issueMap, ok := issue.(map[string]interface{}); ok {
 					// Try direct key field first
 					if issueKey, ok := issueMap["key"].(string); ok {
-						projectKey := extractProjectKey(issueKey)
+						projectKey := ExtractProjectKey(issueKey)
 						for _, pk := range projectKeys {
 							if projectKey == pk {
 								filteredIssues = append(filteredIssues, issue)
@@ -205,34 +201,30 @@ func (h *DataHandler) GetJiraIssuesHandler(w http.ResponseWriter, r *http.Reques
 		Strs("requestedProjects", projectKeys).
 		Msg("Returning issues to client")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"issues": issues,
 	})
 }
 
 // GetConfluenceDataHandler returns all Confluence data (spaces and pages)
 func (h *DataHandler) GetConfluenceDataHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
 	data, err := h.confluenceScraper.GetConfluenceData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch Confluence data")
-		http.Error(w, "Failed to fetch Confluence data", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to fetch Confluence data")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	WriteJSON(w, http.StatusOK, data)
 }
 
 // GetConfluencePagesHandler returns pages optionally filtered by space keys
 func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, "GET") {
 		return
 	}
 
@@ -243,7 +235,7 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 	data, err := h.confluenceScraper.GetConfluenceData()
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch Confluence data")
-		http.Error(w, "Failed to fetch Confluence data", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to fetch Confluence data")
 		return
 	}
 
@@ -325,25 +317,12 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 		Strs("requestedSpaces", spaceKeys).
 		Msg("Returning pages to client")
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"pages": pages,
 	})
 }
 
-// extractProjectKey extracts the project key from an issue key (e.g., "BI9LLQNGKQ-1" -> "BI9LLQNGKQ")
-func extractProjectKey(issueKey string) string {
-	if idx := strings.Index(issueKey, "-"); idx > 0 {
-		return issueKey[:idx]
-	}
-	return ""
-}
-
 // getMapKeys returns all keys from a map
 func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
+	return GetMapKeys(m)
 }
