@@ -17,19 +17,35 @@ type Document struct {
 	Content         string `json:"content"`          // Plain text
 	ContentMarkdown string `json:"content_markdown"` // Markdown format
 
+	// Vector embedding
+	Embedding      []float32 `json:"-"`               // Don't serialize in JSON
+	EmbeddingModel string    `json:"embedding_model"` // Model name (e.g., nomic-embed-text)
+
 	// Metadata (source-specific data + extracted keywords stored as JSON)
 	// Example: {"project": "PROJ-123", "assignee": "alice", "keywords": ["bug", "urgent"]}
 	Metadata map[string]interface{} `json:"metadata"`
 	URL      string                 `json:"url"` // Link to original
 
 	// Sync tracking
-	LastSynced       *time.Time `json:"last_synced,omitempty"`        // When document was last synced from source
-	SourceVersion    string     `json:"source_version,omitempty"`     // Version/etag from source to detect changes
-	ForceSyncPending bool       `json:"force_sync_pending,omitempty"` // Flag for manual force sync
+	LastSynced        *time.Time `json:"last_synced,omitempty"`         // When document was last synced from source
+	SourceVersion     string     `json:"source_version,omitempty"`      // Version/etag from source to detect changes
+	ForceSyncPending  bool       `json:"force_sync_pending,omitempty"`  // Flag for manual force sync
+	ForceEmbedPending bool       `json:"force_embed_pending,omitempty"` // Flag for re-vectorization
 
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DocumentChunk represents a chunk of a document for processing
+type DocumentChunk struct {
+	ID         string    `json:"id"`
+	DocumentID string    `json:"document_id"`
+	ChunkIndex int       `json:"chunk_index"`
+	Content    string    `json:"content"`
+	Embedding  []float32 `json:"-"`
+	TokenCount int       `json:"token_count"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // JiraMetadata represents Jira-specific metadata
@@ -85,9 +101,13 @@ type CrossSourceMetadata struct {
 type DocumentStats struct {
 	TotalDocuments      int            `json:"total_documents"`
 	DocumentsBySource   map[string]int `json:"documents_by_source"`
+	VectorizedCount     int            `json:"vectorized_count"`
+	VectorizedDocuments int            `json:"vectorized_documents"` // Alias for VectorizedCount
 	JiraDocuments       int            `json:"jira_documents"`
 	ConfluenceDocuments int            `json:"confluence_documents"`
+	PendingVectorize    int            `json:"pending_vectorize"`
 	LastUpdated         time.Time      `json:"last_updated"`
+	EmbeddingModel      string         `json:"embedding_model"`
 	AverageContentSize  int            `json:"average_content_size"`
 }
 

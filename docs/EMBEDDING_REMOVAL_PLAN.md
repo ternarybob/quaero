@@ -1,0 +1,463 @@
+# Embedding Removal & Search Service Migration Plan
+
+**Created:** 2025-10-13
+**Status:** Planning Phase
+**Goal:** Remove vector embeddings and migrate to FTS5-based SearchService interface
+
+---
+
+## Executive Summary
+
+This document outlines the comprehensive plan to remove vector embeddings from Quaero and implement a clean `SearchService` interface backed by SQLite FTS5 full-text search. This refactor will:
+
+1. **Simplify the architecture** - Remove embedding generation, storage, and vector similarity search
+2. **Maintain agent functionality** - Keep MCP agent-based chat working
+3. **Improve search quality** - Use FTS5 full-text search with programmatic metadata extraction
+4. **Create clean interfaces** - Allow future search implementation swaps
+
+---
+
+## Current State Analysis
+
+### Embedding Integration Points
+
+**Core Services** (8 total):
+1. `EmbeddingService` - Generates embeddings via LLM
+2. `EmbeddingCoordinator` - Orchestrates embedding generation
+3. `DocumentService` - Depends on EmbeddingService for document storage
+4. `ProcessingService` - Tracks vectorization stats
+5. `SummaryService` - Creates corpus summary documents (uses embedding fields)
+6. `ChatService` - Already migrated to agent-only (no RAG)
+7. `EventService` - Publishes `EventEmbeddingTriggered`
+8. `SchedulerService` - Triggers embedding events every 5 minutes
+
+**Data Models** (internal/models/document.go):
+- `Document.Embedding` ([]float32)
+- `Document.EmbeddingModel` (string)
+- `Document.ForceEmbedPending` (bool)
+- `DocumentChunk` struct (for large document processing)
+- `DocumentStats.VectorizedCount` (int)
+- `DocumentStats.PendingVectorize` (int)
+- `DocumentStats.EmbeddingModel` (string)
+
+**Storage Layer** (internal/storage/sqlite/):
+- `document_storage.go` - Reads/writes embedding fields
+- Database schema includes `embedding` BLOB column
+- `SaveChunk()`, `GetChunks()`, `DeleteChunks()` methods
+
+**App Initialization** (internal/app/app.go):
+```go
+// Lines 143-221: Deep dependency chain
+EmbeddingService → DocumentService → ...
+EmbeddingCoordinator subscribes to EventEmbeddingTriggered
+Scheduler publishes EventEmbeddingTriggered every 5 minutes
+```
+
+### What Was Already Removed
+
+**Stage 3: RAG Removal (Completed in commit 9ee89ed):**
+- ✅ RAG-specific chat logic
+- ✅ Query classification
+- ✅ Document formatting for RAG
+- ✅ `ChatService` simplified (506 → 133 lines)
+- ✅ `ChatRequest.UseAgent` flag removed
+- ✅ RAG test files deleted
+
+**What Remains:**
+- ❌ Vector embeddings still generated for all documents
+- ❌ Embedding services still active
+- ❌ Database still stores embedding BLOBs
+- ❌ Agent uses DocumentService (which depends on embeddings)
+
+---
+
+## Target Architecture
+
+### New SearchService Interface
+
+**File:** `internal/interfaces/search_service.go` (already created)
+
+```go
+type SearchService interface {
+    // Search performs full-text search across documents
+    Search(ctx context.Context, query string, opts SearchOptions) ([]*models.Document, error)
+
+    // GetByID retrieves a single document by ID
+    GetByID(ctx context.Context, id string) (*models.Document, error)
+
+    // SearchByReference finds documents by reference (e.g., "PROJ-123", "@alice")
+    SearchByReference(ctx context.Context, reference string, opts SearchOptions) ([]*models.Document, error)
+}
+```
+
+**Implementation:** `internal/services/search/fts5_search_service.go` (to be created)
+
+### Metadata Extraction System
+
+**Programmatic keyword extraction** (NOT LLM-generated):
+
+1. **Config-driven patterns:**
+```toml
+[metadata.extraction]
+patterns = [
+    { name = "jira_issue", regex = "[A-Z]+-\\d+", field = "issue_keys" },
+    { name = "user_mention", regex = "@\\w+", field = "mentions" },
+    { name = "project", regex = "PROJECT-\\w+", field = "projects" },
+]
+```
+
+2. **Extraction during document save:**
+   - Scan `content` and `content_markdown` fields
+   - Apply regex patterns from config
+   - Store extracted values in `document.metadata` JSON
+   - Make metadata searchable via FTS5
+
+3. **Benefits:**
+   - Fast, deterministic extraction
+   - No LLM calls required
+   - Configurable without code changes
+   - Enriches search context
+
+### Three-Layer Architecture
+
+```
+┌─────────────────────────────────────┐
+│  Data Collection Layer              │
+│  (Atlassian, GitHub services)       │
+│  - Source-specific scrapers         │
+│  - Transform raw data → documents   │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│  Search Interface Layer             │
+│  (SearchService)                    │
+│  - Generic search abstraction       │
+│  - FTS5 implementation (current)    │
+│  - Swappable implementations        │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│  Agent Layer (Consumer)             │
+│  (MCP Agent, ChatService)           │
+│  - Uses SearchService via MCP tools │
+│  - Iterative reasoning & tool calls │
+└─────────────────────────────────────┘
+```
+
+---
+
+## Migration Strategy: Incremental Approach
+
+### Phase 1: Create SearchService Implementation (Week 1)
+
+**Goal:** Build FTS5 search service without touching embeddings
+
+**Tasks:**
+1. ✅ Create `SearchService` interface (already done)
+2. Create `internal/services/search/fts5_search_service.go`
+   - Implement `Search()` using SQLite FTS5
+   - Implement `GetByID()` (simple SELECT)
+   - Implement `SearchByReference()` using LIKE/regex
+3. Create `internal/services/metadata/extractor.go`
+   - Load patterns from config
+   - Extract keywords from document content
+   - Return extracted metadata map
+4. Update `DocumentService.SaveDocument()`
+   - Call metadata extractor before save
+   - Merge extracted metadata with existing metadata
+5. Write unit tests for SearchService
+6. Write unit tests for metadata extractor
+
+**Success Criteria:**
+- SearchService passes all tests
+- Metadata extraction works with sample documents
+- Build compiles successfully
+- **Embeddings still working** (no breaking changes yet)
+
+**Estimated Time:** 3-4 days
+
+### Phase 2: Update MCP Tool Router (Week 1-2)
+
+**Goal:** Switch agent tools to use SearchService instead of DocumentService
+
+**Tasks:**
+1. Update `internal/services/mcp/router.go`
+   - Add `SearchService` to ToolRouter struct
+   - Update `search_documents` tool to use `SearchService.Search()`
+   - Update `get_document` tool to use `SearchService.GetByID()`
+   - Add new `search_by_reference` tool
+2. Update `internal/app/app.go`
+   - Initialize SearchService
+   - Pass SearchService to ToolRouter
+3. Update agent tests (`test/api/chat_agent_test.go`)
+   - Test agent searches with FTS5
+   - Verify tool execution works
+   - Test metadata-based filtering
+
+**Success Criteria:**
+- Agent chat works with FTS5 search
+- Agent tests pass
+- Query: "How many Jira issues?" returns correct count
+- Build compiles successfully
+- **Embeddings still working but unused by agent**
+
+**Estimated Time:** 2-3 days
+
+### Phase 3: Remove Embedding Generation (Week 2)
+
+**Goal:** Stop generating new embeddings
+
+**Tasks:**
+1. Update `internal/services/scheduler/scheduler.go`
+   - Remove `EventEmbeddingTriggered` publishing
+   - Keep `EventCollectionTriggered` (still needed)
+2. Update `internal/app/app.go`
+   - **DO NOT initialize** `EmbeddingCoordinator`
+   - Keep `EmbeddingService` temporarily (DocumentService still uses it)
+3. Update `internal/services/processing/processing_service.go`
+   - Remove vectorization tracking from stats
+   - Remove `VectorizedCount`, `PendingVectorize` references
+4. Update `internal/services/summary/summary_service.go`
+   - Remove embedding field initialization in corpus summary
+5. Run tests to ensure collection still works
+
+**Success Criteria:**
+- Documents collected without embedding generation
+- No embedding-related errors in logs
+- Build compiles successfully
+- **Embedding columns in DB still exist but unpopulated**
+
+**Estimated Time:** 1-2 days
+
+### Phase 4: Remove EmbeddingService Dependency (Week 2-3)
+
+**Goal:** Decouple DocumentService from EmbeddingService
+
+**Tasks:**
+1. Update `internal/services/documents/document_service.go`
+   - Remove `embeddingService` field from struct
+   - Remove `embeddingService` parameter from `NewService()`
+   - Remove any embedding generation calls
+2. Update `internal/app/app.go`
+   - Remove `EmbeddingService` initialization
+   - Update `DocumentService` initialization (remove embedding param)
+3. Delete `internal/services/embeddings/` directory
+   - `embedding_service.go`
+   - `coordinator_service.go`
+4. Update `internal/interfaces/llm_service.go`
+   - Remove `GenerateEmbedding()` method
+   - Keep `Chat()` method (still needed for agent)
+5. Update LLM implementations
+   - Remove embedding generation from offline/mock implementations
+
+**Success Criteria:**
+- DocumentService works without EmbeddingService
+- Build compiles successfully
+- All tests pass
+- **Embedding service completely removed**
+
+**Estimated Time:** 2-3 days
+
+### Phase 5: Clean Up Data Models (Week 3)
+
+**Goal:** Remove embedding fields from Document model
+
+**Tasks:**
+1. Update `internal/models/document.go`
+   - Remove `Embedding` field
+   - Remove `EmbeddingModel` field
+   - Remove `ForceEmbedPending` field
+   - Remove `DocumentChunk` struct
+   - Remove embedding fields from `DocumentStats`
+2. Update `internal/storage/sqlite/document_storage.go`
+   - Remove embedding field reads/writes
+   - Remove chunk-related methods (`SaveChunk`, `GetChunks`, `DeleteChunks`)
+3. Update `internal/interfaces/storage.go`
+   - Remove chunk-related method signatures
+4. Run all tests
+
+**Success Criteria:**
+- Document model clean of embedding references
+- Build compiles successfully
+- All tests pass
+- **Database schema still has embedding columns** (data not lost)
+
+**Estimated Time:** 1-2 days
+
+### Phase 6: Database Schema Migration (Week 3-4)
+
+**Goal:** Remove embedding columns from database (optional, can be deferred)
+
+**Tasks:**
+1. Create migration script `scripts/migrate_remove_embeddings.sql`
+   ```sql
+   -- Drop embedding column (SQLite requires table recreation)
+   -- Backup existing data
+   -- Create new table without embedding columns
+   -- Copy data to new table
+   ```
+2. Update `internal/storage/sqlite/schema.go`
+   - Remove `embedding BLOB` column definition
+3. Test migration on dev database
+4. Document rollback procedure
+
+**Success Criteria:**
+- Migration script tested
+- Database schema clean
+- No data loss during migration
+- **Optional: Can be run manually by users**
+
+**Estimated Time:** 2-3 days
+
+---
+
+## Risk Analysis
+
+### High Risk Items
+
+1. **DocumentService Dependency Chain**
+   - **Risk:** DocumentService is used by 8+ services
+   - **Mitigation:** Phase 4 isolates this change; thorough testing
+
+2. **Agent Functionality Regression**
+   - **Risk:** Breaking agent after removing embeddings
+   - **Mitigation:** Phase 2 migrates agent early; continuous testing
+
+3. **Database Migration Data Loss**
+   - **Risk:** Losing document data during schema change
+   - **Mitigation:** Phase 6 optional; backup required; rollback plan
+
+### Medium Risk Items
+
+1. **FTS5 Search Quality**
+   - **Risk:** FTS5 may not match vector search quality
+   - **Mitigation:** Metadata extraction improves relevance; user feedback
+
+2. **Incomplete Embedding Removal**
+   - **Risk:** Missing a dependency and leaving broken code
+   - **Mitigation:** Comprehensive grep for embedding references; code review
+
+### Low Risk Items
+
+1. **Config Changes**
+   - **Risk:** Breaking existing configs
+   - **Mitigation:** Backward-compatible defaults; migration guide
+
+2. **Test Coverage Gaps**
+   - **Risk:** Insufficient test coverage of new code
+   - **Mitigation:** Unit tests required for each phase
+
+---
+
+## Testing Strategy
+
+### Unit Tests (Each Phase)
+
+- `internal/services/search/fts5_search_service_test.go`
+- `internal/services/metadata/extractor_test.go`
+- `internal/services/mcp/router_test.go` (updated)
+
+### Integration Tests
+
+- `test/api/search_service_test.go` (new)
+- `test/api/chat_agent_test.go` (updated)
+- `test/api/document_collection_test.go` (verify still works)
+
+### Manual Testing Checklist
+
+- [ ] Collect Jira issues → documents created
+- [ ] Collect Confluence pages → documents created
+- [ ] Agent query: "How many Jira issues?" → correct count
+- [ ] Agent query: "Find issues about bug" → relevant results
+- [ ] Agent query: "Show me @alice's issues" → metadata filter works
+- [ ] Corpus summary generated correctly
+- [ ] No errors in logs during normal operation
+
+---
+
+## Rollback Plan
+
+Each phase is reversible via git:
+
+1. **Phase 1-2:** Revert commits, embeddings still work
+2. **Phase 3-4:** Re-enable EmbeddingCoordinator in app.go
+3. **Phase 5:** Revert Document model changes
+4. **Phase 6:** Keep old database (migration is optional)
+
+**Rollback Commands:**
+```bash
+# Identify commit before phase N
+git log --oneline
+
+# Revert to commit
+git reset --hard <commit-hash>
+
+# Or revert specific files
+git checkout <commit-hash> -- <file-path>
+```
+
+---
+
+## Success Metrics
+
+### Phase Completion Metrics
+
+- **Phase 1:** FTS5 search returns results in < 100ms
+- **Phase 2:** Agent chat response time < 30s
+- **Phase 3:** No new embeddings generated (verify in logs)
+- **Phase 4:** EmbeddingService completely removed from codebase
+- **Phase 5:** `grep -r "Embedding" internal/` returns 0 matches
+- **Phase 6:** Database size reduced by ~30% (embedding BLOB removal)
+
+### Overall Success Criteria
+
+- ✅ Build compiles at every phase
+- ✅ All tests pass at every phase
+- ✅ Agent chat works throughout refactor
+- ✅ Document collection works throughout refactor
+- ✅ No regressions in existing functionality
+- ✅ Codebase simplified (fewer dependencies)
+- ✅ Search quality maintained or improved
+
+---
+
+## Timeline
+
+**Total Estimated Time:** 3-4 weeks
+
+| Phase | Duration | Dependencies | Can Start |
+|-------|----------|--------------|-----------|
+| Phase 1 | 3-4 days | None | Immediately |
+| Phase 2 | 2-3 days | Phase 1 | After Phase 1 |
+| Phase 3 | 1-2 days | Phase 2 | After Phase 2 |
+| Phase 4 | 2-3 days | Phase 3 | After Phase 3 |
+| Phase 5 | 1-2 days | Phase 4 | After Phase 4 |
+| Phase 6 | 2-3 days | Phase 5 | After Phase 5 (optional) |
+
+**Critical Path:** Phases 1-5 must be completed sequentially. Phase 6 is optional and can be deferred.
+
+---
+
+## Open Questions
+
+1. **Metadata Extraction Patterns:** Which regex patterns should be default in config?
+2. **FTS5 Configuration:** Should we use custom tokenizers or default?
+3. **Search Ranking:** How to rank FTS5 results (BM25, relevance, recency)?
+4. **Database Migration:** Should Phase 6 be mandatory or optional?
+5. **LLM Service:** Keep for agent chat only, or further simplify?
+
+---
+
+## Next Steps
+
+1. **Review this plan** with team/stakeholders
+2. **Start Phase 1** (create SearchService implementation)
+3. **Create feature branch:** `refactor/remove-embeddings`
+4. **Daily commits** for each sub-task
+5. **Update this document** as we learn during implementation
+
+---
+
+**Document Owner:** Claude Code
+**Last Updated:** 2025-10-13
+**Next Review:** Start of each phase
