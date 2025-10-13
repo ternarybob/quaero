@@ -14,6 +14,7 @@ type Config struct {
 	Sources    SourcesConfig    `toml:"sources"`
 	Storage    StorageConfig    `toml:"storage"`
 	LLM        LLMConfig        `toml:"llm"`
+	RAG        RAGConfig        `toml:"rag"`
 	Embeddings EmbeddingsConfig `toml:"embeddings"`
 	Processing ProcessingConfig `toml:"processing"`
 	Logging    LoggingConfig    `toml:"logging"`
@@ -105,6 +106,12 @@ type AuditConfig struct {
 	LogQueries bool `toml:"log_queries"` // Log query text (disable for PII)
 }
 
+type RAGConfig struct {
+	MaxDocuments  int     `toml:"max_documents"`  // Maximum number of documents to retrieve
+	MinSimilarity float64 `toml:"min_similarity"` // Minimum similarity score (0.0-1.0)
+	SearchMode    string  `toml:"search_mode"`    // "vector", "keyword", or "hybrid"
+}
+
 type EmbeddingsConfig struct {
 	Enabled   bool   `toml:"enabled"`
 	OllamaURL string `toml:"ollama_url"`
@@ -155,7 +162,7 @@ func NewDefaultConfig() *Config {
 				ModelDir:    "./models",
 				EmbedModel:  "nomic-embed-text-v1.5-q8.gguf",
 				ChatModel:   "qwen2.5-7b-instruct-q4.gguf",
-				ContextSize: 2048,
+				ContextSize: 4096, // Increased to handle more RAG documents
 				ThreadCount: 4,
 				GPULayers:   0, // CPU-only by default
 			},
@@ -170,6 +177,11 @@ func NewDefaultConfig() *Config {
 				Enabled:    true,
 				LogQueries: false, // Don't log query text by default (PII safety)
 			},
+		},
+		RAG: RAGConfig{
+			MaxDocuments:  20,       // Retrieve up to 20 documents (local LLM can handle more)
+			MinSimilarity: 0.6,      // Lower threshold to include more relevant docs
+			SearchMode:    "vector", // Default to vector search
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled:   true,

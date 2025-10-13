@@ -18,6 +18,8 @@ type ChatService struct {
 	documentService  interfaces.DocumentService
 	embeddingService interfaces.EmbeddingService
 	logger           arbor.ILogger
+	maxDocuments     int     // Maximum documents from config
+	minSimilarity    float64 // Minimum similarity from config
 }
 
 // NewChatService creates a new chat service
@@ -26,12 +28,16 @@ func NewChatService(
 	documentService interfaces.DocumentService,
 	embeddingService interfaces.EmbeddingService,
 	logger arbor.ILogger,
+	maxDocuments int,
+	minSimilarity float64,
 ) *ChatService {
 	return &ChatService{
 		llmService:       llmService,
 		documentService:  documentService,
 		embeddingService: embeddingService,
 		logger:           logger,
+		maxDocuments:     maxDocuments,
+		minSimilarity:    minSimilarity,
 	}
 }
 
@@ -43,13 +49,13 @@ func (s *ChatService) Chat(ctx context.Context, req *interfaces.ChatRequest) (*i
 		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
 		Msg("Processing chat request")
 
-	// Set default RAG config if not provided
+	// Set default RAG config if not provided, using config values
 	ragConfig := req.RAGConfig
 	if ragConfig == nil {
 		ragConfig = &interfaces.RAGConfig{
 			Enabled:       true,
-			MaxDocuments:  5,
-			MinSimilarity: 0.7,
+			MaxDocuments:  s.maxDocuments,
+			MinSimilarity: float32(s.minSimilarity),
 			SearchMode:    interfaces.SearchModeVector,
 		}
 	}

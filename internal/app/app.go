@@ -159,6 +159,8 @@ func (a *App) initServices() error {
 		a.DocumentService,
 		a.EmbeddingService,
 		a.Logger,
+		a.Config.RAG.MaxDocuments,
+		a.Config.RAG.MinSimilarity,
 	)
 
 	// 5. Initialize event service (must be early for subscriptions)

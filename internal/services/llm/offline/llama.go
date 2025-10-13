@@ -41,8 +41,8 @@ type OfflineLLMService struct {
 	chatServerURL      string
 	chatServerReady    bool
 	mockMode           bool
-	cachedHealthStatus error           // Cached health check result
-	healthCheckTime    time.Time       // Last health check time
+	cachedHealthStatus error         // Cached health check result
+	healthCheckTime    time.Time     // Last health check time
 	healthCheckMutex   *sync.RWMutex // Mutex for health check cache
 }
 

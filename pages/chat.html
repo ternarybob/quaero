@@ -246,8 +246,8 @@ async function sendMessage() {
             history: conversationHistory.slice(0, -1),
             rag_config: {
                 enabled: ragEnabled.checked,
-                max_documents: 5,
-                min_similarity: 0.7,
+                max_documents: 20,
+                min_similarity: 0.6,
                 search_mode: 'vector'
             }
         };
