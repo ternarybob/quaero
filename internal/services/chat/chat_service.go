@@ -10,16 +10,19 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/identifiers"
 )
 
 // ChatService implements RAG-enabled chat functionality
 type ChatService struct {
-	llmService       interfaces.LLMService
-	documentService  interfaces.DocumentService
-	embeddingService interfaces.EmbeddingService
-	logger           arbor.ILogger
-	maxDocuments     int     // Maximum documents from config
-	minSimilarity    float64 // Minimum similarity from config
+	llmService        interfaces.LLMService
+	documentService   interfaces.DocumentService
+	embeddingService  interfaces.EmbeddingService
+	identifierService *identifiers.Extractor
+	documentStorage   interfaces.DocumentStorage
+	logger            arbor.ILogger
+	maxDocuments      int     // Maximum documents from config
+	minSimilarity     float64 // Minimum similarity from config
 }
 
 // NewChatService creates a new chat service
@@ -27,17 +30,21 @@ func NewChatService(
 	llmService interfaces.LLMService,
 	documentService interfaces.DocumentService,
 	embeddingService interfaces.EmbeddingService,
+	identifierService *identifiers.Extractor,
+	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	maxDocuments int,
 	minSimilarity float64,
 ) *ChatService {
 	return &ChatService{
-		llmService:       llmService,
-		documentService:  documentService,
-		embeddingService: embeddingService,
-		logger:           logger,
-		maxDocuments:     maxDocuments,
-		minSimilarity:    minSimilarity,
+		llmService:        llmService,
+		documentService:   documentService,
+		embeddingService:  embeddingService,
+		identifierService: identifierService,
+		documentStorage:   documentStorage,
+		logger:            logger,
+		maxDocuments:      maxDocuments,
+		minSimilarity:     minSimilarity,
 	}
 }
 
@@ -48,6 +55,15 @@ func (s *ChatService) Chat(ctx context.Context, req *interfaces.ChatRequest) (*i
 		Str("message", req.Message).
 		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
 		Msg("Processing chat request")
+
+	// Classify the query to determine retrieval strategy
+	classification := ClassifyQuery(req.Message)
+	s.logger.Info().
+		Str("query_type", string(classification.Type)).
+		Str("needs_corpus", fmt.Sprintf("%v", classification.NeedsCorpus)).
+		Int("max_documents", classification.MaxDocuments).
+		Str("use_pointer_rag", fmt.Sprintf("%v", classification.UsePointerRAG)).
+		Msg("Query classified")
 
 	// Set default RAG config if not provided, using config values
 	ragConfig := req.RAGConfig
@@ -60,23 +76,82 @@ func (s *ChatService) Chat(ctx context.Context, req *interfaces.ChatRequest) (*i
 		}
 	}
 
+	// Override MaxDocuments based on query classification
+	ragConfig.MaxDocuments = classification.MaxDocuments
+
 	var contextDocs []*models.Document
-	var contextText string
+	var messages []interfaces.Message
 
 	// Retrieve relevant documents if RAG is enabled
 	if ragConfig.Enabled {
-		docs, err := s.retrieveContext(ctx, req.Message, ragConfig)
-		if err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to retrieve context documents")
-			// Continue without context rather than failing
-		} else {
-			contextDocs = docs
-			contextText = s.buildContextText(docs)
+		// For count/statistics queries, directly retrieve corpus summary
+		if classification.NeedsCorpus {
+			s.logger.Info().Msg("Retrieving corpus summary for count/statistics query")
+			corpusDoc, err := s.documentService.GetBySource(ctx, "system", "corpus-summary-metadata")
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to retrieve corpus summary, falling back to vector search")
+			} else if corpusDoc != nil {
+				contextDocs = []*models.Document{corpusDoc}
+				messages = s.buildMessages(req, s.buildContextText(contextDocs))
+				s.logger.Info().Msg("Using corpus summary document directly")
+			}
+		}
+
+		// If we haven't retrieved context yet, use normal retrieval
+		if contextDocs == nil && s.identifierService != nil && s.documentStorage != nil && classification.UsePointerRAG {
+			// Pointer RAG: Augmented retrieval with cross-source linking
+			s.logger.Info().Msg("Using Pointer RAG augmented retrieval")
+			result, err := s.retrieveContextAugmented(ctx, req.Message, ragConfig)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to retrieve augmented context")
+				// Fallback to basic retrieval
+				docs, fallbackErr := s.retrieveContext(ctx, req.Message, ragConfig)
+				if fallbackErr != nil {
+					s.logger.Warn().Err(fallbackErr).Msg("Fallback retrieval also failed")
+				} else {
+					contextDocs = docs
+					messages = s.buildMessages(req, s.buildContextText(docs))
+				}
+			} else {
+				contextDocs = result.Documents
+
+				// Log Pointer RAG retrieval metrics
+				s.logger.Info().
+					Int("documents_retrieved", len(result.Documents)).
+					Int("identifiers_found", len(result.Identifiers)).
+					Strs("identifiers", result.Identifiers).
+					Msg("Pointer RAG retrieval complete")
+
+				// Calculate document content sizes
+				totalContentChars := 0
+				for _, doc := range result.Documents {
+					totalContentChars += len(doc.Content)
+				}
+
+				s.logger.Info().
+					Int("total_content_chars", totalContentChars).
+					Int("avg_content_per_doc", totalContentChars/max(len(result.Documents), 1)).
+					Msg("Pointer RAG content metrics")
+
+				messages = s.buildPointerRAGMessages(req, result.Documents, result.Identifiers)
+			}
+		} else if contextDocs == nil {
+			// Fallback to basic vector search (if context not retrieved yet)
+			s.logger.Debug().Msg("Using basic vector retrieval")
+			docs, err := s.retrieveContext(ctx, req.Message, ragConfig)
+			if err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to retrieve context documents")
+			} else {
+				contextDocs = docs
+				messages = s.buildMessages(req, s.buildContextText(docs))
+			}
 		}
 	}
 
-	// Build messages for LLM
-	messages := s.buildMessages(req, contextText)
+	// If messages not built yet (RAG disabled or failed), build basic messages
+	if messages == nil {
+		messages = s.buildMessages(req, "")
+	}
 
 	// Generate response
 	response, err := s.llmService.Chat(ctx, messages)
@@ -148,6 +223,108 @@ func (s *ChatService) retrieveContext(
 	return docs, nil
 }
 
+// augmentedRetrievalResult holds the results of Pointer RAG augmented retrieval
+type augmentedRetrievalResult struct {
+	Documents   []*models.Document
+	Identifiers []string
+}
+
+// retrieveContextAugmented performs Pointer RAG augmented retrieval:
+// 1. Initial vector search for relevant documents
+// 2. Extract identifiers from retrieved documents
+// 3. Search for cross-source linked documents by identifier
+// 4. Deduplicate and rank results
+// 5. Return top-k enriched context with identifiers
+func (s *ChatService) retrieveContextAugmented(
+	ctx context.Context,
+	query string,
+	config *interfaces.RAGConfig,
+) (*augmentedRetrievalResult, error) {
+	s.logger.Debug().Msg("Starting Pointer RAG augmented retrieval")
+
+	// Phase 1: Initial vector search
+	initialDocs, err := s.retrieveContext(ctx, query, config)
+	if err != nil {
+		return nil, fmt.Errorf("phase 1 (vector search) failed: %w", err)
+	}
+
+	s.logger.Debug().
+		Int("initial_docs", len(initialDocs)).
+		Msg("Phase 1: Initial vector search complete")
+
+	if len(initialDocs) == 0 {
+		s.logger.Debug().Msg("No initial documents found, returning empty results")
+		return &augmentedRetrievalResult{
+			Documents:   []*models.Document{},
+			Identifiers: []string{},
+		}, nil
+	}
+
+	// Phase 2: Extract identifiers from initial documents
+	identifiers := s.identifierService.ExtractFromDocuments(initialDocs)
+	s.logger.Debug().
+		Int("identifiers_found", len(identifiers)).
+		Strs("identifiers", identifiers).
+		Msg("Phase 2: Identifier extraction complete")
+
+	// Phase 3: Search for cross-source linked documents
+	var linkedDocs []*models.Document
+	for _, identifier := range identifiers {
+		// Search for documents referencing this identifier
+		// Exclude the same source type to encourage cross-source linking
+		excludeSources := []string{} // Start with no exclusions
+
+		docs, err := s.documentStorage.SearchByIdentifier(identifier, excludeSources, 10)
+		if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("identifier", identifier).
+				Msg("Failed to search by identifier, skipping")
+			continue
+		}
+
+		s.logger.Debug().
+			Str("identifier", identifier).
+			Int("linked_docs", len(docs)).
+			Msg("Found linked documents for identifier")
+
+		linkedDocs = append(linkedDocs, docs...)
+	}
+
+	s.logger.Debug().
+		Int("linked_docs", len(linkedDocs)).
+		Msg("Phase 3: Cross-source linking complete")
+
+	// Phase 4: Combine and deduplicate
+	allDocs := append(initialDocs, linkedDocs...)
+	uniqueDocs := deduplicateDocuments(allDocs)
+
+	s.logger.Debug().
+		Int("total_before_dedup", len(allDocs)).
+		Int("total_after_dedup", len(uniqueDocs)).
+		Msg("Phase 4: Deduplication complete")
+
+	// Phase 5: Rank by cross-source connections
+	rankedDocs := rankByCrossSourceConnections(uniqueDocs, identifiers)
+
+	// Limit to max documents - reduce for performance
+	// Pointer RAG needs more selective retrieval to avoid context overflow
+	maxDocs := config.MaxDocuments // Was: config.MaxDocuments * 2 - reduced to avoid hanging
+	if len(rankedDocs) > maxDocs {
+		rankedDocs = rankedDocs[:maxDocs]
+	}
+
+	s.logger.Info().
+		Int("final_doc_count", len(rankedDocs)).
+		Int("identifiers_found", len(identifiers)).
+		Msg("Pointer RAG augmented retrieval complete")
+
+	return &augmentedRetrievalResult{
+		Documents:   rankedDocs,
+		Identifiers: identifiers,
+	}, nil
+}
+
 // buildContextText builds a formatted context string from documents
 func (s *ChatService) buildContextText(docs []*models.Document) string {
 	if len(docs) == 0 {
@@ -204,6 +381,74 @@ func (s *ChatService) buildMessages(req *interfaces.ChatRequest, contextText str
 		Role:    "user",
 		Content: req.Message,
 	})
+
+	return messages
+}
+
+// buildPointerRAGMessages constructs messages specifically for Pointer RAG,
+// using the specialized prompt and formatted context that highlights cross-source connections
+func (s *ChatService) buildPointerRAGMessages(
+	req *interfaces.ChatRequest,
+	docs []*models.Document,
+	identifiers []string,
+) []interfaces.Message {
+	messages := []interfaces.Message{}
+
+	// Use Pointer RAG system prompt
+	systemPrompt := PointerRAGSystemPrompt
+	basePromptSize := len(systemPrompt)
+
+	// Build Pointer RAG-formatted context
+	contextText := buildPointerRAGContextText(docs, identifiers)
+	contextSize := len(contextText)
+
+	// Augment system prompt with context
+	if contextText != "" {
+		systemPrompt = fmt.Sprintf("%s\n\n%s", systemPrompt, contextText)
+	}
+
+	totalSystemPromptSize := len(systemPrompt)
+
+	// Log context building metrics
+	s.logger.Info().
+		Int("base_prompt_chars", basePromptSize).
+		Int("context_text_chars", contextSize).
+		Int("total_system_prompt_chars", totalSystemPromptSize).
+		Int("formatting_overhead_chars", contextSize-(len(docs)*300)). // Rough estimate
+		Msg("Pointer RAG context formatting complete")
+
+	messages = append(messages, interfaces.Message{
+		Role:    "system",
+		Content: systemPrompt,
+	})
+
+	// Add conversation history
+	if req.History != nil {
+		messages = append(messages, req.History...)
+	}
+
+	// Add current user message
+	messages = append(messages, interfaces.Message{
+		Role:    "user",
+		Content: req.Message,
+	})
+
+	// Calculate total message size
+	totalMessageChars := 0
+	for _, msg := range messages {
+		totalMessageChars += len(msg.Content)
+	}
+
+	// Estimate token count (rough: ~4 chars per token)
+	estimatedTokens := totalMessageChars / 4
+
+	s.logger.Info().
+		Int("total_messages", len(messages)).
+		Int("context_docs", len(docs)).
+		Int("identifiers", len(identifiers)).
+		Int("total_message_chars", totalMessageChars).
+		Int("estimated_tokens", estimatedTokens).
+		Msg("Built Pointer RAG messages - ready for LLM")
 
 	return messages
 }

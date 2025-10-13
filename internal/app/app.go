@@ -19,6 +19,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/embeddings"
 	"github.com/ternarybob/quaero/internal/services/events"
+	"github.com/ternarybob/quaero/internal/services/identifiers"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/processing"
@@ -38,6 +39,7 @@ type App struct {
 	AuditLogger         llm.AuditLogger
 	EmbeddingService    interfaces.EmbeddingService
 	DocumentService     interfaces.DocumentService
+	IdentifierService   *identifiers.Extractor
 	ChatService         interfaces.ChatService
 	ProcessingService   *processing.Service
 	ProcessingScheduler *processing.Scheduler
@@ -153,11 +155,17 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
+	// 3.5. Initialize identifier service (for Pointer RAG)
+	a.IdentifierService = identifiers.NewExtractor()
+	a.Logger.Debug().Msg("Initialized identifier extraction service for Pointer RAG")
+
 	// 4. Initialize chat service (RAG-enabled chat with LLM)
 	a.ChatService = chat.NewChatService(
 		a.LLMService,
 		a.DocumentService,
 		a.EmbeddingService,
+		a.IdentifierService,
+		a.StorageManager.DocumentStorage(),
 		a.Logger,
 		a.Config.RAG.MaxDocuments,
 		a.Config.RAG.MinSimilarity,

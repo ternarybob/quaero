@@ -676,7 +676,7 @@ func (s *OfflineLLMService) Chat(ctx context.Context, messages []interfaces.Mess
 	reqBody := llamaServerChatRequest{
 		Messages:    llamaMessages,
 		Temperature: 0.8,
-		MaxTokens:   2048,
+		MaxTokens:   512, // Reduced from 2048 to prevent context overflow
 		Stream:      false,
 	}
 	jsonData, err := json.Marshal(reqBody)
@@ -774,7 +774,8 @@ func (s *OfflineLLMService) HealthCheck(ctx context.Context) error {
 // refreshHealthCheck performs the actual health check and updates cache
 // This is called by the background updater goroutine
 func (s *OfflineLLMService) refreshHealthCheck(ctx context.Context) {
-	s.logger.Debug().Msg("Refreshing health check cache")
+	// Verbose-level logging for routine health checks
+	s.logger.Trace().Msg("Refreshing health check cache")
 
 	var err error
 
@@ -798,14 +799,16 @@ func (s *OfflineLLMService) refreshHealthCheck(ctx context.Context) {
 		cmd := exec.CommandContext(ctx, s.llamaServerPath, "--version")
 		output, versionErr := cmd.CombinedOutput()
 		if versionErr != nil {
-			s.logger.Warn().
+			// Only log version failures at verbose level
+			s.logger.Debug().
 				Err(versionErr).
 				Str("output", string(output)).
 				Msg("Failed to get llama-server version")
 			err = fmt.Errorf("llama-server binary not functional: %w", versionErr)
 		} else {
+			// Successful health checks at verbose level
 			version := strings.TrimSpace(string(output))
-			s.logger.Info().
+			s.logger.Trace().
 				Str("version", version).
 				Msg("Health check passed")
 		}
@@ -817,8 +820,9 @@ func (s *OfflineLLMService) refreshHealthCheck(ctx context.Context) {
 	s.healthCheckTime = time.Now()
 	s.healthCheckMutex.Unlock()
 
+	// Only log failures at info level for visibility
 	if err != nil {
-		s.logger.Warn().Err(err).Msg("Health check failed")
+		s.logger.Info().Err(err).Msg("LLM service health check failed")
 	}
 }
 
