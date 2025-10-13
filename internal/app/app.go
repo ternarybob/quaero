@@ -155,20 +155,11 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 3.5. Initialize identifier service (for Pointer RAG)
-	a.IdentifierService = identifiers.NewExtractor()
-	a.Logger.Debug().Msg("Initialized identifier extraction service for Pointer RAG")
-
-	// 4. Initialize chat service (RAG-enabled chat with LLM)
+	// 4. Initialize chat service (agent-based chat with LLM)
 	a.ChatService = chat.NewChatService(
 		a.LLMService,
-		a.DocumentService,
-		a.EmbeddingService,
-		a.IdentifierService,
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
-		a.Config.RAG.MaxDocuments,
-		a.Config.RAG.MinSimilarity,
 	)
 
 	// 5. Initialize event service (must be early for subscriptions)

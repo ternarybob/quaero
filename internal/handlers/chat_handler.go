@@ -56,17 +56,10 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hasHistory := len(req.History) > 0
-	ragConfigPresent := req.RAGConfig != nil
-	ragEnabled := false
-	if req.RAGConfig != nil {
-		ragEnabled = req.RAGConfig.Enabled
-	}
 	h.logger.Info().
 		Int("message_length", len(req.Message)).
 		Str("has_history", fmt.Sprintf("%v", hasHistory)).
-		Str("rag_config_present", fmt.Sprintf("%v", ragConfigPresent)).
-		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
-		Msg("Processing chat request")
+		Msg("Processing chat request (agent mode)")
 
 	// Track thinking time
 	startTime := time.Now()
@@ -121,7 +114,6 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		"document_count": docCount,
 		"references":     references,
 		"thinking_time":  fmt.Sprintf("%.2fs", thinkingTime.Seconds()),
-		"rag_enabled":    ragEnabled,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
