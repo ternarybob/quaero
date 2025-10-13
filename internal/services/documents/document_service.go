@@ -8,13 +8,15 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/metadata"
 )
 
 // Service implements DocumentService interface
 type Service struct {
-	storage          interfaces.DocumentStorage
-	embeddingService interfaces.EmbeddingService
-	logger           arbor.ILogger
+	storage           interfaces.DocumentStorage
+	embeddingService  interfaces.EmbeddingService
+	metadataExtractor *metadata.Extractor
+	logger            arbor.ILogger
 }
 
 // NewService creates a new document service
@@ -24,9 +26,10 @@ func NewService(
 	logger arbor.ILogger,
 ) interfaces.DocumentService {
 	return &Service{
-		storage:          storage,
-		embeddingService: embeddingService,
-		logger:           logger,
+		storage:           storage,
+		embeddingService:  embeddingService,
+		metadataExtractor: metadata.NewExtractor(logger),
+		logger:            logger,
 	}
 }
 
@@ -36,6 +39,18 @@ func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error 
 	// Generate ID if not present
 	if doc.ID == "" {
 		doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
+	}
+
+	// Extract and merge metadata
+	extracted, err := s.metadataExtractor.ExtractMetadata(doc)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to extract metadata, continuing without it")
+	} else if len(extracted) > 0 {
+		doc.Metadata = s.metadataExtractor.MergeMetadata(doc.Metadata, extracted)
+		s.logger.Debug().
+			Str("doc_id", doc.ID).
+			Int("extracted_fields", len(extracted)).
+			Msg("Metadata extracted and merged")
 	}
 
 	// Save to storage without embedding
@@ -59,10 +74,21 @@ func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) er
 		return nil
 	}
 
-	// Generate IDs for documents
+	// Generate IDs and extract metadata for each document
 	for _, doc := range docs {
 		if doc.ID == "" {
 			doc.ID = fmt.Sprintf("doc_%s", uuid.New().String())
+		}
+
+		// Extract and merge metadata
+		extracted, err := s.metadataExtractor.ExtractMetadata(doc)
+		if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("doc_id", doc.ID).
+				Msg("Failed to extract metadata, continuing without it")
+		} else if len(extracted) > 0 {
+			doc.Metadata = s.metadataExtractor.MergeMetadata(doc.Metadata, extracted)
 		}
 	}
 
