@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -22,6 +23,7 @@ import (
 type JiraStorage struct {
 	db     *SQLiteDB
 	logger arbor.ILogger
+	mu     sync.Mutex // Serializes write operations to prevent SQLITE_BUSY errors
 }
 
 // NewJiraStorage creates a new JiraStorage instance
@@ -34,6 +36,9 @@ func NewJiraStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.JiraStorage {
 
 // StoreProject stores a Jira project
 func (s *JiraStorage) StoreProject(ctx context.Context, project *models.JiraProject) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	data, err := json.Marshal(project)
 	if err != nil {
 		return fmt.Errorf("failed to marshal project: %w", err)
@@ -185,6 +190,11 @@ func (s *JiraStorage) StoreIssue(ctx context.Context, issue *models.JiraIssue) e
 
 // StoreIssues stores multiple Jira issues in a transaction
 func (s *JiraStorage) StoreIssues(ctx context.Context, issues []*models.JiraIssue) error {
+	// Serialize write operations to prevent SQLITE_BUSY errors when multiple
+	// goroutines try to write simultaneously
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tx, err := s.db.BeginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -20,6 +21,7 @@ import (
 type ConfluenceStorage struct {
 	db     *SQLiteDB
 	logger arbor.ILogger
+	mu     sync.Mutex // Serializes write operations to prevent SQLITE_BUSY errors
 }
 
 // NewConfluenceStorage creates a new ConfluenceStorage instance
@@ -32,6 +34,9 @@ func NewConfluenceStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.Conflue
 
 // StoreSpace stores a Confluence space
 func (s *ConfluenceStorage) StoreSpace(ctx context.Context, space *models.ConfluenceSpace) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	dataJSON, err := json.Marshal(space)
 	if err != nil {
 		return fmt.Errorf("failed to marshal space data: %w", err)
@@ -170,6 +175,11 @@ func (s *ConfluenceStorage) StorePages(ctx context.Context, pages []*models.Conf
 	if len(pages) == 0 {
 		return nil
 	}
+
+	// Serialize write operations to prevent SQLITE_BUSY errors when multiple
+	// goroutines try to write simultaneously
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	tx, err := s.db.DB().BeginTx(ctx, nil)
 	if err != nil {

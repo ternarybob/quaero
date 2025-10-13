@@ -46,6 +46,12 @@ func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, 
 		return nil, fmt.Errorf("failed to configure database: %w", err)
 	}
 
+	// Initialize schema
+	if err := s.InitSchema(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
 	logger.Info().Str("path", config.Path).Msg("SQLite database initialized")
 	return s, nil
 }

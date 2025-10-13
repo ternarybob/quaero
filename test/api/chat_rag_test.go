@@ -53,43 +53,43 @@ func TestChatRAGBasic(t *testing.T) {
 			name:            "Simple hello #1",
 			message:         "hello",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute, // Extended for local LLM processing
 		},
 		{
 			name:            "Simple hello #2",
 			message:         "hello",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 		{
 			name:            "Simple hello #3",
 			message:         "hello",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 		{
 			name:            "Hello with question",
 			message:         "hello, how are you",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 		{
 			name:            "Time question",
 			message:         "hello, what time is it",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 		{
 			name:            "Location question",
 			message:         "where are you",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 		{
 			name:            "Document count question",
 			message:         "how many documents are there?",
 			expectedSuccess: true,
-			maxDuration:     30 * time.Second,
+			maxDuration:     2 * time.Minute,
 		},
 	}
 

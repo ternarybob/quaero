@@ -89,6 +89,7 @@ type DocumentStorage interface {
 	FullTextSearch(query string, limit int) ([]*models.Document, error)
 	VectorSearch(embedding []float32, limit int) ([]*models.Document, error)
 	HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error)
+	SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error)
 
 	// List operations
 	ListDocuments(opts *ListOptions) ([]*models.Document, error)

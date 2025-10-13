@@ -37,7 +37,7 @@ func New(application *app.App) *Server {
 		Addr:         addr,
 		Handler:      s.withConditionalMiddleware(s.router),
 		ReadTimeout:  30 * time.Second,  // Increased to handle large request bodies
-		WriteTimeout: 90 * time.Second,  // Increased to handle slow LLM responses (30-60s typical)
+		WriteTimeout: 360 * time.Second, // 6 minutes - Extended for local LLM processing (chat can take 4+ minutes)
 		IdleTimeout:  120 * time.Second, // Increased for long-polling connections
 	}
 

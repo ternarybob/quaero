@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -17,6 +18,7 @@ import (
 type DocumentStorage struct {
 	db     *SQLiteDB
 	logger arbor.ILogger
+	mu     sync.Mutex // Serializes write operations to prevent SQLITE_BUSY errors
 }
 
 // NewDocumentStorage creates a new document storage instance
@@ -95,6 +97,11 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 
 // SaveDocuments saves multiple documents in batch
 func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
+	// Serialize write operations to prevent SQLITE_BUSY errors when multiple
+	// goroutines try to write simultaneously
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	tx, err := d.db.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -441,6 +448,68 @@ func (d *DocumentStorage) HybridSearch(query string, embedding []float32, limit 
 	// For now, fall back to full-text search
 	d.logger.Warn().Msg("Hybrid search not implemented, using full-text search only")
 	return d.FullTextSearch(query, limit)
+}
+
+// SearchByIdentifier finds documents that reference a specific identifier (e.g., BUG-123, abc123def)
+// Searches in:
+//  1. metadata.issue_key field
+//  2. metadata.referenced_issues array
+//  3. Title (case-insensitive substring match)
+//  4. Content (case-insensitive substring match)
+func (d *DocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) {
+	if identifier == "" {
+		return []*models.Document{}, nil
+	}
+
+	// Build exclude sources clause
+	excludeClause := ""
+	excludeParams := []interface{}{identifier, identifier, identifier, identifier}
+
+	if len(excludeSources) > 0 {
+		excludeClause = " AND source_type NOT IN ("
+		for i, src := range excludeSources {
+			if i > 0 {
+				excludeClause += ", "
+			}
+			excludeClause += "?"
+			excludeParams = append(excludeParams, src)
+		}
+		excludeClause += ")"
+	}
+
+	// Add limit parameter
+	excludeParams = append(excludeParams, limit)
+
+	query := fmt.Sprintf(`
+		SELECT id, source_type, source_id, title, content, content_markdown,
+			   embedding, embedding_model, metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending, force_embed_pending
+		FROM documents
+		WHERE (
+			-- Search in metadata.issue_key (case-insensitive)
+			LOWER(json_extract(metadata, '$.issue_key')) = LOWER(?)
+			-- Search in metadata.referenced_issues array (case-insensitive)
+			OR EXISTS (
+				SELECT 1 FROM json_each(metadata, '$.referenced_issues')
+				WHERE LOWER(json_each.value) = LOWER(?)
+			)
+			-- Search in title (case-insensitive)
+			OR LOWER(title) LIKE '%%' || LOWER(?) || '%%'
+			-- Search in content (case-insensitive)
+			OR LOWER(content) LIKE '%%' || LOWER(?) || '%%'
+		)
+		%s
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`, excludeClause)
+
+	rows, err := d.db.db.Query(query, excludeParams...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search by identifier: %w", err)
+	}
+	defer rows.Close()
+
+	return d.scanDocuments(rows)
 }
 
 // ListDocuments lists documents with pagination

@@ -183,17 +183,42 @@ func (s *JiraScraperService) transformToDocument(issue *models.JiraIssue) (*mode
 	contentMD := fmt.Sprintf("# %s\n\n**Summary:** %s\n\n## Description\n\n%s\n\n## Details\n\n- **Project:** %s\n- **Type:** %s\n- **Status:** %s\n- **Priority:** %s\n- **Assignee:** %s\n- **Reporter:** %s\n- **Labels:** %v\n- **Components:** %v",
 		issue.Key, summary, description, projectKey, issueType, status, priority, assignee, reporter, labels, components)
 
+	// Extract resolution date if available
+	var resolutionDate *time.Time
+	if resolutionDateStr, ok := issue.Fields["resolutiondate"].(string); ok && resolutionDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, resolutionDateStr); err == nil {
+			resolutionDate = &parsed
+		}
+	}
+
+	// Extract created/updated dates (we already parse these below, so reference them)
+	var createdDate, updatedDate *time.Time
+	if createdStr, ok := issue.Fields["created"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			createdDate = &parsed
+		}
+	}
+	if updatedStr, ok := issue.Fields["updated"].(string); ok {
+		if parsed, err := time.Parse(time.RFC3339, updatedStr); err == nil {
+			updatedDate = &parsed
+		}
+	}
+
 	// Build metadata
 	metadata := models.JiraMetadata{
-		IssueKey:   issue.Key,
-		ProjectKey: projectKey,
-		IssueType:  issueType,
-		Status:     status,
-		Priority:   priority,
-		Assignee:   assignee,
-		Reporter:   reporter,
-		Labels:     labels,
-		Components: components,
+		IssueKey:       issue.Key,
+		ProjectKey:     projectKey,
+		IssueType:      issueType,
+		Status:         status,
+		Priority:       priority,
+		Assignee:       assignee,
+		Reporter:       reporter,
+		Labels:         labels,
+		Components:     components,
+		Summary:        summary,
+		ResolutionDate: resolutionDate,
+		CreatedDate:    createdDate,
+		UpdatedDate:    updatedDate,
 	}
 
 	metadataMap, err := metadata.ToMap()

@@ -136,13 +136,18 @@ func (s *ConfluenceScraperService) transformToDocument(page *models.ConfluencePa
 	contentMD := fmt.Sprintf("# %s\n\n%s", page.Title, bodyContent)
 
 	// Build metadata
+	// NOTE: ConfluencePage model currently has limited fields (ID, Title, SpaceID, Body)
+	// TODO: Enhance Confluence scraper to capture version, author, dates from API
 	metadata := models.ConfluenceMetadata{
-		PageID:      page.ID,
-		SpaceKey:    page.SpaceID,
-		SpaceName:   "",
-		Author:      "",
-		Version:     0,
-		ContentType: "page",
+		PageID:       page.ID,
+		PageTitle:    page.Title,
+		SpaceKey:     page.SpaceID,
+		SpaceName:    "", // TODO: Extract from Confluence API
+		Author:       "", // TODO: Extract from Confluence API
+		Version:      0,  // TODO: Extract from Confluence API
+		ContentType:  "page",
+		LastModified: nil, // TODO: Extract from Confluence API
+		CreatedDate:  nil, // TODO: Extract from Confluence API
 	}
 
 	metadataMap, err := metadata.ToMap()
@@ -150,7 +155,7 @@ func (s *ConfluenceScraperService) transformToDocument(page *models.ConfluencePa
 		return nil, fmt.Errorf("failed to convert metadata: %w", err)
 	}
 
-	// Use current time for timestamps (Confluence pages don't have these in the model)
+	// Use current time for timestamps (Confluence pages don't have these in the model yet)
 	now := time.Now()
 
 	return &models.Document{

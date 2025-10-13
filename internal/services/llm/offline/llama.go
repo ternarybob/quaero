@@ -246,7 +246,8 @@ func (s *OfflineLLMService) startEmbeddingServer() error {
 		"--port", "8086",
 		"-t", strconv.Itoa(s.threadCount),
 		"-ngl", strconv.Itoa(s.gpuLayers),
-		"-b", "2048", // Increase physical batch size to handle larger inputs
+		"-b", "4096", // Increase physical batch size to handle larger inputs (was 2048)
+		"-ub", "4096", // Increase batch size for embeddings specifically
 		"--log-disable", // Disable server logs to reduce noise
 	}
 
@@ -394,6 +395,7 @@ func (s *OfflineLLMService) startChatServer() error {
 		"-c", strconv.Itoa(s.contextSize),
 		"-t", strconv.Itoa(s.threadCount),
 		"-ngl", strconv.Itoa(s.gpuLayers),
+		"-b", "2048", // Batch size for chat processing
 		"--log-disable", // Disable server logs to reduce noise
 	}
 
@@ -685,7 +687,7 @@ func (s *OfflineLLMService) Chat(ctx context.Context, messages []interfaces.Mess
 	// Create HTTP client with localhost-only transport
 	// SECURITY: Transport enforces localhost-only connections
 	client := &http.Client{
-		Timeout: 120 * time.Second, // Chat can take longer than embeddings
+		Timeout: 240 * time.Second, // Extended timeout for longer chat completions (was 120s)
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				// SECURITY: Reject any non-localhost connections

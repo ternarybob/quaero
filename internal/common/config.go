@@ -162,7 +162,7 @@ func NewDefaultConfig() *Config {
 				ModelDir:    "./models",
 				EmbedModel:  "nomic-embed-text-v1.5-q8.gguf",
 				ChatModel:   "qwen2.5-7b-instruct-q4.gguf",
-				ContextSize: 4096, // Increased to handle more RAG documents
+				ContextSize: 24000, // Large context for Pointer RAG with extensive cross-source linking
 				ThreadCount: 4,
 				GPULayers:   0, // CPU-only by default
 			},
