@@ -11,9 +11,6 @@ type SchedulerService interface {
 	// TriggerCollectionNow manually triggers collection
 	TriggerCollectionNow() error
 
-	// TriggerEmbeddingNow manually triggers embedding
-	TriggerEmbeddingNow() error
-
 	// IsRunning returns true if scheduler is active
 	IsRunning() bool
 }

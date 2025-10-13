@@ -87,8 +87,7 @@ type DocumentStorage interface {
 
 	// Search operations
 	FullTextSearch(query string, limit int) ([]*models.Document, error)
-	VectorSearch(embedding []float32, limit int) ([]*models.Document, error)
-	HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error)
+	// NOTE: Phase 5 - VectorSearch and HybridSearch removed (using FTS5 only)
 	SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error)
 
 	// List operations
@@ -98,23 +97,17 @@ type DocumentStorage interface {
 	// Stats operations
 	CountDocuments() (int, error)
 	CountDocumentsBySource(sourceType string) (int, error)
-	CountVectorized() (int, error)
+	// NOTE: Phase 5 - CountVectorized removed (no longer using embeddings)
 	GetStats() (*models.DocumentStats, error)
 
-	// Chunk operations
-	SaveChunk(chunk *models.DocumentChunk) error
-	GetChunks(documentID string) ([]*models.DocumentChunk, error)
-	DeleteChunks(documentID string) error
+	// NOTE: Phase 5 - Chunk operations removed (no longer using chunking for embeddings)
 
-	// Force sync/embed operations
+	// Force sync operations
 	SetForceSyncPending(id string, pending bool) error
-	SetForceEmbedPending(id string, pending bool) error
 	GetDocumentsForceSync() ([]*models.Document, error)
-	GetDocumentsForceEmbed(limit int) ([]*models.Document, error)
-	GetUnvectorizedDocuments(limit int) ([]*models.Document, error)
+	// NOTE: Phase 5 - Force embed operations removed: SetForceEmbedPending, GetDocumentsForceEmbed, GetUnvectorizedDocuments
 
-	// Embedding operations
-	ClearAllEmbeddings() (int, error)
+	// NOTE: Phase 5 - Embedding operations removed: ClearAllEmbeddings
 
 	// Bulk operations
 	ClearAll() error

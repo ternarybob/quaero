@@ -17,13 +17,13 @@ import (
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/documents"
-	"github.com/ternarybob/quaero/internal/services/embeddings"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
+	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/storage"
 )
@@ -37,18 +37,17 @@ type App struct {
 	// Document services
 	LLMService          interfaces.LLMService
 	AuditLogger         llm.AuditLogger
-	EmbeddingService    interfaces.EmbeddingService
 	DocumentService     interfaces.DocumentService
+	SearchService       interfaces.SearchService
 	IdentifierService   *identifiers.Extractor
 	ChatService         interfaces.ChatService
 	ProcessingService   *processing.Service
 	ProcessingScheduler *processing.Scheduler
 
 	// Event-driven services
-	EventService         interfaces.EventService
-	SchedulerService     interfaces.SchedulerService
-	EmbeddingCoordinator *embeddings.CoordinatorService
-	SummaryService       *summary.Service
+	EventService     interfaces.EventService
+	SchedulerService interfaces.SchedulerService
+	SummaryService   *summary.Service
 
 	// Atlassian services
 	AuthService       *atlassian.AtlassianAuthService
@@ -65,7 +64,6 @@ type App struct {
 	CollectionHandler *handlers.CollectionHandler
 	DocumentHandler   *handlers.DocumentHandler
 	SchedulerHandler  *handlers.SchedulerHandler
-	EmbeddingHandler  *handlers.EmbeddingHandler
 	ChatHandler       *handlers.ChatHandler
 	MCPHandler        *handlers.MCPHandler
 }
@@ -141,17 +139,23 @@ func (a *App) initServices() error {
 		Msg("LLM service initialized")
 
 	// 2. Initialize embedding service (now uses LLM abstraction)
-	a.EmbeddingService = embeddings.NewService(
-		a.LLMService,
-		a.AuditLogger,
-		a.Config.Embeddings.Dimension,
+	// NOTE: Phase 4 - EmbeddingService removed completely
+	// a.EmbeddingService = embeddings.NewService(
+	// 	a.LLMService,
+	// 	a.AuditLogger,
+	// 	a.Config.Embeddings.Dimension,
+	// 	a.Logger,
+	// )
+
+	// 3. Initialize document service (no longer uses EmbeddingService)
+	a.DocumentService = documents.NewService(
+		a.StorageManager.DocumentStorage(),
 		a.Logger,
 	)
 
-	// 3. Initialize document service
-	a.DocumentService = documents.NewService(
+	// 3.5 Initialize search service (FTS5-based search)
+	a.SearchService = search.NewFTS5SearchService(
 		a.StorageManager.DocumentStorage(),
-		a.EmbeddingService,
 		a.Logger,
 	)
 
@@ -159,6 +163,7 @@ func (a *App) initServices() error {
 	a.ChatService = chat.NewChatService(
 		a.LLMService,
 		a.StorageManager.DocumentStorage(),
+		a.SearchService,
 		a.Logger,
 	)
 
@@ -209,16 +214,18 @@ func (a *App) initServices() error {
 	}
 
 	// 11. Initialize embedding coordinator
-	a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
-		a.EmbeddingService,
-		a.StorageManager.DocumentStorage(),
-		a.EventService,
-		a.Logger,
-		a.Config.Processing.Limit,
-	)
-	if err := a.EmbeddingCoordinator.Start(); err != nil {
-		return fmt.Errorf("failed to start embedding coordinator: %w", err)
-	}
+	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
+	// EmbeddingService kept temporarily for backward compatibility
+	// a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
+	// 	a.EmbeddingService,
+	// 	a.StorageManager.DocumentStorage(),
+	// 	a.EventService,
+	// 	a.Logger,
+	// 	a.Config.Processing.Limit,
+	// )
+	// if err := a.EmbeddingCoordinator.Start(); err != nil {
+	// 	return fmt.Errorf("failed to start embedding coordinator: %w", err)
+	// }
 
 	// 11.5 Initialize summary service (subscribes to embedding events)
 	a.SummaryService = summary.NewService(
@@ -279,18 +286,23 @@ func (a *App) initHandlers() error {
 		a.SchedulerService,
 		a.StorageManager.DocumentStorage(),
 	)
-	a.EmbeddingHandler = handlers.NewEmbeddingHandler(
-		a.EmbeddingService,
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-	)
+	// NOTE: Phase 4 - EmbeddingHandler removed (no longer needed)
+	// a.EmbeddingHandler = handlers.NewEmbeddingHandler(
+	// 	a.EmbeddingService,
+	// 	a.StorageManager.DocumentStorage(),
+	// 	a.Logger,
+	// )
 	a.ChatHandler = handlers.NewChatHandler(
 		a.ChatService,
 		a.Logger,
 	)
 
-	// Initialize MCP handler
-	mcpService := mcp.NewDocumentService(a.StorageManager.DocumentStorage(), a.Logger)
+	// Initialize MCP handler with SearchService
+	mcpService := mcp.NewDocumentService(
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.Logger,
+	)
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Set UI logger for services

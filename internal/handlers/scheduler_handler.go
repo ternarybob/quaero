@@ -43,25 +43,6 @@ func (h *SchedulerHandler) TriggerCollectionHandler(w http.ResponseWriter, r *ht
 	})
 }
 
-// TriggerEmbeddingHandler manually triggers embedding
-func (h *SchedulerHandler) TriggerEmbeddingHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if err := h.schedulerService.TriggerEmbeddingNow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Embedding triggered successfully",
-	})
-}
-
 // ForceSyncDocumentHandler sets force_sync_pending for a document
 func (h *SchedulerHandler) ForceSyncDocumentHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -84,32 +65,6 @@ func (h *SchedulerHandler) ForceSyncDocumentHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Document marked for force sync",
-		"doc_id":  docID,
-	})
-}
-
-// ForceEmbedDocumentHandler sets force_embed_pending for a document
-func (h *SchedulerHandler) ForceEmbedDocumentHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	docID := r.URL.Query().Get("id")
-	if docID == "" {
-		http.Error(w, "Document ID is required", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.documentStorage.SetForceEmbedPending(docID, true); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Document marked for force embed",
 		"doc_id":  docID,
 	})
 }

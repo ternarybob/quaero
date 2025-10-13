@@ -473,18 +473,7 @@ func TestPostEndpoints(t *testing.T) {
 		t.Log("✓ Trigger collection works")
 	})
 
-	t.Run("TriggerEmbedding", func(t *testing.T) {
-		resp, err := http.Post(serverURL+"/api/scheduler/trigger-embedding", "application/json", nil)
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-
-		var result map[string]interface{}
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-		require.True(t, result["success"].(bool))
-		t.Log("✓ Trigger embedding works")
-	})
+	// NOTE: Phase 4 - TriggerEmbedding test removed (embedding functionality removed)
 
 	t.Run("ProcessDocuments", func(t *testing.T) {
 		resp, err := http.Post(serverURL+"/api/documents/process", "application/json", nil)

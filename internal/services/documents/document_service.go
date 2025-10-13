@@ -14,20 +14,18 @@ import (
 // Service implements DocumentService interface
 type Service struct {
 	storage           interfaces.DocumentStorage
-	embeddingService  interfaces.EmbeddingService
 	metadataExtractor *metadata.Extractor
 	logger            arbor.ILogger
 }
 
 // NewService creates a new document service
+// NOTE: Phase 4 - EmbeddingService removed, now uses FTS5 search only
 func NewService(
 	storage interfaces.DocumentStorage,
-	embeddingService interfaces.EmbeddingService,
 	logger arbor.ILogger,
 ) interfaces.DocumentService {
 	return &Service{
 		storage:           storage,
-		embeddingService:  embeddingService,
 		metadataExtractor: metadata.NewExtractor(logger),
 		logger:            logger,
 	}
@@ -143,15 +141,9 @@ func (s *Service) GetBySource(ctx context.Context, sourceType, sourceID string) 
 	return s.storage.GetDocumentBySource(sourceType, sourceID)
 }
 
-// DeleteDocument deletes a document and its chunks
+// DeleteDocument deletes a document
 func (s *Service) DeleteDocument(ctx context.Context, id string) error {
-	// Delete chunks first
-	if err := s.storage.DeleteChunks(id); err != nil {
-		s.logger.Warn().
-			Err(err).
-			Str("doc_id", id).
-			Msg("Failed to delete chunks")
-	}
+	// NOTE: Phase 5 - Chunks removed, no longer need to delete chunks
 
 	// Delete document
 	if err := s.storage.DeleteDocument(id); err != nil {
@@ -176,33 +168,13 @@ func (s *Service) Search(ctx context.Context, query *interfaces.SearchQuery) ([]
 		return s.storage.FullTextSearch(query.Text, query.Limit)
 
 	case interfaces.SearchModeVector:
-		if query.Embedding == nil {
-			// Generate embedding from text query
-			if query.Text == "" {
-				return nil, fmt.Errorf("text or embedding required for vector search")
-			}
-			embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query.Text)
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate query embedding: %w", err)
-			}
-			query.Embedding = embedding
-		}
-		return s.storage.VectorSearch(query.Embedding, query.Limit)
+		// NOTE: Phase 4 - Vector search removed, use FTS5 search instead
+		return nil, fmt.Errorf("vector search mode no longer supported, use keyword search with FTS5")
 
 	case interfaces.SearchModeHybrid:
-		if query.Text == "" {
-			return nil, fmt.Errorf("text query required for hybrid search")
-		}
-		if query.Embedding == nil {
-			// Generate embedding from text query
-			embedding, err := s.embeddingService.GenerateQueryEmbedding(ctx, query.Text)
-			if err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to generate query embedding, falling back to keyword search")
-				return s.storage.FullTextSearch(query.Text, query.Limit)
-			}
-			query.Embedding = embedding
-		}
-		return s.storage.HybridSearch(query.Text, query.Embedding, query.Limit)
+		// NOTE: Phase 4 - Hybrid search removed, use FTS5 search instead
+		s.logger.Warn().Msg("Hybrid search mode no longer supported, falling back to FTS5 keyword search")
+		return s.storage.FullTextSearch(query.Text, query.Limit)
 
 	default:
 		return nil, fmt.Errorf("invalid search mode: %s", query.Mode)

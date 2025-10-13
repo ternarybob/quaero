@@ -24,10 +24,11 @@ type ChatService struct {
 func NewChatService(
 	llmService interfaces.LLMService,
 	documentStorage interfaces.DocumentStorage,
+	searchService interfaces.SearchService,
 	logger arbor.ILogger,
 ) *ChatService {
 	// Initialize agent components
-	toolRouter := mcp.NewToolRouter(documentStorage, logger)
+	toolRouter := mcp.NewToolRouter(documentStorage, searchService, logger)
 	agentLoop := NewAgentLoop(toolRouter, llmService, logger, DefaultAgentConfig())
 
 	return &ChatService{

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/ternarybob/arbor"
@@ -81,19 +80,6 @@ func (s *Service) TriggerCollectionNow() error {
 	return s.eventService.PublishSync(ctx, event)
 }
 
-// TriggerEmbeddingNow manually triggers embedding
-func (s *Service) TriggerEmbeddingNow() error {
-	s.logger.Info().Msg("Manual embedding trigger requested")
-
-	ctx := context.Background()
-	event := interfaces.Event{
-		Type:    interfaces.EventEmbeddingTriggered,
-		Payload: nil,
-	}
-
-	return s.eventService.PublishSync(ctx, event)
-}
-
 // IsRunning returns true if scheduler is active
 func (s *Service) IsRunning() bool {
 	return s.running
@@ -152,30 +138,5 @@ func (s *Service) runScheduledTask() {
 	}
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
-	s.logger.Info().Msg(">>> SCHEDULER: Collection completed, waiting before embedding")
-
-	// Wait 10 seconds to allow collection writes to complete and reduce database contention
-	time.Sleep(10 * time.Second)
-	s.logger.Debug().Msg(">>> SCHEDULER: Step 7.5 - Delay complete, starting embedding")
-
-	// Step 3: Publish embedding event
-	s.logger.Debug().Msg(">>> SCHEDULER: Step 8 - Creating embedding event")
-	embeddingEvent := interfaces.Event{
-		Type:    interfaces.EventEmbeddingTriggered,
-		Payload: nil,
-	}
-	s.logger.Debug().
-		Str("event_type", string(embeddingEvent.Type)).
-		Msg(">>> SCHEDULER: Step 9 - Embedding event created")
-
-	s.logger.Debug().Msg(">>> SCHEDULER: Step 10 - Publishing embedding event synchronously")
-	if err := s.eventService.PublishSync(ctx, embeddingEvent); err != nil {
-		s.logger.Error().
-			Err(err).
-			Msg(">>> SCHEDULER: FAILED - Embedding event publish error")
-		return
-	}
-	s.logger.Debug().Msg(">>> SCHEDULER: Step 11 - Embedding event published successfully")
-
-	s.logger.Info().Msg(">>> SCHEDULER: Scheduled cycle completed successfully")
+	s.logger.Info().Msg(">>> SCHEDULER: Collection completed successfully")
 }

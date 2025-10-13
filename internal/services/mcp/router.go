@@ -14,17 +14,20 @@ import (
 type ToolRouter struct {
 	documentService *DocumentService
 	storage         interfaces.DocumentStorage
+	searchService   interfaces.SearchService
 	logger          arbor.ILogger
 }
 
 // NewToolRouter creates a new MCP tool router
 func NewToolRouter(
 	storage interfaces.DocumentStorage,
+	searchService interfaces.SearchService,
 	logger arbor.ILogger,
 ) *ToolRouter {
 	return &ToolRouter{
-		documentService: NewDocumentService(storage, logger),
+		documentService: NewDocumentService(storage, searchService, logger),
 		storage:         storage,
+		searchService:   searchService,
 		logger:          logger,
 	}
 }

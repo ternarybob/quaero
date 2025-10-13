@@ -16,7 +16,6 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/jira", s.app.UIHandler.JiraPageHandler)
 	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler)
 	mux.HandleFunc("/documents", s.app.UIHandler.DocumentsPageHandler)
-	mux.HandleFunc("/embeddings", s.app.UIHandler.EmbeddingsPageHandler)
 	mux.HandleFunc("/chat", s.app.UIHandler.ChatPageHandler)
 	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
 	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
@@ -79,12 +78,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/process", s.app.DocumentHandler.ProcessHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
-	mux.HandleFunc("/api/documents/force-embed", s.app.SchedulerHandler.ForceEmbedDocumentHandler)
 	mux.HandleFunc("/api/documents/", s.app.DocumentHandler.ReprocessDocumentHandler) // Handles /api/documents/{id}/reprocess
-
-	// API routes - Embeddings (testing)
-	mux.HandleFunc("/api/embeddings/generate", s.app.EmbeddingHandler.GenerateEmbeddingHandler)
-	mux.HandleFunc("/api/embeddings", s.app.EmbeddingHandler.ClearEmbeddingsHandler)
 
 	// API routes - Chat (RAG-enabled chat)
 	mux.HandleFunc("/api/chat", s.app.ChatHandler.ChatHandler)
@@ -99,7 +93,6 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// API routes - Scheduler
 	mux.HandleFunc("/api/scheduler/trigger-collection", s.app.SchedulerHandler.TriggerCollectionHandler)
-	mux.HandleFunc("/api/scheduler/trigger-embedding", s.app.SchedulerHandler.TriggerEmbeddingHandler)
 
 	// API routes - Logs
 	mux.HandleFunc("/api/logs/recent", s.app.WSHandler.GetRecentLogsHandler)

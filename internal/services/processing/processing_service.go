@@ -91,8 +91,9 @@ func (s *Service) GetStatus(ctx context.Context) (*ProcessingStatus, error) {
 	}
 
 	status.TotalDocuments = stats.TotalDocuments
-	status.ProcessedCount = stats.VectorizedCount
-	status.PendingCount = stats.PendingVectorize
+	// NOTE: Phase 3 - Embedding removal: track total documents, not vectorization
+	status.ProcessedCount = stats.TotalDocuments
+	status.PendingCount = 0
 	status.FailedCount = 0
 
 	return status, nil
@@ -271,27 +272,17 @@ func (s *Service) ProcessConfluence(ctx context.Context) (*SourceStats, error) {
 func (s *Service) VectorizeExisting(ctx context.Context) error {
 	s.logger.Info().Msg("Vectorizing documents without embeddings")
 
-	// Get count of documents needing vectorization
+	// NOTE: Phase 5 - Embeddings removed, no longer processing vectorization
+	// This method is now a no-op and can be removed in future cleanup
+
 	total, err := s.documentService.Count(ctx, "")
 	if err != nil {
 		return fmt.Errorf("failed to count documents: %w", err)
 	}
 
-	stats, err := s.documentService.GetStats(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get stats: %w", err)
-	}
-
-	needsVectorization := total - stats.VectorizedCount
-
 	s.logger.Info().
 		Int("total", total).
-		Int("vectorized", stats.VectorizedCount).
-		Int("pending", needsVectorization).
-		Msg("Vectorization status")
-
-	// This will be implemented when we have a way to list documents without embeddings
-	// For now, this is a placeholder that logs the status
+		Msg("Document processing status (embeddings removed in Phase 5)")
 
 	return nil
 }

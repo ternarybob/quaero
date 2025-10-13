@@ -10,15 +10,21 @@ import (
 
 // DocumentService implements MCP protocol for document operations
 type DocumentService struct {
-	storage interfaces.DocumentStorage
-	logger  arbor.ILogger
+	storage       interfaces.DocumentStorage
+	searchService interfaces.SearchService
+	logger        arbor.ILogger
 }
 
 // NewDocumentService creates a new MCP document service
-func NewDocumentService(storage interfaces.DocumentStorage, logger arbor.ILogger) *DocumentService {
+func NewDocumentService(
+	storage interfaces.DocumentStorage,
+	searchService interfaces.SearchService,
+	logger arbor.ILogger,
+) *DocumentService {
 	return &DocumentService{
-		storage: storage,
-		logger:  logger,
+		storage:       storage,
+		searchService: searchService,
+		logger:        logger,
 	}
 }
 
@@ -95,20 +101,51 @@ func (s *DocumentService) ListTools(ctx context.Context) (*ToolList, error) {
 		Tools: []Tool{
 			{
 				Name:        "search_documents",
-				Description: "Search documents using full-text search",
+				Description: "Search documents using full-text search. Supports keyword queries and filters.",
 				InputSchema: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
 						"query": map[string]interface{}{
 							"type":        "string",
-							"description": "Search query",
+							"description": "Search query (can be empty for filter-only searches)",
 						},
 						"limit": map[string]interface{}{
 							"type":        "number",
 							"description": "Maximum number of results (default: 10)",
 						},
+						"source_types": map[string]interface{}{
+							"type":        "array",
+							"description": "Filter by source types (e.g., ['jira', 'confluence'])",
+							"items": map[string]interface{}{
+								"type": "string",
+							},
+						},
 					},
-					"required": []string{"query"},
+				},
+			},
+			{
+				Name:        "search_by_reference",
+				Description: "Search documents containing a specific reference (e.g., Jira issue key 'PROJ-123', user mention '@alice', PR reference 'PR #456')",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"reference": map[string]interface{}{
+							"type":        "string",
+							"description": "Reference to search for (e.g., 'PROJ-123', '@alice', 'PR #456')",
+						},
+						"limit": map[string]interface{}{
+							"type":        "number",
+							"description": "Maximum number of results (default: 10)",
+						},
+						"source_types": map[string]interface{}{
+							"type":        "array",
+							"description": "Filter by source types (e.g., ['jira', 'confluence'])",
+							"items": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"required": []string{"reference"},
 				},
 			},
 			{
@@ -156,9 +193,11 @@ func (s *DocumentService) CallTool(ctx context.Context, name string, args map[st
 
 	switch name {
 	case "search_documents":
-		return s.searchDocuments(args)
+		return s.searchDocuments(ctx, args)
+	case "search_by_reference":
+		return s.searchByReference(ctx, args)
 	case "get_document":
-		return s.getDocumentTool(args)
+		return s.getDocumentTool(ctx, args)
 	case "list_documents":
 		return s.listDocuments(args)
 	default:
@@ -227,18 +266,36 @@ func (s *DocumentService) getDocument(id string) (*ResourceContent, error) {
 	}, nil
 }
 
-func (s *DocumentService) searchDocuments(args map[string]interface{}) (*ToolResult, error) {
-	query, ok := args["query"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid 'query' parameter")
+func (s *DocumentService) searchDocuments(ctx context.Context, args map[string]interface{}) (*ToolResult, error) {
+	query := ""
+	if q, ok := args["query"].(string); ok {
+		query = q
 	}
 
-	limit := 10
+	// Build search options
+	opts := interfaces.SearchOptions{
+		Limit: 10,
+	}
+
 	if l, ok := args["limit"].(float64); ok {
-		limit = int(l)
+		opts.Limit = int(l)
 	}
 
-	docs, err := s.storage.FullTextSearch(query, limit)
+	// Parse source_types array if provided
+	if sourceTypesRaw, ok := args["source_types"]; ok {
+		if sourceTypesArray, ok := sourceTypesRaw.([]interface{}); ok {
+			sourceTypes := make([]string, 0, len(sourceTypesArray))
+			for _, st := range sourceTypesArray {
+				if strType, ok := st.(string); ok {
+					sourceTypes = append(sourceTypes, strType)
+				}
+			}
+			opts.SourceTypes = sourceTypes
+		}
+	}
+
+	// Use SearchService instead of direct storage call
+	docs, err := s.searchService.Search(ctx, query, opts)
 	if err != nil {
 		return &ToolResult{
 			Content: []ContentBlock{
@@ -255,13 +312,60 @@ func (s *DocumentService) searchDocuments(args map[string]interface{}) (*ToolRes
 	}, nil
 }
 
-func (s *DocumentService) getDocumentTool(args map[string]interface{}) (*ToolResult, error) {
+func (s *DocumentService) searchByReference(ctx context.Context, args map[string]interface{}) (*ToolResult, error) {
+	reference, ok := args["reference"].(string)
+	if !ok {
+		return nil, fmt.Errorf("missing or invalid 'reference' parameter")
+	}
+
+	// Build search options
+	opts := interfaces.SearchOptions{
+		Limit: 10,
+	}
+
+	if l, ok := args["limit"].(float64); ok {
+		opts.Limit = int(l)
+	}
+
+	// Parse source_types array if provided
+	if sourceTypesRaw, ok := args["source_types"]; ok {
+		if sourceTypesArray, ok := sourceTypesRaw.([]interface{}); ok {
+			sourceTypes := make([]string, 0, len(sourceTypesArray))
+			for _, st := range sourceTypesArray {
+				if strType, ok := st.(string); ok {
+					sourceTypes = append(sourceTypes, strType)
+				}
+			}
+			opts.SourceTypes = sourceTypes
+		}
+	}
+
+	// Use SearchService.SearchByReference
+	docs, err := s.searchService.SearchByReference(ctx, reference, opts)
+	if err != nil {
+		return &ToolResult{
+			Content: []ContentBlock{
+				{Type: "text", Text: fmt.Sprintf("Error: %v", err)},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	return &ToolResult{
+		Content: []ContentBlock{
+			{Type: "text", Text: formatDocumentList(docs)},
+		},
+	}, nil
+}
+
+func (s *DocumentService) getDocumentTool(ctx context.Context, args map[string]interface{}) (*ToolResult, error) {
 	id, ok := args["id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'id' parameter")
 	}
 
-	doc, err := s.storage.GetDocument(id)
+	// Use SearchService.GetByID instead of direct storage call
+	doc, err := s.searchService.GetByID(ctx, id)
 	if err != nil {
 		return &ToolResult{
 			Content: []ContentBlock{

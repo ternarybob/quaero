@@ -48,15 +48,15 @@ func (m *mockDocumentStorage) DeleteDocument(id string) error {
 	return nil
 }
 
-
-
 func (m *mockDocumentStorage) Close() error {
 	return nil
 }
 
 // Stub methods for DocumentStorage interface (not used in these tests)
 func (m *mockDocumentStorage) SaveDocuments(docs []*models.Document) error { return nil }
-func (m *mockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) { return nil, nil }
+func (m *mockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
+	return nil, nil
+}
 func (m *mockDocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	// Simple mock implementation - return all documents if query matches content
 	var results []*models.Document
@@ -73,29 +73,45 @@ func (m *mockDocumentStorage) FullTextSearch(query string, limit int) ([]*models
 
 	return results, nil
 }
-func (m *mockDocumentStorage) VectorSearch(embedding []float32, limit int) ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) { return m.documents, nil }
-func (m *mockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) CountDocuments() (int, error) { return len(m.documents), nil }
+func (m *mockDocumentStorage) VectorSearch(embedding []float32, limit int) ([]*models.Document, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {
+	return m.documents, nil
+}
+func (m *mockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) CountDocuments() (int, error)                          { return len(m.documents), nil }
 func (m *mockDocumentStorage) CountDocumentsBySource(sourceType string) (int, error) { return 0, nil }
-func (m *mockDocumentStorage) CountVectorized() (int, error) { return 0, nil }
+func (m *mockDocumentStorage) CountVectorized() (int, error)                         { return 0, nil }
 func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error) {
 	return &models.DocumentStats{
 		TotalDocuments: len(m.documents),
 	}, nil
 }
-func (m *mockDocumentStorage) SaveChunk(chunk *models.DocumentChunk) error         { return nil }
-func (m *mockDocumentStorage) GetChunks(documentID string) ([]*models.DocumentChunk, error) { return nil, nil }
-func (m *mockDocumentStorage) DeleteChunks(documentID string) error                { return nil }
-func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error { return nil }
+func (m *mockDocumentStorage) SaveChunk(chunk *models.DocumentChunk) error { return nil }
+func (m *mockDocumentStorage) GetChunks(documentID string) ([]*models.DocumentChunk, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) DeleteChunks(documentID string) error               { return nil }
+func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error  { return nil }
 func (m *mockDocumentStorage) SetForceEmbedPending(id string, pending bool) error { return nil }
 func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) GetDocumentsForceEmbed(limit int) ([]*models.Document, error) { return nil, nil }
-func (m *mockDocumentStorage) GetUnvectorizedDocuments(limit int) ([]*models.Document, error) { return nil, nil }
+func (m *mockDocumentStorage) GetDocumentsForceEmbed(limit int) ([]*models.Document, error) {
+	return nil, nil
+}
+func (m *mockDocumentStorage) GetUnvectorizedDocuments(limit int) ([]*models.Document, error) {
+	return nil, nil
+}
 func (m *mockDocumentStorage) ClearAllEmbeddings() (int, error) { return 0, nil }
-func (m *mockDocumentStorage) ClearAll() error { return nil }
+func (m *mockDocumentStorage) ClearAll() error                  { return nil }
 
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

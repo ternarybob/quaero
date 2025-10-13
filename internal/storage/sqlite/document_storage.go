@@ -4,15 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
+
+// NOTE: Phase 5 - Removed unused imports: math, unsafe (no longer needed without embedding operations)
 
 // DocumentStorage implements interfaces.DocumentStorage
 type DocumentStorage struct {
@@ -37,14 +37,7 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Serialize embedding
-	var embeddingData []byte
-	if doc.Embedding != nil && len(doc.Embedding) > 0 {
-		embeddingData, err = serializeEmbedding(doc.Embedding)
-		if err != nil {
-			return fmt.Errorf("failed to serialize embedding: %w", err)
-		}
-	}
+	// NOTE: Phase 5 - Removed embedding serialization code
 
 	var lastSyncedUnix *int64
 	if doc.LastSynced != nil {
@@ -55,22 +48,19 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 	query := `
 		INSERT INTO documents (
 			id, source_type, source_id, title, content, content_markdown,
-			embedding, embedding_model, metadata, url, created_at, updated_at,
-			last_synced, source_version, force_sync_pending, force_embed_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			metadata, url, created_at, updated_at,
+			last_synced, source_version, force_sync_pending
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content = excluded.content,
 			content_markdown = excluded.content_markdown,
-			embedding = excluded.embedding,
-			embedding_model = excluded.embedding_model,
 			metadata = excluded.metadata,
 			url = excluded.url,
 			updated_at = excluded.updated_at,
 			last_synced = excluded.last_synced,
 			source_version = excluded.source_version,
-			force_sync_pending = excluded.force_sync_pending,
-			force_embed_pending = excluded.force_embed_pending
+			force_sync_pending = excluded.force_sync_pending
 	`
 
 	_, err = d.db.db.Exec(query,
@@ -80,8 +70,6 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		doc.Title,
 		doc.Content,
 		doc.ContentMarkdown,
-		embeddingData,
-		doc.EmbeddingModel,
 		string(metadataJSON),
 		doc.URL,
 		doc.CreatedAt.Unix(),
@@ -89,7 +77,6 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		lastSyncedUnix,
 		doc.SourceVersion,
 		doc.ForceSyncPending,
-		doc.ForceEmbedPending,
 	)
 
 	return err
@@ -111,28 +98,19 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO documents (
 			id, source_type, source_id, title, content, content_markdown,
-			embedding, embedding_model, metadata, url, created_at, updated_at,
-			last_synced, source_version, force_sync_pending, force_embed_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			metadata, url, created_at, updated_at,
+			last_synced, source_version, force_sync_pending
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content = excluded.content,
 			content_markdown = excluded.content_markdown,
-			embedding = CASE
-				WHEN excluded.embedding IS NOT NULL AND excluded.embedding != '' THEN excluded.embedding
-				ELSE documents.embedding
-			END,
-			embedding_model = CASE
-				WHEN excluded.embedding IS NOT NULL AND excluded.embedding != '' THEN excluded.embedding_model
-				ELSE documents.embedding_model
-			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
 			updated_at = excluded.updated_at,
 			last_synced = excluded.last_synced,
 			source_version = excluded.source_version,
-			force_sync_pending = excluded.force_sync_pending,
-			force_embed_pending = excluded.force_embed_pending
+			force_sync_pending = excluded.force_sync_pending
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -145,13 +123,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			return fmt.Errorf("failed to marshal metadata: %w", err)
 		}
 
-		var embeddingData []byte
-		if doc.Embedding != nil && len(doc.Embedding) > 0 {
-			embeddingData, err = serializeEmbedding(doc.Embedding)
-			if err != nil {
-				return fmt.Errorf("failed to serialize embedding: %w", err)
-			}
-		}
+		// NOTE: Phase 5 - Removed embedding serialization code
 
 		var lastSyncedUnix *int64
 		if doc.LastSynced != nil {
@@ -166,8 +138,6 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			doc.Title,
 			doc.Content,
 			doc.ContentMarkdown,
-			embeddingData,
-			doc.EmbeddingModel,
 			string(metadataJSON),
 			doc.URL,
 			doc.CreatedAt.Unix(),
@@ -175,7 +145,6 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			lastSyncedUnix,
 			doc.SourceVersion,
 			doc.ForceSyncPending,
-			doc.ForceEmbedPending,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to save document %s: %w", doc.ID, err)
@@ -189,8 +158,8 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
+			   metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE id = ?
 	`
@@ -203,8 +172,8 @@ func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 func (d *DocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
+			   metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE source_type = ? AND source_id = ?
 	`
@@ -220,21 +189,13 @@ func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	var embeddingData []byte
-	if doc.Embedding != nil && len(doc.Embedding) > 0 {
-		embeddingData, err = serializeEmbedding(doc.Embedding)
-		if err != nil {
-			return fmt.Errorf("failed to serialize embedding: %w", err)
-		}
-	}
+	// NOTE: Phase 5 - Removed embedding serialization code
 
 	query := `
 		UPDATE documents SET
 			title = ?,
 			content = ?,
 			content_markdown = ?,
-			embedding = ?,
-			embedding_model = ?,
 			metadata = ?,
 			url = ?,
 			updated_at = ?
@@ -245,8 +206,6 @@ func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {
 		doc.Title,
 		doc.Content,
 		doc.ContentMarkdown,
-		embeddingData,
-		doc.EmbeddingModel,
 		string(metadataJSON),
 		doc.URL,
 		time.Now().Unix(),
@@ -266,8 +225,8 @@ func (d *DocumentStorage) DeleteDocument(id string) error {
 func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	sqlQuery := `
 		SELECT d.id, d.source_type, d.source_id, d.title, d.content, d.content_markdown,
-			   d.embedding, d.embedding_model, d.metadata, d.url, d.created_at, d.updated_at,
-			   d.last_synced, d.source_version, d.force_sync_pending, d.force_embed_pending
+			   d.metadata, d.url, d.created_at, d.updated_at,
+			   d.last_synced, d.source_version, d.force_sync_pending
 		FROM documents d
 		INNER JOIN documents_fts fts ON d.rowid = fts.rowid
 		WHERE documents_fts MATCH ?
@@ -284,171 +243,9 @@ func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Doc
 	return d.scanDocuments(rows)
 }
 
-// VectorSearch performs vector similarity search using cosine similarity
-func (d *DocumentStorage) VectorSearch(embedding []float32, limit int) ([]*models.Document, error) {
-	// Get all documents with embeddings
-	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
-		FROM documents
-		WHERE embedding IS NOT NULL AND embedding != ''
-	`
-
-	rows, err := d.db.db.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query documents: %w", err)
-	}
-	defer rows.Close()
-
-	// Scan all documents and calculate similarity scores
-	type docWithScore struct {
-		doc   *models.Document
-		score float32
-	}
-
-	docsWithScores := make([]docWithScore, 0)
-
-	for rows.Next() {
-		var doc models.Document
-		var embeddingData []byte
-		var metadataJSON string
-		var createdAt, updatedAt int64
-		var lastSynced sql.NullInt64
-		var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
-		var forceSyncPending, forceEmbedPending sql.NullBool
-
-		err := rows.Scan(
-			&doc.ID,
-			&doc.SourceType,
-			&doc.SourceID,
-			&doc.Title,
-			&doc.Content,
-			&contentMarkdown,
-			&embeddingData,
-			&embeddingModel,
-			&metadataJSON,
-			&url,
-			&createdAt,
-			&updatedAt,
-			&lastSynced,
-			&sourceVersion,
-			&forceSyncPending,
-			&forceEmbedPending,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan document: %w", err)
-		}
-
-		// Parse optional fields
-		if contentMarkdown.Valid {
-			doc.ContentMarkdown = contentMarkdown.String
-		}
-		if embeddingModel.Valid {
-			doc.EmbeddingModel = embeddingModel.String
-		}
-		if url.Valid {
-			doc.URL = url.String
-		}
-		if sourceVersion.Valid {
-			doc.SourceVersion = sourceVersion.String
-		}
-		if forceSyncPending.Valid {
-			doc.ForceSyncPending = forceSyncPending.Bool
-		}
-		if forceEmbedPending.Valid {
-			doc.ForceEmbedPending = forceEmbedPending.Bool
-		}
-		if lastSynced.Valid {
-			t := time.Unix(lastSynced.Int64, 0)
-			doc.LastSynced = &t
-		}
-
-		// Deserialize embedding
-		if len(embeddingData) > 0 {
-			doc.Embedding, err = deserializeEmbedding(embeddingData)
-			if err != nil {
-				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to deserialize embedding")
-				continue
-			}
-		} else {
-			continue
-		}
-
-		// Parse metadata
-		if metadataJSON != "" {
-			if err := json.Unmarshal([]byte(metadataJSON), &doc.Metadata); err != nil {
-				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to unmarshal metadata")
-				doc.Metadata = make(map[string]interface{})
-			}
-		} else {
-			doc.Metadata = make(map[string]interface{})
-		}
-
-		doc.CreatedAt = time.Unix(createdAt, 0)
-		doc.UpdatedAt = time.Unix(updatedAt, 0)
-
-		// Calculate cosine similarity
-		similarity := cosineSimilarity(embedding, doc.Embedding)
-
-		docsWithScores = append(docsWithScores, docWithScore{
-			doc:   &doc,
-			score: similarity,
-		})
-	}
-
-	// Sort by similarity score (descending)
-	for i := 0; i < len(docsWithScores); i++ {
-		for j := i + 1; j < len(docsWithScores); j++ {
-			if docsWithScores[j].score > docsWithScores[i].score {
-				docsWithScores[i], docsWithScores[j] = docsWithScores[j], docsWithScores[i]
-			}
-		}
-	}
-
-	// Return top N documents
-	results := make([]*models.Document, 0, limit)
-	for i := 0; i < len(docsWithScores) && i < limit; i++ {
-		results = append(results, docsWithScores[i].doc)
-	}
-
-	return results, nil
-}
-
-// cosineSimilarity calculates the cosine similarity between two vectors
-func cosineSimilarity(a, b []float32) float32 {
-	if len(a) != len(b) {
-		return 0
-	}
-
-	var dotProduct float32
-	var normA float32
-	var normB float32
-
-	for i := 0; i < len(a); i++ {
-		dotProduct += a[i] * b[i]
-		normA += a[i] * a[i]
-		normB += b[i] * b[i]
-	}
-
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-
-	// Calculate magnitudes using sqrt
-	magnitudeA := float32(math.Sqrt(float64(normA)))
-	magnitudeB := float32(math.Sqrt(float64(normB)))
-
-	// Return cosine similarity
-	return dotProduct / (magnitudeA * magnitudeB)
-}
-
-// HybridSearch combines keyword and vector search
-func (d *DocumentStorage) HybridSearch(query string, embedding []float32, limit int) ([]*models.Document, error) {
-	// For now, fall back to full-text search
-	d.logger.Warn().Msg("Hybrid search not implemented, using full-text search only")
-	return d.FullTextSearch(query, limit)
-}
+// NOTE: Phase 5 - Removed VectorSearch method (vector similarity search no longer supported)
+// NOTE: Phase 5 - Removed cosineSimilarity helper function
+// NOTE: Phase 5 - Removed HybridSearch method (vector search component no longer available)
 
 // SearchByIdentifier finds documents that reference a specific identifier (e.g., BUG-123, abc123def)
 // Searches in:
@@ -482,8 +279,8 @@ func (d *DocumentStorage) SearchByIdentifier(identifier string, excludeSources [
 
 	query := fmt.Sprintf(`
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
+			   metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE (
 			-- Search in metadata.issue_key (case-insensitive)
@@ -534,7 +331,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		opts.Limit = 50
 	}
 
-	query := "SELECT id, source_type, source_id, title, content, content_markdown, embedding, embedding_model, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending, force_embed_pending FROM documents"
+	query := "SELECT id, source_type, source_id, title, content, content_markdown, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
 
 	// Add WHERE clause if filtering by source
 	if opts.SourceType != "" {
@@ -560,8 +357,8 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 func (d *DocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
+			   metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE source_type = ?
 		ORDER BY updated_at DESC
@@ -590,12 +387,7 @@ func (d *DocumentStorage) CountDocumentsBySource(sourceType string) (int, error)
 	return count, err
 }
 
-// CountVectorized returns count of documents with embeddings
-func (d *DocumentStorage) CountVectorized() (int, error) {
-	var count int
-	err := d.db.db.QueryRow("SELECT COUNT(*) FROM documents WHERE embedding IS NOT NULL").Scan(&count)
-	return count, err
-}
+// NOTE: Phase 5 - Removed CountVectorized method (embedding counts no longer tracked)
 
 // GetStats retrieves document statistics
 func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
@@ -611,16 +403,7 @@ func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 		return nil, err
 	}
 
-	// Vectorized count
-	stats.VectorizedCount, err = d.CountVectorized()
-	if err != nil {
-		return nil, err
-	}
-
-	stats.PendingVectorize = stats.TotalDocuments - stats.VectorizedCount
-
-	// Populate VectorizedDocuments (alias for VectorizedCount)
-	stats.VectorizedDocuments = stats.VectorizedCount
+	// NOTE: Phase 5 - Removed vectorized count tracking (no longer using embeddings)
 
 	// Count by source
 	rows, err := d.db.db.Query("SELECT source_type, COUNT(*) FROM documents GROUP BY source_type")
@@ -642,8 +425,7 @@ func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 	stats.JiraDocuments = stats.DocumentsBySource["jira"]
 	stats.ConfluenceDocuments = stats.DocumentsBySource["confluence"]
 
-	// Get embedding model (from any document that has one)
-	d.db.db.QueryRow("SELECT embedding_model FROM documents WHERE embedding_model IS NOT NULL LIMIT 1").Scan(&stats.EmbeddingModel)
+	// NOTE: Phase 5 - Removed embedding model query
 
 	// Average content size
 	var avgSize sql.NullInt64
@@ -655,67 +437,9 @@ func (d *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 	return stats, nil
 }
 
-// SaveChunk saves a document chunk
-func (d *DocumentStorage) SaveChunk(chunk *models.DocumentChunk) error {
-	embeddingData, err := serializeEmbedding(chunk.Embedding)
-	if err != nil {
-		return fmt.Errorf("failed to serialize embedding: %w", err)
-	}
-
-	query := `
-		INSERT INTO document_chunks (id, document_id, chunk_index, content, embedding, token_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(document_id, chunk_index) DO UPDATE SET
-			content = excluded.content,
-			embedding = excluded.embedding,
-			token_count = excluded.token_count
-	`
-
-	_, err = d.db.db.Exec(query,
-		chunk.ID,
-		chunk.DocumentID,
-		chunk.ChunkIndex,
-		chunk.Content,
-		embeddingData,
-		chunk.TokenCount,
-		chunk.CreatedAt.Unix(),
-	)
-
-	return err
-}
-
-// GetChunks retrieves all chunks for a document
-func (d *DocumentStorage) GetChunks(documentID string) ([]*models.DocumentChunk, error) {
-	query := `
-		SELECT id, document_id, chunk_index, content, embedding, token_count, created_at
-		FROM document_chunks
-		WHERE document_id = ?
-		ORDER BY chunk_index
-	`
-
-	rows, err := d.db.db.Query(query, documentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	chunks := make([]*models.DocumentChunk, 0)
-	for rows.Next() {
-		chunk, err := d.scanChunk(rows)
-		if err != nil {
-			return nil, err
-		}
-		chunks = append(chunks, chunk)
-	}
-
-	return chunks, nil
-}
-
-// DeleteChunks deletes all chunks for a document
-func (d *DocumentStorage) DeleteChunks(documentID string) error {
-	_, err := d.db.db.Exec("DELETE FROM document_chunks WHERE document_id = ?", documentID)
-	return err
-}
+// NOTE: Phase 5 - Removed SaveChunk method (DocumentChunk model removed)
+// NOTE: Phase 5 - Removed GetChunks method (DocumentChunk model removed)
+// NOTE: Phase 5 - Removed DeleteChunks method (DocumentChunk model removed)
 
 // ClearAll deletes all documents
 func (d *DocumentStorage) ClearAll() error {
@@ -723,26 +447,7 @@ func (d *DocumentStorage) ClearAll() error {
 	return err
 }
 
-// ClearAllEmbeddings clears all embeddings from documents without deleting the documents
-func (d *DocumentStorage) ClearAllEmbeddings() (int, error) {
-	result, err := d.db.db.Exec(`
-		UPDATE documents
-		SET embedding = NULL,
-			embedding_model = '',
-			force_embed_pending = 0
-		WHERE embedding IS NOT NULL OR embedding != ''
-	`)
-	if err != nil {
-		return 0, err
-	}
-
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-
-	return int(count), nil
-}
+// NOTE: Phase 5 - Removed ClearAllEmbeddings method (embeddings no longer exist)
 
 // SetForceSyncPending sets the force sync pending flag for a document
 func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
@@ -750,18 +455,14 @@ func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
 	return err
 }
 
-// SetForceEmbedPending sets the force embed pending flag for a document
-func (d *DocumentStorage) SetForceEmbedPending(id string, pending bool) error {
-	_, err := d.db.db.Exec("UPDATE documents SET force_embed_pending = ? WHERE id = ?", pending, id)
-	return err
-}
+// NOTE: Phase 5 - Removed SetForceEmbedPending method (force_embed_pending field removed)
 
 // GetDocumentsForceSync gets documents with force sync pending
 func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
+			   metadata, url, created_at, updated_at,
+			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE force_sync_pending = 1
 	`
@@ -775,56 +476,20 @@ func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 	return d.scanDocuments(rows)
 }
 
-// GetDocumentsForceEmbed gets documents with force embed pending or not vectorized
-func (d *DocumentStorage) GetDocumentsForceEmbed(limit int) ([]*models.Document, error) {
-	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
-		FROM documents
-		WHERE force_embed_pending = 1
-		LIMIT ?
-	`
-
-	rows, err := d.db.db.Query(query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return d.scanDocuments(rows)
-}
-
-// GetUnvectorizedDocuments gets documents that haven't been vectorized yet
-func (d *DocumentStorage) GetUnvectorizedDocuments(limit int) ([]*models.Document, error) {
-	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
-			   embedding, embedding_model, metadata, url, created_at, updated_at,
-			   last_synced, source_version, force_sync_pending, force_embed_pending
-		FROM documents
-		WHERE embedding IS NULL OR embedding = ''
-		LIMIT ?
-	`
-
-	rows, err := d.db.db.Query(query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return d.scanDocuments(rows)
-}
+// NOTE: Phase 5 - Removed GetDocumentsForceEmbed method (force_embed_pending field removed)
+// NOTE: Phase 5 - Removed GetUnvectorizedDocuments method (embeddings no longer tracked)
 
 // Helper functions
 
 func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	var doc models.Document
-	var embeddingData []byte
 	var metadataJSON string
 	var createdAt, updatedAt int64
 	var lastSynced sql.NullInt64
-	var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
-	var forceSyncPending, forceEmbedPending sql.NullBool
+	var contentMarkdown, url, sourceVersion sql.NullString
+	var forceSyncPending sql.NullBool
+
+	// NOTE: Phase 5 - Removed embeddingData and embeddingModel scan targets
 
 	err := row.Scan(
 		&doc.ID,
@@ -833,8 +498,6 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		&doc.Title,
 		&doc.Content,
 		&contentMarkdown,
-		&embeddingData,
-		&embeddingModel,
 		&metadataJSON,
 		&url,
 		&createdAt,
@@ -842,7 +505,6 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		&lastSynced,
 		&sourceVersion,
 		&forceSyncPending,
-		&forceEmbedPending,
 	)
 	if err != nil {
 		return nil, err
@@ -851,9 +513,6 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	// Parse optional fields
 	if contentMarkdown.Valid {
 		doc.ContentMarkdown = contentMarkdown.String
-	}
-	if embeddingModel.Valid {
-		doc.EmbeddingModel = embeddingModel.String
 	}
 	if url.Valid {
 		doc.URL = url.String
@@ -864,21 +523,12 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	if forceSyncPending.Valid {
 		doc.ForceSyncPending = forceSyncPending.Bool
 	}
-	if forceEmbedPending.Valid {
-		doc.ForceEmbedPending = forceEmbedPending.Bool
-	}
 	if lastSynced.Valid {
 		t := time.Unix(lastSynced.Int64, 0)
 		doc.LastSynced = &t
 	}
 
-	// Deserialize embedding
-	if len(embeddingData) > 0 {
-		doc.Embedding, err = deserializeEmbedding(embeddingData)
-		if err != nil {
-			d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to deserialize embedding")
-		}
-	}
+	// NOTE: Phase 5 - Removed embedding deserialization code
 
 	// Parse metadata
 	if metadataJSON != "" {
@@ -898,12 +548,13 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 
 	for rows.Next() {
 		var doc models.Document
-		var embeddingData []byte
 		var metadataJSON string
 		var createdAt, updatedAt int64
 		var lastSynced sql.NullInt64
-		var contentMarkdown, embeddingModel, url, sourceVersion sql.NullString
-		var forceSyncPending, forceEmbedPending sql.NullBool
+		var contentMarkdown, url, sourceVersion sql.NullString
+		var forceSyncPending sql.NullBool
+
+		// NOTE: Phase 5 - Removed embeddingData and embeddingModel scan targets
 
 		err := rows.Scan(
 			&doc.ID,
@@ -912,8 +563,6 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			&doc.Title,
 			&doc.Content,
 			&contentMarkdown,
-			&embeddingData,
-			&embeddingModel,
 			&metadataJSON,
 			&url,
 			&createdAt,
@@ -921,7 +570,6 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			&lastSynced,
 			&sourceVersion,
 			&forceSyncPending,
-			&forceEmbedPending,
 		)
 		if err != nil {
 			return nil, err
@@ -929,9 +577,6 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 
 		if contentMarkdown.Valid {
 			doc.ContentMarkdown = contentMarkdown.String
-		}
-		if embeddingModel.Valid {
-			doc.EmbeddingModel = embeddingModel.String
 		}
 		if url.Valid {
 			doc.URL = url.String
@@ -942,20 +587,12 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 		if forceSyncPending.Valid {
 			doc.ForceSyncPending = forceSyncPending.Bool
 		}
-		if forceEmbedPending.Valid {
-			doc.ForceEmbedPending = forceEmbedPending.Bool
-		}
 		if lastSynced.Valid {
 			t := time.Unix(lastSynced.Int64, 0)
 			doc.LastSynced = &t
 		}
 
-		if len(embeddingData) > 0 {
-			doc.Embedding, err = deserializeEmbedding(embeddingData)
-			if err != nil {
-				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to deserialize embedding")
-			}
-		}
+		// NOTE: Phase 5 - Removed embedding deserialization code
 
 		if metadataJSON != "" {
 			if err := json.Unmarshal([]byte(metadataJSON), &doc.Metadata); err != nil {
@@ -975,65 +612,6 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 	return docs, nil
 }
 
-func (d *DocumentStorage) scanChunk(rows *sql.Rows) (*models.DocumentChunk, error) {
-	var chunk models.DocumentChunk
-	var embeddingData []byte
-	var createdAt int64
-
-	err := rows.Scan(
-		&chunk.ID,
-		&chunk.DocumentID,
-		&chunk.ChunkIndex,
-		&chunk.Content,
-		&embeddingData,
-		&chunk.TokenCount,
-		&createdAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(embeddingData) > 0 {
-		chunk.Embedding, err = deserializeEmbedding(embeddingData)
-		if err != nil {
-			d.logger.Warn().Err(err).Str("chunk_id", chunk.ID).Msg("Failed to deserialize embedding")
-		}
-	}
-
-	chunk.CreatedAt = time.Unix(createdAt, 0)
-
-	return &chunk, nil
-}
-
-// Embedding serialization helpers
-func serializeEmbedding(embedding []float32) ([]byte, error) {
-	// Simple binary encoding: just write the float32 array as bytes
-	data := make([]byte, len(embedding)*4)
-	for i, v := range embedding {
-		bits := uint32(0)
-		// Convert float32 to uint32 bits
-		*(*float32)(unsafe.Pointer(&bits)) = v
-		// Write as little-endian
-		data[i*4] = byte(bits)
-		data[i*4+1] = byte(bits >> 8)
-		data[i*4+2] = byte(bits >> 16)
-		data[i*4+3] = byte(bits >> 24)
-	}
-	return data, nil
-}
-
-func deserializeEmbedding(data []byte) ([]float32, error) {
-	if len(data)%4 != 0 {
-		return nil, fmt.Errorf("invalid embedding data length: %d", len(data))
-	}
-
-	embedding := make([]float32, len(data)/4)
-	for i := 0; i < len(embedding); i++ {
-		bits := uint32(data[i*4]) |
-			uint32(data[i*4+1])<<8 |
-			uint32(data[i*4+2])<<16 |
-			uint32(data[i*4+3])<<24
-		embedding[i] = *(*float32)(unsafe.Pointer(&bits))
-	}
-	return embedding, nil
-}
+// NOTE: Phase 5 - Removed scanChunk method (DocumentChunk model removed)
+// NOTE: Phase 5 - Removed serializeEmbedding helper (embeddings no longer stored)
+// NOTE: Phase 5 - Removed deserializeEmbedding helper (embeddings no longer stored)

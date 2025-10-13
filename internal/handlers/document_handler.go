@@ -168,16 +168,10 @@ func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
-	h.logger.Info().Str("doc_id", docID).Msg("Marking document for reprocessing")
+	// NOTE: Phase 5 - Embeddings removed, reprocessing endpoint is now a no-op
+	h.logger.Info().Str("doc_id", docID).Msg("Reprocess endpoint called (no-op after Phase 5 embedding removal)")
 
-	// Mark document for force embed (re-vectorization)
-	if err := h.documentStorage.SetForceEmbedPending(docID, true); err != nil {
-		h.logger.Error().Err(err).Str("doc_id", docID).Msg("Failed to mark document for reprocessing")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	h.logger.Info().Str("doc_id", docID).Msg("Document marked for reprocessing")
+	h.logger.Info().Str("doc_id", docID).Msg("Document reprocessing skipped (embeddings removed)")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

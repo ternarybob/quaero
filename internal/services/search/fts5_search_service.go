@@ -33,21 +33,49 @@ func (s *FTS5SearchService) Search(
 	query string,
 	opts interfaces.SearchOptions,
 ) ([]*models.Document, error) {
-	// Use FullTextSearch from storage layer
-	limit := opts.Limit
-	if limit == 0 {
-		limit = 100 // Default limit
-	}
+	var results []*models.Document
+	var err error
 
-	results, err := s.storage.FullTextSearch(query, limit)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("query", query).
-				Msg("Failed to search documents")
+	// If query is empty, list all documents (for filter-only queries)
+	if query == "" {
+		limit := opts.Limit
+		if limit == 0 {
+			limit = 1000 // Higher default for list operations
 		}
-		return nil, fmt.Errorf("search failed: %w", err)
+
+		listOpts := &interfaces.ListOptions{
+			Limit:    limit,
+			Offset:   0,
+			OrderBy:  "updated_at",
+			OrderDir: "desc",
+		}
+
+		results, err = s.storage.ListDocuments(listOpts)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Error().
+					Err(err).
+					Msg("Failed to list documents")
+			}
+			return nil, fmt.Errorf("search failed: %w", err)
+		}
+	} else {
+		// Use FullTextSearch from storage layer
+		limit := opts.Limit
+		if limit == 0 {
+			limit = 100 // Default limit
+		}
+
+		results, err = s.storage.FullTextSearch(query, limit)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Error().
+					Err(err).
+					Str("query", query).
+					Msg("Failed to search documents")
+			}
+			return nil, fmt.Errorf("search failed: %w", err)
+		}
 	}
 
 	// Apply source type filter if specified
@@ -98,13 +126,17 @@ func (s *FTS5SearchService) SearchByReference(
 	reference string,
 	opts interfaces.SearchOptions,
 ) ([]*models.Document, error) {
+	// Quote the reference for FTS5 to treat it as a literal phrase
+	// This prevents special characters (like dashes) from being interpreted as operators
+	quotedReference := `"` + strings.ReplaceAll(reference, `"`, `""`) + `"`
+
 	// Use FullTextSearch from storage layer
 	limit := opts.Limit
 	if limit == 0 {
 		limit = 100 // Default limit
 	}
 
-	results, err := s.storage.FullTextSearch(reference, limit)
+	results, err := s.storage.FullTextSearch(quotedReference, limit)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Error().
