@@ -107,6 +107,120 @@ function addMessage(role, content) {
     chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
 }
 
+// Add technical metadata section
+function addTechnicalMetadata(metadata) {
+    const metadataDiv = document.createElement('div');
+    metadataDiv.classList.add('technical-metadata', 'box', 'is-size-7', 'has-background-dark', 'mt-2');
+    metadataDiv.style.borderLeft = '3px solid #48c78e';
+    metadataDiv.style.padding = '0.5rem 0.75rem';
+
+    let html = '<strong style="color: #48c78e;">⚙ Technical Details</strong><br>';
+
+    if (metadata.thinking_time) {
+        html += `<span style="color: #b5b5b5;">⏱ Thinking time: ${metadata.thinking_time}</span><br>`;
+    }
+
+    if (metadata.document_count !== undefined) {
+        html += `<span style="color: #b5b5b5;">📄 Documents used: ${metadata.document_count}</span><br>`;
+    }
+
+    if (metadata.references && metadata.references.length > 0) {
+        html += '<span style="color: #b5b5b5;">📚 References:</span><br>';
+        metadata.references.forEach((ref, idx) => {
+            html += `<span style="color: #a0a0a0; margin-left: 1rem;">${idx + 1}. ${ref}</span><br>`;
+        });
+    }
+
+    if (metadata.rag_enabled !== undefined) {
+        const ragStatus = metadata.rag_enabled ? 'enabled' : 'disabled';
+        const ragColor = metadata.rag_enabled ? '#48c78e' : '#f14668';
+        html += `<span style="color: ${ragColor};">🔍 RAG: ${ragStatus}</span>`;
+    }
+
+    metadataDiv.innerHTML = html;
+    chatMessages.appendChild(metadataDiv);
+
+    // Scroll to bottom
+    chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+}
+
+// Add status message to chat window with scrolling bold animation
+function addStatusMessage(message) {
+    const statusMsg = document.createElement('div');
+    statusMsg.classList.add('message-block', 'is-status');
+    statusMsg.style.fontStyle = 'italic';
+    statusMsg.style.color = '#a0a0a0';
+    statusMsg.style.padding = '0.5rem';
+
+    // Create container for animated text
+    const textContainer = document.createElement('span');
+    statusMsg.appendChild(textContainer);
+
+    chatMessages.appendChild(statusMsg);
+
+    // Scroll to bottom
+    chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
+
+    // Text and dot patterns
+    const text = 'Thinking';
+    const dotPatterns = ['.', '..', '...', '....', '...', '..'];
+    let boldIndex = 0; // Which letter is bold
+    let dotIndex = 0;   // Which dot pattern
+
+    // Function to render the text with one letter bold
+    function renderText() {
+        textContainer.innerHTML = '';
+
+        // Render each letter, making one bold
+        for (let i = 0; i < text.length; i++) {
+            const letterSpan = document.createElement('span');
+            letterSpan.textContent = text[i];
+            if (i === boldIndex) {
+                letterSpan.style.fontWeight = 'bold';
+            }
+            textContainer.appendChild(letterSpan);
+        }
+
+        // Add dots
+        const dotsSpan = document.createElement('span');
+        dotsSpan.textContent = dotPatterns[dotIndex];
+        textContainer.appendChild(dotsSpan);
+    }
+
+    // Initial render
+    renderText();
+
+    // Animate: scroll bold through letters and cycle dots
+    statusMsg.animationInterval = setInterval(() => {
+        // Move bold to next letter
+        boldIndex = (boldIndex + 1) % text.length;
+
+        // Update dots every full cycle through the text
+        if (boldIndex === 0) {
+            dotIndex = (dotIndex + 1) % dotPatterns.length;
+        }
+
+        renderText();
+    }, 200); // Update every 200ms for smooth scrolling
+
+    return statusMsg;
+}
+
+// Remove status message from chat window
+function removeStatusMessage(statusMsg) {
+    if (statusMsg) {
+        // Clear animation interval
+        if (statusMsg.animationInterval) {
+            clearInterval(statusMsg.animationInterval);
+        }
+
+        // Remove from DOM
+        if (statusMsg.parentNode) {
+            statusMsg.parentNode.removeChild(statusMsg);
+        }
+    }
+}
+
 // Send message
 async function sendMessage() {
     const message = userMessageInput.value.trim();
@@ -122,9 +236,9 @@ async function sendMessage() {
     // Clear input
     userMessageInput.value = '';
 
-    // Disable send button
+    // Disable send button and show thinking status in chat
     sendBtn.disabled = true;
-    statusDiv.textContent = 'Thinking...';
+    const thinkingMsg = addStatusMessage('Thinking...');
 
     try {
         const requestBody = {
@@ -142,7 +256,7 @@ async function sendMessage() {
 
         // Create AbortController for timeout handling
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout (2 minutes)
+        const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
 
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -153,6 +267,9 @@ async function sendMessage() {
 
         clearTimeout(timeoutId);
 
+        // Remove thinking status
+        removeStatusMessage(thinkingMsg);
+
         const data = await response.json();
 
         if (data.success) {
@@ -160,18 +277,34 @@ async function sendMessage() {
             addMessage('assistant', data.message);
             conversationHistory.push({ role: 'assistant', content: data.message });
 
+            // Add technical metadata if available
+            if (data.metadata) {
+                addTechnicalMetadata(data.metadata);
+            }
+
             // Update status
             const contextDocs = data.context_docs ? data.context_docs.length : 0;
             statusDiv.textContent = `Mode: ${data.mode} | Model: ${data.model} | Context docs: ${contextDocs}`;
         } else {
+            // Show error in chat window
+            addMessage('assistant', '❌ Error: ' + data.error);
             showNotification('Error: ' + data.error, 'error');
             statusDiv.textContent = 'Error occurred';
         }
     } catch (error) {
+        // Remove thinking status if still present
+        removeStatusMessage(thinkingMsg);
+
         if (error.name === 'AbortError') {
-            showNotification('Request timed out after 2 minutes. The LLM may need more time to process your request.', 'error');
+            // Show timeout message in chat window
+            const timeoutMsg = '⏱ Request timed out after 5 minutes. The LLM may need more time to process your request, or the server may be overloaded.';
+            addMessage('assistant', timeoutMsg);
+            showNotification('Request timed out after 5 minutes', 'error');
             statusDiv.textContent = 'Request timed out';
         } else {
+            // Show connection error in chat window
+            const errorMsg = '❌ Connection error: ' + error.message;
+            addMessage('assistant', errorMsg);
             showNotification('Failed to send message: ' + error.message, 'error');
             statusDiv.textContent = 'Connection error';
         }

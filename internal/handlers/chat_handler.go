@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -67,16 +68,60 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		Str("rag_enabled", fmt.Sprintf("%v", ragEnabled)).
 		Msg("Processing chat request")
 
-	ctx := context.Background()
+	// Track thinking time
+	startTime := time.Now()
+
+	// Create context with 5-minute timeout to match client timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
 	response, err := h.chatService.Chat(ctx, &req)
+
+	thinkingTime := time.Since(startTime)
+
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to generate chat response")
+
+		// Check if error was due to timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			h.logger.Warn().
+				Dur("thinking_time", thinkingTime).
+				Msg("Chat request exceeded 5-minute timeout")
+			w.WriteHeader(http.StatusRequestTimeout)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": false,
+				"error":   "Request timed out after 5 minutes. The LLM may need more time to process your request.",
+			})
+			return
+		}
+
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": false,
 			"error":   "Failed to generate response: " + err.Error(),
 		})
 		return
+	}
+
+	// Build technical metadata
+	docCount := len(response.ContextDocs)
+	references := []string{}
+	for _, doc := range response.ContextDocs {
+		ref := fmt.Sprintf("%s", doc.SourceType)
+		if doc.Title != "" {
+			ref = fmt.Sprintf("%s: %s", doc.SourceType, doc.Title)
+		}
+		if doc.URL != "" {
+			ref = fmt.Sprintf("%s (%s)", ref, doc.URL)
+		}
+		references = append(references, ref)
+	}
+
+	metadata := map[string]interface{}{
+		"document_count": docCount,
+		"references":     references,
+		"thinking_time":  fmt.Sprintf("%.2fs", thinkingTime.Seconds()),
+		"rag_enabled":    ragEnabled,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -88,6 +133,7 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		"token_usage":  response.TokenUsage,
 		"model":        response.Model,
 		"mode":         response.Mode,
+		"metadata":     metadata,
 	})
 }
 

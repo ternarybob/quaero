@@ -32,6 +32,7 @@ type ChatResponse struct {
 	Mode        string                   `json:"mode"`
 	Model       string                   `json:"model"`
 	ContextDocs []map[string]interface{} `json:"context_docs"`
+	Metadata    map[string]interface{}   `json:"metadata"`
 	Error       string                   `json:"error,omitempty"`
 }
 
@@ -492,4 +493,120 @@ func TestChatRAGCorpusSummary(t *testing.T) {
 	t.Log("=== RAG Verification Complete ===")
 	t.Log("If context documents were retrieved with corpus statistics,")
 	t.Log("then RAG is definitively working correctly.")
+}
+
+// TestChatMetadata tests that technical metadata is returned in chat responses
+func TestChatMetadata(t *testing.T) {
+	baseURL := os.Getenv("TEST_SERVER_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8085"
+	}
+
+	t.Log("=== Testing Technical Metadata in Chat Responses ===")
+
+	// Create request
+	reqBody := ChatRequest{
+		Message: "Hello, tell me about the system",
+		History: []map[string]string{},
+		RAGConfig: RAGConfig{
+			Enabled:       true,
+			MaxDocuments:  5,
+			MinSimilarity: 0.7,
+			SearchMode:    "vector",
+		},
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	t.Log("Sending chat request...")
+	startTime := time.Now()
+
+	req, err := http.NewRequest("POST", baseURL+"/api/chat", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	duration := time.Since(startTime)
+
+	if err != nil {
+		t.Fatalf("Request failed after %v: %v", duration, err)
+	}
+	defer resp.Body.Close()
+
+	t.Logf("Response received in %v", duration)
+
+	// Parse response
+	var chatResp ChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Validate basic response
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	if !chatResp.Success {
+		t.Errorf("Expected success=true, got false. Error: %s", chatResp.Error)
+	}
+
+	// Verify metadata exists
+	if chatResp.Metadata == nil {
+		t.Fatal("❌ CRITICAL: Metadata field is missing from response")
+	}
+
+	t.Log("✓ Metadata field present in response")
+
+	// Verify metadata contains expected fields
+	expectedFields := []string{"document_count", "references", "thinking_time", "rag_enabled"}
+	for _, field := range expectedFields {
+		if _, exists := chatResp.Metadata[field]; !exists {
+			t.Errorf("❌ Metadata missing expected field: %s", field)
+		} else {
+			t.Logf("✓ Metadata contains field: %s = %v", field, chatResp.Metadata[field])
+		}
+	}
+
+	// Verify thinking_time format (should be like "2.34s")
+	if thinkingTime, ok := chatResp.Metadata["thinking_time"].(string); ok {
+		if len(thinkingTime) == 0 || thinkingTime[len(thinkingTime)-1] != 's' {
+			t.Errorf("❌ thinking_time has unexpected format: %s (expected XXXs)", thinkingTime)
+		} else {
+			t.Logf("✓ thinking_time formatted correctly: %s", thinkingTime)
+		}
+	}
+
+	// Verify document_count is a number
+	if docCount, ok := chatResp.Metadata["document_count"].(float64); ok {
+		t.Logf("✓ document_count is numeric: %.0f", docCount)
+	} else {
+		t.Errorf("❌ document_count is not numeric: %v", chatResp.Metadata["document_count"])
+	}
+
+	// Verify references is an array
+	if references, ok := chatResp.Metadata["references"].([]interface{}); ok {
+		t.Logf("✓ references is an array with %d items", len(references))
+		for i, ref := range references {
+			t.Logf("  Reference %d: %v", i+1, ref)
+		}
+	} else {
+		t.Errorf("❌ references is not an array: %v", chatResp.Metadata["references"])
+	}
+
+	// Verify rag_enabled is a boolean
+	if ragEnabled, ok := chatResp.Metadata["rag_enabled"].(bool); ok {
+		t.Logf("✓ rag_enabled is boolean: %v", ragEnabled)
+	} else {
+		t.Errorf("❌ rag_enabled is not boolean: %v", chatResp.Metadata["rag_enabled"])
+	}
+
+	t.Log("")
+	t.Log("=== Metadata Verification Complete ===")
 }

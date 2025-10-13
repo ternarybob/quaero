@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"net"
 	"strings"
 	"time"
 
@@ -287,22 +287,25 @@ func (s *ChatService) GetServiceStatus(ctx context.Context) map[string]interface
 	return status
 }
 
-// checkServerHealth checks if a server is responding
+// checkServerHealth checks if a server port is listening
+// Does NOT make HTTP requests to avoid triggering llama-server health checks
 func checkServerHealth(url string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
+	// Extract host:port from URL
+	// url format: "http://127.0.0.1:8086/health"
+	var address string
+	if strings.HasPrefix(url, "http://127.0.0.1:8086") {
+		address = "127.0.0.1:8086"
+	} else if strings.HasPrefix(url, "http://127.0.0.1:8087") {
+		address = "127.0.0.1:8087"
+	} else {
 		return false
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	// Simple TCP connection check with 500ms timeout
+	conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode == http.StatusOK
+	conn.Close()
+	return true
 }
