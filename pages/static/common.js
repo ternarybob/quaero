@@ -352,6 +352,172 @@ document.addEventListener('alpine:init', () => {
       return typeMap[this.type] || 'is-info';
     }
   }));
+
+  // Application Status Component
+  Alpine.data('appStatus', () => ({
+    state: 'Idle',
+    metadata: {},
+    timestamp: null,
+
+    init() {
+      this.fetchStatus();
+      this.subscribeToWebSocket();
+    },
+
+    async fetchStatus() {
+      try {
+        const response = await fetch('/api/status');
+        if (!response.ok) throw new Error('Failed to fetch status');
+
+        const data = await response.json();
+        this.state = data.state || 'Idle';
+        this.metadata = data.metadata || {};
+        this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+      } catch (err) {
+        console.error('[AppStatus] Error fetching status:', err);
+        this.state = 'Unknown';
+      }
+    },
+
+    subscribeToWebSocket() {
+      if (typeof WebSocketManager !== 'undefined') {
+        WebSocketManager.subscribe('app_status', (data) => {
+          console.log('[AppStatus] WebSocket update received:', data);
+          this.state = data.state || 'Idle';
+          this.metadata = data.metadata || {};
+          this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+        });
+        console.log('[AppStatus] WebSocket subscription established');
+      }
+    },
+
+    getStatusColor(state) {
+      const colorMap = {
+        'Idle': 'is-info',
+        'Crawling': 'is-warning',
+        'Offline': 'is-danger',
+        'Unknown': 'is-light'
+      };
+      return colorMap[state] || 'is-light';
+    },
+
+    formatTimestamp(timestamp) {
+      if (!timestamp) return 'Never';
+      const date = new Date(timestamp);
+      return date.toLocaleString();
+    }
+  }));
+
+  // Source Management Component
+  Alpine.data('sourceManagement', () => ({
+    sources: [],
+    currentSource: null,
+    showCreateModal: false,
+    showEditModal: false,
+    loading: true,
+
+    init() {
+      this.loadSources();
+      this.resetCurrentSource();
+    },
+
+    async loadSources() {
+      try {
+        const response = await fetch('/api/sources');
+        if (!response.ok) throw new Error('Failed to fetch sources');
+
+        const data = await response.json();
+        this.sources = data.sources || [];
+        this.loading = false;
+      } catch (err) {
+        console.error('[SourceManagement] Error loading sources:', err);
+        this.loading = false;
+        window.showNotification('Failed to load sources: ' + err.message, 'error');
+      }
+    },
+
+    resetCurrentSource() {
+      this.currentSource = {
+        name: '',
+        type: 'jira',
+        base_url: '',
+        auth_domain: '',
+        enabled: true,
+        crawl_config: {
+          max_depth: 3,
+          follow_links: true,
+          concurrency: 2,
+          detail_level: 'full'
+        },
+        filters: {}
+      };
+    },
+
+    editSource(source) {
+      this.currentSource = JSON.parse(JSON.stringify(source));
+      this.showEditModal = true;
+    },
+
+    async saveSource() {
+      try {
+        const isEdit = this.showEditModal;
+        const url = isEdit ? `/api/sources/${this.currentSource.id}` : '/api/sources';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.currentSource)
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to save source');
+        }
+
+        window.showNotification(`Source ${isEdit ? 'updated' : 'created'} successfully`, 'success');
+        await this.loadSources();
+        this.closeModal();
+      } catch (err) {
+        console.error('[SourceManagement] Error saving source:', err);
+        window.showNotification('Failed to save source: ' + err.message, 'error');
+      }
+    },
+
+    async deleteSource(sourceId) {
+      if (!confirm('Are you sure you want to delete this source? This will also remove all associated data.')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/sources/${sourceId}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete source');
+        }
+
+        window.showNotification('Source deleted successfully', 'success');
+        await this.loadSources();
+      } catch (err) {
+        console.error('[SourceManagement] Error deleting source:', err);
+        window.showNotification('Failed to delete source: ' + err.message, 'error');
+      }
+    },
+
+    closeModal() {
+      this.showCreateModal = false;
+      this.showEditModal = false;
+      this.resetCurrentSource();
+    },
+
+    formatDate(dateStr) {
+      if (!dateStr) return 'N/A';
+      const date = new Date(dateStr);
+      return date.toLocaleString();
+    }
+  }));
 });
 
 // Global notification function for backwards compatibility

@@ -16,6 +16,7 @@ var (
 )
 
 // GetLogger returns the global logger instance
+// If InitLogger() hasn't been called yet, returns a fallback console logger
 func GetLogger() arbor.ILogger {
 	loggerMutex.RLock()
 	if globalLogger != nil {
@@ -29,12 +30,15 @@ func GetLogger() arbor.ILogger {
 
 	// Double-check after acquiring write lock
 	if globalLogger == nil {
+		// WARNING: Using fallback logger - InitLogger() should be called during startup
 		globalLogger = arbor.NewLogger().WithConsoleWriter(models.WriterConfiguration{
 			Type:             models.LogWriterTypeConsole,
 			TimeFormat:       "15:04:05",
 			TextOutput:       true,
 			DisableTimestamp: false,
 		})
+		// Log warning about initialization order issue
+		globalLogger.Warn().Msg("Using fallback logger - InitLogger() should be called during startup")
 	}
 	return globalLogger
 }
@@ -100,7 +104,22 @@ func InitLogger(config *Config) arbor.ILogger {
 		})
 	}
 
+	// Ensure at least one visible log writer is configured
+	if !hasFileOutput && !hasStdoutOutput {
+		// Force-enable console writer to guarantee visible logs
+		logger = logger.WithConsoleWriter(models.WriterConfiguration{
+			Type:             models.LogWriterTypeConsole,
+			TimeFormat:       "15:04:05",
+			TextOutput:       true,
+			DisableTimestamp: false,
+		})
+		// Note: We can't log the warning yet because the logger isn't fully configured
+		// The warning will be logged after level is set
+		fmt.Printf("Warning: No visible log outputs configured, falling back to console\n")
+	}
+
 	// Always add memory writer for WebSocket log streaming
+	// This enables real-time log display in the web UI
 	logger = logger.WithMemoryWriter(models.WriterConfiguration{
 		Type:             models.LogWriterTypeMemory,
 		TimeFormat:       "15:04:05",
@@ -113,6 +132,11 @@ func InitLogger(config *Config) arbor.ILogger {
 
 	// Store as global logger
 	globalLogger = logger
+
+	// Log warning if we fell back to console due to misconfiguration
+	if !hasFileOutput && !hasStdoutOutput {
+		logger.Warn().Msg("No visible log outputs configured, falling back to console")
+	}
 
 	return logger
 }

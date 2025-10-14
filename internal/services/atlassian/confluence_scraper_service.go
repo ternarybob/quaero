@@ -16,6 +16,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 // ConfluenceScraperService scrapes Confluence spaces and pages
@@ -24,6 +25,7 @@ type ConfluenceScraperService struct {
 	confluenceStorage interfaces.ConfluenceStorage
 	documentService   interfaces.DocumentService
 	eventService      interfaces.EventService
+	crawlerService    *crawler.Service
 	logger            arbor.ILogger
 	uiLogger          interface{}
 }
@@ -34,6 +36,7 @@ func NewConfluenceScraperService(
 	documentService interfaces.DocumentService,
 	authService interfaces.AtlassianAuthService,
 	eventService interfaces.EventService,
+	crawlerService *crawler.Service,
 	logger arbor.ILogger,
 ) *ConfluenceScraperService {
 	service := &ConfluenceScraperService{
@@ -41,6 +44,7 @@ func NewConfluenceScraperService(
 		documentService:   documentService,
 		authService:       authService,
 		eventService:      eventService,
+		crawlerService:    crawlerService,
 		logger:            logger,
 	}
 
@@ -67,54 +71,53 @@ func (s *ConfluenceScraperService) SetUILogger(logger interface{}) {
 	s.uiLogger = logger
 }
 
-// ScrapeConfluence is an alias for ScrapeSpaces for compatibility
+// ScrapeConfluence is an alias for ScrapeSpaces for interface compatibility
 func (s *ConfluenceScraperService) ScrapeConfluence() error {
+	// Call the actual implementation in confluence_spaces.go
 	return s.ScrapeSpaces()
 }
 
+// makeRequest makes an authenticated HTTP request to the Confluence API
 func (s *ConfluenceScraperService) makeRequest(method, path string) ([]byte, error) {
 	if !s.authService.IsAuthenticated() {
-		return nil, fmt.Errorf("not authenticated: please authenticate using Chrome extension")
+		return nil, fmt.Errorf("not authenticated")
 	}
 
-	reqURL := s.authService.GetBaseURL() + path
+	baseURL := s.authService.GetBaseURL()
+	fullURL := baseURL + path
 
-	req, err := http.NewRequest(method, reqURL, nil)
+	req, err := http.NewRequest(method, fullURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", s.authService.GetUserAgent())
-	req.Header.Set("Accept", "application/json, text/html")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
-	httpClient := s.authService.GetHTTPClient()
-	if httpClient == nil {
-		return nil, fmt.Errorf("HTTP client not initialized: authentication required")
+	// Use auth service's HTTP client which has cookies configured
+	client := s.authService.GetHTTPClient()
+	if client == nil {
+		client = &http.Client{
+			Timeout: 30 * time.Second,
+		}
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, readErr := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		s.logger.Error().
-			Str("url", reqURL).
-			Int("status", resp.StatusCode).
-			Str("body", string(body)).
-			Msg("HTTP request failed")
-
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			return nil, fmt.Errorf("auth expired (status %d)", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return body, readErr
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
 }
 
 // transformToDocument converts Confluence page to normalized document

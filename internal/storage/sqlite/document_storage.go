@@ -45,16 +45,29 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		lastSyncedUnix = &unix
 	}
 
+	// Smart upsert: preserve full content when upserting metadata, always replace when upserting full
 	query := `
 		INSERT INTO documents (
-			id, source_type, source_id, title, content, content_markdown,
+			id, source_type, source_id, title, content, content_markdown, detail_level,
 			metadata, url, created_at, updated_at,
 			last_synced, source_version, force_sync_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
-			content = excluded.content,
-			content_markdown = excluded.content_markdown,
+			content = CASE
+				WHEN excluded.detail_level = 'full' THEN excluded.content
+				WHEN detail_level = 'full' THEN content
+				ELSE excluded.content
+			END,
+			content_markdown = CASE
+				WHEN excluded.detail_level = 'full' THEN excluded.content_markdown
+				WHEN detail_level = 'full' THEN content_markdown
+				ELSE excluded.content_markdown
+			END,
+			detail_level = CASE
+				WHEN excluded.detail_level = 'full' THEN 'full'
+				ELSE detail_level
+			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
 			updated_at = excluded.updated_at,
@@ -63,6 +76,11 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 			force_sync_pending = excluded.force_sync_pending
 	`
 
+	detailLevel := doc.DetailLevel
+	if detailLevel == "" {
+		detailLevel = models.DetailLevelFull // Backward compatibility
+	}
+
 	_, err = d.db.db.Exec(query,
 		doc.ID,
 		doc.SourceType,
@@ -70,6 +88,7 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		doc.Title,
 		doc.Content,
 		doc.ContentMarkdown,
+		detailLevel,
 		string(metadataJSON),
 		doc.URL,
 		doc.CreatedAt.Unix(),
@@ -97,14 +116,26 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO documents (
-			id, source_type, source_id, title, content, content_markdown,
+			id, source_type, source_id, title, content, content_markdown, detail_level,
 			metadata, url, created_at, updated_at,
 			last_synced, source_version, force_sync_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
-			content = excluded.content,
-			content_markdown = excluded.content_markdown,
+			content = CASE
+				WHEN excluded.detail_level = 'full' THEN excluded.content
+				WHEN detail_level = 'full' THEN content
+				ELSE excluded.content
+			END,
+			content_markdown = CASE
+				WHEN excluded.detail_level = 'full' THEN excluded.content_markdown
+				WHEN detail_level = 'full' THEN content_markdown
+				ELSE excluded.content_markdown
+			END,
+			detail_level = CASE
+				WHEN excluded.detail_level = 'full' THEN 'full'
+				ELSE detail_level
+			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
 			updated_at = excluded.updated_at,
@@ -131,6 +162,11 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			lastSyncedUnix = &unix
 		}
 
+		detailLevel := doc.DetailLevel
+		if detailLevel == "" {
+			detailLevel = models.DetailLevelFull // Backward compatibility
+		}
+
 		_, err = stmt.Exec(
 			doc.ID,
 			doc.SourceType,
@@ -138,6 +174,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			doc.Title,
 			doc.Content,
 			doc.ContentMarkdown,
+			detailLevel,
 			string(metadataJSON),
 			doc.URL,
 			doc.CreatedAt.Unix(),
@@ -157,7 +194,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 // GetDocument retrieves a document by ID
 func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
+		SELECT id, source_type, source_id, title, content, content_markdown, detail_level,
 			   metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
@@ -171,7 +208,7 @@ func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 // GetDocumentBySource retrieves a document by source reference
 func (d *DocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
 	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
+		SELECT id, source_type, source_id, title, content, content_markdown, detail_level,
 			   metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
@@ -224,7 +261,7 @@ func (d *DocumentStorage) DeleteDocument(id string) error {
 // FullTextSearch performs full-text search using FTS5
 func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	sqlQuery := `
-		SELECT d.id, d.source_type, d.source_id, d.title, d.content, d.content_markdown,
+		SELECT d.id, d.source_type, d.source_id, d.title, d.content, d.content_markdown, d.detail_level,
 			   d.metadata, d.url, d.created_at, d.updated_at,
 			   d.last_synced, d.source_version, d.force_sync_pending
 		FROM documents d
@@ -460,7 +497,7 @@ func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
 // GetDocumentsForceSync gets documents with force sync pending
 func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
+		SELECT id, source_type, source_id, title, content, content_markdown, detail_level,
 			   metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
@@ -486,7 +523,7 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	var metadataJSON string
 	var createdAt, updatedAt int64
 	var lastSynced sql.NullInt64
-	var contentMarkdown, url, sourceVersion sql.NullString
+	var contentMarkdown, url, sourceVersion, detailLevel sql.NullString
 	var forceSyncPending sql.NullBool
 
 	// NOTE: Phase 5 - Removed embeddingData and embeddingModel scan targets
@@ -498,6 +535,7 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		&doc.Title,
 		&doc.Content,
 		&contentMarkdown,
+		&detailLevel,
 		&metadataJSON,
 		&url,
 		&createdAt,
@@ -513,6 +551,11 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	// Parse optional fields
 	if contentMarkdown.Valid {
 		doc.ContentMarkdown = contentMarkdown.String
+	}
+	if detailLevel.Valid {
+		doc.DetailLevel = detailLevel.String
+	} else {
+		doc.DetailLevel = models.DetailLevelFull // Backward compatibility with NULL values
 	}
 	if url.Valid {
 		doc.URL = url.String
@@ -551,7 +594,7 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 		var metadataJSON string
 		var createdAt, updatedAt int64
 		var lastSynced sql.NullInt64
-		var contentMarkdown, url, sourceVersion sql.NullString
+		var contentMarkdown, url, sourceVersion, detailLevel sql.NullString
 		var forceSyncPending sql.NullBool
 
 		// NOTE: Phase 5 - Removed embeddingData and embeddingModel scan targets
@@ -563,6 +606,7 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			&doc.Title,
 			&doc.Content,
 			&contentMarkdown,
+			&detailLevel,
 			&metadataJSON,
 			&url,
 			&createdAt,
@@ -577,6 +621,11 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 
 		if contentMarkdown.Valid {
 			doc.ContentMarkdown = contentMarkdown.String
+		}
+		if detailLevel.Valid {
+			doc.DetailLevel = detailLevel.String
+		} else {
+			doc.DetailLevel = models.DetailLevelFull // Backward compatibility with NULL values
 		}
 		if url.Valid {
 			doc.URL = url.String

@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS confluence_pages (
 );
 
 -- Documents table (normalized from all sources)
+-- Supports Firecrawl-style layered crawling with detail_level
 CREATE TABLE IF NOT EXISTS documents (
 	id TEXT PRIMARY KEY,
 	source_type TEXT NOT NULL,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS documents (
 	title TEXT NOT NULL,
 	content TEXT NOT NULL,
 	content_markdown TEXT,
+	detail_level TEXT DEFAULT 'full',
 	metadata TEXT,
 	url TEXT,
 	embedding BLOB,
@@ -85,9 +87,49 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 	query_text TEXT
 );
 
+-- Crawler job history with configuration snapshots for re-runnable jobs
+-- Inspired by Firecrawl's async job model
+CREATE TABLE IF NOT EXISTS crawl_jobs (
+	id TEXT PRIMARY KEY,
+	source_type TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	config_json TEXT NOT NULL,
+	status TEXT NOT NULL,
+	progress_json TEXT,
+	created_at INTEGER NOT NULL,
+	started_at INTEGER,
+	completed_at INTEGER,
+	error TEXT,
+	result_count INTEGER DEFAULT 0,
+	failed_count INTEGER DEFAULT 0
+);
+
+-- Crawler job indexes
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC);
+
+-- Source configurations table
+CREATE TABLE IF NOT EXISTS sources (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	type TEXT NOT NULL,
+	base_url TEXT NOT NULL,
+	enabled INTEGER DEFAULT 1,
+	auth_domain TEXT,
+	crawl_config TEXT NOT NULL,
+	filters TEXT,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled);
+CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, force_embed_pending);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents(embedding_model) WHERE embedding IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_detail_level ON documents(detail_level, source_type);
 
 -- FTS5 index for full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(

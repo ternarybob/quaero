@@ -77,4 +77,7 @@ type ListOptions struct {
 	Offset     int
 	OrderBy    string // created_at, updated_at, title
 	OrderDir   string // asc, desc
+	// Additional filters for job listings
+	Status     string // Filter by job status (for job listings)
+	EntityType string // Filter by entity type (for job listings)
 }

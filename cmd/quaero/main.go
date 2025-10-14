@@ -25,14 +25,21 @@ var rootCmd = &cobra.Command{
 	Short: "Quaero - Knowledge search system",
 	Long:  `Quaero (Latin: "I seek") - A local knowledge base system with natural language queries.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Startup sequence: config load -> logging -> banner -> information
+		// Startup sequence (REQUIRED ORDER):
+		// 1. Load config (defaults -> file -> env)
+		// 2. Apply CLI overrides (highest priority)
+		// 3. Initialize logger
+		// 4. Print banner
 		var err error
 
 		// Auto-discover config file if not specified
 		if configPath == "" {
-			// Try to find quaero.toml in current directory
+			// Check current directory first
 			if _, err := os.Stat("quaero.toml"); err == nil {
 				configPath = "quaero.toml"
+			} else if _, err := os.Stat("deployments/local/quaero.toml"); err == nil {
+				// Fallback: check deployments/local for users running from project root
+				configPath = "deployments/local/quaero.toml"
 			}
 		}
 
@@ -41,18 +48,41 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			// Use temporary logger for startup errors
 			tempLogger := arbor.NewLogger()
-			tempLogger.Fatal().Str("path", configPath).Err(err).Msg("Failed to load configuration")
+			if configPath == "" {
+				tempLogger.Fatal().Err(err).Msg("Failed to load configuration: no config file found")
+			} else {
+				tempLogger.Fatal().Str("path", configPath).Err(err).Msg("Failed to load configuration file")
+			}
 			os.Exit(1)
 		}
 
-		// Apply CLI flag overrides (highest priority)
+		// 2. Apply CLI flag overrides (highest priority)
 		common.ApplyCLIOverrides(config, serverPort, serverHost)
 
-		// 2. Initialize logger with final configuration
+		// 3. Initialize logger with final configuration
 		logger = common.InitLogger(config)
 
-		// 3. Print banner with configuration and logger
+		// 4. Print banner with configuration and logger
 		common.PrintBanner(config, logger)
+
+		// Debug: Log final resolved configuration for troubleshooting
+		logger.Debug().
+			Str("storage_type", config.Storage.Type).
+			Str("sqlite_path", config.Storage.SQLite.Path).
+			Str("jira_enabled", fmt.Sprintf("%v", config.Sources.Jira.Enabled)).
+			Str("confluence_enabled", fmt.Sprintf("%v", config.Sources.Confluence.Enabled)).
+			Str("github_enabled", fmt.Sprintf("%v", config.Sources.GitHub.Enabled)).
+			Str("log_level", config.Logging.Level).
+			Strs("log_output", config.Logging.Output).
+			Msg("Resolved configuration (sanitized)")
+
+		// Log initialization complete
+		logger.Info().
+			Str("config_path", configPath).
+			Int("port", config.Server.Port).
+			Str("host", config.Server.Host).
+			Str("llm_mode", config.LLM.Mode).
+			Msg("Application configuration loaded")
 	},
 }
 

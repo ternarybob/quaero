@@ -1,6 +1,11 @@
 # Quaero Configuration
 # ====================
 #
+# This file contains ONLY user-facing configuration settings.
+# Technical parameters (cache sizes, timeouts, dimensions, etc.) have sensible
+# defaults hardcoded in the application and should not be modified unless you
+# are debugging or have specific requirements.
+#
 # Configuration Load Order (priority from lowest to highest):
 #   1. Defaults (hardcoded in application)
 #   2. TOML file (this file)
@@ -8,7 +13,6 @@
 #   4. Command line flags (--port, --host, --config)
 #
 # Only uncomment settings you want to override from defaults.
-# User-specific settings (sources, models) should remain uncommented.
 
 # =============================================================================
 # Server Configuration
@@ -43,27 +47,18 @@ repos = ["your-org/repo1"] # Customize: Your GitHub repositories
 # =============================================================================
 # Storage Configuration
 # =============================================================================
-# Defaults: type="sqlite", path="./data/quaero.db"
-# Env vars: QUAERO_STORAGE_TYPE, QUAERO_SQLITE_PATH
-
-[storage]
-# type = "sqlite"  # Default: sqlite
+# Defaults: path="./data/quaero.db"
+# Env vars: QUAERO_SQLITE_PATH
 
 [storage.sqlite]
-# path = "./data/quaero.db"     # Default: ./data/quaero.db
-# enable_fts5 = true             # Default: true (full-text search)
-# enable_vector = true           # Default: true (vector embeddings)
-# embedding_dimension = 768      # Default: 768 (matches nomic-embed-text)
-# cache_size_mb = 64             # Default: 64
-# wal_mode = true                # Default: true (Write-Ahead Logging)
-# busy_timeout_ms = 5000         # Default: 5000
+# path = "./data/quaero.db"  # Default: ./data/quaero.db
 
 [storage.filesystem]
 # images = "./data/images"           # Default: ./data/images
 # attachments = "./data/attachments" # Default: ./data/attachments
 
 # =============================================================================
-# LLM Configuration - Offline Mode (Secure)
+# LLM Configuration
 # =============================================================================
 # Two modes available: "offline" (local, no network) or "cloud" (API-based)
 # Default: offline (secure by default)
@@ -77,9 +72,6 @@ mode = "offline"  # "offline" or "cloud"
 model_dir = "./models"                          # Directory containing GGUF model files
 embed_model = "nomic-embed-text-v1.5-q8.gguf"  # Embedding model (~150MB)
 chat_model = "qwen2.5-7b-instruct-q4.gguf"     # Chat model (~4.5GB)
-context_size = 2048                             # Context window size
-thread_count = 4                                # CPU threads (adjust for your hardware)
-gpu_layers = 0                                  # GPU layers (0=CPU only, >0 for GPU)
 
 # Cloud Mode - API providers (sends data to external APIs)
 # WARNING: Only use cloud mode if you understand the security implications
@@ -88,45 +80,8 @@ gpu_layers = 0                                  # GPU layers (0=CPU only, >0 for
 # api_key = "${QUAERO_LLM_CLOUD_API_KEY}"  # Use environment variable
 # embed_model = "text-embedding-004"   # Cloud embedding model
 # chat_model = "gemini-1.5-flash"      # Cloud chat model
-# max_tokens = 2048                    # Max response tokens
-# temperature = 0.7                    # Response randomness (0.0-1.0)
 
 # Audit Logging - Compliance and security
 [llm.audit]
 enabled = true      # Enable audit logging to SQLite
 log_queries = false # Don't log query text (PII protection)
-
-# =============================================================================
-# Embeddings Configuration
-# =============================================================================
-# Defaults: enabled=true, ollama_url="http://localhost:11434",
-#           model="nomic-embed-text", dimension=768, batch_size=10
-
-[embeddings]
-# enabled = true                           # Default: true
-# ollama_url = "http://localhost:11434"    # Default: http://localhost:11434
-# model = "nomic-embed-text"               # Default: nomic-embed-text (768-dim)
-# dimension = 768                          # Default: 768
-# batch_size = 10                          # Default: 10
-
-# =============================================================================
-# Document Processing Configuration
-# =============================================================================
-# Defaults: enabled=false, schedule="0 0 */6 * * *" (every 6 hours), limit=1000
-# Processing scheduler transforms source data into normalized documents
-
-[processing]
-# enabled = false                # Default: false (opt-in for safety)
-# schedule = "0 0 */6 * * *"     # Default: every 6 hours (cron format)
-# limit = 1000                   # Default: 1000 (max documents per embedding run)
-
-# =============================================================================
-# Logging Configuration
-# =============================================================================
-# Defaults: level="info", format="text", output=["stdout", "file"]
-# Env vars: QUAERO_LOG_LEVEL, QUAERO_LOG_FORMAT, QUAERO_LOG_OUTPUT
-
-[logging]
-# level = "info"                 # Default: info (debug|info|warn|error)
-# format = "text"                # Default: text (text|json)
-# output = ["stdout", "file"]    # Default: stdout and file

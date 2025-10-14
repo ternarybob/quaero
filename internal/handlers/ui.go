@@ -149,6 +149,34 @@ func (h *UIHandler) ChatPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// JobsPageHandler serves the Jobs page
+func (h *UIHandler) JobsPageHandler(w http.ResponseWriter, r *http.Request) {
+	data := map[string]interface{}{
+		"Page": "jobs",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "jobs.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render jobs")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+// SourcesPageHandler serves the Sources management page
+func (h *UIHandler) SourcesPageHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	data := map[string]interface{}{
+		"Page": "sources",
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "sources.html", data); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to render sources page")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
 // StaticFileHandler serves static files (CSS, JS, favicon) from the pages/static directory
 func (h *UIHandler) StaticFileHandler(w http.ResponseWriter, r *http.Request) {
 	// List of allowed static files

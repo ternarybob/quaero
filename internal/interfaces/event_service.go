@@ -9,6 +9,51 @@ const (
 	EventCollectionTriggered EventType = "collection_triggered"
 	EventEmbeddingTriggered  EventType = "embedding_triggered"
 	EventDocumentForceSync   EventType = "document_force_sync"
+	// EventCrawlProgress is published periodically during crawl jobs with detailed progress updates.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - status: string ("pending", "running", "completed", "failed", "cancelled")
+	//   - total_urls: int
+	//   - completed_urls: int
+	//   - failed_urls: int
+	//   - pending_urls: int
+	//   - current_url: string
+	//   - percentage: float64
+	//   - estimated_completion: time.Time
+	EventCrawlProgress EventType = "crawl_progress"
+
+	// EventStatusChanged is published when application state changes (Idle, Crawling, Offline)
+	// Payload structure: map[string]interface{} with keys:
+	//   - state: string ("idle", "crawling", "offline")
+	//   - metadata: map[string]interface{} (additional context)
+	//   - timestamp: time.Time
+	EventStatusChanged EventType = "status_changed"
+
+	// EventSourceCreated is published when a new source is created
+	// Payload structure: map[string]interface{} with keys:
+	//   - source_id: string
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - source_name: string
+	//   - timestamp: time.Time
+	EventSourceCreated EventType = "source_created"
+
+	// EventSourceUpdated is published when a source is updated
+	// Payload structure: map[string]interface{} with keys:
+	//   - source_id: string
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - source_name: string
+	//   - timestamp: time.Time
+	EventSourceUpdated EventType = "source_updated"
+
+	// EventSourceDeleted is published when a source is deleted
+	// Payload structure: map[string]interface{} with keys:
+	//   - source_id: string
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - source_name: string
+	//   - timestamp: time.Time
+	EventSourceDeleted EventType = "source_deleted"
 )
 
 // Event represents a system event

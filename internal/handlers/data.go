@@ -14,13 +14,15 @@ import (
 type DataHandler struct {
 	jiraScraper       interfaces.JiraScraper
 	confluenceScraper interfaces.ConfluenceScraper
+	documentStorage   interfaces.DocumentStorage
 	logger            arbor.ILogger
 }
 
-func NewDataHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper) *DataHandler {
+func NewDataHandler(jira interfaces.JiraScraper, confluence interfaces.ConfluenceScraper, documentStorage interfaces.DocumentStorage) *DataHandler {
 	return &DataHandler{
 		jiraScraper:       jira,
 		confluenceScraper: confluence,
+		documentStorage:   documentStorage,
 		logger:            common.GetLogger(),
 	}
 }
@@ -325,4 +327,135 @@ func (h *DataHandler) GetConfluencePagesHandler(w http.ResponseWriter, r *http.R
 // getMapKeys returns all keys from a map
 func getMapKeys(m map[string]interface{}) []string {
 	return GetMapKeys(m)
+}
+
+// ClearAllDataHandler handles DELETE /api/data
+func (h *DataHandler) ClearAllDataHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "DELETE") {
+		return
+	}
+
+	ctx := r.Context()
+
+	// Clear documents
+	docs, _ := h.documentStorage.ListDocuments(nil)
+	docCount := len(docs)
+	for _, doc := range docs {
+		h.documentStorage.DeleteDocument(doc.ID)
+	}
+
+	// Clear Jira data
+	jiraData, _ := h.jiraScraper.GetJiraData()
+	jiraProjectCount := 0
+	jiraIssueCount := 0
+	if projects, ok := jiraData["projects"].([]interface{}); ok {
+		jiraProjectCount = len(projects)
+	}
+	if issues, ok := jiraData["issues"].([]interface{}); ok {
+		jiraIssueCount = len(issues)
+	}
+
+	// Clear Confluence data
+	confluenceData, _ := h.confluenceScraper.GetConfluenceData()
+	confluenceSpaceCount := 0
+	confluencePageCount := 0
+	if spaces, ok := confluenceData["spaces"].([]interface{}); ok {
+		confluenceSpaceCount = len(spaces)
+	}
+	if pages, ok := confluenceData["pages"].([]interface{}); ok {
+		confluencePageCount = len(pages)
+	}
+
+	h.logger.Info().
+		Int("documents", docCount).
+		Int("jira_projects", jiraProjectCount).
+		Int("jira_issues", jiraIssueCount).
+		Int("confluence_spaces", confluenceSpaceCount).
+		Int("confluence_pages", confluencePageCount).
+		Msg("Cleared all data")
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted_documents":         docCount,
+		"deleted_jira_projects":     jiraProjectCount,
+		"deleted_jira_issues":       jiraIssueCount,
+		"deleted_confluence_spaces": confluenceSpaceCount,
+		"deleted_confluence_pages":  confluencePageCount,
+	})
+	_ = ctx
+}
+
+// ClearDataBySourceHandler handles DELETE /api/data/{sourceType}
+func (h *DataHandler) ClearDataBySourceHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "DELETE") {
+		return
+	}
+
+	// Extract source type from URL path
+	sourceType := extractIDFromPath(r.URL.Path, "/api/data/")
+	if sourceType == "" {
+		WriteError(w, http.StatusBadRequest, "Source type is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Validate source type
+	validTypes := map[string]bool{
+		"jira":       true,
+		"confluence": true,
+		"github":     true,
+	}
+	if !validTypes[sourceType] {
+		WriteError(w, http.StatusBadRequest, "Invalid source type")
+		return
+	}
+
+	// Clear documents by source type
+	docs, _ := h.documentStorage.GetDocumentsBySource(sourceType)
+	docCount := len(docs)
+	for _, doc := range docs {
+		h.documentStorage.DeleteDocument(doc.ID)
+	}
+
+	result := map[string]interface{}{
+		"deleted_documents": docCount,
+		"source_type":       sourceType,
+	}
+
+	// Clear source-specific data
+	switch sourceType {
+	case "jira":
+		jiraData, _ := h.jiraScraper.GetJiraData()
+		projectCount := 0
+		issueCount := 0
+		if projects, ok := jiraData["projects"].([]interface{}); ok {
+			projectCount = len(projects)
+		}
+		if issues, ok := jiraData["issues"].([]interface{}); ok {
+			issueCount = len(issues)
+		}
+		result["deleted_projects"] = projectCount
+		result["deleted_issues"] = issueCount
+
+	case "confluence":
+		confluenceData, _ := h.confluenceScraper.GetConfluenceData()
+		spaceCount := 0
+		pageCount := 0
+		if spaces, ok := confluenceData["spaces"].([]interface{}); ok {
+			spaceCount = len(spaces)
+		}
+		if pages, ok := confluenceData["pages"].([]interface{}); ok {
+			pageCount = len(pages)
+		}
+		result["deleted_spaces"] = spaceCount
+		result["deleted_pages"] = pageCount
+	}
+
+	h.logger.Info().
+		Str("source_type", sourceType).
+		Int("documents", docCount).
+		Msg("Cleared data by source type")
+
+	WriteJSON(w, http.StatusOK, result)
+	_ = ctx
 }

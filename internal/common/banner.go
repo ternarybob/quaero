@@ -60,27 +60,38 @@ func PrintBanner(config *Config, logger interface{ GetLogFilePath() string }) {
 
 // printCapabilities displays the system capabilities
 func printCapabilities(config *Config) {
-	fmt.Printf("🎯 Quaero Capabilities:\n")
-	fmt.Printf("   • Extension-based authentication (OAuth/SSO compatible)\n")
+	fmt.Printf("🎯 Enabled Features:\n")
 
 	// Show enabled sources
+	sourcesEnabled := false
 	if config.Sources.Jira.Enabled {
-		fmt.Printf("   • Jira project and issue scraping\n")
+		fmt.Printf("   • Jira integration (projects and issues)\n")
+		sourcesEnabled = true
 	}
 	if config.Sources.Confluence.Enabled {
-		fmt.Printf("   • Confluence space and page scraping\n")
+		fmt.Printf("   • Confluence integration (spaces and pages)\n")
+		sourcesEnabled = true
 	}
 	if config.Sources.GitHub.Enabled {
-		fmt.Printf("   • GitHub repository scraping\n")
+		fmt.Printf("   • GitHub integration (repositories)\n")
+		sourcesEnabled = true
+	}
+	if !sourcesEnabled {
+		fmt.Printf("   • No data sources enabled (configure in quaero.toml)\n")
 	}
 
-	// Show storage type
-	storageType := config.Storage.Type
-	if storageType == "" {
-		storageType = "sqlite" // default
+	// Show storage configuration
+	fmt.Printf("   • Local SQLite database with full-text search\n")
+
+	// Show LLM mode
+	if config.LLM.Mode == "offline" {
+		fmt.Printf("   • Offline LLM mode (secure, data stays local)\n")
+	} else if config.LLM.Mode == "cloud" {
+		fmt.Printf("   • Cloud LLM mode (uses external APIs)\n")
 	}
-	fmt.Printf("   • %s storage with full-text search\n", storageType)
-	fmt.Printf("   • Rate-limited API requests\n")
+
+	// Show authentication
+	fmt.Printf("   • Extension-based authentication (OAuth/SSO)\n")
 }
 
 // PrintShutdownBanner displays the application shutdown banner

@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ternarybob/arbor"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/chat"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
@@ -24,6 +26,8 @@ import (
 	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
+	"github.com/ternarybob/quaero/internal/services/sources"
+	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/storage"
 )
@@ -49,8 +53,13 @@ type App struct {
 	SchedulerService interfaces.SchedulerService
 	SummaryService   *summary.Service
 
+	// Source-agnostic services
+	StatusService *status.Service
+	SourceService *sources.Service
+
 	// Atlassian services
 	AuthService       *atlassian.AtlassianAuthService
+	CrawlerService    *crawler.Service
 	JiraService       *atlassian.JiraScraperService
 	ConfluenceService *atlassian.ConfluenceScraperService
 
@@ -66,6 +75,9 @@ type App struct {
 	SchedulerHandler  *handlers.SchedulerHandler
 	ChatHandler       *handlers.ChatHandler
 	MCPHandler        *handlers.MCPHandler
+	JobHandler        *handlers.JobHandler
+	SourcesHandler    *handlers.SourcesHandler
+	StatusHandler     *handlers.StatusHandler
 }
 
 // New initializes the application with all dependencies
@@ -92,12 +104,31 @@ func New(config *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Load stored authentication if available
 	if _, err := app.AuthService.LoadAuth(); err == nil {
-		logger.Info().Msg("Loaded stored authentication from database")
+		logger.Info().Msg("Loaded stored authentication credentials")
 	}
 
-	// Start WebSocket background tasks
+	// Start WebSocket background tasks for real-time UI updates
 	app.WSHandler.StartStatusBroadcaster()
 	app.WSHandler.StartLogStreamer()
+	logger.Info().Msg("WebSocket handlers started for real-time updates")
+
+	// Log initialization summary
+	enabledSources := []string{}
+	if config.Sources.Jira.Enabled {
+		enabledSources = append(enabledSources, "Jira")
+	}
+	if config.Sources.Confluence.Enabled {
+		enabledSources = append(enabledSources, "Confluence")
+	}
+	if config.Sources.GitHub.Enabled {
+		enabledSources = append(enabledSources, "GitHub")
+	}
+
+	logger.Info().
+		Strs("enabled_sources", enabledSources).
+		Str("llm_mode", config.LLM.Mode).
+		Str("processing_enabled", fmt.Sprintf("%v", config.Processing.Enabled)).
+		Msg("Application initialization complete")
 
 	return app, nil
 }
@@ -113,7 +144,9 @@ func (a *App) initDatabase() error {
 	a.Logger.Info().
 		Str("type", a.Config.Storage.Type).
 		Str("path", a.Config.Storage.SQLite.Path).
-		Msg("Storage initialized")
+		Str("fts5_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableFTS5)).
+		Str("vector_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableVector)).
+		Msg("Storage layer initialized")
 
 	return nil
 }
@@ -170,6 +203,19 @@ func (a *App) initServices() error {
 	// 5. Initialize event service (must be early for subscriptions)
 	a.EventService = events.NewService(a.Logger)
 
+	// 5.5. Initialize status service
+	a.StatusService = status.NewService(a.EventService, a.Logger)
+	a.StatusService.SubscribeToCrawlerEvents()
+	a.Logger.Info().Msg("Status service initialized")
+
+	// 5.6. Initialize source service
+	a.SourceService = sources.NewService(
+		a.StorageManager.SourceStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Source service initialized")
+
 	// 6. Initialize auth service
 	a.AuthService, err = atlassian.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -179,21 +225,39 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// 7. Initialize Jira service with EventService (auto-subscribes to events)
+	// 6.5. Initialize crawler service
+	crawlerConfig := crawler.CrawlConfig{
+		MaxDepth:      3,
+		FollowLinks:   true,
+		Concurrency:   2,
+		RateLimit:     time.Second,
+		DetailLevel:   "full",
+		RetryAttempts: 3,
+		RetryBackoff:  time.Second * 2,
+	}
+	a.CrawlerService = crawler.NewService(a.AuthService, a.EventService, a.StorageManager.JobStorage(), a.Logger, crawlerConfig)
+	if err := a.CrawlerService.Start(); err != nil {
+		return fmt.Errorf("failed to start crawler service: %w", err)
+	}
+	a.Logger.Info().Msg("Crawler service initialized")
+
+	// 7. Initialize Jira service with EventService and CrawlerService (auto-subscribes to events)
 	a.JiraService = atlassian.NewJiraScraperService(
 		a.StorageManager.JiraStorage(),
 		a.DocumentService,
 		a.AuthService,
 		a.EventService,
+		a.CrawlerService,
 		a.Logger,
 	)
 
-	// 8. Initialize Confluence service with EventService (auto-subscribes to events)
+	// 8. Initialize Confluence service with EventService and CrawlerService (auto-subscribes to events)
 	a.ConfluenceService = atlassian.NewConfluenceScraperService(
 		a.StorageManager.ConfluenceStorage(),
 		a.DocumentService,
 		a.AuthService,
 		a.EventService,
+		a.CrawlerService,
 		a.Logger,
 	)
 
@@ -210,7 +274,14 @@ func (a *App) initServices() error {
 		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
 		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to start processing scheduler")
+		} else {
+			a.Logger.Info().
+				Str("schedule", a.Config.Processing.Schedule).
+				Int("limit", a.Config.Processing.Limit).
+				Msg("Processing scheduler started")
 		}
+	} else {
+		a.Logger.Info().Msg("Processing scheduler disabled (opt-in via config)")
 	}
 
 	// 11. Initialize embedding coordinator
@@ -260,14 +331,18 @@ func (a *App) initHandlers() error {
 	// Initialize handlers
 	a.APIHandler = handlers.NewAPIHandler()
 	a.UIHandler = handlers.NewUIHandler(a.JiraService, a.ConfluenceService, a.AuthService)
-	a.WSHandler = handlers.NewWebSocketHandler()
+	a.WSHandler = handlers.NewWebSocketHandler(a.EventService)
 	a.ScraperHandler = handlers.NewScraperHandler(
 		a.AuthService,
 		a.JiraService,
 		a.ConfluenceService,
 		a.WSHandler,
 	)
-	a.DataHandler = handlers.NewDataHandler(a.JiraService, a.ConfluenceService)
+	a.DataHandler = handlers.NewDataHandler(
+		a.JiraService,
+		a.ConfluenceService,
+		a.StorageManager.DocumentStorage(),
+	)
 	a.CollectorHandler = handlers.NewCollectorHandler(
 		a.JiraService,
 		a.ConfluenceService,
@@ -305,6 +380,15 @@ func (a *App) initHandlers() error {
 	)
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
+	// Initialize job handler
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.Logger)
+
+	// Initialize sources handler
+	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
+
+	// Initialize status handler
+	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
+
 	// Set UI logger for services
 	a.JiraService.SetUILogger(a.WSHandler)
 	a.ConfluenceService.SetUILogger(a.WSHandler)
@@ -327,6 +411,13 @@ func (a *App) Close() error {
 	// Stop processing scheduler
 	if a.ProcessingScheduler != nil {
 		a.ProcessingScheduler.Stop()
+	}
+
+	// Close crawler service
+	if a.CrawlerService != nil {
+		if err := a.CrawlerService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close crawler service")
+		}
 	}
 
 	// Close event service

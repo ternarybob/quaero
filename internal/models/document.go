@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+const (
+	// DetailLevelMetadata indicates document contains only metadata (Firecrawl-style incremental crawling)
+	DetailLevelMetadata = "metadata"
+	// DetailLevelFull indicates document contains full content
+	DetailLevelFull = "full"
+)
+
 // Document represents a normalized document from any source
 type Document struct {
 	// Identity
@@ -16,6 +23,7 @@ type Document struct {
 	Title           string `json:"title"`
 	Content         string `json:"content"`          // Plain text
 	ContentMarkdown string `json:"content_markdown"` // Markdown format
+	DetailLevel     string `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
 
 	// NOTE: Phase 5 - Embedding fields removed (using FTS5 search only)
 

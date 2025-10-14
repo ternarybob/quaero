@@ -113,12 +113,37 @@ type DocumentStorage interface {
 	ClearAll() error
 }
 
+// JobStorage - interface for crawler job persistence
+type JobStorage interface {
+	SaveJob(ctx context.Context, job interface{}) error
+	GetJob(ctx context.Context, jobID string) (interface{}, error)
+	ListJobs(ctx context.Context, opts *ListOptions) ([]interface{}, error)
+	GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error)
+	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
+	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
+	DeleteJob(ctx context.Context, jobID string) error
+	CountJobs(ctx context.Context) (int, error)
+	CountJobsByStatus(ctx context.Context, status string) (int, error)
+}
+
+// SourceStorage - interface for source configuration persistence
+type SourceStorage interface {
+	SaveSource(ctx context.Context, source *models.SourceConfig) error
+	GetSource(ctx context.Context, id string) (*models.SourceConfig, error)
+	ListSources(ctx context.Context) ([]*models.SourceConfig, error)
+	DeleteSource(ctx context.Context, id string) error
+	GetSourcesByType(ctx context.Context, sourceType string) ([]*models.SourceConfig, error)
+	GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error)
+}
+
 // StorageManager - composite interface for all storage operations
 type StorageManager interface {
 	JiraStorage() JiraStorage
 	ConfluenceStorage() ConfluenceStorage
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
+	JobStorage() JobStorage
+	SourceStorage() SourceStorage
 	DB() interface{}
 	Close() error
 }

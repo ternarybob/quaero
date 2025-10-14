@@ -133,6 +133,8 @@ type LoggingConfig struct {
 }
 
 // NewDefaultConfig creates a configuration with default values
+// Technical parameters are hardcoded here for production stability.
+// Only user-facing settings should be exposed in quaero.toml.
 func NewDefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -144,12 +146,12 @@ func NewDefaultConfig() *Config {
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
 				Path:               "./data/quaero.db",
-				EnableFTS5:         true,
-				EnableVector:       true,
-				EmbeddingDimension: 768,
-				CacheSizeMB:        64,
-				WALMode:            true,
-				BusyTimeoutMS:      5000,
+				EnableFTS5:         true, // Full-text search for keyword queries
+				EnableVector:       true, // Vector embeddings for semantic search
+				EmbeddingDimension: 768,  // Matches nomic-embed-text model output
+				CacheSizeMB:        64,   // Balanced performance for typical workloads
+				WALMode:            true, // Write-Ahead Logging for better concurrency
+				BusyTimeoutMS:      5000, // 5 seconds for lock contention scenarios
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",
@@ -157,48 +159,48 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		LLM: LLMConfig{
-			Mode: "offline", // Default to secure offline mode
+			Mode: "offline", // Secure by default - no data leaves the machine
 			Offline: OfflineLLMConfig{
 				ModelDir:    "./models",
 				EmbedModel:  "nomic-embed-text-v1.5-q8.gguf",
 				ChatModel:   "qwen2.5-7b-instruct-q4.gguf",
 				ContextSize: 24000, // Large context for Pointer RAG with extensive cross-source linking
-				ThreadCount: 4,
-				GPULayers:   0, // CPU-only by default
+				ThreadCount: 4,     // Conservative CPU thread count for compatibility
+				GPULayers:   0,     // CPU-only by default for maximum compatibility
 			},
 			Cloud: CloudLLMConfig{
 				Provider:    "gemini",
 				EmbedModel:  "text-embedding-004",
 				ChatModel:   "gemini-1.5-flash",
-				MaxTokens:   2048,
-				Temperature: 0.7,
+				MaxTokens:   2048, // Reasonable default for chat responses
+				Temperature: 0.7,  // Balanced between deterministic and creative
 			},
 			Audit: AuditConfig{
 				Enabled:    true,
-				LogQueries: false, // Don't log query text by default (PII safety)
+				LogQueries: false, // Don't log query text by default (PII/compliance safety)
 			},
 		},
 		RAG: RAGConfig{
-			MaxDocuments:  20,       // Retrieve up to 20 documents (local LLM can handle more)
-			MinSimilarity: 0.6,      // Lower threshold to include more relevant docs
-			SearchMode:    "vector", // Default to vector search
+			MaxDocuments:  20,       // Retrieve up to 20 documents (local LLM can handle larger contexts)
+			MinSimilarity: 0.6,      // Lower threshold to include more potentially relevant docs
+			SearchMode:    "vector", // Default to semantic vector search
 		},
 		Embeddings: EmbeddingsConfig{
 			Enabled:   true,
-			OllamaURL: "http://localhost:11434",
-			Model:     "nomic-embed-text",
-			Dimension: 768,
-			BatchSize: 10,
+			OllamaURL: "http://localhost:11434", // Standard Ollama default port
+			Model:     "nomic-embed-text",       // 768-dimensional embeddings
+			Dimension: 768,                      // Matches model output
+			BatchSize: 10,                       // Conservative batch size for stability
 		},
 		Processing: ProcessingConfig{
-			Enabled:  false,           // Disabled by default, user must opt-in
-			Schedule: "0 0 */6 * * *", // Every 6 hours
-			Limit:    1000,            // Max documents per embedding run
+			Enabled:  false,           // Disabled by default - user must explicitly opt-in
+			Schedule: "0 0 */6 * * *", // Every 6 hours (cron format)
+			Limit:    1000,            // Max documents per embedding run to prevent resource exhaustion
 		},
 		Logging: LoggingConfig{
-			Level:  "info",
-			Format: "text",
-			Output: []string{"stdout", "file"},
+			Level:  "info",                     // Info level for production (debug|info|warn|error)
+			Format: "text",                     // Human-readable text format (text|json)
+			Output: []string{"stdout", "file"}, // Log to both console and file
 		},
 	}
 }

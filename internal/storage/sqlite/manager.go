@@ -13,6 +13,8 @@ type Manager struct {
 	confluence interfaces.ConfluenceStorage
 	auth       interfaces.AuthStorage
 	document   interfaces.DocumentStorage
+	job        interfaces.JobStorage
+	source     interfaces.SourceStorage
 	logger     arbor.ILogger
 }
 
@@ -29,6 +31,8 @@ func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.S
 		confluence: NewConfluenceStorage(db, logger),
 		auth:       NewAuthStorage(db, logger),
 		document:   NewDocumentStorage(db, logger),
+		job:        NewJobStorage(db, logger),
+		source:     NewSourceStorage(db, logger),
 		logger:     logger,
 	}, nil
 }
@@ -51,6 +55,16 @@ func (m *Manager) AuthStorage() interfaces.AuthStorage {
 // DocumentStorage returns the Document storage interface
 func (m *Manager) DocumentStorage() interfaces.DocumentStorage {
 	return m.document
+}
+
+// JobStorage returns the Job storage interface
+func (m *Manager) JobStorage() interfaces.JobStorage {
+	return m.job
+}
+
+// SourceStorage returns the Source storage interface
+func (m *Manager) SourceStorage() interfaces.SourceStorage {
+	return m.source
 }
 
 // DB returns the underlying database connection

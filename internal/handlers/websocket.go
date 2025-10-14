@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -32,22 +33,31 @@ type AuthLoader interface {
 }
 
 type WebSocketHandler struct {
-	logger      arbor.ILogger
-	clients     map[*websocket.Conn]bool
-	clientMutex map[*websocket.Conn]*sync.Mutex
-	mu          sync.RWMutex
-	lastLogKeys map[string]bool
-	logKeysMu   sync.RWMutex
-	authLoader  AuthLoader
+	logger       arbor.ILogger
+	clients      map[*websocket.Conn]bool
+	clientMutex  map[*websocket.Conn]*sync.Mutex
+	mu           sync.RWMutex
+	lastLogKeys  map[string]bool
+	logKeysMu    sync.RWMutex
+	authLoader   AuthLoader
+	eventService interfaces.EventService
 }
 
-func NewWebSocketHandler() *WebSocketHandler {
-	return &WebSocketHandler{
-		logger:      common.GetLogger(),
-		clients:     make(map[*websocket.Conn]bool),
-		clientMutex: make(map[*websocket.Conn]*sync.Mutex),
-		lastLogKeys: make(map[string]bool),
+func NewWebSocketHandler(eventService interfaces.EventService) *WebSocketHandler {
+	h := &WebSocketHandler{
+		logger:       common.GetLogger(),
+		clients:      make(map[*websocket.Conn]bool),
+		clientMutex:  make(map[*websocket.Conn]*sync.Mutex),
+		lastLogKeys:  make(map[string]bool),
+		eventService: eventService,
 	}
+
+	// Subscribe to crawler events if eventService is provided
+	if eventService != nil {
+		h.SubscribeToCrawlerEvents()
+	}
+
+	return h
 }
 
 // SetAuthLoader sets the auth loader for loading stored authentication
@@ -88,6 +98,28 @@ type LogEntry struct {
 	Timestamp string `json:"timestamp"`
 	Level     string `json:"level"`
 	Message   string `json:"message"`
+}
+
+type CrawlProgressUpdate struct {
+	JobID               string    `json:"jobId"`
+	SourceType          string    `json:"sourceType"`
+	EntityType          string    `json:"entityType"`
+	Status              string    `json:"status"`
+	TotalURLs           int       `json:"totalUrls"`
+	CompletedURLs       int       `json:"completedUrls"`
+	FailedURLs          int       `json:"failedUrls"`
+	PendingURLs         int       `json:"pendingUrls"`
+	CurrentURL          string    `json:"currentUrl,omitempty"`
+	Percentage          float64   `json:"percentage"`
+	EstimatedCompletion time.Time `json:"estimatedCompletion,omitempty"`
+	Errors              []string  `json:"errors,omitempty"`
+	Details             string    `json:"details,omitempty"`
+}
+
+type AppStatusUpdate struct {
+	State     string                 `json:"state"`
+	Metadata  map[string]interface{} `json:"metadata"`
+	Timestamp time.Time              `json:"timestamp"`
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -541,4 +573,191 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 		"logs":  logs,
 		"count": len(logs),
 	})
+}
+
+// BroadcastCrawlProgress sends crawler progress updates to all connected clients
+func (h *WebSocketHandler) BroadcastCrawlProgress(progress CrawlProgressUpdate) {
+	msg := WSMessage{
+		Type:    "crawl_progress",
+		Payload: progress,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal crawl progress message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send crawl progress to client")
+		}
+	}
+}
+
+// BroadcastAppStatus sends application status updates to all connected clients
+func (h *WebSocketHandler) BroadcastAppStatus(status AppStatusUpdate) {
+	msg := WSMessage{
+		Type:    "app_status",
+		Payload: status,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal app status message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send app status to client")
+		}
+	}
+}
+
+// SubscribeToCrawlerEvents subscribes to crawler progress events
+func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
+	if h.eventService == nil {
+		return
+	}
+
+	h.eventService.Subscribe(interfaces.EventCrawlProgress, func(ctx context.Context, event interfaces.Event) error {
+		// Extract payload map
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid crawl progress event payload type")
+			return nil
+		}
+
+		// Convert to CrawlProgressUpdate struct
+		progress := CrawlProgressUpdate{
+			JobID:         getString(payload, "job_id"),
+			SourceType:    getString(payload, "source_type"),
+			EntityType:    getString(payload, "entity_type"),
+			Status:        getString(payload, "status"),
+			TotalURLs:     getInt(payload, "total_urls"),
+			CompletedURLs: getInt(payload, "completed_urls"),
+			FailedURLs:    getInt(payload, "failed_urls"),
+			PendingURLs:   getInt(payload, "pending_urls"),
+			CurrentURL:    getString(payload, "current_url"),
+			Percentage:    getFloat64(payload, "percentage"),
+		}
+
+		// Parse estimated completion if present
+		if estStr := getString(payload, "estimated_completion"); estStr != "" {
+			if est, err := time.Parse(time.RFC3339, estStr); err == nil {
+				progress.EstimatedCompletion = est
+			}
+		}
+
+		// Extract errors array if present
+		if errs, ok := payload["errors"].([]interface{}); ok {
+			progress.Errors = make([]string, 0, len(errs))
+			for _, e := range errs {
+				if errStr, ok := e.(string); ok {
+					progress.Errors = append(progress.Errors, errStr)
+				}
+			}
+		}
+
+		// Extract details if present
+		progress.Details = getString(payload, "details")
+
+		// Broadcast to all clients
+		h.BroadcastCrawlProgress(progress)
+		return nil
+	})
+
+	h.eventService.Subscribe(interfaces.EventStatusChanged, func(ctx context.Context, event interfaces.Event) error {
+		// Extract payload map
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid status changed event payload type")
+			return nil
+		}
+
+		// Convert to AppStatusUpdate struct
+		update := AppStatusUpdate{
+			State:     getString(payload, "state"),
+			Metadata:  make(map[string]interface{}),
+			Timestamp: time.Now(),
+		}
+
+		// Extract metadata if present
+		if metadata, ok := payload["metadata"].(map[string]interface{}); ok {
+			update.Metadata = metadata
+		}
+
+		// Parse timestamp if present
+		if tsStr := getString(payload, "timestamp"); tsStr != "" {
+			if ts, err := time.Parse(time.RFC3339, tsStr); err == nil {
+				update.Timestamp = ts
+			}
+		}
+
+		// Broadcast to all clients
+		h.BroadcastAppStatus(update)
+		return nil
+	})
+}
+
+// Helper functions for safe type conversion from map[string]interface{}
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func getInt(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok {
+		if f, ok := val.(float64); ok {
+			return f
+		}
+	}
+	return 0.0
 }
