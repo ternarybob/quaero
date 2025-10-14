@@ -122,12 +122,20 @@ build: 10-04-16-30-15
 
 ### Testing
 
-```powershell
-# Build with tests
-.\scripts\build.ps1 -Test
+**IMPORTANT**: Tests require a running service. Follow these steps:
 
-# Or run tests separately
-.\test\run-tests.ps1 -Type all
+```powershell
+# STEP 1: Build and start service (in separate window)
+.\scripts\build.ps1 -Run
+
+# STEP 2: Run tests
+cd test/runner
+go run main.go
+
+# Or run tests directly
+cd test
+go test -v ./api
+go test -v ./ui
 ```
 
 ### Release
@@ -163,9 +171,11 @@ build: 10-04-16-30-15
 
 ### Tests Fail
 
-1. Check test output for specific failures
-2. Ensure test dependencies are installed
-3. Run tests with verbose output: `.\scripts\build.ps1 -Test -Verbose`
+1. **Ensure service is running**: Tests require a running service. Start with `.\scripts\build.ps1 -Run`
+2. **Verify service is accessible**: Check `http://localhost:8085` in browser
+3. **Check port availability**: Ensure port 8085 is not in use by another process
+4. **Review test logs**: Check `test/results/{testname}-{datetime}.log` for errors
+5. **Verify configuration**: Service uses `bin/quaero.toml` - ensure it's valid
 
 ### Deployment Issues
 

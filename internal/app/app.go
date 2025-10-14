@@ -74,6 +74,8 @@ type App struct {
 	JobHandler        *handlers.JobHandler
 	SourcesHandler    *handlers.SourcesHandler
 	StatusHandler     *handlers.StatusHandler
+	ConfigHandler     *handlers.ConfigHandler
+	PageHandler       *handlers.PageHandler
 }
 
 // New initializes the application with all dependencies
@@ -329,6 +331,12 @@ func (a *App) initHandlers() error {
 
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
+
+	// Initialize config handler
+	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config)
+
+	// Initialize page handler for serving HTML templates
+	a.PageHandler = handlers.NewPageHandler(a.Logger)
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)

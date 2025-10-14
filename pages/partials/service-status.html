@@ -1,57 +1,32 @@
-<div class="columns">
-  <div class="column is-half">
-    <div class="card" x-data="appStatus">
-      <header class="card-header">
-        <p class="card-header-title">Application Status</p>
-        <div class="card-header-icon">
-          <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
-        </div>
-      </header>
-      <div class="card-content">
-        <div class="content">
-          <p><strong>Current State:</strong> <span x-text="state"></span></p>
-          <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
-          <div x-show="Object.keys(metadata).length > 0">
-            <p><strong>Details:</strong></p>
-            <pre x-text="JSON.stringify(metadata, null, 2)" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px;"></pre>
-          </div>
-        </div>
+<div class="card">
+  <header class="card-header">
+    <p class="card-header-title">Quick Actions</p>
+  </header>
+  <div class="card-content">
+    <div class="content">
+      <div class="buttons">
+        <a href="/sources" class="button is-primary">
+          <span class="icon"><i class="fas fa-database"></i></span>
+          <span>Manage Sources</span>
+        </a>
+        <a href="/jobs" class="button is-link">
+          <span class="icon"><i class="fas fa-tasks"></i></span>
+          <span>View Jobs</span>
+        </a>
+        <a href="/documents" class="button is-info">
+          <span class="icon"><i class="fas fa-file-alt"></i></span>
+          <span>Browse Documents</span>
+        </a>
+        <a href="/chat" class="button is-success">
+          <span class="icon"><i class="fas fa-comments"></i></span>
+          <span>Chat</span>
+        </a>
       </div>
-    </div>
-  </div>
-
-  <div class="column is-half">
-    <div class="card">
-      <header class="card-header">
-        <p class="card-header-title">Quick Actions</p>
-      </header>
-      <div class="card-content">
-        <div class="content">
-          <div class="buttons">
-            <a href="/sources" class="button is-primary">
-              <span class="icon"><i class="fas fa-database"></i></span>
-              <span>Manage Sources</span>
-            </a>
-            <a href="/jobs" class="button is-link">
-              <span class="icon"><i class="fas fa-tasks"></i></span>
-              <span>View Jobs</span>
-            </a>
-            <a href="/documents" class="button is-info">
-              <span class="icon"><i class="fas fa-file-alt"></i></span>
-              <span>Browse Documents</span>
-            </a>
-            <a href="/chat" class="button is-success">
-              <span class="icon"><i class="fas fa-comments"></i></span>
-              <span>Chat</span>
-            </a>
-          </div>
-          <hr>
-          <p class="help">
-            <strong>Getting Started:</strong> Configure data sources in the <a href="/sources">Sources</a> page,
-            then start a crawl job to collect and index data. Use <a href="/chat">Chat</a> to query your data.
-          </p>
-        </div>
-      </div>
+      <hr>
+      <p class="help">
+        <strong>Getting Started:</strong> Configure data sources in the <a href="/sources">Sources</a> page,
+        then start a crawl job to collect and index data. Use <a href="/chat">Chat</a> to query your data.
+      </p>
     </div>
   </div>
 </div>

@@ -8,7 +8,7 @@ import (
 )
 
 func TestChatHealth(t *testing.T) {
-	h := test.NewHTTPTestHelper(t)
+	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	resp, err := h.GET("/api/chat/health")
 	if err != nil {
@@ -38,7 +38,7 @@ func TestChatHealth(t *testing.T) {
 }
 
 func TestChatMessage(t *testing.T) {
-	h := test.NewHTTPTestHelper(t)
+	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Send a simple message
 	message := map[string]interface{}{
@@ -74,7 +74,7 @@ func TestChatMessage(t *testing.T) {
 }
 
 func TestChatWithHistory(t *testing.T) {
-	h := test.NewHTTPTestHelper(t)
+	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// First message
 	message1 := map[string]interface{}{
@@ -127,7 +127,7 @@ func TestChatWithHistory(t *testing.T) {
 }
 
 func TestChatEmptyMessage(t *testing.T) {
-	h := test.NewHTTPTestHelper(t)
+	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Send empty message (should fail validation)
 	message := map[string]interface{}{

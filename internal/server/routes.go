@@ -11,7 +11,18 @@ import "net/http"
 func (s *Server) setupRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// NOTE: UI routes removed - old scraper UI handlers deleted during Stage 2.4 cleanup
+	// UI Page routes (HTML templates)
+	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
+	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("sources.html", "sources"))
+	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))
+	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
+	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))
+	mux.HandleFunc("/settings", s.app.PageHandler.ServePage("settings.html", "settings"))
+	mux.HandleFunc("/config", s.app.PageHandler.ServePage("config.html", "config"))
+
+	// Static files (CSS, JS, images)
+	mux.HandleFunc("/static/", s.app.PageHandler.StaticFileHandler)
+
 	// WebSocket route
 	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
 
@@ -61,7 +72,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
-	mux.HandleFunc("/api/shutdown", s.ShutdownHandler) // Graceful shutdown endpoint (dev mode)
+	mux.HandleFunc("/api/config", s.app.ConfigHandler.GetConfig) // GET - application configuration
+	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)           // Graceful shutdown endpoint (dev mode)
 
 	// 404 handler for unmatched API routes
 	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)

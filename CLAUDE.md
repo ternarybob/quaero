@@ -15,10 +15,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Instructions
 
+**CRITICAL: Tests do NOT build or start the service. You must do this manually:**
+
+1. **Build:** `.\scripts\build.ps1`
+2. **Run:** `.\scripts\build.ps1 -Run` (in separate window, uses `bin/quaero.toml`)
+3. **Test:** `cd test/runner && go run main.go`
+
 -   **ALL testing MUST be performed using the test harness:**
-    -   `./test/run-tests.ps1`
--   **ALL test output MUST be directed to the following path:**
-    -   `./test/results/{testname}-{datetime}`
+    -   Go-native test runner: `cd test/runner && go run main.go`
+    -   Or direct Go test: `cd test && go test -v ./api` or `./ui`
+-   **ALL test output MUST be directed to:**
+    -   `./test/results/{testname}-{datetime}.log`
+-   **Tests auto-detect service URL from:**
+    1. `TEST_SERVER_URL` environment variable (highest priority)
+    2. `bin/quaero.toml` config file (reads host and port)
+    3. Default: `http://localhost:8085`
+-   **Database conflicts:** Tests and dev service may conflict if sharing same database. Use separate DB paths or stop dev service before testing.
 
 ## Build & Development Commands
 
@@ -53,31 +65,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing
 
-**IMPORTANT: Always use run-tests.ps1, never run `go test` directly**
+**Go-Native Test Harness**
 
-```powershell
-# Run all tests
-.\test\run-tests.ps1
+```bash
+# STEP 1: Build and start service (in separate window)
+.\scripts\build.ps1 -Run
 
-# Run specific test types
-.\test\run-tests.ps1 -type unit
-.\test\run-tests.ps1 -type api
-.\test\run-tests.ps1 -type ui
+# STEP 2: Run tests via test runner
+cd test/runner
+go run main.go
+
+# Or run tests directly
+cd test
+go test -v ./api    # API integration tests
+go test -v ./ui     # UI browser tests
 
 # Run specific test
-.\test\run-tests.ps1 -type ui -script PageLayout
+cd test
+go test -v ./api -run TestChatHealth
 
-# Run with verbose output
-.\test\run-tests.ps1 -type api -verboseoutput
+# Run unit tests (colocated with source)
+go test ./internal/...
 ```
 
-**UI tests automatically:**
-- Build the application
-- Start the server
-- Wait for readiness
-- Run tests
-- Stop the server
-- Save results to timestamped directories in `test/results/`
+**Test Infrastructure:**
+- Tests organized by category: `test/api/` and `test/ui/`
+- Tests connect to running service (no automatic server startup)
+- Service uses `bin/quaero.toml` configuration
+- Test results saved to `test/results/{testname}-{datetime}.log`
+- Default server URL: `http://localhost:8085` (configurable via `TEST_SERVER_URL`)
 
 ## Architecture Overview
 
@@ -575,12 +591,14 @@ func TestUIWorkflow(t *testing.T) {
 
 ### Test Runner Features
 
-The `run-tests.ps1` script:
-- Automatically builds the application for UI tests
-- Starts and stops the server
-- Manages test result directories
-- Captures screenshots in UI tests
-- Provides coverage reports
+The Go-native test infrastructure (`test/run_tests.go` and `test/main_test.go`):
+- **TestMain fixture** handles server lifecycle automatically
+- Starts test server on port 18085 (separate from dev server)
+- Waits for server readiness before running tests
+- Manages timestamped test result directories
+- Captures screenshots in UI tests (saved to results/)
+- Provides coverage reports with `-coverprofile`
+- Automatic cleanup on test completion or failure
 
 ## Common Development Tasks
 
@@ -706,10 +724,11 @@ Check:
 ### UI Tests Fail
 
 Check:
-1. Server started correctly (automatic via run-tests.ps1)
-2. Port matches config (default: 8085)
-3. ChromeDP browser installed
-4. Test results in `test/results/` for screenshots
+1. Server started correctly (automatic via TestMain fixture)
+2. Test server port 18085 is available (not in use)
+3. ChromeDP/Chrome browser installed
+4. Test results in `test/results/run-{datetime}/` for screenshots
+5. Run with `-v` flag for verbose output
 
 ### Embeddings Not Generated
 

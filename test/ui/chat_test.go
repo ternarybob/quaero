@@ -16,7 +16,7 @@ func TestChatPageLoad(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.GetTestServerURL() + "/chat"
+	url := test.MustGetTestServerURL() + "/chat"
 	var title string
 
 	err := chromedp.Run(ctx,
@@ -27,6 +27,11 @@ func TestChatPageLoad(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("Failed to load chat page: %v", err)
+	}
+
+	// Take screenshot of chat page
+	if err := TakeScreenshot(ctx, "chat-page"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
 	if title != "Chat - Quaero" {
@@ -41,7 +46,7 @@ func TestChatElements(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.GetTestServerURL() + "/chat"
+	url := test.MustGetTestServerURL() + "/chat"
 
 	// Check for presence of chat UI elements
 	tests := []struct {
@@ -83,7 +88,7 @@ func TestChatHealthCheck(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.GetTestServerURL() + "/chat"
+	url := test.MustGetTestServerURL() + "/chat"
 
 	var statusText string
 	err := chromedp.Run(ctx,

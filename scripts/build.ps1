@@ -429,19 +429,19 @@ if ($Run) {
     # Use bin config (already deployed from deployments/local/)
     $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 
-    # Start in a new terminal window with serve command
+    # Start in a new terminal window
     # Use /k to KEEP window open so Ctrl+C signal propagates correctly
     # This allows proper graceful shutdown via Ctrl+C
-    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" serve -c `"$configPath`""
+    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
 
     Start-Process cmd -ArgumentList "/k", $startCommand
 
     Write-Host "Application started in new terminal window" -ForegroundColor Green
-    Write-Host "Command: quaero.exe serve -c quaero.toml" -ForegroundColor Cyan
+    Write-Host "Command: quaero.exe -c quaero.toml" -ForegroundColor Cyan
     Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
     Write-Host "Press Ctrl+C in the server window to stop gracefully" -ForegroundColor Yellow
     Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
 } else {
     Write-Host "`nTo run with local config:" -ForegroundColor Yellow
-    Write-Host "./bin/quaero.exe serve -c quaero.toml" -ForegroundColor White
+    Write-Host "./bin/quaero.exe -c quaero.toml" -ForegroundColor White
 }

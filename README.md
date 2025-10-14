@@ -123,8 +123,9 @@ enable_wal = true
 
 ### Testing Instructions
 
--   **ALL testing MUST be performed using the test harness:**
-    -   `./test/run-tests.ps1`
+-   **ALL testing MUST be performed using the Go-native test harness:**
+    -   Test runner: `cd test && go run run_tests.go`
+    -   Direct testing: `cd test && go test -v ./api` or `go test -v ./ui`
 -   **ALL test output MUST be directed to the following path:**
     -   `./test/results/{testname}-{datetime}`
 
@@ -192,15 +193,17 @@ quaero/
 │   ├── embeddings.html              # Embeddings test UI
 │   ├── partials/                    # Reusable components
 │   └── static/                      # CSS, JS
-├── test/                            # Test suites
-│   ├── unit/                        # Unit tests
-│   │   └── embedding_service_test.go
-│   ├── integration/                 # Integration tests
-│   │   ├── embedding_api_test.go
-│   │   ├── app_startup_test.go
-│   │   └── collection_test.go
-│   ├── ui/                          # UI automation tests
-│   └── run-tests.ps1                # Test runner
+├── test/                            # Go-native test infrastructure
+│   ├── main_test.go                 # TestMain fixture (setup/teardown)
+│   ├── helpers.go                   # Common test utilities
+│   ├── run_tests.go                 # Go-native test runner
+│   ├── api/                         # API integration tests
+│   │   ├── sources_api_test.go
+│   │   └── chat_api_test.go
+│   ├── ui/                          # UI tests (chromedp)
+│   │   ├── homepage_test.go
+│   │   └── chat_test.go
+│   └── results/                     # Test results (timestamped)
 ├── scripts/                         # Build & deployment
 │   └── build.ps1                    # Build script
 ├── docs/                            # Documentation
@@ -525,31 +528,38 @@ WS   /ws                             - Real-time updates & log streaming
 
 ### Testing
 
+**Go-Native Test Infrastructure:**
+
 ```bash
-# Run all tests
-./test/run-tests.ps1 -Type all
+# Run all tests (API + UI) via test runner
+cd test
+go run run_tests.go
 
-# Integration tests
-./test/run-tests.ps1 -Type integration
+# Run specific test suite
+cd test
+go test -v ./api    # API integration tests
+go test -v ./ui     # UI browser tests
 
-# UI tests
-./test/run-tests.ps1 -Type ui
+# Run unit tests (colocated with source)
+go test ./internal/...
 
 # Run specific test
-go test -v ./test/unit -run TestGenerateEmbedding
-go test -v ./test/integration -run TestEmbeddingAPI
+cd test
+go test -v ./api -run TestListSources
 ```
 
 **Test Coverage:**
-- **Unit Tests** (`test/unit/`): Service-level logic testing with mocks
-  - Embedding service (9 tests)
-- **Integration Tests** (`test/integration/`): End-to-end API testing
-  - Embedding API (5 tests)
-  - App startup validation
-  - Collection workflows
-- **UI Tests** (`test/ui/`): Browser automation tests
-  - Jira workflows
-  - Confluence workflows
+- **Unit Tests** (`internal/*/...`): Colocated with source code
+  - Crawler service (9 tests)
+  - Search service (8 tests)
+  - Storage/SQLite (11 tests)
+  - Config, identifiers, metadata (30 tests)
+- **API Tests** (`test/api/`): HTTP endpoint testing
+  - Sources API
+  - Chat API
+- **UI Tests** (`test/ui/`): Browser automation (chromedp)
+  - Homepage workflows
+  - Chat interface
 
 ### Code Quality
 

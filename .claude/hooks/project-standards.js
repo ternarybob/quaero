@@ -251,9 +251,10 @@ function handleUserPromptSubmit(data) {
 
     if (isTestRelated) {
       console.log('');
-      console.log('  TESTS: MUST use ./test/run-tests.ps1');
-      console.log('         NEVER: go test, cd test && go test');
-      console.log('         Usage: ./test/run-tests.ps1 -Type [all|unit|api|ui]');
+      console.log('  TESTS: MUST use Go-native test harness');
+      console.log('         Runner: cd test && go run run_tests.go');
+      console.log('         Direct: cd test && go test -v ./api or ./ui');
+      console.log('         Unit:   go test ./internal/...');
     }
 
     if (isBuildRelated) {

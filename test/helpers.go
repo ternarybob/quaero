@@ -6,8 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
+	"github.com/ternarybob/quaero/internal/common"
 )
 
 // HTTPTestHelper provides helper methods for HTTP testing
@@ -18,10 +25,10 @@ type HTTPTestHelper struct {
 }
 
 // NewHTTPTestHelper creates a new HTTP test helper
-func NewHTTPTestHelper(t *testing.T) *HTTPTestHelper {
+func NewHTTPTestHelper(t *testing.T, baseURL string) *HTTPTestHelper {
 	return &HTTPTestHelper{
-		BaseURL: GetTestServerURL(),
-		Client:  &http.Client{Timeout: 30 * time.Second},
+		BaseURL: baseURL,
+		Client:  &http.Client{Timeout: 60 * time.Second}, // Increased for slow LLM responses
 		T:       t,
 	}
 }
@@ -154,4 +161,82 @@ func Retry(fn func() error, maxAttempts int, delay time.Duration) error {
 	}
 
 	return fmt.Errorf("retry failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// GetTestServerURL returns the test server URL from environment variable or bin/quaero.toml
+func GetTestServerURL() (string, error) {
+	// Check environment variable first (highest priority)
+	if url := os.Getenv("TEST_SERVER_URL"); url != "" {
+		return url, nil
+	}
+
+	// Read from bin/quaero.toml
+	configPath := filepath.Join("..", "bin", "quaero.toml")
+
+	// Try to read the config file
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		// If config file doesn't exist, use default
+		return "http://localhost:8085", nil
+	}
+
+	var config common.Config
+	if err := toml.Unmarshal(data, &config); err != nil {
+		// If config is invalid, use default
+		return "http://localhost:8085", nil
+	}
+
+	// Construct URL from config
+	host := config.Server.Host
+	if host == "" {
+		host = "localhost"
+	}
+	port := config.Server.Port
+	if port == 0 {
+		port = 8085
+	}
+
+	return fmt.Sprintf("http://%s:%d", host, port), nil
+}
+
+// MustGetTestServerURL returns the test server URL or panics on error
+func MustGetTestServerURL() string {
+	url, err := GetTestServerURL()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to get test server URL: %v", err))
+	}
+	return url
+}
+
+// GetExpectedPort returns the expected port from config or default
+func GetExpectedPort() int {
+	// Check environment variable first
+	if url := os.Getenv("TEST_SERVER_URL"); url != "" {
+		// Extract port from URL
+		parts := strings.Split(url, ":")
+		if len(parts) >= 3 {
+			portStr := parts[2]
+			if port, err := strconv.Atoi(portStr); err == nil {
+				return port
+			}
+		}
+	}
+
+	// Read from bin/quaero.toml
+	configPath := filepath.Join("..", "bin", "quaero.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return 8085 // Default
+	}
+
+	var config common.Config
+	if err := toml.Unmarshal(data, &config); err != nil {
+		return 8085 // Default
+	}
+
+	if config.Server.Port == 0 {
+		return 8085
+	}
+
+	return config.Server.Port
 }

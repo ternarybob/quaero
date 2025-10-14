@@ -15,19 +15,13 @@
       <a class="navbar-item{{if eq .Page "home"}} is-active{{end}}" href="/">
         HOME
       </a>
-      <a class="navbar-item{{if eq .Page "sources"}} is-active{{end}}" href="/sources">
-        SOURCES
-      </a>
       <a class="navbar-item{{if eq .Page "documents"}} is-active{{end}}" href="/documents">
         DOCUMENTS
       </a>
       <a class="navbar-item{{if eq .Page "chat"}} is-active{{end}}" href="/chat">
         CHAT
       </a>
-      <a class="navbar-item{{if eq .Page "jobs"}} is-active{{end}}" href="/jobs">
-        JOBS
-      </a>
-      <a class="navbar-item{{if eq .Page "settings"}} is-active{{end}}" href="/settings">
+      <a class="navbar-item{{if or (eq .Page "settings") (eq .Page "config")}} is-active{{end}}" href="/config">
         SETTINGS
       </a>
     </div>
