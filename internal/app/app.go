@@ -15,15 +15,15 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/services/atlassian"
+	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
+	"github.com/ternarybob/quaero/internal/services/config"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
-	"github.com/ternarybob/quaero/internal/services/processing"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/services/sources"
@@ -34,19 +34,18 @@ import (
 
 // App holds all application components and dependencies
 type App struct {
-	Config         *common.Config
+	Config         *common.Config // Deprecated: Use ConfigService instead
+	ConfigService  interfaces.ConfigService
 	Logger         arbor.ILogger
 	StorageManager interfaces.StorageManager
 
 	// Document services
-	LLMService          interfaces.LLMService
-	AuditLogger         llm.AuditLogger
-	DocumentService     interfaces.DocumentService
-	SearchService       interfaces.SearchService
-	IdentifierService   *identifiers.Extractor
-	ChatService         interfaces.ChatService
-	ProcessingService   *processing.Service
-	ProcessingScheduler *processing.Scheduler
+	LLMService        interfaces.LLMService
+	AuditLogger       llm.AuditLogger
+	DocumentService   interfaces.DocumentService
+	SearchService     interfaces.SearchService
+	IdentifierService *identifiers.Extractor
+	ChatService       interfaces.ChatService
 
 	// Event-driven services
 	EventService     interfaces.EventService
@@ -57,19 +56,16 @@ type App struct {
 	StatusService *status.Service
 	SourceService *sources.Service
 
-	// Atlassian services
-	AuthService       *atlassian.AtlassianAuthService
-	CrawlerService    *crawler.Service
-	JiraService       *atlassian.JiraScraperService
-	ConfluenceService *atlassian.ConfluenceScraperService
+	// Authentication service (supports multiple providers)
+	AuthService *auth.Service
+
+	// Crawler service
+	CrawlerService *crawler.Service
 
 	// HTTP handlers
 	APIHandler        *handlers.APIHandler
-	UIHandler         *handlers.UIHandler
+	AuthHandler       *handlers.AuthHandler
 	WSHandler         *handlers.WebSocketHandler
-	ScraperHandler    *handlers.ScraperHandler
-	DataHandler       *handlers.DataHandler
-	CollectorHandler  *handlers.CollectorHandler
 	CollectionHandler *handlers.CollectionHandler
 	DocumentHandler   *handlers.DocumentHandler
 	SchedulerHandler  *handlers.SchedulerHandler
@@ -81,10 +77,14 @@ type App struct {
 }
 
 // New initializes the application with all dependencies
-func New(config *common.Config, logger arbor.ILogger) (*App, error) {
+func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
+	// Create ConfigService for dependency injection
+	configService := config.NewService(cfg)
+
 	app := &App{
-		Config: config,
-		Logger: logger,
+		Config:        cfg,           // Deprecated: kept for backward compatibility
+		ConfigService: configService, // Use this for new code
+		Logger:        logger,
 	}
 
 	// Initialize database
@@ -114,20 +114,20 @@ func New(config *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Log initialization summary
 	enabledSources := []string{}
-	if config.Sources.Jira.Enabled {
+	if cfg.Sources.Jira.Enabled {
 		enabledSources = append(enabledSources, "Jira")
 	}
-	if config.Sources.Confluence.Enabled {
+	if cfg.Sources.Confluence.Enabled {
 		enabledSources = append(enabledSources, "Confluence")
 	}
-	if config.Sources.GitHub.Enabled {
+	if cfg.Sources.GitHub.Enabled {
 		enabledSources = append(enabledSources, "GitHub")
 	}
 
 	logger.Info().
 		Strs("enabled_sources", enabledSources).
-		Str("llm_mode", config.LLM.Mode).
-		Str("processing_enabled", fmt.Sprintf("%v", config.Processing.Enabled)).
+		Str("llm_mode", cfg.LLM.Mode).
+		Str("processing_enabled", fmt.Sprintf("%v", cfg.Processing.Enabled)).
 		Msg("Application initialization complete")
 
 	return app, nil
@@ -216,8 +216,8 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Source service initialized")
 
-	// 6. Initialize auth service
-	a.AuthService, err = atlassian.NewAtlassianAuthService(
+	// 6. Initialize auth service (Atlassian)
+	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
 		a.Logger,
 	)
@@ -241,50 +241,7 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Crawler service initialized")
 
-	// 7. Initialize Jira service with EventService and CrawlerService (auto-subscribes to events)
-	a.JiraService = atlassian.NewJiraScraperService(
-		a.StorageManager.JiraStorage(),
-		a.DocumentService,
-		a.AuthService,
-		a.EventService,
-		a.CrawlerService,
-		a.Logger,
-	)
-
-	// 8. Initialize Confluence service with EventService and CrawlerService (auto-subscribes to events)
-	a.ConfluenceService = atlassian.NewConfluenceScraperService(
-		a.StorageManager.ConfluenceStorage(),
-		a.DocumentService,
-		a.AuthService,
-		a.EventService,
-		a.CrawlerService,
-		a.Logger,
-	)
-
-	// 9. Initialize processing service
-	a.ProcessingService = processing.NewService(
-		a.DocumentService,
-		a.StorageManager.JiraStorage(),
-		a.StorageManager.ConfluenceStorage(),
-		a.Logger,
-	)
-
-	// 10. Initialize and start processing scheduler (if enabled)
-	if a.Config.Processing.Enabled {
-		a.ProcessingScheduler = processing.NewScheduler(a.ProcessingService, a.Logger)
-		if err := a.ProcessingScheduler.Start(a.Config.Processing.Schedule); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to start processing scheduler")
-		} else {
-			a.Logger.Info().
-				Str("schedule", a.Config.Processing.Schedule).
-				Int("limit", a.Config.Processing.Limit).
-				Msg("Processing scheduler started")
-		}
-	} else {
-		a.Logger.Info().Msg("Processing scheduler disabled (opt-in via config)")
-	}
-
-	// 11. Initialize embedding coordinator
+	// 7. Initialize embedding coordinator
 	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
 	// EmbeddingService kept temporarily for backward compatibility
 	// a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
@@ -329,25 +286,9 @@ func (a *App) initServices() error {
 // initHandlers initializes all HTTP handlers
 func (a *App) initHandlers() error {
 	// Initialize handlers
-	a.APIHandler = handlers.NewAPIHandler()
-	a.UIHandler = handlers.NewUIHandler(a.JiraService, a.ConfluenceService, a.AuthService)
-	a.WSHandler = handlers.NewWebSocketHandler(a.EventService)
-	a.ScraperHandler = handlers.NewScraperHandler(
-		a.AuthService,
-		a.JiraService,
-		a.ConfluenceService,
-		a.WSHandler,
-	)
-	a.DataHandler = handlers.NewDataHandler(
-		a.JiraService,
-		a.ConfluenceService,
-		a.StorageManager.DocumentStorage(),
-	)
-	a.CollectorHandler = handlers.NewCollectorHandler(
-		a.JiraService,
-		a.ConfluenceService,
-		a.Logger,
-	)
+	a.APIHandler = handlers.NewAPIHandler(a.Logger)
+	a.WSHandler = handlers.NewWebSocketHandler(a.EventService, a.Logger)
+	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.WSHandler, a.Logger)
 	a.CollectionHandler = handlers.NewCollectionHandler(
 		a.EventService,
 		a.Logger,
@@ -355,7 +296,7 @@ func (a *App) initHandlers() error {
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
 		a.StorageManager.DocumentStorage(),
-		a.ProcessingService,
+		a.Logger,
 	)
 	a.SchedulerHandler = handlers.NewSchedulerHandler(
 		a.SchedulerService,
@@ -389,10 +330,6 @@ func (a *App) initHandlers() error {
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
 
-	// Set UI logger for services
-	a.JiraService.SetUILogger(a.WSHandler)
-	a.ConfluenceService.SetUILogger(a.WSHandler)
-
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
 
@@ -406,11 +343,6 @@ func (a *App) Close() error {
 		if err := a.SchedulerService.Stop(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to stop scheduler service")
 		}
-	}
-
-	// Stop processing scheduler
-	if a.ProcessingScheduler != nil {
-		a.ProcessingScheduler.Stop()
 	}
 
 	// Close crawler service

@@ -5,32 +5,45 @@ This Chrome extension captures authentication data from your active Jira/Conflue
 ## Installation
 
 1. Build the project using `.\scripts\build.ps1`
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable "Developer mode" in the top right
-4. Click "Load unpacked"
-5. Select the `cmd/quaero-chrome-extension` directory
+2. The extension will be automatically copied to `bin/quaero-chrome-extension`
+3. Open Chrome and navigate to `chrome://extensions/`
+4. Enable "Developer mode" in the top right
+5. Click "Load unpacked"
+6. Select the `bin/quaero-chrome-extension` directory
 
 ## Usage
 
-1. Start the Quaero service (it runs on `http://localhost:8080`)
+1. Start the Quaero service (default: `http://localhost:8085`)
 2. Navigate to your Jira or Confluence instance and log in
 3. Click the Quaero extension icon in Chrome
-4. Click "Capture Auth Data"
+4. Click "Capture Authentication"
 5. The extension will capture your authentication and send it to the service
-6. The service will automatically start scraping
+6. Use the Quaero web UI to manage sources and start crawling
 
 ## Features
 
 - **Side Panel Interface**: Modern side panel UI for easy access
 - **Authentication Capture**: Extracts cookies and tokens from Atlassian sites
-- **Server Status**: Real-time monitoring of Quaero server connection
-- **Settings**: Configurable server URL
+- **WebSocket Status**: Real-time monitoring of Quaero server connection
+- **Settings**: Configurable server URL (default: http://localhost:8085)
+- **Version Display**: Shows both extension and server version
+
+## API Endpoints
+
+The extension uses the following Quaero API endpoints:
+
+- `POST /api/auth` - Capture and store authentication credentials
+- `GET /api/auth/status` - Check authentication status
+- `GET /api/version` - Get server version information
+- `GET /api/status` - Get application status
+- `WS /ws` - WebSocket connection for real-time updates
 
 ## Security
 
-- Authentication data is only sent to `localhost:8080`
+- Authentication data is only sent to localhost (default: `localhost:8085`)
 - No data is sent to external servers
 - All communication is local to your machine
+- Uses secure WebSocket (WSS) for HTTPS connections
 
 ## Files
 

@@ -59,9 +59,15 @@ func (m *mockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (
 }
 func (m *mockDocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	// Simple mock implementation - return all documents if query matches content
+	// Strip quotes from query if present (FTS5 quoted phrases)
+	searchQuery := query
+	if len(query) >= 2 && query[0] == '"' && query[len(query)-1] == '"' {
+		searchQuery = query[1 : len(query)-1]
+	}
+
 	var results []*models.Document
 	for _, doc := range m.documents {
-		if query == "" || containsSubstring(doc.Content, query) || containsSubstring(doc.Title, query) {
+		if query == "" || containsSubstring(doc.Content, searchQuery) || containsSubstring(doc.Title, searchQuery) {
 			results = append(results, doc)
 		}
 	}
@@ -96,11 +102,6 @@ func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error) {
 		TotalDocuments: len(m.documents),
 	}, nil
 }
-func (m *mockDocumentStorage) SaveChunk(chunk *models.DocumentChunk) error { return nil }
-func (m *mockDocumentStorage) GetChunks(documentID string) ([]*models.DocumentChunk, error) {
-	return nil, nil
-}
-func (m *mockDocumentStorage) DeleteChunks(documentID string) error               { return nil }
 func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error  { return nil }
 func (m *mockDocumentStorage) SetForceEmbedPending(id string, pending bool) error { return nil }
 func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) { return nil, nil }

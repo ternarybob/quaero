@@ -11,71 +11,20 @@ import "net/http"
 func (s *Server) setupRoutes() *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// UI routes
-	mux.HandleFunc("/", s.app.UIHandler.IndexHandler)
-	mux.HandleFunc("/sources", s.app.UIHandler.SourcesPageHandler)
-	mux.HandleFunc("/jira", s.app.UIHandler.JiraPageHandler)             // Deprecated: use /sources
-	mux.HandleFunc("/confluence", s.app.UIHandler.ConfluencePageHandler) // Deprecated: use /sources
-	mux.HandleFunc("/documents", s.app.UIHandler.DocumentsPageHandler)
-	mux.HandleFunc("/chat", s.app.UIHandler.ChatPageHandler)
-	mux.HandleFunc("/jobs", s.app.UIHandler.JobsPageHandler)
-	mux.HandleFunc("/settings", s.app.UIHandler.SettingsPageHandler)
-	mux.HandleFunc("/static/common.css", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/static/theme-sandstone.css", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/static/theme-yeti.css", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/static/common.js", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/static/websocket-manager.js", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/favicon.ico", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/navbar.html", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/footer.html", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/head.html", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/service-status.html", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/service-logs.html", s.app.UIHandler.StaticFileHandler)
-	mux.HandleFunc("/partials/snackbar.html", s.app.UIHandler.StaticFileHandler)
-
+	// NOTE: UI routes removed - old scraper UI handlers deleted during Stage 2.4 cleanup
 	// WebSocket route
 	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
 
-	// API routes - Authentication
-	mux.HandleFunc("/api/auth/status", s.app.ScraperHandler.AuthStatusHandler)
-	mux.HandleFunc("/api/auth", s.app.ScraperHandler.AuthUpdateHandler)
-	mux.HandleFunc("/api/auth/details", s.app.ScraperHandler.AuthDetailsHandler)
-
-	// API routes - Status
-	mux.HandleFunc("/api/status/parser", s.app.ScraperHandler.ParserStatusHandler)
-
-	// API routes - Scraping (UI-triggered collection)
-	mux.HandleFunc("/api/scrape", s.app.ScraperHandler.ScrapeHandler)
-	mux.HandleFunc("/api/scrape/projects", s.app.ScraperHandler.ScrapeProjectsHandler)
-	mux.HandleFunc("/api/scrape/spaces", s.app.ScraperHandler.ScrapeSpacesHandler)
-
-	// API routes - Cache management
-	mux.HandleFunc("/api/projects/refresh-cache", s.app.ScraperHandler.RefreshProjectsCacheHandler)
-	mux.HandleFunc("/api/projects/get-issues", s.app.ScraperHandler.GetProjectIssuesHandler)
-	mux.HandleFunc("/api/spaces/refresh-cache", s.app.ScraperHandler.RefreshSpacesCacheHandler)
-	mux.HandleFunc("/api/spaces/get-pages", s.app.ScraperHandler.GetSpacePagesHandler)
+	// API routes - Authentication (Chrome extension)
+	mux.HandleFunc("/api/auth", s.app.AuthHandler.CaptureAuthHandler)          // POST - capture auth from extension
+	mux.HandleFunc("/api/auth/status", s.app.AuthHandler.GetAuthStatusHandler) // GET - check auth status
 
 	// API routes - Source management (NEW)
 	mux.HandleFunc("/api/sources", s.handleSourcesRoute)                // GET (list), POST (create)
 	mux.HandleFunc("/api/sources/", s.handleSourceRoutes)               // GET/PUT/DELETE /{id}
 	mux.HandleFunc("/api/status", s.app.StatusHandler.GetStatusHandler) // GET - application status
 
-	// API routes - Data management
-	mux.HandleFunc("/api/data", s.handleDataRoute)                                                // DELETE - clear all data (NEW)
-	mux.HandleFunc("/api/data/", s.handleDataRoutes)                                              // DELETE /{sourceType} - clear by source (NEW)
-	mux.HandleFunc("/api/data/clear-all", s.app.ScraperHandler.ClearAllDataHandler)               // Deprecated: use DELETE /api/data
-	mux.HandleFunc("/api/data/jira/clear", s.app.ScraperHandler.ClearJiraDataHandler)             // Deprecated: use DELETE /api/data/jira
-	mux.HandleFunc("/api/data/confluence/clear", s.app.ScraperHandler.ClearConfluenceDataHandler) // Deprecated: use DELETE /api/data/confluence
-	mux.HandleFunc("/api/data/jira", s.app.DataHandler.GetJiraDataHandler)
-	mux.HandleFunc("/api/data/jira/issues", s.app.DataHandler.GetJiraIssuesHandler)
-	mux.HandleFunc("/api/data/confluence", s.app.DataHandler.GetConfluenceDataHandler)
-	mux.HandleFunc("/api/data/confluence/pages", s.app.DataHandler.GetConfluencePagesHandler)
-
-	// API routes - Collector (paginated data)
-	mux.HandleFunc("/api/collector/projects", s.app.CollectorHandler.GetProjectsHandler)
-	mux.HandleFunc("/api/collector/spaces", s.app.CollectorHandler.GetSpacesHandler)
-	mux.HandleFunc("/api/collector/issues", s.app.CollectorHandler.GetIssuesHandler)
-	mux.HandleFunc("/api/collector/pages", s.app.CollectorHandler.GetPagesHandler)
+	// NOTE: Old data management and collector routes removed - handlers deleted during Stage 2.4 cleanup
 
 	// API routes - Collection (manual data sync)
 	mux.HandleFunc("/api/collection/jira/sync", s.app.CollectionHandler.SyncJiraHandler)
@@ -85,7 +34,6 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
-	mux.HandleFunc("/api/documents/process", s.app.DocumentHandler.ProcessHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/", s.app.DocumentHandler.ReprocessDocumentHandler) // Handles /api/documents/{id}/reprocess
 
@@ -97,8 +45,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/mcp", s.app.MCPHandler.HandleRPC)
 	mux.HandleFunc("/mcp/info", s.app.MCPHandler.InfoHandler)
 
-	// API routes - Processing
-	mux.HandleFunc("/api/processing/status", s.app.DocumentHandler.ProcessingStatusHandler)
+	// NOTE: Processing routes removed - ProcessHandler and ProcessingStatusHandler deleted during Stage 2.4 cleanup
 
 	// API routes - Scheduler
 	mux.HandleFunc("/api/scheduler/trigger-collection", s.app.SchedulerHandler.TriggerCollectionHandler)
@@ -198,20 +145,4 @@ func (s *Server) handleSourceRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDataRoute routes /api/data requests (clear all)
-func (s *Server) handleDataRoute(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "DELETE" {
-		s.app.DataHandler.ClearAllDataHandler(w, r)
-	} else {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// handleDataRoutes routes /api/data/{sourceType} requests (clear by source)
-func (s *Server) handleDataRoutes(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "DELETE" {
-		s.app.DataHandler.ClearDataBySourceHandler(w, r)
-	} else {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
+// NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup

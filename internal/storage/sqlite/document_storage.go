@@ -315,7 +315,7 @@ func (d *DocumentStorage) SearchByIdentifier(identifier string, excludeSources [
 	excludeParams = append(excludeParams, limit)
 
 	query := fmt.Sprintf(`
-		SELECT id, source_type, source_id, title, content, content_markdown,
+		SELECT id, source_type, source_id, title, content, content_markdown, detail_level,
 			   metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
@@ -368,7 +368,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		opts.Limit = 50
 	}
 
-	query := "SELECT id, source_type, source_id, title, content, content_markdown, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
+	query := "SELECT id, source_type, source_id, title, content, content_markdown, detail_level, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
 
 	// Add WHERE clause if filtering by source
 	if opts.SourceType != "" {
@@ -393,7 +393,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 // GetDocumentsBySource retrieves all documents for a source type
 func (d *DocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
 	query := `
-		SELECT id, source_type, source_id, title, content, content_markdown,
+		SELECT id, source_type, source_id, title, content, content_markdown, detail_level,
 			   metadata, url, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents

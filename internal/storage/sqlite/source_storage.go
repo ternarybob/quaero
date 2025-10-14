@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -58,7 +59,7 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 			updated_at = excluded.updated_at
 	`
 
-	_, err = s.db.Exec(
+	_, err = s.db.DB().Exec(
 		query,
 		source.ID,
 		source.Name,
@@ -93,7 +94,7 @@ func (s *SourceStorage) GetSource(ctx context.Context, id string) (*models.Sourc
 		WHERE id = ?
 	`
 
-	row := s.db.QueryRow(query, id)
+	row := s.db.DB().QueryRow(query, id)
 	source, err := s.scanSource(row)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("source not found: %s", id)
@@ -113,7 +114,7 @@ func (s *SourceStorage) ListSources(ctx context.Context) ([]*models.SourceConfig
 		ORDER BY created_at DESC
 	`
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.DB().Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sources: %w", err)
 	}
@@ -126,7 +127,7 @@ func (s *SourceStorage) ListSources(ctx context.Context) ([]*models.SourceConfig
 func (s *SourceStorage) DeleteSource(ctx context.Context, id string) error {
 	query := `DELETE FROM sources WHERE id = ?`
 
-	result, err := s.db.Exec(query, id)
+	result, err := s.db.DB().Exec(query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete source: %w", err)
 	}
@@ -153,7 +154,7 @@ func (s *SourceStorage) GetSourcesByType(ctx context.Context, sourceType string)
 		ORDER BY created_at DESC
 	`
 
-	rows, err := s.db.Query(query, sourceType)
+	rows, err := s.db.DB().Query(query, sourceType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sources by type: %w", err)
 	}
@@ -171,7 +172,7 @@ func (s *SourceStorage) GetEnabledSources(ctx context.Context) ([]*models.Source
 		ORDER BY created_at DESC
 	`
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.DB().Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get enabled sources: %w", err)
 	}
@@ -272,4 +273,9 @@ func (s *SourceStorage) scanSources(rows *sql.Rows) ([]*models.SourceConfig, err
 	}
 
 	return sources, nil
+}
+
+// timeFromUnix converts Unix timestamp to time.Time
+func timeFromUnix(timestamp int64) time.Time {
+	return time.Unix(timestamp, 0)
 }

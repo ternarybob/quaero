@@ -15,7 +15,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
@@ -43,9 +42,9 @@ type WebSocketHandler struct {
 	eventService interfaces.EventService
 }
 
-func NewWebSocketHandler(eventService interfaces.EventService) *WebSocketHandler {
+func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger) *WebSocketHandler {
 	h := &WebSocketHandler{
-		logger:       common.GetLogger(),
+		logger:       logger,
 		clients:      make(map[*websocket.Conn]bool),
 		clientMutex:  make(map[*websocket.Conn]*sync.Mutex),
 		lastLogKeys:  make(map[string]bool),
@@ -386,7 +385,7 @@ func (h *WebSocketHandler) StartLogStreamer() {
 
 // sendLogs retrieves logs from arbor memory writer and broadcasts them
 func (h *WebSocketHandler) sendLogs() {
-	logger := common.GetLogger()
+	logger := h.logger
 	if logger == nil {
 		return
 	}

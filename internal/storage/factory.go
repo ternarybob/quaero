@@ -19,24 +19,6 @@ func NewStorageManager(logger arbor.ILogger, config *common.Config) (interfaces.
 	}
 }
 
-// NewJiraStorage creates a new Jira storage instance
-func NewJiraStorage(logger arbor.ILogger, config *common.Config) (interfaces.JiraStorage, error) {
-	manager, err := NewStorageManager(logger, config)
-	if err != nil {
-		return nil, err
-	}
-	return manager.JiraStorage(), nil
-}
-
-// NewConfluenceStorage creates a new Confluence storage instance
-func NewConfluenceStorage(logger arbor.ILogger, config *common.Config) (interfaces.ConfluenceStorage, error) {
-	manager, err := NewStorageManager(logger, config)
-	if err != nil {
-		return nil, err
-	}
-	return manager.ConfluenceStorage(), nil
-}
-
 // NewAuthStorage creates a new Auth storage instance
 func NewAuthStorage(logger arbor.ILogger, config *common.Config) (interfaces.AuthStorage, error) {
 	manager, err := NewStorageManager(logger, config)

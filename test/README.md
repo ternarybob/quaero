@@ -1,228 +1,304 @@
-# Quaero Test Suite
+# Quaero Testing Infrastructure
 
-## Directory Structure
+This directory contains the Go-native testing infrastructure for Quaero.
+
+## Test Structure
 
 ```
 test/
-  ├── api/                   # API integration tests
-  ├── ui/                    # UI/browser tests (end-to-end workflows)
-  │   ├── config.go          # Test configuration
-  │   ├── *_test.go          # ChromeDP-based UI tests
-  │   └── ui_test.go         # Test utilities and helpers
-  ├── unit/                  # Unit tests
-  ├── results/               # Test results (timestamped directories)
-  └── run-tests.ps1          # Test runner script (USE THIS)
+├── main_test.go          # Integration test fixture (setup/teardown)
+├── helpers.go            # Common test utilities
+├── run_tests.go          # Go-native test runner
+├── api/                  # API integration tests
+│   ├── sources_api_test.go
+│   └── chat_api_test.go
+├── ui/                   # UI tests (chromedp)
+│   ├── homepage_test.go
+│   └── chat_test.go
+├── results/              # Test results (timestamped)
+└── archive/              # Archived old tests
 ```
 
 ## Running Tests
 
-**IMPORTANT: ALL tests MUST be run through `run-tests.ps1`**
+### Run All Tests
 
-### Basic Usage
-
-```powershell
-# Run all tests (default)
+```bash
 cd test
-./run-tests.ps1
-
-# Run specific test type
-./run-tests.ps1 -type unit
-./run-tests.ps1 -type api
-./run-tests.ps1 -type ui
-./run-tests.ps1 -type all
-
-# Run specific test with pattern matching
-./run-tests.ps1 -type ui -script PageLayout
-./run-tests.ps1 -script navbar
-
-# Run with verbose output
-./run-tests.ps1 -type ui -verboseoutput
-
-# Run without coverage
-./run-tests.ps1 -type ui -coverage:$false
+go run run_tests.go
 ```
 
-### Test Types
+### Run Specific Test Suite
 
-- **`unit`** - Fast unit tests for individual components
-- **`api`** - API integration tests with database interactions
-- **`ui`** - Browser-based end-to-end tests (builds and starts server automatically)
-- **`all`** - All test types (default)
+**API Tests:**
+```bash
+cd test
+go test -v ./api
+```
+
+**UI Tests:**
+```bash
+cd test
+go test -v ./ui
+```
+
+### Run Individual Test
+
+```bash
+cd test
+go test -v ./api -run TestListSources
+```
+
+## Test Types
+
+### 1. API Tests (`test/api/`)
+
+Integration tests that make HTTP requests to the running server.
+
+**Features:**
+- Tests all REST API endpoints
+- CRUD operations verification
+- Request/response validation
+- Error handling verification
+
+**Example:**
+```go
+func TestCreateSource(t *testing.T) {
+    h := test.NewHTTPTestHelper(t)
+
+    source := map[string]interface{}{
+        "name": "Test Source",
+        "type": "jira",
+    }
+
+    resp, err := h.POST("/api/sources", source)
+    if err != nil {
+        t.Fatalf("Failed: %v", err)
+    }
+
+    h.AssertStatusCode(resp, http.StatusOK)
+}
+```
+
+### 2. UI Tests (`test/ui/`)
+
+Browser automation tests using chromedp.
+
+**Features:**
+- Page load verification
+- Element presence checks
+- Navigation testing
+- JavaScript functionality
+
+**Example:**
+```go
+func TestHomepageTitle(t *testing.T) {
+    ctx, cancel := chromedp.NewContext(context.Background())
+    defer cancel()
+
+    var title string
+    err := chromedp.Run(ctx,
+        chromedp.Navigate(test.GetTestServerURL()),
+        chromedp.Title(&title),
+    )
+
+    // Assertions...
+}
+```
+
+## Test Fixture
+
+The `main_test.go` file provides a `TestMain` function that:
+
+1. **Setup:**
+   - Creates test data directory
+   - Initializes test configuration (port 18085)
+   - Starts the server in background
+   - Waits for server readiness
+
+2. **Runs all tests**
+
+3. **Teardown:**
+   - Stops the server gracefully
+   - Cleans up test data directory
+
+## Test Utilities
+
+### HTTPTestHelper
+
+Helper for making HTTP requests and assertions:
+
+```go
+h := test.NewHTTPTestHelper(t)
+
+// Make requests
+resp, err := h.GET("/api/status")
+resp, err := h.POST("/api/sources", sourceData)
+resp, err := h.PUT("/api/sources/123", updatedData)
+resp, err := h.DELETE("/api/sources/123")
+
+// Assertions
+h.AssertStatusCode(resp, http.StatusOK)
+h.AssertJSONField(resp, "status", "success")
+
+// Parse JSON
+var result map[string]interface{}
+h.ParseJSONResponse(resp, &result)
+```
+
+### Retry Helper
+
+Retry operations with exponential backoff:
+
+```go
+err := test.Retry(func() error {
+    resp, err := http.Get(url)
+    if err != nil {
+        return err
+    }
+    if resp.StatusCode != 200 {
+        return fmt.Errorf("not ready")
+    }
+    return nil
+}, 10, 500*time.Millisecond)
+```
+
+## Configuration
+
+Tests use a separate configuration:
+- **Port:** 18085 (avoids conflicts with dev server)
+- **Database:** `./testdata/test_quaero.db` (temporary)
+- **LLM Mode:** mock (no real LLM required)
 
 ## Test Results
 
-Results are automatically organized in timestamped directories:
+Test results are saved to timestamped directories:
 
 ```
-results/
-  ├── unit-2025-10-07_14-30-15/
-  │   ├── test-output.log
-  │   └── coverage.out
-  ├── api-2025-10-07_14-35-22/
-  │   ├── test-output.log
-  │   └── coverage.out
-  ├── ui-2025-10-07_14-40-10/
-  │   ├── test-output.log
-  │   ├── coverage.out
-  │   ├── 01_navbar_home.png
-  │   ├── 02_navbar_jira_data.png
-  │   └── ...
-  └── ui-PageLayout-2025-10-07_14-57-36/
-      ├── test-output.log
-      ├── coverage.out
-      └── 06_navbar_settings.png
+test/results/
+└── run-2025-10-14_20-30-45/
+    ├── api_tests.log
+    └── ui_tests.log
 ```
 
-**Format:** `{test-type}-{script-filter}-{yyyy-MM-dd_HH-mm-ss}/`
+## Writing New Tests
 
-## UI Tests
-
-UI tests use ChromeDP to automate browser interactions and verify the web interface.
-
-### Automatic Server Management
-
-**The test runner automatically:**
-1. Builds the application using `./scripts/build.ps1`
-2. Reads configuration from `bin/quaero.toml` to get the server port
-3. Starts the Quaero server in the background
-4. Waits for the server to be ready
-5. Runs the tests
-6. Stops the server when tests complete
-
-**No manual server setup required!**
-
-### Available UI Tests
-
-- **PageLayoutConsistency** - Tests navbar, footer, and service status consistency across all pages
-- **JiraCompleteWorkflow** - Complete Jira data collection workflow
-- **ConfluenceCompleteWorkflow** - Complete Confluence data collection workflow
-- **ConfluenceCascade** - Tests cascading Confluence operations
-- **JiraGetIssues** - Tests Jira issue retrieval
-
-### Screenshots
-
-UI tests automatically capture screenshots at key steps. Screenshots are saved to the timestamped results directory with numbered prefixes (e.g., `01_navbar_home.png`, `02_navbar_jira_data.png`) for sequential ordering.
-
-## API Tests
-
-API tests verify server endpoints and database interactions. They test the REST API functionality without requiring browser automation.
-
-## Writing Tests
-
-### Unit Tests
-
-Unit tests should be colocated with the code they test:
-
-```
-internal/services/atlassian/
-  ├── auth_service.go
-  └── auth_service_test.go        ← Same directory
-```
-
-Run with: `go test ./internal/services/atlassian/`
-
-### API Tests
-
-Add to `test/api/`:
+### API Test Template
 
 ```go
 package api
 
-import "testing"
+import (
+    "net/http"
+    "testing"
+    "github.com/ternarybob/quaero/test"
+)
 
-func TestAPIFeature(t *testing.T) {
-    // Test setup
-    // HTTP request/response testing
-    // Database interaction verification
-    // Assertions
+func TestMyFeature(t *testing.T) {
+    h := test.NewHTTPTestHelper(t)
+
+    // Arrange
+    data := map[string]interface{}{
+        "field": "value",
+    }
+
+    // Act
+    resp, err := h.POST("/api/endpoint", data)
+    if err != nil {
+        t.Fatalf("Failed: %v", err)
+    }
+
+    // Assert
+    h.AssertStatusCode(resp, http.StatusOK)
+
+    var result map[string]interface{}
+    h.ParseJSONResponse(resp, &result)
+
+    if result["status"] != "success" {
+        t.Errorf("Expected success, got: %v", result)
+    }
 }
 ```
 
-Run with: `./run-tests.ps1 -type api`
-
-### UI Tests
-
-Add to `test/ui/`:
+### UI Test Template
 
 ```go
 package ui
 
 import (
+    "context"
     "testing"
+    "time"
     "github.com/chromedp/chromedp"
+    "github.com/ternarybob/quaero/test"
 )
 
-func TestUIFeature(t *testing.T) {
-    config, _ := LoadTestConfig()
-    serverURL := config.ServerURL
+func TestMyPage(t *testing.T) {
+    ctx, cancel := chromedp.NewContext(context.Background())
+    defer cancel()
 
-    // ChromeDP test logic
-    // Use takeScreenshot() helper for screenshots
-    // Test navigation, form interactions, etc.
+    ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+    defer cancel()
+
+    url := test.GetTestServerURL() + "/mypage"
+
+    var title string
+    err := chromedp.Run(ctx,
+        chromedp.Navigate(url),
+        chromedp.WaitVisible(`body`, chromedp.ByQuery),
+        chromedp.Title(&title),
+    )
+
+    if err != nil {
+        t.Fatalf("Failed: %v", err)
+    }
+
+    if title != "Expected Title" {
+        t.Errorf("Wrong title: %s", title)
+    }
 }
 ```
 
-Run with: `./run-tests.ps1 -type ui`
-
 ## Best Practices
 
-1. **Always use run-tests.ps1** - Never run `go test` directly
-2. **Use specific test types** - Run `-type ui` for UI tests, `-type api` for API tests
-3. **Filter with -script** - Use pattern matching to run specific tests
-4. **Check results directory** - Review screenshots and logs after tests
-5. **Clean up regularly** - Old result directories can be deleted
-6. **Use descriptive test names** - Follow Go naming conventions
-
-## Common Test Commands
-
-```powershell
-# Run all UI tests
-./run-tests.ps1 -type ui
-
-# Run only page layout tests
-./run-tests.ps1 -type ui -script PageLayout
-
-# Run navbar-related tests across all types
-./run-tests.ps1 -script navbar
-
-# Run API tests with verbose output
-./run-tests.ps1 -type api -verboseoutput
-```
+1. **Use table-driven tests** for multiple similar test cases
+2. **Clean up resources** (delete created entities)
+3. **Use descriptive test names** (TestFeature_Scenario_ExpectedResult)
+4. **Log useful information** with `t.Logf()`
+5. **Fail fast** with `t.Fatalf()` for setup failures
+6. **Use subtests** with `t.Run()` for organization
 
 ## Troubleshooting
 
-### Build Fails
+### Tests Fail to Start Server
 
-**Problem:** Build script fails during test setup
+- Check if port 18085 is already in use
+- Verify database path is writable
+- Check logs for initialization errors
 
-**Solution:**
-```powershell
-# Check build manually
-cd ..
-./scripts/build.ps1
+### UI Tests Fail
+
+- Ensure chromedp is installed: `go get github.com/chromedp/chromedp`
+- Chrome/Chromium must be installed
+- Increase timeouts if tests are flaky
+
+### Tests are Slow
+
+- Run specific suites instead of all tests
+- Use `-short` flag to skip long-running tests
+- Parallelize independent tests with `t.Parallel()`
+
+## CI/CD Integration
+
+To integrate with CI/CD:
+
+```bash
+# In your CI pipeline
+cd test
+go run run_tests.go
+
+# Or use Go's native test runner
+go test -v ./...
 ```
 
-### UI Tests Fail with "Server not ready"
-
-**Problem:** Server failed to start or took too long
-
-**Solution:** Check if port is already in use:
-```powershell
-# Check what's using port 8085
-netstat -an | findstr :8085
-
-# Kill existing quaero process
-Get-Process quaero -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
-### Screenshots Not Captured
-
-**Problem:** `TEST_RUN_DIR` not set or ChromeDP issues
-
-**Solution:** Always use `run-tests.ps1` - it sets environment variables automatically
-
-### Tests Pass But No Results
-
-**Problem:** Running `go test` directly instead of through script
-
-**Solution:** Use `./run-tests.ps1 -type ui`
+The test runner exits with code 0 on success, non-zero on failure.

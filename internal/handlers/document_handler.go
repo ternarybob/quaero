@@ -10,24 +10,20 @@ import (
 	"net/http"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/services/processing"
 )
 
 type DocumentHandler struct {
-	documentService   interfaces.DocumentService
-	documentStorage   interfaces.DocumentStorage
-	processingService *processing.Service
-	logger            arbor.ILogger
+	documentService interfaces.DocumentService
+	documentStorage interfaces.DocumentStorage
+	logger          arbor.ILogger
 }
 
-func NewDocumentHandler(documentService interfaces.DocumentService, documentStorage interfaces.DocumentStorage, processingService *processing.Service) *DocumentHandler {
+func NewDocumentHandler(documentService interfaces.DocumentService, documentStorage interfaces.DocumentStorage, logger arbor.ILogger) *DocumentHandler {
 	return &DocumentHandler{
-		documentService:   documentService,
-		documentStorage:   documentStorage,
-		processingService: processingService,
-		logger:            common.GetLogger(),
+		documentService: documentService,
+		documentStorage: documentStorage,
+		logger:          logger,
 	}
 }
 
@@ -92,57 +88,6 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-// ProcessHandler triggers document processing
-func (h *DocumentHandler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	ctx := r.Context()
-
-	h.logger.Info().Msg("Starting document processing")
-
-	go func() {
-		stats, err := h.processingService.ProcessAll(ctx)
-		if err != nil {
-			h.logger.Error().Err(err).Msg("Document processing failed")
-		} else {
-			h.logger.Info().
-				Int("total", stats.TotalProcessed).
-				Int("jira", stats.JiraProcessed).
-				Int("confluence", stats.ConfProcessed).
-				Msg("Document processing completed")
-		}
-	}()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "started",
-		"message": "Document processing started in background",
-	})
-}
-
-// ProcessingStatusHandler returns processing engine status
-func (h *DocumentHandler) ProcessingStatusHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	ctx := r.Context()
-
-	status, err := h.processingService.GetStatus(ctx)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to get processing status")
-		http.Error(w, "Failed to get processing status", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
 }
 
 // ReprocessDocumentHandler handles POST /api/documents/{id}/reprocess

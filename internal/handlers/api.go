@@ -11,9 +11,9 @@ type APIHandler struct {
 	logger arbor.ILogger
 }
 
-func NewAPIHandler() *APIHandler {
+func NewAPIHandler(logger arbor.ILogger) *APIHandler {
 	return &APIHandler{
-		logger: common.GetLogger(),
+		logger: logger,
 	}
 }
 

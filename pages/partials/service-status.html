@@ -1,115 +1,55 @@
 <div class="columns">
   <div class="column is-half">
-    <div class="card" x-data="parserStatus">
+    <div class="card" x-data="appStatus">
       <header class="card-header">
-        <p class="card-header-title">Parser Status</p>
+        <p class="card-header-title">Application Status</p>
         <div class="card-header-icon">
-          <button class="button is-small is-outlined" aria-label="refresh" @click="refresh()" title="Refresh">
-            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-          </button>
+          <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
         </div>
       </header>
       <div class="card-content">
-        <div class="table-container">
-          <table class="table is-fullwidth is-striped">
-            <thead>
-              <tr>
-                <th>Component</th>
-                <th>Status</th>
-                <th>Last Updated</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-if="loading && items.length === 0">
-                <tr>
-                  <td colspan="4" class="has-text-centered">Loading...</td>
-                </tr>
-              </template>
-              <template x-if="error && items.length === 0">
-                <tr>
-                  <td colspan="4" class="has-text-centered has-text-danger" x-text="error"></td>
-                </tr>
-              </template>
-              <template x-if="items.length > 0">
-                <template x-for="item in items" :key="item.component">
-                  <tr>
-                    <td x-text="item.component"></td>
-                    <td><span class="tag is-success" x-text="item.status"></span></td>
-                    <td x-text="item.lastUpdated"></td>
-                    <td x-text="item.details"></td>
-                  </tr>
-                </template>
-              </template>
-              <template x-if="error && items.length > 0">
-                <tr>
-                  <td colspan="4" class="has-text-centered">
-                    <span class="tag is-warning is-light">
-                      <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
-                      <span x-text="'Last refresh failed: ' + error"></span>
-                    </span>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+        <div class="content">
+          <p><strong>Current State:</strong> <span x-text="state"></span></p>
+          <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
+          <div x-show="Object.keys(metadata).length > 0">
+            <p><strong>Details:</strong></p>
+            <pre x-text="JSON.stringify(metadata, null, 2)" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px;"></pre>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
   <div class="column is-half">
-    <div class="card" x-data="authDetails">
+    <div class="card">
       <header class="card-header">
-        <p class="card-header-title">Authentication Details</p>
-        <div class="card-header-icon">
-          <button class="button is-small is-outlined" aria-label="refresh" @click="refresh()" title="Refresh">
-            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-          </button>
-        </div>
+        <p class="card-header-title">Quick Actions</p>
       </header>
       <div class="card-content">
-        <div class="table-container">
-          <table class="table is-fullwidth is-striped">
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th>Status</th>
-                <th>User</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template x-if="loading && services.length === 0">
-                <tr>
-                  <td colspan="3" class="has-text-centered">Loading...</td>
-                </tr>
-              </template>
-              <template x-if="error && services.length === 0">
-                <tr>
-                  <td colspan="3" class="has-text-centered has-text-danger" x-text="error"></td>
-                </tr>
-              </template>
-              <template x-if="services.length > 0">
-                <template x-for="service in services" :key="service.name">
-                  <tr>
-                    <td x-text="service.name"></td>
-                    <td><span :class="getStatusClass(service.authenticated)" x-text="getStatusText(service.authenticated)"></span></td>
-                    <td x-text="service.user"></td>
-                  </tr>
-                </template>
-              </template>
-              <template x-if="error && services.length > 0">
-                <tr>
-                  <td colspan="3" class="has-text-centered">
-                    <span class="tag is-warning is-light">
-                      <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
-                      <span x-text="'Last refresh failed: ' + error"></span>
-                    </span>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+        <div class="content">
+          <div class="buttons">
+            <a href="/sources" class="button is-primary">
+              <span class="icon"><i class="fas fa-database"></i></span>
+              <span>Manage Sources</span>
+            </a>
+            <a href="/jobs" class="button is-link">
+              <span class="icon"><i class="fas fa-tasks"></i></span>
+              <span>View Jobs</span>
+            </a>
+            <a href="/documents" class="button is-info">
+              <span class="icon"><i class="fas fa-file-alt"></i></span>
+              <span>Browse Documents</span>
+            </a>
+            <a href="/chat" class="button is-success">
+              <span class="icon"><i class="fas fa-comments"></i></span>
+              <span>Chat</span>
+            </a>
+          </div>
+          <hr>
+          <p class="help">
+            <strong>Getting Started:</strong> Configure data sources in the <a href="/sources">Sources</a> page,
+            then start a crawl job to collect and index data. Use <a href="/chat">Chat</a> to query your data.
+          </p>
         </div>
       </div>
     </div>

@@ -95,10 +95,15 @@ func (s *Service) GetStatus() map[string]interface{} {
 // SubscribeToCrawlerEvents subscribes to crawler events to automatically update state
 func (s *Service) SubscribeToCrawlerEvents() {
 	// Subscribe to crawler progress events
-	s.eventService.Subscribe(interfaces.EventCrawlProgress, func(payload map[string]interface{}) {
+	s.eventService.Subscribe(interfaces.EventCrawlProgress, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+
 		status, ok := payload["status"].(string)
 		if !ok {
-			return
+			return nil
 		}
 
 		switch status {
@@ -120,6 +125,8 @@ func (s *Service) SubscribeToCrawlerEvents() {
 			// Clear metadata and return to idle
 			s.SetState(StateIdle, nil)
 		}
+
+		return nil
 	})
 
 	s.logger.Info().Msg("StatusService subscribed to crawler events")

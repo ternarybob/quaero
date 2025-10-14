@@ -8,14 +8,12 @@ import (
 
 // Manager implements the StorageManager interface
 type Manager struct {
-	db         *SQLiteDB
-	jira       interfaces.JiraStorage
-	confluence interfaces.ConfluenceStorage
-	auth       interfaces.AuthStorage
-	document   interfaces.DocumentStorage
-	job        interfaces.JobStorage
-	source     interfaces.SourceStorage
-	logger     arbor.ILogger
+	db       *SQLiteDB
+	auth     interfaces.AuthStorage
+	document interfaces.DocumentStorage
+	job      interfaces.JobStorage
+	source   interfaces.SourceStorage
+	logger   arbor.ILogger
 }
 
 // NewManager creates a new SQLite storage manager
@@ -26,25 +24,13 @@ func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.S
 	}
 
 	return &Manager{
-		db:         db,
-		jira:       NewJiraStorage(db, logger),
-		confluence: NewConfluenceStorage(db, logger),
-		auth:       NewAuthStorage(db, logger),
-		document:   NewDocumentStorage(db, logger),
-		job:        NewJobStorage(db, logger),
-		source:     NewSourceStorage(db, logger),
-		logger:     logger,
+		db:       db,
+		auth:     NewAuthStorage(db, logger),
+		document: NewDocumentStorage(db, logger),
+		job:      NewJobStorage(db, logger),
+		source:   NewSourceStorage(db, logger),
+		logger:   logger,
 	}, nil
-}
-
-// JiraStorage returns the Jira storage interface
-func (m *Manager) JiraStorage() interfaces.JiraStorage {
-	return m.jira
-}
-
-// ConfluenceStorage returns the Confluence storage interface
-func (m *Manager) ConfluenceStorage() interfaces.ConfluenceStorage {
-	return m.confluence
 }
 
 // AuthStorage returns the Auth storage interface

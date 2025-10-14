@@ -224,6 +224,42 @@ mock_mode = false  # Set to true for testing
 **Auth Table:**
 - `auth_credentials` - Atlassian authentication tokens
 
+### Chrome Extension & Authentication Flow
+
+**Chrome Extension** (`cmd/quaero-chrome-extension/`):
+- Captures authentication cookies and tokens from Atlassian sites (Jira/Confluence)
+- Automatically deployed to `bin/` during build
+- Uses Chrome Side Panel API for modern UI
+- WebSocket connection for real-time server status
+
+**Authentication Flow:**
+1. User navigates to Jira/Confluence and logs in
+2. User clicks Quaero extension icon
+3. Extension captures cookies, cloudId, and atlToken
+4. Extension sends auth data to `POST /api/auth`
+5. AuthHandler (`internal/handlers/auth_handler.go`) receives data
+6. AuthService (`internal/services/auth/service.go`) stores credentials
+7. AuthService configures HTTP client with cookies
+8. Crawler service can now access Jira/Confluence APIs
+
+**Auth API Endpoints:**
+- `POST /api/auth` - Capture authentication from Chrome extension
+- `GET /api/auth/status` - Check if authenticated
+- `GET /api/version` - Server version info
+- `WS /ws` - WebSocket for real-time updates
+
+**Key Files:**
+- `cmd/quaero-chrome-extension/background.js` - Auth capture logic
+- `cmd/quaero-chrome-extension/sidepanel.js` - Side panel UI with status
+- `internal/handlers/auth_handler.go` - HTTP handler for auth endpoints
+- `internal/services/auth/service.go` - Auth service with HTTP client config
+- `internal/interfaces/atlassian.go` - Auth data types
+
+**Configuration:**
+- Default server URL: `http://localhost:8085`
+- Configurable in extension settings
+- Supports WebSocket (WS) and secure WebSocket (WSS)
+
 ## Go Structure Standards
 
 ### Directory Structure & Rules
@@ -692,3 +728,7 @@ Check:
 3. Sufficient RAM available (8-16GB)
 4. Check logs for subprocess errors
 5. Try mock_mode=true for testing without models
+
+## Task Master AI Instructions
+**Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
+@./.taskmaster/CLAUDE.md

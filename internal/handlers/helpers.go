@@ -64,6 +64,14 @@ func RequireAuth(w http.ResponseWriter, authService AuthChecker) bool {
 	return true
 }
 
+// PaginationResponse contains pagination metadata for API responses.
+type PaginationResponse struct {
+	Page       int `json:"page"`
+	PageSize   int `json:"page_size"`
+	TotalItems int `json:"total_items"`
+	TotalPages int `json:"total_pages"`
+}
+
 // GetPaginationParams extracts pagination parameters from query string.
 // Returns page (0-indexed) and pageSize (default 10, max 100).
 func GetPaginationParams(r *http.Request) (page, pageSize int) {
