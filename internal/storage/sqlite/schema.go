@@ -2,15 +2,24 @@ package sqlite
 
 const schemaSQL = `
 -- Authentication table
+-- Site-based authentication for multiple service instances
 CREATE TABLE IF NOT EXISTS auth_credentials (
-	service TEXT PRIMARY KEY,
-	data TEXT NOT NULL,
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	site_domain TEXT NOT NULL,
+	service_type TEXT NOT NULL,
+	data TEXT,
 	cookies TEXT,
 	tokens TEXT NOT NULL,
 	base_url TEXT NOT NULL,
 	user_agent TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
+
+-- Indexes for efficient lookup
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_site_domain ON auth_credentials(site_domain);
+CREATE INDEX IF NOT EXISTS idx_auth_service_type ON auth_credentials(service_type, site_domain);
 
 -- Jira tables
 CREATE TABLE IF NOT EXISTS jira_projects (
@@ -116,15 +125,18 @@ CREATE TABLE IF NOT EXISTS sources (
 	type TEXT NOT NULL,
 	base_url TEXT NOT NULL,
 	enabled INTEGER DEFAULT 1,
+	auth_id TEXT,
 	auth_domain TEXT,
 	crawl_config TEXT NOT NULL,
 	filters TEXT,
 	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
+	updated_at INTEGER NOT NULL,
+	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled);
 CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, force_embed_pending);

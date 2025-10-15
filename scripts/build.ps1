@@ -348,6 +348,42 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Build test runner
+Write-Host "`nBuilding quaero-test-runner..." -ForegroundColor Yellow
+$testRunnerOutputPath = Join-Path -Path $binDir -ChildPath "quaero-test-runner.exe"
+$testRunnerBuildArgs = @(
+    "build"
+    "-ldflags=$ldflags"
+    "-o", $testRunnerOutputPath
+    ".\cmd\quaero-test-runner"
+)
+
+if ($Verbose) {
+    $testRunnerBuildArgs += "-v"
+}
+
+Write-Host "Build command: go $($testRunnerBuildArgs -join ' ')" -ForegroundColor Gray
+
+& go @testRunnerBuildArgs
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Test runner build failed (non-critical)"
+} else {
+    Write-Host "[OK] Test runner built successfully" -ForegroundColor Green
+
+    # Copy test runner config to bin
+    $testRunnerConfigSource = Join-Path -Path $projectRoot -ChildPath "cmd\quaero-test-runner\quaero-test-runner.toml"
+    $testRunnerConfigDest = Join-Path -Path $binDir -ChildPath "quaero-test-runner.toml"
+    if (Test-Path $testRunnerConfigSource) {
+        if (-not (Test-Path $testRunnerConfigDest)) {
+            Copy-Item -Path $testRunnerConfigSource -Destination $testRunnerConfigDest
+            Write-Host "Copied test runner config: cmd/quaero-test-runner/quaero-test-runner.toml -> bin/" -ForegroundColor Green
+        } else {
+            Write-Host "Using existing bin/quaero-test-runner.toml (preserving customizations)" -ForegroundColor Cyan
+        }
+    }
+}
+
 # Copy configuration file to bin directory
 $configSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\quaero.toml"
 $configDestPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
@@ -412,7 +448,7 @@ Write-Host "Status: SUCCESS" -ForegroundColor Green
 Write-Host "Environment: $Environment" -ForegroundColor Green
 Write-Host "Version: $($versionInfo.Version)" -ForegroundColor Green
 Write-Host "Build: $($versionInfo.Build)" -ForegroundColor Green
-Write-Host "Output: $outputPath ($fileSizeMB MB)" -ForegroundColor Green
+Write-Host "Output: $outputPath ($([math]::Round($fileSizeMB, 2)) MB)" -ForegroundColor Green
 Write-Host "Build Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Green
 
 if ($Clean) {

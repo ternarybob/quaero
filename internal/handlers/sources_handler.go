@@ -37,6 +37,12 @@ func (h *SourcesHandler) ListSourcesHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Return sources array directly (not wrapped in object)
+	// If sources is nil, return empty array
+	if sources == nil {
+		sources = []*models.SourceConfig{}
+	}
+
 	WriteJSON(w, http.StatusOK, sources)
 }
 

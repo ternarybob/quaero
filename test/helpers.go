@@ -33,6 +33,15 @@ func NewHTTPTestHelper(t *testing.T, baseURL string) *HTTPTestHelper {
 	}
 }
 
+// NewHTTPTestHelperWithTimeout creates a new HTTP test helper with custom timeout
+func NewHTTPTestHelperWithTimeout(t *testing.T, baseURL string, timeout time.Duration) *HTTPTestHelper {
+	return &HTTPTestHelper{
+		BaseURL: baseURL,
+		Client:  &http.Client{Timeout: timeout},
+		T:       t,
+	}
+}
+
 // GET makes a GET request and returns the response
 func (h *HTTPTestHelper) GET(path string) (*http.Response, error) {
 	url := h.BaseURL + path

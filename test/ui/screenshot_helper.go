@@ -5,22 +5,61 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/chromedp/chromedp"
 )
 
-// TakeScreenshot captures a screenshot and saves it to the test results directory
+var (
+	testRunDir     string
+	testRunDirOnce sync.Once
+)
+
+// getOrCreateTestRunDir returns the test run directory, creating it if necessary
+// This ensures all screenshots from a single test run go to the same directory
+func getOrCreateTestRunDir() (string, error) {
+	var err error
+	testRunDirOnce.Do(func() {
+		// Check if TEST_RESULTS_DIR is set by runner
+		if envDir := os.Getenv("TEST_RESULTS_DIR"); envDir != "" {
+			testRunDir = envDir
+			return
+		}
+
+		// Create timestamped directory in test/results/
+		timestamp := time.Now().Format("run-2006-01-02-15-04-05")
+
+		// Get path to test/results/ relative to where tests run
+		// When running from test/ directory: ../test/results/
+		// When running from project root: test/results/
+		resultsBase := filepath.Join("..", "results")
+		if _, err := os.Stat("results"); err == nil {
+			// We're in test/ directory already
+			resultsBase = "results"
+		}
+
+		testRunDir = filepath.Join(resultsBase, timestamp)
+		err = os.MkdirAll(testRunDir, 0755)
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to create test run directory: %w", err)
+	}
+
+	return testRunDir, nil
+}
+
+// TakeScreenshot captures a screenshot and saves it to test/results/{run-timestamp}/screenshots/
 func TakeScreenshot(ctx context.Context, name string) error {
-	// Get results directory from environment (set by test runner)
-	resultsDir := os.Getenv("TEST_RESULTS_DIR")
-	if resultsDir == "" {
-		// Fallback to creating a screenshots dir in current location
-		resultsDir = "screenshots"
+	// Get or create test run directory
+	runDir, err := getOrCreateTestRunDir()
+	if err != nil {
+		return err
 	}
 
 	// Create screenshots subdirectory
-	screenshotDir := filepath.Join(resultsDir, "screenshots")
+	screenshotDir := filepath.Join(runDir, "screenshots")
 	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
 		return fmt.Errorf("failed to create screenshots directory: %w", err)
 	}
@@ -41,4 +80,14 @@ func TakeScreenshot(ctx context.Context, name string) error {
 	}
 
 	return nil
+}
+
+// GetScreenshotsDir returns the screenshots directory path for the current test run
+func GetScreenshotsDir() string {
+	runDir, err := getOrCreateTestRunDir()
+	if err != nil {
+		// Fallback - should not happen if TakeScreenshot was called first
+		return filepath.Join("..", "results", "screenshots")
+	}
+	return filepath.Join(runDir, "screenshots")
 }

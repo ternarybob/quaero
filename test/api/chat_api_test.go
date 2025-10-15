@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ternarybob/quaero/test"
 )
@@ -38,7 +39,8 @@ func TestChatHealth(t *testing.T) {
 }
 
 func TestChatMessage(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	// Use longer timeout for chat tests (LLM responses can be slow)
+	h := test.NewHTTPTestHelperWithTimeout(t, test.MustGetTestServerURL(), 120*time.Second)
 
 	// Send a simple message
 	message := map[string]interface{}{
@@ -74,7 +76,8 @@ func TestChatMessage(t *testing.T) {
 }
 
 func TestChatWithHistory(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	// Use longer timeout for chat tests (LLM responses can be slow)
+	h := test.NewHTTPTestHelperWithTimeout(t, test.MustGetTestServerURL(), 120*time.Second)
 
 	// First message
 	message1 := map[string]interface{}{

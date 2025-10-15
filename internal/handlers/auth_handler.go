@@ -22,14 +22,16 @@ type AuthBroadcaster interface {
 // AuthHandler handles authentication-related HTTP requests
 type AuthHandler struct {
 	authService AuthUpdater
+	authStorage interfaces.AuthStorage
 	wsHandler   AuthBroadcaster
 	logger      arbor.ILogger
 }
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler(authService AuthUpdater, wsHandler AuthBroadcaster, logger arbor.ILogger) *AuthHandler {
+func NewAuthHandler(authService AuthUpdater, authStorage interfaces.AuthStorage, wsHandler AuthBroadcaster, logger arbor.ILogger) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
+		authStorage: authStorage,
 		wsHandler:   wsHandler,
 		logger:      logger,
 	}
@@ -92,5 +94,106 @@ func (h *AuthHandler) GetAuthStatusHandler(w http.ResponseWriter, r *http.Reques
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"authenticated": authenticated,
+	})
+}
+
+// ListAuthHandler lists all stored authentication credentials
+func (h *AuthHandler) ListAuthHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	credentials, err := h.authStorage.ListCredentials(r.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to list credentials")
+		WriteError(w, http.StatusInternalServerError, "Failed to list credentials")
+		return
+	}
+
+	// Sanitize response - don't send cookies or tokens to client
+	sanitized := make([]map[string]interface{}, len(credentials))
+	for i, cred := range credentials {
+		sanitized[i] = map[string]interface{}{
+			"id":           cred.ID,
+			"name":         cred.Name,
+			"site_domain":  cred.SiteDomain,
+			"service_type": cred.ServiceType,
+			"base_url":     cred.BaseURL,
+			"created_at":   cred.CreatedAt,
+			"updated_at":   cred.UpdatedAt,
+		}
+	}
+
+	WriteJSON(w, http.StatusOK, sanitized)
+}
+
+// GetAuthHandler retrieves a specific authentication credential
+func (h *AuthHandler) GetAuthHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	// Extract ID from path: /api/auth/{id}
+	path := r.URL.Path
+	id := path[len("/api/auth/"):]
+
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "Missing auth ID")
+		return
+	}
+
+	cred, err := h.authStorage.GetCredentialsByID(r.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("id", id).Msg("Failed to get credentials")
+		WriteError(w, http.StatusInternalServerError, "Failed to get credentials")
+		return
+	}
+
+	if cred == nil {
+		WriteError(w, http.StatusNotFound, "Authentication not found")
+		return
+	}
+
+	// Sanitize response - don't send cookies or tokens
+	sanitized := map[string]interface{}{
+		"id":           cred.ID,
+		"name":         cred.Name,
+		"site_domain":  cred.SiteDomain,
+		"service_type": cred.ServiceType,
+		"base_url":     cred.BaseURL,
+		"created_at":   cred.CreatedAt,
+		"updated_at":   cred.UpdatedAt,
+	}
+
+	WriteJSON(w, http.StatusOK, sanitized)
+}
+
+// DeleteAuthHandler deletes an authentication credential
+func (h *AuthHandler) DeleteAuthHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "DELETE") {
+		return
+	}
+
+	// Extract ID from path: /api/auth/{id}
+	path := r.URL.Path
+	id := path[len("/api/auth/"):]
+
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "Missing auth ID")
+		return
+	}
+
+	err := h.authStorage.DeleteCredentials(r.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("id", id).Msg("Failed to delete credentials")
+		WriteError(w, http.StatusInternalServerError, "Failed to delete credentials")
+		return
+	}
+
+	h.logger.Info().Str("id", id).Msg("Deleted authentication credentials")
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Authentication deleted successfully",
 	})
 }

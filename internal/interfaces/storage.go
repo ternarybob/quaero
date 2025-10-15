@@ -14,8 +14,14 @@ import (
 // AuthStorage - interface for authentication data
 type AuthStorage interface {
 	StoreCredentials(ctx context.Context, credentials *models.AuthCredentials) error
+	GetCredentialsByID(ctx context.Context, id string) (*models.AuthCredentials, error)
+	GetCredentialsBySiteDomain(ctx context.Context, siteDomain string) (*models.AuthCredentials, error)
+	DeleteCredentials(ctx context.Context, id string) error
+	ListCredentials(ctx context.Context) ([]*models.AuthCredentials, error)
+
+	// Deprecated: Use GetCredentialsBySiteDomain instead
 	GetCredentials(ctx context.Context, service string) (*models.AuthCredentials, error)
-	DeleteCredentials(ctx context.Context, service string) error
+	// Deprecated: Use ListCredentials instead
 	ListServices(ctx context.Context) ([]string, error)
 }
 

@@ -246,6 +246,7 @@ document.addEventListener('alpine:init', () => {
   // Source Management Component
   Alpine.data('sourceManagement', () => ({
     sources: [],
+    authentications: [],
     currentSource: null,
     showCreateModal: false,
     showEditModal: false,
@@ -253,6 +254,7 @@ document.addEventListener('alpine:init', () => {
 
     init() {
       this.loadSources();
+      this.loadAuthentications();
       this.resetCurrentSource();
     },
 
@@ -262,7 +264,7 @@ document.addEventListener('alpine:init', () => {
         if (!response.ok) throw new Error('Failed to fetch sources');
 
         const data = await response.json();
-        this.sources = data.sources || [];
+        this.sources = Array.isArray(data) ? data : [];
         this.loading = false;
       } catch (err) {
         console.error('[SourceManagement] Error loading sources:', err);
@@ -271,11 +273,24 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    async loadAuthentications() {
+      try {
+        const response = await fetch('/api/auth/list');
+        if (!response.ok) throw new Error('Failed to fetch authentications');
+        const data = await response.json();
+        this.authentications = Array.isArray(data) ? data : [];
+      } catch (err) {
+        console.error('[SourceManagement] Error loading authentications:', err);
+        this.authentications = [];
+      }
+    },
+
     resetCurrentSource() {
       this.currentSource = {
         name: '',
         type: 'jira',
         base_url: '',
+        auth_id: '',
         auth_domain: '',
         enabled: true,
         crawl_config: {
@@ -291,6 +306,15 @@ document.addEventListener('alpine:init', () => {
     editSource(source) {
       this.currentSource = JSON.parse(JSON.stringify(source));
       this.showEditModal = true;
+      // Reload authentications in case they changed
+      this.loadAuthentications();
+    },
+
+    openCreateModal() {
+      this.resetCurrentSource();
+      this.showCreateModal = true;
+      // Load authentications when opening modal
+      this.loadAuthentications();
     },
 
     async saveSource() {

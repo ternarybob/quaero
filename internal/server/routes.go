@@ -13,6 +13,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
+	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))
 	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("sources.html", "sources"))
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
@@ -29,6 +30,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Authentication (Chrome extension)
 	mux.HandleFunc("/api/auth", s.app.AuthHandler.CaptureAuthHandler)          // POST - capture auth from extension
 	mux.HandleFunc("/api/auth/status", s.app.AuthHandler.GetAuthStatusHandler) // GET - check auth status
+	mux.HandleFunc("/api/auth/list", s.app.AuthHandler.ListAuthHandler)        // GET - list all auth credentials
+	mux.HandleFunc("/api/auth/", s.handleAuthRoutes)                           // GET/DELETE /{id}
 
 	// API routes - Source management (NEW)
 	mux.HandleFunc("/api/sources", s.handleSourcesRoute)                // GET (list), POST (create)
@@ -155,6 +158,31 @@ func (s *Server) handleSourceRoutes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleAuthRoutes routes /api/auth/{id} requests
+func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Skip if path is /api/auth/status or /api/auth/list (already handled)
+	if path == "/api/auth/status" || path == "/api/auth/list" {
+		return
+	}
+
+	// Handle /api/auth/{id}
+	if len(path) > len("/api/auth/") {
+		switch r.Method {
+		case "GET":
+			s.app.AuthHandler.GetAuthHandler(w, r)
+		case "DELETE":
+			s.app.AuthHandler.DeleteAuthHandler(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	http.Error(w, "Not found", http.StatusNotFound)
 }
 
 // NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup

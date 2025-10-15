@@ -114,8 +114,8 @@ func TestConfigNavbar(t *testing.T) {
 		t.Error("Navbar not found on page")
 	}
 
-	// Check for expected menu items (simplified navbar)
-	expectedItems := []string{"Quaero", "HOME", "DOCUMENTS", "CHAT", "SETTINGS"}
+	// Check for expected menu items
+	expectedItems := []string{"Quaero", "HOME", "SOURCES", "JOBS", "DOCUMENTS", "CHAT", "SETTINGS"}
 	for _, expected := range expectedItems {
 		found := false
 		for _, item := range menuItems {
@@ -126,16 +126,6 @@ func TestConfigNavbar(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("Menu item '%s' not found in navbar. Found: %v", expected, menuItems)
-		}
-	}
-
-	// Verify removed items are NOT present
-	removedItems := []string{"SOURCES", "JOBS", "CONFIG"}
-	for _, removed := range removedItems {
-		for _, item := range menuItems {
-			if item == removed {
-				t.Errorf("Menu item '%s' should not be in navbar (should be removed)", removed)
-			}
 		}
 	}
 

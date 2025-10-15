@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -253,4 +255,242 @@ func TestDeleteSource(t *testing.T) {
 	if getResp.StatusCode != http.StatusNotFound && getResp.StatusCode != http.StatusOK {
 		t.Errorf("Expected 404 or 200 after deletion, got: %d", getResp.StatusCode)
 	}
+}
+
+// TestCreateSourcesWithAuthentication creates test Jira and Confluence sources with authentication
+func TestCreateSourcesWithAuthentication(t *testing.T) {
+	baseURL := test.MustGetTestServerURL()
+
+	// First, create test authentication for bobmcallan.atlassian.net
+	authData := map[string]interface{}{
+		"baseUrl":   "https://bobmcallan.atlassian.net",
+		"userAgent": "Mozilla/5.0 Test",
+		"cookies": []map[string]interface{}{
+			{
+				"name":     "cloud.session.token",
+				"value":    "test-token-sources",
+				"domain":   ".atlassian.net",
+				"path":     "/",
+				"secure":   true,
+				"httpOnly": true,
+			},
+		},
+		"tokens": map[string]string{
+			"cloudId":  "test-cloud-id",
+			"atlToken": "test-atl-token",
+		},
+	}
+
+	// Create authentication
+	authJSON, err := json.Marshal(authData)
+	if err != nil {
+		t.Fatalf("Failed to marshal auth data: %v", err)
+	}
+
+	authResp, err := http.Post(baseURL+"/api/auth", "application/json", bytes.NewBuffer(authJSON))
+	if err != nil {
+		t.Fatalf("Failed to create auth: %v", err)
+	}
+	defer authResp.Body.Close()
+
+	if authResp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 for auth creation, got %d", authResp.StatusCode)
+	}
+
+	// Get list of authentications to find the auth_id
+	authListResp, err := http.Get(baseURL + "/api/auth/list")
+	if err != nil {
+		t.Fatalf("Failed to list auths: %v", err)
+	}
+	defer authListResp.Body.Close()
+
+	var auths []map[string]interface{}
+	if err := json.NewDecoder(authListResp.Body).Decode(&auths); err != nil {
+		t.Fatalf("Failed to decode auth list: %v", err)
+	}
+
+	var authID string
+	for _, auth := range auths {
+		if siteDomain, ok := auth["site_domain"].(string); ok && siteDomain == "bobmcallan.atlassian.net" {
+			authID = auth["id"].(string)
+			break
+		}
+	}
+
+	if authID == "" {
+		t.Fatal("Could not find created authentication")
+	}
+
+	t.Logf("Created authentication with ID: %s", authID)
+
+	// Now create Jira source with authentication
+	h := test.NewHTTPTestHelper(t, baseURL)
+
+	jiraSource := map[string]interface{}{
+		"name":     "Test Jira with Auth",
+		"type":     "jira",
+		"base_url": "https://bobmcallan.atlassian.net/jira",
+		"auth_id":  authID,
+		"enabled":  true,
+		"crawl_config": map[string]interface{}{
+			"max_depth":    3,
+			"follow_links": true,
+			"concurrency":  2,
+			"detail_level": "full",
+		},
+	}
+
+	jiraResp, err := h.POST("/api/sources", jiraSource)
+	if err != nil {
+		t.Fatalf("Failed to create Jira source: %v", err)
+	}
+
+	h.AssertStatusCode(jiraResp, http.StatusCreated)
+
+	var jiraResult map[string]interface{}
+	if err := h.ParseJSONResponse(jiraResp, &jiraResult); err != nil {
+		t.Fatalf("Failed to parse Jira response: %v", err)
+	}
+
+	// Verify auth_id is set
+	if savedAuthID, ok := jiraResult["auth_id"].(string); !ok || savedAuthID != authID {
+		t.Errorf("Expected auth_id '%s', got: %v", authID, jiraResult["auth_id"])
+	}
+
+	jiraSourceID := jiraResult["id"].(string)
+	t.Logf("Created Jira source with ID: %s", jiraSourceID)
+
+	// Create Confluence source with the same authentication
+	confluenceSource := map[string]interface{}{
+		"name":     "Test Confluence with Auth",
+		"type":     "confluence",
+		"base_url": "https://bobmcallan.atlassian.net/wiki/home",
+		"auth_id":  authID,
+		"enabled":  true,
+		"crawl_config": map[string]interface{}{
+			"max_depth":    2,
+			"follow_links": false,
+			"concurrency":  1,
+			"detail_level": "basic",
+		},
+	}
+
+	confluenceResp, err := h.POST("/api/sources", confluenceSource)
+	if err != nil {
+		t.Fatalf("Failed to create Confluence source: %v", err)
+	}
+
+	h.AssertStatusCode(confluenceResp, http.StatusCreated)
+
+	var confluenceResult map[string]interface{}
+	if err := h.ParseJSONResponse(confluenceResp, &confluenceResult); err != nil {
+		t.Fatalf("Failed to parse Confluence response: %v", err)
+	}
+
+	// Verify auth_id is set
+	if savedAuthID, ok := confluenceResult["auth_id"].(string); !ok || savedAuthID != authID {
+		t.Errorf("Expected auth_id '%s', got: %v", authID, confluenceResult["auth_id"])
+	}
+
+	confluenceSourceID := confluenceResult["id"].(string)
+	t.Logf("Created Confluence source with ID: %s", confluenceSourceID)
+
+	// Cleanup sources
+	defer func() {
+		h.DELETE("/api/sources/" + jiraSourceID)
+		h.DELETE("/api/sources/" + confluenceSourceID)
+		// Clean up authentication
+		if authID != "" {
+			req, err := http.NewRequest("DELETE", baseURL+"/api/auth/"+authID, nil)
+			if err == nil {
+				client := &http.Client{}
+				resp, _ := client.Do(req)
+				if resp != nil {
+					resp.Body.Close()
+				}
+			}
+		}
+	}()
+
+	// Verify both sources use the same authentication
+	listResp, err := h.GET("/api/sources")
+	if err != nil {
+		t.Fatalf("Failed to list sources: %v", err)
+	}
+
+	var sources []map[string]interface{}
+	if err := h.ParseJSONResponse(listResp, &sources); err != nil {
+		t.Fatalf("Failed to parse list response: %v", err)
+	}
+
+	jiraFound := false
+	confluenceFound := false
+
+	for _, source := range sources {
+		id := source["id"].(string)
+
+		if id == jiraSourceID {
+			jiraFound = true
+			if authIDCheck := source["auth_id"].(string); authIDCheck != authID {
+				t.Errorf("Jira source auth_id mismatch: expected %s, got %s", authID, authIDCheck)
+			}
+		}
+
+		if id == confluenceSourceID {
+			confluenceFound = true
+			if authIDCheck := source["auth_id"].(string); authIDCheck != authID {
+				t.Errorf("Confluence source auth_id mismatch: expected %s, got %s", authID, authIDCheck)
+			}
+		}
+	}
+
+	if !jiraFound {
+		t.Error("Jira source not found in list")
+	}
+	if !confluenceFound {
+		t.Error("Confluence source not found in list")
+	}
+
+	t.Log("✓ Successfully created Jira and Confluence sources with shared authentication")
+}
+
+// TestSourceWithoutAuthentication verifies that sources can be created without authentication
+func TestSourceWithoutAuthentication(t *testing.T) {
+	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+
+	// Create source without auth_id (empty string)
+	source := map[string]interface{}{
+		"name":     "Source without Auth",
+		"type":     "jira",
+		"base_url": "https://public.atlassian.net/jira",
+		"auth_id":  "", // Explicitly set to empty
+		"enabled":  true,
+		"crawl_config": map[string]interface{}{
+			"concurrency": 1,
+		},
+	}
+
+	resp, err := h.POST("/api/sources", source)
+	if err != nil {
+		t.Fatalf("Failed to create source: %v", err)
+	}
+
+	h.AssertStatusCode(resp, http.StatusCreated)
+
+	var result map[string]interface{}
+	if err := h.ParseJSONResponse(resp, &result); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	// Verify auth_id is empty
+	if authID, ok := result["auth_id"].(string); ok && authID != "" {
+		t.Errorf("Expected empty auth_id, got: %s", authID)
+	}
+
+	// Cleanup
+	if sourceID, ok := result["id"].(string); ok {
+		defer h.DELETE("/api/sources/" + sourceID)
+	}
+
+	t.Log("✓ Successfully created source without authentication")
 }

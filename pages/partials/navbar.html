@@ -15,6 +15,15 @@
       <a class="navbar-item{{if eq .Page "home"}} is-active{{end}}" href="/">
         HOME
       </a>
+      <a class="navbar-item{{if eq .Page "auth"}} is-active{{end}}" href="/auth">
+        AUTHENTICATION
+      </a>
+      <a class="navbar-item{{if eq .Page "sources"}} is-active{{end}}" href="/sources">
+        SOURCES
+      </a>
+      <a class="navbar-item{{if eq .Page "jobs"}} is-active{{end}}" href="/jobs">
+        JOBS
+      </a>
       <a class="navbar-item{{if eq .Page "documents"}} is-active{{end}}" href="/documents">
         DOCUMENTS
       </a>

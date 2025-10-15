@@ -98,6 +98,8 @@ func TestNavigation(t *testing.T) {
 		linkHref      string
 		expectedTitle string
 	}{
+		{"Sources", "/sources", "Source Management"},
+		{"Jobs", "/jobs", "Job Management"},
 		{"Documents", "/documents", "Document Management"},
 		{"Chat", "/chat", "Chat"},
 		{"Settings", "/config", "Configuration"},

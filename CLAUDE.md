@@ -15,22 +15,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Instructions
 
-**CRITICAL: Tests do NOT build or start the service. You must do this manually:**
+**CRITICAL: The test runner handles EVERYTHING automatically - do NOT run build scripts or start the service manually!**
 
-1. **Build:** `.\scripts\build.ps1`
-2. **Run:** `.\scripts\build.ps1 -Run` (in separate window, uses `bin/quaero.toml`)
-3. **Test:** `cd test/runner && go run main.go`
+**Test Runner** (`cmd/quaero-test-runner/`):
+- Builds the application using `scripts/build.ps1`
+- Starts a test server on port 3333 for browser validation
+- Starts the Quaero service in a visible window
+- Waits for service readiness
+- Runs all test suites (API + UI)
+- Captures screenshots for UI tests
+- Saves results to timestamped directories
+- Stops the service and cleans up
 
--   **ALL testing MUST be performed using the test harness:**
-    -   Go-native test runner: `cd test/runner && go run main.go`
-    -   Or direct Go test: `cd test && go test -v ./api` or `./ui`
--   **ALL test output MUST be directed to:**
-    -   `./test/results/{testname}-{datetime}.log`
--   **Tests auto-detect service URL from:**
-    1. `TEST_SERVER_URL` environment variable (highest priority)
-    2. `bin/quaero.toml` config file (reads host and port)
-    3. Default: `http://localhost:8085`
--   **Database conflicts:** Tests and dev service may conflict if sharing same database. Use separate DB paths or stop dev service before testing.
+**How to Run Tests:**
+
+```powershell
+# Option 1: Use pre-built test runner (recommended)
+.\scripts\build.ps1           # Builds test runner automatically
+cd bin
+.\quaero-test-runner.exe
+
+# Option 2: Run from source
+cd cmd/quaero-test-runner
+go run .
+```
+
+**For Development/Debugging Only:**
+```powershell
+# Run tests directly (requires manual service start)
+.\scripts\build.ps1 -Run      # Start service in separate window first
+cd test
+go test -v ./api              # API tests
+go test -v ./ui               # UI tests
+```
+
+**See:** `cmd/quaero-test-runner/README.md` for detailed documentation, configuration, and troubleshooting.
+
+**IMPORTANT:**
+- ❌ DO NOT run `build.ps1` before the test runner
+- ❌ DO NOT manually start the service before the test runner
+- ✅ Let the test runner control the service lifecycle
 
 ## Build & Development Commands
 
@@ -62,38 +86,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Start with custom config
 .\bin\quaero serve --config path/to/quaero.toml
 ```
-
-### Testing
-
-**Go-Native Test Harness**
-
-```bash
-# STEP 1: Build and start service (in separate window)
-.\scripts\build.ps1 -Run
-
-# STEP 2: Run tests via test runner
-cd test/runner
-go run main.go
-
-# Or run tests directly
-cd test
-go test -v ./api    # API integration tests
-go test -v ./ui     # UI browser tests
-
-# Run specific test
-cd test
-go test -v ./api -run TestChatHealth
-
-# Run unit tests (colocated with source)
-go test ./internal/...
-```
-
-**Test Infrastructure:**
-- Tests organized by category: `test/api/` and `test/ui/`
-- Tests connect to running service (no automatic server startup)
-- Service uses `bin/quaero.toml` configuration
-- Test results saved to `test/results/{testname}-{datetime}.log`
-- Default server URL: `http://localhost:8085` (configurable via `TEST_SERVER_URL`)
 
 ## Architecture Overview
 

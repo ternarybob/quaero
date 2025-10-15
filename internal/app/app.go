@@ -213,6 +213,7 @@ func (a *App) initServices() error {
 	// 5.6. Initialize source service
 	a.SourceService = sources.NewService(
 		a.StorageManager.SourceStorage(),
+		a.StorageManager.AuthStorage(),
 		a.EventService,
 		a.Logger,
 	)
@@ -290,7 +291,7 @@ func (a *App) initHandlers() error {
 	// Initialize handlers
 	a.APIHandler = handlers.NewAPIHandler(a.Logger)
 	a.WSHandler = handlers.NewWebSocketHandler(a.EventService, a.Logger)
-	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.WSHandler, a.Logger)
+	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.StorageManager.AuthStorage(), a.WSHandler, a.Logger)
 	a.CollectionHandler = handlers.NewCollectionHandler(
 		a.EventService,
 		a.Logger,

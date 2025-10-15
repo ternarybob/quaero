@@ -144,13 +144,20 @@ func (s *Service) storeAtlassianAuth(authData *interfaces.AtlassianAuthData) err
 		}
 	}
 
+	// Extract site domain from base URL
+	baseURL, err := url.Parse(authData.BaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse base URL: %w", err)
+	}
+	siteDomain := baseURL.Host
+
 	credentials := &models.AuthCredentials{
-		Service:   s.serviceName,
-		Cookies:   cookiesJSON,
-		Tokens:    tokens,
-		BaseURL:   authData.BaseURL,
-		UserAgent: authData.UserAgent,
-		UpdatedAt: time.Now().Unix(),
+		ServiceType: s.serviceName,
+		SiteDomain:  siteDomain,
+		Cookies:     cookiesJSON,
+		Tokens:      tokens,
+		BaseURL:     authData.BaseURL,
+		UserAgent:   authData.UserAgent,
 	}
 
 	return s.authStorage.StoreCredentials(ctx, credentials)

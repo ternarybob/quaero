@@ -123,11 +123,36 @@ enable_wal = true
 
 ### Testing Instructions
 
--   **ALL testing MUST be performed using the Go-native test harness:**
-    -   Test runner: `cd test && go run run_tests.go`
-    -   Direct testing: `cd test && go test -v ./api` or `go test -v ./ui`
--   **ALL test output MUST be directed to the following path:**
-    -   `./test/results/{testname}-{datetime}`
+**CRITICAL: The test runner handles EVERYTHING automatically!**
+
+The test runner (`cmd/quaero-test-runner/`) builds the application, starts the service, runs all tests, and cleans up automatically.
+
+```powershell
+# Option 1: Use pre-built test runner (recommended)
+.\scripts\build.ps1           # Builds test runner automatically
+cd bin
+.\quaero-test-runner.exe
+
+# Option 2: Run from source
+cd cmd/quaero-test-runner
+go run .
+```
+
+**See:** `cmd/quaero-test-runner/README.md` for detailed documentation, configuration, and troubleshooting.
+
+**IMPORTANT:**
+- ❌ DO NOT run `build.ps1` before the test runner
+- ❌ DO NOT manually start the service before the test runner
+- ✅ Let the test runner control the service lifecycle
+
+**For Development/Debugging Only:**
+```powershell
+# Run tests directly (requires manual service start)
+.\scripts\build.ps1 -Run      # Start service in separate window first
+cd test
+go test -v ./api              # API tests
+go test -v ./ui               # UI tests
+```
 
 ## Project Structure
 
@@ -528,17 +553,36 @@ WS   /ws                             - Real-time updates & log streaming
 
 ### Testing
 
-**Go-Native Test Infrastructure:**
+**Test Runner** (`cmd/quaero-test-runner/`):
 
+The test runner handles the complete test lifecycle automatically:
+- Builds the application
+- Starts the service in a visible window
+- Runs API and UI tests
+- Captures screenshots for UI tests
+- Saves results to timestamped directories
+- Stops the service and cleans up
+
+```powershell
+# Option 1: Use pre-built test runner (recommended)
+.\scripts\build.ps1           # Builds test runner automatically
+cd bin
+.\quaero-test-runner.exe
+
+# Option 2: Run from source
+cd cmd/quaero-test-runner
+go run .
+```
+
+**For Development/Debugging Only:**
 ```bash
-# Run all tests (API + UI) via test runner
-cd test
-go run run_tests.go
+# Run tests directly (requires manual service start)
+.\scripts\build.ps1 -Run      # Start service in separate window first
 
 # Run specific test suite
 cd test
-go test -v ./api    # API integration tests
-go test -v ./ui     # UI browser tests
+go test -v ./api              # API integration tests
+go test -v ./ui               # UI browser tests
 
 # Run unit tests (colocated with source)
 go test ./internal/...
@@ -547,6 +591,8 @@ go test ./internal/...
 cd test
 go test -v ./api -run TestListSources
 ```
+
+**See:** `cmd/quaero-test-runner/README.md` for detailed documentation.
 
 **Test Coverage:**
 - **Unit Tests** (`internal/*/...`): Colocated with source code

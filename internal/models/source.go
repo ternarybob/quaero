@@ -30,7 +30,8 @@ type SourceConfig struct {
 	Type        string                 `json:"type"`
 	BaseURL     string                 `json:"base_url"`
 	Enabled     bool                   `json:"enabled"`
-	AuthDomain  string                 `json:"auth_domain"`
+	AuthID      string                 `json:"auth_id"`      // Reference to auth_credentials.id
+	AuthDomain  string                 `json:"auth_domain"`   // Deprecated: kept for backward compatibility
 	CrawlConfig CrawlConfig            `json:"crawl_config"`
 	Filters     map[string]interface{} `json:"filters"`
 	CreatedAt   time.Time              `json:"created_at"`
