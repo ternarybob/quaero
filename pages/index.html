@@ -2,39 +2,36 @@
 <html lang="en">
 
 <head>
-  {{template "head.html" .}}
-  <title>Quaero - Home</title>
+    {{template "head.html" .}}
+    <title>Quaero - Home</title>
 </head>
 
 <body class="has-navbar-fixed-top">
-  <div class="wrapper">
+
     {{template "navbar.html" .}}
 
-    <!-- Hero Section -->
-    <section class="hero">
-      <div class="hero-body">
-        <div class="container">
-          <h1 class="title">Quaero</h1>
-          <p class="subtitle">Unified Data Collection and Analysis Platform</p>
-        </div>
-      </div>
-    </section>
+    <div class="container is-fluid">
 
-    <!-- Main Content -->
-    <section class="section">
-      <div class="container">
+        <!-- Heading Section -->
+        <section class="section">
+            <h1 class="title">Quaero</h1>
+            <p class="subtitle">Unified Data Collection and Analysis Platform</p>
+        </section>
 
-        {{template "service-status.html" .}}
+        <!-- Main Content -->
+        <section class="section">
 
-        {{template "service-logs.html" .}}
+            {{template "service-status.html" .}}
 
-      </div>
-    </section>
-  </div>
+            {{template "service-logs.html" .}}
 
-  {{template "footer.html" .}}
+        </section>
 
-  {{template "snackbar.html" .}}
+    </div>
+
+    {{template "footer.html" .}}
+
+    {{template "snackbar.html" .}}
 
 </body>
 

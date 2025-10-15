@@ -1,26 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     {{template "head.html" .}}
     <title>Settings - Quaero</title>
 </head>
-<body class="has-navbar-fixed-top">
-    <div class="wrapper">
-        {{template "navbar.html" .}}
 
-        <!-- Hero Section -->
-        <section class="hero">
-            <div class="hero-body">
-                <div class="container">
-                    <h1 class="title">Settings</h1>
-                    <p class="subtitle">System configuration and operational controls</p>
-                </div>
-            </div>
+<body class="has-navbar-fixed-top">
+
+    {{template "navbar.html" .}}
+
+    <div class="container is-fluid">
+
+        <!-- Heading Section -->
+        <section class="section">
+            <h1 class="title">Settings</h1>
+            <p class="subtitle">System configuration and operational controls</p>
         </section>
 
         <section class="section">
-        <div class="container">
-            
+
             <!-- Full Configuration Table -->
             <div class="card mt-5">
                 <header class="card-header">
@@ -81,8 +80,9 @@
             </div>
 
             {{template "service-logs.html" .}}
-        </div>
-    </section>
+
+        </section>
+
     </div>
 
     {{template "footer.html" .}}
@@ -182,9 +182,10 @@
         }
 
         // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             loadConfig();
         });
     </script>
 </body>
+
 </html>

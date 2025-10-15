@@ -1,25 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     {{template "head.html" .}}
     <title>Document Management - Quaero</title>
 </head>
-<body class="has-navbar-fixed-top">
-    <div class="wrapper">
-        {{template "navbar.html" .}}
 
-        <!-- Hero Section -->
-        <section class="hero">
-            <div class="hero-body">
-                <div class="container">
-                    <h1 class="title">Document Management</h1>
-                    <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
-                </div>
-            </div>
+<body class="has-navbar-fixed-top">
+
+    {{template "navbar.html" .}}
+
+    <div class="container is-fluid">
+
+        <!-- Heading Section -->
+        <section class="section">
+            <h1 class="title">Document Management</h1>
+            <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
         </section>
 
         <section class="section">
-        <div class="container">
 
             <!-- Document Statistics -->
             <div class="card mt-5">
@@ -157,13 +156,12 @@
             </div>
 
             {{template "service-logs.html" .}}
-        </div>
-    </section>
+
+        </section>
+
     </div>
 
-    <footer class="footer">
-        {{template "footer.html" .}}
-    </footer>
+    {{template "footer.html" .}}
 
     {{template "snackbar.html" .}}
 
@@ -475,13 +473,13 @@
         document.getElementById('search-box').addEventListener('input', filterDocuments);
 
         // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             loadStats();
             loadDocuments();
         });
 
         // Ensure Alpine.js is fully initialized
-        document.addEventListener('alpine:init', function() {
+        document.addEventListener('alpine:init', function () {
             console.log('[Documents] Alpine.js initialized');
         });
 
@@ -494,4 +492,5 @@
         }
     </script>
 </body>
+
 </html>

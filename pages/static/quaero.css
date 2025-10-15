@@ -1,0 +1,769 @@
+/*
+---------------------------------------------------
+Soft Technical Palette Overrides (CSS Variables)
+Loaded after bulma.min.css to override defaults.
+---------------------------------------------------
+*/
+
+/* Import Open Sans Font */
+@import url('https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,700italic,400,300,700&display=swap');
+
+/* Custom Colors and Typography (LIGHT THEME, DARK TEXT) */
+:root {
+    --bulma-body-background-color: #F8F8F8;
+    --bulma-text: #2D3748;
+    --bulma-body-color: var(--bulma-text);
+    --bulma-title-color: #1A202C;
+    --bulma-subtitle-color: #4A5568;
+
+    /* Override Bulma's title lightness calculation */
+    --bulma-text-title-l: 10%;
+
+    --bulma-link: var(--bulma-primary);
+    --bulma-border: #E2E8F0;
+    font-family: 'Open Sans', sans-serif !important;
+}
+
+/* Color Modifiers (Soft/Muted Tones) */
+:root {
+    /* Primary: Muted Professional Blue (Used as Accent) */
+    --bulma-primary: #5C7F9B;
+    --bulma-primary-h: 210;
+    --bulma-primary-s: 29%;
+    --bulma-primary-l: 50%;
+    --bulma-primary-invert: #FFFFFF;
+    /* White invert for text on filled primary */
+
+    /* Link/Info: Calming Cyan/Blue */
+    --bulma-info: #79A6B2;
+    --bulma-info-h: 196;
+    --bulma-info-s: 23%;
+    --bulma-info-l: 65%;
+    --bulma-info-invert: #FFFFFF;
+
+    /* Success: Soft Sage Green */
+    --bulma-success: #8EBCA1;
+    --bulma-success-h: 147;
+    --bulma-success-s: 23%;
+    --bulma-success-l: 64%;
+    --bulma-success-invert: #FFFFFF;
+
+    /* Warning: Muted Gold/Orange */
+    --bulma-warning: #DDBA8B;
+    --bulma-warning-h: 37;
+    --bulma-warning-s: 50%;
+    --bulma-warning-l: 70%;
+    --bulma-warning-invert: #FFFFFF;
+
+    /* Danger: Warning Red */
+    --bulma-danger: #DC2626;
+    --bulma-danger-h: 0;
+    --bulma-danger-s: 73%;
+    --bulma-danger-l: 50%;
+    --bulma-danger-invert: #FFFFFF;
+
+    /* Dark/Light Tones */
+    --bulma-dark: #3D4A50;
+    /* Deep Blue/Gray for contrast/borders/text */
+    --bulma-light: #F0F4F7;
+    /* Card Background color */
+}
+
+/* Base Styles for Soft/Technical Look */
+
+/* Soft shadows and slight rounding for containers */
+.box,
+.card,
+.notification {
+    border-radius: 0.5rem;
+    /* Use the light 'light' color for cards */
+    background-color: var(--bulma-light) !important;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* Ensure all titles and subtitles are dark, even if Bulma's defaults were light */
+.title,
+.subtitle {
+    color: var(--bulma-title-color) !important;
+}
+
+/* Force title color for all title elements (override Bulma's HSL calculations) */
+h1.title,
+h2.title,
+h3.title,
+h4.title,
+h5.title,
+h6.title,
+.hero .title {
+    color: #1A202C !important;
+}
+
+/* Ensure text on card backgrounds is readable (Dark Text) */
+.card .title,
+.card .subtitle,
+.card .content {
+    color: var(--bulma-text);
+}
+
+
+/* ---------------------------------------------------
+Button Overrides: Square and Outlined Default
+---------------------------------------------------
+*/
+.button {
+    border-radius: 0 !important;
+    /* Forces buttons to be square */
+    font-weight: 600;
+    /* Slightly heavier font for buttons */
+}
+
+/* Make primary, info, etc. buttons outlined by default for a technical look */
+.button.is-primary,
+.button.is-link,
+.button.is-info,
+.button.is-success,
+.button.is-warning,
+.button.is-danger {
+    background-color: transparent !important;
+    /* Remove background fill */
+    border-style: solid;
+}
+
+/* Explicitly set the color for the outlined buttons */
+.button.is-primary {
+    color: var(--bulma-primary) !important;
+    border-color: var(--bulma-primary) !important;
+}
+
+.button.is-link {
+    color: var(--bulma-link) !important;
+    border-color: var(--bulma-link) !important;
+}
+
+.button.is-info {
+    color: var(--bulma-info) !important;
+    border-color: var(--bulma-info) !important;
+}
+
+.button.is-success {
+    color: var(--bulma-success) !important;
+    border-color: var(--bulma-success) !important;
+}
+
+.button.is-warning {
+    color: var(--bulma-warning) !important;
+    border-color: var(--bulma-warning) !important;
+}
+
+.button.is-danger {
+    color: var(--bulma-danger) !important;
+    border-color: var(--bulma-danger) !important;
+}
+
+/* Add soft hover effects for outlined buttons */
+.button.is-primary:hover,
+.button.is-link:hover,
+.button.is-info:hover,
+.button.is-success:hover,
+.button.is-warning:hover,
+.button.is-danger:hover {
+    background-color: var(--bulma-light) !important;
+    /* Use a soft light background fill on hover */
+    /* The color and border-color are maintained */
+}
+
+/* Ensure the hero text is visible against the primary color */
+.hero.is-primary .title,
+.hero.is-primary .subtitle {
+    color: var(--bulma-primary-invert);
+}
+
+/* Fix text color for notification.is-light (Used on a light background now) */
+.notification.is-light {
+    background-color: var(--bulma-body-background-color);
+    /* Very light subtle background */
+    color: var(--bulma-text);
+    /* Dark text on light background */
+}
+
+/* Notifications: ensure text is dark enough on the soft colored backgrounds */
+.notification:not(.is-light) {
+    color: var(--bulma-dark);
+    /* Dark text for contrast on soft color fill */
+}
+
+/* Ensure the light versions of notifications still have dark text for contrast */
+.notification.is-primary.is-light,
+.notification.is-info.is-light,
+.notification.is-success.is-light,
+.notification.is-warning.is-light,
+.notification.is-danger.is-light {
+    color: var(--bulma-dark) !important;
+}
+
+/* Fix text color within card content using utility classes (Dark text on light background) */
+.has-text-primary,
+.has-text-info,
+.has-text-success,
+.has-text-warning,
+.has-text-danger {
+    /* These utility classes now use the soft accent colors as foreground, which works well on light background */
+    font-weight: 700;
+}
+
+/* ---------------------------------------------------
+Additional Text Color Enforcement
+Ensures all text is dark slate gray for readability
+---------------------------------------------------
+*/
+
+/* Apply Open Sans and dark text to body and all common elements */
+body,
+html {
+    font-family: 'Open Sans', sans-serif !important;
+    color: var(--bulma-text) !important;
+}
+
+/* Ensure all text elements use dark slate gray (except log levels) */
+p,
+span:not(.button span):not(.button .icon):not(.button *):not([class*="log-level"]),
+li,
+td,
+th,
+a,
+label,
+.content,
+.text {
+    color: var(--bulma-text) !important;
+}
+
+/* Ensure button children (icons, spans) inherit button color */
+.button span,
+.button .icon,
+.button .icon i,
+.button i {
+    color: inherit !important;
+}
+
+/* Table text should be dark */
+.table td,
+.table th {
+    color: var(--bulma-text) !important;
+}
+
+/* Card content text */
+.card-content,
+.card-content p,
+.card-content span,
+.card-content li {
+    color: var(--bulma-text) !important;
+}
+
+/* Ensure titles and headings are very dark */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.title,
+.subtitle {
+    font-family: 'Open Sans', sans-serif !important;
+    color: var(--bulma-title-color) !important;
+}
+
+/* Subtitle slightly lighter but still dark */
+.subtitle {
+    color: var(--bulma-text) !important;
+}
+
+/* Links should be normal text color with underline on hover (except navbar) */
+a:not(.button):not(.navbar-item):not(.navbar-link) {
+    color: var(--bulma-text) !important;
+    text-decoration: none;
+}
+
+a:not(.button):not(.navbar-item):not(.navbar-link):hover {
+    color: var(--bulma-text) !important;
+    text-decoration: underline;
+    text-decoration-color: var(--bulma-primary);
+    text-decoration-thickness: 2px;
+}
+
+/* Input and form text */
+input,
+textarea,
+select,
+.input,
+.textarea,
+.select select {
+    color: var(--bulma-text) !important;
+    font-family: 'Open Sans', sans-serif !important;
+}
+
+/* ---------------------------------------------------
+Navbar Overrides
+---------------------------------------------------
+*/
+
+/* Make navbar background white */
+.navbar.is-light {
+    background-color: #FFFFFF !important;
+    border-bottom: 1px solid var(--bulma-border);
+}
+
+.navbar-item,
+.navbar-link,
+.navbar-brand .navbar-item {
+    color: var(--bulma-text) !important;
+}
+
+.navbar-item:hover,
+.navbar-link:hover {
+    background-color: var(--bulma-body-background-color) !important;
+    color: var(--bulma-dark) !important;
+}
+
+/* ---------------------------------------------------
+Table Header Text - Ensure Dark Color
+---------------------------------------------------
+*/
+
+/* Make table headers dark and bold */
+.table thead th {
+    color: var(--bulma-title-color) !important;
+    font-weight: 700 !important;
+}
+
+/* Ensure table cell links are dark */
+.table td a {
+    color: var(--bulma-primary) !important;
+}
+
+/* ---------------------------------------------------
+Override Bulma's Light Gray Text Classes
+Make .has-text-grey darker for readability
+---------------------------------------------------
+*/
+
+.has-text-grey,
+.has-text-grey-light,
+.has-text-grey-lighter,
+small.has-text-grey,
+.has-text-grey-dark {
+    color: var(--bulma-text) !important;
+}
+
+/* Ensure strong/bold text within content is dark */
+strong,
+b,
+.has-text-weight-semibold,
+.has-text-weight-bold {
+    color: var(--bulma-text) !important;
+    font-weight: 600;
+}
+
+/* Preserve log level colors (don't override from common.css) */
+.log-level-info,
+.log-level-warn,
+.log-level-error,
+.log-level-debug {
+    /* Colors defined in common.css - don't override */
+}
+
+/* Dropdown and select backgrounds - transparent/light instead of black */
+select,
+.select select,
+select.input {
+    background-color: transparent !important;
+    color: var(--bulma-text) !important;
+    border: 1px solid var(--bulma-border) !important;
+}
+
+/* ---------------------------------------------------
+Code and Pre Elements - Fix Black Backgrounds
+---------------------------------------------------
+*/
+
+/* Inline code snippets - light background instead of black */
+code {
+    background-color: #F5F5F5 !important;
+    color: var(--bulma-text) !important;
+    padding: 0.25em 0.5em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: 'Courier New', Courier, monospace !important;
+}
+
+/* Code blocks - override Highlight.js black background */
+pre {
+    background-color: #F5F5F5 !important;
+    color: var(--bulma-text) !important;
+    padding: 1.25rem 1.5rem !important;
+    border-radius: 6px;
+    border: 1px solid var(--bulma-border);
+    overflow-x: auto;
+}
+
+/* Code inside pre - ensure proper styling */
+pre code {
+    background-color: transparent !important;
+    color: var(--bulma-text) !important;
+    padding: 0 !important;
+    font-size: 0.875rem;
+}
+
+/* Search input fields - white background */
+input[type="search"],
+.input[type="search"] {
+    background-color: #FFFFFF !important;
+    color: var(--bulma-text) !important;
+    border: 1px solid var(--bulma-border) !important;
+}
+
+/* ---------------------------------------------------
+Layout and Component Styles
+Merged from common.css for single-file consolidation
+---------------------------------------------------
+*/
+
+/* Sticky footer implementation */
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background-color: #f5f5f5 !important;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.wrapper {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+footer.footer {
+    flex-shrink: 0;
+    background-color: #ffffff !important;
+    border-top: 1px solid #dbdbdb;
+    padding: 1rem 1.5rem;
+}
+
+/* Bulma Card Overrides - Force Light Theme */
+.card {
+    background-color: #ffffff !important;
+    border-radius: 6px;
+    box-shadow: 0 0.5em 1em -0.125em rgba(10, 10, 10, 0.1), 0 0px 0 1px rgba(10, 10, 10, 0.02);
+}
+
+.card-header {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #dbdbdb !important;
+    color: #363636 !important;
+}
+
+.card-header-title {
+    color: #363636 !important;
+    font-weight: 600;
+}
+
+.card-header-icon {
+    color: #4a4a4a !important;
+}
+
+.card-content {
+    background-color: #ffffff !important;
+    color: #4a4a4a !important;
+}
+
+/* Table Overrides */
+.table {
+    background-color: #ffffff !important;
+    color: #363636 !important;
+    font-size: 0.875rem !important; /* Reduced from default 1rem */
+}
+
+.table thead th {
+    color: #363636 !important;
+    background-color: #f5f5f5 !important;
+    font-size: 0.875rem !important;
+}
+
+.table tbody tr {
+    background-color: #ffffff !important;
+}
+
+.table tbody tr:hover {
+    background-color: #fafafa !important;
+}
+
+.table td, .table th {
+    border-color: #dbdbdb !important;
+    color: #363636 !important;
+    font-size: 0.875rem !important;
+    padding: 0.5rem 0.75rem !important; /* Reduced padding */
+}
+
+/* Log Container */
+.log-container {
+    background-color: #f8f9fa !important;
+    color: #363636 !important;
+    padding: 1rem;
+    border-radius: 4px;
+    border: 1px solid #dbdbdb;
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: auto;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    word-break: break-word;
+    scroll-behavior: smooth;
+}
+
+.log-entry {
+    margin-bottom: 2px;
+    display: block;
+    line-height: 1.5;
+}
+
+.log-timestamp {
+    color: #7a7a7a !important;
+}
+
+.log-message {
+    color: #363636 !important;
+}
+
+.log-level-info {
+    color: #48c774 !important;
+    font-weight: bold;
+}
+
+.log-level-warn {
+    color: #ffdd57 !important;
+    font-weight: bold;
+}
+
+.log-level-error {
+    color: #f14668 !important;
+    font-weight: bold;
+}
+
+.log-level-debug {
+    color: #7a7a7a !important;
+    font-weight: bold;
+}
+
+/* Status Chips */
+.status-chip {
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    display: inline-block;
+}
+
+.status-idle {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-failed {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.status-running {
+    background-color: #e3f2fd;
+    color: #1565c0;
+}
+
+.status-authenticated {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+/* Additional spacing for cards */
+.card {
+    margin-bottom: 1rem;
+}
+
+/* Navbar bottom border */
+.navbar {
+    border-bottom: 1px solid #dbdbdb;
+}
+
+/* Active navbar item underline */
+.navbar-item.is-active {
+    border-bottom: 2px solid #3273dc;
+    font-weight: 600;
+}
+
+/* Reduce section padding and ensure background extends to bottom */
+.section {
+    padding: 1.5rem 1.5rem;
+    background-color: #f5f5f5 !important;
+    flex: 1;
+}
+
+
+/* Snackbar */
+#snackbar {
+    visibility: hidden;
+    min-width: 250px;
+    margin-left: -125px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 2px;
+    padding: 16px;
+    position: fixed;
+    z-index: 1;
+    left: 50%;
+    bottom: 30px;
+}
+
+#snackbar.show {
+    visibility: visible;
+    -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    animation: fadein 0.5s, fadeout 0.5s 2.5s;
+}
+
+@-webkit-keyframes fadein {
+    from {
+        bottom: 0;
+        opacity: 0;
+    }
+
+    to {
+        bottom: 30px;
+        opacity: 1;
+    }
+}
+
+@keyframes fadein {
+    from {
+        bottom: 0;
+        opacity: 0;
+    }
+
+    to {
+        bottom: 30px;
+        opacity: 1;
+    }
+}
+
+@-webkit-keyframes fadeout {
+    from {
+        bottom: 30px;
+        opacity: 1;
+    }
+
+    to {
+        bottom: 0;
+        opacity: 0;
+    }
+}
+
+@keyframes fadeout {
+    from {
+        bottom: 30px;
+        opacity: 1;
+    }
+
+    to {
+        bottom: 0;
+        opacity: 0;
+    }
+}
+
+/* ---------------------------------------------------
+Modal Overrides - Force Light Theme
+---------------------------------------------------
+*/
+
+/* Modal background overlay */
+.modal-background {
+    background-color: rgba(10, 10, 10, 0.6) !important;
+}
+
+/* Modal card container */
+.modal-card {
+    background-color: #ffffff !important;
+}
+
+/* Modal card header */
+.modal-card-head {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #dbdbdb !important;
+}
+
+.modal-card-title {
+    color: #363636 !important;
+    font-weight: 600;
+}
+
+/* Modal card body */
+.modal-card-body {
+    background-color: #ffffff !important;
+    color: #363636 !important;
+}
+
+/* Modal card body - all text elements */
+.modal-card-body label,
+.modal-card-body p,
+.modal-card-body .label {
+    color: #363636 !important;
+}
+
+/* Modal card body - help text */
+.modal-card-body .help {
+    color: #7a7a7a !important;
+}
+
+/* Modal card body - input fields */
+.modal-card-body input,
+.modal-card-body textarea,
+.modal-card-body select {
+    background-color: #ffffff !important;
+    color: #363636 !important;
+    border: 1px solid #dbdbdb !important;
+}
+
+/* Modal card body - input fields on focus */
+.modal-card-body input:focus,
+.modal-card-body textarea:focus,
+.modal-card-body select:focus {
+    border-color: #3273dc !important;
+}
+
+/* Modal card body - checkbox labels */
+.modal-card-body .checkbox,
+.modal-card-body .checkbox input {
+    color: #363636 !important;
+}
+
+/* Modal card footer */
+.modal-card-foot {
+    background-color: #f5f5f5 !important;
+    border-top: 1px solid #dbdbdb !important;
+}
+
+/* Close button (X) in modal header */
+.modal-card-head .delete,
+.modal-close {
+    background-color: rgba(10, 10, 10, 0.2) !important;
+}
+
+.modal-card-head .delete:hover,
+.modal-close:hover {
+    background-color: rgba(10, 10, 10, 0.3) !important;
+}

@@ -207,58 +207,31 @@ func main() {
 	}
 
 	serviceURL := fmt.Sprintf("http://%s:%d", serviceHost, servicePort)
+	fmt.Printf("✓ Service URL: %s\n\n", serviceURL)
 
-	// Step 2: Check if service is already running
-	fmt.Println("\nSTEP 2: Checking for existing service...")
+	// Step 2: Build and start service (build.ps1 will kill any existing services)
+	fmt.Println("STEP 2: Building and starting service...")
 	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println("Building fresh service for testing...")
+	fmt.Println("Note: build.ps1 will automatically stop any existing services")
 
-	var serviceCmd *exec.Cmd
-	var needsCleanup bool
-
-	if err := waitForService(serviceURL, 2*time.Second); err == nil {
-		// Service is already running!
-		fmt.Printf("✓ Service already running on %s\n", serviceURL)
-		fmt.Println("✓ Using existing service (will not start new instance)")
-		fmt.Println("  Note: Service will NOT be stopped when tests complete\n")
-		needsCleanup = false
-	} else {
-		// Service not running, need to start it
-		fmt.Printf("Service not detected on port %d, will start new instance\n", servicePort)
-
-		// Kill any zombie processes on the port
-		fmt.Printf("Checking for zombie processes on port %d...\n", servicePort)
-		if err := killProcessOnPort(servicePort); err != nil {
-			fmt.Printf("WARNING: Failed to kill process on port %d: %v\n", servicePort, err)
-		} else {
-			fmt.Printf("✓ Port %d is clear\n", servicePort)
-		}
-
-		fmt.Println("\nStarting service in visible window...")
-		serviceCmd, err = startService(config, servicePort)
-		if err != nil {
-			fmt.Printf("ERROR: Failed to start service: %v\n", err)
-			os.Exit(1)
-		}
-		needsCleanup = true
-
-		// Wait for service to be ready
-		fmt.Println("Waiting for service to be ready...")
-		startupTimeout := time.Duration(config.Service.StartupTimeoutSeconds) * time.Second
-		if err := waitForService(serviceURL, startupTimeout); err != nil {
-			fmt.Printf("ERROR: Service did not become ready: %v\n", err)
-			if needsCleanup {
-				stopService(serviceCmd)
-			}
-			os.Exit(1)
-		}
-		fmt.Printf("✓ Service is ready on %s\n", serviceURL)
-		fmt.Println("✓ Service window should be visible\n")
+	serviceCmd, err := startService(config, servicePort)
+	if err != nil {
+		fmt.Printf("ERROR: Failed to start service: %v\n", err)
+		os.Exit(1)
 	}
+	defer stopService(serviceCmd)
 
-	// Ensure cleanup happens if we started the service
-	if needsCleanup {
-		defer stopService(serviceCmd)
+	// Wait for service to be ready
+	fmt.Println("Waiting for service to be ready...")
+	startupTimeout := time.Duration(config.Service.StartupTimeoutSeconds) * time.Second
+	if err := waitForService(serviceURL, startupTimeout); err != nil {
+		fmt.Printf("ERROR: Service did not become ready: %v\n", err)
+		stopService(serviceCmd)
+		os.Exit(1)
 	}
+	fmt.Printf("✓ Service is ready on %s\n", serviceURL)
+	fmt.Println("✓ Service window should be visible\n")
 
 	// Step 3: Run tests
 	fmt.Println("STEP 3: Running tests...")
@@ -303,14 +276,9 @@ func main() {
 		}
 	}
 
-	// Step 4: Cleanup
-	if needsCleanup {
-		fmt.Println("\nSTEP 4: Stopping service...")
-		stopService(serviceCmd)
-	} else {
-		fmt.Println("\nSTEP 4: Cleanup...")
-		fmt.Println("✓ Skipping service stop (using external service)")
-	}
+	// Step 4: Cleanup (always stop service since we built it for testing)
+	fmt.Println("\nSTEP 4: Stopping service...")
+	stopService(serviceCmd)
 
 	// Print summary
 	printSummary(results, allPassed)
@@ -337,50 +305,43 @@ func buildApplication(config *TestRunnerConfig) error {
 	return cmd.Run()
 }
 
-// startService starts the quaero service
+// startService builds and starts the quaero service using build.ps1 -Run
 func startService(config *TestRunnerConfig, servicePort int) (*exec.Cmd, error) {
-	// Get absolute paths
-	exePath, err := filepath.Abs(config.Service.Binary)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve binary path: %w", err)
+	fmt.Println("Building and starting service using build script...")
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		// Use build.ps1 -Run to build and start service in visible window
+		cmd = exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", config.TestRunner.BuildScript, "-Run")
+	} else {
+		// Linux/Mac: use build.sh with -run flag
+		cmd = exec.Command("bash", config.TestRunner.BuildScript, "-run")
 	}
 
-	configPath, err := filepath.Abs(config.Service.Config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve config path: %w", err)
-	}
+	// Run from project root
+	cmd.Dir = "."
 
-	binDir := filepath.Dir(exePath)
-
-	// Build command args
-	args := []string{"-c", configPath}
-	if config.Service.Port != 0 {
-		// Port override specified in test runner config
-		args = append(args, "--port", fmt.Sprintf("%d", servicePort))
-	}
-
-	// Run service directly from bin directory
-	cmd := exec.Command(exePath, args...)
-	cmd.Dir = binDir
-
-	// For Windows, create a new console window
+	// For Windows, create a new console window so we can see the service output
 	if runtime.GOOS == "windows" {
 		// CREATE_NEW_CONSOLE flag (0x00000010)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			CreationFlags: 0x00000010,
 		}
-		fmt.Println("  ✓ Service starting in new console window...")
+		fmt.Println("  [OK] Build+Run starting in new console window...")
+		fmt.Println("  [OK] Service will be built and then started automatically")
 	} else {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start service: %w", err)
+		return nil, fmt.Errorf("failed to start build script: %w", err)
 	}
 
-	// Give it a moment to actually start
-	time.Sleep(3 * time.Second)
+	// Give the build time to complete and service time to start
+	// Build typically takes 15-30 seconds, then service needs a few seconds to start
+	fmt.Println("  Waiting for build to complete and service to start...")
+	time.Sleep(8 * time.Second)
 
 	return cmd, nil
 }

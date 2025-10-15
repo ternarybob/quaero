@@ -2,111 +2,108 @@
 <html lang="en">
 
 <head>
-  {{template "head.html" .}}
-  <title>Quaero - Configuration</title>
+    {{template "head.html" .}}
+    <title>Quaero - Configuration</title>
 </head>
 
 <body class="has-navbar-fixed-top">
-  <div class="wrapper">
+
     {{template "navbar.html" .}}
 
-    <!-- Hero Section -->
-    <section class="hero">
-      <div class="hero-body">
-        <div class="container">
-          <h1 class="title">Configuration</h1>
-          <p class="subtitle">Application Configuration and System Information</p>
-        </div>
-      </div>
-    </section>
+    <div class="container is-fluid">
 
-    <!-- Main Content -->
-    <section class="section">
-      <div class="container">
+        <!-- Heading Section -->
+        <section class="section">
+            <h1 class="title">Configuration</h1>
+            <p class="subtitle">Application Configuration and System Information</p>
+        </section>
 
-        <!-- Service Status Cards -->
-        <div class="card mb-5" x-data="configPage()">
-          <header class="card-header">
-            <p class="card-header-title">Service Status</p>
-            <div class="card-header-icon">
-              <span :class="'tag ' + (isOnline ? 'is-success' : 'is-danger')" id="service-status">
-                <span x-text="isOnline ? 'Online' : 'Offline'"></span>
-              </span>
+        <!-- Main Content -->
+        <section class="section">
+
+            <!-- Service Status Cards -->
+            <div class="card mb-5" x-data="configPage()">
+                <header class="card-header">
+                    <p class="card-header-title">Service Status</p>
+                    <div class="card-header-icon">
+                        <span :class="'tag ' + (isOnline ? 'is-success' : 'is-danger')" id="service-status">
+                            <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                        </span>
+                    </div>
+                </header>
+                <div class="card-content">
+                    <div class="content">
+                        <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
+                        <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
+                        <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
+                        <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
+                    </div>
+                </div>
             </div>
-          </header>
-          <div class="card-content">
-            <div class="content">
-              <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
-              <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
-              <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
-              <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
+
+            <div class="card mb-5" x-data="configPage()">
+                <header class="card-header">
+                    <p class="card-header-title">Configuration Details</p>
+                </header>
+                <div class="card-content">
+                    <div class="content">
+                        <pre id="config-display" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px; max-height: 300px; overflow-y: auto;"><code x-text="formatConfig(config)"></code></pre>
+                    </div>
+                </div>
             </div>
-          </div>
-        </div>
 
-        <div class="card mb-5" x-data="configPage()">
-          <header class="card-header">
-            <p class="card-header-title">Configuration Details</p>
-          </header>
-          <div class="card-content">
-            <div class="content">
-              <pre id="config-display" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px; max-height: 300px; overflow-y: auto;"><code x-text="formatConfig(config)"></code></pre>
-            </div>
-          </div>
-        </div>
+            {{template "service-logs.html" .}}
 
-        {{template "service-logs.html" .}}
+        </section>
 
-      </div>
-    </section>
-  </div>
+    </div>
 
-  {{template "footer.html" .}}
+    {{template "footer.html" .}}
 
-  {{template "snackbar.html" .}}
+    {{template "snackbar.html" .}}
 
-  <script>
-    function configPage() {
-      return {
-        isOnline: false,
-        version: 'unknown',
-        build: 'unknown',
-        port: 0,
-        host: '',
-        config: null,
+    <script>
+        function configPage() {
+            return {
+                isOnline: false,
+                version: 'unknown',
+                build: 'unknown',
+                port: 0,
+                host: '',
+                config: null,
 
-        init() {
-          this.loadConfig();
-        },
+                init() {
+                    this.loadConfig();
+                },
 
-        async loadConfig() {
-          try {
-            const response = await fetch('/api/config');
-            if (!response.ok) {
-              throw new Error(`HTTP error! status: ${response.status}`);
+                async loadConfig() {
+                    try {
+                        const response = await fetch('/api/config');
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        const data = await response.json();
+
+                        this.isOnline = true;
+                        this.version = data.version || 'unknown';
+                        this.build = data.build || 'unknown';
+                        this.port = data.port || 0;
+                        this.host = data.host || '';
+                        this.config = data.config || {};
+
+                    } catch (error) {
+                        console.error('Failed to load configuration:', error);
+                        this.isOnline = false;
+                    }
+                },
+
+                formatConfig(cfg) {
+                    if (!cfg) return 'No configuration loaded';
+                    return JSON.stringify(cfg, null, 2);
+                }
             }
-            const data = await response.json();
-
-            this.isOnline = true;
-            this.version = data.version || 'unknown';
-            this.build = data.build || 'unknown';
-            this.port = data.port || 0;
-            this.host = data.host || '';
-            this.config = data.config || {};
-
-          } catch (error) {
-            console.error('Failed to load configuration:', error);
-            this.isOnline = false;
-          }
-        },
-
-        formatConfig(cfg) {
-          if (!cfg) return 'No configuration loaded';
-          return JSON.stringify(cfg, null, 2);
         }
-      }
-    }
-  </script>
+    </script>
 
 </body>
 

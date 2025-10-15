@@ -1,25 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     {{template "head.html" .}}
     <title>Source Management - Quaero</title>
 </head>
+
 <body class="has-navbar-fixed-top">
-    <div class="wrapper">
-        {{template "navbar.html" .}}
 
-        <!-- Hero Section -->
-        <section class="hero">
-            <div class="hero-body">
-                <div class="container">
-                    <h1 class="title">Source Management</h1>
-                    <p class="subtitle">Configure and manage data sources for collection and indexing</p>
-                </div>
-            </div>
-        </section>
+    {{template "navbar.html" .}}
 
-        <section class="section">
-        <div class="container">
+    <!-- Heading Section -->
+    <section class="section">
+
+        <div class="container is-fluid">
+            <h1 class="title">Source Management</h1>
+            <p class="subtitle">Configure and manage data sources for collection and indexing</p>
+        </div>
+
+    </section>
+
+    <section class="section">
+
+        <div class="container is-fluid">
 
             <!-- Application Status -->
             <div class="card mt-5" x-data="appStatus">
@@ -41,215 +44,213 @@
                 </div>
             </div>
 
-            <!-- Sources List -->
-            <div class="card mt-5" x-data="sourceManagement">
-                <header class="card-header">
-                    <p class="card-header-title">
-                        <span x-text="sources.length" class="has-text-grey mr-2"></span>Sources
-                    </p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-info" @click="openCreateModal()">
-                            <span class="icon"><i class="fas fa-plus"></i></span>
-                            <span>Add Source</span>
-                        </button>
-                        <button class="button is-small is-outlined ml-2" @click="loadSources()" title="Refresh Sources">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <!-- Sources Table -->
-                    <div class="table-container">
-                        <table class="table is-fullwidth is-striped is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>NAME</th>
-                                    <th>TYPE</th>
-                                    <th>BASE URL</th>
-                                    <th>AUTHENTICATION</th>
-                                    <th class="has-text-centered">STATUS</th>
-                                    <th>CREATED</th>
-                                    <th class="has-text-centered">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-if="sources.length === 0">
+            <!-- Sources Management Component (wrap card and modal in shared scope) -->
+            <div x-data="sourceManagement">
+                <!-- Sources List -->
+                <div class="card mt-5">
+                    <header class="card-header">
+                        <p class="card-header-title">
+                            <span x-text="sources.length" class="has-text-grey mr-2"></span>Sources
+                        </p>
+                        <div class="card-header-icon">
+                            <button class="button is-small is-info" @click="openCreateModal()">
+                                <span class="icon"><i class="fas fa-plus"></i></span>
+                                <span>Add Source</span>
+                            </button>
+                            <button class="button is-small is-outlined ml-2" @click="loadSources()" title="Refresh Sources">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
+                        </div>
+                    </header>
+                    <div class="card-content">
+                        <!-- Sources Table -->
+                        <div class="table-container">
+                            <table class="table is-fullwidth is-striped is-hoverable">
+                                <thead>
                                     <tr>
-                                        <td colspan="7" class="has-text-centered">
-                                            No sources configured. Click "Add Source" to get started.
-                                        </td>
+                                        <th>NAME</th>
+                                        <th>TYPE</th>
+                                        <th>BASE URL</th>
+                                        <th>AUTHENTICATION</th>
+                                        <th class="has-text-centered">STATUS</th>
+                                        <th>CREATED</th>
+                                        <th class="has-text-centered">ACTIONS</th>
                                     </tr>
-                                </template>
-                                <template x-for="source in sources" :key="source.id">
-                                    <tr>
-                                        <td x-text="source.name"></td>
-                                        <td>
-                                            <span class="tag" :class="{
-                                                'is-info': source.type === 'jira',
-                                                'is-link': source.type === 'confluence',
-                                                'is-dark': source.type === 'github'
-                                            }" x-text="source.type.toUpperCase()"></span>
-                                        </td>
-                                        <td x-text="source.base_url"></td>
-                                        <td>
-                                            <template x-if="source.auth_id">
-                                                <span class="tag is-light is-success">Configured</span>
-                                            </template>
-                                            <template x-if="!source.auth_id">
-                                                <span class="tag is-light">None</span>
-                                            </template>
-                                        </td>
-                                        <td class="has-text-centered">
-                                            <span class="tag" :class="source.enabled ? 'is-success' : 'is-warning'"
-                                                  x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
-                                        </td>
-                                        <td x-text="formatDate(source.created_at)"></td>
-                                        <td class="has-text-centered">
-                                            <button class="button is-small is-outlined"
-                                                    @click="editSource(source)"
-                                                    title="Edit Source">
-                                                <span class="icon"><i class="fas fa-edit"></i></span>
-                                            </button>
-                                            <button class="button is-small is-danger is-outlined ml-1"
-                                                    @click="deleteSource(source.id)"
-                                                    title="Delete Source">
-                                                <span class="icon"><i class="fas fa-trash"></i></span>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    <template x-if="sources.length === 0">
+                                        <tr>
+                                            <td colspan="7" class="has-text-centered">
+                                                No sources configured. Click "Add Source" to get started.
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <template x-for="source in sources" :key="source.id">
+                                        <tr>
+                                            <td x-text="source.name"></td>
+                                            <td>
+                                                <span class="tag" :class="{
+                                                    'is-info': source.type === 'jira',
+                                                    'is-link': source.type === 'confluence',
+                                                    'is-dark': source.type === 'github'
+                                                }" x-text="source.type.toUpperCase()"></span>
+                                            </td>
+                                            <td x-text="source.base_url"></td>
+                                            <td>
+                                                <template x-if="source.auth_id">
+                                                    <span class="tag is-light is-success">Configured</span>
+                                                </template>
+                                                <template x-if="!source.auth_id">
+                                                    <span class="tag is-light">None</span>
+                                                </template>
+                                            </td>
+                                            <td class="has-text-centered">
+                                                <span class="tag" :class="source.enabled ? 'is-success' : 'is-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
+                                            </td>
+                                            <td x-text="formatDate(source.created_at)"></td>
+                                            <td class="has-text-centered">
+                                                <button class="button is-small is-outlined" @click="editSource(source)" title="Edit Source">
+                                                    <span class="icon"><i class="fas fa-edit"></i></span>
+                                                </button>
+                                                <button class="button is-small is-danger is-outlined ml-1" @click="deleteSource(source.id)" title="Delete Source">
+                                                    <span class="icon"><i class="fas fa-trash"></i></span>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Create/Edit Source Modal -->
-            <div class="modal" :class="{'is-active': showCreateModal || showEditModal}" x-data="sourceManagement">
-                <div class="modal-background" @click="closeModal()"></div>
-                <div class="modal-card">
-                    <header class="modal-card-head">
-                        <p class="modal-card-title" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></p>
-                        <button class="delete" aria-label="close" @click="closeModal()"></button>
-                    </header>
-                    <section class="modal-card-body">
-                        <div class="field">
-                            <label class="label">Name</label>
-                            <div class="control">
-                                <input class="input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label class="label">Type</label>
-                            <div class="control">
-                                <div class="select is-fullwidth">
-                                    <select x-model="currentSource.type">
-                                        <option value="jira">Jira</option>
-                                        <option value="confluence">Confluence</option>
-                                        <option value="github">GitHub</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label class="label">Base URL</label>
-                            <div class="control">
-                                <input class="input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label class="label">Authentication</label>
-                            <div class="control">
-                                <div class="select is-fullwidth">
-                                    <select x-model="currentSource.auth_id">
-                                        <option value="">No Authentication</option>
-                                        <template x-for="auth in authentications" :key="auth.id">
-                                            <option :value="auth.id" x-text="`${auth.name} (${auth.site_domain})`"></option>
-                                        </template>
-                                    </select>
-                                </div>
-                            </div>
-                            <p class="help">Select authentication credentials for this source</p>
-                            <template x-if="authentications.length === 0">
-                                <p class="help has-text-warning">
-                                    No authentication configured.
-                                    <a href="/auth" class="has-text-link">Add authentication</a> first.
-                                </p>
-                            </template>
-                        </div>
-
-                        <div class="field">
-                            <label class="checkbox">
-                                <input type="checkbox" x-model="currentSource.enabled">
-                                Enabled
-                            </label>
-                        </div>
-
-                        <div class="field">
-                            <label class="label">Crawl Configuration</label>
+                <!-- Create/Edit Source Modal -->
+                <div class="modal" :class="{'is-active': showCreateModal || showEditModal}">
+                    <div class="modal-background" @click="closeModal()"></div>
+                    <div class="modal-card">
+                        <header class="modal-card-head">
+                            <p class="modal-card-title" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></p>
+                            <button class="delete" aria-label="close" @click="closeModal()"></button>
+                        </header>
+                        <section class="modal-card-body">
                             <div class="field">
-                                <label class="label is-small">Max Depth</label>
+                                <label class="label">Name</label>
                                 <div class="control">
-                                    <input class="input is-small" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
+                                    <input class="input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
                                 </div>
                             </div>
+
                             <div class="field">
-                                <label class="label is-small">Concurrency</label>
+                                <label class="label">Type</label>
                                 <div class="control">
-                                    <input class="input is-small" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="label is-small">Detail Level</label>
-                                <div class="control">
-                                    <div class="select is-small is-fullwidth">
-                                        <select x-model="currentSource.crawl_config.detail_level">
-                                            <option value="minimal">Minimal</option>
-                                            <option value="basic">Basic</option>
-                                            <option value="full">Full</option>
+                                    <div class="select is-fullwidth">
+                                        <select x-model="currentSource.type">
+                                            <option value="jira">Jira</option>
+                                            <option value="confluence">Confluence</option>
+                                            <option value="github">GitHub</option>
                                         </select>
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="field">
+                                <label class="label">Base URL</label>
+                                <div class="control">
+                                    <input class="input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="label">Authentication</label>
+                                <div class="control">
+                                    <div class="select is-fullwidth">
+                                        <select x-model="currentSource.auth_id">
+                                            <option value="">No Authentication</option>
+                                            <template x-for="auth in authentications" :key="auth.id">
+                                                <option :value="auth.id" x-text="`${auth.name} (${auth.site_domain})`"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                </div>
+                                <p class="help">Select authentication credentials for this source</p>
+                                <template x-if="authentications.length === 0">
+                                    <p class="help has-text-warning">
+                                        No authentication configured.
+                                        <a href="/auth" class="has-text-link">Add authentication</a> first.
+                                    </p>
+                                </template>
+                            </div>
+
                             <div class="field">
                                 <label class="checkbox">
-                                    <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
-                                    Follow Links
+                                    <input type="checkbox" x-model="currentSource.enabled">
+                                    Enabled
                                 </label>
                             </div>
-                        </div>
-                    </section>
-                    <footer class="modal-card-foot">
-                        <button class="button is-success" @click="saveSource()">Save</button>
-                        <button class="button is-outlined" @click="closeModal()">Cancel</button>
-                    </footer>
+
+                            <div class="field">
+                                <label class="label">Crawl Configuration</label>
+                                <div class="field">
+                                    <label class="label is-small">Max Depth</label>
+                                    <div class="control">
+                                        <input class="input is-small" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label class="label is-small">Concurrency</label>
+                                    <div class="control">
+                                        <input class="input is-small" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label class="label is-small">Detail Level</label>
+                                    <div class="control">
+                                        <div class="select is-small is-fullwidth">
+                                            <select x-model="currentSource.crawl_config.detail_level">
+                                                <option value="minimal">Minimal</option>
+                                                <option value="basic">Basic</option>
+                                                <option value="full">Full</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label class="checkbox">
+                                        <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
+                                        Follow Links
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+                        <footer class="modal-card-foot">
+                            <button class="button is-success is-outlined" @click="saveSource()">Save</button>
+                            <button class="button is-outlined" @click="closeModal()">Cancel</button>
+                        </footer>
+                    </div>
                 </div>
             </div>
 
             {{template "service-logs.html" .}}
-        </div>
-    </section>
-    </div>
 
-    <footer class="footer">
-        {{template "footer.html" .}}
-    </footer>
+        </div>
+
+    </section>
+
+    {{template "footer.html" .}}
 
     {{template "snackbar.html" .}}
 
     <script>
         // Initialize Alpine.js components when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             console.log('[Sources] Page loaded, Alpine.js components should be initialized');
         });
 
         // Ensure Alpine.js is fully initialized
-        document.addEventListener('alpine:init', function() {
+        document.addEventListener('alpine:init', function () {
             console.log('[Sources] Alpine.js initialized');
         });
     </script>
 </body>
+
 </html>
