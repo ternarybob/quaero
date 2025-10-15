@@ -10,154 +10,150 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container is-fluid">
+    <div class="container">
 
         <!-- Heading Section -->
-        <section class="section">
+        <div class="mt-5 mb-5">
             <h1 class="title">Document Management</h1>
             <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
-        </section>
+        </div>
 
-        <section class="section">
-
-            <!-- Document Statistics -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">Document Statistics</p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-outlined" onclick="loadStats()">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <nav class="level">
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">TOTAL DOCUMENTS</p>
-                                <p class="title" id="stat-total">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">VECTORIZED</p>
-                                <p class="title" id="stat-vectorized">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">JIRA DOCUMENTS</p>
-                                <p class="title" id="stat-jira">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">CONFLUENCE DOCUMENTS</p>
-                                <p class="title" id="stat-confluence">-</p>
-                            </div>
-                        </div>
-                    </nav>
+        <!-- Document Statistics -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">Document Statistics</p>
+                <div class="card-header-icon">
+                    <button class="button is-small is-outlined" onclick="loadStats()">
+                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                    </button>
                 </div>
+            </header>
+            <div class="card-content">
+                <nav class="level">
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">TOTAL DOCUMENTS</p>
+                            <p class="title" id="stat-total">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">VECTORIZED</p>
+                            <p class="title" id="stat-vectorized">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">JIRA DOCUMENTS</p>
+                            <p class="title" id="stat-jira">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">CONFLUENCE DOCUMENTS</p>
+                            <p class="title" id="stat-confluence">-</p>
+                        </div>
+                    </div>
+                </nav>
             </div>
+        </div>
 
-            <!-- Documents Table -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">
-                        <span id="document-count" class="has-text-grey mr-2">0</span>Documents
-                    </p>
-                </header>
-                <div class="card-content">
-                    <!-- Filter Controls -->
-                    <div class="columns">
-                        <div class="column is-6">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <input type="search" id="search-box" class="input" placeholder="Search documents...">
-                                    <span class="icon is-small is-left"><i class="fas fa-search"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column is-3">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <div class="select is-fullwidth">
-                                        <select id="source-filter" onchange="filterDocuments()">
-                                            <option value="">All Sources</option>
-                                            <option value="jira">Jira</option>
-                                            <option value="confluence">Confluence</option>
-                                        </select>
-                                    </div>
-                                    <span class="icon is-small is-left"><i class="fas fa-filter"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column is-3">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <div class="select is-fullwidth">
-                                        <select id="vectorized-filter" onchange="filterDocuments()">
-                                            <option value="">All Documents</option>
-                                            <option value="true">Vectorized Only</option>
-                                            <option value="false">Not Vectorized</option>
-                                        </select>
-                                    </div>
-                                    <span class="icon is-small is-left"><i class="fas fa-vector-square"></i></span>
-                                </div>
+        <!-- Documents Table -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">
+                    <span id="document-count" class="has-text-grey mr-2">0</span>Documents
+                </p>
+            </header>
+            <div class="card-content">
+                <!-- Filter Controls -->
+                <div class="columns">
+                    <div class="column is-6">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <input type="search" id="search-box" class="input" placeholder="Search documents...">
+                                <span class="icon is-small is-left"><i class="fas fa-search"></i></span>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Documents Table -->
-                    <div class="table-container">
-                        <table class="table is-fullwidth is-striped is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>SOURCE</th>
-                                    <th>SOURCE ID</th>
-                                    <th>TITLE</th>
-                                    <th class="has-text-centered">VECTORIZED</th>
-                                    <th>UPDATED</th>
-                                    <th class="has-text-centered">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody id="documents-table-body">
-                                <tr>
-                                    <td colspan="6" class="has-text-centered">
-                                        Loading documents...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <div class="select is-fullwidth">
+                                    <select id="source-filter" onchange="filterDocuments()">
+                                        <option value="">All Sources</option>
+                                        <option value="jira">Jira</option>
+                                        <option value="confluence">Confluence</option>
+                                    </select>
+                                </div>
+                                <span class="icon is-small is-left"><i class="fas fa-filter"></i></span>
+                            </div>
+                        </div>
                     </div>
-
-                    <!-- Pagination Controls -->
-                    <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
-                        <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
-                        <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
-                        <ul class="pagination-list">
-                            <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
-                        </ul>
-                    </nav>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <div class="select is-fullwidth">
+                                    <select id="vectorized-filter" onchange="filterDocuments()">
+                                        <option value="">All Documents</option>
+                                        <option value="true">Vectorized Only</option>
+                                        <option value="false">Not Vectorized</option>
+                                    </select>
+                                </div>
+                                <span class="icon is-small is-left"><i class="fas fa-vector-square"></i></span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
 
-            <!-- Document Detail -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">Document Detail</p>
-                    <div class="card-header-icon">
-                        <span id="selected-document-id" class="tag is-info"></span>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <pre id="document-detail-json"><code class="language-json"></code></pre>
+                <!-- Documents Table -->
+                <div class="table-container">
+                    <table class="table is-fullwidth is-striped is-hoverable">
+                        <thead>
+                            <tr>
+                                <th>SOURCE</th>
+                                <th>SOURCE ID</th>
+                                <th>TITLE</th>
+                                <th class="has-text-centered">VECTORIZED</th>
+                                <th>UPDATED</th>
+                                <th class="has-text-centered">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="documents-table-body">
+                            <tr>
+                                <td colspan="6" class="has-text-centered">
+                                    Loading documents...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
+
+                <!-- Pagination Controls -->
+                <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
+                    <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
+                    <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
+                    <ul class="pagination-list">
+                        <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
+                    </ul>
+                </nav>
             </div>
+        </div>
 
-            {{template "service-logs.html" .}}
+        <!-- Document Detail -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">Document Detail</p>
+                <div class="card-header-icon">
+                    <span id="selected-document-id" class="tag is-info"></span>
+                </div>
+            </header>
+            <div class="card-content">
+                <pre id="document-detail-json"><code class="language-json"></code></pre>
+            </div>
+        </div>
 
-        </section>
+        {{template "service-logs.html" .}}
 
     </div>
 

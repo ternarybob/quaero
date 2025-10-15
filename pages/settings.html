@@ -10,78 +10,74 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container is-fluid">
+    <div class="container">
 
         <!-- Heading Section -->
-        <section class="section">
+        <div class="mt-5 mb-5">
             <h1 class="title">Settings</h1>
             <p class="subtitle">System configuration and operational controls</p>
-        </section>
+        </div>
 
-        <section class="section">
+        <!-- Full Configuration Table -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">System Configuration (Read-Only)</p>
+                <div class="card-header-icon">
+                    <button class="button is-small is-outlined" onclick="loadConfig()">
+                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                    </button>
+                </div>
+            </header>
+            <div class="card-content">
+                <div class="table-container">
+                    <table class="table is-fullwidth is-striped is-hoverable">
+                        <thead>
+                            <tr>
+                                <th style="width: 30%;">Section</th>
+                                <th style="width: 35%;">Setting</th>
+                                <th style="width: 35%;">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="config-table-body">
+                            <tr>
+                                <td colspan="3" class="has-text-centered has-text-grey">
+                                    Loading configuration...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-            <!-- Full Configuration Table -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">System Configuration (Read-Only)</p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-outlined" onclick="loadConfig()">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+        <!-- Danger Zone -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title has-text-danger">
+                    <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
+                    <span>Danger Zone</span>
+                </p>
+            </header>
+            <div class="card-content">
+                <div class="columns is-vcentered">
+                    <div class="column">
+                        <p class="title is-5">Clear All Documents</p>
+                        <p class="subtitle is-6">
+                            Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                            Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+                        </p>
+                    </div>
+                    <div class="column is-narrow">
+                        <button class="button is-danger is-small is-outlined" onclick="confirmRemoveEmbeddings()">
+                            <span class="icon"><i class="fas fa-trash"></i></span>
+                            <span>CLEAR ALL</span>
                         </button>
                     </div>
-                </header>
-                <div class="card-content">
-                    <div class="table-container">
-                        <table class="table is-fullwidth is-striped is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th style="width: 30%;">Section</th>
-                                    <th style="width: 35%;">Setting</th>
-                                    <th style="width: 35%;">Value</th>
-                                </tr>
-                            </thead>
-                            <tbody id="config-table-body">
-                                <tr>
-                                    <td colspan="3" class="has-text-centered has-text-grey">
-                                        Loading configuration...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Danger Zone -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title has-text-danger">
-                        <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
-                        <span>Danger Zone</span>
-                    </p>
-                </header>
-                <div class="card-content">
-                    <div class="columns is-vcentered">
-                        <div class="column">
-                            <p class="title is-5">Clear All Documents</p>
-                            <p class="subtitle is-6">
-                                Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                                Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
-                            </p>
-                        </div>
-                        <div class="column is-narrow">
-                            <button class="button is-danger is-small is-outlined" onclick="confirmRemoveEmbeddings()">
-                                <span class="icon"><i class="fas fa-trash"></i></span>
-                                <span>CLEAR ALL</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {{template "service-logs.html" .}}
-
-        </section>
+        {{template "service-logs.html" .}}
 
     </div>
 

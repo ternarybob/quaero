@@ -10,22 +10,17 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container is-fluid">
+    <div class="container">
 
         <!-- Heading Section -->
-        <section class="section">
+        <div class="mt-5 mb-5">
             <h1 class="title">Quaero</h1>
             <p class="subtitle">Unified Data Collection and Analysis Platform</p>
-        </section>
+        </div>
 
-        <!-- Main Content -->
-        <section class="section">
+        {{template "service-status.html" .}}
 
-            {{template "service-status.html" .}}
-
-            {{template "service-logs.html" .}}
-
-        </section>
+        {{template "service-logs.html" .}}
 
     </div>
 

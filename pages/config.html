@@ -10,51 +10,46 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container is-fluid">
+    <div class="container">
 
         <!-- Heading Section -->
-        <section class="section">
+        <div class="mt-5 mb-5">
             <h1 class="title">Configuration</h1>
             <p class="subtitle">Application Configuration and System Information</p>
-        </section>
+        </div>
 
-        <!-- Main Content -->
-        <section class="section">
-
-            <!-- Service Status Cards -->
-            <div class="card mb-5" x-data="configPage()">
-                <header class="card-header">
-                    <p class="card-header-title">Service Status</p>
-                    <div class="card-header-icon">
-                        <span :class="'tag ' + (isOnline ? 'is-success' : 'is-danger')" id="service-status">
-                            <span x-text="isOnline ? 'Online' : 'Offline'"></span>
-                        </span>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <div class="content">
-                        <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
-                        <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
-                        <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
-                        <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
-                    </div>
+        <!-- Service Status Cards -->
+        <div class="card mb-5" x-data="configPage()">
+            <header class="card-header">
+                <p class="card-header-title">Service Status</p>
+                <div class="card-header-icon">
+                    <span :class="'tag ' + (isOnline ? 'is-success' : 'is-danger')" id="service-status">
+                        <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                    </span>
+                </div>
+            </header>
+            <div class="card-content">
+                <div class="content">
+                    <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
+                    <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
+                    <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
+                    <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
                 </div>
             </div>
+        </div>
 
-            <div class="card mb-5" x-data="configPage()">
-                <header class="card-header">
-                    <p class="card-header-title">Configuration Details</p>
-                </header>
-                <div class="card-content">
-                    <div class="content">
-                        <pre id="config-display" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px; max-height: 300px; overflow-y: auto;"><code x-text="formatConfig(config)"></code></pre>
-                    </div>
+        <div class="card mb-5" x-data="configPage()">
+            <header class="card-header">
+                <p class="card-header-title">Configuration Details</p>
+            </header>
+            <div class="card-content">
+                <div class="content">
+                    <pre id="config-display" style="background-color: #f5f5f5; padding: 0.5rem; border-radius: 4px; max-height: 300px; overflow-y: auto;"><code x-text="formatConfig(config)"></code></pre>
                 </div>
             </div>
+        </div>
 
-            {{template "service-logs.html" .}}
-
-        </section>
+        {{template "service-logs.html" .}}
 
     </div>
 

@@ -10,175 +10,171 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container is-fluid">
+    <div class="container">
 
         <!-- Heading Section -->
-        <section class="section">
+        <div class="mt-5 mb-5">
             <h1 class="title">Job Management</h1>
             <p class="subtitle">Monitor and manage crawler jobs for Jira and Confluence data collection</p>
-        </section>
+        </div>
 
-        <section class="section">
-
-            <!-- Job Statistics -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">Job Statistics</p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-outlined" onclick="loadStats()">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <nav class="level">
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">TOTAL JOBS</p>
-                                <p class="title" id="stat-total">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">RUNNING</p>
-                                <p class="title has-text-info" id="stat-running">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">COMPLETED</p>
-                                <p class="title has-text-success" id="stat-completed">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">FAILED</p>
-                                <p class="title has-text-danger" id="stat-failed">-</p>
-                            </div>
-                        </div>
-                        <div class="level-item has-text-centered">
-                            <div>
-                                <p class="heading">CANCELLED</p>
-                                <p class="title has-text-warning" id="stat-cancelled">-</p>
-                            </div>
-                        </div>
-                    </nav>
+        <!-- Job Statistics -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">Job Statistics</p>
+                <div class="card-header-icon">
+                    <button class="button is-small is-outlined" onclick="loadStats()">
+                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                    </button>
                 </div>
+            </header>
+            <div class="card-content">
+                <nav class="level">
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">TOTAL JOBS</p>
+                            <p class="title" id="stat-total">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">RUNNING</p>
+                            <p class="title has-text-info" id="stat-running">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">COMPLETED</p>
+                            <p class="title has-text-success" id="stat-completed">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">FAILED</p>
+                            <p class="title has-text-danger" id="stat-failed">-</p>
+                        </div>
+                    </div>
+                    <div class="level-item has-text-centered">
+                        <div>
+                            <p class="heading">CANCELLED</p>
+                            <p class="title has-text-warning" id="stat-cancelled">-</p>
+                        </div>
+                    </div>
+                </nav>
             </div>
+        </div>
 
-            <!-- Jobs Table -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">
-                        <span id="job-count" class="has-text-grey mr-2">0</span>Jobs
-                    </p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-outlined" onclick="loadJobs()">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
-                    </div>
-                </header>
-                <div class="card-content">
-                    <!-- Filter Controls -->
-                    <div class="columns">
-                        <div class="column is-3">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <div class="select is-fullwidth">
-                                        <select id="status-filter" onchange="filterJobs()">
-                                            <option value="">All Statuses</option>
-                                            <option value="pending">Pending</option>
-                                            <option value="running">Running</option>
-                                            <option value="completed">Completed</option>
-                                            <option value="failed">Failed</option>
-                                            <option value="cancelled">Cancelled</option>
-                                        </select>
-                                    </div>
-                                    <span class="icon is-small is-left"><i class="fas fa-filter"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column is-3">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <div class="select is-fullwidth">
-                                        <select id="source-filter" onchange="filterJobs()">
-                                            <option value="">All Sources</option>
-                                            <option value="jira">Jira</option>
-                                            <option value="confluence">Confluence</option>
-                                        </select>
-                                    </div>
-                                    <span class="icon is-small is-left"><i class="fas fa-database"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column is-3">
-                            <div class="field">
-                                <div class="control has-icons-left">
-                                    <div class="select is-fullwidth">
-                                        <select id="entity-filter" onchange="filterJobs()">
-                                            <option value="">All Entity Types</option>
-                                            <option value="project">Project</option>
-                                            <option value="space">Space</option>
-                                        </select>
-                                    </div>
-                                    <span class="icon is-small is-left"><i class="fas fa-folder"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Jobs Table -->
-                    <div class="table-container">
-                        <table class="table is-fullwidth is-striped is-hoverable">
-                            <thead>
-                                <tr>
-                                    <th>JOB ID</th>
-                                    <th>SOURCE</th>
-                                    <th>ENTITY</th>
-                                    <th class="has-text-centered">STATUS</th>
-                                    <th>PROGRESS</th>
-                                    <th>CREATED</th>
-                                    <th class="has-text-centered">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody id="jobs-table-body">
-                                <tr>
-                                    <td colspan="7" class="has-text-centered">
-                                        Loading jobs...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Pagination Controls -->
-                    <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
-                        <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
-                        <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
-                        <ul class="pagination-list">
-                            <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
-                        </ul>
-                    </nav>
+        <!-- Jobs Table -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">
+                    <span id="job-count" class="has-text-grey mr-2">0</span>Jobs
+                </p>
+                <div class="card-header-icon">
+                    <button class="button is-small is-outlined" onclick="loadJobs()">
+                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                    </button>
                 </div>
-            </div>
-
-            <!-- Job Detail -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">Job Detail</p>
-                    <div class="card-header-icon">
-                        <span id="selected-job-id" class="tag is-info"></span>
+            </header>
+            <div class="card-content">
+                <!-- Filter Controls -->
+                <div class="columns">
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <div class="select is-fullwidth">
+                                    <select id="status-filter" onchange="filterJobs()">
+                                        <option value="">All Statuses</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="running">Running</option>
+                                        <option value="completed">Completed</option>
+                                        <option value="failed">Failed</option>
+                                        <option value="cancelled">Cancelled</option>
+                                    </select>
+                                </div>
+                                <span class="icon is-small is-left"><i class="fas fa-filter"></i></span>
+                            </div>
+                        </div>
                     </div>
-                </header>
-                <div class="card-content">
-                    <pre id="job-detail-json"><code class="language-json"></code></pre>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <div class="select is-fullwidth">
+                                    <select id="source-filter" onchange="filterJobs()">
+                                        <option value="">All Sources</option>
+                                        <option value="jira">Jira</option>
+                                        <option value="confluence">Confluence</option>
+                                    </select>
+                                </div>
+                                <span class="icon is-small is-left"><i class="fas fa-database"></i></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control has-icons-left">
+                                <div class="select is-fullwidth">
+                                    <select id="entity-filter" onchange="filterJobs()">
+                                        <option value="">All Entity Types</option>
+                                        <option value="project">Project</option>
+                                        <option value="space">Space</option>
+                                    </select>
+                                </div>
+                                <span class="icon is-small is-left"><i class="fas fa-folder"></i></span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- Jobs Table -->
+                <div class="table-container">
+                    <table class="table is-fullwidth is-striped is-hoverable">
+                        <thead>
+                            <tr>
+                                <th>JOB ID</th>
+                                <th>SOURCE</th>
+                                <th>ENTITY</th>
+                                <th class="has-text-centered">STATUS</th>
+                                <th>PROGRESS</th>
+                                <th>CREATED</th>
+                                <th class="has-text-centered">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobs-table-body">
+                            <tr>
+                                <td colspan="7" class="has-text-centered">
+                                    Loading jobs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination Controls -->
+                <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
+                    <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
+                    <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
+                    <ul class="pagination-list">
+                        <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
+                    </ul>
+                </nav>
             </div>
+        </div>
 
-            {{template "service-logs.html" .}}
+        <!-- Job Detail -->
+        <div class="card mt-5">
+            <header class="card-header">
+                <p class="card-header-title">Job Detail</p>
+                <div class="card-header-icon">
+                    <span id="selected-job-id" class="tag is-info"></span>
+                </div>
+            </header>
+            <div class="card-content">
+                <pre id="job-detail-json"><code class="language-json"></code></pre>
+            </div>
+        </div>
 
-        </section>
+        {{template "service-logs.html" .}}
 
     </div>
 
