@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
@@ -23,21 +24,23 @@ import (
 
 // JobHandler handles job-related API requests
 type JobHandler struct {
-	crawlerService *crawler.Service
-	jobStorage     interfaces.JobStorage
-	sourceService  *sources.Service
-	authStorage    interfaces.AuthStorage
-	logger         arbor.ILogger
+	crawlerService   *crawler.Service
+	jobStorage       interfaces.JobStorage
+	sourceService    *sources.Service
+	authStorage      interfaces.AuthStorage
+	schedulerService interfaces.SchedulerService
+	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
-		crawlerService: crawlerService,
-		jobStorage:     jobStorage,
-		sourceService:  sourceService,
-		authStorage:    authStorage,
-		logger:         logger,
+		crawlerService:   crawlerService,
+		jobStorage:       jobStorage,
+		sourceService:    sourceService,
+		authStorage:      authStorage,
+		schedulerService: schedulerService,
+		logger:           logger,
 	}
 }
 
@@ -545,6 +548,138 @@ func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// GetDefaultJobsHandler returns all default job statuses
+// GET /api/jobs/default
+func (h *JobHandler) GetDefaultJobsHandler(w http.ResponseWriter, r *http.Request) {
+	statuses := h.schedulerService.GetAllJobStatuses()
+
+	// Convert map to array for JSON response
+	jobsList := make([]map[string]interface{}, 0, len(statuses))
+	for name, status := range statuses {
+		jobsList = append(jobsList, map[string]interface{}{
+			"name":        name,
+			"enabled":     status.Enabled,
+			"schedule":    status.Schedule,
+			"description": status.Description,
+			"last_run":    status.LastRun,
+			"next_run":    status.NextRun,
+			"is_running":  status.IsRunning,
+			"last_error":  status.LastError,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"jobs":  jobsList,
+		"total": len(jobsList),
+	})
+}
+
+// EnableDefaultJobHandler enables a default job
+// POST /api/jobs/default/{name}/enable
+func (h *JobHandler) EnableDefaultJobHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract job name from path: /api/jobs/default/{name}/enable
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Job name is required", http.StatusBadRequest)
+		return
+	}
+	jobName := pathParts[3]
+
+	if err := h.schedulerService.EnableJob(jobName); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to enable job")
+		http.Error(w, fmt.Sprintf("Failed to enable job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("job_name", jobName).Msg("Job enabled")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name": jobName,
+		"enabled":  true,
+		"message":  "Job enabled successfully",
+	})
+}
+
+// DisableDefaultJobHandler disables a default job
+// POST /api/jobs/default/{name}/disable
+func (h *JobHandler) DisableDefaultJobHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract job name from path: /api/jobs/default/{name}/disable
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Job name is required", http.StatusBadRequest)
+		return
+	}
+	jobName := pathParts[3]
+
+	if err := h.schedulerService.DisableJob(jobName); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to disable job")
+		http.Error(w, fmt.Sprintf("Failed to disable job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("job_name", jobName).Msg("Job disabled")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name": jobName,
+		"enabled":  false,
+		"message":  "Job disabled successfully",
+	})
+}
+
+// UpdateDefaultJobScheduleHandler updates a default job's schedule
+// PUT /api/jobs/default/{name}/schedule
+func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract job name from path: /api/jobs/default/{name}/schedule
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Job name is required", http.StatusBadRequest)
+		return
+	}
+	jobName := pathParts[3]
+
+	// Parse request body
+	var req struct {
+		Schedule string `json:"schedule"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Schedule == "" {
+		http.Error(w, "Schedule is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate schedule format
+	if err := common.ValidateJobSchedule(req.Schedule); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid schedule: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get current job status
+	status, err := h.schedulerService.GetJobStatus(jobName)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Job not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// Re-register job with new schedule
+	// Note: This requires the scheduler to expose the job handler
+	// For now, we'll return an error indicating this functionality requires config update
+	h.logger.Warn().
+		Str("job_name", jobName).
+		Str("old_schedule", status.Schedule).
+		Str("new_schedule", req.Schedule).
+		Msg("Schedule update requested but requires config file update")
+
+	http.Error(w, "Schedule updates require configuration file modification. Please update quaero.toml and restart the service.", http.StatusNotImplemented)
 }
 
 // deriveEntityType derives entity type based on source type

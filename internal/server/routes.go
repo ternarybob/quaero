@@ -5,7 +5,10 @@
 
 package server
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // setupRoutes configures all HTTP routes
 func (s *Server) setupRoutes() *http.ServeMux {
@@ -87,6 +90,36 @@ func (s *Server) setupRoutes() *http.ServeMux {
 // handleJobRoutes routes job-related requests to the appropriate handler
 func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+
+	// GET /api/jobs/default
+	if r.Method == "GET" && path == "/api/jobs/default" {
+		s.app.JobHandler.GetDefaultJobsHandler(w, r)
+		return
+	}
+
+	// Handle default job routes
+	if strings.Contains(path, "/default/") {
+		// POST /api/jobs/default/{name}/enable
+		if r.Method == "POST" && strings.HasSuffix(path, "/enable") {
+			s.app.JobHandler.EnableDefaultJobHandler(w, r)
+			return
+		}
+
+		// POST /api/jobs/default/{name}/disable
+		if r.Method == "POST" && strings.HasSuffix(path, "/disable") {
+			s.app.JobHandler.DisableDefaultJobHandler(w, r)
+			return
+		}
+
+		// PUT /api/jobs/default/{name}/schedule
+		if r.Method == "PUT" && strings.HasSuffix(path, "/schedule") {
+			s.app.JobHandler.UpdateDefaultJobScheduleHandler(w, r)
+			return
+		}
+
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
 
 	// POST /api/jobs/create
 	if r.Method == "POST" && len(path) > len("/api/jobs/") {

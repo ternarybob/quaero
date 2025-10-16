@@ -178,28 +178,22 @@ func (j *ScanSummarizeJob) generateSummary(ctx context.Context, content string) 
 		summaryContent = content[:2000] + "..."
 	}
 
-	// Create chat request
+	// Create chat messages
 	systemPrompt := "You are a helpful assistant that generates concise summaries. Provide a 2-3 sentence summary of the following content."
 	userPrompt := fmt.Sprintf("Summarize this content:\n\n%s", summaryContent)
 
-	messages := []interfaces.ChatMessage{
+	messages := []interfaces.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 
-	req := &interfaces.ChatRequest{
-		Messages:    messages,
-		Temperature: 0.3, // Lower temperature for more focused summaries
-		MaxTokens:   150, // Limit to about 2-3 sentences
-	}
-
-	// Generate summary
-	resp, err := j.llmService.Chat(ctx, req)
+	// Generate summary using LLM
+	summary, err := j.llmService.Chat(ctx, messages)
 	if err != nil {
 		return "", fmt.Errorf("llm chat failed: %w", err)
 	}
 
-	return strings.TrimSpace(resp.Content), nil
+	return strings.TrimSpace(summary), nil
 }
 
 // extractKeywords performs frequency analysis to extract keywords

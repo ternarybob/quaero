@@ -5,25 +5,27 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
+	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
 // CrawlCollectJob implements the crawl and collect default job
 type CrawlCollectJob struct {
-	crawlerService interfaces.CrawlerService
-	sourceService  interfaces.SourceService
+	crawlerService *crawler.Service
+	sourceService  *sources.Service
 	authStorage    interfaces.AuthStorage
 	logger         arbor.ILogger
 }
 
 // NewCrawlCollectJob creates a new crawl and collect job
 func NewCrawlCollectJob(
-	crawlerService interfaces.CrawlerService,
-	sourceService interfaces.SourceService,
+	crawlerService *crawler.Service,
+	sourceService *sources.Service,
 	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *CrawlCollectJob {
@@ -99,23 +101,40 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Msg("Derived crawl parameters")
 
 	// Get auth credentials for this source
-	authSnapshot, err := j.authStorage.GetAuth(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get auth credentials: %w", err)
+	var authCreds *models.AuthCredentials
+	if source.AuthID != "" {
+		var err error
+		authCreds, err = j.authStorage.GetCredentialsByID(ctx, source.AuthID)
+		if err != nil {
+			return fmt.Errorf("failed to get auth credentials: %w", err)
+		}
 	}
 
 	// Create crawler config
-	crawlerConfig := &crawler.CrawlConfig{
-		SourceConfig:  *source,
-		SeedURLs:      seedURLs,
-		EntityType:    entityType,
-		DetailLevel:   "full",
-		AuthSnapshot:  authSnapshot,
-		RefreshSource: true,
+	crawlerConfig := crawler.CrawlConfig{
+		MaxDepth:        source.CrawlConfig.MaxDepth,
+		MaxPages:        source.CrawlConfig.MaxPages,
+		FollowLinks:     source.CrawlConfig.FollowLinks,
+		Concurrency:     source.CrawlConfig.Concurrency,
+		RateLimit:       time.Duration(source.CrawlConfig.RateLimit) * time.Millisecond,
+		IncludePatterns: source.CrawlConfig.IncludePatterns,
+		ExcludePatterns: source.CrawlConfig.ExcludePatterns,
+		DetailLevel:     "full",
+		RetryAttempts:   3,
+		RetryBackoff:    2 * time.Second,
 	}
 
-	// Start crawl
-	jobID, err := j.crawlerService.StartCrawl(crawlerConfig)
+	// Start crawl with correct signature
+	jobID, err := j.crawlerService.StartCrawl(
+		source.Type,
+		entityType,
+		seedURLs,
+		crawlerConfig,
+		source.ID,
+		true, // refreshSource
+		source,
+		authCreds,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to start crawl: %w", err)
 	}
@@ -126,13 +145,15 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Msg("Crawl job started, waiting for completion")
 
 	// Wait for job completion
-	if err := j.crawlerService.WaitForJob(ctx, jobID); err != nil {
+	results, err := j.crawlerService.WaitForJob(ctx, jobID)
+	if err != nil {
 		return fmt.Errorf("crawl job failed: %w", err)
 	}
 
 	j.logger.Info().
 		Str("job_id", jobID).
 		Str("source_id", source.ID).
+		Int("results_count", len(results)).
 		Msg("Crawl job completed successfully")
 
 	return nil

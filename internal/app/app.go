@@ -22,6 +22,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
+	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -273,14 +274,64 @@ func (a *App) initServices() error {
 
 	// 12. Initialize scheduler service
 	a.SchedulerService = scheduler.NewService(a.EventService, a.Logger)
+
+	// Register default jobs
+	jobsRegistered := 0
+
+	// Register crawl and collect job if enabled
+	if a.Config.Jobs.CrawlAndCollect.Enabled {
+		crawlCollectJob := jobs.NewCrawlCollectJob(
+			a.CrawlerService,
+			a.SourceService,
+			a.StorageManager.AuthStorage(),
+			a.Logger,
+		)
+		if err := a.SchedulerService.RegisterJob(
+			"crawl_and_collect",
+			a.Config.Jobs.CrawlAndCollect.Schedule,
+			crawlCollectJob.Execute,
+		); err != nil {
+			a.Logger.Error().Err(err).Msg("Failed to register crawl_and_collect job")
+		} else {
+			jobsRegistered++
+			a.Logger.Info().
+				Str("schedule", a.Config.Jobs.CrawlAndCollect.Schedule).
+				Msg("Registered crawl_and_collect job")
+		}
+	}
+
+	// Register scan and summarize job if enabled
+	if a.Config.Jobs.ScanAndSummarize.Enabled {
+		scanSummarizeJob := jobs.NewScanSummarizeJob(
+			a.StorageManager.DocumentStorage(),
+			a.LLMService,
+			a.Logger,
+		)
+		if err := a.SchedulerService.RegisterJob(
+			"scan_and_summarize",
+			a.Config.Jobs.ScanAndSummarize.Schedule,
+			scanSummarizeJob.Execute,
+		); err != nil {
+			a.Logger.Error().Err(err).Msg("Failed to register scan_and_summarize job")
+		} else {
+			jobsRegistered++
+			a.Logger.Info().
+				Str("schedule", a.Config.Jobs.ScanAndSummarize.Schedule).
+				Msg("Registered scan_and_summarize job")
+		}
+	}
+
 	// NOTE: Scheduler triggers event-driven processing:
 	// - EventCollectionTriggered: Transforms scraped data (issues/pages → documents)
 	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
+	// PLUS: Default jobs run on schedule (crawl_and_collect, scan_and_summarize)
 	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
 	} else {
-		a.Logger.Info().Msg("Scheduler service started (runs every 5 minutes)")
+		a.Logger.Info().
+			Int("registered_jobs", jobsRegistered).
+			Msg("Scheduler service started with default jobs")
 	}
 
 	return nil
@@ -325,7 +376,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
