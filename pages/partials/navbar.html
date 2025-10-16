@@ -1,82 +1,82 @@
 <nav class="header header-fixed bg-white q-border-bottom" role="navigation" aria-label="main navigation">
-  <div class="header-nav" id="header-nav">
-    <div class="nav-left">
-      <div class="nav-item">
-        <a href="/" class="q-brand">Quaero</a>
-      </div>
-      <div class="nav-item">
-        <button class="nav-btn" id="nav-toggle" aria-label="Toggle mobile menu">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
-      </div>
+    <div class="header-nav" id="header-nav">
+        <div class="nav-left">
+            <div class="nav-item">
+                <a href="/" class="q-brand">Quaero</a>
+            </div>
+            <div class="nav-item">
+                <button class="nav-btn" id="nav-toggle" aria-label="Toggle mobile menu">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+        </div>
+        <div class="nav-center">
+            <div class="nav-item">
+                <a href="/" class="{{if eq .Page " home"}}active{{end}}">HOME</a>
+            </div>
+            <div class="nav-item">
+                <a href="/auth" class="{{if eq .Page " auth"}}active{{end}}">AUTHENTICATION</a>
+            </div>
+            <div class="nav-item">
+                <a href="/sources" class="{{if eq .Page " sources"}}active{{end}}">SOURCES</a>
+            </div>
+            <div class="nav-item">
+                <a href="/jobs" class="{{if eq .Page " jobs"}}active{{end}}">JOBS</a>
+            </div>
+            <div class="nav-item">
+                <a href="/documents" class="{{if eq .Page " documents"}}active{{end}}">DOCUMENTS</a>
+            </div>
+            <div class="nav-item">
+                <a href="/chat" class="{{if eq .Page " chat"}}active{{end}}">CHAT</a>
+            </div>
+            <div class="nav-item">
+                <a href="/config" class="{{if or (eq .Page " settings") (eq .Page "config" )}}active{{end}}">SETTINGS</a>
+            </div>
+        </div>
+        <div class="nav-right">
+            <div class="nav-item">
+                <span class="tag tag--success status-text">ONLINE</span>
+            </div>
+        </div>
     </div>
-    <div class="nav-center">
-      <div class="nav-item">
-        <a href="/" class="{{if eq .Page "home"}}active{{end}}">HOME</a>
-      </div>
-      <div class="nav-item">
-        <a href="/auth" class="{{if eq .Page "auth"}}active{{end}}">AUTHENTICATION</a>
-      </div>
-      <div class="nav-item">
-        <a href="/sources" class="{{if eq .Page "sources"}}active{{end}}">SOURCES</a>
-      </div>
-      <div class="nav-item">
-        <a href="/jobs" class="{{if eq .Page "jobs"}}active{{end}}">JOBS</a>
-      </div>
-      <div class="nav-item">
-        <a href="/documents" class="{{if eq .Page "documents"}}active{{end}}">DOCUMENTS</a>
-      </div>
-      <div class="nav-item">
-        <a href="/chat" class="{{if eq .Page "chat"}}active{{end}}">CHAT</a>
-      </div>
-      <div class="nav-item">
-        <a href="/config" class="{{if or (eq .Page "settings") (eq .Page "config")}}active{{end}}">SETTINGS</a>
-      </div>
-    </div>
-    <div class="nav-right">
-      <div class="nav-item">
-        <span class="tag tag--success status-text">ONLINE</span>
-      </div>
-    </div>
-  </div>
 </nav>
 
 <script>
-  // Mobile menu toggle
-  document.addEventListener('DOMContentLoaded', function () {
-    const navToggle = document.getElementById('nav-toggle');
-    const headerNav = document.getElementById('header-nav');
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', function () {
+        const navToggle = document.getElementById('nav-toggle');
+        const headerNav = document.getElementById('header-nav');
 
-    if (navToggle && headerNav) {
-      navToggle.addEventListener('click', function () {
-        headerNav.classList.toggle('active');
-      });
-    }
-
-    // Navbar status indicator using shared WebSocket manager
-    function updateNavbarStatus(online) {
-      const statusText = document.querySelector('.status-text');
-      if (statusText) {
-        if (online) {
-          statusText.classList.remove('tag--danger');
-          statusText.classList.add('tag--success');
-          statusText.textContent = 'ONLINE';
-        } else {
-          statusText.classList.remove('tag--success');
-          statusText.classList.add('tag--danger');
-          statusText.textContent = 'OFFLINE';
+        if (navToggle && headerNav) {
+            navToggle.addEventListener('click', function () {
+                headerNav.classList.toggle('active');
+            });
         }
-      }
-    }
 
-    // Subscribe to connection changes
-    if (typeof WebSocketManager !== 'undefined') {
-      WebSocketManager.onConnectionChange(updateNavbarStatus);
-      console.log('[Navbar] WebSocket subscription established');
-    } else {
-      console.error('[Navbar] WebSocketManager not loaded');
-    }
-  });
+        // Navbar status indicator using shared WebSocket manager
+        function updateNavbarStatus(online) {
+            const statusText = document.querySelector('.status-text');
+            if (statusText) {
+                if (online) {
+                    statusText.classList.remove('tag--danger');
+                    statusText.classList.add('tag--success');
+                    statusText.textContent = 'ONLINE';
+                } else {
+                    statusText.classList.remove('tag--success');
+                    statusText.classList.add('tag--danger');
+                    statusText.textContent = 'OFFLINE';
+                }
+            }
+        }
+
+        // Subscribe to connection changes
+        if (typeof WebSocketManager !== 'undefined') {
+            WebSocketManager.onConnectionChange(updateNavbarStatus);
+            console.log('[Navbar] WebSocket subscription established');
+        } else {
+            console.error('[Navbar] WebSocketManager not loaded');
+        }
+    });
 </script>

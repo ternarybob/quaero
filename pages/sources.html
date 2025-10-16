@@ -20,31 +20,17 @@
             </div>
         </section>
 
-        <div class="frame">
+        <!-- Application Status -->
+        <div class="frame" x-data="appStatus">
             <div class="frame__header">
                 <div class="u-flex u-items-center u-justify-space-between">
                     <h2>Application Status</h2>
-                    <button class="btn btn--sm outline" @click="loadSources()" title="Refresh Sources">
-                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                    </button>
+                    <div class="u-flex u-items-center">
+                        <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
+                    </div>
                 </div>
             </div>
             <div class="frame__body">
-                Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content.
-                Content. Content. Content. Content. Content. Content.
-            </div>
-        </div>
-
-        <!-- Application Status -->
-        <div class="card" x-data="appStatus">
-
-            <div class="card__header">
-                <h2>Application Status</h2>
-                <div class="q-d-flex q-align-center">
-                    <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
-                </div>
-            </div>
-            <div class="card-body">
                 <p><strong>Current State:</strong> <span x-text="state"></span></p>
                 <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
                 <div x-show="Object.keys(metadata).length > 0">
@@ -57,23 +43,24 @@
         <!-- Sources Management Component (wrap card and modal in shared scope) -->
         <div x-data="sourceManagement">
             <!-- Sources List -->
-            <div class="card">
-
-                <div class="card__header">
-                    <h2>
-                        <span x-text="sources.length" class="q-text-muted q-mr-2"></span>Sources
-                    </h2>
-                    <div class="q-d-flex q-align-center q-gap-2">
-                        <button class="btn btn--sm btn-info outline" @click="openCreateModal()">
-                            <span class="icon"><i class="fas fa-plus"></i></span>
-                            <span>Add Source</span>
-                        </button>
-                        <button class="btn btn--sm outline" @click="loadSources()" title="Refresh Sources">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
+            <div class="frame">
+                <div class="frame__header">
+                    <div class="u-flex u-items-center u-justify-space-between">
+                        <h2>
+                            <span x-text="sources.length" class="q-text-muted q-mr-2"></span>Sources
+                        </h2>
+                        <div class="u-flex u-items-center u-gap-2">
+                            <button class="btn btn--sm btn-info outline" @click="openCreateModal()">
+                                <span class="icon"><i class="fas fa-plus"></i></span>
+                                <span>Add Source</span>
+                            </button>
+                            <button class="btn btn--sm outline" @click="loadSources()" title="Refresh Sources">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div class="card-body">
+                <div class="frame__body">
                     <!-- Sources Table -->
                     <table class="table">
                         <thead>
