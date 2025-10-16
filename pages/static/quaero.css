@@ -158,6 +158,14 @@ h6 {
     line-height: 1.2;
 }
 
+h1 {
+    font-size: 1.5rem;
+}
+
+h2 {
+    font-size: 1.25rem;
+}
+
 /* 7. MOBILE RESPONSIVENESS
    ========================================================================== */
 @media (max-width: 768px) {
@@ -206,33 +214,29 @@ h6 {
 
 /* 8. COMPONENT OVERRIDES
    ========================================================================== */
+div {
+    .card__header {
+        padding-left: var(--spacing-3);
+        /* padding-bottom: var(--spacing-2); */
+        margin-bottom: var(--spacing-3);
+        border-bottom: 1px solid var(--border-light);
+    }
 
-/* Card Styling */
-.card {
-    border: 1px solid var(--border-light);
-    border-radius: 0.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    padding: var(--spacing-2);
-    margin-bottom: var(--spacing-4);
-    background-color: white;
 }
 
-.card-header {
-    font-weight: 600;
-    font-size: 1.25rem;
-    margin-bottom: var(--spacing-2);
-    padding-bottom: var(--spacing-2);
-    border-bottom: 1px solid var(--border-light);
-}
+.frame {
+    .frame__header {
+        padding-bottom: var(--spacing-1);
+        /* margin-bottom: var(--spacing-2);         */
+        border-bottom: 1px solid var(--border-light);
+    }
 
-.card-body {
-    padding: var(--spacing-2) 0;
-}
+    .frame__body {
+        margin-top: var(--spacing-3);
+        margin-bottom: var(--spacing-3);
+    }
 
-.card-footer {
-    padding-top: var(--spacing-2);
-    border-top: 1px solid var(--border-light);
-    margin-top: var(--spacing-3);
+    margin-bottom: var(--spacing-3);
 }
 
 /* Table Styling */

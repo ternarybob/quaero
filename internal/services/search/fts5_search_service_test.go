@@ -67,7 +67,7 @@ func (m *mockDocumentStorage) FullTextSearch(query string, limit int) ([]*models
 
 	var results []*models.Document
 	for _, doc := range m.documents {
-		if query == "" || containsSubstring(doc.Content, searchQuery) || containsSubstring(doc.Title, searchQuery) {
+		if query == "" || containsSubstring(doc.ContentMarkdown, searchQuery) || containsSubstring(doc.Title, searchQuery) {
 			results = append(results, doc)
 		}
 	}
@@ -135,11 +135,11 @@ func TestFTS5SearchService_Search(t *testing.T) {
 	storage := &mockDocumentStorage{
 		documents: []*models.Document{
 			{
-				ID:         "doc_1",
-				SourceType: "jira",
-				SourceID:   "PROJ-123",
-				Title:      "Bug in authentication",
-				Content:    "Users cannot log in due to authentication service failure",
+				ID:              "doc_1",
+				SourceType:      "jira",
+				SourceID:        "PROJ-123",
+				Title:           "Bug in authentication",
+				ContentMarkdown: "Users cannot log in due to authentication service failure",
 				Metadata: map[string]interface{}{
 					"project": "PROJ",
 					"type":    "bug",
@@ -148,11 +148,11 @@ func TestFTS5SearchService_Search(t *testing.T) {
 				UpdatedAt: time.Now(),
 			},
 			{
-				ID:         "doc_2",
-				SourceType: "confluence",
-				SourceID:   "page_456",
-				Title:      "API Documentation",
-				Content:    "Complete guide to authentication API endpoints",
+				ID:              "doc_2",
+				SourceType:      "confluence",
+				SourceID:        "page_456",
+				Title:           "API Documentation",
+				ContentMarkdown: "Complete guide to authentication API endpoints",
 				Metadata: map[string]interface{}{
 					"space": "DOCS",
 				},
@@ -160,11 +160,11 @@ func TestFTS5SearchService_Search(t *testing.T) {
 				UpdatedAt: time.Now(),
 			},
 			{
-				ID:         "doc_3",
-				SourceType: "jira",
-				SourceID:   "PROJ-124",
-				Title:      "Feature request for dashboard",
-				Content:    "Add new widgets to dashboard interface",
+				ID:              "doc_3",
+				SourceType:      "jira",
+				SourceID:        "PROJ-124",
+				Title:           "Feature request for dashboard",
+				ContentMarkdown: "Add new widgets to dashboard interface",
 				Metadata: map[string]interface{}{
 					"project": "PROJ",
 					"type":    "feature",
@@ -255,12 +255,12 @@ func TestFTS5SearchService_GetByID(t *testing.T) {
 	storage := &mockDocumentStorage{
 		documents: []*models.Document{
 			{
-				ID:         "doc_1",
-				SourceType: "jira",
-				Title:      "Test Document",
-				Content:    "Test content",
-				CreatedAt:  time.Now(),
-				UpdatedAt:  time.Now(),
+				ID:              "doc_1",
+				SourceType:      "jira",
+				Title:           "Test Document",
+				ContentMarkdown: "Test content",
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			},
 		},
 	}
@@ -302,10 +302,10 @@ func TestFTS5SearchService_SearchByReference(t *testing.T) {
 	storage := &mockDocumentStorage{
 		documents: []*models.Document{
 			{
-				ID:         "doc_1",
-				SourceType: "jira",
-				Title:      "PROJ-123: Bug fix",
-				Content:    "Fixed issue PROJ-123 as reported by @alice",
+				ID:              "doc_1",
+				SourceType:      "jira",
+				Title:           "PROJ-123: Bug fix",
+				ContentMarkdown: "Fixed issue PROJ-123 as reported by @alice",
 				Metadata: map[string]interface{}{
 					"issue_keys": []string{"PROJ-123"},
 					"mentions":   []string{"@alice"},
@@ -314,10 +314,10 @@ func TestFTS5SearchService_SearchByReference(t *testing.T) {
 				UpdatedAt: time.Now(),
 			},
 			{
-				ID:         "doc_2",
-				SourceType: "confluence",
-				Title:      "Meeting notes",
-				Content:    "Discussed PROJ-123 and PROJ-124 with @bob",
+				ID:              "doc_2",
+				SourceType:      "confluence",
+				Title:           "Meeting notes",
+				ContentMarkdown: "Discussed PROJ-123 and PROJ-124 with @bob",
 				Metadata: map[string]interface{}{
 					"issue_keys": []string{"PROJ-123", "PROJ-124"},
 					"mentions":   []string{"@bob"},

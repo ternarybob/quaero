@@ -64,12 +64,12 @@ CREATE TABLE IF NOT EXISTS confluence_pages (
 
 -- Documents table (normalized from all sources)
 -- Supports Firecrawl-style layered crawling with detail_level
+-- PRIMARY CONTENT FORMAT: Markdown (content_markdown field)
 CREATE TABLE IF NOT EXISTS documents (
 	id TEXT PRIMARY KEY,
 	source_type TEXT NOT NULL,
 	source_id TEXT NOT NULL,
 	title TEXT NOT NULL,
-	content TEXT NOT NULL,
 	content_markdown TEXT,
 	detail_level TEXT DEFAULT 'full',
 	metadata TEXT,
@@ -146,23 +146,23 @@ CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, f
 CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents(embedding_model) WHERE embedding IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_detail_level ON documents(detail_level, source_type);
 
--- FTS5 index for full-text search
+-- FTS5 index for full-text search on markdown content
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
 	title,
-	content,
+	content_markdown,
 	content=documents,
 	content_rowid=rowid
 );
 
--- Triggers to keep FTS index in sync
+-- Triggers to keep FTS index in sync with markdown content
 CREATE TRIGGER IF NOT EXISTS documents_fts_insert AFTER INSERT ON documents BEGIN
-	INSERT INTO documents_fts(rowid, title, content)
-	VALUES (new.rowid, new.title, new.content);
+	INSERT INTO documents_fts(rowid, title, content_markdown)
+	VALUES (new.rowid, new.title, new.content_markdown);
 END;
 
 CREATE TRIGGER IF NOT EXISTS documents_fts_update AFTER UPDATE ON documents BEGIN
 	UPDATE documents_fts
-	SET title = new.title, content = new.content
+	SET title = new.title, content_markdown = new.content_markdown
 	WHERE rowid = new.rowid;
 END;
 
@@ -189,7 +189,21 @@ func (s *SQLiteDB) InitSchema() error {
 
 // runMigrations checks for and applies schema migrations for existing databases
 func (s *SQLiteDB) runMigrations() error {
-	// Check if new crawl_jobs columns exist
+	// MIGRATION 1: Add missing crawl_jobs columns
+	if err := s.migrateCrawlJobsColumns(); err != nil {
+		return err
+	}
+
+	// MIGRATION 2: Remove content column and migrate to content_markdown only
+	if err := s.migrateToMarkdownOnly(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// migrateCrawlJobsColumns adds missing columns to crawl_jobs table
+func (s *SQLiteDB) migrateCrawlJobsColumns() error {
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -250,9 +264,183 @@ func (s *SQLiteDB) runMigrations() error {
 		}
 	}
 
-	if !hasSourceConfigSnapshot || !hasAuthSnapshot || !hasRefreshSource || !hasSeedURLs {
-		s.logger.Info().Msg("Schema migrations completed successfully")
+	return nil
+}
+
+// migrateToMarkdownOnly migrates documents table from dual content/content_markdown to markdown-only
+func (s *SQLiteDB) migrateToMarkdownOnly() error {
+	// Check if content column exists in documents table
+	columnsQuery := `PRAGMA table_info(documents)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasContentColumn := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "content" {
+			hasContentColumn = true
+			break
+		}
 	}
 
+	// If content column doesn't exist, migration already completed
+	if !hasContentColumn {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Migrating documents table to markdown-only storage")
+
+	// Step 1: Copy content to content_markdown where content_markdown is NULL or empty
+	s.logger.Info().Msg("Step 1: Copying content to content_markdown where needed")
+	_, err = s.db.Exec(`
+		UPDATE documents
+		SET content_markdown = content
+		WHERE content_markdown IS NULL OR content_markdown = ''
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Drop and recreate FTS5 table with new schema
+	s.logger.Info().Msg("Step 2: Recreating FTS5 table with content_markdown")
+	_, err = s.db.Exec(`DROP TABLE IF EXISTS documents_fts`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`
+		CREATE VIRTUAL TABLE documents_fts USING fts5(
+			title,
+			content_markdown,
+			content=documents,
+			content_rowid=rowid
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Create new documents table without content column
+	s.logger.Info().Msg("Step 3: Creating new documents table without content column")
+	_, err = s.db.Exec(`
+		CREATE TABLE documents_new (
+			id TEXT PRIMARY KEY,
+			source_type TEXT NOT NULL,
+			source_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			content_markdown TEXT,
+			detail_level TEXT DEFAULT 'full',
+			metadata TEXT,
+			url TEXT,
+			embedding BLOB,
+			embedding_model TEXT,
+			last_synced INTEGER,
+			source_version TEXT,
+			force_sync_pending INTEGER DEFAULT 0,
+			force_embed_pending INTEGER DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 4: Copy all data to new table (excluding content column)
+	s.logger.Info().Msg("Step 4: Copying data to new table")
+	_, err = s.db.Exec(`
+		INSERT INTO documents_new
+		SELECT
+			id, source_type, source_id, title, content_markdown, detail_level,
+			metadata, url, embedding, embedding_model, last_synced, source_version,
+			force_sync_pending, force_embed_pending, created_at, updated_at
+		FROM documents
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 5: Drop old table and rename new table
+	s.logger.Info().Msg("Step 5: Replacing old table with new table")
+	_, err = s.db.Exec(`DROP TABLE documents`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`ALTER TABLE documents_new RENAME TO documents`)
+	if err != nil {
+		return err
+	}
+
+	// Step 6: Recreate indexes
+	s.logger.Info().Msg("Step 6: Recreating indexes")
+	_, err = s.db.Exec(`CREATE UNIQUE INDEX idx_documents_source ON documents(source_type, source_id)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX idx_documents_sync ON documents(force_sync_pending, force_embed_pending)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX idx_documents_embedding ON documents(embedding_model) WHERE embedding IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX idx_documents_detail_level ON documents(detail_level, source_type)`)
+	if err != nil {
+		return err
+	}
+
+	// Step 7: Recreate FTS5 triggers
+	s.logger.Info().Msg("Step 7: Recreating FTS5 triggers")
+	_, err = s.db.Exec(`
+		CREATE TRIGGER documents_fts_insert AFTER INSERT ON documents BEGIN
+			INSERT INTO documents_fts(rowid, title, content_markdown)
+			VALUES (new.rowid, new.title, new.content_markdown);
+		END
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`
+		CREATE TRIGGER documents_fts_update AFTER UPDATE ON documents BEGIN
+			UPDATE documents_fts
+			SET title = new.title, content_markdown = new.content_markdown
+			WHERE rowid = new.rowid;
+		END
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`
+		CREATE TRIGGER documents_fts_delete AFTER DELETE ON documents BEGIN
+			DELETE FROM documents_fts WHERE rowid = old.rowid;
+		END
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 8: Rebuild FTS5 index with existing data
+	s.logger.Info().Msg("Step 8: Rebuilding FTS5 index")
+	_, err = s.db.Exec(`INSERT INTO documents_fts(documents_fts) VALUES('rebuild')`)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration to markdown-only storage completed successfully")
 	return nil
 }

@@ -13,21 +13,24 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Configuration</h1>
-            <p class="subtitle">Application Configuration and System Information</p>
-        </div>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Configuration</h1>
+                <p class="subtitle">Application Configuration and System Information</p>
+            </div>
+        </section>
 
         <!-- Service Status Cards -->
         <div class="card" x-data="configPage()">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Service Status</h3>
+
+            <div class="card__header">
+                <h2>Service Status</h2>
                 <div class="q-d-flex q-align-center">
                     <span :class="'tag ' + (isOnline ? 'tag--success' : 'tag--danger')" id="service-status">
                         <span x-text="isOnline ? 'Online' : 'Offline'"></span>
                     </span>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
                 <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
@@ -37,9 +40,9 @@
         </div>
 
         <div class="card" x-data="configPage()">
-            <header class="card-header">
-                <h3>Configuration Details</h3>
-            </header>
+            <div class="card__header">
+                <h2>Configuration Details</h2>
+            </div>
             <div class="card-body">
                 <pre id="config-display" class="q-bg-light q-p-3 q-rounded q-overflow-auto q-max-h-300"><code x-text="formatConfig(config)"></code></pre>
             </div>

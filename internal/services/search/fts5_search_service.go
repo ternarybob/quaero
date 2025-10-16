@@ -250,8 +250,8 @@ func containsReference(doc *models.Document, reference string) bool {
 		return true
 	}
 
-	// Check in content
-	if strings.Contains(doc.Content, reference) {
+	// Check in content markdown
+	if strings.Contains(doc.ContentMarkdown, reference) {
 		return true
 	}
 

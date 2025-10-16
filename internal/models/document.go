@@ -13,16 +13,16 @@ const (
 )
 
 // Document represents a normalized document from any source
+// PRIMARY CONTENT FORMAT: Markdown (ContentMarkdown field)
 type Document struct {
 	// Identity
 	ID         string `json:"id"`          // doc_{uuid}
 	SourceType string `json:"source_type"` // jira, confluence, github
 	SourceID   string `json:"source_id"`   // Original ID from source
 
-	// Content
+	// Content (markdown-first)
 	Title           string `json:"title"`
-	Content         string `json:"content"`          // Plain text
-	ContentMarkdown string `json:"content_markdown"` // Markdown format
+	ContentMarkdown string `json:"content_markdown"` // PRIMARY CONTENT: Markdown format
 	DetailLevel     string `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
 
 	// NOTE: Phase 5 - Embedding fields removed (using FTS5 search only)

@@ -112,7 +112,7 @@ func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) erro
 	}
 
 	// Check if content changed (for logging only)
-	contentChanged := existing.Content != doc.Content || existing.Title != doc.Title
+	contentChanged := existing.ContentMarkdown != doc.ContentMarkdown || existing.Title != doc.Title
 
 	// Update in storage without re-embedding
 	if err := s.storage.UpdateDocument(doc); err != nil {

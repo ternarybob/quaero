@@ -29,12 +29,12 @@ func NewExtractor(logger arbor.ILogger) *Extractor {
 	}
 }
 
-// ExtractMetadata extracts structured metadata from a document's title and content
+// ExtractMetadata extracts structured metadata from a document's title and content markdown
 func (e *Extractor) ExtractMetadata(doc *models.Document) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
 
-	// Combine title and content for extraction
-	combinedText := doc.Title + " " + doc.Content
+	// Combine title and content markdown for extraction
+	combinedText := doc.Title + " " + doc.ContentMarkdown
 
 	// Extract Jira issue keys
 	if issueKeys := e.extractUniqueMatches(e.jiraIssuePattern, combinedText); len(issueKeys) > 0 {
@@ -47,12 +47,12 @@ func (e *Extractor) ExtractMetadata(doc *models.Document) (map[string]interface{
 	}
 
 	// Extract PR references
-	if prRefs := e.extractUniqueMatches(e.prRefPattern, doc.Content); len(prRefs) > 0 {
+	if prRefs := e.extractUniqueMatches(e.prRefPattern, doc.ContentMarkdown); len(prRefs) > 0 {
 		metadata["pr_refs"] = prRefs
 	}
 
 	// Extract Confluence page references
-	if pageRefs := e.extractUniqueMatches(e.confluencePagePattern, doc.Content); len(pageRefs) > 0 {
+	if pageRefs := e.extractUniqueMatches(e.confluencePagePattern, doc.ContentMarkdown); len(pageRefs) > 0 {
 		metadata["confluence_pages"] = pageRefs
 	}
 

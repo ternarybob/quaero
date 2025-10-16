@@ -124,14 +124,14 @@ Questions you can ask about this data:
 	// Create document with well-known ID
 	lastSynced := now
 	summaryDoc := &models.Document{
-		ID:         "corpus-summary-metadata",
-		SourceID:   "system",
-		SourceType: "system",
-		Title:      "Quaero Corpus Summary - Document Statistics and Metadata",
-		Content:    content,
-		LastSynced: &lastSynced,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:              "corpus-summary-metadata",
+		SourceID:        "system",
+		SourceType:      "system",
+		Title:           "Quaero Corpus Summary - Document Statistics and Metadata",
+		ContentMarkdown: content,
+		LastSynced:      &lastSynced,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 		// NOTE: Phase 5 - Embedding removal: no longer using embeddings
 	}
 

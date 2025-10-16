@@ -13,20 +13,20 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Authentication Management</h1>
-            <p class="subtitle">Manage authentication credentials for data sources</p>
-        </div>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Authentication Management</h1>
+                <p class="subtitle">Manage authentication credentials for data sources</p>
+            </div>
+        </section>
 
         <!-- Main Content -->
 
         <!-- Instructions Card -->
         <div class="card">
-            <header class="card-header">
-                <h3 class="q-d-flex q-align-center q-gap-2">
-                    <span>How to Add Authentication</span>
-                </h3>
-            </header>
+            <div class="card__header">
+                <h2>How to Add Authentication</h2>
+            </div>
             <div class="card-body">
                 <ol>
                     <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
@@ -44,16 +44,17 @@
 
         <!-- Authentication List -->
         <div class="card" x-data="authPage()">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h4 class="q-d-flex q-align-center q-gap-2">
+
+            <div class="card__header">
+                <h2>
                     <span>Stored Authentications</span>
-                </h4>
+                </h2>
                 <div class="q-d-flex q-align-center">
                     <button class="btn outline btn--sm" @click="loadAuthentications" title="Refresh Authentications">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <!-- Loading State -->
                 <div x-show="loading" class="q-text-center q-p-5">
@@ -116,9 +117,9 @@
 
         <!-- Associated Sources Information -->
         <div class="card">
-            <header class="card-header">
-                <h3>Using Authentication in Sources</h3>
-            </header>
+            <div class="card__header">
+                <h2>Using Authentication in Sources</h2>
+            </div>
             <div class="card-body">
                 <p>
                     Once you have captured authentication for a site, you can create sources that use these credentials:

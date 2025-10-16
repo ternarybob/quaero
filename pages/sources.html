@@ -13,19 +13,37 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Source Management</h1>
-            <p class="subtitle">Configure and manage data sources for collection and indexing</p>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Source Management</h1>
+                <p class="subtitle">Configure and manage data sources for collection and indexing</p>
+            </div>
+        </section>
+
+        <div class="frame">
+            <div class="frame__header">
+                <div class="u-flex u-items-center u-justify-space-between">
+                    <h2>Application Status</h2>
+                    <button class="btn btn--sm outline" @click="loadSources()" title="Refresh Sources">
+                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                    </button>
+                </div>
+            </div>
+            <div class="frame__body">
+                Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content. Content.
+                Content. Content. Content. Content. Content. Content.
+            </div>
         </div>
 
         <!-- Application Status -->
         <div class="card" x-data="appStatus">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Application Status</h3>
+
+            <div class="card__header">
+                <h2>Application Status</h2>
                 <div class="q-d-flex q-align-center">
                     <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <p><strong>Current State:</strong> <span x-text="state"></span></p>
                 <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
@@ -40,10 +58,11 @@
         <div x-data="sourceManagement">
             <!-- Sources List -->
             <div class="card">
-                <header class="card-header q-d-flex q-align-center q-justify-between">
-                    <h3>
+
+                <div class="card__header">
+                    <h2>
                         <span x-text="sources.length" class="q-text-muted q-mr-2"></span>Sources
-                    </h3>
+                    </h2>
                     <div class="q-d-flex q-align-center q-gap-2">
                         <button class="btn btn--sm btn-info outline" @click="openCreateModal()">
                             <span class="icon"><i class="fas fa-plus"></i></span>
@@ -53,7 +72,7 @@
                             <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                         </button>
                     </div>
-                </header>
+                </div>
                 <div class="card-body">
                     <!-- Sources Table -->
                     <table class="table">

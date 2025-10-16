@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/robfig/cron/v3"
 )
 
 // Config represents the application configuration
@@ -18,6 +20,7 @@ type Config struct {
 	Embeddings EmbeddingsConfig `toml:"embeddings"`
 	Processing ProcessingConfig `toml:"processing"`
 	Logging    LoggingConfig    `toml:"logging"`
+	Jobs       JobsConfig       `toml:"jobs"`
 }
 
 type ServerConfig struct {
@@ -132,6 +135,19 @@ type LoggingConfig struct {
 	Output []string `toml:"output"`
 }
 
+// JobsConfig contains configuration for default scheduled jobs
+type JobsConfig struct {
+	CrawlAndCollect  JobConfig `toml:"crawl_and_collect"`
+	ScanAndSummarize JobConfig `toml:"scan_and_summarize"`
+}
+
+// JobConfig defines configuration for a single job
+type JobConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	Schedule    string `toml:"schedule"`
+	Description string `toml:"description"`
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -201,6 +217,18 @@ func NewDefaultConfig() *Config {
 			Level:  "info",                     // Info level for production (debug|info|warn|error)
 			Format: "text",                     // Human-readable text format (text|json)
 			Output: []string{"stdout", "file"}, // Log to both console and file
+		},
+		Jobs: JobsConfig{
+			CrawlAndCollect: JobConfig{
+				Enabled:     true,
+				Schedule:    "*/5 * * * *", // Every 5 minutes
+				Description: "Crawl and collect website data, store as markdown",
+			},
+			ScanAndSummarize: JobConfig{
+				Enabled:     true,
+				Schedule:    "*/10 * * * *", // Every 10 minutes
+				Description: "Scan markdown documents and generate summaries with metadata",
+			},
 		},
 	}
 }
@@ -372,4 +400,39 @@ func trimSpace(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+// ValidateJobSchedule validates a cron schedule expression and ensures minimum 5-minute interval
+func ValidateJobSchedule(schedule string) error {
+	// Parse the cron expression
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	_, err := parser.Parse(schedule)
+	if err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+
+	// Check for minimum 5-minute interval
+	// Validate minute field (first field in standard cron)
+	parts := strings.Fields(schedule)
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid cron format: expected 5 fields")
+	}
+
+	minuteField := parts[0]
+
+	// Check for patterns that violate 5-minute minimum
+	if minuteField == "*" {
+		return fmt.Errorf("schedule must have minimum 5-minute interval (every minute is not allowed)")
+	}
+
+	// Check for */n patterns where n < 5
+	if strings.HasPrefix(minuteField, "*/") {
+		intervalStr := strings.TrimPrefix(minuteField, "*/")
+		interval, err := strconv.Atoi(intervalStr)
+		if err == nil && interval < 5 {
+			return fmt.Errorf("schedule interval must be at least 5 minutes, got %d", interval)
+		}
+	}
+
+	return nil
 }

@@ -13,15 +13,18 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Job Management</h1>
-            <p class="subtitle">Monitor and manage crawler jobs for Jira and Confluence data collection</p>
-        </div>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Job Management</h1>
+                <p class="subtitle">Monitor and manage crawler jobs for Jira and Confluence data collection</p>
+            </div>
+        </section>
 
         <!-- Job Statistics -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Job Statistics</h3>
+
+            <div class="card__header">
+                <h2>Job Statistics</h2>
                 <div class="q-d-flex q-align-center q-gap-2">
                     <button class="btn btn--sm btn-info outline" onclick="showCreateJobModal()">
                         <span class="icon"><i class="fa-solid fa-plus"></i></span>
@@ -31,7 +34,7 @@
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <div class="q-d-flex q-justify-between q-flex-wrap q-gap-3">
                     <div class="q-text-center">
@@ -64,16 +67,17 @@
 
         <!-- Jobs Table -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>
+
+            <div class="card__header">
+                <h2>
                     <span id="job-count" class="q-text-muted q-mr-2">0</span>Jobs
-                </h3>
+                </h2>
                 <div class="q-d-flex q-align-center">
                     <button class="btn btn--sm outline" onclick="loadJobs()">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <!-- Filter Controls -->
                 <div class="q-d-flex q-gap-2 q-mb-4 q-flex-wrap">
@@ -155,12 +159,13 @@
 
         <!-- Job Detail -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Job Detail</h3>
+
+            <div class="card__header">
+                <h2>Job Detail</h2>
                 <div class="q-d-flex q-align-center">
                     <span id="selected-job-id" class="tag tag--info"></span>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <pre id="job-detail-json"><code class="language-json"></code></pre>
             </div>
@@ -179,7 +184,7 @@
         <div class="modal-content">
             <div class="modal-card">
                 <div class="modal-header">
-                    <h3>Create New Job</h3>
+                    <h1>Create New Job</h1>
                     <button class="btn btn--sm outline" onclick="closeCreateJobModal()">
                         <span class="icon"><i class="fa-solid fa-times"></i></span>
                     </button>

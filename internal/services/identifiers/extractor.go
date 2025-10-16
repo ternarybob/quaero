@@ -83,8 +83,8 @@ func (e *Extractor) ExtractFromDocuments(docs []*models.Document) []string {
 			allIdentifiers = append(allIdentifiers, e.ExtractFromText(doc.Title)...)
 		}
 
-		// 3. Extract from content
-		allIdentifiers = append(allIdentifiers, e.ExtractFromText(doc.Content)...)
+		// 3. Extract from content markdown
+		allIdentifiers = append(allIdentifiers, e.ExtractFromText(doc.ContentMarkdown)...)
 	}
 
 	return unique(allIdentifiers)

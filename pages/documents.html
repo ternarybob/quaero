@@ -13,21 +13,24 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Document Management</h1>
-            <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
-        </div>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Document Management</h1>
+                <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
+            </div>
+        </section>
 
         <!-- Document Statistics -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Document Statistics</h3>
+
+            <div class="card__header">
+                <h2>Document Statistics</h2>
                 <div class="q-d-flex q-align-center">
                     <button class="btn btn--sm outline" onclick="loadStats()">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <div class="q-d-flex q-justify-between q-flex-wrap q-gap-3">
                     <div class="q-text-center">
@@ -52,11 +55,9 @@
 
         <!-- Documents Table -->
         <div class="card">
-            <header class="card-header">
-                <h3>
-                    <span id="document-count" class="q-text-muted q-mr-2">0</span>Documents
-                </h3>
-            </header>
+            <div class="card__header">
+                <h2><span id="document-count" class="q-text-muted q-mr-2">0</span>Documents</h2>
+            </div>
             <div class="card-body">
                 <!-- Filter Controls -->
                 <div class="q-d-flex q-gap-2 q-mb-4 q-flex-wrap">
@@ -127,12 +128,13 @@
 
         <!-- Document Detail -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>Document Detail</h3>
+
+            <div class="card__header">
+                <h2>Document Detail</h2>
                 <div class="q-d-flex q-align-center">
                     <span id="selected-document-id" class="tag tag--info"></span>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <pre id="document-detail-json"><code class="language-json"></code></pre>
             </div>

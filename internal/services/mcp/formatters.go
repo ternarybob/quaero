@@ -29,11 +29,7 @@ func formatDocument(doc *models.Document) string {
 	}
 
 	b.WriteString("\n## Content\n\n")
-	if doc.ContentMarkdown != "" {
-		b.WriteString(doc.ContentMarkdown)
-	} else {
-		b.WriteString(doc.Content)
-	}
+	b.WriteString(doc.ContentMarkdown)
 
 	return b.String()
 }
@@ -57,7 +53,7 @@ func formatDocumentList(docs []*models.Document) string {
 		b.WriteString(fmt.Sprintf("- **Updated:** %s\n", doc.UpdatedAt.Format("2006-01-02")))
 
 		// Preview of content (first 200 chars)
-		content := doc.Content
+		content := doc.ContentMarkdown
 		if len(content) > 200 {
 			content = content[:200] + "..."
 		}
@@ -81,15 +77,15 @@ func formatStats(stats *models.DocumentStats) string {
 func formatDocumentJSON(doc *models.Document) string {
 	// Create a simplified version without embedding data
 	simplified := map[string]interface{}{
-		"id":          doc.ID,
-		"source_type": doc.SourceType,
-		"source_id":   doc.SourceID,
-		"title":       doc.Title,
-		"content":     doc.Content,
-		"url":         doc.URL,
-		"created_at":  doc.CreatedAt,
-		"updated_at":  doc.UpdatedAt,
-		"metadata":    doc.Metadata,
+		"id":               doc.ID,
+		"source_type":      doc.SourceType,
+		"source_id":        doc.SourceID,
+		"title":            doc.Title,
+		"content_markdown": doc.ContentMarkdown,
+		"url":              doc.URL,
+		"created_at":       doc.CreatedAt,
+		"updated_at":       doc.UpdatedAt,
+		"metadata":         doc.Metadata,
 	}
 
 	data, err := json.MarshalIndent(simplified, "", "  ")

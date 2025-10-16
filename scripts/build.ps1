@@ -319,8 +319,9 @@ if ($Web) {
     }
     
     # Start in a new terminal window
+    # Use /c to close window when application exits
     $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
-    Start-Process cmd -ArgumentList "/k", $startCommand
+    Start-Process cmd -ArgumentList "/c", $startCommand
     
     Write-Host "`n==== Web Deployment Summary ====" -ForegroundColor Cyan
     Write-Host "Status: SUCCESS" -ForegroundColor Green
@@ -659,11 +660,10 @@ if ($Run) {
     $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
 
     # Start in a new terminal window
-    # Use /k to KEEP window open so Ctrl+C signal propagates correctly
-    # This allows proper graceful shutdown via Ctrl+C
+    # Use /c to close window when application exits
     $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
 
-    Start-Process cmd -ArgumentList "/k", $startCommand
+    Start-Process cmd -ArgumentList "/c", $startCommand
 
     Write-Host "Application started in new terminal window" -ForegroundColor Green
     Write-Host "Command: quaero.exe -c quaero.toml" -ForegroundColor Cyan

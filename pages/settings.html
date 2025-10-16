@@ -13,21 +13,24 @@
     <div class="content">
 
         <!-- Heading Section -->
-        <div class="q-mt-5 q-mb-5">
-            <h1 class="title">Settings</h1>
-            <p class="subtitle">System configuration and operational controls</p>
-        </div>
+        <section>
+            <div class="pl-2">
+                <h1 class="title">Settings</h1>
+                <p class="subtitle">System configuration and operational controls</p>
+            </div>
+        </section>
 
         <!-- Full Configuration Table -->
         <div class="card">
-            <header class="card-header q-d-flex q-align-center q-justify-between">
-                <h3>System Configuration (Read-Only)</h3>
+
+            <div class="card__header">
+                <h2>System Configuration (Read-Only)</h2>
                 <div class="q-d-flex q-align-center">
                     <button class="btn btn--sm outline" onclick="loadConfig()">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
-            </header>
+            </div>
             <div class="card-body">
                 <table class="table">
                     <thead>
@@ -50,12 +53,9 @@
 
         <!-- Danger Zone -->
         <div class="card">
-            <header class="card-header">
-                <h3 class="q-text-danger q-d-flex q-align-center q-gap-2">
-                    <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
-                    <span>Danger Zone</span>
-                </h3>
-            </header>
+            <div class="card__header">
+                <h2>Danger Zone</h2>
+            </div>
             <div class="card-body">
                 <div class="q-d-flex q-align-center q-justify-between q-gap-3">
                     <div>
