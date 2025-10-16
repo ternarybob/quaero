@@ -1,473 +1,922 @@
-/*
----------------------------------------------------
-Optimized Soft Technical Palette Overrides (quaero.css)
-Loaded after bulma.min.css to override defaults.
----------------------------------------------------
-*/
+/* ============================================================================
+   Quaero Custom Styles - Cirrus UI Overrides and Brand Styling
+   ============================================================================ */
 
-/* Import Open Sans Font */
-@import url('https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,700italic,400,300,700&display=swap');
-
-/* ===============================================
-   1. CSS Variables (Color & Typography)
-   =============================================== */
+/* 1. ROOT VARIABLES
+   ========================================================================== */
 :root {
-    /* Base Typography & Background */
-    --bulma-body-background-color: #F8F8F8;
-    --bulma-text: #2D3748;
-    /* Dark Slate Gray */
-    --bulma-title-color: #1A202C;
-    /* Very Dark Gray */
-    --bulma-subtitle-color: #4A5568;
-    /* Slightly Lighter Dark Gray */
-    --bulma-border: #E2E8F0;
-    /* Light Gray/Blue Border */
-    --bulma-body-color: var(--bulma-text);
-    --bulma-text-title-l: 10%;
-    /* Override Bulma's title lightness calculation */
+    /* Global Font Size - Reduced from default 16px to 15px */
+    font-size: 15px;
 
-    /* Dark/Light Tones */
-    --bulma-dark: #3D4A50;
-    /* Deep Blue/Gray for contrast */
-    --bulma-light: #F0F4F7;
-    /* Subtle card/hover background color */
+    /* Brand Colors */
+    --color-primary: #0757ba;
+    --color-success: #1f883d;
+    --color-danger: #d1242f;
+    --color-warning: #ffdd57;
+    --color-info: #0757ba;
 
-    /* Primary/Accent Colors (Muted Professional Tones) */
-    --bulma-primary: #5C7F9B;
-    --bulma-primary-h: 210;
-    --bulma-primary-s: 29%;
-    --bulma-primary-l: 50%;
-    --bulma-primary-invert: #FFFFFF;
-    --bulma-link: var(--bulma-primary);
+    /* Border Colors */
+    --border-light: #e0e0e0;
+    --border-medium: #d0d0d0;
 
-    --bulma-info: #79A6B2;
-    --bulma-info-h: 196;
-    --bulma-info-s: 23%;
-    --bulma-info-l: 65%;
-    --bulma-info-invert: #FFFFFF;
+    /* Spacing Scale (rem) */
+    --spacing-1: 0.25rem;
+    /* 4px */
+    --spacing-2: 0.5rem;
+    /* 8px */
+    --spacing-3: 1rem;
+    /* 16px */
+    --spacing-4: 1.5rem;
+    /* 24px */
+    --spacing-5: 2rem;
+    /* 32px */
+    --spacing-6: 3rem;
+    /* 48px */
 
-    --bulma-success: #8EBCA1;
-    --bulma-success-h: 147;
-    --bulma-success-s: 23%;
-    --bulma-success-l: 64%;
-    --bulma-success-invert: #FFFFFF;
-
-    --bulma-warning: #DDBA8B;
-    --bulma-warning-h: 37;
-    --bulma-warning-s: 50%;
-    --bulma-warning-l: 70%;
-    --bulma-warning-invert: #FFFFFF;
-
-    --bulma-danger: #DC2626;
-    --bulma-danger-h: 0;
-    --bulma-danger-s: 73%;
-    --bulma-danger-l: 50%;
-    --bulma-danger-invert: #FFFFFF;
-
-    /* Global Font Application */
-    font-family: 'Open Sans', sans-serif !important;
-
-    --quaero-dark-title: #1A202C;
-    /* Very Dark Gray */
-    --quaero-dark-text: #2D3748;
-    /* Dark Slate Gray */
+    /* Fixed Navbar Height */
+    --navbar-height: 3.5rem;
+    /* 56px */
 }
 
-/* ===============================================
-   2. Base & Text Overrides
-   =============================================== */
-
-/* Ensure Open Sans and dark text is used everywhere */
-body, html {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-}
-    font-family: 'Open Sans', sans-serif !important;
-    color: var(--bulma-text) !important;
-    background-color: #f5f5f5 !important;
-    /* Specific body background from layout block */
+/* 2. BODY & LAYOUT
+   ========================================================================== */
+body {
+    padding-top: var(--navbar-height);
 }
 
-/* Targets the main title (h1.title) explicitly inside the Bulma container */
-.container h1.title {
-    /* Forces the very dark color: #1A202C */
-    color: var(--quaero-dark-title) !important;
+/* Content container - centered max-width layout */
+.content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 var(--spacing-3);
 }
 
-/* Targets the subtitle (p.subtitle) explicitly inside the Bulma container */
-.container p.subtitle {
-    /* Forces the correct dark text color for subtitles: #2D3748 */
-    color: var(--quaero-dark-text) !important;
+/* 3. NAVBAR OVERRIDES
+   ========================================================================== */
+.header {
+    border-bottom-color: var(--border-light);
 }
 
-/* Ensure the generic .title selector doesn't win a future battle if nested */
-.container .title {
-    color: var(--quaero-title-color) !important;
+/* Brand Link Styling */
+.q-brand {
+    font-weight: 600;
+    color: var(--color-primary);
 }
 
-/* --- FIX: Enforce dark color on the main heading section --- */
-.section .container .title,
-.section .container .subtitle {
-    color: hsl(var(--bulma-dark-h), var(--bulma-dark-s), var(--bulma-dark-l)) !important;
+/* Navigation Link Styling */
+.header .nav-item a {
+    transition: color 0.2s ease, border-bottom 0.2s ease;
 }
 
-.section {
-    padding: 0.75rem 1.5rem;
-    /* Reduced top/bottom padding to 0.75rem */
-    background-color: #f5f5f5 !important;
-    flex: 1;
+.header .nav-item a:hover {
+    color: var(--color-primary);
 }
 
-/* Enforce dark color for all common text elements */
-p,
-span,
-li,
-td,
-th,
-a,
-label,
-.content,
-.text,
-.subtitle {
-    color: var(--bulma-text) !important;
+/* Active Navigation Link */
+.header .nav-item a.active {
+    color: var(--color-primary);
+    border-bottom: 2px solid var(--color-primary);
+    font-weight: 600;
 }
 
-/* Force dark title colors (h1-h6) */
+/* Mobile Hamburger Button - Hidden by default on desktop */
+.nav-btn {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+}
+
+.nav-btn span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background-color: var(--color-primary);
+    margin: 5px 0;
+    transition: all 0.3s ease;
+}
+
+/* Status Indicator Tags */
+.tag.tag--success {
+    background-color: var(--color-success);
+    color: white;
+}
+
+.tag.tag--danger {
+    background-color: var(--color-danger);
+    color: white;
+}
+
+/* 4. FOOTER OVERRIDES
+   ========================================================================== */
+footer {
+    border-top-color: var(--border-light);
+    color: #666;
+    font-size: 0.875rem;
+}
+
+/* 5. BORDER UTILITIES
+   ========================================================================== */
+.q-border-bottom {
+    border-bottom: 1px solid var(--border-light);
+}
+
+.q-border-top {
+    border-top: 1px solid var(--border-light);
+}
+
+.q-border-left {
+    border-left: 1px solid var(--border-light);
+}
+
+.q-border-right {
+    border-right: 1px solid var(--border-light);
+}
+
+.q-border {
+    border: 1px solid var(--border-light);
+}
+
+/* 6. TYPOGRAPHY
+   ========================================================================== */
+.q-text-bold {
+    font-weight: 600;
+}
+
+.q-text-bolder {
+    font-weight: 700;
+}
+
 h1,
 h2,
 h3,
 h4,
 h5,
-h6,
-.title,
-.subtitle {
-    font-family: 'Open Sans', sans-serif !important;
-    color: var(--bulma-title-color) !important;
-}
-
-/* Strong text should be dark and bold/semibold */
-strong,
-b,
-.has-text-weight-semibold,
-.has-text-weight-bold {
-    color: var(--bulma-text) !important;
+h6 {
     font-weight: 600;
+    line-height: 1.2;
 }
 
-/* Override Bulma's grey text classes to use main text color for readability */
-.has-text-grey,
-.has-text-grey-light,
-.has-text-grey-lighter,
-small.has-text-grey,
-.has-text-grey-dark {
-    color: var(--bulma-text) !important;
+/* 7. MOBILE RESPONSIVENESS
+   ========================================================================== */
+@media (max-width: 768px) {
+
+    /* Show hamburger button on mobile */
+    .nav-btn {
+        display: block;
+    }
+
+    /* Hide navigation items by default on mobile */
+    .header-nav .nav-center,
+    .header-nav .nav-right {
+        display: none;
+        width: 100%;
+    }
+
+    /* Show navigation when active */
+    .header-nav.active .nav-center,
+    .header-nav.active .nav-right {
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Stack navigation items vertically on mobile */
+    .header-nav.active {
+        flex-direction: column;
+    }
+
+    .header-nav .nav-center {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    /* Mobile navigation item styling */
+    .header-nav .nav-item {
+        width: 100%;
+        border-bottom: 1px solid var(--border-light);
+    }
+
+    .header-nav .nav-item a {
+        display: block;
+        width: 100%;
+        padding: 1rem;
+    }
 }
 
-/* Non-button/navbar links: dark text with primary color underline on hover */
-a:not(.button):not(.navbar-item):not(.navbar-link) {
-    color: var(--bulma-text) !important;
-    text-decoration: none;
-}
+/* 8. COMPONENT OVERRIDES
+   ========================================================================== */
 
-a:not(.button):not(.navbar-item):not(.navbar-link):hover {
-    text-decoration: underline;
-    text-decoration-color: var(--bulma-primary);
-    text-decoration-thickness: 2px;
-}
-
-/* ===============================================
-   3. Box/Card/Notification Styles
-   =============================================== */
-
-/* Soft shadows and slight rounding for containers */
-.box,
-.card,
-.notification,
-.modal-card {
+/* Card Styling */
+.card {
+    border: 1px solid var(--border-light);
     border-radius: 0.5rem;
-    background-color: #FFFFFF !important;
-    /* Force white background for main components */
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: var(--spacing-2);
+    margin-bottom: var(--spacing-4);
+    background-color: white;
 }
 
-/* Card Content Text */
-.card .title,
-.card .subtitle,
-.card .content,
-.card-content {
-    color: var(--bulma-text) !important;
-    background-color: #ffffff !important;
-}
-
-/* Card Headers */
 .card-header {
-    background-color: #ffffff !important;
-    border-bottom: 1px solid #dbdbdb !important;
-    color: #363636 !important;
-}
-
-/* Light Notifications (e.g., is-light, is-primary-light) */
-.notification.is-light,
-.notification.is-primary.is-light,
-.notification.is-info.is-light,
-.notification.is-success.is-light,
-.notification.is-warning.is-light,
-.notification.is-danger.is-light {
-    background-color: var(--bulma-body-background-color) !important;
-    /* Very subtle background */
-    color: var(--bulma-dark) !important;
-    /* Dark text for contrast */
-}
-
-/* Colored Notifications */
-.notification:not(.is-light) {
-    color: var(--bulma-dark);
-    /* Dark text for contrast on soft color fill */
-}
-
-
-/* ===============================================
-   4. Button Overrides
-   =============================================== */
-.button {
-    border-radius: 0 !important;
-    /* Forces buttons to be square */
     font-weight: 600;
+    font-size: 1.25rem;
+    margin-bottom: var(--spacing-2);
+    padding-bottom: var(--spacing-2);
+    border-bottom: 1px solid var(--border-light);
 }
 
-/* Make primary, info, etc. buttons outlined by default */
-.button.is-primary,
-.button.is-link,
-.button.is-info,
-.button.is-success,
-.button.is-warning,
-.button.is-danger {
-    background-color: transparent !important;
-    border-style: solid;
-    /* Styles for these are set below using color variables */
+.card-body {
+    padding: var(--spacing-2) 0;
 }
 
-/* Explicitly set color/border for outlined buttons */
-.button.is-primary {
-    color: var(--bulma-primary) !important;
-    border-color: var(--bulma-primary) !important;
+.card-footer {
+    padding-top: var(--spacing-2);
+    border-top: 1px solid var(--border-light);
+    margin-top: var(--spacing-3);
 }
 
-.button.is-link {
-    color: var(--bulma-link) !important;
-    border-color: var(--bulma-link) !important;
-}
-
-.button.is-info {
-    color: var(--bulma-info) !important;
-    border-color: var(--bulma-info) !important;
-}
-
-.button.is-success {
-    color: var(--bulma-success) !important;
-    border-color: var(--bulma-success) !important;
-}
-
-.button.is-warning {
-    color: var(--bulma-warning) !important;
-    border-color: var(--bulma-warning) !important;
-}
-
-.button.is-danger {
-    color: var(--bulma-danger) !important;
-    border-color: var(--bulma-danger) !important;
-}
-
-/* Add soft hover effects for outlined buttons */
-.button.is-primary:hover,
-.button.is-link:hover,
-.button.is-info:hover,
-.button.is-success:hover,
-.button.is-warning:hover,
-.button.is-danger:hover {
-    background-color: var(--bulma-light) !important;
-}
-
-/* Ensure button children (icons, spans) inherit button color */
-.button span,
-.button .icon,
-.button .icon i,
-.button i {
-    color: inherit !important;
-}
-
-/* ===============================================
-   5. Form and Input Styles
-   =============================================== */
-input,
-textarea,
-select,
-.input,
-.textarea,
-.select select,
-input[type="search"],
-.input[type="search"] {
-    color: var(--bulma-text) !important;
-    font-family: 'Open Sans', sans-serif !important;
-    background-color: #FFFFFF !important;
-    /* White background */
-    border: 1px solid var(--bulma-border) !important;
-}
-
-/* Dropdown/Select backgrounds (transparent is generally fine but forcing white for consistency) */
-select,
-.select select,
-select.input {
-    background-color: #FFFFFF !important;
-}
-
-
-/* ===============================================
-   6. Code Blocks and Inline Code
-   =============================================== */
-
-/* Inline code snippets */
-code {
-    background-color: #F5F5F5 !important;
-    color: var(--bulma-text) !important;
-    padding: 0.25em 0.5em;
-    border-radius: 4px;
-    font-size: 0.9em;
-    font-family: 'Courier New', Courier, monospace !important;
-}
-
-/* Code blocks (pre) */
-pre {
-    background-color: #F5F5F5 !important;
-    color: var(--bulma-text) !important;
-    padding: 1.25rem 1.5rem !important;
-    border-radius: 6px;
-    border: 1px solid var(--bulma-border);
-}
-
-/* Code inside pre */
-pre code {
-    background-color: transparent !important;
-    color: var(--bulma-text) !important;
-    padding: 0 !important;
-    font-size: 0.875rem;
-}
-
-
-/* ===============================================
-   7. Layout and Component Styles
-   =============================================== */
-
-/* Navbar: White background with a subtle bottom border */
-.navbar {
-    border-bottom: 1px solid var(--bulma-border);
-    background-color: #FFFFFF !important;
-}
-
-.navbar-item,
-.navbar-link,
-.navbar-brand .navbar-item {
-    color: var(--bulma-text) !important;
-}
-
-.navbar-item:hover,
-.navbar-link:hover {
-    background-color: var(--bulma-body-background-color) !important;
-    color: var(--bulma-dark) !important;
-}
-
-/* Active navbar item (e.g., active page) */
-.navbar-item.is-active {
-    border-bottom: 2px solid var(--bulma-primary);
-    font-weight: 600;
-}
-
-.wrapper {
-    flex: 1 0 auto;
-    display: flex;
-    flex-direction: column;
-}
-
-/* Footer (Sticky Layout) */
-footer.footer {
-    flex-shrink: 0;
-    background-color: #ffffff !important;
-    border-top: 1px solid #dbdbdb;
-    padding: 1rem 1.5rem;
-}
-
-/* Section Padding Reduction (for cleaner page content) */
-.section {
-    padding: 1.5rem 1.5rem;
-    background-color: #f5f5f5 !important;
-    flex: 1;
-}
-
-/* Table Overrides */
+/* Table Styling */
 .table {
-    background-color: #ffffff !important;
-    font-size: 0.875rem !important;
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: var(--spacing-4);
 }
 
-.table thead th {
-    color: var(--bulma-title-color) !important;
-    background-color: #f5f5f5 !important;
-    font-weight: 700 !important;
-    font-size: 0.875rem !important;
+.table thead {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid var(--border-light);
+}
+
+.table th {
+    font-weight: 600;
+    text-align: left;
+    padding: var(--spacing-3);
+    color: #333;
+}
+
+.table td {
+    padding: var(--spacing-3);
+    border-bottom: 1px solid var(--border-light);
 }
 
 .table tbody tr:hover {
-    background-color: #fafafa !important;
+    background-color: #f8f9fa;
 }
 
-.table td,
-.table th {
-    border-color: #dbdbdb !important;
-    padding: 0.5rem 0.75rem !important;
+/* 9. LOG CONTAINER STYLES
+   ========================================================================== */
+.log-container {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    padding: var(--spacing-3);
+    border-radius: 0.5rem;
+    max-height: 600px;
+    overflow-y: auto;
+    border: 1px solid var(--border-medium);
 }
 
-.table td a {
-    color: var(--bulma-primary) !important;
-    /* Link color in table cells */
+.log-entry {
+    display: flex;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) 0;
+    line-height: 1.6;
 }
 
-pre.log-container {
-    max-height: 300px !important;
-    /* Forces height constraint */
-    overflow-y: auto !important;
-    /* Forces vertical scrolling */
-    overflow-x: auto !important;
-    /* Forces horizontal scrolling */
-    font-size: 0.75rem !important;
-    /* Forces the small font size */
-    padding: 1rem !important;
-    /* Ensures content has breathing room */
+.log-timestamp {
+    color: #808080;
+    flex-shrink: 0;
+    font-weight: 600;
 }
 
-/* Ensure font is applied to the code block content */
-.log-container code {
-    font-family: 'Courier New', Courier, monospace !important;
-    font-size: 0.75rem !important;
-}
-
-/* Enforce Log Level Colors (They may be overridden by .content or span rules) */
-.log-level-info {
-    color: #48c774 !important;
-    /* Green */
-}
-
-.log-level-warn {
-    color: #ffdd57 !important;
-    /* Yellow/Warning */
+.log-level {
+    flex-shrink: 0;
+    font-weight: 700;
+    min-width: 60px;
 }
 
 .log-level-error {
-    color: #f14668 !important;
-    /* Red/Danger */
+    color: #f44747;
+}
+
+.log-level-warn {
+    color: #ffdd57;
+}
+
+.log-level-info {
+    color: #4fc3f7;
 }
 
 .log-level-debug {
-    color: #7a7a7a !important;
-    /* Gray/Debug */
+    color: #b39ddb;
+}
+
+.log-message {
+    flex-grow: 1;
+    word-break: break-word;
+}
+
+/* Log scrollbar styling */
+.log-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.log-container::-webkit-scrollbar-track {
+    background: #2d2d2d;
+    border-radius: 4px;
+}
+
+.log-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* 10. UTILITY OVERRIDES
+   ========================================================================== */
+
+/* Spacing Utilities */
+.q-m-0 {
+    margin: 0;
+}
+
+.q-m-1 {
+    margin: var(--spacing-1);
+}
+
+.q-m-2 {
+    margin: var(--spacing-2);
+}
+
+.q-m-3 {
+    margin: var(--spacing-3);
+}
+
+.q-m-4 {
+    margin: var(--spacing-4);
+}
+
+.q-m-5 {
+    margin: var(--spacing-5);
+}
+
+.q-m-6 {
+    margin: var(--spacing-6);
+}
+
+.q-mt-0 {
+    margin-top: 0;
+}
+
+.q-mt-1 {
+    margin-top: var(--spacing-1);
+}
+
+.q-mt-2 {
+    margin-top: var(--spacing-2);
+}
+
+.q-mt-3 {
+    margin-top: var(--spacing-3);
+}
+
+.q-mt-4 {
+    margin-top: var(--spacing-4);
+}
+
+.q-mt-5 {
+    margin-top: var(--spacing-5);
+}
+
+.q-mt-6 {
+    margin-top: var(--spacing-6);
+}
+
+.q-mb-0 {
+    margin-bottom: 0;
+}
+
+.q-mb-1 {
+    margin-bottom: var(--spacing-1);
+}
+
+.q-mb-2 {
+    margin-bottom: var(--spacing-2);
+}
+
+.q-mb-3 {
+    margin-bottom: var(--spacing-3);
+}
+
+.q-mb-4 {
+    margin-bottom: var(--spacing-4);
+}
+
+.q-mb-5 {
+    margin-bottom: var(--spacing-5);
+}
+
+.q-mb-6 {
+    margin-bottom: var(--spacing-6);
+}
+
+.q-p-0 {
+    padding: 0;
+}
+
+.q-p-1 {
+    padding: var(--spacing-1);
+}
+
+.q-p-2 {
+    padding: var(--spacing-2);
+}
+
+.q-p-3 {
+    padding: var(--spacing-3);
+}
+
+.q-p-4 {
+    padding: var(--spacing-4);
+}
+
+.q-p-5 {
+    padding: var(--spacing-5);
+}
+
+.q-p-6 {
+    padding: var(--spacing-6);
+}
+
+/* Text Color Utilities */
+.q-text-primary {
+    color: var(--color-primary);
+}
+
+.q-text-success {
+    color: var(--color-success);
+}
+
+.q-text-danger {
+    color: var(--color-danger);
+}
+
+.q-text-warning {
+    color: var(--color-warning);
+}
+
+.q-text-info {
+    color: var(--color-info);
+}
+
+.q-text-muted {
+    color: #666;
+}
+
+/* Background Color Utilities */
+.q-bg-primary {
+    background-color: var(--color-primary);
+    color: white;
+}
+
+.q-bg-success {
+    background-color: var(--color-success);
+    color: white;
+}
+
+.q-bg-danger {
+    background-color: var(--color-danger);
+    color: white;
+}
+
+.q-bg-warning {
+    background-color: var(--color-warning);
+    color: #333;
+}
+
+.q-bg-info {
+    background-color: var(--color-info);
+    color: white;
+}
+
+.q-bg-light {
+    background-color: #f8f9fa;
+}
+
+.q-bg-dark {
+    background-color: #343a40;
+    color: white;
+}
+
+/* Display Utilities */
+.q-d-none {
+    display: none;
+}
+
+.q-d-block {
+    display: block;
+}
+
+.q-d-inline {
+    display: inline;
+}
+
+.q-d-inline-block {
+    display: inline-block;
+}
+
+.q-d-flex {
+    display: flex;
+}
+
+/* Flexbox Utilities */
+.q-flex-row {
+    flex-direction: row;
+}
+
+.q-flex-column {
+    flex-direction: column;
+}
+
+.q-flex-wrap {
+    flex-wrap: wrap;
+}
+
+.q-justify-start {
+    justify-content: flex-start;
+}
+
+.q-justify-center {
+    justify-content: center;
+}
+
+.q-justify-end {
+    justify-content: flex-end;
+}
+
+.q-justify-between {
+    justify-content: space-between;
+}
+
+.q-align-start {
+    align-items: flex-start;
+}
+
+.q-align-center {
+    align-items: center;
+}
+
+.q-align-end {
+    align-items: flex-end;
+}
+
+/* Width & Height Utilities */
+.q-w-100 {
+    width: 100%;
+}
+
+.q-w-75 {
+    width: 75%;
+}
+
+.q-w-50 {
+    width: 50%;
+}
+
+.q-w-25 {
+    width: 25%;
+}
+
+.q-h-100 {
+    height: 100%;
+}
+
+/* Text Alignment */
+.q-text-left {
+    text-align: left;
+}
+
+.q-text-center {
+    text-align: center;
+}
+
+.q-text-right {
+    text-align: right;
+}
+
+/* Overflow Utilities */
+.q-overflow-hidden {
+    overflow: hidden;
+}
+
+.q-overflow-auto {
+    overflow: auto;
+}
+
+.q-overflow-scroll {
+    overflow: scroll;
+}
+
+/* Shadow Utilities */
+.q-shadow-sm {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.075);
+}
+
+.q-shadow {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.q-shadow-lg {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Border Radius Utilities */
+.q-rounded {
+    border-radius: 0.25rem;
+}
+
+.q-rounded-lg {
+    border-radius: 0.5rem;
+}
+
+.q-rounded-full {
+    border-radius: 9999px;
+}
+
+/* Typography Size Utilities */
+.text-lg {
+    font-size: 1.125rem;
+}
+
+.text-md {
+    font-size: 0.875rem;
+}
+
+/* Gap Utilities */
+.q-gap-1 {
+    gap: var(--spacing-1);
+}
+
+.q-gap-2 {
+    gap: var(--spacing-2);
+}
+
+.q-gap-3 {
+    gap: var(--spacing-3);
+}
+
+/* Max Height Utilities */
+.q-max-h-300 {
+    max-height: 300px;
+}
+
+/* 13. SNACKBAR COMPONENT
+   ========================================================================== */
+.snackbar {
+    padding: var(--spacing-3) var(--spacing-4);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    color: white;
+    font-weight: 500;
+    min-width: 250px;
+    max-width: 400px;
+    animation: snackbar-fadein 0.3s ease-in-out;
+}
+
+@keyframes snackbar-fadein {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.snackbar.snackbar--info {
+    background-color: var(--color-info);
+}
+
+.snackbar.snackbar--success {
+    background-color: var(--color-success);
+}
+
+.snackbar.snackbar--warning {
+    background-color: var(--color-warning);
+    color: #333;
+}
+
+.snackbar.snackbar--danger,
+.snackbar.snackbar--error {
+    background-color: var(--color-danger);
+}
+
+/* 11. MODAL COMPONENT
+   ========================================================================== */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.is-active {
+    display: flex;
+}
+
+.modal-background {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-card {
+    position: relative;
+    background-color: white;
+    border-radius: 0.5rem;
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+}
+
+.modal-card-head {
+    background-color: #f8f9fa;
+    padding: var(--spacing-4);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-card-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.modal-card-body {
+    padding: var(--spacing-4);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-card-foot {
+    background-color: #f8f9fa;
+    padding: var(--spacing-4);
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    gap: var(--spacing-2);
+    justify-content: flex-end;
+}
+
+/* Modal close button */
+.delete {
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    height: 20px;
+    width: 20px;
+    position: relative;
+    flex-shrink: 0;
+}
+
+.delete::before,
+.delete::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(45deg);
+    background-color: #333;
+    height: 2px;
+    width: 16px;
+}
+
+.delete::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.delete:hover::before,
+.delete:hover::after {
+    background-color: var(--color-danger);
+}
+
+/* 12. FORM ELEMENTS
+   ========================================================================== */
+.field {
+    margin-bottom: var(--spacing-3);
+}
+
+.label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: var(--spacing-1);
+    color: #333;
+}
+
+.label.is-small {
+    font-size: 0.875rem;
+}
+
+.control {
+    position: relative;
+}
+
+.input,
+.select select {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-light);
+    border-radius: 0.25rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.input:focus,
+.select select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(87, 85, 217, 0.1);
+}
+
+.input.is-small,
+.select.is-small select {
+    font-size: 0.875rem;
+    padding: 0.375rem 0.5rem;
+}
+
+.select {
+    display: inline-block;
+    position: relative;
+}
+
+.select.is-fullwidth {
+    display: block;
+    width: 100%;
+}
+
+.select select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23333' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.5rem;
+}
+
+.checkbox {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.checkbox input[type="checkbox"] {
+    margin-right: var(--spacing-2);
+    cursor: pointer;
+}
+
+.help {
+    display: block;
+    margin-top: var(--spacing-1);
+    font-size: 0.875rem;
+    color: #666;
+}
+
+.help.has-text-warning {
+    color: var(--color-warning);
+}
+
+.help a,
+.help .has-text-link {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+/* 14. BUTTON OVERRIDES
+   ========================================================================== */
+/* Small button height override - maintains icon/text size */
+button.btn.btn--sm {
+    line-height: 1.5;
+}
+
+a.btn.btn--sm {
+    line-height: 2;
 }

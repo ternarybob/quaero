@@ -1,58 +1,57 @@
-<nav class="navbar is-light is-fixed-top" role="navigation" aria-label="main navigation">
-  <div class="navbar-brand">
-    <a class="navbar-item" href="/">
-      <strong>Quaero</strong>
-    </a>
-    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
-      <span aria-hidden="true"></span>
-      <span aria-hidden="true"></span>
-      <span aria-hidden="true"></span>
-    </a>
-  </div>
-
-  <div id="navbarMenu" class="navbar-menu">
-    <div class="navbar-start">
-      <a class="navbar-item{{if eq .Page "home"}} is-active{{end}}" href="/">
-        HOME
-      </a>
-      <a class="navbar-item{{if eq .Page "auth"}} is-active{{end}}" href="/auth">
-        AUTHENTICATION
-      </a>
-      <a class="navbar-item{{if eq .Page "sources"}} is-active{{end}}" href="/sources">
-        SOURCES
-      </a>
-      <a class="navbar-item{{if eq .Page "jobs"}} is-active{{end}}" href="/jobs">
-        JOBS
-      </a>
-      <a class="navbar-item{{if eq .Page "documents"}} is-active{{end}}" href="/documents">
-        DOCUMENTS
-      </a>
-      <a class="navbar-item{{if eq .Page "chat"}} is-active{{end}}" href="/chat">
-        CHAT
-      </a>
-      <a class="navbar-item{{if or (eq .Page "settings") (eq .Page "config")}} is-active{{end}}" href="/config">
-        SETTINGS
-      </a>
+<nav class="header header-fixed bg-white q-border-bottom" role="navigation" aria-label="main navigation">
+  <div class="header-nav" id="header-nav">
+    <div class="nav-left">
+      <div class="nav-item">
+        <a href="/" class="q-brand">Quaero</a>
+      </div>
+      <div class="nav-item">
+        <button class="nav-btn" id="nav-toggle" aria-label="Toggle mobile menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
     </div>
-
-    <div class="navbar-end">
-      <div class="navbar-item">
-        <span class="tag is-success status-text">ONLINE</span>
+    <div class="nav-center">
+      <div class="nav-item">
+        <a href="/" class="{{if eq .Page "home"}}active{{end}}">HOME</a>
+      </div>
+      <div class="nav-item">
+        <a href="/auth" class="{{if eq .Page "auth"}}active{{end}}">AUTHENTICATION</a>
+      </div>
+      <div class="nav-item">
+        <a href="/sources" class="{{if eq .Page "sources"}}active{{end}}">SOURCES</a>
+      </div>
+      <div class="nav-item">
+        <a href="/jobs" class="{{if eq .Page "jobs"}}active{{end}}">JOBS</a>
+      </div>
+      <div class="nav-item">
+        <a href="/documents" class="{{if eq .Page "documents"}}active{{end}}">DOCUMENTS</a>
+      </div>
+      <div class="nav-item">
+        <a href="/chat" class="{{if eq .Page "chat"}}active{{end}}">CHAT</a>
+      </div>
+      <div class="nav-item">
+        <a href="/config" class="{{if or (eq .Page "settings") (eq .Page "config")}}active{{end}}">SETTINGS</a>
+      </div>
+    </div>
+    <div class="nav-right">
+      <div class="nav-item">
+        <span class="tag tag--success status-text">ONLINE</span>
       </div>
     </div>
   </div>
 </nav>
 
 <script>
-  // Navbar burger menu toggle
+  // Mobile menu toggle
   document.addEventListener('DOMContentLoaded', function () {
-    const burger = document.querySelector('.navbar-burger');
-    const menu = document.getElementById('navbarMenu');
+    const navToggle = document.getElementById('nav-toggle');
+    const headerNav = document.getElementById('header-nav');
 
-    if (burger && menu) {
-      burger.addEventListener('click', function () {
-        burger.classList.toggle('is-active');
-        menu.classList.toggle('is-active');
+    if (navToggle && headerNav) {
+      navToggle.addEventListener('click', function () {
+        headerNav.classList.toggle('active');
       });
     }
 
@@ -61,12 +60,12 @@
       const statusText = document.querySelector('.status-text');
       if (statusText) {
         if (online) {
-          statusText.classList.remove('is-danger');
-          statusText.classList.add('is-success');
+          statusText.classList.remove('tag--danger');
+          statusText.classList.add('tag--success');
           statusText.textContent = 'ONLINE';
         } else {
-          statusText.classList.remove('is-success');
-          statusText.classList.add('is-danger');
+          statusText.classList.remove('tag--success');
+          statusText.classList.add('tag--danger');
           statusText.textContent = 'OFFLINE';
         }
       }

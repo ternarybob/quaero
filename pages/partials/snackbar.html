@@ -4,11 +4,11 @@
 function showSnackbar(message, type = 'info') {
     const snackbar = document.getElementById('snackbar');
     if (!snackbar) return;
-    
+
     snackbar.textContent = message;
-    snackbar.className = 'notification is-' + type;
+    snackbar.className = 'snackbar snackbar--' + type;
     snackbar.style.display = 'block';
-    
+
     setTimeout(function() {
         snackbar.style.display = 'none';
     }, 3000);

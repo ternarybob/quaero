@@ -88,9 +88,34 @@ func (s *Server) setupRoutes() *http.ServeMux {
 func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
+	// POST /api/jobs/create
+	if r.Method == "POST" && len(path) > len("/api/jobs/") {
+		pathSuffix := path[len("/api/jobs/"):]
+		if pathSuffix == "create" {
+			s.app.JobHandler.CreateJobHandler(w, r)
+			return
+		}
+		// POST /api/jobs/{id}/rerun
+		if len(pathSuffix) > 6 && pathSuffix[len(pathSuffix)-6:] == "/rerun" {
+			s.app.JobHandler.RerunJobHandler(w, r)
+			return
+		}
+		// POST /api/jobs/{id}/cancel
+		if len(pathSuffix) > 7 && pathSuffix[len(pathSuffix)-7:] == "/cancel" {
+			s.app.JobHandler.CancelJobHandler(w, r)
+			return
+		}
+	}
+
 	// GET /api/jobs/{id}
 	if r.Method == "GET" && len(path) > len("/api/jobs/") {
 		pathSuffix := path[len("/api/jobs/"):]
+		// GET /api/jobs/queue
+		if pathSuffix == "queue" {
+			s.app.JobHandler.GetJobQueueHandler(w, r)
+			return
+		}
+		// GET /api/jobs/stats
 		if pathSuffix == "stats" {
 			s.app.JobHandler.GetJobStatsHandler(w, r)
 			return
@@ -103,20 +128,6 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 		// Otherwise it's /api/jobs/{id}
 		s.app.JobHandler.GetJobHandler(w, r)
 		return
-	}
-
-	// POST /api/jobs/{id}/rerun
-	if r.Method == "POST" && len(path) > len("/api/jobs/") {
-		pathSuffix := path[len("/api/jobs/"):]
-		if len(pathSuffix) > 6 && pathSuffix[len(pathSuffix)-6:] == "/rerun" {
-			s.app.JobHandler.RerunJobHandler(w, r)
-			return
-		}
-		// POST /api/jobs/{id}/cancel
-		if len(pathSuffix) > 7 && pathSuffix[len(pathSuffix)-7:] == "/cancel" {
-			s.app.JobHandler.CancelJobHandler(w, r)
-			return
-		}
 	}
 
 	// DELETE /api/jobs/{id}

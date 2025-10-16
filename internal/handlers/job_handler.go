@@ -7,27 +7,36 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
+	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
 // JobHandler handles job-related API requests
 type JobHandler struct {
 	crawlerService *crawler.Service
 	jobStorage     interfaces.JobStorage
+	sourceService  *sources.Service
+	authStorage    interfaces.AuthStorage
 	logger         arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService: crawlerService,
 		jobStorage:     jobStorage,
+		sourceService:  sourceService,
+		authStorage:    authStorage,
 		logger:         logger,
 	}
 }
@@ -86,6 +95,12 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mask sensitive data in jobs
+	maskedJobs := make([]*crawler.CrawlJob, len(jobs))
+	for i, job := range jobs {
+		maskedJobs[i] = job.MaskSensitiveData()
+	}
+
 	// Get total count
 	totalCount, err := h.jobStorage.CountJobs(ctx)
 	if err != nil {
@@ -94,7 +109,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"jobs":        jobs,
+		"jobs":        maskedJobs,
 		"total_count": totalCount,
 		"limit":       limit,
 		"offset":      offset,
@@ -122,18 +137,18 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try to get job from active jobs first
 	job, err := h.crawlerService.GetJobStatus(jobID)
-	if err != nil {
-		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job")
-		http.Error(w, "Job not found", http.StatusNotFound)
-		return
-	}
 
-	// If job is not in active jobs, try to get it from database
-	if job == nil {
-		jobInterface, err := h.jobStorage.GetJob(ctx, jobID)
+	// If job is not in active jobs or there was an error, try to get it from database
+	if err != nil || job == nil {
 		if err != nil {
-			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job from storage")
+			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not in active jobs, checking storage")
+		}
+
+		jobInterface, storageErr := h.jobStorage.GetJob(ctx, jobID)
+		if storageErr != nil {
+			h.logger.Error().Err(storageErr).Str("job_id", jobID).Msg("Failed to get job from storage")
 			http.Error(w, "Job not found", http.StatusNotFound)
 			return
 		}
@@ -146,8 +161,11 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Mask sensitive data before returning
+	masked := job.MaskSensitiveData()
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(job)
+	json.NewEncoder(w).Encode(masked)
 }
 
 // GetJobResultsHandler returns the results of a completed job
@@ -328,4 +346,272 @@ func (h *JobHandler) GetJobStatsHandler(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+// ConfigOverrides allows selective overriding of crawl configuration
+// Using pointers to detect presence of fields
+type ConfigOverrides struct {
+	MaxDepth        *int      `json:"max_depth,omitempty"`
+	MaxPages        *int      `json:"max_pages,omitempty"`
+	Concurrency     *int      `json:"concurrency,omitempty"`
+	RateLimit       *int      `json:"rate_limit,omitempty"` // milliseconds
+	FollowLinks     *bool     `json:"follow_links,omitempty"`
+	IncludePatterns *[]string `json:"include_patterns,omitempty"`
+	ExcludePatterns *[]string `json:"exclude_patterns,omitempty"`
+}
+
+// CreateJobHandler creates a new job from a source configuration
+// POST /api/jobs/create
+func (h *JobHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse request body
+	var req struct {
+		SourceID        string           `json:"source_id"`
+		RefreshSource   bool             `json:"refresh_source"`
+		SeedURLs        []string         `json:"seed_urls"`
+		ConfigOverrides *ConfigOverrides `json:"config_overrides"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to parse request body")
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.SourceID == "" {
+		http.Error(w, "source_id is required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch source configuration
+	source, err := h.sourceService.GetSource(ctx, req.SourceID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Failed to fetch source")
+		http.Error(w, "Source not found", http.StatusNotFound)
+		return
+	}
+
+	// Validate source configuration
+	if err := source.Validate(); err != nil {
+		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Source validation failed")
+		http.Error(w, fmt.Sprintf("Invalid source configuration: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Fetch auth credentials if source has auth_id
+	var authCreds *models.AuthCredentials
+	if source.AuthID != "" {
+		authCreds, err = h.authStorage.GetCredentialsByID(ctx, source.AuthID)
+		if err != nil {
+			h.logger.Error().Err(err).Str("auth_id", source.AuthID).Msg("Failed to fetch auth credentials")
+			http.Error(w, "Authentication credentials not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	// Derive seed URLs if not provided
+	seedURLs := req.SeedURLs
+	if len(seedURLs) == 0 {
+		seedURLs = h.deriveSeedURLs(source)
+		if len(seedURLs) == 0 {
+			http.Error(w, "Failed to derive seed URLs from source configuration", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Merge config overrides with source's crawl config
+	// Start with source config, then apply overrides only if explicitly provided
+	crawlConfig := source.CrawlConfig
+	if req.ConfigOverrides != nil {
+		if req.ConfigOverrides.MaxDepth != nil {
+			crawlConfig.MaxDepth = *req.ConfigOverrides.MaxDepth
+		}
+		if req.ConfigOverrides.Concurrency != nil {
+			crawlConfig.Concurrency = *req.ConfigOverrides.Concurrency
+		}
+		if req.ConfigOverrides.MaxPages != nil {
+			crawlConfig.MaxPages = *req.ConfigOverrides.MaxPages
+		}
+		if req.ConfigOverrides.RateLimit != nil {
+			crawlConfig.RateLimit = *req.ConfigOverrides.RateLimit
+		}
+		if req.ConfigOverrides.FollowLinks != nil {
+			crawlConfig.FollowLinks = *req.ConfigOverrides.FollowLinks
+		}
+		if req.ConfigOverrides.IncludePatterns != nil {
+			crawlConfig.IncludePatterns = *req.ConfigOverrides.IncludePatterns
+		}
+		if req.ConfigOverrides.ExcludePatterns != nil {
+			crawlConfig.ExcludePatterns = *req.ConfigOverrides.ExcludePatterns
+		}
+	}
+
+	// Convert source.CrawlConfig to crawler.CrawlConfig (RateLimit: int ms -> time.Duration)
+	crawlerConfig := crawler.CrawlConfig{
+		MaxDepth:        crawlConfig.MaxDepth,
+		MaxPages:        crawlConfig.MaxPages,
+		FollowLinks:     crawlConfig.FollowLinks,
+		Concurrency:     crawlConfig.Concurrency,
+		RateLimit:       time.Duration(crawlConfig.RateLimit) * time.Millisecond,
+		IncludePatterns: crawlConfig.IncludePatterns,
+		ExcludePatterns: crawlConfig.ExcludePatterns,
+		DetailLevel:     "full",
+		RetryAttempts:   3,
+		RetryBackoff:    2 * time.Second,
+	}
+
+	// Derive entity type based on source type
+	entityType := h.deriveEntityType(source)
+
+	// Start crawl with snapshots
+	jobID, err := h.crawlerService.StartCrawl(
+		source.Type,
+		entityType,
+		seedURLs,
+		crawlerConfig,
+		req.SourceID,
+		req.RefreshSource,
+		source,
+		authCreds,
+	)
+	if err != nil {
+		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Failed to start crawl")
+		http.Error(w, fmt.Sprintf("Failed to create job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().
+		Str("job_id", jobID).
+		Str("source_id", req.SourceID).
+		Str("refresh_source", fmt.Sprintf("%t", req.RefreshSource)).
+		Msg("Job created successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id":         jobID,
+		"source_id":      req.SourceID,
+		"source_type":    source.Type,
+		"refresh_source": req.RefreshSource,
+		"message":        "Job created successfully",
+	})
+}
+
+// GetJobQueueHandler returns jobs in pending or running status
+// GET /api/jobs/queue
+func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Fetch pending jobs
+	pendingJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(crawler.JobStatusPending))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to fetch pending jobs")
+		http.Error(w, "Failed to fetch job queue", http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch running jobs
+	runningJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(crawler.JobStatusRunning))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to fetch running jobs")
+		http.Error(w, "Failed to fetch job queue", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to CrawlJob slices and mask sensitive data
+	pendingJobs := make([]*crawler.CrawlJob, 0)
+	for _, jobInterface := range pendingJobsInterface {
+		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+			pendingJobs = append(pendingJobs, job.MaskSensitiveData())
+		}
+	}
+
+	runningJobs := make([]*crawler.CrawlJob, 0)
+	for _, jobInterface := range runningJobsInterface {
+		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+			runningJobs = append(runningJobs, job.MaskSensitiveData())
+		}
+	}
+
+	totalCount := len(pendingJobs) + len(runningJobs)
+
+	response := map[string]interface{}{
+		"pending": pendingJobs,
+		"running": runningJobs,
+		"total":   totalCount,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// deriveEntityType derives entity type based on source type
+func (h *JobHandler) deriveEntityType(source *models.SourceConfig) string {
+	switch source.Type {
+	case models.SourceTypeJira:
+		return "projects"
+	case models.SourceTypeConfluence:
+		return "spaces"
+	case models.SourceTypeGithub:
+		return "repos"
+	default:
+		return "all"
+	}
+}
+
+// deriveSeedURLs derives seed URLs from source configuration
+// Normalizes base URL using net/url to handle various path formats properly
+func (h *JobHandler) deriveSeedURLs(source *models.SourceConfig) []string {
+	// Parse base URL using net/url for proper normalization
+	parsedURL, err := url.Parse(source.BaseURL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("base_url", source.BaseURL).Msg("Failed to parse base URL")
+		return []string{}
+	}
+
+	// Normalize the path by removing trailing slashes
+	path := strings.TrimRight(parsedURL.Path, "/")
+
+	// Check if path already contains /rest/ to avoid duplication
+	if strings.Contains(path, "/rest/") {
+		h.logger.Warn().
+			Str("base_url", source.BaseURL).
+			Msg("Base URL already contains /rest/ path, using as-is")
+		return []string{source.BaseURL}
+	}
+
+	// Build base URL with scheme and host
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+
+	switch source.Type {
+	case models.SourceTypeJira:
+		// For Jira, strip any path segments after host and add /rest/api/3/project
+		// Handles: https://example.atlassian.net, https://example.atlassian.net/jira, https://example.atlassian.net/jira/
+		return []string{fmt.Sprintf("%s/rest/api/3/project", baseURL)}
+
+	case models.SourceTypeConfluence:
+		// For Confluence, preserve /wiki root path but drop any additional segments
+		// Handles: https://example.atlassian.net/wiki, https://example.atlassian.net/wiki/, https://example.atlassian.net/wiki/home
+		if strings.HasPrefix(path, "/wiki") {
+			return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
+		}
+		// Fallback if /wiki not in path - add it
+		return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
+
+	case models.SourceTypeGithub:
+		// GitHub repos endpoint (if filters specify org/user)
+		if org, ok := source.Filters["org"].(string); ok {
+			return []string{fmt.Sprintf("%s/orgs/%s/repos", baseURL, org)}
+		}
+		if user, ok := source.Filters["user"].(string); ok {
+			return []string{fmt.Sprintf("%s/users/%s/repos", baseURL, user)}
+		}
+		return []string{}
+
+	default:
+		h.logger.Warn().Str("source_type", source.Type).Msg("Unknown source type, cannot derive seed URLs")
+		return []string{}
+	}
 }

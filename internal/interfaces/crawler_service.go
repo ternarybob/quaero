@@ -17,8 +17,12 @@ type CrawlerService interface {
 	// entityType: "projects", "issues", "spaces", "pages", etc.
 	// seedURLs: Initial URLs to begin crawling
 	// config: Crawl configuration (concurrency, rate limits, filters, etc.)
+	// sourceID: Optional source ID to load configuration from
+	// refreshSource: If true, re-fetch latest source config and auth
+	// sourceConfigSnapshot: Optional point-in-time source configuration
+	// authSnapshot: Optional point-in-time authentication snapshot
 	// Returns: jobID for tracking the crawl
-	StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}) (string, error)
+	StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error)
 
 	// GetJobStatus retrieves the current status of a crawl job
 	GetJobStatus(jobID string) (interface{}, error)

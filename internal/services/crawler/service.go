@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,15 +17,19 @@ import (
 	"github.com/ternarybob/arbor"
 
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/workers"
 )
 
 // Service orchestrates URL queue, rate limiting, retries, and worker pool
 type Service struct {
-	authService  interfaces.AuthService
-	eventService interfaces.EventService
-	jobStorage   interfaces.JobStorage
-	logger       arbor.ILogger
+	authService   interfaces.AuthService
+	sourceService *sources.Service
+	authStorage   interfaces.AuthStorage
+	eventService  interfaces.EventService
+	jobStorage    interfaces.JobStorage
+	logger        arbor.ILogger
 
 	queue       *URLQueue
 	rateLimiter *RateLimiter
@@ -32,6 +38,7 @@ type Service struct {
 
 	activeJobs map[string]*CrawlJob
 	jobResults map[string][]*CrawlResult
+	jobClients map[string]*http.Client // Per-job HTTP clients built from auth snapshots
 	jobsMu     sync.RWMutex
 
 	ctx    context.Context
@@ -40,22 +47,25 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, eventService interfaces.EventService, jobStorage interfaces.JobStorage, logger arbor.ILogger, config CrawlConfig) *Service {
+func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, logger arbor.ILogger, config CrawlConfig) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
-		authService:  authService,
-		eventService: eventService,
-		jobStorage:   jobStorage,
-		logger:       logger,
-		queue:        NewURLQueue(),
-		rateLimiter:  NewRateLimiter(config.RateLimit),
-		retryPolicy:  NewRetryPolicy(),
-		workerPool:   workers.NewPool(config.Concurrency, logger),
-		activeJobs:   make(map[string]*CrawlJob),
-		jobResults:   make(map[string][]*CrawlResult),
-		ctx:          ctx,
-		cancel:       cancel,
+		authService:   authService,
+		sourceService: sourceService,
+		authStorage:   authStorage,
+		eventService:  eventService,
+		jobStorage:    jobStorage,
+		logger:        logger,
+		queue:         NewURLQueue(),
+		rateLimiter:   NewRateLimiter(config.RateLimit),
+		retryPolicy:   NewRetryPolicy(),
+		workerPool:    workers.NewPool(config.Concurrency, logger),
+		activeJobs:    make(map[string]*CrawlJob),
+		jobResults:    make(map[string][]*CrawlResult),
+		jobClients:    make(map[string]*http.Client),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// Override retry policy if config specifies
@@ -76,15 +86,17 @@ func (s *Service) Start() error {
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
-func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, config CrawlConfig) (string, error) {
+func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, config CrawlConfig, sourceID string, refreshSource bool, sourceConfigSnapshot *models.SourceConfig, authSnapshot *models.AuthCredentials) (string, error) {
 	jobID := uuid.New().String()
 
 	job := &CrawlJob{
-		ID:         jobID,
-		SourceType: sourceType,
-		EntityType: entityType,
-		Config:     config,
-		Status:     JobStatusPending,
+		ID:            jobID,
+		SourceType:    sourceType,
+		EntityType:    entityType,
+		Config:        config,
+		RefreshSource: refreshSource,
+		SeedURLs:      seedURLs, // Store seed URLs for rerun capability
+		Status:        JobStatusPending,
 		Progress: CrawlProgress{
 			TotalURLs:     len(seedURLs),
 			CompletedURLs: 0,
@@ -93,6 +105,83 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			StartTime:     time.Now(),
 		},
 		CreatedAt: time.Now(),
+	}
+
+	// Handle snapshot logic
+	// If sourceID is provided and snapshots are nil, fetch from services
+	if sourceID != "" && sourceConfigSnapshot == nil {
+		if s.sourceService != nil {
+			sourceConfig, err := s.sourceService.GetSource(s.ctx, sourceID)
+			if err != nil {
+				return "", fmt.Errorf("failed to fetch source config: %w", err)
+			}
+			sourceConfigSnapshot = sourceConfig
+
+			// Fetch auth if source has auth_id
+			if sourceConfig.AuthID != "" && s.authStorage != nil {
+				auth, err := s.authStorage.GetCredentialsByID(s.ctx, sourceConfig.AuthID)
+				if err != nil {
+					s.logger.Warn().Err(err).Str("auth_id", sourceConfig.AuthID).Msg("Failed to fetch auth credentials")
+				} else {
+					authSnapshot = auth
+				}
+			}
+		}
+	}
+
+	// If refreshSource is true, re-fetch latest config and auth
+	if refreshSource && sourceID != "" && s.sourceService != nil {
+		latestConfig, err := s.sourceService.GetSource(s.ctx, sourceID)
+		if err != nil {
+			return "", fmt.Errorf("failed to refresh source config: %w", err)
+		}
+
+		// Validate latest config
+		if err := latestConfig.Validate(); err != nil {
+			return "", fmt.Errorf("source configuration validation failed: %w", err)
+		}
+
+		sourceConfigSnapshot = latestConfig
+
+		// Re-fetch auth if present
+		if latestConfig.AuthID != "" && s.authStorage != nil {
+			latestAuth, err := s.authStorage.GetCredentialsByID(s.ctx, latestConfig.AuthID)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("auth_id", latestConfig.AuthID).Msg("Failed to refresh auth credentials")
+			} else {
+				authSnapshot = latestAuth
+			}
+		}
+	}
+
+	// Validate source config snapshot if provided
+	if sourceConfigSnapshot != nil {
+		if err := sourceConfigSnapshot.Validate(); err != nil {
+			return "", fmt.Errorf("source configuration validation failed: %w", err)
+		}
+
+		// Store snapshot in job
+		if err := job.SetSourceConfigSnapshot(sourceConfigSnapshot); err != nil {
+			return "", fmt.Errorf("failed to set source config snapshot: %w", err)
+		}
+	}
+
+	// Store auth snapshot if provided
+	if authSnapshot != nil {
+		if err := job.SetAuthSnapshot(authSnapshot); err != nil {
+			return "", fmt.Errorf("failed to set auth snapshot: %w", err)
+		}
+
+		// Build HTTP client from auth snapshot for this job
+		client, err := buildHTTPClientFromAuth(authSnapshot)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to build HTTP client from auth snapshot, will use default")
+		} else {
+			s.jobsMu.Lock()
+			s.jobClients[jobID] = client
+			s.jobsMu.Unlock()
+			s.logger.Debug().Str("job_id", jobID).Msg("Per-job HTTP client configured from auth snapshot")
+		}
 	}
 
 	// Persist job to database
@@ -108,7 +197,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	s.jobResults[jobID] = make([]*CrawlResult, 0)
 	s.jobsMu.Unlock()
 
-	// Seed queue
+	// Seed queue with metadata for link discovery
 	for i, url := range seedURLs {
 		item := &URLQueueItem{
 			URL:      url,
@@ -116,7 +205,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Priority: i,
 			AddedAt:  time.Now(),
 			Metadata: map[string]interface{}{
-				"job_id": jobID,
+				"job_id":      jobID,
+				"source_type": sourceType,
+				"entity_type": entityType,
 			},
 		}
 		s.queue.Push(item)
@@ -173,6 +264,12 @@ func (s *Service) CancelJob(jobID string) error {
 
 	job.Status = JobStatusCancelled
 	job.CompletedAt = time.Now()
+
+	// Clean up per-job HTTP client
+	if _, exists := s.jobClients[jobID]; exists {
+		delete(s.jobClients, jobID)
+		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after cancellation")
+	}
 
 	s.emitProgress(job)
 
@@ -335,8 +432,20 @@ func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, erro
 	req.Header.Set("User-Agent", "Quaero/1.0")
 	req.Header.Set("Accept", "application/json")
 
-	// Use auth service's HTTP client which has cookies configured
-	client := s.authService.GetHTTPClient()
+	// Try to use per-job HTTP client from auth snapshot
+	var client *http.Client
+	if jobID, ok := item.Metadata["job_id"].(string); ok && jobID != "" {
+		s.jobsMu.RLock()
+		client = s.jobClients[jobID]
+		s.jobsMu.RUnlock()
+	}
+
+	// Fallback to auth service's HTTP client if no per-job client
+	if client == nil {
+		client = s.authService.GetHTTPClient()
+	}
+
+	// Final fallback to default client
 	if client == nil {
 		client = &http.Client{
 			Timeout: 30 * time.Second,
@@ -494,17 +603,27 @@ func (s *Service) filterLinks(links []string, config CrawlConfig) []string {
 }
 
 // enqueueLinks adds discovered links to queue with depth tracking
+// Propagates source_type and entity_type from parent for link discovery
 func (s *Service) enqueueLinks(jobID string, links []string, parent *URLQueueItem) {
 	for i, link := range links {
+		// Propagate metadata from parent
+		metadata := map[string]interface{}{
+			"job_id": jobID,
+		}
+		if sourceType, ok := parent.Metadata["source_type"]; ok {
+			metadata["source_type"] = sourceType
+		}
+		if entityType, ok := parent.Metadata["entity_type"]; ok {
+			metadata["entity_type"] = entityType
+		}
+
 		item := &URLQueueItem{
 			URL:       link,
 			Depth:     parent.Depth + 1,
 			ParentURL: parent.URL,
 			Priority:  parent.Priority + i + 1,
 			AddedAt:   time.Now(),
-			Metadata: map[string]interface{}{
-				"job_id": jobID,
-			},
+			Metadata:  metadata,
 		}
 
 		if s.queue.Push(item) {
@@ -633,6 +752,14 @@ func (s *Service) monitorCompletion(jobID string) {
 
 				s.emitProgress(job)
 
+				// Clean up per-job HTTP client
+				s.jobsMu.Lock()
+				if _, exists := s.jobClients[jobID]; exists {
+					delete(s.jobClients, jobID)
+					s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
+				}
+				s.jobsMu.Unlock()
+
 				s.logger.Info().
 					Str("job_id", jobID).
 					Int("completed", job.Progress.CompletedURLs).
@@ -691,13 +818,18 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 		config = *updateConfig
 	}
 
-	// Extract seed URLs from original job (this would need to be stored in config)
-	// For now, we'll need to reconstruct or store seed URLs in the job
-	// This is a limitation of the current design - we should store seed URLs in the job
-	seedURLs := []string{} // TODO: Store seed URLs in job config for rerun capability
+	// Use stored seed URLs from original job
+	seedURLs := originalJob.SeedURLs
+	if len(seedURLs) == 0 {
+		return "", fmt.Errorf("cannot rerun job: no seed URLs stored in original job")
+	}
 
-	// Start new crawl with original parameters
-	newJobID, err := s.StartCrawl(originalJob.SourceType, originalJob.EntityType, seedURLs, config)
+	// Get snapshots from original job
+	sourceConfigSnapshot, _ := originalJob.GetSourceConfigSnapshot()
+	authSnapshot, _ := originalJob.GetAuthSnapshot()
+
+	// Start new crawl with original parameters and snapshots
+	newJobID, err := s.StartCrawl(originalJob.SourceType, originalJob.EntityType, seedURLs, config, "", originalJob.RefreshSource, sourceConfigSnapshot, authSnapshot)
 	if err != nil {
 		return "", fmt.Errorf("failed to start crawl: %w", err)
 	}
@@ -742,6 +874,17 @@ func (s *Service) Shutdown() error {
 	s.cancel()
 	s.queue.Close()
 	s.wg.Wait()
+
+	// Clean up all per-job HTTP clients
+	s.jobsMu.Lock()
+	clientCount := len(s.jobClients)
+	s.jobClients = make(map[string]*http.Client)
+	s.jobsMu.Unlock()
+
+	if clientCount > 0 {
+		s.logger.Debug().Int("count", clientCount).Msg("Cleaned up per-job HTTP clients on shutdown")
+	}
+
 	s.logger.Info().Msg("Crawler service stopped")
 	return nil
 }
@@ -752,6 +895,53 @@ func (s *Service) Close() error {
 }
 
 // Helper functions
+
+// buildHTTPClientFromAuth creates an HTTP client with cookies from AuthCredentials
+func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, error) {
+	if authCreds == nil {
+		return &http.Client{Timeout: 30 * time.Second}, nil
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	}
+
+	client := &http.Client{
+		Jar:     jar,
+		Timeout: 30 * time.Second,
+	}
+
+	// Parse base URL and set cookies
+	baseURL, err := url.Parse(authCreds.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	// Unmarshal cookies from JSON
+	var cookies []*interfaces.AtlassianExtensionCookie
+	if err := json.Unmarshal(authCreds.Cookies, &cookies); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cookies: %w", err)
+	}
+
+	// Convert to http.Cookie
+	httpCookies := make([]*http.Cookie, 0, len(cookies))
+	for _, c := range cookies {
+		httpCookies = append(httpCookies, &http.Cookie{
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   c.Domain,
+			Path:     c.Path,
+			Expires:  time.Unix(c.Expires, 0),
+			Secure:   c.Secure,
+			HttpOnly: c.HTTPOnly,
+		})
+	}
+
+	client.Jar.SetCookies(baseURL, httpCookies)
+
+	return client, nil
+}
 
 func makeAbsoluteURL(base, relative string) string {
 	if strings.HasPrefix(relative, "http://") || strings.HasPrefix(relative, "https://") {

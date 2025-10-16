@@ -1,38 +1,30 @@
-<div class="columns">
+<div class="card" x-data="serviceLogs">
 
-  <div class="column">
+    <header class="card-header q-d-flex q-align-center q-justify-between">
 
-    <div class="card" x-data="serviceLogs">
+        <h3>Service Logs</h3>
 
-      <header class="card-header">
+        <div class="q-d-flex q-align-center q-gap-1">
 
-        <p class="card-header-title">Service Logs</p>
-      
-        <div class="card-header-icon">
-      
-          <button class="button is-small is-outlined" aria-label="toggle auto-scroll" @click="toggleAutoScroll()"
-                  :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-            <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
-          </button>
-      
-          <button class="button is-small is-outlined ml-1" aria-label="refresh" @click="refresh()" title="Refresh Logs">
-            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-          </button>
-      
-          <button class="button is-small is-outlined is-danger ml-1" aria-label="clear" @click="clearLogs()" title="Clear Logs">
-            <span class="icon"><i class="fas fa-trash"></i></span>
-          </button>
-      
+            <button class="btn btn--sm outline" aria-label="toggle auto-scroll" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
+            </button>
+
+            <button class="btn btn--sm outline" aria-label="refresh" @click="refresh()" title="Refresh Logs">
+                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+            </button>
+
+            <button class="btn btn--sm btn-danger outline" aria-label="clear" @click="clearLogs()" title="Clear Logs">
+                <span class="icon"><i class="fas fa-trash"></i></span>
+            </button>
+
         </div>
-      
-      </header>
-      
-      <div class="card-content">
-        <pre class="log-container" x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="has-text-centered has-text-grey">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
-      </div>
 
+    </header>
+
+    <div class="card-body">
+        <pre class="log-container"
+            x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="q-text-center q-text-muted">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
     </div>
 
-  </div>
-  
 </div>

@@ -174,6 +174,8 @@ func createTestService() *Service {
 
 	return NewService(
 		&mockAuthService{},
+		nil, // sourceService
+		nil, // authStorage
 		&mockEventService{},
 		&mockJobStorage{},
 		logger,
@@ -212,6 +214,8 @@ func TestNewService(t *testing.T) {
 			logger := arbor.NewLogger()
 			service := NewService(
 				&mockAuthService{},
+				nil, // sourceService
+				nil, // authStorage
 				&mockEventService{},
 				&mockJobStorage{},
 				logger,
@@ -310,7 +314,7 @@ func TestStartCrawl(t *testing.T) {
 			service := createTestService()
 			defer service.Close()
 
-			jobID, err := service.StartCrawl(tt.sourceType, tt.entityType, tt.seedURLs, tt.config)
+			jobID, err := service.StartCrawl(tt.sourceType, tt.entityType, tt.seedURLs, tt.config, "", false, nil, nil)
 			if err != nil {
 				t.Fatalf("StartCrawl failed: %v", err)
 			}
@@ -368,7 +372,7 @@ func TestGetJobStatus(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -404,7 +408,7 @@ func TestCancelJob(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -453,7 +457,7 @@ func TestGetJobResults(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -496,7 +500,7 @@ func TestListJobs(t *testing.T) {
 
 	jobIDs := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config)
+		jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
 		if err != nil {
 			t.Fatalf("StartCrawl failed: %v", err)
 		}
@@ -621,7 +625,7 @@ func TestServiceShutdown(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	_, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config)
+	_, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}

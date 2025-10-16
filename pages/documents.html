@@ -10,75 +10,66 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container">
+    <div class="content">
 
         <!-- Heading Section -->
-        <div class="mt-5 mb-5">
+        <div class="q-mt-5 q-mb-5">
             <h1 class="title">Document Management</h1>
             <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
         </div>
 
         <!-- Document Statistics -->
-        <div class="card mt-5">
-            <header class="card-header">
-                <p class="card-header-title">Document Statistics</p>
-                <div class="card-header-icon">
-                    <button class="button is-small is-outlined" onclick="loadStats()">
+        <div class="card">
+            <header class="card-header q-d-flex q-align-center q-justify-between">
+                <h3>Document Statistics</h3>
+                <div class="q-d-flex q-align-center">
+                    <button class="btn btn--sm outline" onclick="loadStats()">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
             </header>
-            <div class="card-content">
-                <nav class="level">
-                    <div class="level-item has-text-centered">
-                        <div>
-                            <p class="heading">TOTAL DOCUMENTS</p>
-                            <p class="title" id="stat-total">-</p>
-                        </div>
+            <div class="card-body">
+                <div class="q-d-flex q-justify-between q-flex-wrap q-gap-3">
+                    <div class="q-text-center">
+                        <p class="text-md q-text-muted">TOTAL DOCUMENTS</p>
+                        <p class="title" id="stat-total">-</p>
                     </div>
-                    <div class="level-item has-text-centered">
-                        <div>
-                            <p class="heading">VECTORIZED</p>
-                            <p class="title" id="stat-vectorized">-</p>
-                        </div>
+                    <div class="q-text-center">
+                        <p class="text-md q-text-muted">VECTORIZED</p>
+                        <p class="title" id="stat-vectorized">-</p>
                     </div>
-                    <div class="level-item has-text-centered">
-                        <div>
-                            <p class="heading">JIRA DOCUMENTS</p>
-                            <p class="title" id="stat-jira">-</p>
-                        </div>
+                    <div class="q-text-center">
+                        <p class="text-md q-text-muted">JIRA DOCUMENTS</p>
+                        <p class="title" id="stat-jira">-</p>
                     </div>
-                    <div class="level-item has-text-centered">
-                        <div>
-                            <p class="heading">CONFLUENCE DOCUMENTS</p>
-                            <p class="title" id="stat-confluence">-</p>
-                        </div>
+                    <div class="q-text-center">
+                        <p class="text-md q-text-muted">CONFLUENCE DOCUMENTS</p>
+                        <p class="title" id="stat-confluence">-</p>
                     </div>
-                </nav>
+                </div>
             </div>
         </div>
 
         <!-- Documents Table -->
-        <div class="card mt-5">
+        <div class="card">
             <header class="card-header">
-                <p class="card-header-title">
-                    <span id="document-count" class="has-text-grey mr-2">0</span>Documents
-                </p>
+                <h3>
+                    <span id="document-count" class="q-text-muted q-mr-2">0</span>Documents
+                </h3>
             </header>
-            <div class="card-content">
+            <div class="card-body">
                 <!-- Filter Controls -->
-                <div class="columns">
-                    <div class="column is-6">
+                <div class="q-d-flex q-gap-2 q-mb-4 q-flex-wrap">
+                    <div class="q-w-50">
                         <div class="field">
-                            <div class="control has-icons-left">
+                            <div class="control">
                                 <input type="search" id="search-box" class="input" placeholder="Search documents...">
-                                <span class="icon is-small is-left"><i class="fas fa-search"></i></span>
                             </div>
                         </div>
                     </div>
-                    <div class="column is-3">
+                    <div class="q-w-25">
                         <div class="field">
-                            <div class="control has-icons-left">
+                            <div class="control">
                                 <div class="select is-fullwidth">
                                     <select id="source-filter" onchange="filterDocuments()">
                                         <option value="">All Sources</option>
@@ -86,13 +77,12 @@
                                         <option value="confluence">Confluence</option>
                                     </select>
                                 </div>
-                                <span class="icon is-small is-left"><i class="fas fa-filter"></i></span>
                             </div>
                         </div>
                     </div>
-                    <div class="column is-3">
+                    <div class="q-w-25">
                         <div class="field">
-                            <div class="control has-icons-left">
+                            <div class="control">
                                 <div class="select is-fullwidth">
                                     <select id="vectorized-filter" onchange="filterDocuments()">
                                         <option value="">All Documents</option>
@@ -100,55 +90,50 @@
                                         <option value="false">Not Vectorized</option>
                                     </select>
                                 </div>
-                                <span class="icon is-small is-left"><i class="fas fa-vector-square"></i></span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Documents Table -->
-                <div class="table-container">
-                    <table class="table is-fullwidth is-striped is-hoverable">
-                        <thead>
-                            <tr>
-                                <th>SOURCE</th>
-                                <th>SOURCE ID</th>
-                                <th>TITLE</th>
-                                <th class="has-text-centered">VECTORIZED</th>
-                                <th>UPDATED</th>
-                                <th class="has-text-centered">ACTIONS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="documents-table-body">
-                            <tr>
-                                <td colspan="6" class="has-text-centered">
-                                    Loading documents...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>SOURCE</th>
+                            <th>SOURCE ID</th>
+                            <th>TITLE</th>
+                            <th class="q-text-center">VECTORIZED</th>
+                            <th>UPDATED</th>
+                            <th class="q-text-center">ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="documents-table-body">
+                        <tr>
+                            <td colspan="6" class="q-text-center">
+                                Loading documents...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
 
                 <!-- Pagination Controls -->
-                <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
-                    <button id="prev-page" class="pagination-previous button is-small is-outlined" onclick="previousPage()">Previous</button>
-                    <button id="next-page" class="pagination-next button is-small is-outlined" onclick="nextPage()">Next</button>
-                    <ul class="pagination-list">
-                        <li><span class="pagination-link has-text-grey" id="page-info">Page 1 of 1</span></li>
-                    </ul>
+                <nav class="q-d-flex q-justify-center q-align-center q-gap-2 q-mt-4" role="navigation" aria-label="pagination">
+                    <button id="prev-page" class="btn btn--sm outline" onclick="previousPage()">Previous</button>
+                    <span class="text-md q-text-muted" id="page-info">Page 1 of 1</span>
+                    <button id="next-page" class="btn btn--sm outline" onclick="nextPage()">Next</button>
                 </nav>
             </div>
         </div>
 
         <!-- Document Detail -->
-        <div class="card mt-5">
-            <header class="card-header">
-                <p class="card-header-title">Document Detail</p>
-                <div class="card-header-icon">
-                    <span id="selected-document-id" class="tag is-info"></span>
+        <div class="card">
+            <header class="card-header q-d-flex q-align-center q-justify-between">
+                <h3>Document Detail</h3>
+                <div class="q-d-flex q-align-center">
+                    <span id="selected-document-id" class="tag tag--info"></span>
                 </div>
             </header>
-            <div class="card-content">
+            <div class="card-body">
                 <pre id="document-detail-json"><code class="language-json"></code></pre>
             </div>
         </div>
@@ -234,7 +219,7 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="has-text-centered has-text-danger">
+                        <td colspan="6" class="q-text-center q-text-danger">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
@@ -303,7 +288,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="has-text-centered">
+                        <td colspan="6" class="q-text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -315,23 +300,23 @@
                 const globalIndex = startIndex + pageIndex; // Index in filteredDocuments
                 const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
                 const vectorizedBadge = hasEmbedding
-                    ? '<span class="tag is-success">✓</span>'
-                    : '<span class="tag is-danger">✗</span>';
+                    ? '<span class="tag tag--success">✓</span>'
+                    : '<span class="tag tag--danger">✗</span>';
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
 
                 return `
-                    <tr class="${isSelected ? 'is-selected' : ''}">
+                    <tr class="${isSelected ? 'q-bg-light' : ''}">
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${globalIndex})" class="has-text-centered" style="cursor: pointer;">${vectorizedBadge}</td>
+                        <td onclick="selectDocument(${globalIndex})" class="q-text-center" style="cursor: pointer;">${vectorizedBadge}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${updatedDate}</td>
-                        <td class="has-text-centered">
-                            <button class="button is-small is-outlined" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
+                        <td class="q-text-center">
+                            <button class="btn btn--sm outline q-mr-1" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
                                 <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                             </button>
-                            <button class="button is-small is-danger is-outlined" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
+                            <button class="btn btn--sm btn-danger outline" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
                             </button>
                         </td>

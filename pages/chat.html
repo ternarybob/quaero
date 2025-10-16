@@ -10,52 +10,48 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container">
+    <div class="content">
 
         <!-- Heading Section -->
-        <div class="mt-5 mb-5">
+        <div class="q-mt-5 q-mb-5">
             <h1 class="title">Chat</h1>
             <p class="subtitle">AI-powered conversational interface with RAG document retrieval</p>
         </div>
 
-        {{template "navbar.html" .}}
-
-        <div class="card mt-5">
+        <div class="card">
             <header class="card-header">
-                <p class="card-header-title">
+                <h3 class="q-d-flex q-align-center q-gap-2">
                     <span class="icon"><i class="fas fa-comments"></i></span>
                     <span>Chat</span>
-                </p>
+                </h3>
             </header>
-            <div class="card-content">
+            <div class="card-body">
                 <!-- Chat Container -->
-                <div class="box" style="height: 60vh; overflow-y: auto; padding: 1rem; margin-bottom: 1rem; background: #1a1a1a;">
+                <div style="height: 60vh; overflow-y: auto; padding: 1rem; margin-bottom: 1rem; background: #1a1a1a; border-radius: 0.5rem;">
                     <div id="chat-messages"></div>
                 </div>
 
                 <!-- Message Input -->
                 <div class="field">
                     <div class="control">
-                        <textarea id="user-message" class="textarea" rows="3" placeholder="Type your message..."></textarea>
+                        <textarea id="user-message" class="input" rows="3" placeholder="Type your message..." style="min-height: 5rem; resize: vertical;"></textarea>
                     </div>
                 </div>
 
                 <!-- Controls -->
-                <div class="field is-grouped">
-                    <div class="control is-expanded">
+                <div class="q-d-flex q-align-center q-justify-between q-gap-2 q-flex-wrap">
+                    <div class="q-d-flex q-align-center">
                         <label class="checkbox">
                             <input type="checkbox" id="rag-enabled" checked>
                             Enable RAG (Document Retrieval) - Requires embedding support
                         </label>
                     </div>
-                    <div class="control">
-                        <button id="send-btn" class="button is-primary is-small is-outlined">
+                    <div class="q-d-flex q-gap-2">
+                        <button id="send-btn" class="btn btn-primary btn--sm outline">
                             <span class="icon"><i class="fas fa-paper-plane"></i></span>
                             <span>Send</span>
                         </button>
-                    </div>
-                    <div class="control">
-                        <button id="clear-btn" class="button is-danger is-small is-outlined">
+                        <button id="clear-btn" class="btn btn-danger btn--sm outline">
                             <span class="icon"><i class="fas fa-trash"></i></span>
                             <span>Clear</span>
                         </button>
@@ -63,10 +59,10 @@
                 </div>
 
                 <!-- Status -->
-                <div class="mt-3">
-                    <div id="status" class="has-text-grey mb-2"></div>
-                    <div id="live-status" class="has-text-grey-light is-size-7">
-                        <span class="icon-text">
+                <div class="q-mt-3">
+                    <div id="status" class="q-text-muted q-mb-2"></div>
+                    <div id="live-status" class="q-text-muted text-md">
+                        <span>
                             <span class="icon"><i class="fas fa-circle-notch fa-spin"></i></span>
                             <span>Checking service status...</span>
                         </span>
@@ -119,9 +115,10 @@
         // Add technical metadata section
         function addTechnicalMetadata(metadata) {
             const metadataDiv = document.createElement('div');
-            metadataDiv.classList.add('technical-metadata', 'box', 'is-size-7', 'has-background-dark', 'mt-2');
+            metadataDiv.classList.add('technical-metadata', 'text-md', 'q-bg-dark', 'q-mt-2');
             metadataDiv.style.borderLeft = '3px solid #48c78e';
             metadataDiv.style.padding = '0.5rem 0.75rem';
+            metadataDiv.style.borderRadius = '0.25rem';
 
             let html = '<strong style="color: #48c78e;">⚙ Technical Details</strong><br>';
 
@@ -363,43 +360,43 @@
                     lastHealthCheck = data;
 
                     // Build status HTML with visual indicators
-                    let statusHTML = '<span class="icon-text is-flex-wrap-wrap">';
+                    let statusHTML = '<span class="q-d-flex q-flex-wrap">';
 
                     // Mode indicator
-                    statusHTML += `<span class="mr-3"><strong>Mode:</strong> ${data.mode}</span>`;
+                    statusHTML += `<span class="q-mr-3"><strong>Mode:</strong> ${data.mode}</span>`;
 
                     // For offline mode, show server statuses
                     if (data.mode === 'offline') {
                         // Embed server status
                         const embedActive = data.embed_server === 'active';
-                        const embedColor = embedActive ? 'has-text-success' : 'has-text-danger';
+                        const embedColor = embedActive ? 'q-text-success' : 'q-text-danger';
                         const embedIcon = embedActive ? 'fa-circle' : 'fa-circle';
-                        statusHTML += `<span class="icon-text mr-3">
+                        statusHTML += `<span class="q-d-flex q-align-center q-gap-1 q-mr-3">
                     <span class="icon ${embedColor}"><i class="fas ${embedIcon}"></i></span>
                     <span><strong>Embed:</strong> ${data.embed_server}</span>
                 </span>`;
 
                         // Chat server status
                         const chatActive = data.chat_server === 'active';
-                        const chatColor = chatActive ? 'has-text-success' : 'has-text-danger';
+                        const chatColor = chatActive ? 'q-text-success' : 'q-text-danger';
                         const chatIcon = chatActive ? 'fa-circle' : 'fa-circle';
-                        statusHTML += `<span class="icon-text mr-3">
+                        statusHTML += `<span class="q-d-flex q-align-center q-gap-1 q-mr-3">
                     <span class="icon ${chatColor}"><i class="fas ${chatIcon}"></i></span>
                     <span><strong>Chat:</strong> ${data.chat_server}</span>
                 </span>`;
 
                         // Model loaded indicator
-                        const modelColor = data.model_loaded ? 'has-text-success' : 'has-text-warning';
+                        const modelColor = data.model_loaded ? 'q-text-success' : 'q-text-warning';
                         const modelIcon = data.model_loaded ? 'fa-check-circle' : 'fa-exclamation-triangle';
-                        statusHTML += `<span class="icon-text">
+                        statusHTML += `<span class="q-d-flex q-align-center q-gap-1">
                     <span class="icon ${modelColor}"><i class="fas ${modelIcon}"></i></span>
                     <span><strong>Models:</strong> ${data.model_loaded ? 'loaded' : 'not loaded'}</span>
                 </span>`;
                     } else {
                         // For mock/online mode, just show health
-                        const healthColor = data.healthy ? 'has-text-success' : 'has-text-danger';
+                        const healthColor = data.healthy ? 'q-text-success' : 'q-text-danger';
                         const healthIcon = data.healthy ? 'fa-check-circle' : 'fa-times-circle';
-                        statusHTML += `<span class="icon-text">
+                        statusHTML += `<span class="q-d-flex q-align-center q-gap-1">
                     <span class="icon ${healthColor}"><i class="fas ${healthIcon}"></i></span>
                     <span><strong>Status:</strong> ${data.healthy ? 'healthy' : 'unhealthy'}</span>
                 </span>`;
@@ -418,8 +415,8 @@
                     }
                 })
                 .catch(err => {
-                    liveStatusDiv.innerHTML = `<span class="icon-text">
-                <span class="icon has-text-danger"><i class="fas fa-times-circle"></i></span>
+                    liveStatusDiv.innerHTML = `<span class="q-d-flex q-align-center q-gap-1">
+                <span class="icon q-text-danger"><i class="fas fa-times-circle"></i></span>
                 <span>Connection error - retrying...</span>
             </span>`;
                     console.error('Health check failed:', err);

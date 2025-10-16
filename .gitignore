@@ -32,6 +32,7 @@ build/
 dist/
 bin/
 nul
+.playwright-mcp
 
 # Node (for potential tooling)
 node_modules/
@@ -50,7 +51,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 dev-debug.log
-# Dependency directories
+.kilocode
+/tools/
+/pages/styles/bulma/
 # Environment variables
 .env
 # Editor directories and files

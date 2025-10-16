@@ -10,30 +10,28 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container">
+    <div class="content">
 
         <!-- Heading Section -->
-        <div class="mt-5 mb-5">
+        <div class="q-mt-5 q-mb-5">
             <h1 class="title">Source Management</h1>
             <p class="subtitle">Configure and manage data sources for collection and indexing</p>
         </div>
 
         <!-- Application Status -->
-        <div class="card mt-5" x-data="appStatus">
-            <header class="card-header">
-                <p class="card-header-title">Application Status</p>
-                <div class="card-header-icon">
+        <div class="card" x-data="appStatus">
+            <header class="card-header q-d-flex q-align-center q-justify-between">
+                <h3>Application Status</h3>
+                <div class="q-d-flex q-align-center">
                     <span :class="'tag ' + getStatusColor(state)" x-text="state"></span>
                 </div>
             </header>
-            <div class="card-content">
-                <div class="content">
-                    <p><strong>Current State:</strong> <span x-text="state"></span></p>
-                    <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
-                    <div x-show="Object.keys(metadata).length > 0">
-                        <p><strong>Details:</strong></p>
-                        <pre x-text="JSON.stringify(metadata, null, 2)"></pre>
-                    </div>
+            <div class="card-body">
+                <p><strong>Current State:</strong> <span x-text="state"></span></p>
+                <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
+                <div x-show="Object.keys(metadata).length > 0">
+                    <p><strong>Details:</strong></p>
+                    <pre x-text="JSON.stringify(metadata, null, 2)"></pre>
                 </div>
             </div>
         </div>
@@ -41,80 +39,78 @@
         <!-- Sources Management Component (wrap card and modal in shared scope) -->
         <div x-data="sourceManagement">
             <!-- Sources List -->
-            <div class="card mt-5">
-                <header class="card-header">
-                    <p class="card-header-title">
-                        <span x-text="sources.length" class="has-text-grey mr-2"></span>Sources
-                    </p>
-                    <div class="card-header-icon">
-                        <button class="button is-small is-info" @click="openCreateModal()">
+            <div class="card">
+                <header class="card-header q-d-flex q-align-center q-justify-between">
+                    <h3>
+                        <span x-text="sources.length" class="q-text-muted q-mr-2"></span>Sources
+                    </h3>
+                    <div class="q-d-flex q-align-center q-gap-2">
+                        <button class="btn btn--sm btn-info outline" @click="openCreateModal()">
                             <span class="icon"><i class="fas fa-plus"></i></span>
                             <span>Add Source</span>
                         </button>
-                        <button class="button is-small is-outlined ml-2" @click="loadSources()" title="Refresh Sources">
+                        <button class="btn btn--sm outline" @click="loadSources()" title="Refresh Sources">
                             <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                         </button>
                     </div>
                 </header>
-                <div class="card-content">
+                <div class="card-body">
                     <!-- Sources Table -->
-                    <div class="table-container">
-                        <table class="table is-fullwidth is-striped is-hoverable">
-                            <thead>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>NAME</th>
+                                <th>TYPE</th>
+                                <th>BASE URL</th>
+                                <th>AUTHENTICATION</th>
+                                <th class="q-text-center">STATUS</th>
+                                <th>CREATED</th>
+                                <th class="q-text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-if="sources.length === 0">
                                 <tr>
-                                    <th>NAME</th>
-                                    <th>TYPE</th>
-                                    <th>BASE URL</th>
-                                    <th>AUTHENTICATION</th>
-                                    <th class="has-text-centered">STATUS</th>
-                                    <th>CREATED</th>
-                                    <th class="has-text-centered">ACTIONS</th>
+                                    <td colspan="7" class="q-text-center">
+                                        No sources configured. Click "Add Source" to get started.
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                <template x-if="sources.length === 0">
-                                    <tr>
-                                        <td colspan="7" class="has-text-centered">
-                                            No sources configured. Click "Add Source" to get started.
-                                        </td>
-                                    </tr>
-                                </template>
-                                <template x-for="source in sources" :key="source.id">
-                                    <tr>
-                                        <td x-text="source.name"></td>
-                                        <td>
-                                            <span class="tag" :class="{
-                                                    'is-info': source.type === 'jira',
-                                                    'is-link': source.type === 'confluence',
-                                                    'is-dark': source.type === 'github'
-                                                }" x-text="source.type.toUpperCase()"></span>
-                                        </td>
-                                        <td x-text="source.base_url"></td>
-                                        <td>
-                                            <template x-if="source.auth_id">
-                                                <span class="tag is-light is-success">Configured</span>
-                                            </template>
-                                            <template x-if="!source.auth_id">
-                                                <span class="tag is-light">None</span>
-                                            </template>
-                                        </td>
-                                        <td class="has-text-centered">
-                                            <span class="tag" :class="source.enabled ? 'is-success' : 'is-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
-                                        </td>
-                                        <td x-text="formatDate(source.created_at)"></td>
-                                        <td class="has-text-centered">
-                                            <button class="button is-small is-outlined" @click="editSource(source)" title="Edit Source">
-                                                <span class="icon"><i class="fas fa-edit"></i></span>
-                                            </button>
-                                            <button class="button is-small is-danger is-outlined ml-1" @click="deleteSource(source.id)" title="Delete Source">
-                                                <span class="icon"><i class="fas fa-trash"></i></span>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
+                            </template>
+                            <template x-for="source in sources" :key="source.id">
+                                <tr>
+                                    <td x-text="source.name"></td>
+                                    <td>
+                                        <span class="tag" :class="{
+                                                'tag--info': source.type === 'jira',
+                                                'tag--info': source.type === 'confluence',
+                                                'tag--primary': source.type === 'github'
+                                            }" x-text="source.type.toUpperCase()"></span>
+                                    </td>
+                                    <td x-text="source.base_url"></td>
+                                    <td>
+                                        <template x-if="source.auth_id">
+                                            <span class="tag tag--success">Configured</span>
+                                        </template>
+                                        <template x-if="!source.auth_id">
+                                            <span class="tag">None</span>
+                                        </template>
+                                    </td>
+                                    <td class="q-text-center">
+                                        <span class="tag" :class="source.enabled ? 'tag--success' : 'tag--warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
+                                    </td>
+                                    <td x-text="formatDate(source.created_at)"></td>
+                                    <td class="q-text-center">
+                                        <button class="btn btn--sm outline q-mr-1" @click="editSource(source)" title="Edit Source">
+                                            <span class="icon"><i class="fas fa-edit"></i></span>
+                                        </button>
+                                        <button class="btn btn--sm btn-danger outline" @click="deleteSource(source.id)" title="Delete Source">
+                                            <span class="icon"><i class="fas fa-trash"></i></span>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
@@ -217,8 +213,8 @@
                         </div>
                     </section>
                     <footer class="modal-card-foot">
-                        <button class="button is-success is-outlined" @click="saveSource()">Save</button>
-                        <button class="button is-outlined" @click="closeModal()">Cancel</button>
+                        <button class="btn btn-success btn--sm outline" @click="saveSource()">Save</button>
+                        <button class="btn btn--sm outline" @click="closeModal()">Cancel</button>
                     </footer>
                 </div>
             </div>

@@ -238,7 +238,7 @@ func (a *App) initServices() error {
 		RetryAttempts: 3,
 		RetryBackoff:  time.Second * 2,
 	}
-	a.CrawlerService = crawler.NewService(a.AuthService, a.EventService, a.StorageManager.JobStorage(), a.Logger, crawlerConfig)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.Logger, crawlerConfig)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -325,7 +325,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)

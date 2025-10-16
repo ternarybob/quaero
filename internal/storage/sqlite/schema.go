@@ -103,6 +103,9 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 	source_type TEXT NOT NULL,
 	entity_type TEXT NOT NULL,
 	config_json TEXT NOT NULL,
+	source_config_snapshot TEXT,
+	auth_snapshot TEXT,
+	refresh_source INTEGER DEFAULT 0,
 	status TEXT NOT NULL,
 	progress_json TEXT,
 	created_at INTEGER NOT NULL,
@@ -175,5 +178,81 @@ func (s *SQLiteDB) InitSchema() error {
 		return err
 	}
 	s.logger.Info().Msg("Database schema initialized")
+
+	// Run migrations for schema evolution
+	if err := s.runMigrations(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// runMigrations checks for and applies schema migrations for existing databases
+func (s *SQLiteDB) runMigrations() error {
+	// Check if new crawl_jobs columns exist
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasSourceConfigSnapshot := false
+	hasAuthSnapshot := false
+	hasRefreshSource := false
+	hasSeedURLs := false
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		switch name {
+		case "source_config_snapshot":
+			hasSourceConfigSnapshot = true
+		case "auth_snapshot":
+			hasAuthSnapshot = true
+		case "refresh_source":
+			hasRefreshSource = true
+		case "seed_urls":
+			hasSeedURLs = true
+		}
+	}
+
+	// Add missing columns
+	if !hasSourceConfigSnapshot {
+		s.logger.Info().Msg("Running migration: Adding source_config_snapshot column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN source_config_snapshot TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if !hasAuthSnapshot {
+		s.logger.Info().Msg("Running migration: Adding auth_snapshot column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN auth_snapshot TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if !hasRefreshSource {
+		s.logger.Info().Msg("Running migration: Adding refresh_source column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN refresh_source INTEGER DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+
+	if !hasSeedURLs {
+		s.logger.Info().Msg("Running migration: Adding seed_urls column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN seed_urls TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if !hasSourceConfigSnapshot || !hasAuthSnapshot || !hasRefreshSource || !hasSeedURLs {
+		s.logger.Info().Msg("Schema migrations completed successfully")
+	}
+
 	return nil
 }

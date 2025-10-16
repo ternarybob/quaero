@@ -10,65 +10,63 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container">
+    <div class="content">
 
         <!-- Heading Section -->
-        <div class="mt-5 mb-5">
+        <div class="q-mt-5 q-mb-5">
             <h1 class="title">Settings</h1>
             <p class="subtitle">System configuration and operational controls</p>
         </div>
 
         <!-- Full Configuration Table -->
-        <div class="card mt-5">
-            <header class="card-header">
-                <p class="card-header-title">System Configuration (Read-Only)</p>
-                <div class="card-header-icon">
-                    <button class="button is-small is-outlined" onclick="loadConfig()">
+        <div class="card">
+            <header class="card-header q-d-flex q-align-center q-justify-between">
+                <h3>System Configuration (Read-Only)</h3>
+                <div class="q-d-flex q-align-center">
+                    <button class="btn btn--sm outline" onclick="loadConfig()">
                         <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                     </button>
                 </div>
             </header>
-            <div class="card-content">
-                <div class="table-container">
-                    <table class="table is-fullwidth is-striped is-hoverable">
-                        <thead>
-                            <tr>
-                                <th style="width: 30%;">Section</th>
-                                <th style="width: 35%;">Setting</th>
-                                <th style="width: 35%;">Value</th>
-                            </tr>
-                        </thead>
-                        <tbody id="config-table-body">
-                            <tr>
-                                <td colspan="3" class="has-text-centered has-text-grey">
-                                    Loading configuration...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Section</th>
+                            <th>Setting</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="config-table-body">
+                        <tr>
+                            <td colspan="3" class="q-text-center q-text-muted">
+                                Loading configuration...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
         <!-- Danger Zone -->
-        <div class="card mt-5">
+        <div class="card">
             <header class="card-header">
-                <p class="card-header-title has-text-danger">
+                <h3 class="q-text-danger q-d-flex q-align-center q-gap-2">
                     <span class="icon"><i class="fas fa-exclamation-triangle"></i></span>
                     <span>Danger Zone</span>
-                </p>
+                </h3>
             </header>
-            <div class="card-content">
-                <div class="columns is-vcentered">
-                    <div class="column">
-                        <p class="title is-5">Clear All Documents</p>
-                        <p class="subtitle is-6">
+            <div class="card-body">
+                <div class="q-d-flex q-align-center q-justify-between q-gap-3">
+                    <div>
+                        <p class="text-lg q-text-bold">Clear All Documents</p>
+                        <p>
                             Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
                             Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
                         </p>
                     </div>
-                    <div class="column is-narrow">
-                        <button class="button is-danger is-small is-outlined" onclick="confirmRemoveEmbeddings()">
+                    <div>
+                        <button class="btn btn-danger btn--sm outline" onclick="confirmRemoveEmbeddings()">
                             <span class="icon"><i class="fas fa-trash"></i></span>
                             <span>CLEAR ALL</span>
                         </button>
