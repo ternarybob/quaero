@@ -32,7 +32,7 @@ type Service struct {
 	eventService interfaces.EventService
 	cron         *cron.Cron
 	logger       arbor.ILogger
-	db           *sql.DB // Database for persisting job settings
+	db           *sql.DB    // Database for persisting job settings
 	mu           sync.Mutex // Protects isProcessing
 	jobMu        sync.Mutex // Protects jobs map
 	globalMu     sync.Mutex // Prevents concurrent job execution

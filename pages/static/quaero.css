@@ -1,8 +1,8 @@
 /* ============================================================================
-   Quaero Custom Styles - Metro UI Color Theming
+   Quaero Custom Styles - Spectre CSS Custom Theming
    ============================================================================ */
 
-/* 1. ROOT VARIABLES - Color Theming Only
+/* 1. ROOT VARIABLES - Extended Color Theming & Layout
    ========================================================================== */
 :root {
     /* Brand Colors - Software Blue Theme */
@@ -12,81 +12,630 @@
     --color-danger: #d1242f;
     --color-warning: #ffdd57;
     --color-info: #0757ba;
+
+    /* GitHub-like Layout Colors */
+    --header-bg: #24292f;
+    --page-bg: #f6f8fa;
+    --content-bg: #ffffff;
+    --text-primary: #1f2328;
+    --text-secondary: #57606a;
+    --btn-primary: #57606a;
+    --border-color: #d0d7de;
+    --border-radius: .375rem;
+
+    /* Code Block Colors */
+    --code-bg: #0d1117;
+    --code-color: #c9d1d9;
+
+    /* Typography */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
 }
 
-/* 2. METRO UI COLOR INTEGRATION
+/* 2. SPECTRE CSS BUTTON OVERRIDES
    ========================================================================== */
+.btn {
+    border-radius: var(--border-radius);
+    color: var(--btn-primary);
+    border-color: var(--border-color);
+    transition: all 0.2s;
+}
 
-/* Button Colors */
-.button.primary {
+.btn-primary {
     background-color: var(--color-primary);
+    border-color: var(--color-primary);
     color: white;
 }
 
-.button.primary:hover {
+.btn-primary:hover,
+.btn-primary:focus {
     background-color: #064a9c;
+    border-color: #064a9c;
 }
 
-.button.success {
+.btn-success {
     background-color: var(--color-success);
+    border-color: var(--color-success);
     color: white;
 }
 
-.button.success:hover {
+.btn-success:hover,
+.btn-success:focus {
     background-color: #1a7335;
+    border-color: #1a7335;
 }
 
-.button.danger {
+.btn-error {
     background-color: var(--color-danger);
+    border-color: var(--color-danger);
     color: white;
 }
 
-.button.danger:hover {
+.btn-error:hover,
+.btn-error:focus {
     background-color: #b31e28;
+    border-color: #b31e28;
 }
 
-/* Tag/Badge Colors */
-.tag.primary,
-.badge.primary {
-    background-color: var(--color-primary);
+.btn-header-primary {
+    background-color: rgba(255, 255, 255, 0.1);
     color: white;
+    border-color: rgba(255, 255, 255, 0.2);
 }
 
-.tag.success,
-.badge.success {
+.btn-header-primary:hover,
+.btn-header-primary:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 3. SPECTRE CSS LABEL (BADGE) OVERRIDES
+   ========================================================================== */
+.label {
+    border-radius: var(--border-radius);
+}
+
+.label-success {
     background-color: var(--color-success);
     color: white;
 }
 
-.tag.danger,
-.badge.danger {
+.label-danger,
+.label-error {
     background-color: var(--color-danger);
     color: white;
 }
 
-.tag.warning,
-.badge.warning {
+.label-warning {
     background-color: var(--color-warning);
     color: #333;
 }
 
-.tag.info,
-.badge.info {
+.label-info,
+.label-primary {
     background-color: var(--color-info);
     color: white;
 }
 
-/* AppBar Brand Styling */
-.app-bar .brand {
+.label-secondary {
+    background-color: var(--color-secondary);
+    color: white;
+}
+
+/* 4. GITHUB-LIKE LAYOUT STYLES
+   ========================================================================== */
+
+/* Body Styling */
+body {
+    font-family: var(--font-sans);
+    background-color: var(--page-bg);
+    color: var(--text-primary);
+    padding-top: 64px; /* Space for fixed header */
+}
+
+h2 {
+    font-size: 1.25rem;
+}
+
+/* App Header */
+.app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background-color: var(--header-bg);
+    border-bottom: 1px solid #424a53;
+    height: 64px;
+}
+
+.app-header-content {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 100%;
+}
+
+.app-header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.app-header-nav .brand {
+    color: white;
+    text-decoration: none;
+    font-size: 1.25rem;
+    margin-right: 1rem;
+}
+
+.nav-links {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nav-links a {
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.nav-links a:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-links a.active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Mobile Menu Toggle */
+.mobile-menu-toggle {
+    display: none;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.5rem;
+}
+
+.mobile-menu-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius);
+}
+
+/* Mobile Responsive Navbar */
+@media (max-width: 768px) {
+    .mobile-menu-toggle {
+        display: block;
+    }
+
+    .nav-links {
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background-color: var(--header-bg);
+        flex-direction: column;
+        border-bottom: 1px solid #424a53;
+        display: none;
+    }
+
+    .nav-links.mobile-open {
+        display: flex;
+    }
+
+    .nav-links a {
+        padding: 1rem 1.5rem;
+        border-radius: 0;
+    }
+
+    .nav-links a:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+/* Page Container */
+.page-container {
+    max-width: 1280px;
+    margin: 1.5rem auto;
+    padding: 0 1.5rem;
+}
+
+/* Page Title */
+.page-title {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.page-title h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2rem;
+    font-weight: 600;
+}
+
+.page-title p {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+/* Content Sections */
+.content-section {
+    background-color: var(--content-bg);
+    border-radius: var(--border-radius);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    margin-bottom: 1.5rem;
+}
+
+.section-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.section-body {
+    padding: 1.5rem;
+}
+
+/* Cards */
+.card {
+    border-radius: var(--border-radius);
+    margin-bottom: 1.5rem;
+}
+
+.card .card-header {
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.8rem;
+}
+
+.navbar-section h2 {
+    margin-bottom: 0;
+}
+
+/* 5. CUSTOM COMPONENT STYLES
+   ========================================================================== */
+
+/* Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.stat-item {
+    padding: 1.5rem;
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Code Block Styles */
+.code-block {
+    background-color: var(--code-bg);
+    color: var(--code-color);
+    border-radius: 6px;
+    padding: 1rem;
+    font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 0;
+}
+
+.code-block code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-family: inherit;
+}
+
+/* Terminal Styles for Logs */
+.terminal {
+    background-color: var(--code-bg);
+    color: var(--code-color);
+    border-radius: 6px;
+    padding: 1rem;
+    font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.terminal-line {
+    margin-bottom: 0.25rem;
+}
+
+.terminal-time {
+    color: #8b949e;
+}
+
+.terminal-info {
+    color: #58a6ff;
+}
+
+.terminal-warning {
+    color: #d29922;
+}
+
+.terminal-error {
+    color: #f85149;
+}
+
+/* Table Styling Overrides */
+.table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.table thead th {
+    background-color: var(--page-bg);
+    border-bottom: 2px solid var(--border-color);
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.table tbody td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.table.striped tbody tr:nth-child(even) {
+    background-color: var(--page-bg);
+}
+
+/* 6. TOAST NOTIFICATION STYLES
+   ========================================================================== */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+    max-width: 400px;
+}
+
+.toast-item {
+    background: white;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    animation: slideIn 0.3s ease-out;
+    display: flex;
+    align-items: center;
+}
+
+.toast-success {
+    background: #d4edda;
+    border-left: 4px solid var(--color-success);
+    color: #155724;
+}
+
+.toast-error {
+    background: #f8d7da;
+    border-left: 4px solid var(--color-danger);
+    color: #721c24;
+}
+
+.toast-warning {
+    background: #fff3cd;
+    border-left: 4px solid var(--color-warning);
+    color: #856404;
+}
+
+.toast-info {
+    background: #d1ecf1;
+    border-left: 4px solid var(--color-info);
+    color: #0c5460;
+}
+
+.toast-removing {
+    animation: slideOut 0.3s ease-out forwards;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(400px);
+    }
+}
+
+/* 7. PAGINATION STYLES
+   ========================================================================== */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+}
+
+.pagination-list {
+    display: flex;
+    list-style: none;
+    gap: 0.25rem;
+    padding: 0;
+    margin: 0;
+}
+
+.pagination-item button {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+}
+
+.pagination-item button.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.pagination-item button:hover:not(.active):not(:disabled) {
+    background: var(--page-bg);
+}
+
+.pagination-item button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Alternative pagination classes for anchor-based pagination */
+.pagination {
+    display: flex;
+    list-style: none;
+    gap: 0.25rem;
+    padding: 0;
+    margin: 0;
+}
+
+.page-item a {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+    text-decoration: none;
+    display: inline-block;
+}
+
+.page-item.active a {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.page-item:not(.active):not(.disabled) a:hover {
+    background: var(--page-bg);
+}
+
+.page-item.disabled a {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 8. MODAL ENHANCEMENTS
+   ========================================================================== */
+.modal.active {
+    display: flex;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* 9. FORM CONTROL ENHANCEMENTS
+   ========================================================================== */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.form-input:focus,
+.form-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
+}
+
+.form-input-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+/* 10. UTILITY CLASSES
+   ========================================================================== */
+
+/* Color Utilities */
+.text-success {
+    color: var(--color-success);
+}
+
+.text-warning {
+    color: var(--color-warning);
+}
+
+.text-danger,
+.text-error {
+    color: var(--color-danger);
+}
+
+.text-info {
+    color: var(--color-info);
+}
+
+.text-primary {
     color: var(--color-primary);
 }
 
-/* AppBar Border */
-[data-role="appbar"] {
-    border-bottom: 1px solid var(--color-primary);
+.text-secondary,
+.text-muted {
+    color: var(--text-secondary);
 }
 
-/* Panel Header Spacing */
-.panel-header {
-    padding: 1rem 1.5rem;
+/* Background Utilities */
+.bg-gray {
+    background-color: var(--page-bg);
+}
+
+/* Spacing Utilities */
+.mt-4 {
+    margin-top: 1.5rem;
+}
+
+.mb-4 {
+    margin-bottom: 1.5rem;
+}
+
+.p-4 {
+    padding: 1.5rem;
 }

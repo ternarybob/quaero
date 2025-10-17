@@ -10,29 +10,25 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Quaero</h1>
-                <p class="text-leader">Unified Data Collection and Analysis Platform</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Quaero</h1>
+            <p>Unified Data Collection and Analysis Platform</p>
         </div>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-status.html" .}}
-            </div>
-        </div>
+        <!-- Quick Actions -->
+        <section>
+            {{template "service-status.html" .}}
+        </section>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-logs.html" .}}
-            </div>
-        </div>
+        <!-- Service Logs -->
+        <section style="margin-top: 1.5rem;">
+            {{template "service-logs.html" .}}
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 

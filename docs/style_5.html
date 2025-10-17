@@ -33,6 +33,7 @@
             --border-color: #d0d7de;
             --border-radius: .375rem;
             --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            --font-h2-size: 1.25rem;
         }
 
         body {
@@ -44,16 +45,7 @@
         }
 
         h2 {
-            font-size: 1.25rem;
-        }
-
-        .card-header{
-            
-        }
-        .navbar-section {
-            h2 {
-                margin-bottom: 0;
-            }
+            font-size: var(--font-h2-size);
         }
 
         /* Header */
@@ -115,6 +107,7 @@
             color: white;
         }
 
+        /* buttons */
         .btn-header-primary {
             background-color: var(--brand-primary);
             border-color: var(--brand-primary);
@@ -138,7 +131,7 @@
         .page-container {
             max-width: 1280px;
             margin: 1.5rem auto;
-            padding: 0 1.5rem;
+            /* padding: 0 1.5rem; */
         }
 
         .page-title h1 {
@@ -162,8 +155,12 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 1rem 1.5rem;
+            padding: 0.8rem 0.8rem;
             border-bottom: 1px solid var(--border-color);
+
+            h2 {
+                margin-bottom: 0;
+            }
         }
 
         .section-body {
@@ -171,9 +168,15 @@
         }
 
         /* Cards */
-        .card-header {
+        .card .card-header {
+            padding-bottom: 0.8rem;
             border-bottom: 1px solid var(--border-color);
+        }
 
+        .navbar-section {
+            h2 {
+                margin-bottom: 0;
+            }
         }
 
         /* Statistics */
@@ -294,9 +297,10 @@
                     <a href="#">Style Guide</a>
                 </div>
             </nav>
-            <button class="btn btn-sm btn-header-primary">
+            <span class="chip">Crime</span>
+            <!-- <button class="btn btn-sm btn-header-primary">
                 <i class="ti ti-plus"></i> New Task
-            </button>
+            </button> -->
         </div>
     </header>
 

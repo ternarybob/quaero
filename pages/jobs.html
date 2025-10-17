@@ -10,79 +10,83 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Job Management</h1>
-                <p class="text-leader">Monitor and manage crawler jobs for Jira and Confluence data collection</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Job Management</h1>
+            <p>Monitor and manage crawler jobs for Jira and Confluence data collection</p>
         </div>
 
         <!-- Job Statistics -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">Job Statistics</h6>
-                            <div class="d-flex flex-gap-2">
-                                <button class="button info small outline" onclick="showCreateJobModal()">
-                                    <span class="icon"><i class="fa-solid fa-plus"></i></span>
+        <section>
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Job Statistics</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <div class="btn-group btn-group-block">
+                                <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
+                                    <i class="fa-solid fa-plus"></i>
                                     <span>Create Job</span>
                                 </button>
-                                <button class="button small outline" onclick="loadStats()">
-                                    <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                                <button class="btn btn-sm" onclick="loadStats()">
+                                    <i class="fa-solid fa-rotate-right"></i>
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="panel-content">
-                        <div class="d-flex flex-justify-around flex-align-center flex-gap-2" style="flex-wrap: nowrap;">
-                            <div class="text-center">
-                                <p class="text-small text-muted">TOTAL JOBS</p>
-                                <p class="text-bold h3" id="stat-total">-</p>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                        <div style="display: flex; justify-content: space-around; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">TOTAL JOBS</p>
+                                <p style="font-size: 1.75rem; font-weight: bold;" id="stat-total">-</p>
                             </div>
-                            <div class="text-center">
-                                <p class="text-small text-muted">PENDING</p>
-                                <p class="text-bold h3 fg-orange" id="stat-pending">-</p>
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">PENDING</p>
+                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-warning);" id="stat-pending">-</p>
                             </div>
-                            <div class="text-center">
-                                <p class="text-small text-muted">RUNNING</p>
-                                <p class="text-bold h3 fg-cyan" id="stat-running">-</p>
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">RUNNING</p>
+                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-primary);" id="stat-running">-</p>
                             </div>
-                            <div class="text-center">
-                                <p class="text-small text-muted">COMPLETED</p>
-                                <p class="text-bold h3 fg-green" id="stat-completed">-</p>
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">COMPLETED</p>
+                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-success);" id="stat-completed">-</p>
                             </div>
-                            <div class="text-center">
-                                <p class="text-small text-muted">FAILED</p>
-                                <p class="text-bold h3 fg-red" id="stat-failed">-</p>
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">FAILED</p>
+                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-danger);" id="stat-failed">-</p>
                             </div>
-                            <div class="text-center">
-                                <p class="text-small text-muted">CANCELLED</p>
-                                <p class="text-bold h3 fg-orange" id="stat-cancelled">-</p>
+                            <div style="text-align: center;">
+                                <p style="font-size: 0.875rem; color: var(--text-secondary);">CANCELLED</p>
+                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-warning);" id="stat-cancelled">-</p>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Default Jobs -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">Default Jobs</h6>
-                            <button class="button small outline" onclick="loadDefaultJobs()" title="Refresh Default Jobs">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Default Jobs</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" onclick="loadDefaultJobs()" title="Refresh Default Jobs">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
-                        </div>
-                    </div>
-                    <div class="panel-content">
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
                         <table class="table striped border">
                             <thead>
                                 <tr>
@@ -106,50 +110,47 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Crawler Jobs -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">
-                                <span id="job-count" class="text-muted mr-2">0</span>Crawler Jobs
-                            </h6>
-                            <button class="button small outline" onclick="loadJobs()" title="Refresh Jobs">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>
+                                <span id="job-count" style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Crawler Jobs
+                            </h2>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" onclick="loadJobs()" title="Refresh Jobs">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
-                        </div>
-                    </div>
-                    <div class="panel-content">
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
                         <!-- Filter Controls -->
-                        <div class="row mb-4">
-                            <div class="cell-4">
-                                <select data-role="select" class="input" id="status-filter" onchange="filterJobs()">
-                                    <option value="">All Statuses</option>
-                                    <option value="pending">Pending</option>
-                                    <option value="running">Running</option>
-                                    <option value="completed">Completed</option>
-                                    <option value="failed">Failed</option>
-                                    <option value="cancelled">Cancelled</option>
-                                </select>
-                            </div>
-                            <div class="cell-4">
-                                <select data-role="select" class="input" id="source-filter" onchange="filterJobs()">
-                                    <option value="">All Sources</option>
-                                    <option value="jira">Jira</option>
-                                    <option value="confluence">Confluence</option>
-                                </select>
-                            </div>
-                            <div class="cell-4">
-                                <select data-role="select" class="input" id="entity-filter" onchange="filterJobs()">
-                                    <option value="">All Entity Types</option>
-                                    <option value="projects">Projects</option>
-                                    <option value="spaces">Spaces</option>
-                                    <option value="repos">Repos</option>
-                                </select>
-                            </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                            <select class="form-select" id="status-filter" onchange="filterJobs()">
+                                <option value="">All Statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="running">Running</option>
+                                <option value="completed">Completed</option>
+                                <option value="failed">Failed</option>
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                            <select class="form-select" id="source-filter" onchange="filterJobs()">
+                                <option value="">All Sources</option>
+                                <option value="jira">Jira</option>
+                                <option value="confluence">Confluence</option>
+                            </select>
+                            <select class="form-select" id="entity-filter" onchange="filterJobs()">
+                                <option value="">All Entity Types</option>
+                                <option value="projects">Projects</option>
+                                <option value="spaces">Spaces</option>
+                                <option value="repos">Repos</option>
+                            </select>
                         </div>
 
                         <!-- Jobs Table -->
@@ -175,90 +176,92 @@
                         </table>
 
                         <!-- Pagination Controls -->
-                        <div class="d-flex flex-justify-center mt-4">
-                            <ul id="job-pagination" data-role="pagination"
-                                data-length="7"
-                                data-total="1"
-                                data-current="1"
-                                data-on-page-click="onJobPaginationPageClick"></ul>
+                        <div id="job-pagination-container" class="pagination-container" style="margin-top: 1rem;">
+                            <!-- Pagination will be rendered here by renderPagination() -->
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Job Detail -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">Job Detail</h6>
-                            <span id="selected-job-id" class="badge info"></span>
-                        </div>
-                    </div>
-                    <div class="panel-content">
-                        <pre id="job-detail-json"><code class="language-json"></code></pre>
-                    </div>
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Job Detail</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <span id="selected-job-id" class="label label-primary"></span>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-logs.html" .}}
-            </div>
-        </div>
+        <!-- Service Logs -->
+        <section style="margin-top: 1.5rem;">
+            {{template "service-logs.html" .}}
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 
     {{template "snackbar.html" .}}
 
     <!-- Create Job Modal -->
-    <div id="create-job-modal" data-role="dialog" data-overlay="true" style="width: 600px; max-width: 90%;">
-        <div class="dialog-title">Create New Job</div>
-        <div class="dialog-content">
-                <form id="create-job-form">
-                    <!-- Source Selection -->
-                    <div class="form-group mb-4">
-                        <label>Source</label>
-                        <select data-role="select" class="input" id="job-source-select" required>
-                            <option value="">Select a source...</option>
-                        </select>
-                        <small class="text-muted">Select the data source for this job</small>
-                    </div>
+    <div id="create-job-modal" class="modal" @keydown.escape.window="closeCreateJobModal()">
+        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
+        <div class="modal-container" style="max-width: 600px;">
+            <div class="modal-header">
+                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
+                <div class="modal-title h5">Create New Job</div>
+            </div>
+            <div class="modal-body">
+                <div class="content">
+                    <form id="create-job-form">
+                        <!-- Source Selection -->
+                        <div class="form-group">
+                            <label class="form-label">Source</label>
+                            <select class="form-select" id="job-source-select" required>
+                                <option value="">Select a source...</option>
+                            </select>
+                            <p class="form-input-hint">Select the data source for this job</p>
+                        </div>
 
-                    <!-- Refresh Source Checkbox -->
-                    <div class="form-group mb-4">
-                        <label class="checkbox">
-                            <input type="checkbox" id="refresh-source-checkbox">
-                            <span class="check"></span>
-                            <span class="caption">Refresh source configuration before execution</span>
-                        </label>
-                        <small class="text-muted">If checked, the job will fetch the latest source configuration before starting</small>
-                    </div>
+                        <!-- Refresh Source Checkbox -->
+                        <div class="form-group">
+                            <label class="form-checkbox">
+                                <input type="checkbox" id="refresh-source-checkbox">
+                                <i class="form-icon"></i> Refresh source configuration before execution
+                            </label>
+                            <p class="form-input-hint">If checked, the job will fetch the latest source configuration before starting</p>
+                        </div>
 
-                    <!-- Optional Seed URLs -->
-                    <div class="form-group mb-4">
-                        <label>Seed URLs (Optional)</label>
-                        <textarea data-role="textarea" id="seed-urls-textarea" class="input" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
-                        <small class="text-muted">One URL per line. Leave empty to derive from source configuration</small>
-                    </div>
+                        <!-- Optional Seed URLs -->
+                        <div class="form-group">
+                            <label class="form-label">Seed URLs (Optional)</label>
+                            <textarea id="seed-urls-textarea" class="form-input" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
+                            <p class="form-input-hint">One URL per line. Leave empty to derive from source configuration</p>
+                        </div>
 
-                    <!-- Loading State -->
-                    <div id="modal-loading" style="display: none;" class="text-center p-3">
-                        <span class="icon">
+                        <!-- Loading State -->
+                        <div id="modal-loading" style="display: none; text-align: center; padding: 1rem;">
                             <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-2">Creating job...</p>
-                    </div>
-                </form>
-        </div>
-        <div class="dialog-actions">
-            <button type="button" class="button" onclick="closeCreateJobModal()">Cancel</button>
-            <button type="submit" class="button info" onclick="createJobFromSource(event)">Create Job</button>
+                            <p style="margin-top: 0.5rem;">Creating job...</p>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeCreateJobModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" onclick="createJobFromSource(event)">Create Job</button>
+            </div>
         </div>
     </div>
 
@@ -285,7 +288,7 @@
             let originalIcon = null;
             if (statsBtn) {
                 statsBtn.disabled = true;
-                const iconElement = statsBtn.querySelector('.icon i');
+                const iconElement = statsBtn.querySelector('i');
                 if (iconElement) {
                     originalIcon = iconElement.className;
                     iconElement.className = 'fas fa-spinner fa-pulse';
@@ -317,7 +320,7 @@
             } finally {
                 if (statsBtn) {
                     statsBtn.disabled = false;
-                    const iconElement = statsBtn.querySelector('.icon i');
+                    const iconElement = statsBtn.querySelector('i');
                     if (iconElement && originalIcon) {
                         iconElement.className = originalIcon;
                     }
@@ -361,7 +364,7 @@
                 console.error('Error loading jobs:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center fg-red">
+                        <td colspan="7" class="text-center" style="color: var(--color-danger);">
                             Failed to load jobs. Please try again.
                         </td>
                     </tr>
@@ -387,16 +390,8 @@
             }
             document.getElementById('job-count').textContent = `${totalJobs}`;
 
-            // Update Metro pagination
-            const paginationElement = document.getElementById('job-pagination');
-            if (paginationElement && typeof Metro !== 'undefined' && Metro.getPlugin) {
-                const pagination = Metro.getPlugin(paginationElement, 'pagination');
-                if (pagination) {
-                    pagination.options.total = totalPages;
-                    pagination.options.current = currentPage;
-                    pagination.drawPagination();
-                }
-            }
+            // Update custom pagination
+            renderPagination(totalPages);
 
             if (!filteredJobs || filteredJobs.length === 0) {
                 tbody.innerHTML = `
@@ -417,7 +412,7 @@
                 const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
 
                 return `
-                    <tr class="${isSelected ? 'bg-light' : ''}" onclick="selectJob(${index})" style="cursor: pointer;">
+                    <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})" style="cursor: pointer;">
                         <td title="${job.id || 'N/A'}">${jobIdShort}...</td>
                         <td>${job.source_type || 'N/A'}</td>
                         <td>${job.entity_type || 'N/A'}</td>
@@ -425,17 +420,17 @@
                         <td>${progressText}</td>
                         <td>${createdDate}</td>
                         <td class="text-center">
-                            <button class="button small outline mr-1" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job" style="margin-right: 0.25rem;">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
                             ${job.status === 'running' ? `
-                            <button class="button warning small outline mr-1" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job">
-                                <span class="icon"><i class="fas fa-stop"></i></span>
+                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job" style="margin-right: 0.25rem;">
+                                <i class="fas fa-stop"></i>
                             </button>
                             ` : ''}
                             ${job.status !== 'running' ? `
-                            <button class="button danger small outline" onclick="event.stopPropagation(); deleteJob('${job.id}')" title="Delete Job">
-                                <span class="icon"><i class="fas fa-trash"></i></span>
+                            <button class="btn btn-sm btn-error" onclick="event.stopPropagation(); deleteJob('${job.id}')" title="Delete Job">
+                                <i class="fas fa-trash"></i>
                             </button>
                             ` : ''}
                         </td>
@@ -447,13 +442,13 @@
         // Get status badge HTML
         function getStatusBadge(status) {
             const badges = {
-                'pending': '<span class="badge warning">Pending</span>',
-                'running': '<span class="badge info">Running</span>',
-                'completed': '<span class="badge success">Completed</span>',
-                'failed': '<span class="badge danger">Failed</span>',
-                'cancelled': '<span class="badge">Cancelled</span>'
+                'pending': '<span class="label label-warning">Pending</span>',
+                'running': '<span class="label label-primary">Running</span>',
+                'completed': '<span class="label label-success">Completed</span>',
+                'failed': '<span class="label label-error">Failed</span>',
+                'cancelled': '<span class="label">Cancelled</span>'
             };
-            return badges[status] || '<span class="badge">Unknown</span>';
+            return badges[status] || '<span class="label">Unknown</span>';
         }
 
         // Get progress text
@@ -473,8 +468,69 @@
             return 'N/A';
         }
 
-        // Metro pagination callback
-        function onJobPaginationPageClick(pageNumber) {
+        // Custom pagination rendering
+        function renderPagination(totalPages) {
+            const container = document.getElementById('job-pagination-container');
+            if (!container) return;
+
+            if (totalPages <= 1) {
+                container.innerHTML = '';
+                return;
+            }
+
+            let html = '<ul class="pagination">';
+
+            // Previous button
+            if (currentPage > 1) {
+                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage - 1})">Previous</a></li>`;
+            } else {
+                html += '<li class="page-item disabled"><a href="#">Previous</a></li>';
+            }
+
+            // Page numbers (show max 7 pages)
+            const maxVisible = 7;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+            if (endPage - startPage < maxVisible - 1) {
+                startPage = Math.max(1, endPage - maxVisible + 1);
+            }
+
+            if (startPage > 1) {
+                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(1)">1</a></li>`;
+                if (startPage > 2) {
+                    html += '<li class="page-item disabled"><a href="#">...</a></li>';
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                if (i === currentPage) {
+                    html += `<li class="page-item active"><a href="#">${i}</a></li>`;
+                } else {
+                    html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${i})">${i}</a></li>`;
+                }
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    html += '<li class="page-item disabled"><a href="#">...</a></li>';
+                }
+                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${totalPages})">${totalPages}</a></li>`;
+            }
+
+            // Next button
+            if (currentPage < totalPages) {
+                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage + 1})">Next</a></li>`;
+            } else {
+                html += '<li class="page-item disabled"><a href="#">Next</a></li>';
+            }
+
+            html += '</ul>';
+            container.innerHTML = html;
+        }
+
+        // Pagination page change handler
+        function changePage(pageNumber) {
             currentPage = pageNumber;
             loadJobs();
         }
@@ -520,7 +576,7 @@
             let originalIcon = null;
             if (button) {
                 button.disabled = true;
-                const iconElement = button.querySelector('.icon i');
+                const iconElement = button.querySelector('i');
                 if (iconElement) {
                     originalIcon = iconElement.className;
                     iconElement.className = 'fas fa-spinner fa-pulse';
@@ -537,18 +593,18 @@
                 }
 
                 const result = await response.json();
-                alert(`Job rerun started successfully!\nNew Job ID: ${result.new_job_id}`);
+                window.showNotification(`Job rerun started successfully! New Job ID: ${result.new_job_id}`, 'success');
                 setTimeout(() => {
                     loadStats();
                     loadJobs();
                 }, 1000);
             } catch (error) {
                 console.error('Error rerunning job:', error);
-                alert('Failed to rerun job: ' + error.message);
+                window.showNotification('Failed to rerun job: ' + error.message, 'error');
             } finally {
                 if (button) {
                     button.disabled = false;
-                    const iconElement = button.querySelector('.icon i');
+                    const iconElement = button.querySelector('i');
                     if (iconElement && originalIcon) {
                         iconElement.className = originalIcon;
                     }
@@ -570,7 +626,7 @@
             let originalIcon = null;
             if (button) {
                 button.disabled = true;
-                const iconElement = button.querySelector('.icon i');
+                const iconElement = button.querySelector('i');
                 if (iconElement) {
                     originalIcon = iconElement.className;
                     iconElement.className = 'fas fa-spinner fa-pulse';
@@ -586,18 +642,18 @@
                     throw new Error('Failed to cancel job');
                 }
 
-                alert('Job cancelled successfully');
+                window.showNotification('Job cancelled successfully', 'success');
                 setTimeout(() => {
                     loadStats();
                     loadJobs();
                 }, 1000);
             } catch (error) {
                 console.error('Error cancelling job:', error);
-                alert('Failed to cancel job: ' + error.message);
+                window.showNotification('Failed to cancel job: ' + error.message, 'error');
             } finally {
                 if (button) {
                     button.disabled = false;
-                    const iconElement = button.querySelector('.icon i');
+                    const iconElement = button.querySelector('i');
                     if (iconElement && originalIcon) {
                         iconElement.className = originalIcon;
                     }
@@ -619,7 +675,7 @@
             let originalIcon = null;
             if (button) {
                 button.disabled = true;
-                const iconElement = button.querySelector('.icon i');
+                const iconElement = button.querySelector('i');
                 if (iconElement) {
                     originalIcon = iconElement.className;
                     iconElement.className = 'fas fa-spinner fa-pulse';
@@ -635,18 +691,18 @@
                     throw new Error('Failed to delete job');
                 }
 
-                alert('Job deleted successfully');
+                window.showNotification('Job deleted successfully', 'success');
                 setTimeout(() => {
                     loadStats();
                     loadJobs();
                 }, 1000);
             } catch (error) {
                 console.error('Error deleting job:', error);
-                alert('Failed to delete job: ' + error.message);
+                window.showNotification('Failed to delete job: ' + error.message, 'error');
             } finally {
                 if (button) {
                     button.disabled = false;
-                    const iconElement = button.querySelector('.icon i');
+                    const iconElement = button.querySelector('i');
                     if (iconElement && originalIcon) {
                         iconElement.className = originalIcon;
                     }
@@ -704,16 +760,28 @@
         // Job creation modal functions
         async function showCreateJobModal() {
             const modal = document.getElementById('create-job-modal');
-            modal.classList.add('open');
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
             await loadSourcesForJobCreation();
         }
 
         function closeCreateJobModal() {
             const modal = document.getElementById('create-job-modal');
-            modal.classList.remove('open');
+            modal.classList.remove('active');
+            document.body.classList.remove('modal-open');
             // Reset form
             document.getElementById('create-job-form').reset();
         }
+
+        // ESC key handler for modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('create-job-modal');
+                if (modal && modal.classList.contains('active')) {
+                    closeCreateJobModal();
+                }
+            }
+        });
 
         async function loadSourcesForJobCreation() {
             const sourceSelect = document.getElementById('job-source-select');
@@ -748,7 +816,7 @@
                 });
             } catch (error) {
                 console.error('Error loading sources:', error);
-                alert('Failed to load sources: ' + error.message);
+                window.showNotification('Failed to load sources: ' + error.message, 'error');
             }
         }
 
@@ -763,7 +831,7 @@
 
             const sourceID = sourceSelect.value;
             if (!sourceID) {
-                alert('Please select a source');
+                window.showNotification('Please select a source', 'warning');
                 return;
             }
 
@@ -776,7 +844,7 @@
             createButton.disabled = true;
 
             let originalIcon = null;
-            const iconElement = createButton.querySelector('.icon i');
+            const iconElement = createButton.querySelector('i');
             if (iconElement) {
                 originalIcon = iconElement.className;
                 iconElement.className = 'fas fa-spinner fa-pulse';
@@ -808,11 +876,7 @@
                 const result = await response.json();
 
                 // Show success message
-                if (window.showSnackbar) {
-                    window.showSnackbar(`Job created successfully! Job ID: ${result.job_id}`, 'success');
-                } else {
-                    alert(`Job created successfully!\nJob ID: ${result.job_id}`);
-                }
+                window.showNotification(`Job created successfully! Job ID: ${result.job_id}`, 'success');
 
                 // Close modal and refresh
                 closeCreateJobModal();
@@ -823,11 +887,7 @@
 
             } catch (error) {
                 console.error('Error creating job:', error);
-                if (window.showSnackbar) {
-                    window.showSnackbar('Failed to create job: ' + error.message, 'error');
-                } else {
-                    alert('Failed to create job: ' + error.message);
-                }
+                window.showNotification('Failed to create job: ' + error.message, 'error');
             } finally {
                 modalLoading.style.display = 'none';
                 createButton.disabled = false;
@@ -884,8 +944,8 @@
 
                 tbody.innerHTML = jobs.map(job => {
                     const statusBadge = job.enabled
-                        ? '<span class="badge success">Enabled</span>'
-                        : '<span class="badge">Disabled</span>';
+                        ? '<span class="label label-success">Enabled</span>'
+                        : '<span class="label">Disabled</span>';
 
                     const lastRun = job.last_run
                         ? new Date(job.last_run).toLocaleString()
@@ -897,7 +957,7 @@
 
                     const isRunning = job.is_running;
                     const runningIndicator = isRunning
-                        ? '<span class="icon fg-cyan"><i class="fa-solid fa-spinner fa-pulse"></i></span>'
+                        ? '<i class="fa-solid fa-spinner fa-pulse" style="color: var(--color-primary); margin-right: 0.5rem;"></i>'
                         : '';
 
                     return `
@@ -913,23 +973,25 @@
                             <td>${nextRun}</td>
                             <td class="text-center">
                                 ${job.enabled ? `
-                                <button class="button warning small outline mr-1"
+                                <button class="btn btn-sm btn-warning"
                                         onclick="toggleDefaultJob('${job.name}', false)"
                                         title="Disable Job"
+                                        style="margin-right: 0.25rem;"
                                         ${isRunning ? 'disabled' : ''}>
-                                    <span class="icon"><i class="fa-solid fa-pause"></i></span>
+                                    <i class="fa-solid fa-pause"></i>
                                 </button>
                                 ` : `
-                                <button class="button success small outline mr-1"
+                                <button class="btn btn-sm btn-success"
                                         onclick="toggleDefaultJob('${job.name}', true)"
-                                        title="Enable Job">
-                                    <span class="icon"><i class="fa-solid fa-play"></i></span>
+                                        title="Enable Job"
+                                        style="margin-right: 0.25rem;">
+                                    <i class="fa-solid fa-play"></i>
                                 </button>
                                 `}
-                                <button class="button small outline"
+                                <button class="btn btn-sm"
                                         onclick="editJobSchedule('${job.name}', '${job.schedule}')"
                                         title="Edit Schedule">
-                                    <span class="icon"><i class="fa-solid fa-clock"></i></span>
+                                    <i class="fa-solid fa-clock"></i>
                                 </button>
                             </td>
                         </tr>
@@ -940,7 +1002,7 @@
                 console.error('Error loading default jobs:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center fg-red">
+                        <td colspan="7" class="text-center" style="color: var(--color-danger);">
                             Failed to load default jobs. Please try again.
                         </td>
                     </tr>
@@ -965,22 +1027,14 @@
 
                 const result = await response.json();
 
-                if (window.showSnackbar) {
-                    window.showSnackbar(result.message || `Job ${enable ? 'enabled' : 'disabled'} successfully`, 'success');
-                } else {
-                    alert(result.message || `Job ${enable ? 'enabled' : 'disabled'} successfully`);
-                }
+                window.showNotification(result.message || `Job ${enable ? 'enabled' : 'disabled'} successfully`, 'success');
 
                 // Reload default jobs to reflect changes
                 setTimeout(() => loadDefaultJobs(), 500);
 
             } catch (error) {
                 console.error(`Error ${action}ing job:`, error);
-                if (window.showSnackbar) {
-                    window.showSnackbar(`Failed to ${action} job: ` + error.message, 'error');
-                } else {
-                    alert(`Failed to ${action} job: ` + error.message);
-                }
+                window.showNotification(`Failed to ${action} job: ` + error.message, 'error');
             }
         }
 
@@ -1024,22 +1078,14 @@
 
                 const result = await response.json();
 
-                if (window.showSnackbar) {
-                    window.showSnackbar(result.message || 'Schedule updated successfully', 'success');
-                } else {
-                    alert(result.message || 'Schedule updated successfully');
-                }
+                window.showNotification(result.message || 'Schedule updated successfully', 'success');
 
                 // Reload default jobs to reflect changes
                 setTimeout(() => loadDefaultJobs(), 500);
 
             } catch (error) {
                 console.error('Error updating schedule:', error);
-                if (window.showSnackbar) {
-                    window.showSnackbar('Failed to update schedule: ' + error.message, 'error');
-                } else {
-                    alert('Failed to update schedule: ' + error.message);
-                }
+                window.showNotification('Failed to update schedule: ' + error.message, 'error');
             }
         }
     </script>

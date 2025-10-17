@@ -356,12 +356,12 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 
 	// Whitelist allowed ORDER BY columns to prevent SQL injection
 	allowedOrderBy := map[string]bool{
-		"id":           true,
-		"title":        true,
-		"source_type":  true,
-		"created_at":   true,
-		"updated_at":   true,
-		"last_synced":  true,
+		"id":          true,
+		"title":       true,
+		"source_type": true,
+		"created_at":  true,
+		"updated_at":  true,
+		"last_synced": true,
 	}
 	if !allowedOrderBy[opts.OrderBy] {
 		opts.OrderBy = "updated_at" // Default to safe value

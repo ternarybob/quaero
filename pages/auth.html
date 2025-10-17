@@ -10,26 +10,21 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Authentication Management</h1>
-                <p class="text-leader">Manage authentication credentials for data sources</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Authentication Management</h1>
+            <p>Manage authentication credentials for data sources</p>
         </div>
 
-        <!-- Main Content -->
-
         <!-- Instructions Card -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <h6 class="m-0">How to Add Authentication</h6>
-                    </div>
-                    <div class="panel-content">
+        <section>
+            <div class="card">
+                <div class="card-header">
+                    <h2>How to Add Authentication</h2>
+                </div>
+                <div class="card-body">
                         <ol>
                             <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
                             <li>Log in to your account</li>
@@ -37,28 +32,31 @@
                             <li>The extension will automatically capture and store your authentication</li>
                             <li>Authentication for the same site will be automatically updated when recaptured</li>
                         </ol>
-                        <div class="bg-cyan p-3 bd-default mt-4" style="border-radius: 4px;">
+                        <div class="toast toast-primary" style="margin-top: 1rem;">
                             <strong>Note:</strong> Each site domain can have only one set of credentials.
                             Capturing new authentication for an existing site will override the previous credentials.
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Authentication List -->
-        <div class="row mt-4" x-data="authPage()">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">Stored Authentications</h6>
-                            <button class="button outline small" @click="loadAuthentications" title="Refresh Authentications">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+        <section style="margin-top: 1.5rem;" x-data="authPage()">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Stored Authentications</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" @click="loadAuthentications" title="Refresh Authentications">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
-                        </div>
-                    </div>
-                    <div class="panel-content">
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
                         <!-- Loading State -->
                         <div x-show="loading" class="text-center p-5">
                             <span class="icon">
@@ -98,16 +96,14 @@
                                             </td>
                                             <td x-text="auth.name || '-'"></td>
                                             <td>
-                                                <span class="badge primary" x-text="auth.service_type.toUpperCase()"></span>
+                                                <span class="label label-primary" x-text="auth.service_type.toUpperCase()"></span>
                                             </td>
                                             <td>
                                                 <small x-text="formatDate(auth.updated_at)"></small>
                                             </td>
                                             <td>
-                                                <button class="button danger small outline" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
-                                                    <span class="icon">
-                                                        <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
-                                                    </span>
+                                                <button class="btn btn-sm btn-error" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
+                                                    <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
                                                 </button>
                                             </td>
                                         </tr>
@@ -118,16 +114,15 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Associated Sources Information -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <h6 class="m-0">Using Authentication in Sources</h6>
-                    </div>
-                    <div class="panel-content">
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Using Authentication in Sources</h2>
+                </div>
+                <div class="card-body">
                         <p>
                             Once you have captured authentication for a site, you can create sources that use these credentials:
                         </p>
@@ -138,16 +133,16 @@
                         <p>
                             Sources will automatically use the authentication credentials matching their site domain.
                         </p>
-                        <a href="/sources" class="button info small outline">
-                            <span class="icon"><i class="fas fa-database"></i></span>
+                        <a href="/sources" class="btn btn-sm">
+                            <i class="fas fa-database"></i>
                             <span>Manage Sources</span>
                         </a>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 

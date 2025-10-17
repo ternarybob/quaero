@@ -10,61 +10,53 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Configuration</h1>
-                <p class="text-leader">Application Configuration and System Information</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Configuration</h1>
+            <p>Application Configuration and System Information</p>
         </div>
 
         <!-- Service Status and Configuration (Single Alpine Component) -->
-        <div x-data="configPage()">
-            <div class="row mt-4">
-                <div class="cell-12">
-                    <div class="panel">
-
-                        <div class="panel-header">
-                            <div class="d-flex flex-justify-between flex-align-center">
-                                <h6 class="m-0">Service Status</h6>
-                                <span :class="'badge ' + (isOnline ? 'success' : 'danger')" id="service-status">
-                                    <span x-text="isOnline ? 'Online' : 'Offline'"></span>
-                                </span>
-                            </div>
-                        </div>
-                        <div class="panel-content">
-                            <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
-                            <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
-                            <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
-                            <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
-                        </div>
-                    </div>
+        <section x-data="configPage()">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Service Status</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <span :class="'label ' + (isOnline ? 'label-success' : 'label-error')" id="service-status">
+                                <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                            </span>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
+                    <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
+                    <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
+                    <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
                 </div>
             </div>
 
-            <div class="row mt-4">
-                <div class="cell-12">
-                    <div class="panel">
-                        <div class="panel-header">
-                            <h6 class="m-0">Configuration Details</h6>
-                        </div>
-                        <div class="panel-content">
-                            <pre id="config-display" class="bg-light p-4 border" style="max-height: 300px; overflow: auto;"><code x-text="formatConfig(config)"></code></pre>
-                        </div>
-                    </div>
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-header">
+                    <h2>Configuration Details</h2>
+                </div>
+                <div class="card-body">
+                    <pre id="config-display" class="code-block" style="max-height: 300px; overflow: auto;"><code x-text="formatConfig(config)"></code></pre>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-logs.html" .}}
-            </div>
-        </div>
+        <!-- Service Logs -->
+        <section style="margin-top: 1.5rem;">
+            {{template "service-logs.html" .}}
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 

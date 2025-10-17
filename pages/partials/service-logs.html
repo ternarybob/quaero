@@ -1,25 +1,38 @@
-<div class="panel" x-data="serviceLogs">
+<div class="card" x-data="serviceLogs">
 
-    <div class="panel-header">
-        <div class="d-flex flex-justify-between flex-align-center">
-            <h6 class="m-0">Service Logs</h6>
-            <div class="d-flex flex-gap-2">
-                <button class="button small outline" aria-label="toggle auto-scroll" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                    <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
-                </button>
-
-                <button class="button small outline" aria-label="refresh" @click="refresh()" title="Refresh Logs">
-                    <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                </button>
-
-                <button class="button small outline danger" aria-label="clear" @click="clearLogs()" title="Clear Logs">
-                    <span class="icon"><i class="fas fa-trash"></i></span>
-                </button>
-            </div>
-        </div>
+    <div class="card-header">
+        <header class="navbar">
+            <section class="navbar-section">
+                <h2>Service Logs</h2>
+            </section>
+            <section class="navbar-section">
+                <div class="btn-group btn-group-block">
+                    <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                        <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
+                    </button>
+                    <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <button class="btn btn-sm btn-error" @click="clearLogs()" title="Clear Logs">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </section>
+        </header>
     </div>
 
-    <div class="panel-content">
-        <div class="log-container bg-light p-4" style="max-height: 500px; overflow: auto; font-family: monospace; white-space: pre-wrap;" x-ref="logContainer"><template x-if="logs.length === 0"><div class="text-center text-muted">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></div>
+    <div class="card-body">
+        <div class="terminal" x-ref="logContainer">
+            <template x-if="logs.length === 0">
+                <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
+            </template>
+            <template x-for="log in logs" :key="log.id">
+                <div class="terminal-line">
+                    <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
+                    <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                    <span x-text="log.message"></span>
+                </div>
+            </template>
+        </div>
     </div>
 </div>

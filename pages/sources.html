@@ -10,62 +10,63 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Source Management</h1>
-                <p class="text-leader">Configure and manage data sources for collection and indexing</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Source Management</h1>
+            <p>Configure and manage data sources for collection and indexing</p>
         </div>
 
         <!-- Application Status -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel" x-data="appStatus">
-                    <div class="panel-header">
-                        <div class="d-flex flex-align-center flex-justify-between">
-                            <h6 class="m-0">Application Status</h6>
-                            <div class="d-flex flex-align-center">
-                                <span :class="'badge ' + getStatusColor(state)" x-text="state"></span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="panel-content">
-                        <p><strong>Current State:</strong> <span x-text="state"></span></p>
-                        <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
-                        <div x-show="Object.keys(metadata).length > 0">
-                            <p><strong>Details:</strong></p>
-                            <pre x-text="JSON.stringify(metadata, null, 2)"></pre>
-                        </div>
+        <section x-data="appStatus">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Application Status</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <span :class="'label ' + getStatusColor(state)" x-text="state"></span>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <p><strong>Current State:</strong> <span x-text="state"></span></p>
+                    <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
+                    <div x-show="Object.keys(metadata).length > 0">
+                        <p><strong>Details:</strong></p>
+                        <pre class="code-block" x-text="JSON.stringify(metadata, null, 2)"></pre>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Sources Management Component (wrap card and modal in shared scope) -->
-        <div class="row mt-4" x-data="sourceManagement">
-            <div class="cell-12">
-                <!-- Sources List -->
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-align-center flex-justify-between">
-                            <h6 class="m-0">
-                                <span x-text="sources.length" class="text-muted mr-2"></span>Sources
-                            </h6>
-                            <div class="d-flex flex-align-center flex-gap-2">
-                                <button class="button info small outline" @click="openCreateModal()">
-                                    <span class="icon"><i class="fas fa-plus"></i></span>
+        <section style="margin-top: 1.5rem;" x-data="sourceManagement">
+            <!-- Sources List -->
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>
+                                <span x-text="sources.length" style="color: var(--text-secondary); margin-right: 0.5rem;"></span>Sources
+                            </h2>
+                        </section>
+                        <section class="navbar-section">
+                            <div class="btn-group btn-group-block">
+                                <button class="btn btn-sm btn-primary" @click="openCreateModal()">
+                                    <i class="fas fa-plus"></i>
                                     <span>Add Source</span>
                                 </button>
-                                <button class="button small outline" @click="loadSources()" title="Refresh Sources">
-                                    <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                                <button class="btn btn-sm" @click="loadSources()" title="Refresh Sources">
+                                    <i class="fa-solid fa-rotate-right"></i>
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="panel-content">
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
                         <!-- Sources Table -->
                         <table class="table striped border">
                             <thead>
@@ -91,30 +92,30 @@
                                     <tr>
                                         <td x-text="source.name"></td>
                                         <td>
-                                            <span class="badge" :class="{
-                                                    'info': ['jira', 'confluence'].includes(source.type),
-                                                    'primary': source.type === 'github'
+                                            <span class="label" :class="{
+                                                    'label-primary': ['jira', 'confluence'].includes(source.type),
+                                                    'label-secondary': source.type === 'github'
                                                 }" x-text="source.type.toUpperCase()"></span>
                                         </td>
                                         <td x-text="source.base_url"></td>
                                         <td>
                                             <template x-if="source.auth_id">
-                                                <span class="badge success">Configured</span>
+                                                <span class="label label-success">Configured</span>
                                             </template>
                                             <template x-if="!source.auth_id">
-                                                <span class="badge">None</span>
+                                                <span class="label">None</span>
                                             </template>
                                         </td>
                                         <td class="text-center">
-                                            <span class="badge" :class="source.enabled ? 'success' : 'warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
+                                            <span class="label" :class="source.enabled ? 'label-success' : 'label-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
                                         </td>
                                         <td x-text="formatDate(source.created_at)"></td>
                                         <td class="text-center">
-                                            <button class="button small outline mr-1" @click="editSource(source)" title="Edit Source">
-                                                <span class="icon"><i class="fas fa-edit"></i></span>
+                                            <button class="btn btn-sm" @click="editSource(source)" title="Edit Source" style="margin-right: 0.25rem;">
+                                                <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="button danger small outline" @click="deleteSource(source.id)" title="Delete Source">
-                                                <span class="icon"><i class="fas fa-trash"></i></span>
+                                            <button class="btn btn-sm btn-error" @click="deleteSource(source.id)" title="Delete Source">
+                                                <i class="fas fa-trash"></i>
                                             </button>
                                         </td>
                                     </tr>
@@ -123,97 +124,102 @@
                         </table>
                     </div>
                 </div>
+            </div>
 
-                <!-- Create/Edit Source Modal -->
-                <div data-role="dialog" data-overlay="true" :class="{'open': showCreateModal || showEditModal}" style="width: 600px; max-width: 90%;">
-                    <div class="dialog-title" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></div>
-                        <div class="dialog-content">
-                            <div class="form-group mb-4">
-                                <label>Name</label>
-                                <input data-role="input" class="input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
+            <!-- Create/Edit Source Modal -->
+            <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
+                <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
+                <div class="modal-container" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
+                        <div class="modal-title h5" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></div>
+                    </div>
+                    <div class="modal-body">
+                        <div class="content">
+                            <div class="form-group">
+                                <label class="form-label">Name</label>
+                                <input class="form-input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
                             </div>
 
-                            <div class="form-group mb-4">
-                                <label>Type</label>
-                                <select data-role="select" class="input" x-model="currentSource.type">
+                            <div class="form-group">
+                                <label class="form-label">Type</label>
+                                <select class="form-select" x-model="currentSource.type">
                                     <option value="jira">Jira</option>
                                     <option value="confluence">Confluence</option>
                                     <option value="github">GitHub</option>
                                 </select>
                             </div>
 
-                            <div class="form-group mb-4">
-                                <label>Base URL</label>
-                                <input data-role="input" class="input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
+                            <div class="form-group">
+                                <label class="form-label">Base URL</label>
+                                <input class="form-input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
                             </div>
 
-                            <div class="form-group mb-4">
-                                <label>Authentication</label>
-                                <select data-role="select" class="input" x-model="currentSource.auth_id">
+                            <div class="form-group">
+                                <label class="form-label">Authentication</label>
+                                <select class="form-select" x-model="currentSource.auth_id">
                                     <option value="">No Authentication</option>
                                     <template x-for="auth in authentications" :key="auth.id">
                                         <option :value="auth.id" x-text="`${auth.name} (${auth.site_domain})`"></option>
                                     </template>
                                 </select>
-                                <small class="text-muted">Select authentication credentials for this source</small>
+                                <p class="form-input-hint">Select authentication credentials for this source</p>
                                 <template x-if="authentications.length === 0">
-                                    <small class="text-warning">
+                                    <p class="form-input-hint text-warning">
                                         No authentication configured.
                                         <a href="/auth">Add authentication</a> first.
-                                    </small>
+                                    </p>
                                 </template>
                             </div>
 
-                            <div class="form-group mb-4">
-                                <label class="checkbox">
+                            <div class="form-group">
+                                <label class="form-checkbox">
                                     <input type="checkbox" x-model="currentSource.enabled">
-                                    <span class="check"></span>
-                                    <span class="caption">Enabled</span>
+                                    <i class="form-icon"></i> Enabled
                                 </label>
                             </div>
 
-                            <div class="form-group mb-4">
-                                <label>Crawl Configuration</label>
-                                <div class="mb-2">
-                                    <label class="text-small">Max Depth</label>
-                                    <input data-role="input" class="input" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
+                            <div class="form-group">
+                                <label class="form-label">Crawl Configuration</label>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Max Depth</label>
+                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
                                 </div>
-                                <div class="mb-2">
-                                    <label class="text-small">Concurrency</label>
-                                    <input data-role="input" class="input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Concurrency</label>
+                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
                                 </div>
-                                <div class="mb-2">
-                                    <label class="text-small">Detail Level</label>
-                                    <select data-role="select" class="input" x-model="currentSource.crawl_config.detail_level">
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Detail Level</label>
+                                    <select class="form-select" x-model="currentSource.crawl_config.detail_level">
                                         <option value="minimal">Minimal</option>
                                         <option value="basic">Basic</option>
                                         <option value="full">Full</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="checkbox">
+                                    <label class="form-checkbox">
                                         <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
-                                        <span class="check"></span>
-                                        <span class="caption">Follow Links</span>
+                                        <i class="form-icon"></i> Follow Links
                                     </label>
                                 </div>
                             </div>
                         </div>
-                        <div class="dialog-actions">
-                            <button class="button success" @click="saveSource()">Save</button>
-                            <button class="button" @click="closeModal()">Cancel</button>
-                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" @click="saveSource()">Save</button>
+                        <button class="btn" @click="closeModal()">Cancel</button>
+                    </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-logs.html" .}}
-            </div>
-        </div>
+        <!-- Service Logs -->
+        <section style="margin-top: 1.5rem;">
+            {{template "service-logs.html" .}}
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 
@@ -228,6 +234,20 @@
         // Ensure Alpine.js is fully initialized
         document.addEventListener('alpine:init', function () {
             console.log('[Sources] Alpine.js initialized');
+        });
+
+        // Plain JavaScript ESC key handler for modal (backup for Alpine directive)
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.querySelector('.modal.active');
+                if (modal) {
+                    // Trigger Alpine's closeModal method if available
+                    const sourceSection = document.querySelector('[x-data="sourceManagement"]');
+                    if (sourceSection && sourceSection.__x) {
+                        sourceSection.__x.$data.closeModal();
+                    }
+                }
+            }
         });
     </script>
 </body>

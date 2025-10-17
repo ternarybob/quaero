@@ -121,13 +121,13 @@ document.addEventListener('alpine:init', () => {
 
     _getLevelClass(level) {
       const levelMap = {
-        'ERROR': 'fg-red',
-        'WARN': 'fg-orange',
-        'WARNING': 'fg-orange',
-        'INFO': 'fg-blue',
-        'DEBUG': 'fg-gray'
+        'ERROR': 'terminal-error',
+        'WARN': 'terminal-warning',
+        'WARNING': 'terminal-warning',
+        'INFO': 'terminal-info',
+        'DEBUG': 'terminal-time'
       };
-      return levelMap[level] || 'fg-blue';
+      return levelMap[level] || 'terminal-info';
     },
 
     clearLogs() {
@@ -190,12 +190,12 @@ document.addEventListener('alpine:init', () => {
 
     getStatusColor(state) {
       const colorMap = {
-        'Idle': 'info',
-        'Crawling': 'warning',
-        'Offline': 'danger',
-        'Unknown': 'secondary'
+        'Idle': 'label-primary',
+        'Crawling': 'label-warning',
+        'Offline': 'label-error',
+        'Unknown': 'label'
       };
-      return colorMap[state] || 'secondary';
+      return colorMap[state] || 'label';
     },
 
     formatTimestamp(timestamp) {
@@ -268,6 +268,7 @@ document.addEventListener('alpine:init', () => {
     editSource(source) {
       this.currentSource = JSON.parse(JSON.stringify(source));
       this.showEditModal = true;
+      document.body.classList.add('modal-open');
       // Reload authentications in case they changed
       this.loadAuthentications();
     },
@@ -275,6 +276,7 @@ document.addEventListener('alpine:init', () => {
     openCreateModal() {
       this.resetCurrentSource();
       this.showCreateModal = true;
+      document.body.classList.add('modal-open');
       // Load authentications when opening modal
       this.loadAuthentications();
     },
@@ -330,6 +332,7 @@ document.addEventListener('alpine:init', () => {
     closeModal() {
       this.showCreateModal = false;
       this.showEditModal = false;
+      document.body.classList.remove('modal-open');
       this.resetCurrentSource();
     },
 
@@ -341,21 +344,67 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
-// Global notification function using Metro Toast
+// Global notification function using custom toast system
 window.showNotification = function(message, type = 'info') {
+  // Type to class mapping
   const typeMap = {
-    'info': 'bg-blue fg-white',
-    'success': 'bg-green fg-white',
-    'warning': 'bg-yellow fg-dark',
-    'error': 'bg-red fg-white',
-    'danger': 'bg-red fg-white'
+    'info': 'toast-info',
+    'success': 'toast-success',
+    'warning': 'toast-warning',
+    'error': 'toast-error',
+    'danger': 'toast-error'
   };
-  const classes = typeMap[type] || 'bg-blue fg-white';
+  const toastClass = typeMap[type] || 'toast-info';
 
-  if (typeof Metro !== 'undefined' && Metro.toast) {
-    Metro.toast.create(message, null, 3000, classes);
-  } else {
-    console.warn('Metro UI not loaded, falling back to console');
+  try {
+    // Get or create toast container
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = 'toast-item ' + toastClass;
+
+    // Add icon based on type
+    const icons = {
+      'success': 'fa-check-circle',
+      'error': 'fa-exclamation-circle',
+      'warning': 'fa-exclamation-triangle',
+      'info': 'fa-info-circle'
+    };
+    const iconClass = icons[type] || icons['info'];
+
+    toast.innerHTML = `
+      <i class="fas ${iconClass}" style="margin-right: 0.5rem;"></i>
+      <span>${message}</span>
+    `;
+
+    // Append to container
+    container.appendChild(toast);
+
+    // Limit to 5 toasts
+    const toasts = container.querySelectorAll('.toast-item');
+    if (toasts.length > 5) {
+      toasts[0].remove();
+    }
+
+    // Auto-dismiss after 3000ms
+    setTimeout(() => {
+      toast.classList.add('toast-removing');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300); // Allow animation to complete
+    }, 3000);
+  } catch (error) {
+    // Fallback to console if DOM manipulation fails
+    console.warn('Toast notification failed, falling back to console');
     console.log(`[${type.toUpperCase()}] ${message}`);
   }
 };

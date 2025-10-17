@@ -1,22 +1,23 @@
-<nav data-role="appbar" data-expand-point="md" class="pos-fixed" role="navigation" aria-label="main navigation">
-    <a href="/" class="brand no-hover"><span class="text-bold">Quaero</span></a>
-
-    <div class="app-bar-container ml-auto mr-auto">
-        <ul class="app-bar-menu">
-            <li><a href="/" {{if eq .Page "home" }}class="active" {{end}}>HOME</a></li>
-            <li><a href="/auth" {{if eq .Page "auth" }}class="active" {{end}}>AUTHENTICATION</a></li>
-            <li><a href="/sources" {{if eq .Page "sources" }}class="active" {{end}}>SOURCES</a></li>
-            <li><a href="/jobs" {{if eq .Page "jobs" }}class="active" {{end}}>JOBS</a></li>
-            <li><a href="/documents" {{if eq .Page "documents" }}class="active" {{end}}>DOCUMENTS</a></li>
-            <li><a href="/chat" {{if eq .Page "chat" }}class="active" {{end}}>CHAT</a></li>
-            <li><a href="/config" {{if or (eq .Page "settings" ) (eq .Page "config" )}}class="active" {{end}}>SETTINGS</a></li>
-        </ul>
+<header class="app-header">
+    <div class="app-header-content">
+        <nav class="app-header-nav" x-data="{ mobileMenuOpen: false }">
+            <a href="/" class="brand"><span class="text-bold">Quaero</span></a>
+            <button class="mobile-menu-toggle" @click="mobileMenuOpen = !mobileMenuOpen" aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="nav-links" :class="{ 'mobile-open': mobileMenuOpen }">
+                <a href="/" {{if eq .Page "home"}}class="active"{{end}}>HOME</a>
+                <a href="/auth" {{if eq .Page "auth"}}class="active"{{end}}>AUTHENTICATION</a>
+                <a href="/sources" {{if eq .Page "sources"}}class="active"{{end}}>SOURCES</a>
+                <a href="/jobs" {{if eq .Page "jobs"}}class="active"{{end}}>JOBS</a>
+                <a href="/documents" {{if eq .Page "documents"}}class="active"{{end}}>DOCUMENTS</a>
+                <a href="/chat" {{if eq .Page "chat"}}class="active"{{end}}>CHAT</a>
+                <a href="/config" {{if or (eq .Page "settings") (eq .Page "config")}}class="active"{{end}}>SETTINGS</a>
+            </div>
+        </nav>
+        <span class="label label-success status-text">ONLINE</span>
     </div>
-
-    <div class="app-bar-container ml-auto">
-        <span class="badge success status-text">ONLINE</span>
-    </div>
-</nav>
+</header>
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -25,12 +26,12 @@
             const statusText = document.querySelector('.status-text');
             if (statusText) {
                 if (online) {
-                    statusText.classList.remove('danger');
-                    statusText.classList.add('success');
+                    statusText.classList.remove('label-error');
+                    statusText.classList.add('label-success');
                     statusText.textContent = 'ONLINE';
                 } else {
-                    statusText.classList.remove('success');
-                    statusText.classList.add('danger');
+                    statusText.classList.remove('label-success');
+                    statusText.classList.add('label-error');
                     statusText.textContent = 'OFFLINE';
                 }
             }
@@ -43,24 +44,5 @@
         } else {
             console.error('[Navbar] WebSocketManager not loaded');
         }
-
-        // Dynamic body padding based on AppBar height
-        function updateBodyPadding() {
-            const appbar = document.querySelector('[data-role="appbar"]');
-            if (appbar) {
-                const height = appbar.getBoundingClientRect().height;
-                document.body.style.paddingTop = height + 'px';
-            }
-        }
-
-        // Initial padding calculation after Metro enhances the AppBar
-        setTimeout(updateBodyPadding, 100);
-
-        // Debounced resize handler
-        let resizeTimer;
-        window.addEventListener('resize', function () {
-            clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(updateBodyPadding, 250);
-        });
     });
 </script>

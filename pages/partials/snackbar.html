@@ -1,22 +1,13 @@
 <script>
-function showSnackbar(message, type = 'info') {
-    const typeMap = {
-        'info': 'bg-blue fg-white',
-        'success': 'bg-green fg-white',
-        'warning': 'bg-yellow fg-dark',
-        'error': 'bg-red fg-white',
-        'danger': 'bg-red fg-white'
-    };
-    const classes = typeMap[type] || 'bg-blue fg-white';
-
-    if (typeof Metro !== 'undefined' && Metro.toast) {
-        Metro.toast.create(message, null, 3000, classes);
-    } else {
-        console.warn('Metro UI not loaded, falling back to console');
-        console.log(`[${type.toUpperCase()}] ${message}`);
+// Create toast container on page load
+// Toast notification function is defined in common.js
+document.addEventListener('DOMContentLoaded', function() {
+    // Create toast container if it doesn't exist
+    if (!document.getElementById('toast-container')) {
+        const toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        toastContainer.id = 'toast-container';
+        document.body.appendChild(toastContainer);
     }
-}
-
-// Keep alias for backwards compatibility
-window.showNotification = showSnackbar;
+});
 </script>

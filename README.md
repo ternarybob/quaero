@@ -19,7 +19,7 @@ Quaero collects documentation from Atlassian (Confluence, Jira) using browser ex
 
 - **Language:** Go 1.25+
 - **Storage:** SQLite with FTS5 (full-text search)
-- **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
+- **Web UI:** HTML templates, Alpine.js, Spectre CSS, WebSockets
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
@@ -154,6 +154,21 @@ cd test
 go test -v ./api              # API tests
 go test -v ./ui               # UI tests
 ```
+
+### UI Framework Migration
+
+**Note:** Quaero migrated from Metro UI v5 to Spectre CSS for improved maintainability and modern design patterns.
+
+**Git Checkpoint (Before Major Changes):**
+```bash
+# Create migration branch
+git checkout -b refactor-spectre-css
+
+# Create checkpoint
+git commit -m "Checkpoint before Spectre CSS migration"
+```
+
+**Full Migration Checklist:** See [docs/MIGRATION_TESTING.md](docs/MIGRATION_TESTING.md) for comprehensive testing checklist and rollback procedures.
 
 ## Project Structure
 

@@ -10,29 +10,30 @@
 
     {{template "navbar.html" .}}
 
-    <div class="container-fluid mt-4">
+    <main class="page-container">
 
-        <!-- Heading Section -->
-        <div class="row">
-            <div class="cell-12 p-2">
-                <h1 class="text-bold">Settings</h1>
-                <p class="text-leader">System configuration and operational controls</p>
-            </div>
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Settings</h1>
+            <p>System configuration and operational controls</p>
         </div>
 
         <!-- Full Configuration Table -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="d-flex flex-justify-between flex-align-center">
-                            <h6 class="m-0">System Configuration (Read-Only)</h6>
-                            <button class="button small outline" onclick="loadConfig()">
-                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+        <section>
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>System Configuration (Read-Only)</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" onclick="loadConfig()">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
-                        </div>
-                    </div>
-                    <div class="panel-content">
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
                         <table class="table striped border">
                             <thead>
                                 <tr>
@@ -52,43 +53,40 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
         <!-- Danger Zone -->
-        <div class="row mt-4">
-            <div class="cell-12">
-                <div class="panel">
-                    <div class="panel-header">
-                        <h6 class="m-0 fg-red">Danger Zone</h6>
-                    </div>
-                    <div class="panel-content">
-                        <div class="d-flex flex-align-center flex-justify-between flex-gap-3">
-                            <div>
-                                <p class="text-bold">Clear All Documents</p>
-                                <p>
-                                    Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                                    Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
-                                </p>
-                            </div>
-                            <div>
-                                <button class="button danger small outline" onclick="confirmRemoveEmbeddings()">
-                                    <span class="icon"><i class="fas fa-trash"></i></span>
-                                    <span>CLEAR ALL</span>
-                                </button>
-                            </div>
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h2 style="color: var(--color-danger);">Danger Zone</h2>
+                </div>
+                <div class="card-body">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+                        <div>
+                            <p style="font-weight: bold;">Clear All Documents</p>
+                            <p>
+                                Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                                Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+                            </p>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-error" onclick="confirmRemoveEmbeddings()">
+                                <i class="fas fa-trash"></i>
+                                <span>CLEAR ALL</span>
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div class="row mt-4">
-            <div class="cell-12">
-                {{template "service-logs.html" .}}
-            </div>
-        </div>
+        <!-- Service Logs -->
+        <section style="margin-top: 1.5rem;">
+            {{template "service-logs.html" .}}
+        </section>
 
-    </div>
+    </main>
 
     {{template "footer.html" .}}
 
