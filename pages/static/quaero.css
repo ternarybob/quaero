@@ -21,7 +21,7 @@
     --text-secondary: #57606a;
     --btn-primary: #57606a;
     --border-color: #d0d7de;
-    --border-radius: .375rem;
+    --border-radius: .275rem;
 
     /* Code Block Colors */
     --code-bg: #0d1117;
@@ -38,54 +38,54 @@
     color: var(--btn-primary);
     border-color: var(--border-color);
     transition: all 0.2s;
-}
 
-.btn-primary {
-    background-color: var(--color-primary);
-    border-color: var(--color-primary);
-    color: white;
-}
+    &.btn-primary {
+        background-color: var(--color-primary);
+        border-color: var(--color-primary);
+        color: white;
+    }
 
-.btn-primary:hover,
-.btn-primary:focus {
-    background-color: #064a9c;
-    border-color: #064a9c;
-}
+    &.btn-primary:hover,
+    &.btn-primary:focus {
+        background-color: #064a9c;
+        border-color: #064a9c;
+    }
 
-.btn-success {
-    background-color: var(--color-success);
-    border-color: var(--color-success);
-    color: white;
-}
+    &.btn-success {
+        background-color: var(--color-success);
+        border-color: var(--color-success);
+        color: white;
+    }
 
-.btn-success:hover,
-.btn-success:focus {
-    background-color: #1a7335;
-    border-color: #1a7335;
-}
+    &.btn-success:hover,
+    &.btn-success:focus {
+        background-color: #1a7335;
+        border-color: #1a7335;
+    }
 
-.btn-error {
-    background-color: var(--color-danger);
-    border-color: var(--color-danger);
-    color: white;
-}
+    &.btn-error {
+        background-color: var(--color-danger);
+        border-color: var(--color-danger);
+        color: white;
+    }
 
-.btn-error:hover,
-.btn-error:focus {
-    background-color: #b31e28;
-    border-color: #b31e28;
-}
+    &.btn-error:hover,
+    &.btn-error:focus {
+        background-color: #b31e28;
+        border-color: #b31e28;
+    }
 
-.btn-header-primary {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: white;
-    border-color: rgba(255, 255, 255, 0.2);
-}
+    &.btn-header-primary {
+        background-color: rgba(255, 255, 255, 0.1);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
 
-.btn-header-primary:hover,
-.btn-header-primary:focus {
-    background-color: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
+    &.btn-header-primary:hover,
+    &.btn-header-primary:focus {
+        background-color: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.3);
+    }
 }
 
 /* 3. SPECTRE CSS LABEL (BADGE) OVERRIDES
@@ -129,7 +129,8 @@ body {
     font-family: var(--font-sans);
     background-color: var(--page-bg);
     color: var(--text-primary);
-    padding-top: 64px; /* Space for fixed header */
+    padding-top: 64px;
+    /* Space for fixed header */
 }
 
 h2 {
@@ -358,7 +359,7 @@ h2 {
     border-radius: 6px;
     padding: 1rem;
     font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-    font-size: 0.875rem;
+    font-size: 0.600rem;
     line-height: 1.6;
     max-height: 400px;
     overflow-y: auto;
@@ -427,6 +428,33 @@ h2 {
     animation: slideIn 0.3s ease-out;
     display: flex;
     align-items: center;
+    gap: 0.5rem;
+    position: relative;
+}
+
+.toast-close-btn {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    color: currentColor;
+    opacity: 0.7;
+}
+
+.toast-close-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.toast-close-btn:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
 }
 
 .toast-success {
@@ -462,6 +490,7 @@ h2 {
         transform: translateX(400px);
         opacity: 0;
     }
+
     to {
         transform: translateX(0);
         opacity: 1;
@@ -473,6 +502,7 @@ h2 {
         opacity: 1;
         transform: translateX(0);
     }
+
     to {
         opacity: 0;
         transform: translateX(400px);

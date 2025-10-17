@@ -217,7 +217,7 @@
     <!-- Create Job Modal -->
     <div id="create-job-modal" class="modal" @keydown.escape.window="closeCreateJobModal()">
         <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
-        <div class="modal-container" style="max-width: 600px;">
+        <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
             <div class="modal-header">
                 <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
                 <div class="modal-title h5">Create New Job</div>
@@ -758,11 +758,23 @@
         }
 
         // Job creation modal functions
+        let modalTriggerElement = null;
+
         async function showCreateJobModal() {
+            modalTriggerElement = document.activeElement;
             const modal = document.getElementById('create-job-modal');
             modal.classList.add('active');
             document.body.classList.add('modal-open');
             await loadSourcesForJobCreation();
+
+            // Move focus to first focusable element in modal
+            setTimeout(() => {
+                const modalContainer = modal.querySelector('.modal-container');
+                if (modalContainer) {
+                    const firstFocusable = modalContainer.querySelector('input, select, textarea, button');
+                    if (firstFocusable) firstFocusable.focus();
+                }
+            }, 100);
         }
 
         function closeCreateJobModal() {
@@ -771,6 +783,14 @@
             document.body.classList.remove('modal-open');
             // Reset form
             document.getElementById('create-job-form').reset();
+
+            // Restore focus to trigger element
+            if (modalTriggerElement) {
+                setTimeout(() => {
+                    modalTriggerElement.focus();
+                    modalTriggerElement = null;
+                }, 100);
+            }
         }
 
         // ESC key handler for modal
@@ -779,6 +799,35 @@
                 const modal = document.getElementById('create-job-modal');
                 if (modal && modal.classList.contains('active')) {
                     closeCreateJobModal();
+                }
+            }
+        });
+
+        // Focus trap for modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Tab') {
+                const modal = document.getElementById('create-job-modal');
+                if (modal && modal.classList.contains('active')) {
+                    const modalContainer = modal.querySelector('.modal-container');
+                    if (modalContainer) {
+                        const focusableElements = modalContainer.querySelectorAll(
+                            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
+                        );
+                        const firstFocusable = focusableElements[0];
+                        const lastFocusable = focusableElements[focusableElements.length - 1];
+
+                        if (e.shiftKey) {
+                            if (document.activeElement === firstFocusable) {
+                                lastFocusable.focus();
+                                e.preventDefault();
+                            }
+                        } else {
+                            if (document.activeElement === lastFocusable) {
+                                firstFocusable.focus();
+                                e.preventDefault();
+                            }
+                        }
+                    }
                 }
             }
         });

@@ -55,7 +55,7 @@
                         </section>
                         <section class="navbar-section">
                             <div class="btn-group btn-group-block">
-                                <button class="btn btn-sm btn-primary" @click="openCreateModal()">
+                                <button class="btn btn-sm btn-primary" @click="openCreateModal($event)">
                                     <i class="fas fa-plus"></i>
                                     <span>Add Source</span>
                                 </button>
@@ -111,7 +111,7 @@
                                         </td>
                                         <td x-text="formatDate(source.created_at)"></td>
                                         <td class="text-center">
-                                            <button class="btn btn-sm" @click="editSource(source)" title="Edit Source" style="margin-right: 0.25rem;">
+                                            <button class="btn btn-sm" @click="editSource(source, $event)" title="Edit Source" style="margin-right: 0.25rem;">
                                                 <i class="fas fa-edit"></i>
                                             </button>
                                             <button class="btn btn-sm btn-error" @click="deleteSource(source.id)" title="Delete Source">
@@ -129,7 +129,7 @@
             <!-- Create/Edit Source Modal -->
             <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
                 <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
-                <div class="modal-container" style="max-width: 600px;">
+                <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
                     <div class="modal-header">
                         <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
                         <div class="modal-title h5" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></div>
@@ -245,6 +245,32 @@
                     const sourceSection = document.querySelector('[x-data="sourceManagement"]');
                     if (sourceSection && sourceSection.__x) {
                         sourceSection.__x.$data.closeModal();
+                    }
+                }
+            }
+        });
+
+        // Focus trap for modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Tab') {
+                const modal = document.querySelector('.modal.active .modal-container');
+                if (modal) {
+                    const focusableElements = modal.querySelectorAll(
+                        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
+                    );
+                    const firstFocusable = focusableElements[0];
+                    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+                    if (e.shiftKey) {
+                        if (document.activeElement === firstFocusable) {
+                            lastFocusable.focus();
+                            e.preventDefault();
+                        }
+                    } else {
+                        if (document.activeElement === lastFocusable) {
+                            firstFocusable.focus();
+                            e.preventDefault();
+                        }
                     }
                 }
             }

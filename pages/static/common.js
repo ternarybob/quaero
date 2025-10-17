@@ -213,6 +213,7 @@ document.addEventListener('alpine:init', () => {
     showCreateModal: false,
     showEditModal: false,
     loading: true,
+    modalTriggerElement: null,
 
     init() {
       this.loadSources();
@@ -265,20 +266,40 @@ document.addEventListener('alpine:init', () => {
       };
     },
 
-    editSource(source) {
+    editSource(source, event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
       this.currentSource = JSON.parse(JSON.stringify(source));
       this.showEditModal = true;
       document.body.classList.add('modal-open');
       // Reload authentications in case they changed
       this.loadAuthentications();
+
+      // Move focus to modal after it renders
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
     },
 
-    openCreateModal() {
+    openCreateModal(event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
       this.resetCurrentSource();
       this.showCreateModal = true;
       document.body.classList.add('modal-open');
       // Load authentications when opening modal
       this.loadAuthentications();
+
+      // Move focus to modal after it renders
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
     },
 
     async saveSource() {
@@ -334,6 +355,14 @@ document.addEventListener('alpine:init', () => {
       this.showEditModal = false;
       document.body.classList.remove('modal-open');
       this.resetCurrentSource();
+
+      // Restore focus to trigger element
+      if (this.modalTriggerElement) {
+        this.$nextTick(() => {
+          this.modalTriggerElement.focus();
+          this.modalTriggerElement = null;
+        });
+      }
     },
 
     formatDate(dateStr) {
@@ -363,12 +392,20 @@ window.showNotification = function(message, type = 'info') {
       container = document.createElement('div');
       container.id = 'toast-container';
       container.className = 'toast-container';
+      container.setAttribute('aria-live', 'polite');
+      container.setAttribute('aria-atomic', 'false');
       document.body.appendChild(container);
     }
 
     // Create toast element
     const toast = document.createElement('div');
     toast.className = 'toast-item ' + toastClass;
+
+    // Set ARIA role and aria-live based on type
+    const isError = type === 'error' || type === 'danger';
+    toast.setAttribute('role', isError ? 'alert' : 'status');
+    toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
+    toast.setAttribute('aria-atomic', 'true');
 
     // Add icon based on type
     const icons = {
@@ -382,7 +419,21 @@ window.showNotification = function(message, type = 'info') {
     toast.innerHTML = `
       <i class="fas ${iconClass}" style="margin-right: 0.5rem;"></i>
       <span>${message}</span>
+      <button class="toast-close-btn" aria-label="Close notification" title="Close">
+        <i class="fas fa-times"></i>
+      </button>
     `;
+
+    // Add close button event listener
+    const closeBtn = toast.querySelector('.toast-close-btn');
+    closeBtn.addEventListener('click', () => {
+      toast.classList.add('toast-removing');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300);
+    });
 
     // Append to container
     container.appendChild(toast);
