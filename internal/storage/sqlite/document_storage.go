@@ -354,20 +354,42 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		opts.Limit = 50
 	}
 
-	query := "SELECT id, source_type, source_id, title, content_markdown, detail_level, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
-
-	// Add WHERE clause if filtering by source
-	if opts.SourceType != "" {
-		query += " WHERE source_type = '" + opts.SourceType + "'"
+	// Whitelist allowed ORDER BY columns to prevent SQL injection
+	allowedOrderBy := map[string]bool{
+		"id":           true,
+		"title":        true,
+		"source_type":  true,
+		"created_at":   true,
+		"updated_at":   true,
+		"last_synced":  true,
+	}
+	if !allowedOrderBy[opts.OrderBy] {
+		opts.OrderBy = "updated_at" // Default to safe value
 	}
 
-	// Add ORDER BY
-	query += fmt.Sprintf(" ORDER BY %s %s", opts.OrderBy, opts.OrderDir)
+	// Whitelist allowed ORDER directions
+	orderDir := "DESC"
+	if opts.OrderDir == "asc" || opts.OrderDir == "ASC" {
+		orderDir = "ASC"
+	}
 
-	// Add LIMIT and OFFSET
-	query += fmt.Sprintf(" LIMIT %d OFFSET %d", opts.Limit, opts.Offset)
+	query := "SELECT id, source_type, source_id, title, content_markdown, detail_level, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
+	args := []interface{}{}
 
-	rows, err := d.db.db.Query(query)
+	// Add WHERE clause if filtering by source (using placeholder)
+	if opts.SourceType != "" {
+		query += " WHERE source_type = ?"
+		args = append(args, opts.SourceType)
+	}
+
+	// Add ORDER BY (safe after whitelist validation)
+	query += fmt.Sprintf(" ORDER BY %s %s", opts.OrderBy, orderDir)
+
+	// Add LIMIT and OFFSET (using placeholders)
+	query += " LIMIT ? OFFSET ?"
+	args = append(args, opts.Limit, opts.Offset)
+
+	rows, err := d.db.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

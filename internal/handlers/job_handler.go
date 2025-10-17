@@ -663,23 +663,24 @@ func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Get current job status
-	status, err := h.schedulerService.GetJobStatus(jobName)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Job not found: %v", err), http.StatusNotFound)
+	// Update job schedule
+	if err := h.schedulerService.UpdateJobSchedule(jobName, req.Schedule); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to update job schedule")
+		http.Error(w, fmt.Sprintf("Failed to update schedule: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Re-register job with new schedule
-	// Note: This requires the scheduler to expose the job handler
-	// For now, we'll return an error indicating this functionality requires config update
-	h.logger.Warn().
+	h.logger.Info().
 		Str("job_name", jobName).
-		Str("old_schedule", status.Schedule).
 		Str("new_schedule", req.Schedule).
-		Msg("Schedule update requested but requires config file update")
+		Msg("Job schedule updated successfully")
 
-	http.Error(w, "Schedule updates require configuration file modification. Please update quaero.toml and restart the service.", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name": jobName,
+		"schedule": req.Schedule,
+		"message":  "Schedule updated successfully",
+	})
 }
 
 // deriveEntityType derives entity type based on source type

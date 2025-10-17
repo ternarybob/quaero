@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Quaero</title>
+
+    <!-- WebAwesome Components & Icons -->
+    <link rel="stylesheet" href="https://early.webawesome.com/webawesome@3.0.0-beta.6/dist/styles/webawesome.css" />
+    <script type="module" src="https://early.webawesome.com/webawesome@3.0.0-beta.6/dist/webawesome.loader.js"></script>
+
+    <!-- Alpine.js for Interactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        /* Design System */
+        :root {
+            --canvas-default: #ffffff;
+            --canvas-subtle: #f6f8fa;
+            --canvas-inset: #f6f8fa;
+            --header-bg: #24292f;
+            --header-text: #ffffff;
+            --border-default: #d0d7de;
+            --border-muted: #e7ecf0;
+            --fg-default: #1f2328;
+            --fg-muted: #59636e;
+            --fg-subtle: #6e7781;
+            --accent-fg: #0969da;
+            --accent-emphasis: #0969da;
+            --success-fg: #1a7f37;
+            --success-emphasis: #1f883d;
+            --success-subtle: #dafbe1;
+            --danger-fg: #d1242f;
+            --danger-emphasis: #cf222e;
+            --danger-subtle: #ffebe9;
+            --attention-fg: #9a6700;
+            --attention-emphasis: #bf8700;
+            --attention-subtle: #fff8c5;
+            --info-fg: #0969da;
+            --info-subtle: #ddf4ff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background-color: var(--canvas-subtle);
+            color: var(--fg-default);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            padding-top: 64px;
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 24px;
+            width: 100%;
+        }
+
+        /* Header */
+        .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 64px;
+            background-color: var(--header-bg);
+            z-index: 32;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .app-header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 100%;
+            gap: 16px;
+        }
+
+        .app-header .brand {
+            font-size: 20px;
+            font-weight: 600;
+            text-decoration: none;
+            color: var(--header-text);
+        }
+
+        .app-header-nav {
+            display: flex;
+            gap: 8px;
+            flex: 1;
+            margin-left: 24px;
+        }
+
+        .app-header-nav a {
+            padding: 8px 16px;
+            text-decoration: none;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .app-header-nav a:hover {
+            color: var(--header-text);
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .app-header-nav a.active {
+            color: var(--header-text);
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Main Content */
+        main {
+            flex: 1 0 auto;
+            padding: 24px 0;
+        }
+
+        .page-header {
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-default);
+        }
+
+        .page-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--fg-default);
+            margin-bottom: 4px;
+        }
+
+        .page-header p {
+            font-size: 14px;
+            color: var(--fg-muted);
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--canvas-default);
+            border: 1px solid var(--border-default);
+            border-radius: 6px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px;
+            background-color: var(--canvas-default);
+            border-bottom: 1px solid var(--border-default);
+        }
+
+        .card-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--fg-default);
+        }
+
+        .card-body {
+            padding: 0;
+        }
+
+        /* Statistics Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0;
+            padding: 16px;
+        }
+
+        .stat-box {
+            text-align: center;
+            padding: 16px;
+            border-right: 1px solid var(--border-muted);
+        }
+
+        .stat-box:last-child {
+            border-right: none;
+        }
+
+        .stat-box .label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--fg-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .stat-box .value {
+            font-size: 28px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .stat-box .value.success {
+            color: var(--success-emphasis);
+        }
+
+        .stat-box .value.warning {
+            color: var(--attention-emphasis);
+        }
+
+        .stat-box .value.danger {
+            color: var(--danger-emphasis);
+        }
+
+        /* Table */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table thead {
+            background-color: var(--canvas-subtle);
+        }
+
+        .table th {
+            padding: 8px 16px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--fg-default);
+            border-bottom: 1px solid var(--border-default);
+            background-color: var(--canvas-subtle);
+        }
+
+        .table td {
+            padding: 8px 16px;
+            border-top: 1px solid var(--border-muted);
+            font-size: 13px;
+            color: var(--fg-default);
+        }
+
+        .table tbody tr:first-child td {
+            border-top: none;
+        }
+
+        .table tbody tr:hover {
+            background-color: var(--canvas-subtle);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 20px;
+            white-space: nowrap;
+            border: 1px solid rgba(27, 31, 36, 0.15);
+            border-radius: 6px;
+            background-color: #f6f8fa;
+            color: var(--fg-default);
+            cursor: pointer;
+            transition: all 0.1s ease;
+            text-decoration: none;
+            box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+
+        .btn:hover {
+            background-color: #f3f4f6;
+            border-color: rgba(27, 31, 36, 0.15);
+            transition-duration: 0.1s;
+        }
+
+        .btn:active {
+            background-color: #ebecf0;
+            box-shadow: inset 0 1px 0 rgba(27, 31, 36, 0.04);
+            transition: none;
+        }
+
+        .btn-primary {
+            background-color: #2da44e;
+            color: white;
+            border-color: rgba(27, 31, 36, 0.15);
+            box-shadow: 0 1px 0 rgba(27, 31, 36, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+
+        .btn-primary:hover {
+            background-color: #2c974b;
+            border-color: rgba(27, 31, 36, 0.15);
+        }
+
+        .btn-primary:active {
+            background-color: #298e46;
+            box-shadow: inset 0 1px 0 rgba(20, 70, 32, 0.2);
+        }
+
+        .btn-danger {
+            color: var(--danger-fg);
+            background-color: #f6f8fa;
+        }
+
+        .btn-danger:hover {
+            background-color: var(--danger-subtle);
+            border-color: rgba(27, 31, 36, 0.15);
+            color: white;
+            background-color: #cf222e;
+        }
+
+        .btn-sm {
+            padding: 3px 12px;
+            font-size: 12px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 4px;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0 7px;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 18px;
+            border-radius: 2em;
+            border: 1px solid transparent;
+        }
+
+        .badge-success {
+            background-color: var(--success-subtle);
+            color: var(--success-fg);
+            border-color: rgba(26, 127, 55, 0.1);
+        }
+
+        .badge-warning {
+            background-color: var(--attention-subtle);
+            color: var(--attention-fg);
+            border-color: rgba(154, 103, 0, 0.1);
+        }
+
+        .badge-info {
+            background-color: var(--info-subtle);
+            color: var(--info-fg);
+            border-color: rgba(9, 105, 218, 0.1);
+        }
+
+        /* Service Logs - Terminal Style */
+        .log-container {
+            background-color: #0d1117;
+            border-radius: 6px;
+            padding: 12px 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: auto;
+            font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            color: #c9d1d9;
+            margin-bottom: 0;
+            white-space: nowrap;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .log-timestamp {
+            color: #6e7681;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .log-level-info {
+            color: #58a6ff;
+            font-weight: 600;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .log-level-warning {
+            color: #d29922;
+            font-weight: 600;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .log-level-error {
+            color: #f85149;
+            font-weight: 600;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        .log-message {
+            color: #c9d1d9;
+            flex-grow: 1;
+            font-size: 11px;
+        }
+
+        .text-muted {
+            color: #8b949e;
+            text-align: left;
+            padding: 20px 0;
+            font-size: 11px;
+        }
+
+        /* Footer */
+        .footer {
+            flex-shrink: 0;
+            padding: 24px 0;
+            text-align: center;
+            color: var(--fg-muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border-default);
+            background-color: var(--canvas-default);
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .icon {
+            width: 16px;
+            height: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 16px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stat-box {
+                border-right: none;
+                border-bottom: 1px solid var(--border-muted);
+            }
+
+            .stat-box:last-child {
+                border-bottom: none;
+            }
+
+            .btn-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="container app-header-content">
+            <a href="/" class="brand">
+                <strong>Quaero</strong>
+            </a>
+            <nav class="app-header-nav">
+                <a href="dashboard.html" class="active">Dashboard</a>
+                <a href="settings.html">Settings</a>
+                <a href="style-guide.html">Style Guide</a>
+            </nav>
+            <div>
+                <button class="btn btn-primary btn-sm">
+                    <wa-icon name="plus" class="icon"></wa-icon>
+                    New Task
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1>Dashboard</h1>
+            <p>Overview of your current projects and tasks</p>
+        </div>
+
+        <!-- Statistics Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Statistics</h2>
+                <button class="btn btn-sm">
+                    <wa-icon name="arrows-rotate" class="icon"></wa-icon>
+                    Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="label">Total Projects</div>
+                        <div class="value">12</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Active Tasks</div>
+                        <div class="value success">42</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Pending Review</div>
+                        <div class="value warning">8</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="label">Overdue</div>
+                        <div class="value danger">3</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Projects Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Recent Projects</h2>
+                <button class="btn btn-sm">
+                    <wa-icon name="plus" class="icon"></wa-icon>
+                    Add Project
+                </button>
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Project Name</th>
+                            <th>Status</th>
+                            <th>Last Update</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Alpha Initiative</strong></td>
+                            <td><span class="badge badge-success">Active</span></td>
+                            <td>Oct 17, 2025</td>
+                            <td class="text-right">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm">
+                                        <wa-icon name="pencil" class="icon"></wa-icon>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger">
+                                        <wa-icon name="trash-can" class="icon"></wa-icon>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Beta Platform Launch</strong></td>
+                            <td><span class="badge badge-warning">Pending</span></td>
+                            <td>Oct 15, 2025</td>
+                            <td class="text-right">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm">
+                                        <wa-icon name="pencil" class="icon"></wa-icon>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger">
+                                        <wa-icon name="trash-can" class="icon"></wa-icon>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Gamma Data Migration</strong></td>
+                            <td><span class="badge badge-info">In Progress</span></td>
+                            <td>Oct 16, 2025</td>
+                            <td class="text-right">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm">
+                                        <wa-icon name="pencil" class="icon"></wa-icon>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger">
+                                        <wa-icon name="trash-can" class="icon"></wa-icon>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Service Logs Card -->
+        <div class="card" x-data="serviceLogs">
+            <div class="card-header">
+                <h2>Service Logs</h2>
+                <div class="btn-group">
+                    <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                        <wa-icon :name="autoScroll ? 'pause' : 'play'" class="icon"></wa-icon>
+                    </button>
+                    <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
+                        <wa-icon name="arrows-rotate" class="icon"></wa-icon>
+                    </button>
+                    <button class="btn btn-sm btn-danger" @click="clearLogs()" title="Clear Logs">
+                        <wa-icon name="trash-can" class="icon"></wa-icon>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="log-container" x-ref="logContainer">
+                    <template x-if="logs.length === 0">
+                        <div class="log-entry text-muted">No logs available</div>
+                    </template>
+                    <template x-for="log in logs" :key="log.id">
+                        <div class="log-entry">
+                            <span class="log-timestamp" x-text="`[${log.timestamp}]`"></span>
+                            <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                            <span class="log-message" x-text="log.message"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>Quaero &copy; 2025 - Dashboard Management System</p>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('serviceLogs', () => ({
+                logs: [],
+                autoScroll: true,
+                logIdCounter: 0,
+                init() {
+                    this.generateSampleLogs();
+                },
+                generateSampleLogs() {
+                    const levels = ['INFO', 'WARNING', 'ERROR'];
+                    const messages = [
+                        'Service started successfully',
+                        'Processing document batch',
+                        'Database connection established',
+                        'Warning: High memory usage detected',
+                        'Error: Failed to connect to external API',
+                        'Job completed successfully',
+                        'Cache cleared',
+                        'User authentication successful',
+                        'Warning: Slow query detected',
+                        'Error: Timeout waiting for response'
+                    ];
+                    for (let i = 0; i < 15; i++) {
+                        const level = levels[Math.floor(Math.random() * levels.length)];
+                        const message = messages[Math.floor(Math.random() * messages.length)];
+                        this.addLog(level, message);
+                    }
+                },
+                addLog(level, message) {
+                    this.logs.push({
+                        id: ++this.logIdCounter,
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: level,
+                        levelClass: `log-level-${level.toLowerCase()}`,
+                        message: message
+                    });
+                    if (this.autoScroll) {
+                        this.$nextTick(() => {
+                            const container = this.$refs.logContainer;
+                            if (container) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        });
+                    }
+                },
+                toggleAutoScroll() {
+                    this.autoScroll = !this.autoScroll;
+                },
+                refresh() {
+                    this.clearLogs();
+                    this.generateSampleLogs();
+                },
+                clearLogs() {
+                    this.logs = [];
+                    this.logIdCounter = 0;
+                }
+            }));
+        });
+    </script>
+</body>
+
+</html>

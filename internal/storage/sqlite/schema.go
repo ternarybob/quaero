@@ -141,6 +141,14 @@ CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled);
 CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id);
 
+-- Job settings table for persisting scheduler job configurations
+CREATE TABLE IF NOT EXISTS job_settings (
+	job_name TEXT PRIMARY KEY,
+	schedule TEXT NOT NULL,
+	enabled INTEGER DEFAULT 1,
+	updated_at INTEGER NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, force_embed_pending);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding ON documents(embedding_model) WHERE embedding IS NOT NULL;
@@ -404,8 +412,26 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 
 	// Step 7: Recreate FTS5 triggers
 	s.logger.Info().Msg("Step 7: Recreating FTS5 triggers")
+
+	// Drop existing triggers first to avoid "trigger already exists" errors
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_insert`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_update`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_delete`)
+	if err != nil {
+		return err
+	}
+
+	// Create new triggers
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_insert AFTER INSERT ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_insert AFTER INSERT ON documents BEGIN
 			INSERT INTO documents_fts(rowid, title, content_markdown)
 			VALUES (new.rowid, new.title, new.content_markdown);
 		END
@@ -415,7 +441,7 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_update AFTER UPDATE ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_update AFTER UPDATE ON documents BEGIN
 			UPDATE documents_fts
 			SET title = new.title, content_markdown = new.content_markdown
 			WHERE rowid = new.rowid;
@@ -426,7 +452,7 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_delete AFTER DELETE ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_delete AFTER DELETE ON documents BEGIN
 			DELETE FROM documents_fts WHERE rowid = old.rowid;
 		END
 	`)

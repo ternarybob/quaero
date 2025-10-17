@@ -1,19 +1,22 @@
-<div id="snackbar" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: none;"></div>
-
 <script>
 function showSnackbar(message, type = 'info') {
-    const snackbar = document.getElementById('snackbar');
-    if (!snackbar) return;
+    const typeMap = {
+        'info': 'bg-blue fg-white',
+        'success': 'bg-green fg-white',
+        'warning': 'bg-yellow fg-dark',
+        'error': 'bg-red fg-white',
+        'danger': 'bg-red fg-white'
+    };
+    const classes = typeMap[type] || 'bg-blue fg-white';
 
-    snackbar.textContent = message;
-    snackbar.className = 'snackbar snackbar--' + type;
-    snackbar.style.display = 'block';
-
-    setTimeout(function() {
-        snackbar.style.display = 'none';
-    }, 3000);
+    if (typeof Metro !== 'undefined' && Metro.toast) {
+        Metro.toast.create(message, null, 3000, classes);
+    } else {
+        console.warn('Metro UI not loaded, falling back to console');
+        console.log(`[${type.toUpperCase()}] ${message}`);
+    }
 }
 
-// Make showNotification globally available as an alias
+// Keep alias for backwards compatibility
 window.showNotification = showSnackbar;
 </script>

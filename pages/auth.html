@@ -6,135 +6,144 @@
     <title>Quaero - Authentication Management</title>
 </head>
 
-<body class="has-navbar-fixed-top">
+<body>
 
     {{template "navbar.html" .}}
 
-    <div class="content">
+    <div class="container-fluid mt-4">
 
         <!-- Heading Section -->
-        <section>
-            <div class="pl-2">
-                <h1 class="title">Authentication Management</h1>
-                <p class="subtitle">Manage authentication credentials for data sources</p>
+        <div class="row">
+            <div class="cell-12 p-2">
+                <h1 class="text-bold">Authentication Management</h1>
+                <p class="text-leader">Manage authentication credentials for data sources</p>
             </div>
-        </section>
+        </div>
 
         <!-- Main Content -->
 
         <!-- Instructions Card -->
-        <div class="card">
-            <div class="card__header">
-                <h2>How to Add Authentication</h2>
-            </div>
-            <div class="card-body">
-                <ol>
-                    <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
-                    <li>Log in to your account</li>
-                    <li>Click the Quaero Chrome extension icon</li>
-                    <li>The extension will automatically capture and store your authentication</li>
-                    <li>Authentication for the same site will be automatically updated when recaptured</li>
-                </ol>
-                <div class="q-bg-info q-p-3 q-rounded q-mt-4">
-                    <strong>Note:</strong> Each site domain can have only one set of credentials.
-                    Capturing new authentication for an existing site will override the previous credentials.
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h6 class="m-0">How to Add Authentication</h6>
+                    </div>
+                    <div class="panel-content">
+                        <ol>
+                            <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
+                            <li>Log in to your account</li>
+                            <li>Click the Quaero Chrome extension icon</li>
+                            <li>The extension will automatically capture and store your authentication</li>
+                            <li>Authentication for the same site will be automatically updated when recaptured</li>
+                        </ol>
+                        <div class="bg-cyan p-3 bd-default mt-4" style="border-radius: 4px;">
+                            <strong>Note:</strong> Each site domain can have only one set of credentials.
+                            Capturing new authentication for an existing site will override the previous credentials.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Authentication List -->
-        <div class="card" x-data="authPage()">
+        <div class="row mt-4" x-data="authPage()">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="d-flex flex-justify-between flex-align-center">
+                            <h6 class="m-0">Stored Authentications</h6>
+                            <button class="button outline small" @click="loadAuthentications" title="Refresh Authentications">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <!-- Loading State -->
+                        <div x-show="loading" class="text-center p-5">
+                            <span class="icon">
+                                <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                            </span>
+                            <p class="mt-3">Loading authentications...</p>
+                        </div>
 
-            <div class="card__header">
-                <h2>
-                    <span>Stored Authentications</span>
-                </h2>
-                <div class="q-d-flex q-align-center">
-                    <button class="btn outline btn--sm" @click="loadAuthentications" title="Refresh Authentications">
-                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <!-- Loading State -->
-                <div x-show="loading" class="q-text-center q-p-5">
-                    <span class="icon">
-                        <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                    </span>
-                    <p class="q-mt-3">Loading authentications...</p>
-                </div>
+                        <!-- Empty State -->
+                        <div x-show="!loading && authentications.length === 0" class="text-center p-5">
+                            <span class="icon text-muted">
+                                <i class="fas fa-lock fa-3x"></i>
+                            </span>
+                            <p class="mt-3 text-muted">No authentication credentials stored</p>
+                            <p class="text-muted">Use the Chrome extension to capture authentication from your sites</p>
+                        </div>
 
-                <!-- Empty State -->
-                <div x-show="!loading && authentications.length === 0" class="q-text-center q-p-5">
-                    <span class="icon q-text-muted">
-                        <i class="fas fa-lock fa-3x"></i>
-                    </span>
-                    <p class="q-mt-3 q-text-muted">No authentication credentials stored</p>
-                    <p class="q-text-muted">Use the Chrome extension to capture authentication from your sites</p>
-                </div>
-
-                <!-- Authentication Table -->
-                <div x-show="!loading && authentications.length > 0">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Site</th>
-                                <th>Name</th>
-                                <th>Service Type</th>
-                                <th>Last Updated</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="auth in authentications" :key="auth.id">
-                                <tr>
-                                    <td>
-                                        <strong x-text="auth.site_domain"></strong>
-                                        <br>
-                                        <small class="q-text-muted" x-text="auth.base_url"></small>
-                                    </td>
-                                    <td x-text="auth.name || '-'"></td>
-                                    <td>
-                                        <span class="tag tag--primary" x-text="auth.service_type.toUpperCase()"></span>
-                                    </td>
-                                    <td>
-                                        <small x-text="formatDate(auth.updated_at)"></small>
-                                    </td>
-                                    <td>
-                                        <button class="btn btn--sm btn-danger outline" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
-                                            <span class="icon">
-                                                <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
-                                            </span>
-                                        </button>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
+                        <!-- Authentication Table -->
+                        <div x-show="!loading && authentications.length > 0">
+                            <table class="table striped border">
+                                <thead>
+                                    <tr>
+                                        <th>Site</th>
+                                        <th>Name</th>
+                                        <th>Service Type</th>
+                                        <th>Last Updated</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="auth in authentications" :key="auth.id">
+                                        <tr>
+                                            <td>
+                                                <strong x-text="auth.site_domain"></strong>
+                                                <br>
+                                                <small class="text-muted" x-text="auth.base_url"></small>
+                                            </td>
+                                            <td x-text="auth.name || '-'"></td>
+                                            <td>
+                                                <span class="badge primary" x-text="auth.service_type.toUpperCase()"></span>
+                                            </td>
+                                            <td>
+                                                <small x-text="formatDate(auth.updated_at)"></small>
+                                            </td>
+                                            <td>
+                                                <button class="button danger small outline" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
+                                                    <span class="icon">
+                                                        <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
+                                                    </span>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Associated Sources Information -->
-        <div class="card">
-            <div class="card__header">
-                <h2>Using Authentication in Sources</h2>
-            </div>
-            <div class="card-body">
-                <p>
-                    Once you have captured authentication for a site, you can create sources that use these credentials:
-                </p>
-                <ul>
-                    <li><strong>Jira Source:</strong> Create a source with URL like <code>https://yoursite.atlassian.net/jira</code></li>
-                    <li><strong>Confluence Source:</strong> Create a source with URL like <code>https://yoursite.atlassian.net/wiki</code></li>
-                </ul>
-                <p>
-                    Sources will automatically use the authentication credentials matching their site domain.
-                </p>
-                <a href="/sources" class="btn btn-info btn--sm outline">
-                    <span class="icon"><i class="fas fa-database"></i></span>
-                    <span>Manage Sources</span>
-                </a>
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h6 class="m-0">Using Authentication in Sources</h6>
+                    </div>
+                    <div class="panel-content">
+                        <p>
+                            Once you have captured authentication for a site, you can create sources that use these credentials:
+                        </p>
+                        <ul>
+                            <li><strong>Jira Source:</strong> Create a source with URL like <code>https://yoursite.atlassian.net/jira</code></li>
+                            <li><strong>Confluence Source:</strong> Create a source with URL like <code>https://yoursite.atlassian.net/wiki</code></li>
+                        </ul>
+                        <p>
+                            Sources will automatically use the authentication credentials matching their site domain.
+                        </p>
+                        <a href="/sources" class="button info small outline">
+                            <span class="icon"><i class="fas fa-database"></i></span>
+                            <span>Manage Sources</span>
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -166,7 +175,7 @@
                         this.authentications = Array.isArray(data) ? data : [];
                     } catch (error) {
                         console.error('Failed to load authentications:', error);
-                        window.showSnackbar('Failed to load authentications', 'error');
+                        window.showNotification('Failed to load authentications', 'error');
                     } finally {
                         this.loading = false;
                     }
@@ -189,10 +198,10 @@
 
                         // Remove from local array
                         this.authentications = this.authentications.filter(auth => auth.id !== id);
-                        window.showSnackbar('Authentication deleted successfully', 'success');
+                        window.showNotification('Authentication deleted successfully', 'success');
                     } catch (error) {
                         console.error('Failed to delete authentication:', error);
-                        window.showSnackbar('Failed to delete authentication', 'error');
+                        window.showNotification('Failed to delete authentication', 'error');
                     } finally {
                         this.deleting = null;
                     }

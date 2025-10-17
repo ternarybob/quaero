@@ -6,76 +6,87 @@
     <title>Settings - Quaero</title>
 </head>
 
-<body class="has-navbar-fixed-top">
+<body>
 
     {{template "navbar.html" .}}
 
-    <div class="content">
+    <div class="container-fluid mt-4">
 
         <!-- Heading Section -->
-        <section>
-            <div class="pl-2">
-                <h1 class="title">Settings</h1>
-                <p class="subtitle">System configuration and operational controls</p>
+        <div class="row">
+            <div class="cell-12 p-2">
+                <h1 class="text-bold">Settings</h1>
+                <p class="text-leader">System configuration and operational controls</p>
             </div>
-        </section>
+        </div>
 
         <!-- Full Configuration Table -->
-        <div class="card">
-
-            <div class="card__header">
-                <h2>System Configuration (Read-Only)</h2>
-                <div class="q-d-flex q-align-center">
-                    <button class="btn btn--sm outline" onclick="loadConfig()">
-                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                    </button>
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="d-flex flex-justify-between flex-align-center">
+                            <h6 class="m-0">System Configuration (Read-Only)</h6>
+                            <button class="button small outline" onclick="loadConfig()">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <table class="table striped border">
+                            <thead>
+                                <tr>
+                                    <th>Section</th>
+                                    <th>Setting</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="config-table-body">
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted">
+                                        Loading configuration...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-            <div class="card-body">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Section</th>
-                            <th>Setting</th>
-                            <th>Value</th>
-                        </tr>
-                    </thead>
-                    <tbody id="config-table-body">
-                        <tr>
-                            <td colspan="3" class="q-text-center q-text-muted">
-                                Loading configuration...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
             </div>
         </div>
 
         <!-- Danger Zone -->
-        <div class="card">
-            <div class="card__header">
-                <h2>Danger Zone</h2>
-            </div>
-            <div class="card-body">
-                <div class="q-d-flex q-align-center q-justify-between q-gap-3">
-                    <div>
-                        <p class="text-lg q-text-bold">Clear All Documents</p>
-                        <p>
-                            Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                            Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
-                        </p>
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h6 class="m-0 fg-red">Danger Zone</h6>
                     </div>
-                    <div>
-                        <button class="btn btn-danger btn--sm outline" onclick="confirmRemoveEmbeddings()">
-                            <span class="icon"><i class="fas fa-trash"></i></span>
-                            <span>CLEAR ALL</span>
-                        </button>
+                    <div class="panel-content">
+                        <div class="d-flex flex-align-center flex-justify-between flex-gap-3">
+                            <div>
+                                <p class="text-bold">Clear All Documents</p>
+                                <p>
+                                    Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                                    Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+                                </p>
+                            </div>
+                            <div>
+                                <button class="button danger small outline" onclick="confirmRemoveEmbeddings()">
+                                    <span class="icon"><i class="fas fa-trash"></i></span>
+                                    <span>CLEAR ALL</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        {{template "service-logs.html" .}}
+        <div class="row mt-4">
+            <div class="cell-12">
+                {{template "service-logs.html" .}}
+            </div>
+        </div>
 
     </div>
 

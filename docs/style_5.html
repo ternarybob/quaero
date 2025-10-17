@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Quaero</title>
+
+    <!-- Spectre.css -->
+    <link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-exp.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-icons.min.css">
+
+    <!-- Tabler Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+
+    <style>
+        /* ---
+          CUSTOM STYLES TO MATCH REQUIREMENT
+        --- */
+        :root {
+            --brand-primary: #4f46e5;
+            --brand-success: #16a34a;
+            --brand-warning: #f59e0b;
+            --brand-danger: #dc2626;
+            --brand-info: #2563eb;
+            --header-bg: #24292f;
+            --page-bg: #f6f8fa;
+            --content-bg: #ffffff;
+            --text-primary: #1f2328;
+            --text-secondary: #57606a;
+            --btn-primary: #57606a;
+            --border-color: #d0d7de;
+            --border-radius: .375rem;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--page-bg);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            padding-top: 64px;
+            /* Space for fixed header */
+        }
+
+        h2 {
+            font-size: 1.25rem;
+        }
+
+        .card-header{
+            
+        }
+        .navbar-section {
+            h2 {
+                margin-bottom: 0;
+            }
+        }
+
+        /* Header */
+        .app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 64px;
+            background-color: var(--header-bg);
+            z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .app-header-content {
+            max-width: 1280px;
+            margin: 0 auto;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .app-header-nav {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .app-header .brand {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: white;
+            text-decoration: none;
+        }
+
+        .app-header-nav .nav-links {
+            display: flex;
+            gap: 0.5rem;
+            margin-left: 1rem;
+        }
+
+        .app-header-nav .nav-links a {
+            padding: 0.5rem 1rem;
+            text-decoration: none;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.875rem;
+            font-weight: 500;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .app-header-nav .nav-links a:hover {
+            color: white;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .app-header-nav .nav-links a.active {
+            color: white;
+        }
+
+        .btn-header-primary {
+            background-color: var(--brand-primary);
+            border-color: var(--brand-primary);
+            color: white;
+            font-weight: 500;
+        }
+
+        .btn-header-primary:hover {
+            background-color: #4338ca;
+            border-color: #4338ca;
+            color: white;
+        }
+
+        .btn {
+            border-radius: var(--border-radius, .375rem);
+            color: var(--btn-primary);
+            border-color: var(--btn-primary);
+        }
+
+        /* Main Content */
+        .page-container {
+            max-width: 1280px;
+            margin: 1.5rem auto;
+            padding: 0 1.5rem;
+        }
+
+        .page-title h1 {
+            font-size: 1.75rem;
+            font-weight: 600;
+        }
+
+        .page-title p {
+            color: var(--text-secondary);
+        }
+
+        /* Content Sections */
+        .content-section {
+            background: var(--content-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-top: 1.5rem;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-body {
+            padding: 1.5rem;
+        }
+
+        /* Cards */
+        .card-header {
+            border-bottom: 1px solid var(--border-color);
+
+        }
+
+        /* Statistics */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            text-align: center;
+        }
+
+        .stat-item .stat-label {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-item .stat-value {
+            font-size: 1.75rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .stat-value.text-success {
+            color: var(--brand-success);
+        }
+
+        .stat-value.text-warning {
+            color: var(--brand-warning);
+        }
+
+        .stat-value.text-danger {
+            color: var(--brand-danger);
+        }
+
+        /* Table */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th,
+        .table td {
+            padding: 0.5rem 0;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .table th {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table .label {
+            font-weight: 500;
+        }
+
+        /* Terminal */
+        .terminal {
+            background-color: #0d1117;
+            border-radius: 6px;
+            padding: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+
+        .terminal-line {
+            color: #c9d1d9;
+            white-space: pre-wrap;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .terminal-time {
+            color: #6e7681;
+        }
+
+        .terminal-info {
+            color: #58a6ff;
+            font-weight: 600;
+        }
+
+        .terminal-warning {
+            color: #d29922;
+            font-weight: 600;
+        }
+
+        .terminal-error {
+            color: #f85149;
+            font-weight: 600;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="app-header-content">
+            <nav class="app-header-nav">
+                <a href="/" class="brand">Quaero</a>
+                <div class="nav-links">
+                    <a href="#" class="active">Dashboard</a>
+                    <a href="#">Settings</a>
+                    <a href="#">Style Guide</a>
+                </div>
+            </nav>
+            <button class="btn btn-sm btn-header-primary">
+                <i class="ti ti-plus"></i> New Task
+            </button>
+        </div>
+    </header>
+
+    <main class="page-container">
+        <div class="page-title">
+            <h1>Dashboard</h1>
+            <p>Overview of your current projects and tasks</p>
+        </div>
+
+        <section>
+
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2>Statistics</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <div class="btn-group btn-group-block">
+                                <button class="btn btn-sm" title="Pause"><i class="ti ti-player-pause"></i></button>
+                                <button class="btn btn-sm" title="Refresh"><i class="ti ti-refresh"></i></button>
+                                <button class="btn btn-sm btn-error" title="Clear"><i class="ti ti-trash"></i></button>
+                            </div>
+                        </section>
+                    </header>
+                    <!-- <div class="card-title h5">Title</div>
+                    <div class="card-subtitle text-gray">SubTitle</div>
+                    <button class="btn btn-primary float-right"><i class="icon icon-plus"></i></button> -->
+                </div>
+                <div class="card-body">
+                    Test, content, text, Test, content, text, Test, content, text, Test, content, text
+                </div>
+            </div>
+
+        </section>
+
+        <section class="content-section">
+            <div class="section-header">
+                <h2>Statistics</h2>
+                <button class="btn btn-sm"><i class="ti ti-refresh"></i> Refresh</button>
+            </div>
+            <div class="section-body">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-label">Projects</div>
+                        <div class="stat-value">12</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Active</div>
+                        <div class="stat-value text-success">42</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Pending</div>
+                        <div class="stat-value text-warning">8</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">Overdue</div>
+                        <div class="stat-value text-danger">3</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content-section">
+            <div class="section-header">
+                <h2>Recent Projects</h2>
+                <button class="btn btn-sm"><i class="ti ti-plus"></i> Add Project</button>
+            </div>
+            <div class="section-body" style="padding-top: 0; padding-bottom: 0;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Project</th>
+                            <th>Status</th>
+                            <th>Last Update</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Alpha Initiative</strong></td>
+                            <td><span class="label label-success">Active</span></td>
+                            <td>Oct 17, 2025</td>
+                            <td class="text-right">
+                                <button class="btn btn-sm"><i class="ti ti-pencil"></i></button>
+                                <button class="btn btn-sm btn-error"><i class="ti ti-trash"></i></button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Beta Platform Launch</strong></td>
+                            <td><span class="label label-warning">Pending</span></td>
+                            <td>Oct 15, 2025</td>
+                            <td class="text-right">
+                                <button class="btn btn-sm"><i class="ti ti-pencil"></i></button>
+                                <button class="btn btn-sm btn-error"><i class="ti ti-trash"></i></button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><strong>Gamma Data Migration</strong></td>
+                            <td><span class="label" style="background-color: var(--brand-info); color: white;">In Progress</span></td>
+                            <td>Oct 16, 2025</td>
+                            <td class="text-right">
+                                <button class="btn btn-sm"><i class="ti ti-pencil"></i></button>
+                                <button class="btn btn-sm btn-error"><i class="ti ti-trash"></i></button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="content-section">
+            <div class="section-header">
+                <h2>Service Logs</h2>
+                <div class="btn-group btn-group-block">
+                    <button class="btn btn-sm" title="Pause"><i class="ti ti-player-pause"></i></button>
+                    <button class="btn btn-sm" title="Refresh"><i class="ti ti-refresh"></i></button>
+                    <button class="btn btn-sm btn-error" title="Clear"><i class="ti ti-trash"></i></button>
+                </div>
+            </div>
+            <div class="section-body">
+                <div class="terminal">
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-warning">[WARNING]</span><span>Error: Timeout waiting for response</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-error">[ERROR]</span><span>Processing document batch</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-error">[ERROR]</span><span>Error: Timeout waiting for response</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Cache cleared</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-warning">[WARNING]</span><span>Warning: High memory usage detected</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Service started successfully</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Health check passed</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>User authentication successful</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Cache cleared</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Server listening on port 3000</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-warning">[WARNING]</span><span>Redis cache initialized</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Server listening on port 3000</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-info">[INFO]</span><span>Health check passed</span></div>
+                    <div class="terminal-line"><span class="terminal-time">[14:30:11]</span><span class="terminal-error">[ERROR]</span><span>Worker process started</span></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Quaero © 2025 — Dashboard Management System</p>
+    </footer>
+
+</body>
+
+</html>

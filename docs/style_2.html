@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Quaero</title>
+
+    <!-- WebAwesome Components & Icons -->
+    <link rel="stylesheet" href="https://early.webawesome.com/webawesome@3.0.0-beta.6/dist/styles/webawesome.css" />
+    <script type="module" src="https://early.webawesome.com/webawesome@3.0.0-beta.6/dist/webawesome.loader.js"></script>
+
+    <!-- Alpine.js for Interactivity -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Custom Styles -->
+    <style>
+        /* ---
+          CUSTOM STYLES FOR QUAERO (GitHub Theme)
+          Using variables provided by WebAwesome
+        --- */
+        /* 1. GLOBAL & THEME VARIABLES
+        ------------------------------------------- */
+        :root {
+            --brand-primary: var(--wa-color-primary-600);
+            --brand-success: var(--wa-color-success-600);
+            --brand-danger: var(--wa-color-danger-600);
+            --brand-warning: var(--wa-color-warning-500);
+            --brand-info: var(--wa-color-info-600);
+            /* GitHub-like color scheme */
+            --surface-1: var(--wa-color-neutral-0);
+            /* White for cards */
+            --surface-2: var(--wa-color-neutral-100);
+            /* Light gray for page background */
+            --surface-3: var(--wa-color-neutral-50);
+            /* Lighter gray for card headers */
+            --text-1: var(--wa-color-neutral-900);
+            /* Dark text */
+            --text-2: var(--wa-color-neutral-600);
+            /* Lighter text */
+            --border-color: var(--wa-color-neutral-200);
+            /* Subtle borders */
+            --font-sans: var(--wa-font-sans);
+        }
+
+        /* 2. BASE & LAYOUT
+        ------------------------------------------- */
+        body {
+            background-color: var(--surface-2);
+            color: var(--text-1);
+            font-family: var(--font-sans);
+            padding-top: 60px;
+            /* Space for fixed app-bar */
+        }
+
+        .container {
+            max-width: 1200px;
+            margin-inline: auto;
+            padding-inline: var(--wa-spacing-medium);
+        }
+
+        section {
+            margin-block: var(--wa-spacing-large);
+        }
+
+        h1,
+        h2,
+        h3,
+        h4,
+        h5,
+        h6 {
+            font-weight: var(--wa-font-weight-semibold);
+            color: var(--text-1);
+        }
+
+        p.text-leader {
+            font-size: var(--wa-font-size-large);
+            color: var(--text-2);
+        }
+
+        .page-header {
+            margin-block: var(--wa-spacing-xlarge);
+            padding-bottom: var(--wa-spacing-medium);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Flexbox Grid System */
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--wa-spacing-medium);
+        }
+
+        .col-4,
+        .col-8 {
+            flex-grow: 1;
+        }
+
+        @media (min-width: 768px) {
+            .col-4 {
+                flex-basis: calc(33.333% - var(--wa-spacing-medium));
+            }
+
+            .col-8 {
+                flex-basis: calc(66.666% - var(--wa-spacing-medium));
+            }
+        }
+
+        /* 3. APP BAR (NAVBAR)
+        ------------------------------------------- */
+        .app-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background-color: var(--surface-1);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 10;
+        }
+
+        .app-bar-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 100%;
+        }
+
+        .app-bar .brand {
+            font-size: var(--wa-font-size-xlarge);
+            text-decoration: none;
+            color: var(--text-1);
+        }
+
+        .app-bar-nav {
+            display: flex;
+            gap: var(--wa-spacing-large);
+        }
+
+        .app-bar-nav a {
+            text-decoration: none;
+            color: var(--text-2);
+            font-size: var(--wa-font-size-medium);
+            transition: color 0.2s ease;
+        }
+
+        .app-bar-nav a:hover,
+        .app-bar-nav a.active {
+            color: var(--brand-primary);
+            font-weight: var(--wa-font-weight-medium);
+        }
+
+        .app-bar-actions {
+            display: flex;
+            align-items: center;
+        }
+
+        /* 4. WEB AWESOME COMPONENT OVERRIDES/HELPERS
+        ------------------------------------------- */
+        wa-card {
+            --wa-border-color: var(--border-color);
+        }
+
+        wa-card::part(header) {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--surface-3);
+        }
+
+        wa-card h6 {
+            margin: 0;
+            font-size: var(--wa-font-size-medium);
+        }
+
+        /* 5. TABLES
+        ------------------------------------------- */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th,
+        .table td {
+            padding: var(--wa-spacing-medium);
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .table th {
+            font-size: var(--wa-font-size-small);
+            font-weight: var(--wa-font-weight-semibold);
+            color: var(--text-2);
+            text-transform: uppercase;
+            background-color: var(--surface-3);
+        }
+
+        .table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table tbody tr:hover {
+            background-color: var(--surface-3);
+        }
+
+        .button-group {
+            display: flex;
+            gap: var(--wa-spacing-xsmall);
+        }
+
+        /* 6. UTILITIES
+        ------------------------------------------- */
+        .text-right {
+            text-align: right;
+        }
+
+        .text-success {
+            color: var(--brand-success);
+        }
+
+        .text-danger {
+            color: var(--brand-danger);
+        }
+
+        .text-warning {
+            color: var(--brand-warning);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: var(--wa-spacing-large);
+            padding: var(--wa-spacing-medium);
+        }
+
+        .stat-item {
+            display: grid;
+            text-align: center;
+        }
+
+        .stat-item .stat-label {
+            font-size: var(--wa-font-size-small);
+            color: var(--text-2);
+            text-transform: uppercase;
+            font-weight: var(--wa-font-weight-semibold);
+        }
+
+        .stat-item .stat-value {
+            font-size: var(--wa-font-size-xxxlarge);
+            font-weight: var(--wa-font-weight-bold);
+        }
+
+        .footer {
+            padding-block: var(--wa-spacing-large);
+            text-align: center;
+            color: var(--text-2);
+            font-size: var(--wa-font-size-small);
+            margin-top: var(--wa-spacing-xlarge);
+            border-top: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- App Bar -->
+    <header class="app-bar">
+        <div class="container app-bar-content">
+            <a href="/" class="brand"><strong>Quaero</strong></a>
+            <nav class="app-bar-nav">
+                <a href="dashboard.html" class="active">Dashboard</a>
+                <a href="settings.html">Settings</a>
+                <a href="style-guide-webawesome.html">Style Guide</a>
+            </nav>
+            <div class="app-bar-actions">
+                <wa-button variant="success" size="small">
+                    <wa-icon name="plus" slot="prefix"></wa-icon>
+                    New Task
+                </wa-button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+
+        <!-- Page Header -->
+        <section class="page-header">
+            <h1>Dashboard</h1>
+            <p class="text-leader">Overview of your current projects and tasks.</p>
+        </section>
+
+        <!-- Statistics Section -->
+        <section id="statistics">
+            <wa-card>
+                <div slot="header">
+                    <h6>Statistics</h6>
+                    <wa-button size="small">
+                        <wa-icon name="arrows-rotate" slot="prefix"></wa-icon>
+                        Refresh
+                    </wa-button>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">TOTAL PROJECTS</span>
+                        <span class="stat-value">12</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">ACTIVE TASKS</span>
+                        <span class="stat-value text-success">42</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">PENDING REVIEW</span>
+                        <span class="stat-value text-warning">8</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">OVERDUE</span>
+                        <span class="stat-value text-danger">3</span>
+                    </div>
+                </div>
+            </wa-card>
+        </section>
+
+        <!-- Recent Projects Table -->
+        <section id="recent-projects">
+            <wa-card>
+                <div slot="header">
+                    <h6>Recent Projects</h6>
+                    <wa-button size="small">
+                        <wa-icon name="plus" slot="prefix"></wa-icon>
+                        Add Project
+                    </wa-button>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>PROJECT NAME</th>
+                            <th>STATUS</th>
+                            <th>LAST UPDATE</th>
+                            <th class="text-right">ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Alpha Initiative</td>
+                            <td><wa-badge variant="success">Active</wa-badge></td>
+                            <td>2025-10-17</td>
+                            <td class="text-right button-group">
+                                <wa-button size="small"><wa-icon name="pencil"></wa-icon></wa-button>
+                                <wa-button variant="danger" size="small" outline><wa-icon name="trash-can"></wa-icon></wa-button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Beta Platform Launch</td>
+                            <td><wa-badge variant="warning">Pending</wa-badge></td>
+                            <td>2025-10-15</td>
+                            <td class="text-right button-group">
+                                <wa-button size="small"><wa-icon name="pencil"></wa-icon></wa-button>
+                                <wa-button variant="danger" size="small" outline><wa-icon name="trash-can"></wa-icon></wa-button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Gamma Data Migration</td>
+                            <td><wa-badge variant="info">In Progress</wa-badge></td>
+                            <td>2025-10-16</td>
+                            <td class="text-right button-group">
+                                <wa-button size="small"><wa-icon name="pencil"></wa-icon></wa-button>
+                                <wa-button variant="danger" size="small" outline><wa-icon name="trash-can"></wa-icon></wa-button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </wa-card>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>Quaero &copy; 2025</p>
+        </div>
+    </footer>
+</body>
+
+</html>

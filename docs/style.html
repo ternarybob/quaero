@@ -4,153 +4,387 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Templates - Open Props Style Guide</title>
 
-    <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="../pages/static/favicon.ico">
 
-    <!-- Cirrus UI CSS Framework -->
-    <link rel="stylesheet" href="https://unpkg.com/cirrus-ui@0.7.1/dist/cirrus.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/open-props" />
+    <link rel="stylesheet" href="https://unpkg.com/open-props/normalize.min.css" />
 
-    <!-- Custom Styles - Cirrus UI overrides and brand styling (loads after Cirrus) -->
-    <link rel="stylesheet" href="../pages/static/quaero.css">
+    <link rel="stylesheet" href="style.css">
 
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-
-    <!-- Highlight.js (for code syntax highlighting) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-
-    <!-- Highlight.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
-
-    <!-- Custom Scripts - Load BEFORE Alpine so components are registered first -->
-    <script src="../pages/static/websocket-manager.js"></script>
-    <script src="../pages/static/common.js"></script>
-
-    <!-- Alpine.js - Load AFTER component definitions -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 
 <body>
 
-    <nav class="header header-fixed bg-white q-border-bottom" role="navigation" aria-label="main navigation">
-        <div class="header-nav" id="header-nav">
-            <div class="nav-left">
-                <div class="nav-item">
-                    <a href="/" class="q-brand">Quaero</a>
-                </div>
-                <div class="nav-item">
-                    <button class="nav-btn" id="nav-toggle" aria-label="Toggle mobile menu">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </button>
-                </div>
-            </div>
-            <div class="nav-center">
-                <div class="nav-item">
-                    <a href="/" class="{{if eq .Page " home"}}active{{end}}">HOME</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/auth" class="{{if eq .Page " auth"}}active{{end}}">AUTHENTICATION</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/sources" class="{{if eq .Page " sources"}}active{{end}}">SOURCES</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/jobs" class="{{if eq .Page " jobs"}}active{{end}}">JOBS</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/documents" class="{{if eq .Page " documents"}}active{{end}}">DOCUMENTS</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/chat" class="{{if eq .Page " chat"}}active{{end}}">CHAT</a>
-                </div>
-                <div class="nav-item">
-                    <a href="/config" class="{{if or (eq .Page " settings") (eq .Page "config" )}}active{{end}}">SETTINGS</a>
-                </div>
-            </div>
-            <div class="nav-right">
-                <div class="nav-item">
-                    <span class="tag tag--success status-text">ONLINE</span>
-                </div>
+    <header class="app-bar">
+        <div class="container app-bar-content">
+            <a href="/" class="brand"><strong>Quaero</strong></a>
+            <nav class="app-bar-nav">
+                <a href="#panels">Panels</a>
+                <a href="#buttons">Buttons</a>
+                <a href="#tables">Tables</a>
+                <a href="#badges">Badges</a>
+                <a href="#dialogs">Dialogs</a>
+                <a href="#logs">Logs</a>
+            </nav>
+            <div class="app-bar-actions">
+                <span class="badge success">STYLE GUIDE</span>
             </div>
         </div>
-    </nav>
+    </header>
 
-    <div class="content">
+    <main class="container" x-data="{ isModalOpen: false }">
 
-        <div class="frame">
+        <section class="page-header">
+            <h1>Component Templates</h1>
+            <p class="text-leader">Open Props component patterns and examples for Quaero.</p>
+        </section>
 
-            <div class="frame__header">
-                <p class="text-lg font-bold">Quick Actions</p>
-            </div>
+        <section id="panels">
+            <h2>Panels (Cards)</h2>
 
-            <div class="frame__body">
-
-                <div class="q-d-flex q-gap-2">
-                    <a href="/sources" class="btn btn-primary btn--sm outline">
-                        <span class="icon"><i class="fas fa-database"></i></span>
-                        <span>Manage Sources</span>
-                    </a>
-                    <a href="/jobs" class="btn btn-info btn--sm outline">
-                        <span class="icon"><i class="fas fa-tasks"></i></span>
-                        <span>View Jobs</span>
-                    </a>
-                    <a href="/documents" class="btn btn-info btn--sm outline">
-                        <span class="icon"><i class="fas fa-file-alt"></i></span>
-                        <span>Browse Documents</span>
-                    </a>
-                    <a href="/chat" class="btn btn-success btn--sm outline">
-                        <span class="icon"><i class="fas fa-comments"></i></span>
-                        <span>Chat</span>
-                    </a>
-                </div>
-                <hr>
-                <p class="text-md q-text-muted">
-                    <strong>Getting Started:</strong> Configure data sources in the <a href="/sources">Sources</a> page,
-                    then start a crawl job to collect and index data. Use <a href="/chat">Chat</a> to query your data.
-                </p>
-
-            </div>
-
-        </div>
-
-        <div class="frame" x-data="serviceLogs">
-
-            <div class="frame__header">
-
-                <div class="tile">
-
-                    <div class="tile__container">
-                        <p class="text-lg font-bold">Service Logs</p>
-                    </div>
-
-                    <div class="tile__buttons m-0">
-                        <button class="btn btn--sm outline" aria-label="toggle auto-scroll" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                            <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
+            <div class="card">
+                <div class="card-header">
+                    <h6>Panel Title</h6>
+                    <div class="button-group">
+                        <button class="button primary outline small">
+                            <span class="icon">➕</span>
+                            <span>Add Item</span>
                         </button>
-
-                        <button class="btn btn--sm outline" aria-label="refresh" @click="refresh()" title="Refresh Logs">
-                            <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                        </button>
-
-                        <button class="btn btn--sm btn-danger outline" aria-label="clear" @click="clearLogs()" title="Clear Logs">
-                            <span class="icon"><i class="fas fa-trash"></i></span>
+                        <button class="button outline small">
+                            <span class="icon">🔄</span>
                         </button>
                     </div>
                 </div>
-
+                <div class="card-content">
+                    <p>This is the standard panel pattern. The header uses Flexbox to perfectly align the title left and actions right.</p>
+                </div>
             </div>
 
-            <div class="frame__body">
-                <pre class="log-container"
-                    x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="u-text-center u-text-muted">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
+            <div class="card">
+                <div class="card-header">
+                    <h6><span class="count">24</span>Items</h6>
+                    <div class="button-group">
+                        <button class="button info outline small">
+                            <span class="icon">🔍</span>
+                            <span>Filter</span>
+                        </button>
+                        <button class="button outline small">
+                            <span class="icon">🔄</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <p>Panel with an item count in the title.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h6>Statistics</h6>
+                    <button class="button outline small"><span class="icon">🔄</span></button>
+                </div>
+                <div class="card-content">
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">TOTAL</span>
+                            <span class="stat-value">156</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">ACTIVE</span>
+                            <span class="stat-value text-success">42</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">PENDING</span>
+                            <span class="stat-value text-warning">8</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">FAILED</span>
+                            <span class="stat-value text-danger">3</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="layouts">
+            <h2>Row-Based Layouts</h2>
+            <div class="row">
+                <div class="col-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>Left Panel</h6>
+                            <button class="button outline small"><span class="icon">⚙️</span></button>
+                        </div>
+                        <div class="card-content">
+                            <p>This is a two-column layout example.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>Right Panel</h6>
+                            <button class="button outline small"><span class="icon">ℹ️</span></button>
+                        </div>
+                        <div class="card-content">
+                            <p>Each panel maintains the standard header pattern.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-8">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>Main Content (8 columns)</h6>
+                            <button class="button primary outline small">View All</button>
+                        </div>
+                        <div class="card-content">
+                            <p>Use 8/4 or 9/3 splits for main/sidebar layouts.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-4">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>Sidebar (4 columns)</h6>
+                        </div>
+                        <div class="card-content">
+                            <p>Smaller panel for secondary content, links, or actions.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="buttons">
+            <h2>Buttons</h2>
+            <div class="card">
+                <div class="card-header">
+                    <h6>Button Variants</h6>
+                </div>
+                <div class="card-content">
+                    <h5>Solid Buttons</h5>
+                    <div class="button-group">
+                        <button class="button primary">Primary</button>
+                        <button class="button success">Success</button>
+                        <button class="button danger">Danger</button>
+                        <button class="button info">Info</button>
+                    </div>
+
+                    <h5>Outline Buttons</h5>
+                    <div class="button-group">
+                        <button class="button primary outline">Primary Outline</button>
+                        <button class="button success outline">Success Outline</button>
+                        <button class="button danger outline">Danger Outline</button>
+                        <button class="button outline">Default Outline</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tables">
+            <h2>Tables</h2>
+            <div class="card">
+                <div class="card-header">
+                    <h6><span class="count">3</span>Records</h6>
+                    <div class="button-group">
+                        <button class="button primary outline small">
+                            <span class="icon">➕</span>
+                            <span>Add Record</span>
+                        </button>
+                        <button class="button outline small">
+                            <span class="icon">🔄</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>NAME</th>
+                                <th>TYPE</th>
+                                <th>STATUS</th>
+                                <th>CREATED</th>
+                                <th class="text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Item Alpha</td>
+                                <td><span class="badge info">Type A</span></td>
+                                <td><span class="badge success">Active</span></td>
+                                <td>2025-01-15</td>
+                                <td class="text-center">
+                                    <button class="button outline small"><span class="icon">✏️</span></button>
+                                    <button class="button danger outline small"><span class="icon">🗑️</span></button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Item Beta</td>
+                                <td><span class="badge primary">Type B</span></td>
+                                <td><span class="badge warning">Pending</span></td>
+                                <td>2025-01-14</td>
+                                <td class="text-center">
+                                    <button class="button outline small"><span class="icon">✏️</span></button>
+                                    <button class="button danger outline small"><span class="icon">🗑️</span></button>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>Item Gamma</td>
+                                <td><span class="badge info">Type A</span></td>
+                                <td><span class="badge danger">Failed</span></td>
+                                <td>2025-01-13</td>
+                                <td class="text-center">
+                                    <button class="button outline small"><span class="icon">✏️</span></button>
+                                    <button class="button danger outline small"><span class="icon">🗑️</span></button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section id="badges">
+            <h2>Badges</h2>
+            <div class="card">
+                <div class="card-header">
+                    <h6>Badge Variants</h6>
+                </div>
+                <div class="card-content">
+                    <h5>Status Badges</h5>
+                    <div class="button-group">
+                        <span class="badge primary">Primary</span>
+                        <span class="badge success">Success</span>
+                        <span class="badge danger">Danger</span>
+                        <span class="badge warning">Warning</span>
+                        <span class="badge info">Info</span>
+                        <span class="badge">Default</span>
+                    </div>
+
+                    <h5>Common Status Patterns</h5>
+                    <div class="button-group">
+                        <span class="badge success">Enabled</span>
+                        <span class="badge warning">Pending</span>
+                        <span class="badge danger">Failed</span>
+                        <span class="badge">Cancelled</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="dialogs">
+            <h2>Dialogs (Modals)</h2>
+            <div class="card">
+                <div class="card-header">
+                    <h6>Dialog Pattern</h6>
+                </div>
+                <div class="card-content">
+                    <p>Click the button below to see an Alpine.js powered dialog.</p>
+                    <button class="button primary" @click="isModalOpen = true">Open Dialog</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="logs">
+            <h2>Service Logs</h2>
+            <div class="card" x-data="serviceLogs">
+                <div class="card-header">
+                    <h6>Service Logs</h6>
+                    <div class="button-group">
+                        <button class="button outline small" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                            <span class="icon" x-text="autoScroll ? '⏸️' : '▶️'"></span>
+                        </button>
+                        <button class="button outline small" @click="refresh()" title="Refresh Logs"><span class="icon">🔄</span></button>
+                        <button class="button danger outline small" @click="clearLogs()" title="Clear Logs"><span class="icon">🗑️</span></button>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="log-container" x-ref="logContainer">
+                        <template x-if="logs.length === 0">
+                            <div class="log-entry text-muted">No logs available</div>
+                        </template>
+                        <template x-for="log in logs" :key="log.id">
+                            <div class="log-entry">
+                                <span class="log-timestamp" x-text="`[${log.timestamp}]`"></span>
+                                <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                                <span class="log-message" x-text="log.message"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="dialog-overlay" x-show="isModalOpen" x-transition>
+            <div class="dialog-content" @click.outside="isModalOpen = false">
+                <div class="dialog-header">
+                    <h5>Example Dialog</h5>
+                    <button class="button-close" @click="isModalOpen = false">&times;</button>
+                </div>
+                <div class="dialog-body">
+                    <div class="form-group">
+                        <label for="name">Name</label>
+                        <input type="text" id="name" placeholder="Enter name...">
+                    </div>
+                    <div class="form-group">
+                        <label for="type">Type</label>
+                        <select id="type">
+                            <option value="">Select type...</option>
+                            <option value="1">Type A</option>
+                            <option value="2">Type B</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="dialog-footer">
+                    <button class="button" @click="isModalOpen = false">Cancel</button>
+                    <button class="button success" @click="isModalOpen = false">Save</button>
+                </div>
             </div>
         </div>
+    </main>
 
-    </div>
+    <footer class="footer">
+        <div class="container">
+            <p>Quaero Style Guide &copy; 2025</p>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('serviceLogs', () => ({
+                logs: [],
+                autoScroll: true,
+                logIdCounter: 0,
+                init() { this.generateSampleLogs(); },
+                generateSampleLogs() {
+                    const levels = ['INFO', 'WARNING', 'ERROR'];
+                    const messages = ['Service started', 'Processing document', 'Connection established', 'Warning: High memory usage', 'Error: Failed to connect to API', 'Job completed'];
+                    for (let i = 0; i < 15; i++) {
+                        const level = levels[Math.floor(Math.random() * levels.length)];
+                        const message = messages[Math.floor(Math.random() * messages.length)];
+                        this.addLog(level, message);
+                    }
+                },
+                addLog(level, message) {
+                    this.logs.push({ id: ++this.logIdCounter, timestamp: new Date().toLocaleTimeString(), level: level, levelClass: `log-level-${level.toLowerCase()}`, message: message });
+                    if (this.autoScroll) {
+                        this.$nextTick(() => {
+                            const container = this.$refs.logContainer;
+                            if (container) container.scrollTop = container.scrollHeight;
+                        });
+                    }
+                },
+                toggleAutoScroll() { this.autoScroll = !this.autoScroll; },
+                refresh() { this.clearLogs(); this.generateSampleLogs(); },
+                clearLogs() { this.logs = []; this.logIdCounter = 0; }
+            }));
+        });
+    </script>
 
 </body>
 

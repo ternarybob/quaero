@@ -6,141 +6,141 @@
     <title>Document Management - Quaero</title>
 </head>
 
-<body class="has-navbar-fixed-top">
+<body>
 
     {{template "navbar.html" .}}
 
-    <div class="content">
+    <div class="container-fluid mt-4">
 
         <!-- Heading Section -->
-        <section>
-            <div class="pl-2">
-                <h1 class="title">Document Management</h1>
-                <p class="subtitle">Normalized documents with vector embeddings for semantic search</p>
+        <div class="row">
+            <div class="cell-12 p-2">
+                <h1 class="text-bold">Document Management</h1>
+                <p class="text-leader">Normalized documents with vector embeddings for semantic search</p>
             </div>
-        </section>
+        </div>
 
         <!-- Document Statistics -->
-        <div class="card">
-
-            <div class="card__header">
-                <h2>Document Statistics</h2>
-                <div class="q-d-flex q-align-center">
-                    <button class="btn btn--sm outline" onclick="loadStats()">
-                        <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <div class="q-d-flex q-justify-between q-flex-wrap q-gap-3">
-                    <div class="q-text-center">
-                        <p class="text-md q-text-muted">TOTAL DOCUMENTS</p>
-                        <p class="title" id="stat-total">-</p>
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="d-flex flex-justify-between flex-align-center">
+                            <h6 class="m-0">Document Statistics</h6>
+                            <button class="button small outline" onclick="loadStats()">
+                                <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                            </button>
+                        </div>
                     </div>
-                    <div class="q-text-center">
-                        <p class="text-md q-text-muted">VECTORIZED</p>
-                        <p class="title" id="stat-vectorized">-</p>
-                    </div>
-                    <div class="q-text-center">
-                        <p class="text-md q-text-muted">JIRA DOCUMENTS</p>
-                        <p class="title" id="stat-jira">-</p>
-                    </div>
-                    <div class="q-text-center">
-                        <p class="text-md q-text-muted">CONFLUENCE DOCUMENTS</p>
-                        <p class="title" id="stat-confluence">-</p>
+                    <div class="panel-content">
+                        <div class="d-flex flex-justify-between flex-wrap flex-gap-3">
+                            <div class="text-center">
+                                <p class="text-small text-muted">TOTAL DOCUMENTS</p>
+                                <p class="text-bold h3" id="stat-total">-</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-small text-muted">VECTORIZED</p>
+                                <p class="text-bold h3" id="stat-vectorized">-</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-small text-muted">JIRA DOCUMENTS</p>
+                                <p class="text-bold h3" id="stat-jira">-</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-small text-muted">CONFLUENCE DOCUMENTS</p>
+                                <p class="text-bold h3" id="stat-confluence">-</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Documents Table -->
-        <div class="card">
-            <div class="card__header">
-                <h2><span id="document-count" class="q-text-muted q-mr-2">0</span>Documents</h2>
-            </div>
-            <div class="card-body">
-                <!-- Filter Controls -->
-                <div class="q-d-flex q-gap-2 q-mb-4 q-flex-wrap">
-                    <div class="q-w-50">
-                        <div class="field">
-                            <div class="control">
-                                <input type="search" id="search-box" class="input" placeholder="Search documents...">
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <h6 class="m-0"><span id="document-count" class="text-muted mr-2">0</span>Documents</h6>
+                    </div>
+                    <div class="panel-content">
+                        <!-- Filter Controls -->
+                        <div class="row mb-4">
+                            <div class="cell-6">
+                                <input type="search" id="search-box" data-role="input" class="input" placeholder="Search documents...">
+                            </div>
+                            <div class="cell-3">
+                                <select data-role="select" class="input" id="source-filter" onchange="filterDocuments()">
+                                    <option value="">All Sources</option>
+                                    <option value="jira">Jira</option>
+                                    <option value="confluence">Confluence</option>
+                                </select>
+                            </div>
+                            <div class="cell-3">
+                                <select data-role="select" class="input" id="vectorized-filter" onchange="filterDocuments()">
+                                    <option value="">All Documents</option>
+                                    <option value="true">Vectorized Only</option>
+                                    <option value="false">Not Vectorized</option>
+                                </select>
                             </div>
                         </div>
-                    </div>
-                    <div class="q-w-25">
-                        <div class="field">
-                            <div class="control">
-                                <div class="select is-fullwidth">
-                                    <select id="source-filter" onchange="filterDocuments()">
-                                        <option value="">All Sources</option>
-                                        <option value="jira">Jira</option>
-                                        <option value="confluence">Confluence</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="q-w-25">
-                        <div class="field">
-                            <div class="control">
-                                <div class="select is-fullwidth">
-                                    <select id="vectorized-filter" onchange="filterDocuments()">
-                                        <option value="">All Documents</option>
-                                        <option value="true">Vectorized Only</option>
-                                        <option value="false">Not Vectorized</option>
-                                    </select>
-                                </div>
-                            </div>
+
+                        <!-- Documents Table -->
+                        <table class="table striped border">
+                            <thead>
+                                <tr>
+                                    <th>SOURCE</th>
+                                    <th>SOURCE ID</th>
+                                    <th>TITLE</th>
+                                    <th class="text-center">VECTORIZED</th>
+                                    <th>UPDATED</th>
+                                    <th class="text-center">ACTIONS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="documents-table-body">
+                                <tr>
+                                    <td colspan="6" class="text-center">
+                                        Loading documents...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <!-- Pagination Controls -->
+                        <div class="d-flex flex-justify-center mt-4">
+                            <ul id="document-pagination" data-role="pagination"
+                                data-length="7"
+                                data-total="1"
+                                data-current="1"
+                                data-on-page-click="onPaginationPageClick"></ul>
                         </div>
                     </div>
                 </div>
-
-                <!-- Documents Table -->
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>SOURCE</th>
-                            <th>SOURCE ID</th>
-                            <th>TITLE</th>
-                            <th class="q-text-center">VECTORIZED</th>
-                            <th>UPDATED</th>
-                            <th class="q-text-center">ACTIONS</th>
-                        </tr>
-                    </thead>
-                    <tbody id="documents-table-body">
-                        <tr>
-                            <td colspan="6" class="q-text-center">
-                                Loading documents...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <!-- Pagination Controls -->
-                <nav class="q-d-flex q-justify-center q-align-center q-gap-2 q-mt-4" role="navigation" aria-label="pagination">
-                    <button id="prev-page" class="btn btn--sm outline" onclick="previousPage()">Previous</button>
-                    <span class="text-md q-text-muted" id="page-info">Page 1 of 1</span>
-                    <button id="next-page" class="btn btn--sm outline" onclick="nextPage()">Next</button>
-                </nav>
             </div>
         </div>
 
         <!-- Document Detail -->
-        <div class="card">
-
-            <div class="card__header">
-                <h2>Document Detail</h2>
-                <div class="q-d-flex q-align-center">
-                    <span id="selected-document-id" class="tag tag--info"></span>
+        <div class="row mt-4">
+            <div class="cell-12">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="d-flex flex-justify-between flex-align-center">
+                            <h6 class="m-0">Document Detail</h6>
+                            <span id="selected-document-id" class="badge info"></span>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <pre id="document-detail-json"><code class="language-json"></code></pre>
+                    </div>
                 </div>
-            </div>
-            <div class="card-body">
-                <pre id="document-detail-json"><code class="language-json"></code></pre>
             </div>
         </div>
 
-        {{template "service-logs.html" .}}
+        <div class="row mt-4">
+            <div class="cell-12">
+                {{template "service-logs.html" .}}
+            </div>
+        </div>
 
     </div>
 
@@ -168,9 +168,14 @@
                 statsBtn = event.target.closest('button');
             }
 
+            let originalIcon = null;
             if (statsBtn) {
                 statsBtn.disabled = true;
-                statsBtn.classList.add('is-loading');
+                const iconElement = statsBtn.querySelector('.icon i');
+                if (iconElement) {
+                    originalIcon = iconElement.className;
+                    iconElement.className = 'fas fa-spinner fa-pulse';
+                }
             }
 
             try {
@@ -195,7 +200,10 @@
             } finally {
                 if (statsBtn) {
                     statsBtn.disabled = false;
-                    statsBtn.classList.remove('is-loading');
+                    const iconElement = statsBtn.querySelector('.icon i');
+                    if (iconElement && originalIcon) {
+                        iconElement.className = originalIcon;
+                    }
                 }
             }
         }
@@ -221,7 +229,7 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="q-text-center q-text-danger">
+                        <td colspan="6" class="text-center fg-red">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
@@ -282,15 +290,21 @@
             // Update count display - show API total count (not filtered count)
             countElement.textContent = `${totalDocuments}`;
 
-            // Update pagination controls
-            document.getElementById('prev-page').disabled = currentPage === 1;
-            document.getElementById('next-page').disabled = currentPage === totalPages;
-            document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+            // Update Metro pagination
+            const paginationElement = document.getElementById('document-pagination');
+            if (paginationElement && typeof Metro !== 'undefined' && Metro.getPlugin) {
+                const pagination = Metro.getPlugin(paginationElement, 'pagination');
+                if (pagination) {
+                    pagination.options.total = totalPages;
+                    pagination.options.current = currentPage;
+                    pagination.drawPagination();
+                }
+            }
 
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="q-text-center">
+                        <td colspan="6" class="text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -302,23 +316,23 @@
                 const globalIndex = startIndex + pageIndex; // Index in filteredDocuments
                 const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
                 const vectorizedBadge = hasEmbedding
-                    ? '<span class="tag tag--success">✓</span>'
-                    : '<span class="tag tag--danger">✗</span>';
+                    ? '<span class="badge success">✓</span>'
+                    : '<span class="badge danger">✗</span>';
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
 
                 return `
-                    <tr class="${isSelected ? 'q-bg-light' : ''}">
+                    <tr class="${isSelected ? 'bg-light' : ''}">
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${globalIndex})" class="q-text-center" style="cursor: pointer;">${vectorizedBadge}</td>
+                        <td onclick="selectDocument(${globalIndex})" class="text-center" style="cursor: pointer;">${vectorizedBadge}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${updatedDate}</td>
-                        <td class="q-text-center">
-                            <button class="btn btn--sm outline q-mr-1" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
+                        <td class="text-center">
+                            <button class="button small outline mr-1" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess">
                                 <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
                             </button>
-                            <button class="btn btn--sm btn-danger outline" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
+                            <button class="button danger small outline" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
                                 <span class="icon"><i class="fas fa-trash"></i></span>
                             </button>
                         </td>
@@ -327,20 +341,10 @@
             }).join('');
         }
 
-        // Pagination functions
-        function previousPage() {
-            if (currentPage > 1) {
-                currentPage--;
-                renderDocuments();
-            }
-        }
-
-        function nextPage() {
-            const totalPages = Math.max(1, Math.ceil(filteredDocuments.length / pageSize));
-            if (currentPage < totalPages) {
-                currentPage++;
-                renderDocuments();
-            }
+        // Metro pagination callback
+        function onPaginationPageClick(pageNumber) {
+            currentPage = pageNumber;
+            renderDocuments();
         }
 
         // Select and display document details
@@ -381,9 +385,14 @@
                 button = event.target.closest('button');
             }
 
+            let originalIcon = null;
             if (button) {
                 button.disabled = true;
-                button.classList.add('is-loading');
+                const iconElement = button.querySelector('.icon i');
+                if (iconElement) {
+                    originalIcon = iconElement.className;
+                    iconElement.className = 'fas fa-spinner fa-pulse';
+                }
             }
 
             try {
@@ -406,7 +415,10 @@
             } finally {
                 if (button) {
                     button.disabled = false;
-                    button.classList.remove('is-loading');
+                    const iconElement = button.querySelector('.icon i');
+                    if (iconElement && originalIcon) {
+                        iconElement.className = originalIcon;
+                    }
                 }
             }
         }
@@ -422,9 +434,14 @@
                 button = event.target.closest('button');
             }
 
+            let originalIcon = null;
             if (button) {
                 button.disabled = true;
-                button.classList.add('is-loading');
+                const iconElement = button.querySelector('.icon i');
+                if (iconElement) {
+                    originalIcon = iconElement.className;
+                    iconElement.className = 'fas fa-spinner fa-pulse';
+                }
             }
 
             try {
@@ -447,7 +464,10 @@
             } finally {
                 if (button) {
                     button.disabled = false;
-                    button.classList.remove('is-loading');
+                    const iconElement = button.querySelector('.icon i');
+                    if (iconElement && originalIcon) {
+                        iconElement.className = originalIcon;
+                    }
                 }
             }
         }

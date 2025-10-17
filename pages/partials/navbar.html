@@ -1,71 +1,36 @@
-<nav class="header header-fixed bg-white q-border-bottom" role="navigation" aria-label="main navigation">
-    <div class="header-nav" id="header-nav">
-        <div class="nav-left">
-            <div class="nav-item">
-                <a href="/" class="q-brand">Quaero</a>
-            </div>
-            <div class="nav-item">
-                <button class="nav-btn" id="nav-toggle" aria-label="Toggle mobile menu">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </button>
-            </div>
-        </div>
-        <div class="nav-center">
-            <div class="nav-item">
-                <a href="/" class="{{if eq .Page " home"}}active{{end}}">HOME</a>
-            </div>
-            <div class="nav-item">
-                <a href="/auth" class="{{if eq .Page " auth"}}active{{end}}">AUTHENTICATION</a>
-            </div>
-            <div class="nav-item">
-                <a href="/sources" class="{{if eq .Page " sources"}}active{{end}}">SOURCES</a>
-            </div>
-            <div class="nav-item">
-                <a href="/jobs" class="{{if eq .Page " jobs"}}active{{end}}">JOBS</a>
-            </div>
-            <div class="nav-item">
-                <a href="/documents" class="{{if eq .Page " documents"}}active{{end}}">DOCUMENTS</a>
-            </div>
-            <div class="nav-item">
-                <a href="/chat" class="{{if eq .Page " chat"}}active{{end}}">CHAT</a>
-            </div>
-            <div class="nav-item">
-                <a href="/config" class="{{if or (eq .Page " settings") (eq .Page "config" )}}active{{end}}">SETTINGS</a>
-            </div>
-        </div>
-        <div class="nav-right">
-            <div class="nav-item">
-                <span class="tag tag--success status-text">ONLINE</span>
-            </div>
-        </div>
+<nav data-role="appbar" data-expand-point="md" class="pos-fixed" role="navigation" aria-label="main navigation">
+    <a href="/" class="brand no-hover"><span class="text-bold">Quaero</span></a>
+
+    <div class="app-bar-container ml-auto mr-auto">
+        <ul class="app-bar-menu">
+            <li><a href="/" {{if eq .Page "home" }}class="active" {{end}}>HOME</a></li>
+            <li><a href="/auth" {{if eq .Page "auth" }}class="active" {{end}}>AUTHENTICATION</a></li>
+            <li><a href="/sources" {{if eq .Page "sources" }}class="active" {{end}}>SOURCES</a></li>
+            <li><a href="/jobs" {{if eq .Page "jobs" }}class="active" {{end}}>JOBS</a></li>
+            <li><a href="/documents" {{if eq .Page "documents" }}class="active" {{end}}>DOCUMENTS</a></li>
+            <li><a href="/chat" {{if eq .Page "chat" }}class="active" {{end}}>CHAT</a></li>
+            <li><a href="/config" {{if or (eq .Page "settings" ) (eq .Page "config" )}}class="active" {{end}}>SETTINGS</a></li>
+        </ul>
+    </div>
+
+    <div class="app-bar-container ml-auto">
+        <span class="badge success status-text">ONLINE</span>
     </div>
 </nav>
 
 <script>
-    // Mobile menu toggle
     document.addEventListener('DOMContentLoaded', function () {
-        const navToggle = document.getElementById('nav-toggle');
-        const headerNav = document.getElementById('header-nav');
-
-        if (navToggle && headerNav) {
-            navToggle.addEventListener('click', function () {
-                headerNav.classList.toggle('active');
-            });
-        }
-
         // Navbar status indicator using shared WebSocket manager
         function updateNavbarStatus(online) {
             const statusText = document.querySelector('.status-text');
             if (statusText) {
                 if (online) {
-                    statusText.classList.remove('tag--danger');
-                    statusText.classList.add('tag--success');
+                    statusText.classList.remove('danger');
+                    statusText.classList.add('success');
                     statusText.textContent = 'ONLINE';
                 } else {
-                    statusText.classList.remove('tag--success');
-                    statusText.classList.add('tag--danger');
+                    statusText.classList.remove('success');
+                    statusText.classList.add('danger');
                     statusText.textContent = 'OFFLINE';
                 }
             }
@@ -78,5 +43,24 @@
         } else {
             console.error('[Navbar] WebSocketManager not loaded');
         }
+
+        // Dynamic body padding based on AppBar height
+        function updateBodyPadding() {
+            const appbar = document.querySelector('[data-role="appbar"]');
+            if (appbar) {
+                const height = appbar.getBoundingClientRect().height;
+                document.body.style.paddingTop = height + 'px';
+            }
+        }
+
+        // Initial padding calculation after Metro enhances the AppBar
+        setTimeout(updateBodyPadding, 100);
+
+        // Debounced resize handler
+        let resizeTimer;
+        window.addEventListener('resize', function () {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(updateBodyPadding, 250);
+        });
     });
 </script>

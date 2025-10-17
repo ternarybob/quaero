@@ -121,13 +121,13 @@ document.addEventListener('alpine:init', () => {
 
     _getLevelClass(level) {
       const levelMap = {
-        'ERROR': 'log-level-error',
-        'WARN': 'log-level-warn',
-        'WARNING': 'log-level-warn',
-        'INFO': 'log-level-info',
-        'DEBUG': 'log-level-debug'
+        'ERROR': 'fg-red',
+        'WARN': 'fg-orange',
+        'WARNING': 'fg-orange',
+        'INFO': 'fg-blue',
+        'DEBUG': 'fg-gray'
       };
-      return levelMap[level] || 'log-level-info';
+      return levelMap[level] || 'fg-blue';
     },
 
     clearLogs() {
@@ -147,44 +147,6 @@ document.addEventListener('alpine:init', () => {
           if (container) container.scrollTop = container.scrollHeight;
         });
       }
-    }
-  }));
-
-  // Snackbar Notification Component
-  Alpine.data('snackbar', () => ({
-    visible: false,
-    message: '',
-    type: 'info',
-    timeout: null,
-
-    show(message, type = 'info', duration = 3000) {
-      this.message = message;
-      this.type = type;
-      this.visible = true;
-
-      if (this.timeout) clearTimeout(this.timeout);
-
-      this.timeout = setTimeout(() => {
-        this.hide();
-      }, duration);
-    },
-
-    hide() {
-      this.visible = false;
-      if (this.timeout) {
-        clearTimeout(this.timeout);
-        this.timeout = null;
-      }
-    },
-
-    getClass() {
-      const typeMap = {
-        'success': 'is-success',
-        'error': 'is-danger',
-        'warning': 'is-warning',
-        'info': 'is-info'
-      };
-      return typeMap[this.type] || 'is-info';
     }
   }));
 
@@ -228,12 +190,12 @@ document.addEventListener('alpine:init', () => {
 
     getStatusColor(state) {
       const colorMap = {
-        'Idle': 'is-info',
-        'Crawling': 'is-warning',
-        'Offline': 'is-danger',
-        'Unknown': 'is-light'
+        'Idle': 'info',
+        'Crawling': 'warning',
+        'Offline': 'danger',
+        'Unknown': 'secondary'
       };
-      return colorMap[state] || 'is-light';
+      return colorMap[state] || 'secondary';
     },
 
     formatTimestamp(timestamp) {
@@ -379,10 +341,21 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
-// Global notification function for backwards compatibility
+// Global notification function using Metro Toast
 window.showNotification = function(message, type = 'info') {
-  const snackbarEl = document.querySelector('[x-data*="snackbar"]');
-  if (snackbarEl && snackbarEl._x_dataStack) {
-    snackbarEl._x_dataStack[0].show(message, type);
+  const typeMap = {
+    'info': 'bg-blue fg-white',
+    'success': 'bg-green fg-white',
+    'warning': 'bg-yellow fg-dark',
+    'error': 'bg-red fg-white',
+    'danger': 'bg-red fg-white'
+  };
+  const classes = typeMap[type] || 'bg-blue fg-white';
+
+  if (typeof Metro !== 'undefined' && Metro.toast) {
+    Metro.toast.create(message, null, 3000, classes);
+  } else {
+    console.warn('Metro UI not loaded, falling back to console');
+    console.log(`[${type.toUpperCase()}] ${message}`);
   }
 };

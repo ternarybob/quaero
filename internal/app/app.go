@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -272,52 +273,75 @@ func (a *App) initServices() error {
 		a.Logger.Warn().Err(err).Msg("Failed to generate initial summary document (non-critical)")
 	}
 
-	// 12. Initialize scheduler service
-	a.SchedulerService = scheduler.NewService(a.EventService, a.Logger)
+	// 12. Initialize scheduler service with database persistence
+	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB))
 
-	// Register default jobs
+	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
 
-	// Register crawl and collect job if enabled
-	if a.Config.Jobs.CrawlAndCollect.Enabled {
-		crawlCollectJob := jobs.NewCrawlCollectJob(
-			a.CrawlerService,
-			a.SourceService,
-			a.StorageManager.AuthStorage(),
-			a.Logger,
-		)
-		if err := a.SchedulerService.RegisterJob(
-			"crawl_and_collect",
-			a.Config.Jobs.CrawlAndCollect.Schedule,
-			crawlCollectJob.Execute,
-		); err != nil {
-			a.Logger.Error().Err(err).Msg("Failed to register crawl_and_collect job")
+	// Register crawl and collect job (always register, disable if not enabled in config)
+	crawlCollectJob := jobs.NewCrawlCollectJob(
+		a.CrawlerService,
+		a.SourceService,
+		a.StorageManager.AuthStorage(),
+		a.Logger,
+	)
+	if err := a.SchedulerService.RegisterJob(
+		"crawl_and_collect",
+		a.Config.Jobs.CrawlAndCollect.Schedule,
+		a.Config.Jobs.CrawlAndCollect.Description,
+		crawlCollectJob.Execute,
+	); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to register crawl_and_collect job")
+	} else {
+		jobsRegistered++
+		// Disable if not enabled in config (before scheduler starts)
+		if !a.Config.Jobs.CrawlAndCollect.Enabled {
+			if err := a.SchedulerService.DisableJob("crawl_and_collect"); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to disable crawl_and_collect job")
+			} else {
+				a.Logger.Info().Msg("Registered crawl_and_collect job (disabled)")
+			}
 		} else {
-			jobsRegistered++
 			a.Logger.Info().
 				Str("schedule", a.Config.Jobs.CrawlAndCollect.Schedule).
-				Msg("Registered crawl_and_collect job")
+				Msg("Registered crawl_and_collect job (enabled)")
 		}
 	}
 
-	// Register scan and summarize job if enabled
-	if a.Config.Jobs.ScanAndSummarize.Enabled {
-		scanSummarizeJob := jobs.NewScanSummarizeJob(
-			a.StorageManager.DocumentStorage(),
-			a.LLMService,
-			a.Logger,
-		)
-		if err := a.SchedulerService.RegisterJob(
-			"scan_and_summarize",
-			a.Config.Jobs.ScanAndSummarize.Schedule,
-			scanSummarizeJob.Execute,
-		); err != nil {
-			a.Logger.Error().Err(err).Msg("Failed to register scan_and_summarize job")
+	// Register scan and summarize job (always register, disable if not enabled in config)
+	scanSummarizeJob := jobs.NewScanSummarizeJob(
+		a.StorageManager.DocumentStorage(),
+		a.LLMService,
+		a.Logger,
+	)
+	if err := a.SchedulerService.RegisterJob(
+		"scan_and_summarize",
+		a.Config.Jobs.ScanAndSummarize.Schedule,
+		a.Config.Jobs.ScanAndSummarize.Description,
+		scanSummarizeJob.Execute,
+	); err != nil {
+		a.Logger.Error().Err(err).Msg("Failed to register scan_and_summarize job")
+	} else {
+		jobsRegistered++
+		// Disable if not enabled in config (before scheduler starts)
+		if !a.Config.Jobs.ScanAndSummarize.Enabled {
+			if err := a.SchedulerService.DisableJob("scan_and_summarize"); err != nil {
+				a.Logger.Error().Err(err).Msg("Failed to disable scan_and_summarize job")
+			} else {
+				a.Logger.Info().Msg("Registered scan_and_summarize job (disabled)")
+			}
 		} else {
-			jobsRegistered++
 			a.Logger.Info().
 				Str("schedule", a.Config.Jobs.ScanAndSummarize.Schedule).
-				Msg("Registered scan_and_summarize job")
+				Msg("Registered scan_and_summarize job (enabled)")
+		}
+	}
+
+	// Load persisted job settings from database (overrides config)
+	if loadSvc, ok := a.SchedulerService.(interface{ LoadJobSettings() error }); ok {
+		if err := loadSvc.LoadJobSettings(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load job settings from database")
 		}
 	}
 

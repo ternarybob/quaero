@@ -4,10 +4,11 @@
 <!-- Favicon -->
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 
-<!-- Cirrus UI CSS Framework -->
-<link rel="stylesheet" href="https://unpkg.com/cirrus-ui@0.7.1/dist/cirrus.min.css">
+<!-- Metro UI v5 CSS Framework -->
+<link rel="stylesheet" href="https://cdn.metroui.org.ua/current/metro.css">
+<link rel="stylesheet" href="https://cdn.metroui.org.ua/current/icons.css">
 
-<!-- Custom Styles - Cirrus UI overrides and brand styling (loads after Cirrus) -->
+<!-- Custom Styles - Metro UI color theming and brand styling (loads after Metro UI) -->
 <link rel="stylesheet" href="/static/quaero.css">
 
 <!-- Font Awesome -->
@@ -24,5 +25,8 @@
 <script src="/static/websocket-manager.js"></script>
 <script src="/static/common.js"></script>
 
-<!-- Alpine.js - Load AFTER component definitions -->
+<!-- Metro UI JavaScript - Load BEFORE Alpine.js -->
+<script src="https://cdn.metroui.org.ua/current/metro.js"></script>
+
+<!-- Alpine.js - Load AFTER component definitions and Metro UI -->
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>

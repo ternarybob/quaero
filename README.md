@@ -13,6 +13,7 @@ Quaero collects documentation from Atlassian (Confluence, Jira) using browser ex
 - 💾 **SQLite Storage** - Local database with full-text search
 - 🌐 **Web Interface** - Browser-based UI for collection and browsing
 - ⚡ **Fast Collection** - Efficient scraping and storage
+- ⏰ **Scheduled Jobs** - Automated crawling and document summarization
 
 ## Technology Stack
 
@@ -524,6 +525,14 @@ POST /api/scheduler/trigger-collection - Trigger collection event
 POST /api/scheduler/trigger-embedding  - Trigger embedding event
 ```
 
+#### Default Jobs
+```
+GET  /api/jobs/default                      - List all default jobs with status
+POST /api/jobs/default/{name}/enable        - Enable a default job
+POST /api/jobs/default/{name}/disable       - Disable a default job
+PUT  /api/jobs/default/{name}/schedule      - Update job schedule (JSON: {"schedule": "* * * * *"})
+```
+
 #### System
 ```
 GET  /api/version                    - API version
@@ -669,6 +678,17 @@ mock_mode = true  # Set to false to use actual models
 enabled = true
 log_queries = false  # PII protection
 
+[jobs]
+# Default jobs configuration
+
+[jobs.crawl_and_collect]
+enabled = true
+schedule = "*/10 * * * *"  # Every 10 minutes
+
+[jobs.scan_and_summarize]
+enabled = true
+schedule = "0 */2 * * *"  # Every 2 hours
+
 [logging]
 level = "debug"
 output = ["console", "file"]
@@ -728,6 +748,8 @@ netstat -an | grep 8080
 - LLM audit logging and monitoring
 - Real-time WebSocket log streaming
 - Cron-based scheduler for automated workflows
+- Default scheduled jobs (crawl_and_collect, scan_and_summarize)
+- Web UI for managing default jobs (enable/disable, schedule editing)
 
 **⚠️ In Development:**
 - Offline LLM integration (llama.cpp models)

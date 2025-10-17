@@ -6,49 +6,63 @@
     <title>Quaero - Configuration</title>
 </head>
 
-<body class="has-navbar-fixed-top">
+<body>
 
     {{template "navbar.html" .}}
 
-    <div class="content">
+    <div class="container-fluid mt-4">
 
         <!-- Heading Section -->
-        <section>
-            <div class="pl-2">
-                <h1 class="title">Configuration</h1>
-                <p class="subtitle">Application Configuration and System Information</p>
+        <div class="row">
+            <div class="cell-12 p-2">
+                <h1 class="text-bold">Configuration</h1>
+                <p class="text-leader">Application Configuration and System Information</p>
             </div>
-        </section>
+        </div>
 
-        <!-- Service Status Cards -->
-        <div class="card" x-data="configPage()">
+        <!-- Service Status and Configuration (Single Alpine Component) -->
+        <div x-data="configPage()">
+            <div class="row mt-4">
+                <div class="cell-12">
+                    <div class="panel">
 
-            <div class="card__header">
-                <h2>Service Status</h2>
-                <div class="q-d-flex q-align-center">
-                    <span :class="'tag ' + (isOnline ? 'tag--success' : 'tag--danger')" id="service-status">
-                        <span x-text="isOnline ? 'Online' : 'Offline'"></span>
-                    </span>
+                        <div class="panel-header">
+                            <div class="d-flex flex-justify-between flex-align-center">
+                                <h6 class="m-0">Service Status</h6>
+                                <span :class="'badge ' + (isOnline ? 'success' : 'danger')" id="service-status">
+                                    <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="panel-content">
+                            <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
+                            <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
+                            <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
+                            <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="card-body">
-                <p><strong>Version:</strong> <span x-text="version" id="config-version"></span></p>
-                <p><strong>Build:</strong> <span x-text="build" id="config-build"></span></p>
-                <p><strong>Port:</strong> <span x-text="port" id="config-port"></span></p>
-                <p><strong>Host:</strong> <span x-text="host" id="config-host"></span></p>
+
+            <div class="row mt-4">
+                <div class="cell-12">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h6 class="m-0">Configuration Details</h6>
+                        </div>
+                        <div class="panel-content">
+                            <pre id="config-display" class="bg-light p-4 border" style="max-height: 300px; overflow: auto;"><code x-text="formatConfig(config)"></code></pre>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="card" x-data="configPage()">
-            <div class="card__header">
-                <h2>Configuration Details</h2>
-            </div>
-            <div class="card-body">
-                <pre id="config-display" class="q-bg-light q-p-3 q-rounded q-overflow-auto q-max-h-300"><code x-text="formatConfig(config)"></code></pre>
+        <div class="row mt-4">
+            <div class="cell-12">
+                {{template "service-logs.html" .}}
             </div>
         </div>
-
-        {{template "service-logs.html" .}}
 
     </div>
 

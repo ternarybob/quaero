@@ -6,23 +6,31 @@
     <title>Quaero - Home</title>
 </head>
 
-<body class="has-navbar-fixed-top">
+<body>
 
     {{template "navbar.html" .}}
 
-    <div class="content">
+    <div class="container-fluid mt-4">
 
         <!-- Heading Section -->
-        <section>
-            <div class="pl-2">
-                <h1 class="title">Quaero</h1>
-                <p class="subtitle">Unified Data Collection and Analysis Platform</p>
+        <div class="row">
+            <div class="cell-12 p-2">
+                <h1 class="text-bold">Quaero</h1>
+                <p class="text-leader">Unified Data Collection and Analysis Platform</p>
             </div>
-        </section>
+        </div>
 
-        {{template "service-status.html" .}}
+        <div class="row mt-4">
+            <div class="cell-12">
+                {{template "service-status.html" .}}
+            </div>
+        </div>
 
-        {{template "service-logs.html" .}}
+        <div class="row mt-4">
+            <div class="cell-12">
+                {{template "service-logs.html" .}}
+            </div>
+        </div>
 
     </div>
 
