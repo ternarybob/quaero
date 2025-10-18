@@ -669,3 +669,36 @@ body.modal-open {
 .p-4 {
     padding: 1.5rem;
 }
+
+/* 11. LOG LEVEL FILTER DROPDOWN
+   ========================================================================== */
+.log-level-filter {
+    width: 140px;
+    height: 32px;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--content-bg);
+    color: var(--text-primary);
+    margin-right: 0.5rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+.log-level-filter:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
+}
+
+.log-level-filter:hover {
+    border-color: var(--color-primary);
+}
+
+/* Ensure navbar section keeps controls inline */
+.navbar-section {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}

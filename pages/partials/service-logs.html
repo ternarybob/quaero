@@ -6,7 +6,17 @@
                 <h2>Service Logs</h2>
             </section>
             <section class="navbar-section">
-                <div class="btn-group btn-group-block">
+                <select class="form-select select-sm log-level-filter"
+                        x-model="selectedLogLevel"
+                        @change="setLogLevel($event.target.value)"
+                        title="Filter by log level">
+                    <option value="all">All Levels</option>
+                    <option value="error">Error</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                    <option value="debug">Debug</option>
+                </select>
+                <div class="btn-group">
                     <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
                         <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                     </button>
@@ -23,10 +33,10 @@
 
     <div class="card-body">
         <div class="terminal" x-ref="logContainer">
-            <template x-if="logs.length === 0">
+            <template x-if="filteredLogs.length === 0">
                 <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
             </template>
-            <template x-for="log in logs" :key="log.id">
+            <template x-for="log in filteredLogs" :key="log.id">
                 <div class="terminal-line">
                     <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
                     <span :class="log.levelClass" x-text="`[${log.level}]`"></span>

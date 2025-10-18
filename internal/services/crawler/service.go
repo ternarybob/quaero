@@ -242,15 +242,41 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 // GetJobStatus returns the current status of a job
 func (s *Service) GetJobStatus(jobID string) (*CrawlJob, error) {
+	// Fast path: Check in-memory storage first (for running jobs)
 	s.jobsMu.RLock()
-	defer s.jobsMu.RUnlock()
-
 	job, exists := s.activeJobs[jobID]
-	if !exists {
-		return nil, fmt.Errorf("job not found: %s", jobID)
+	s.jobsMu.RUnlock()
+
+	if exists {
+		return job, nil
 	}
 
-	return job, nil
+	// Database fallback: Query persistent storage for completed/failed/cancelled jobs
+	if s.jobStorage != nil {
+		jobInterface, err := s.jobStorage.GetJob(s.ctx, jobID)
+		if err == nil {
+			// Type assertion to convert interface{} to *CrawlJob
+			if crawlJob, ok := jobInterface.(*CrawlJob); ok {
+				s.logger.Debug().
+					Str("job_id", jobID).
+					Str("status", string(crawlJob.Status)).
+					Msg("Retrieved job from database (not in active jobs)")
+				return crawlJob, nil
+			}
+		} else {
+			// Log non-"not found" errors as they indicate database issues
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "job not found") && !strings.Contains(errMsg, "not found") {
+				s.logger.Warn().
+					Err(err).
+					Str("job_id", jobID).
+					Msg("Database error while retrieving job")
+				return nil, fmt.Errorf("database error retrieving job %s: %w", jobID, err)
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("job not found: %s", jobID)
 }
 
 // CancelJob cancels a running job
@@ -836,11 +862,17 @@ func (s *Service) monitorCompletion(jobID string) {
 			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
 				s.jobsMu.RUnlock()
 
-				// Remove from activeJobs since job is in terminal state
-				s.jobsMu.Lock()
-				delete(s.activeJobs, jobID)
-				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Removed terminal state job from active jobs")
-				s.jobsMu.Unlock()
+				// Only remove from activeJobs if jobStorage is nil or job was already persisted
+				// When jobStorage is nil, keep job in memory for lookup
+				if s.jobStorage == nil {
+					s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Keeping terminal state job in memory (no job storage)")
+				} else {
+					// Job should have been persisted by CancelJob/FailJob, safe to remove
+					s.jobsMu.Lock()
+					delete(s.activeJobs, jobID)
+					s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Removed terminal state job from active jobs")
+					s.jobsMu.Unlock()
+				}
 
 				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Monitor goroutine exiting for terminal job status")
 				return
@@ -869,30 +901,45 @@ func (s *Service) monitorCompletion(jobID string) {
 				s.jobsMu.Unlock()
 
 				// Persist job completion to database
+				persistSucceeded := false
 				if s.jobStorage != nil {
 					if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
-						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job completion")
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job completion - keeping job in memory")
+					} else {
+						persistSucceeded = true
 					}
 				}
 
 				s.emitProgress(job)
 
-				// Clean up per-job HTTP client and remove from activeJobs
-				s.jobsMu.Lock()
-				if _, exists := s.jobClients[jobID]; exists {
-					delete(s.jobClients, jobID)
-					s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
+				// Only remove from activeJobs if persistence succeeded or jobStorage is nil
+				if s.jobStorage == nil {
+					s.logger.Debug().Str("job_id", jobID).Msg("Keeping completed job in memory (no job storage)")
+				} else if persistSucceeded {
+					// Persistence succeeded, safe to clean up and remove from memory
+					s.jobsMu.Lock()
+					if _, exists := s.jobClients[jobID]; exists {
+						delete(s.jobClients, jobID)
+						s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
+					}
+					delete(s.activeJobs, jobID)
+					s.logger.Debug().Str("job_id", jobID).Msg("Removed completed job from active jobs")
+					s.jobsMu.Unlock()
+				} else {
+					// Persistence failed, keep job in memory for subsequent lookups
+					s.logger.Debug().Str("job_id", jobID).Msg("Keeping completed job in memory due to persistence failure")
 				}
-				// Remove from activeJobs since job is now complete
-				delete(s.activeJobs, jobID)
-				s.logger.Debug().Str("job_id", jobID).Msg("Removed completed job from active jobs")
-				s.jobsMu.Unlock()
 
 				s.logger.Info().
 					Str("job_id", jobID).
 					Int("completed", job.Progress.CompletedURLs).
 					Int("failed", job.Progress.FailedURLs).
 					Msg("Crawl job completed")
+
+				// Continue monitoring if persistence failed (job still in activeJobs)
+				if !persistSucceeded && s.jobStorage != nil {
+					continue
+				}
 
 				return
 			}
@@ -971,25 +1018,62 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 }
 
 // WaitForJob blocks until a job completes or context is cancelled
+//
+// IMPORTANT: This function expects in-process waiting where the job is running in the same
+// service instance and s.jobResults is populated during execution. When GetJobStatus() falls
+// back to the database and retrieves a completed job from another instance or a previous run,
+// the results may not be available in s.jobResults (which is in-memory only).
+//
+// Edge case: If the database returns a completed job but GetJobResults() returns "not found",
+// this indicates the job was completed by a different service instance or the service was
+// restarted. In this case, the function returns an error. Callers should handle this by
+// checking the job's ResultCount field from GetJobStatus() for summary information.
 func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+
+	pollCount := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
+			pollCount++
+
 			job, err := s.GetJobStatus(jobID)
 			if err != nil {
+				s.logger.Debug().
+					Err(err).
+					Str("job_id", jobID).
+					Int("poll_count", pollCount).
+					Msg("Failed to get job status while waiting")
 				return nil, fmt.Errorf("failed to get job status: %w", err)
+			}
+
+			// Periodic status logging every 10 polls
+			if pollCount%10 == 0 {
+				s.logger.Debug().
+					Str("job_id", jobID).
+					Str("status", string(job.Status)).
+					Int("poll_count", pollCount).
+					Msg("Job status polling update")
 			}
 
 			// Check if job is complete
 			if job.Status == JobStatusCompleted || job.Status == JobStatusFailed || job.Status == JobStatusCancelled {
 				results, err := s.GetJobResults(jobID)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get job results: %w", err)
+					// Edge case: Job completed in another instance or before service restart
+					s.logger.Warn().
+						Err(err).
+						Str("job_id", jobID).
+						Str("status", string(job.Status)).
+						Int("result_count", job.ResultCount).
+						Int("failed_count", job.FailedCount).
+						Msg("Job completed but results not available (completed in different instance or before restart)")
+					return nil, fmt.Errorf("job %s completed but results unavailable (result_count: %d, failed_count: %d): %w",
+						jobID, job.ResultCount, job.FailedCount, err)
 				}
 				return results, nil
 			}
