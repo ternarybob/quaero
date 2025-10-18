@@ -11,6 +11,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 // jobEntry represents a registered job with metadata
@@ -29,16 +30,19 @@ type jobEntry struct {
 
 // Service implements SchedulerService interface
 type Service struct {
-	eventService interfaces.EventService
-	cron         *cron.Cron
-	logger       arbor.ILogger
-	db           *sql.DB    // Database for persisting job settings
-	mu           sync.Mutex // Protects isProcessing
-	jobMu        sync.Mutex // Protects jobs map
-	globalMu     sync.Mutex // Prevents concurrent job execution
-	jobs         map[string]*jobEntry
-	isProcessing bool
-	running      bool
+	eventService   interfaces.EventService
+	crawlerService *crawler.Service      // For shutdown coordination
+	jobStorage     interfaces.JobStorage // For stale job detection
+	cron           *cron.Cron
+	logger         arbor.ILogger
+	db             *sql.DB    // Database for persisting job settings
+	mu             sync.Mutex // Protects isProcessing
+	jobMu          sync.Mutex // Protects jobs map
+	globalMu       sync.Mutex // Prevents concurrent job execution
+	jobs           map[string]*jobEntry
+	isProcessing   bool
+	running        bool
+	staleJobTicker *time.Ticker // For stale job detection cleanup goroutine
 }
 
 // NewService creates a new scheduler service
@@ -52,13 +56,15 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 }
 
 // NewServiceWithDB creates a new scheduler service with database persistence
-func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB) interfaces.SchedulerService {
+func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage) interfaces.SchedulerService {
 	return &Service{
-		eventService: eventService,
-		cron:         cron.New(),
-		logger:       logger,
-		db:           db,
-		jobs:         make(map[string]*jobEntry),
+		eventService:   eventService,
+		crawlerService: crawlerService,
+		jobStorage:     jobStorage,
+		cron:           cron.New(),
+		logger:         logger,
+		db:             db,
+		jobs:           make(map[string]*jobEntry),
 	}
 }
 
@@ -94,6 +100,13 @@ func (s *Service) Start(cronExpr string) error {
 	s.cron.Start()
 	s.running = true
 
+	// Launch stale job detector goroutine (runs every 5 minutes)
+	if s.jobStorage != nil {
+		s.staleJobTicker = time.NewTicker(5 * time.Minute)
+		go s.staleJobDetectorLoop()
+		s.logger.Info().Msg("Stale job detector started (5 minute interval)")
+	}
+
 	s.logger.Info().Msg("Scheduler started")
 
 	return nil
@@ -103,6 +116,50 @@ func (s *Service) Start(cronExpr string) error {
 func (s *Service) Stop() error {
 	if !s.running {
 		return nil
+	}
+
+	// Cancel running crawler jobs before stopping scheduler
+	if s.crawlerService != nil {
+		runningJobIDs := s.crawlerService.GetRunningJobIDs()
+		if len(runningJobIDs) > 0 {
+			s.logger.Info().Int("count", len(runningJobIDs)).Msg("Cancelling running crawler jobs")
+
+			// Cancel each job
+			for _, jobID := range runningJobIDs {
+				if err := s.crawlerService.CancelJob(jobID); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to cancel job")
+				}
+			}
+
+			// Wait up to 30 seconds for jobs to cancel
+			timeout := time.After(30 * time.Second)
+			ticker := time.NewTicker(500 * time.Millisecond)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-timeout:
+					remaining := s.crawlerService.GetRunningJobIDs()
+					if len(remaining) > 0 {
+						s.logger.Warn().Int("count", len(remaining)).Msg("Some jobs did not cancel within timeout")
+					}
+					goto cancelComplete
+				case <-ticker.C:
+					remaining := s.crawlerService.GetRunningJobIDs()
+					if len(remaining) == 0 {
+						s.logger.Info().Msg("All running jobs cancelled successfully")
+						goto cancelComplete
+					}
+				}
+			}
+		cancelComplete:
+		}
+	}
+
+	// Stop stale job ticker if running
+	if s.staleJobTicker != nil {
+		s.staleJobTicker.Stop()
+		s.logger.Info().Msg("Stale job detector stopped")
 	}
 
 	s.cron.Stop()
@@ -381,9 +438,9 @@ func (s *Service) executeJob(name string) {
 	s.globalMu.Lock()
 	defer s.globalMu.Unlock()
 
-	s.logger.Debug().
+	s.logger.Info().
 		Str("job_name", name).
-		Msg("Job execution started")
+		Msg("🚀 Job execution started")
 
 	// Get job handler
 	s.jobMu.Lock()
@@ -414,12 +471,14 @@ func (s *Service) executeJob(name string) {
 		s.logger.Error().
 			Str("job_name", name).
 			Err(err).
-			Msg("Job execution failed")
+			Dur("duration", time.Since(now)).
+			Msg("❌ Job execution failed")
 	} else {
 		entry.lastError = ""
 		s.logger.Info().
 			Str("job_name", name).
-			Msg("Job execution completed successfully")
+			Dur("duration", time.Since(now)).
+			Msg("✅ Job execution completed successfully")
 	}
 	s.jobMu.Unlock()
 }
@@ -457,7 +516,7 @@ func (s *Service) runScheduledTask() {
 		s.logger.Debug().Msg(">>> SCHEDULER: Processing flag cleared")
 	}()
 
-	s.logger.Info().Msg(">>> SCHEDULER: Starting scheduled collection and embedding cycle")
+	s.logger.Info().Msg("🔄 >>> SCHEDULER: Starting scheduled collection and embedding cycle")
 
 	ctx := context.Background()
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 3 - Context created")
@@ -481,7 +540,7 @@ func (s *Service) runScheduledTask() {
 	}
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
-	s.logger.Info().Msg(">>> SCHEDULER: Collection completed successfully")
+	s.logger.Info().Msg("✅ >>> SCHEDULER: Collection completed successfully")
 }
 
 // saveJobSettings persists job schedule and enabled status to database
@@ -577,4 +636,122 @@ func (s *Service) LoadJobSettings() error {
 	}
 
 	return nil
+}
+
+// CleanupOrphanedJobs marks orphaned running jobs as failed after service restart
+func (s *Service) CleanupOrphanedJobs() error {
+	if s.jobStorage == nil {
+		return nil // No job storage available
+	}
+
+	ctx := context.Background()
+
+	// Get all jobs with status "running"
+	runningJobs, err := s.jobStorage.GetJobsByStatus(ctx, "running")
+	if err != nil {
+		return fmt.Errorf("failed to get running jobs: %w", err)
+	}
+
+	if len(runningJobs) == 0 {
+		return nil
+	}
+
+	s.logger.Info().Int("count", len(runningJobs)).Msg("Cleaning up orphaned jobs from previous run")
+
+	// Mark each as failed
+	cleanedCount := 0
+	for _, jobInterface := range runningJobs {
+		job, ok := jobInterface.(*crawler.CrawlJob)
+		if !ok {
+			s.logger.Warn().Msg("Skipping non-crawler job in orphaned job cleanup")
+			continue
+		}
+
+		if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", "Service restarted while job was running"); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update orphaned job status")
+		} else {
+			cleanedCount++
+		}
+	}
+
+	s.logger.Info().Int("count", cleanedCount).Msg("Orphaned jobs cleaned up")
+	return nil
+}
+
+// DetectStaleJobs finds and marks stale jobs as failed
+func (s *Service) DetectStaleJobs() error {
+	if s.jobStorage == nil {
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// Get jobs with heartbeat older than 10 minutes
+	staleJobs, err := s.jobStorage.GetStaleJobs(ctx, 10)
+	if err != nil {
+		return fmt.Errorf("failed to get stale jobs: %w", err)
+	}
+
+	if len(staleJobs) == 0 {
+		return nil
+	}
+
+	s.logger.Warn().Int("count", len(staleJobs)).Msg("Detected stale jobs (no heartbeat for 10+ minutes)")
+
+	// Mark each as failed
+	for _, jobInterface := range staleJobs {
+		job, ok := jobInterface.(*crawler.CrawlJob)
+		if !ok {
+			s.logger.Warn().Msg("Skipping non-crawler job in stale job detection")
+			continue
+		}
+
+		reason := "Job stale (no heartbeat for 10+ minutes)"
+
+		// Try to fail job via crawler service first to update in-memory state
+		failedViaService := false
+		if s.crawlerService != nil {
+			if err := s.crawlerService.FailJob(job.ID, reason); err != nil {
+				// Job not in crawler's active jobs, will fall back to direct storage update
+				s.logger.Debug().Err(err).Str("job_id", job.ID).Msg("Job not in crawler memory, updating storage directly")
+			} else {
+				// Successfully failed via crawler service (in-memory + storage updated)
+				failedViaService = true
+				s.logger.Info().Str("job_id", job.ID).Msg("Marked stale job as failed (via crawler service)")
+			}
+		}
+
+		// Fallback to direct storage update if not handled by crawler service
+		if !failedViaService {
+			if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", reason); err != nil {
+				s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update stale job status")
+			} else {
+				s.logger.Info().Str("job_id", job.ID).Msg("Marked stale job as failed (via storage)")
+
+				// Emit progress event for UI update
+				if s.eventService != nil {
+					event := interfaces.Event{
+						Type: interfaces.EventCrawlProgress,
+						Payload: map[string]interface{}{
+							"job_id": job.ID,
+							"status": "failed",
+							"error":  reason,
+						},
+					}
+					_ = s.eventService.Publish(ctx, event)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// staleJobDetectorLoop runs periodically to detect and mark stale jobs
+func (s *Service) staleJobDetectorLoop() {
+	for range s.staleJobTicker.C {
+		if err := s.DetectStaleJobs(); err != nil {
+			s.logger.Error().Err(err).Msg("Stale job detection failed")
+		}
+	}
 }

@@ -130,9 +130,10 @@ type ProcessingConfig struct {
 }
 
 type LoggingConfig struct {
-	Level  string   `toml:"level"`
-	Format string   `toml:"format"`
-	Output []string `toml:"output"`
+	Level       string   `toml:"level"`        // "debug", "info", "warn", "error"
+	Format      string   `toml:"format"`       // "json" or "text"
+	Output      []string `toml:"output"`       // "stdout", "file"
+	ClientDebug bool     `toml:"client_debug"` // Enable client-side debug logging
 }
 
 // JobsConfig contains configuration for default scheduled jobs

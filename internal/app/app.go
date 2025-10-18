@@ -274,7 +274,7 @@ func (a *App) initServices() error {
 	}
 
 	// 12. Initialize scheduler service with database persistence
-	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB))
+	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB), a.CrawlerService, a.StorageManager.JobStorage())
 
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
@@ -345,6 +345,11 @@ func (a *App) initServices() error {
 		}
 	}
 
+	// Cleanup orphaned jobs from previous run before starting scheduler
+	if err := a.SchedulerService.CleanupOrphanedJobs(); err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to cleanup orphaned jobs")
+	}
+
 	// NOTE: Scheduler triggers event-driven processing:
 	// - EventCollectionTriggered: Transforms scraped data (issues/pages → documents)
 	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
@@ -412,7 +417,7 @@ func (a *App) initHandlers() error {
 	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config)
 
 	// Initialize page handler for serving HTML templates
-	a.PageHandler = handlers.NewPageHandler(a.Logger)
+	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)

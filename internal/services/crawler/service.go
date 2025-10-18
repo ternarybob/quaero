@@ -224,6 +224,11 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status in database")
 		}
+
+		// Initialize heartbeat for the running job
+		if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to initialize job heartbeat")
+		}
 	}
 
 	// Emit started event
@@ -274,12 +279,55 @@ func (s *Service) CancelJob(jobID string) error {
 		}
 	}
 
-	// Reacquire lock to clean up per-job HTTP client map
+	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
 	s.jobsMu.Lock()
 	if _, exists := s.jobClients[jobID]; exists {
 		delete(s.jobClients, jobID)
 		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after cancellation")
 	}
+	// Remove from activeJobs since job is now in terminal state
+	delete(s.activeJobs, jobID)
+	s.logger.Debug().Str("job_id", jobID).Msg("Removed cancelled job from active jobs")
+	s.jobsMu.Unlock()
+
+	// Emit progress after persistence
+	s.emitProgress(job)
+
+	return nil
+}
+
+// FailJob marks a job as failed with a reason (called by scheduler for stale job detection)
+func (s *Service) FailJob(jobID string, reason string) error {
+	// Acquire lock to check job and update status
+	s.jobsMu.Lock()
+	job, exists := s.activeJobs[jobID]
+	if !exists {
+		s.jobsMu.Unlock()
+		return fmt.Errorf("job not found in active jobs: %s", jobID)
+	}
+
+	// Set job status to failed
+	job.Status = JobStatusFailed
+	job.CompletedAt = time.Now()
+	job.Error = reason
+	s.jobsMu.Unlock()
+
+	// Persist failed status to database (outside lock to avoid contention)
+	if s.jobStorage != nil {
+		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job failure")
+		}
+	}
+
+	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
+	s.jobsMu.Lock()
+	if _, exists := s.jobClients[jobID]; exists {
+		delete(s.jobClients, jobID)
+		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after failure")
+	}
+	// Remove from activeJobs since job is now in terminal state
+	delete(s.activeJobs, jobID)
+	s.logger.Debug().Str("job_id", jobID).Str("reason", reason).Msg("Removed failed job from active jobs")
 	s.jobsMu.Unlock()
 
 	// Emit progress after persistence
@@ -299,6 +347,34 @@ func (s *Service) GetJobResults(jobID string) ([]*CrawlResult, error) {
 	}
 
 	return results, nil
+}
+
+// GetActiveJobIDs returns a list of all active job IDs
+func (s *Service) GetActiveJobIDs() []string {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobIDs := make([]string, 0, len(s.activeJobs))
+	for jobID := range s.activeJobs {
+		jobIDs = append(jobIDs, jobID)
+	}
+
+	return jobIDs
+}
+
+// GetRunningJobIDs returns a list of job IDs with status = running
+func (s *Service) GetRunningJobIDs() []string {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobIDs := make([]string, 0)
+	for jobID, job := range s.activeJobs {
+		if job.Status == JobStatusRunning {
+			jobIDs = append(jobIDs, jobID)
+		}
+	}
+
+	return jobIDs
 }
 
 // startWorkers launches worker goroutines for a job
@@ -740,11 +816,15 @@ func (s *Service) monitorCompletion(jobID string) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	heartbeatCounter := 0 // Track ticks for heartbeat updates (every 15 ticks = 30 seconds)
+
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
+			heartbeatCounter++
+
 			s.jobsMu.RLock()
 			job, exists := s.activeJobs[jobID]
 			if !exists {
@@ -755,8 +835,25 @@ func (s *Service) monitorCompletion(jobID string) {
 			// Check if job is in a terminal state (cancelled or failed) and exit
 			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
 				s.jobsMu.RUnlock()
+
+				// Remove from activeJobs since job is in terminal state
+				s.jobsMu.Lock()
+				delete(s.activeJobs, jobID)
+				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Removed terminal state job from active jobs")
+				s.jobsMu.Unlock()
+
 				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Monitor goroutine exiting for terminal job status")
 				return
+			}
+
+			// Update heartbeat every 30 seconds (15 ticks)
+			if heartbeatCounter >= 15 {
+				if s.jobStorage != nil {
+					if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job heartbeat")
+					}
+				}
+				heartbeatCounter = 0
 			}
 
 			// Check if job is complete
@@ -780,12 +877,15 @@ func (s *Service) monitorCompletion(jobID string) {
 
 				s.emitProgress(job)
 
-				// Clean up per-job HTTP client
+				// Clean up per-job HTTP client and remove from activeJobs
 				s.jobsMu.Lock()
 				if _, exists := s.jobClients[jobID]; exists {
 					delete(s.jobClients, jobID)
 					s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
 				}
+				// Remove from activeJobs since job is now complete
+				delete(s.activeJobs, jobID)
+				s.logger.Debug().Str("job_id", jobID).Msg("Removed completed job from active jobs")
 				s.jobsMu.Unlock()
 
 				s.logger.Info().

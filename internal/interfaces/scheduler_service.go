@@ -45,4 +45,7 @@ type SchedulerService interface {
 
 	// GetAllJobStatuses returns all job statuses
 	GetAllJobStatuses() map[string]*JobStatus
+
+	// CleanupOrphanedJobs marks orphaned running jobs as failed after service restart
+	CleanupOrphanedJobs() error
 }

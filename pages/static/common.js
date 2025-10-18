@@ -1,7 +1,28 @@
 // Alpine.js components for Quaero
 // Provides reactive data components for parser status, auth details, and service logs
 
+// Global debug flag - read from server config (injected by template)
+// Can be overridden in browser console: window.QUAERO_DEBUG = false
+window.QUAERO_DEBUG = typeof window.QUAERO_CLIENT_DEBUG !== 'undefined' ? window.QUAERO_CLIENT_DEBUG : false;
+
+// Debug logger helper
+window.debugLog = function(component, message, ...args) {
+  if (window.QUAERO_DEBUG) {
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+    console.log(`[${timestamp}] [${component}]`, message, ...args);
+  }
+};
+
+window.debugError = function(component, message, error) {
+  const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+  console.error(`[${timestamp}] [${component}]`, message, error);
+  if (error && error.stack) {
+    console.error(`[${timestamp}] [${component}] Stack:`, error.stack);
+  }
+};
+
 document.addEventListener('alpine:init', () => {
+  window.debugLog('Common', 'Alpine.js init event started');
   // Service Logs Component
   Alpine.data('serviceLogs', () => ({
     logs: [],
@@ -10,31 +31,31 @@ document.addEventListener('alpine:init', () => {
     logIdCounter: 0,
 
     init() {
-      console.log('[ServiceLogs] Initializing component');
+      window.debugLog('ServiceLogs', 'Initializing component');
       this.loadRecentLogs();
       this.subscribeToWebSocket();
     },
 
     async loadRecentLogs() {
-      console.log('[ServiceLogs] Loading recent logs...');
+      window.debugLog('ServiceLogs', 'Loading recent logs...');
       try {
         const response = await fetch('/api/logs/recent');
-        console.log('[ServiceLogs] API response status:', response.status);
+        window.debugLog('ServiceLogs', 'API response status:', response.status);
         if (!response.ok) {
-          console.warn('[ServiceLogs] API returned non-OK status:', response.status);
+          window.debugLog('ServiceLogs', 'API returned non-OK status:', response.status);
           return;
         }
 
         const data = await response.json();
-        console.log('[ServiceLogs] Received data:', data);
+        window.debugLog('ServiceLogs', 'Received data:', data);
         if (data.logs && Array.isArray(data.logs)) {
-          console.log('[ServiceLogs] Processing', data.logs.length, 'log entries');
+          window.debugLog('ServiceLogs', 'Processing', data.logs.length, 'log entries');
           this.logs = data.logs.map(log => {
             const entry = this._parseLogEntry(log);
             entry.id = ++this.logIdCounter;
             return entry;
           });
-          console.log('[ServiceLogs] Logs array now contains', this.logs.length, 'entries');
+          window.debugLog('ServiceLogs', 'Logs array now contains', this.logs.length, 'entries');
           // Scroll to bottom after loading recent logs
           this.$nextTick(() => {
             const container = this.$refs.logContainer;
@@ -43,10 +64,10 @@ document.addEventListener('alpine:init', () => {
             }
           });
         } else {
-          console.warn('[ServiceLogs] No logs in response or invalid format');
+          window.debugLog('ServiceLogs', 'No logs in response or invalid format');
         }
       } catch (err) {
-        console.error('[ServiceLogs] Error loading recent logs:', err);
+        window.debugError('ServiceLogs', 'Error loading recent logs:', err);
       }
     },
 
@@ -55,9 +76,9 @@ document.addEventListener('alpine:init', () => {
         WebSocketManager.subscribe('log', (data) => {
           this.addLog(data);
         });
-        console.log('[ServiceLogs] WebSocket subscription established');
+        window.debugLog('ServiceLogs', 'WebSocket subscription established');
       } else {
-        console.error('[ServiceLogs] WebSocketManager not loaded');
+        window.debugError('ServiceLogs', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
       }
     },
 
@@ -157,21 +178,25 @@ document.addEventListener('alpine:init', () => {
     timestamp: null,
 
     init() {
+      window.debugLog('AppStatus', 'Initializing component');
       this.fetchStatus();
       this.subscribeToWebSocket();
     },
 
     async fetchStatus() {
+      window.debugLog('AppStatus', 'Fetching status from /api/status');
       try {
         const response = await fetch('/api/status');
+        window.debugLog('AppStatus', 'Response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch status');
 
         const data = await response.json();
+        window.debugLog('AppStatus', 'Status data received:', data);
         this.state = data.state || 'Idle';
         this.metadata = data.metadata || {};
         this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
       } catch (err) {
-        console.error('[AppStatus] Error fetching status:', err);
+        window.debugError('AppStatus', 'Error fetching status:', err);
         this.state = 'Unknown';
       }
     },
@@ -179,12 +204,12 @@ document.addEventListener('alpine:init', () => {
     subscribeToWebSocket() {
       if (typeof WebSocketManager !== 'undefined') {
         WebSocketManager.subscribe('app_status', (data) => {
-          console.log('[AppStatus] WebSocket update received:', data);
+          window.debugLog('AppStatus', 'WebSocket update received:', data);
           this.state = data.state || 'Idle';
           this.metadata = data.metadata || {};
           this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
         });
-        console.log('[AppStatus] WebSocket subscription established');
+        window.debugLog('AppStatus', 'WebSocket subscription established');
       }
     },
 
@@ -216,34 +241,42 @@ document.addEventListener('alpine:init', () => {
     modalTriggerElement: null,
 
     init() {
+      window.debugLog('SourceManagement', 'Initializing component');
       this.loadSources();
       this.loadAuthentications();
       this.resetCurrentSource();
     },
 
     async loadSources() {
+      window.debugLog('SourceManagement', 'Loading sources from /api/sources');
       try {
         const response = await fetch('/api/sources');
+        window.debugLog('SourceManagement', 'Response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch sources');
 
         const data = await response.json();
+        window.debugLog('SourceManagement', 'Sources data received:', data);
         this.sources = Array.isArray(data) ? data : [];
+        window.debugLog('SourceManagement', 'Sources array:', this.sources, 'Count:', this.sources.length);
         this.loading = false;
       } catch (err) {
-        console.error('[SourceManagement] Error loading sources:', err);
+        window.debugError('SourceManagement', 'Error loading sources:', err);
         this.loading = false;
         window.showNotification('Failed to load sources: ' + err.message, 'error');
       }
     },
 
     async loadAuthentications() {
+      window.debugLog('SourceManagement', 'Loading authentications from /api/auth/list');
       try {
         const response = await fetch('/api/auth/list');
+        window.debugLog('SourceManagement', 'Auth response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch authentications');
         const data = await response.json();
+        window.debugLog('SourceManagement', 'Authentications received:', data);
         this.authentications = Array.isArray(data) ? data : [];
       } catch (err) {
-        console.error('[SourceManagement] Error loading authentications:', err);
+        window.debugError('SourceManagement', 'Error loading authentications:', err);
         this.authentications = [];
       }
     },
@@ -303,17 +336,20 @@ document.addEventListener('alpine:init', () => {
     },
 
     async saveSource() {
+      window.debugLog('SourceManagement', 'Saving source:', this.currentSource);
       try {
         const isEdit = this.showEditModal;
         const url = isEdit ? `/api/sources/${this.currentSource.id}` : '/api/sources';
         const method = isEdit ? 'PUT' : 'POST';
 
+        window.debugLog('SourceManagement', `${method} ${url}`);
         const response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.currentSource)
         });
 
+        window.debugLog('SourceManagement', 'Save response status:', response.status);
         if (!response.ok) {
           const error = await response.json();
           throw new Error(error.error || 'Failed to save source');
@@ -323,7 +359,7 @@ document.addEventListener('alpine:init', () => {
         await this.loadSources();
         this.closeModal();
       } catch (err) {
-        console.error('[SourceManagement] Error saving source:', err);
+        window.debugError('SourceManagement', 'Error saving source:', err);
         window.showNotification('Failed to save source: ' + err.message, 'error');
       }
     },
@@ -333,11 +369,13 @@ document.addEventListener('alpine:init', () => {
         return;
       }
 
+      window.debugLog('SourceManagement', 'Deleting source:', sourceId);
       try {
         const response = await fetch(`/api/sources/${sourceId}`, {
           method: 'DELETE'
         });
 
+        window.debugLog('SourceManagement', 'Delete response status:', response.status);
         if (!response.ok) {
           throw new Error('Failed to delete source');
         }
@@ -345,7 +383,7 @@ document.addEventListener('alpine:init', () => {
         window.showNotification('Source deleted successfully', 'success');
         await this.loadSources();
       } catch (err) {
-        console.error('[SourceManagement] Error deleting source:', err);
+        window.debugError('SourceManagement', 'Error deleting source:', err);
         window.showNotification('Failed to delete source: ' + err.message, 'error');
       }
     },

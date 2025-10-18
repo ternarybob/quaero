@@ -19,7 +19,7 @@ Quaero collects documentation from Atlassian (Confluence, Jira) using browser ex
 
 - **Language:** Go 1.25+
 - **Storage:** SQLite with FTS5 (full-text search)
-- **Web UI:** HTML templates, Alpine.js, Spectre CSS, WebSockets
+- **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
 - **Authentication:** Chrome extension → WebSocket → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
@@ -34,17 +34,16 @@ Quaero collects documentation from Atlassian (Confluence, Jira) using browser ex
 
 ### Installation
 
-```bash
+```powershell
 # Clone the repository
 git clone https://github.com/ternarybob/quaero.git
 cd quaero
 
-# Build
-./scripts/build.ps1
-
-# Or use Go directly
-go build -o bin/quaero ./cmd/quaero
+# Build (Windows only)
+.\scripts\build.ps1
 ```
+
+**Important:** Building MUST use `.\scripts\build.ps1`. Direct `go build` is not supported for production builds.
 
 ### Configuration
 
@@ -53,7 +52,7 @@ Create `quaero.toml` in your project directory:
 ```toml
 [server]
 host = "localhost"
-port = 8080
+port = 8085
 
 [logging]
 level = "info"
@@ -70,12 +69,12 @@ enable_wal = true
 
 ### Running the Server
 
-```bash
-# Start the server
-./bin/quaero serve
+```powershell
+# Start the server (after building)
+.\bin\quaero.exe
 
-# Or with custom config
-./bin/quaero serve --config /path/to/quaero.toml --port 8080
+# Or build and run in one step
+.\scripts\build.ps1 -Run
 ```
 
 ### Installing Chrome Extension
@@ -88,8 +87,8 @@ enable_wal = true
 ### Using Quaero
 
 1. **Start the server:**
-   ```bash
-   ./bin/quaero serve
+   ```powershell
+   .\scripts\build.ps1 -Run
    ```
 
 2. **Navigate to Atlassian:**
@@ -102,7 +101,7 @@ enable_wal = true
    - Extension sends credentials to server
 
 4. **Access Web UI:**
-   - Open http://localhost:8080
+   - Open http://localhost:8085
    - Click "Confluence" or "Jira"
    - Click "Collect" to start gathering data
 
@@ -155,20 +154,11 @@ go test -v ./api              # API tests
 go test -v ./ui               # UI tests
 ```
 
-### UI Framework Migration
+### UI Framework
 
-**Note:** Quaero migrated from Metro UI v5 to Spectre CSS for improved maintainability and modern design patterns.
+**Framework:** Vanilla JavaScript with Alpine.js and Bulma CSS
 
-**Git Checkpoint (Before Major Changes):**
-```bash
-# Create migration branch
-git checkout -b refactor-spectre-css
-
-# Create checkpoint
-git commit -m "Checkpoint before Spectre CSS migration"
-```
-
-**Full Migration Checklist:** See [docs/MIGRATION_TESTING.md](docs/MIGRATION_TESTING.md) for comprehensive testing checklist and rollback procedures.
+**Important:** The project uses Alpine.js for client-side interactivity and Bulma CSS for styling.
 
 ## Project Structure
 
@@ -267,7 +257,7 @@ quaero/
 quaero serve
 
 # With custom port
-quaero serve --port 8080
+quaero serve --port 8085
 
 # With custom config
 quaero serve --config /path/to/quaero.toml
@@ -390,7 +380,7 @@ Scheduler → Collection Event → Collectors scrape data → Documents created
    ↓
 2. Extension captures cookies/tokens
    ↓
-3. Extension connects to ws://localhost:8080/ws
+3. Extension connects to ws://localhost:8085/ws
    ↓
 4. Extension sends auth data
    ↓
@@ -564,15 +554,18 @@ WS   /ws                             - Real-time updates & log streaming
 
 ### Building
 
-```bash
+```powershell
 # Development build
-./scripts/build.ps1
+.\scripts\build.ps1
 
 # Production build
-./scripts/build.ps1 -Release
+.\scripts\build.ps1 -Release
 
 # Clean build
-./scripts/build.ps1 -Clean
+.\scripts\build.ps1 -Clean
+
+# Build and run
+.\scripts\build.ps1 -Run
 ```
 
 ### Testing
@@ -599,7 +592,7 @@ go run .
 ```
 
 **For Development/Debugging Only:**
-```bash
+```powershell
 # Run tests directly (requires manual service start)
 .\scripts\build.ps1 -Run      # Start service in separate window first
 
@@ -651,7 +644,7 @@ See [CLAUDE.md](CLAUDE.md) for:
 ### Environment Variables
 
 ```bash
-QUAERO_PORT=8080
+QUAERO_PORT=8085
 QUAERO_HOST=localhost
 QUAERO_LOG_LEVEL=info
 ```
@@ -722,17 +715,19 @@ cache_size_mb = 100
 
 ### Server won't start
 
-```bash
-# Check port availability
-netstat -an | grep 8080
+```powershell
+# Check port availability (default is 8085)
+netstat -an | findstr :8085
 
-# Try different port
-./bin/quaero serve --port 8081
+# Check if config is valid
+type quaero.toml
+
+# Check logs in console output
 ```
 
 ### Extension not connecting
 
-1. Check server is running: http://localhost:8080/health
+1. Check server is running: http://localhost:8085/health
 2. Check extension permissions in Chrome
 3. Reload extension
 4. Check browser console for errors
@@ -750,7 +745,8 @@ netstat -an | grep 8080
 - [Dependency Injection](docs/dependency-injection.md) - Constructor-based DI pattern
 - [Requirements](docs/requirements.md) - Current requirements
 - [Remaining Requirements](docs/remaining-requirements.md) - Future work
-- [CLAUDE.md](CLAUDE.md) - Development standards
+- [AGENTS.md](AGENTS.md) - AI agent development standards
+- [CLAUDE.md](CLAUDE.md) - Legacy agent standards (see AGENTS.md)
 
 ## Current Status
 
@@ -803,7 +799,7 @@ See [docs/remaining-requirements.md](docs/remaining-requirements.md) for detaile
 
 ## Contributing
 
-See [CLAUDE.md](CLAUDE.md) for development guidelines and agent-based workflow.
+See [AGENTS.md](AGENTS.md) for AI agent development guidelines and workflow standards.
 
 ## License
 

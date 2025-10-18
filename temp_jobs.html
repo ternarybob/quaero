@@ -2,23 +2,112 @@
 <html lang="en">
 
 <head>
-    {{template "head.html" .}}
+    <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+
+
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre.min.css">
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-exp.min.css">
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-icons.min.css">
+
+
+<link rel="stylesheet" href="/static/quaero.css">
+
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+
+<script>
+    window.QUAERO_CLIENT_DEBUG =  true ;
+</script>
+
+
+<script src="/static/websocket-manager.js"></script>
+<script src="/static/common.js"></script>
+
+
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
     <title>Job Management - Quaero</title>
 </head>
 
 <body>
 
-    {{template "navbar.html" .}}
+    <header class="app-header">
+    <div class="app-header-content">
+        <nav class="app-header-nav" x-data="{ mobileMenuOpen: false }">
+            <a href="/" class="brand"><span class="text-bold">Quaero</span></a>
+            <button class="mobile-menu-toggle"
+                    @click="mobileMenuOpen = !mobileMenuOpen"
+                    :aria-expanded="mobileMenuOpen.toString()"
+                    aria-controls="nav-links"
+                    aria-label="Toggle navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div id="nav-links" class="nav-links"
+                 :class="{ 'mobile-open': mobileMenuOpen }"
+                 :aria-hidden="(!mobileMenuOpen).toString()">
+                <a href="/" @click="mobileMenuOpen = false" >HOME</a>
+                <a href="/auth" @click="mobileMenuOpen = false" >AUTHENTICATION</a>
+                <a href="/sources" @click="mobileMenuOpen = false" >SOURCES</a>
+                <a href="/jobs" @click="mobileMenuOpen = false" class="active">JOBS</a>
+                <a href="/documents" @click="mobileMenuOpen = false" >DOCUMENTS</a>
+                <a href="/chat" @click="mobileMenuOpen = false" >CHAT</a>
+                <a href="/config" @click="mobileMenuOpen = false" >SETTINGS</a>
+            </div>
+        </nav>
+        <span class="label label-success status-text">ONLINE</span>
+    </div>
+</header>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        
+        function updateNavbarStatus(online) {
+            const statusText = document.querySelector('.status-text');
+            if (statusText) {
+                if (online) {
+                    statusText.classList.remove('label-error');
+                    statusText.classList.add('label-success');
+                    statusText.textContent = 'ONLINE';
+                } else {
+                    statusText.classList.remove('label-success');
+                    statusText.classList.add('label-error');
+                    statusText.textContent = 'OFFLINE';
+                }
+            }
+        }
+
+        
+        if (typeof WebSocketManager !== 'undefined') {
+            WebSocketManager.onConnectionChange(updateNavbarStatus);
+            console.log('[Navbar] WebSocket subscription established');
+        } else {
+            console.error('[Navbar] WebSocketManager not loaded');
+        }
+    });
+</script>
+
 
     <main class="page-container">
 
-        <!-- Page Title -->
+        
         <div class="page-title">
             <h1>Job Management</h1>
             <p>Monitor and manage crawler jobs for Jira and Confluence data collection</p>
         </div>
 
-        <!-- Job Statistics -->
+        
         <section>
             <div class="card">
                 <div class="card-header">
@@ -71,7 +160,7 @@
             </div>
         </section>
 
-        <!-- Default Jobs -->
+        
         <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
@@ -112,7 +201,7 @@
             </div>
         </section>
 
-        <!-- Crawler Jobs -->
+        
         <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
@@ -130,9 +219,9 @@
                     </header>
                 </div>
                 <div class="card-body">
-                        <!-- Filter Controls -->
+                        
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-                            <!-- Multi-checkbox Status Filter -->
+                            
                             <div style="position: relative;" x-data="{ open: false }">
                                 <button type="button"
                                         class="form-select"
@@ -187,7 +276,7 @@
                             </select>
                         </div>
 
-                        <!-- Jobs Table -->
+                        
                         <table class="table striped border">
                             <thead>
                                 <tr>
@@ -209,16 +298,16 @@
                             </tbody>
                         </table>
 
-                        <!-- Pagination Controls -->
+                        
                         <div id="job-pagination-container" class="pagination-container" style="margin-top: 1rem;">
-                            <!-- Pagination will be rendered here by renderPagination() -->
+                            
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Job Detail -->
+        
         <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
@@ -237,18 +326,89 @@
             </div>
         </section>
 
-        <!-- Service Logs -->
+        
         <section style="margin-top: 1.5rem;">
-            {{template "service-logs.html" .}}
+            <div class="card" x-data="serviceLogs">
+
+    <div class="card-header">
+        <header class="navbar">
+            <section class="navbar-section">
+                <h2>Service Logs</h2>
+            </section>
+            <section class="navbar-section">
+                <div class="btn-group btn-group-block">
+                    <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                        <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
+                    </button>
+                    <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <button class="btn btn-sm btn-error" @click="clearLogs()" title="Clear Logs">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </section>
+        </header>
+    </div>
+
+    <div class="card-body">
+        <div class="terminal" x-ref="logContainer">
+            <template x-if="logs.length === 0">
+                <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
+            </template>
+            <template x-for="log in logs" :key="log.id">
+                <div class="terminal-line">
+                    <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
+                    <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                    <span x-text="log.message"></span>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+
         </section>
 
     </main>
 
-    {{template "footer.html" .}}
+    <footer style="text-align: center; padding: 2rem; color: var(--text-secondary); font-size: 0.875rem; border-top: 1px solid var(--border-color);">
+  <div id="footer-version">
+    Quaero
+  </div>
+</footer>
 
-    {{template "snackbar.html" .}}
+<script>
+  
+  fetch('/api/version')
+    .then(response => response.json())
+    .then(data => {
+      const footerEl = document.getElementById('footer-version');
+      if (footerEl && data.version) {
+        footerEl.innerHTML = `Quaero • Version ${data.version} • Build ${data.build}`;
+      }
+    })
+    .catch(error => {
+      console.error('Failed to load version:', error);
+    });
+</script>
 
-    <!-- Create Job Modal -->
+
+    <script>
+
+
+document.addEventListener('DOMContentLoaded', function() {
+    
+    if (!document.getElementById('toast-container')) {
+        const toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        toastContainer.id = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+});
+</script>
+
+
+    
     <div id="create-job-modal" class="modal" @keydown.escape.window="closeCreateJobModal()">
         <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
         <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
@@ -259,7 +419,7 @@
             <div class="modal-body">
                 <div class="content">
                     <form id="create-job-form">
-                        <!-- Source Selection -->
+                        
                         <div class="form-group">
                             <label class="form-label">Source</label>
                             <select class="form-select" id="job-source-select" required>
@@ -268,7 +428,7 @@
                             <p class="form-input-hint">Select the data source for this job</p>
                         </div>
 
-                        <!-- Refresh Source Checkbox -->
+                        
                         <div class="form-group">
                             <label class="form-checkbox">
                                 <input type="checkbox" id="refresh-source-checkbox">
@@ -277,14 +437,14 @@
                             <p class="form-input-hint">If checked, the job will fetch the latest source configuration before starting</p>
                         </div>
 
-                        <!-- Optional Seed URLs -->
+                        
                         <div class="form-group">
                             <label class="form-label">Seed URLs (Optional)</label>
                             <textarea id="seed-urls-textarea" class="form-input" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
                             <p class="form-input-hint">One URL per line. Leave empty to derive from source configuration</p>
                         </div>
 
-                        <!-- Loading State -->
+                        
                         <div id="modal-loading" style="display: none; text-align: center; padding: 1rem;">
                             <i class="fas fa-spinner fa-pulse fa-2x"></i>
                             <p style="margin-top: 0.5rem;">Creating job...</p>
@@ -300,7 +460,7 @@
     </div>
 
     <script>
-        // State management
+        
         let allJobs = [];
         let filteredJobs = [];
         let selectedJob = null;
@@ -309,7 +469,7 @@
         const pageSize = 50;
         let autoRefreshInterval = null;
 
-        // Load job statistics
+        
         async function loadStats() {
             console.log('[Jobs] loadStats() called');
             try {
@@ -347,19 +507,19 @@
             }
         }
 
-        // Load all jobs
+        
         async function loadJobs() {
             const tbody = document.getElementById('jobs-table-body');
 
             try {
-                // Build query parameters from filters
+                
                 const params = new URLSearchParams();
                 params.append('limit', pageSize);
                 params.append('offset', (currentPage - 1) * pageSize);
                 params.append('order_by', 'created_at');
                 params.append('order_dir', 'DESC');
 
-                // Build comma-separated status values from checkboxes
+                
                 const statusCheckboxes = document.querySelectorAll('.status-checkbox:checked');
                 const statusValues = Array.from(statusCheckboxes).map(cb => cb.value);
                 const statusFilter = statusValues.join(',');
@@ -396,13 +556,13 @@
             }
         }
 
-        // Filter jobs based on dropdowns
+        
         function filterJobs() {
-            currentPage = 1; // Reset to first page when filtering
-            loadJobs(); // Reload with new filters
+            currentPage = 1; 
+            loadJobs(); 
         }
 
-        // Update status filter label and trigger filter
+        
         function updateStatusFilter() {
             const checkboxes = document.querySelectorAll('.status-checkbox');
             const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
@@ -419,33 +579,33 @@
             filterJobs();
         }
 
-        // Select all status checkboxes
+        
         function selectAllStatuses() {
             const checkboxes = document.querySelectorAll('.status-checkbox');
             checkboxes.forEach(cb => cb.checked = true);
             updateStatusFilter();
         }
 
-        // Clear all status checkboxes
+        
         function clearAllStatuses() {
             const checkboxes = document.querySelectorAll('.status-checkbox');
             checkboxes.forEach(cb => cb.checked = false);
             updateStatusFilter();
         }
 
-        // Render jobs table
+        
         function renderJobs() {
             const tbody = document.getElementById('jobs-table-body');
             const countElement = document.getElementById('document-count');
             const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
 
-            // Update count display
+            
             if (countElement) {
                 countElement.textContent = `${totalJobs}`;
             }
             document.getElementById('job-count').textContent = `${totalJobs}`;
 
-            // Update custom pagination
+            
             renderPagination(totalPages);
 
             if (!filteredJobs || filteredJobs.length === 0) {
@@ -496,7 +656,7 @@
             }).join('');
         }
 
-        // Get status badge HTML
+        
         function getStatusBadge(status) {
             const badges = {
                 'pending': '<span class="label label-warning">Pending</span>',
@@ -508,7 +668,7 @@
             return badges[status] || '<span class="label">Unknown</span>';
         }
 
-        // Get progress text
+        
         function getProgressText(job) {
             if (!job.progress) return 'N/A';
 
@@ -525,7 +685,7 @@
             return 'N/A';
         }
 
-        // Custom pagination rendering
+        
         function renderPagination(totalPages) {
             const container = document.getElementById('job-pagination-container');
             if (!container) return;
@@ -537,14 +697,14 @@
 
             let html = '<ul class="pagination">';
 
-            // Previous button
+            
             if (currentPage > 1) {
                 html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage - 1})">Previous</a></li>`;
             } else {
                 html += '<li class="page-item disabled"><a href="#">Previous</a></li>';
             }
 
-            // Page numbers (show max 7 pages)
+            
             const maxVisible = 7;
             let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
             let endPage = Math.min(totalPages, startPage + maxVisible - 1);
@@ -575,7 +735,7 @@
                 html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${totalPages})">${totalPages}</a></li>`;
             }
 
-            // Next button
+            
             if (currentPage < totalPages) {
                 html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage + 1})">Next</a></li>`;
             } else {
@@ -586,13 +746,13 @@
             container.innerHTML = html;
         }
 
-        // Pagination page change handler
+        
         function changePage(pageNumber) {
             currentPage = pageNumber;
             loadJobs();
         }
 
-        // Select and display job details
+        
         function selectJob(index) {
             selectedJob = filteredJobs[index];
             displayJobDetail(selectedJob);
@@ -619,7 +779,7 @@
             }
         }
 
-        // Rerun a job
+        
         async function rerunJob(jobId) {
             if (!confirm(`Rerun job ${jobId.substring(0, 8)}?\n\nThis will create a new job with the same configuration.`)) {
                 return;
@@ -669,7 +829,7 @@
             }
         }
 
-        // Cancel a running job
+        
         async function cancelJob(jobId) {
             if (!confirm(`Cancel job ${jobId.substring(0, 8)}?\n\nThe job will be stopped immediately.`)) {
                 return;
@@ -718,7 +878,7 @@
             }
         }
 
-        // Delete a job
+        
         async function deleteJob(jobId) {
             if (!confirm(`Delete job ${jobId.substring(0, 8)}?\n\nThis will permanently remove the job from the database.`)) {
                 return;
@@ -767,25 +927,25 @@
             }
         }
 
-        // Auto-refresh for running jobs
+        
         function startAutoRefresh() {
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
             }
 
             autoRefreshInterval = setInterval(() => {
-                // Check if there are any running jobs
+                
                 const hasRunningJobs = allJobs.some(job => job.status === 'running');
                 if (hasRunningJobs) {
-                    loadJobs(); // Silently refresh
-                    loadStats(); // Update stats
-                    loadJobQueue(); // Update queue data
-                    loadDefaultJobs(); // Update default jobs status
+                    loadJobs(); 
+                    loadStats(); 
+                    loadJobQueue(); 
+                    loadDefaultJobs(); 
                 }
-            }, 5000); // Refresh every 5 seconds
+            }, 5000); 
         }
 
-        // Initialize on page load
+        
         document.addEventListener('DOMContentLoaded', function () {
             console.log('[Jobs] ==================== PAGE LOAD ====================');
             console.log('[Jobs] DOMContentLoaded event fired');
@@ -794,27 +954,27 @@
             
             loadStats();
             loadJobs();
-            loadJobQueue(); // Load queue data on initial page load
-            loadDefaultJobs(); // Load default jobs on initial page load
+            loadJobQueue(); 
+            loadDefaultJobs(); 
             startAutoRefresh();
             
             console.log('[Jobs] Page initialization complete');
             console.log('[Jobs] ====================================================');
         });
 
-        // Cleanup on page unload
+        
         window.addEventListener('beforeunload', function () {
             if (autoRefreshInterval) {
                 clearInterval(autoRefreshInterval);
             }
         });
 
-        // Ensure Alpine.js is fully initialized
+        
         document.addEventListener('alpine:init', function () {
             console.log('[Jobs] Alpine.js initialized');
         });
 
-        // Initialize highlight.js - only for job detail, not service logs
+        
         if (typeof hljs !== 'undefined') {
             const codeBlock = document.querySelector('#job-detail-json code');
             if (codeBlock) {
@@ -822,7 +982,7 @@
             }
         }
 
-        // Job creation modal functions
+        
         let modalTriggerElement = null;
 
         async function showCreateJobModal() {
@@ -832,7 +992,7 @@
             document.body.classList.add('modal-open');
             await loadSourcesForJobCreation();
 
-            // Move focus to first focusable element in modal
+            
             setTimeout(() => {
                 const modalContainer = modal.querySelector('.modal-container');
                 if (modalContainer) {
@@ -846,10 +1006,10 @@
             const modal = document.getElementById('create-job-modal');
             modal.classList.remove('active');
             document.body.classList.remove('modal-open');
-            // Reset form
+            
             document.getElementById('create-job-form').reset();
 
-            // Restore focus to trigger element
+            
             if (modalTriggerElement) {
                 setTimeout(() => {
                     modalTriggerElement.focus();
@@ -858,7 +1018,7 @@
             }
         }
 
-        // ESC key handler for modal
+        
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 const modal = document.getElementById('create-job-modal');
@@ -868,7 +1028,7 @@
             }
         });
 
-        // Focus trap for modal
+        
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Tab') {
                 const modal = document.getElementById('create-job-modal');
@@ -908,7 +1068,7 @@
 
                 const sources = await response.json();
 
-                // Clear existing options except the first placeholder
+                
                 sourceSelect.innerHTML = '<option value="">Select a source...</option>';
 
                 if (!sources || sources.length === 0) {
@@ -920,7 +1080,7 @@
                     return;
                 }
 
-                // Add sources to dropdown
+                
                 sources.forEach(source => {
                     const option = document.createElement('option');
                     option.value = source.id;
@@ -953,7 +1113,7 @@
             const seedUrlsText = seedUrlsTextarea.value.trim();
             const seedURLs = seedUrlsText ? seedUrlsText.split('\n').map(url => url.trim()).filter(url => url) : [];
 
-            // Show loading state
+            
             modalLoading.style.display = 'block';
             createButton.disabled = true;
 
@@ -989,10 +1149,10 @@
 
                 const result = await response.json();
 
-                // Show success message
+                
                 window.showNotification(`Job created successfully! Job ID: ${result.job_id}`, 'success');
 
-                // Close modal and refresh
+                
                 closeCreateJobModal();
                 setTimeout(() => {
                     loadStats();
@@ -1011,7 +1171,7 @@
             }
         }
 
-        // Load queue data (optional enhancement)
+        
         async function loadJobQueue() {
             try {
                 const response = await fetch('/api/jobs/queue');
@@ -1021,7 +1181,7 @@
 
                 const queue = await response.json();
 
-                // Update pending and running counts in stats
+                
                 document.getElementById('stat-pending').textContent = queue.pending ? queue.pending.length : 0;
                 document.getElementById('stat-running').textContent = queue.running ? queue.running.length : 0;
 
@@ -1030,9 +1190,9 @@
             }
         }
 
-        // ===== DEFAULT JOBS MANAGEMENT =====
+        
 
-        // Load default jobs from API
+        
         async function loadDefaultJobs() {
             console.log('[Jobs] loadDefaultJobs() called');
             const tbody = document.getElementById('default-jobs-table-body');
@@ -1137,7 +1297,7 @@
             }
         }
 
-        // Toggle default job enabled/disabled status
+        
         async function toggleDefaultJob(jobName, enable) {
             const action = enable ? 'enable' : 'disable';
             const endpoint = `/api/jobs/default/${jobName}/${action}`;
@@ -1156,7 +1316,7 @@
 
                 window.showNotification(result.message || `Job ${enable ? 'enabled' : 'disabled'} successfully`, 'success');
 
-                // Reload default jobs to reflect changes
+                
                 setTimeout(() => loadDefaultJobs(), 500);
 
             } catch (error) {
@@ -1165,7 +1325,7 @@
             }
         }
 
-        // Edit job schedule (shows prompt)
+        
         function editJobSchedule(jobName, currentSchedule) {
             const newSchedule = prompt(
                 `Edit schedule for "${jobName}"\n\n` +
@@ -1185,7 +1345,7 @@
             }
         }
 
-        // Update job schedule via API
+        
         async function updateJobSchedule(jobName, schedule) {
             const endpoint = `/api/jobs/default/${jobName}/schedule`;
 
@@ -1207,7 +1367,7 @@
 
                 window.showNotification(result.message || 'Schedule updated successfully', 'success');
 
-                // Reload default jobs to reflect changes
+                
                 setTimeout(() => loadDefaultJobs(), 500);
 
             } catch (error) {

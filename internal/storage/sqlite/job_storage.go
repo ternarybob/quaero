@@ -275,28 +275,21 @@ func (s *JobStorage) UpdateJobStatus(ctx context.Context, jobID string, status s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Determine completed_at based on status
+	// Single query with conditional completed_at handling
+	// Terminal statuses set completed_at to NOW, non-terminal statuses clear it to NULL
 	query := `
 		UPDATE crawl_jobs
-		SET status = ?, error = ?, completed_at = ?
+		SET status = ?,
+		    error = ?,
+		    completed_at = CASE
+		        WHEN ? IN ('completed', 'failed', 'cancelled')
+		        THEN strftime('%s', 'now')
+		        ELSE NULL
+		    END
 		WHERE id = ?
 	`
 
-	var completedAt sql.NullInt64
-	if status == string(crawler.JobStatusCompleted) || status == string(crawler.JobStatusFailed) || status == string(crawler.JobStatusCancelled) {
-		completedAt.Valid = true
-		completedAt.Int64 = sql.NullInt64{}.Int64 // Current time will be set by trigger or we set it here
-		// For simplicity, we'll use a separate query to set completed_at to current time
-		query = `
-			UPDATE crawl_jobs
-			SET status = ?, error = ?, completed_at = strftime('%s', 'now')
-			WHERE id = ?
-		`
-		_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, jobID)
-		return err
-	}
-
-	_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, completedAt, jobID)
+	_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, status, jobID)
 	return err
 }
 
@@ -315,6 +308,44 @@ func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progre
 
 	_, err := s.db.db.ExecContext(ctx, query, progressJSON, jobID)
 	return err
+}
+
+// UpdateJobHeartbeat updates the last_heartbeat timestamp for a job
+func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `
+		UPDATE crawl_jobs
+		SET last_heartbeat = strftime('%s', 'now')
+		WHERE id = ?
+	`
+
+	_, err := s.db.db.ExecContext(ctx, query, jobID)
+	if err != nil {
+		return fmt.Errorf("failed to update job heartbeat: %w", err)
+	}
+	return nil
+}
+
+// GetStaleJobs returns jobs with stale heartbeats (older than threshold)
+func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
+	query := `
+		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		FROM crawl_jobs
+		WHERE status = 'running'
+		  AND COALESCE(last_heartbeat, started_at, created_at) < strftime('%s', 'now', '-' || ? || ' minutes')
+		ORDER BY COALESCE(last_heartbeat, started_at, created_at) ASC
+	`
+
+	rows, err := s.db.db.QueryContext(ctx, query, staleThresholdMinutes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stale jobs: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanJobs(rows)
 }
 
 // DeleteJob deletes a job by ID

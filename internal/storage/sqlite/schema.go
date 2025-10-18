@@ -207,6 +207,11 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 3: Add last_heartbeat column to crawl_jobs
+	if err := s.migrateAddHeartbeatColumn(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -468,5 +473,50 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	s.logger.Info().Msg("Migration to markdown-only storage completed successfully")
+	return nil
+}
+
+// migrateAddHeartbeatColumn adds last_heartbeat column to crawl_jobs table
+func (s *SQLiteDB) migrateAddHeartbeatColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasLastHeartbeat := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "last_heartbeat" {
+			hasLastHeartbeat = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasLastHeartbeat {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding last_heartbeat column to crawl_jobs")
+
+	// Add the last_heartbeat column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN last_heartbeat INTEGER`); err != nil {
+		return err
+	}
+
+	// Set default value to created_at for existing rows
+	s.logger.Info().Msg("Setting default last_heartbeat values for existing jobs")
+	if _, err := s.db.Exec(`UPDATE crawl_jobs SET last_heartbeat = created_at WHERE last_heartbeat IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: last_heartbeat column added successfully")
 	return nil
 }
