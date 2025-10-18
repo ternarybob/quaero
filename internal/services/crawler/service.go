@@ -250,27 +250,39 @@ func (s *Service) GetJobStatus(jobID string) (*CrawlJob, error) {
 
 // CancelJob cancels a running job
 func (s *Service) CancelJob(jobID string) error {
+	// Acquire lock to check job and update status
 	s.jobsMu.Lock()
-	defer s.jobsMu.Unlock()
-
 	job, exists := s.activeJobs[jobID]
 	if !exists {
+		s.jobsMu.Unlock()
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
 	if job.Status != JobStatusRunning {
+		s.jobsMu.Unlock()
 		return fmt.Errorf("job is not running: %s", job.Status)
 	}
 
 	job.Status = JobStatusCancelled
 	job.CompletedAt = time.Now()
+	s.jobsMu.Unlock()
 
-	// Clean up per-job HTTP client
+	// Persist cancellation status to database (outside lock to avoid contention)
+	if s.jobStorage != nil {
+		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job cancellation")
+		}
+	}
+
+	// Reacquire lock to clean up per-job HTTP client map
+	s.jobsMu.Lock()
 	if _, exists := s.jobClients[jobID]; exists {
 		delete(s.jobClients, jobID)
 		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after cancellation")
 	}
+	s.jobsMu.Unlock()
 
+	// Emit progress after persistence
 	s.emitProgress(job)
 
 	return nil
@@ -343,6 +355,12 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 			return
 		}
 
+		// Check if this URL belongs to our job
+		if itemJobID, ok := item.Metadata["job_id"].(string); !ok || itemJobID != jobID {
+			// URL belongs to different job, skip it (other workers will handle it)
+			continue
+		}
+
 		// Check depth limit
 		if config.MaxDepth > 0 && item.Depth > config.MaxDepth {
 			s.logger.Debug().
@@ -350,6 +368,8 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Int("depth", item.Depth).
 				Int("max_depth", config.MaxDepth).
 				Msg("Skipping URL beyond max depth")
+			// Count as failed to decrement pending count
+			s.updateProgress(jobID, false, true)
 			continue
 		}
 
@@ -644,12 +664,13 @@ func (s *Service) updateProgress(jobID string, success bool, failed bool) {
 
 	if success {
 		job.Progress.CompletedURLs++
+		job.Progress.PendingURLs-- // Decrement pending when URL is completed
 	}
 	if failed {
 		job.Progress.FailedURLs++
+		job.Progress.PendingURLs-- // Decrement pending when URL fails
 	}
 
-	job.Progress.PendingURLs = s.queue.Len()
 	job.Progress.Percentage = float64(job.Progress.CompletedURLs+job.Progress.FailedURLs) / float64(job.Progress.TotalURLs) * 100
 
 	// Estimate completion
@@ -731,8 +752,15 @@ func (s *Service) monitorCompletion(jobID string) {
 				return
 			}
 
+			// Check if job is in a terminal state (cancelled or failed) and exit
+			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
+				s.jobsMu.RUnlock()
+				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Monitor goroutine exiting for terminal job status")
+				return
+			}
+
 			// Check if job is complete
-			if job.Status == JobStatusRunning && s.queue.Len() == 0 && job.Progress.CompletedURLs+job.Progress.FailedURLs >= job.Progress.TotalURLs {
+			if job.Status == JobStatusRunning && job.Progress.PendingURLs == 0 && job.Progress.CompletedURLs+job.Progress.FailedURLs >= job.Progress.TotalURLs {
 				s.jobsMu.RUnlock()
 
 				// Mark job as completed

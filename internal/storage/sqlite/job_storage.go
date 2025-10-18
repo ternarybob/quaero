@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,19 @@ import (
 // unixToTime converts Unix timestamp to time.Time
 func unixToTime(unix int64) time.Time {
 	return time.Unix(unix, 0)
+}
+
+// splitAndTrim splits a string by delimiter and trims whitespace from each part
+func splitAndTrim(s string, delimiter string) []string {
+	parts := strings.Split(s, delimiter)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // JobStorage implements SQLite storage for crawler jobs
@@ -173,8 +187,30 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 			args = append(args, opts.SourceType)
 		}
 		if opts.Status != "" {
-			query += " AND status = ?"
-			args = append(args, opts.Status)
+			// Support comma-separated status values: "pending,running" -> IN clause
+			statuses := []string{}
+			for _, s := range splitAndTrim(opts.Status, ",") {
+				if s != "" {
+					statuses = append(statuses, s)
+				}
+			}
+
+			if len(statuses) == 1 {
+				// Single status: use equality
+				query += " AND status = ?"
+				args = append(args, statuses[0])
+			} else if len(statuses) > 1 {
+				// Multiple statuses: use IN clause
+				placeholders := ""
+				for i := range statuses {
+					if i > 0 {
+						placeholders += ", "
+					}
+					placeholders += "?"
+					args = append(args, statuses[i])
+				}
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+			}
 		}
 		if opts.EntityType != "" {
 			query += " AND entity_type = ?"
@@ -304,6 +340,54 @@ func (s *JobStorage) CountJobsByStatus(ctx context.Context, status string) (int,
 	query := "SELECT COUNT(*) FROM crawl_jobs WHERE status = ?"
 	var count int
 	err := s.db.db.QueryRowContext(ctx, query, status).Scan(&count)
+	return count, err
+}
+
+// CountJobsWithFilters returns count of jobs matching filter criteria
+func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+	query := "SELECT COUNT(*) FROM crawl_jobs WHERE 1=1"
+	args := []interface{}{}
+
+	// Apply same filters as ListJobs
+	if opts != nil {
+		if opts.SourceType != "" {
+			query += " AND source_type = ?"
+			args = append(args, opts.SourceType)
+		}
+		if opts.Status != "" {
+			// Support comma-separated status values: "pending,running" -> IN clause
+			statuses := []string{}
+			for _, s := range splitAndTrim(opts.Status, ",") {
+				if s != "" {
+					statuses = append(statuses, s)
+				}
+			}
+
+			if len(statuses) == 1 {
+				// Single status: use equality
+				query += " AND status = ?"
+				args = append(args, statuses[0])
+			} else if len(statuses) > 1 {
+				// Multiple statuses: use IN clause
+				placeholders := ""
+				for i := range statuses {
+					if i > 0 {
+						placeholders += ", "
+					}
+					placeholders += "?"
+					args = append(args, statuses[i])
+				}
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+			}
+		}
+		if opts.EntityType != "" {
+			query += " AND entity_type = ?"
+			args = append(args, opts.EntityType)
+		}
+	}
+
+	var count int
+	err := s.db.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	return count, err
 }
 

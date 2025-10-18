@@ -128,6 +128,11 @@ func (m *mockJobStorage) CountJobs(ctx context.Context) (int, error) {
 	return len(m.jobs), nil
 }
 
+func (m *mockJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+	// Simple mock implementation - just return total count
+	return m.CountJobs(ctx)
+}
+
 func (m *mockJobStorage) CountJobsByStatus(ctx context.Context, status string) (int, error) {
 	if m.jobs == nil {
 		return 0, nil

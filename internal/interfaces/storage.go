@@ -74,6 +74,7 @@ type JobStorage interface {
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)
+	CountJobsWithFilters(ctx context.Context, opts *ListOptions) (int, error)
 }
 
 // SourceStorage - interface for source configuration persistence

@@ -132,14 +132,48 @@
                 <div class="card-body">
                         <!-- Filter Controls -->
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-                            <select class="form-select" id="status-filter" onchange="filterJobs()">
-                                <option value="">All Statuses</option>
-                                <option value="pending">Pending</option>
-                                <option value="running">Running</option>
-                                <option value="completed">Completed</option>
-                                <option value="failed">Failed</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
+                            <!-- Multi-checkbox Status Filter -->
+                            <div style="position: relative;" x-data="{ open: false }">
+                                <button type="button"
+                                        class="form-select"
+                                        @click="open = !open"
+                                        style="text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+                                    <span id="status-filter-label">Status (2 selected)</span>
+                                    <i class="fas fa-chevron-down" style="font-size: 0.75rem;"></i>
+                                </button>
+                                <div x-show="open"
+                                     @click.outside="open = false"
+                                     style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: var(--border-radius); margin-top: 0.25rem; padding: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 100;">
+                                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                                        <button type="button" class="btn btn-sm" onclick="selectAllStatuses()" style="flex: 1;">
+                                            <i class="fas fa-check-double"></i> Select All
+                                        </button>
+                                        <button type="button" class="btn btn-sm" onclick="clearAllStatuses()" style="flex: 1;">
+                                            <i class="fas fa-times"></i> Clear All
+                                        </button>
+                                    </div>
+                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
+                                        <input type="checkbox" class="status-checkbox" value="pending" onchange="updateStatusFilter()" checked>
+                                        <i class="form-icon"></i> Pending
+                                    </label>
+                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
+                                        <input type="checkbox" class="status-checkbox" value="running" onchange="updateStatusFilter()" checked>
+                                        <i class="form-icon"></i> Running
+                                    </label>
+                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
+                                        <input type="checkbox" class="status-checkbox" value="completed" onchange="updateStatusFilter()">
+                                        <i class="form-icon"></i> Completed
+                                    </label>
+                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
+                                        <input type="checkbox" class="status-checkbox" value="failed" onchange="updateStatusFilter()">
+                                        <i class="form-icon"></i> Failed
+                                    </label>
+                                    <label class="form-checkbox" style="display: block; margin-bottom: 0;">
+                                        <input type="checkbox" class="status-checkbox" value="cancelled" onchange="updateStatusFilter()">
+                                        <i class="form-icon"></i> Cancelled
+                                    </label>
+                                </div>
+                            </div>
                             <select class="form-select" id="source-filter" onchange="filterJobs()">
                                 <option value="">All Sources</option>
                                 <option value="jira">Jira</option>
@@ -340,7 +374,11 @@
                 params.append('order_by', 'created_at');
                 params.append('order_dir', 'DESC');
 
-                const statusFilter = document.getElementById('status-filter').value;
+                // Build comma-separated status values from checkboxes
+                const statusCheckboxes = document.querySelectorAll('.status-checkbox:checked');
+                const statusValues = Array.from(statusCheckboxes).map(cb => cb.value);
+                const statusFilter = statusValues.join(',');
+
                 const sourceFilter = document.getElementById('source-filter').value;
                 const entityFilter = document.getElementById('entity-filter').value;
 
@@ -376,6 +414,37 @@
         function filterJobs() {
             currentPage = 1; // Reset to first page when filtering
             loadJobs(); // Reload with new filters
+        }
+
+        // Update status filter label and trigger filter
+        function updateStatusFilter() {
+            const checkboxes = document.querySelectorAll('.status-checkbox');
+            const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+            const label = document.getElementById('status-filter-label');
+
+            if (checkedCount === 0) {
+                label.textContent = 'Status (none selected)';
+            } else if (checkedCount === checkboxes.length) {
+                label.textContent = 'Status (all)';
+            } else {
+                label.textContent = `Status (${checkedCount} selected)`;
+            }
+
+            filterJobs();
+        }
+
+        // Select all status checkboxes
+        function selectAllStatuses() {
+            const checkboxes = document.querySelectorAll('.status-checkbox');
+            checkboxes.forEach(cb => cb.checked = true);
+            updateStatusFilter();
+        }
+
+        // Clear all status checkboxes
+        function clearAllStatuses() {
+            const checkboxes = document.querySelectorAll('.status-checkbox');
+            checkboxes.forEach(cb => cb.checked = false);
+            updateStatusFilter();
         }
 
         // Render jobs table
@@ -420,9 +489,11 @@
                         <td>${progressText}</td>
                         <td>${createdDate}</td>
                         <td class="text-center">
+                            ${job.status !== 'running' ? `
                             <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job" style="margin-right: 0.25rem;">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
+                            ` : ''}
                             ${job.status === 'running' ? `
                             <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job" style="margin-right: 0.25rem;">
                                 <i class="fas fa-stop"></i>

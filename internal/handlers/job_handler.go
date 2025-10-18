@@ -46,13 +46,14 @@ func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobSto
 
 // ListJobsHandler returns a paginated list of jobs
 // GET /api/jobs?limit=50&offset=0&status=completed&source=jira&entity=project
+// Note: status parameter supports comma-separated values (e.g., "pending,running")
 func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Parse query parameters
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
-	status := r.URL.Query().Get("status")
+	status := r.URL.Query().Get("status") // Supports comma-separated values (e.g., "pending,running"); parsing handled by storage layer
 	sourceType := r.URL.Query().Get("source")
 	entityType := r.URL.Query().Get("entity")
 	orderBy := r.URL.Query().Get("order_by")
@@ -104,11 +105,28 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		maskedJobs[i] = job.MaskSensitiveData()
 	}
 
-	// Get total count
-	totalCount, err := h.jobStorage.CountJobs(ctx)
-	if err != nil {
-		h.logger.Warn().Err(err).Msg("Failed to count jobs")
-		totalCount = len(jobs)
+	// Get total count - use filtered count when filters are present
+	totalCount := 0
+	hasFilters := opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "")
+
+	if hasFilters {
+		// Get filtered count matching the query criteria
+		filteredCount, err := h.jobStorage.CountJobsWithFilters(ctx, opts)
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to count filtered jobs, falling back to global count")
+			totalCount, _ = h.jobStorage.CountJobs(ctx)
+		} else {
+			totalCount = filteredCount
+		}
+	} else {
+		// No filters: use global count
+		globalCount, err := h.jobStorage.CountJobs(ctx)
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to count jobs")
+			totalCount = len(jobs)
+		} else {
+			totalCount = globalCount
+		}
 	}
 
 	response := map[string]interface{}{
@@ -218,6 +236,26 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
 		return
+	}
+
+	// Check if job is currently running in memory - prevent rerun of active jobs
+	job, err := h.crawlerService.GetJobStatus(jobID)
+	if err == nil && job != nil && job.Status == crawler.JobStatusRunning {
+		h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun active job")
+		http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
+		return
+	}
+
+	// Check if job is marked as running in storage
+	jobFromStorage, err := h.jobStorage.GetJob(ctx, jobID)
+	if err == nil && jobFromStorage != nil {
+		if crawlJob, ok := jobFromStorage.(*crawler.CrawlJob); ok {
+			if crawlJob.Status == crawler.JobStatusRunning {
+				h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun job marked as running in database")
+				http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
+				return
+			}
+		}
 	}
 
 	// Parse optional config update from request body
