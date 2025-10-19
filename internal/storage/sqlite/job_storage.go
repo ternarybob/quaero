@@ -4,18 +4,37 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
+
+// ErrJobNotFound is returned when a job is not found in the database
+var ErrJobNotFound = errors.New("job not found")
 
 // unixToTime converts Unix timestamp to time.Time
 func unixToTime(unix int64) time.Time {
 	return time.Unix(unix, 0)
+}
+
+// splitAndTrim splits a string by delimiter and trims whitespace from each part
+func splitAndTrim(s string, delimiter string) []string {
+	parts := strings.Split(s, delimiter)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // JobStorage implements SQLite storage for crawler jobs
@@ -173,8 +192,30 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 			args = append(args, opts.SourceType)
 		}
 		if opts.Status != "" {
-			query += " AND status = ?"
-			args = append(args, opts.Status)
+			// Support comma-separated status values: "pending,running" -> IN clause
+			statuses := []string{}
+			for _, s := range splitAndTrim(opts.Status, ",") {
+				if s != "" {
+					statuses = append(statuses, s)
+				}
+			}
+
+			if len(statuses) == 1 {
+				// Single status: use equality
+				query += " AND status = ?"
+				args = append(args, statuses[0])
+			} else if len(statuses) > 1 {
+				// Multiple statuses: use IN clause
+				placeholders := ""
+				for i := range statuses {
+					if i > 0 {
+						placeholders += ", "
+					}
+					placeholders += "?"
+					args = append(args, statuses[i])
+				}
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+			}
 		}
 		if opts.EntityType != "" {
 			query += " AND entity_type = ?"
@@ -239,28 +280,21 @@ func (s *JobStorage) UpdateJobStatus(ctx context.Context, jobID string, status s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Determine completed_at based on status
+	// Single query with conditional completed_at handling
+	// Terminal statuses set completed_at to NOW, non-terminal statuses clear it to NULL
 	query := `
 		UPDATE crawl_jobs
-		SET status = ?, error = ?, completed_at = ?
+		SET status = ?,
+		    error = ?,
+		    completed_at = CASE
+		        WHEN ? IN ('completed', 'failed', 'cancelled')
+		        THEN strftime('%s', 'now')
+		        ELSE NULL
+		    END
 		WHERE id = ?
 	`
 
-	var completedAt sql.NullInt64
-	if status == string(crawler.JobStatusCompleted) || status == string(crawler.JobStatusFailed) || status == string(crawler.JobStatusCancelled) {
-		completedAt.Valid = true
-		completedAt.Int64 = sql.NullInt64{}.Int64 // Current time will be set by trigger or we set it here
-		// For simplicity, we'll use a separate query to set completed_at to current time
-		query = `
-			UPDATE crawl_jobs
-			SET status = ?, error = ?, completed_at = strftime('%s', 'now')
-			WHERE id = ?
-		`
-		_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, jobID)
-		return err
-	}
-
-	_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, completedAt, jobID)
+	_, err := s.db.db.ExecContext(ctx, query, status, errorMsg, status, jobID)
 	return err
 }
 
@@ -279,6 +313,44 @@ func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progre
 
 	_, err := s.db.db.ExecContext(ctx, query, progressJSON, jobID)
 	return err
+}
+
+// UpdateJobHeartbeat updates the last_heartbeat timestamp for a job
+func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `
+		UPDATE crawl_jobs
+		SET last_heartbeat = strftime('%s', 'now')
+		WHERE id = ?
+	`
+
+	_, err := s.db.db.ExecContext(ctx, query, jobID)
+	if err != nil {
+		return fmt.Errorf("failed to update job heartbeat: %w", err)
+	}
+	return nil
+}
+
+// GetStaleJobs returns jobs with stale heartbeats (older than threshold)
+func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
+	query := `
+		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		FROM crawl_jobs
+		WHERE status = 'running'
+		  AND COALESCE(last_heartbeat, started_at, created_at) < strftime('%s', 'now', '-' || ? || ' minutes')
+		ORDER BY COALESCE(last_heartbeat, started_at, created_at) ASC
+	`
+
+	rows, err := s.db.db.QueryContext(ctx, query, staleThresholdMinutes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stale jobs: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanJobs(rows)
 }
 
 // DeleteJob deletes a job by ID
@@ -307,6 +379,54 @@ func (s *JobStorage) CountJobsByStatus(ctx context.Context, status string) (int,
 	return count, err
 }
 
+// CountJobsWithFilters returns count of jobs matching filter criteria
+func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+	query := "SELECT COUNT(*) FROM crawl_jobs WHERE 1=1"
+	args := []interface{}{}
+
+	// Apply same filters as ListJobs
+	if opts != nil {
+		if opts.SourceType != "" {
+			query += " AND source_type = ?"
+			args = append(args, opts.SourceType)
+		}
+		if opts.Status != "" {
+			// Support comma-separated status values: "pending,running" -> IN clause
+			statuses := []string{}
+			for _, s := range splitAndTrim(opts.Status, ",") {
+				if s != "" {
+					statuses = append(statuses, s)
+				}
+			}
+
+			if len(statuses) == 1 {
+				// Single status: use equality
+				query += " AND status = ?"
+				args = append(args, statuses[0])
+			} else if len(statuses) > 1 {
+				// Multiple statuses: use IN clause
+				placeholders := ""
+				for i := range statuses {
+					if i > 0 {
+						placeholders += ", "
+					}
+					placeholders += "?"
+					args = append(args, statuses[i])
+				}
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+			}
+		}
+		if opts.EntityType != "" {
+			query += " AND entity_type = ?"
+			args = append(args, opts.EntityType)
+		}
+	}
+
+	var count int
+	err := s.db.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
 // scanJob scans a single row into CrawlJob
 func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	var (
@@ -327,7 +447,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("job not found")
+			return nil, ErrJobNotFound
 		}
 		return nil, fmt.Errorf("failed to scan job: %w", err)
 	}
@@ -478,4 +598,84 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 	}
 
 	return jobs, rows.Err()
+}
+
+// AppendJobLog appends a single log entry to the job's logs array
+func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Query current logs
+	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
+	var logsJSON sql.NullString
+	err := s.db.db.QueryRowContext(ctx, query, jobID).Scan(&logsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrJobNotFound
+		}
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to query job logs")
+		return fmt.Errorf("failed to query job logs: %w", err)
+	}
+
+	// Deserialize existing logs
+	var logs []models.JobLogEntry
+	if logsJSON.Valid && logsJSON.String != "" && logsJSON.String != "[]" {
+		if err := json.Unmarshal([]byte(logsJSON.String), &logs); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to deserialize logs, starting with empty array")
+			logs = []models.JobLogEntry{}
+		}
+	}
+
+	// Append new log entry
+	logs = append(logs, logEntry)
+
+	// Limit to last 100 entries to prevent unbounded growth
+	if len(logs) > 100 {
+		logs = logs[len(logs)-100:]
+	}
+
+	// Serialize back to JSON
+	logsBytes, err := json.Marshal(logs)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to serialize logs")
+		return fmt.Errorf("failed to serialize logs: %w", err)
+	}
+
+	// Update database
+	updateQuery := "UPDATE crawl_jobs SET logs = ? WHERE id = ?"
+	_, err = s.db.db.ExecContext(ctx, updateQuery, string(logsBytes), jobID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update job logs")
+		return fmt.Errorf("failed to update job logs: %w", err)
+	}
+
+	s.logger.Debug().Str("job_id", jobID).Int("log_count", len(logs)).Msg("Job log appended")
+	return nil
+}
+
+// GetJobLogs retrieves all log entries for a job
+func (s *JobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
+	var logsJSON sql.NullString
+	err := s.db.db.QueryRowContext(ctx, query, jobID).Scan(&logsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrJobNotFound
+		}
+		return nil, fmt.Errorf("failed to query job logs: %w", err)
+	}
+
+	// Handle NULL/empty cases by returning empty array
+	if !logsJSON.Valid || logsJSON.String == "" || logsJSON.String == "[]" {
+		return []models.JobLogEntry{}, nil
+	}
+
+	// Deserialize JSON array
+	var logs []models.JobLogEntry
+	if err := json.Unmarshal([]byte(logsJSON.String), &logs); err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to deserialize logs")
+		return nil, fmt.Errorf("failed to deserialize logs: %w", err)
+	}
+
+	return logs, nil
 }

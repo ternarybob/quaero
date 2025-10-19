@@ -58,11 +58,11 @@ func TestSearchByIdentifier(t *testing.T) {
 
 	// Document 1: Jira issue with issue_key in metadata
 	jiraDoc := &models.Document{
-		ID:         "jira-1",
-		SourceType: "jira",
-		SourceID:   "BUG-123",
-		Title:      "Authentication bug in login flow",
-		Content:    "Users cannot log in when using SSO authentication",
+		ID:              "jira-1",
+		SourceType:      "jira",
+		SourceID:        "BUG-123",
+		Title:           "Authentication bug in login flow",
+		ContentMarkdown: "Users cannot log in when using SSO authentication",
 		Metadata: map[string]interface{}{
 			"issue_key":   "BUG-123",
 			"project_key": "BUG",
@@ -74,11 +74,11 @@ func TestSearchByIdentifier(t *testing.T) {
 
 	// Document 2: Confluence page referencing BUG-123 in metadata.referenced_issues
 	confluenceDoc := &models.Document{
-		ID:         "confluence-1",
-		SourceType: "confluence",
-		SourceID:   "12345",
-		Title:      "Authentication Architecture",
-		Content:    "This page documents the authentication system design.",
+		ID:              "confluence-1",
+		SourceType:      "confluence",
+		SourceID:        "12345",
+		Title:           "Authentication Architecture",
+		ContentMarkdown: "This page documents the authentication system design.",
 		Metadata: map[string]interface{}{
 			"space_key":         "TECH",
 			"referenced_issues": []interface{}{"BUG-123", "STORY-456"},
@@ -89,23 +89,23 @@ func TestSearchByIdentifier(t *testing.T) {
 
 	// Document 3: Another Confluence page with BUG-123 in title
 	confluenceDoc2 := &models.Document{
-		ID:         "confluence-2",
-		SourceType: "confluence",
-		SourceID:   "12346",
-		Title:      "Fix for bug-123 deployed to production",
-		Content:    "The fix has been deployed successfully.",
-		Metadata:   map[string]interface{}{},
-		CreatedAt:  now.Add(-2 * time.Hour),
-		UpdatedAt:  now.Add(-2 * time.Hour),
+		ID:              "confluence-2",
+		SourceType:      "confluence",
+		SourceID:        "12346",
+		Title:           "Fix for bug-123 deployed to production",
+		ContentMarkdown: "The fix has been deployed successfully.",
+		Metadata:        map[string]interface{}{},
+		CreatedAt:       now.Add(-2 * time.Hour),
+		UpdatedAt:       now.Add(-2 * time.Hour),
 	}
 
 	// Document 4: GitHub commit with BUG-123 in content
 	githubDoc := &models.Document{
-		ID:         "github-1",
-		SourceType: "github",
-		SourceID:   "abc123def456",
-		Title:      "Fix authentication timeout",
-		Content:    "This commit resolves BUG-123 by increasing the session timeout to 30 minutes.",
+		ID:              "github-1",
+		SourceType:      "github",
+		SourceID:        "abc123def456",
+		Title:           "Fix authentication timeout",
+		ContentMarkdown: "This commit resolves BUG-123 by increasing the session timeout to 30 minutes.",
 		Metadata: map[string]interface{}{
 			"commit_sha": "abc123def456",
 			"author":     "John Doe",
@@ -116,11 +116,11 @@ func TestSearchByIdentifier(t *testing.T) {
 
 	// Document 5: Unrelated document (should not match)
 	unrelatedDoc := &models.Document{
-		ID:         "jira-2",
-		SourceType: "jira",
-		SourceID:   "STORY-999",
-		Title:      "New feature request",
-		Content:    "Implement dark mode for the application.",
+		ID:              "jira-2",
+		SourceType:      "jira",
+		SourceID:        "STORY-999",
+		Title:           "New feature request",
+		ContentMarkdown: "Implement dark mode for the application.",
 		Metadata: map[string]interface{}{
 			"issue_key":   "STORY-999",
 			"project_key": "STORY",
@@ -262,11 +262,11 @@ func TestSearchByIdentifierWithReferencedIssuesAsStringArray(t *testing.T) {
 
 	// Create document with referenced_issues as []string (alternative serialization)
 	doc := &models.Document{
-		ID:         "test-1",
-		SourceType: "confluence",
-		SourceID:   "99999",
-		Title:      "Test Document",
-		Content:    "Test content",
+		ID:              "test-1",
+		SourceType:      "confluence",
+		SourceID:        "99999",
+		Title:           "Test Document",
+		ContentMarkdown: "Test content",
 		Metadata: map[string]interface{}{
 			"referenced_issues": []string{"TASK-100", "TASK-200"},
 		},
@@ -304,11 +304,11 @@ func TestSearchByIdentifierMetadataIntegrity(t *testing.T) {
 
 	// Create document with complex metadata
 	doc := &models.Document{
-		ID:         "meta-test-1",
-		SourceType: "jira",
-		SourceID:   "TEST-500",
-		Title:      "Metadata Test",
-		Content:    "Testing metadata preservation",
+		ID:              "meta-test-1",
+		SourceType:      "jira",
+		SourceID:        "TEST-500",
+		Title:           "Metadata Test",
+		ContentMarkdown: "Testing metadata preservation",
 		Metadata: map[string]interface{}{
 			"issue_key":         "TEST-500",
 			"project_key":       "TEST",

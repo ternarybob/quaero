@@ -7,9 +7,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +20,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
+	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 // JobHandler handles job-related API requests
@@ -29,30 +30,33 @@ type JobHandler struct {
 	sourceService    *sources.Service
 	authStorage      interfaces.AuthStorage
 	schedulerService interfaces.SchedulerService
+	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
 		sourceService:    sourceService,
 		authStorage:      authStorage,
 		schedulerService: schedulerService,
+		config:           config,
 		logger:           logger,
 	}
 }
 
 // ListJobsHandler returns a paginated list of jobs
 // GET /api/jobs?limit=50&offset=0&status=completed&source=jira&entity=project
+// Note: status parameter supports comma-separated values (e.g., "pending,running")
 func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Parse query parameters
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
-	status := r.URL.Query().Get("status")
+	status := r.URL.Query().Get("status") // Supports comma-separated values (e.g., "pending,running"); parsing handled by storage layer
 	sourceType := r.URL.Query().Get("source")
 	entityType := r.URL.Query().Get("entity")
 	orderBy := r.URL.Query().Get("order_by")
@@ -91,10 +95,18 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		OrderDir:   orderDir,
 	}
 
-	jobs, err := h.crawlerService.ListJobs(ctx, opts)
+	jobsInterface, err := h.crawlerService.ListJobs(ctx, opts)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to list jobs")
 		http.Error(w, "Failed to list jobs", http.StatusInternalServerError)
+		return
+	}
+
+	// Type assert to []*crawler.CrawlJob
+	jobs, ok := jobsInterface.([]*crawler.CrawlJob)
+	if !ok {
+		h.logger.Error().Msg("Unexpected result type from ListJobs")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -104,11 +116,28 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		maskedJobs[i] = job.MaskSensitiveData()
 	}
 
-	// Get total count
-	totalCount, err := h.jobStorage.CountJobs(ctx)
-	if err != nil {
-		h.logger.Warn().Err(err).Msg("Failed to count jobs")
-		totalCount = len(jobs)
+	// Get total count - use filtered count when filters are present
+	totalCount := 0
+	hasFilters := opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "")
+
+	if hasFilters {
+		// Get filtered count matching the query criteria
+		filteredCount, err := h.jobStorage.CountJobsWithFilters(ctx, opts)
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to count filtered jobs, falling back to global count")
+			totalCount, _ = h.jobStorage.CountJobs(ctx)
+		} else {
+			totalCount = filteredCount
+		}
+	} else {
+		// No filters: use global count
+		globalCount, err := h.jobStorage.CountJobs(ctx)
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to count jobs")
+			totalCount = len(jobs)
+		} else {
+			totalCount = globalCount
+		}
 	}
 
 	response := map[string]interface{}{
@@ -141,10 +170,10 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to get job from active jobs first
-	job, err := h.crawlerService.GetJobStatus(jobID)
+	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
 
 	// If job is not in active jobs or there was an error, try to get it from database
-	if err != nil || job == nil {
+	if err != nil || jobInterface == nil {
 		if err != nil {
 			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not in active jobs, checking storage")
 		}
@@ -156,12 +185,25 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var ok bool
-		job, ok = jobInterface.(*crawler.CrawlJob)
+		job, ok := jobInterface.(*crawler.CrawlJob)
 		if !ok {
 			http.Error(w, "Invalid job type", http.StatusInternalServerError)
 			return
 		}
+
+		// Mask sensitive data before returning
+		masked := job.MaskSensitiveData()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(masked)
+		return
+	}
+
+	// Type assert the job from active jobs
+	job, ok := jobInterface.(*crawler.CrawlJob)
+	if !ok {
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
 	}
 
 	// Mask sensitive data before returning
@@ -187,10 +229,18 @@ func (h *JobHandler) GetJobResultsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	results, err := h.crawlerService.GetJobResults(jobID)
+	resultsInterface, err := h.crawlerService.GetJobResults(jobID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job results")
 		http.Error(w, "Failed to get job results", http.StatusInternalServerError)
+		return
+	}
+
+	// Type assert to []*crawler.CrawlResult
+	results, ok := resultsInterface.([]*crawler.CrawlResult)
+	if !ok {
+		h.logger.Error().Str("job_id", jobID).Msg("Unexpected result type from GetJobResults")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -199,6 +249,44 @@ func (h *JobHandler) GetJobResultsHandler(w http.ResponseWriter, r *http.Request
 		"job_id":  jobID,
 		"results": results,
 		"count":   len(results),
+	})
+}
+
+// GetJobLogsHandler returns the logs of a job
+// GET /api/jobs/{id}/logs
+func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/logs
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	logs, err := h.jobStorage.GetJobLogs(ctx, jobID)
+	if err != nil {
+		if errors.Is(err, sqlite.ErrJobNotFound) {
+			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not found when retrieving logs")
+			http.Error(w, "Job not found", http.StatusNotFound)
+			return
+		}
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
+		http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_id": jobID,
+		"logs":   logs,
+		"count":  len(logs),
 	})
 }
 
@@ -218,6 +306,33 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	if jobID == "" {
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
 		return
+	}
+
+	// Check if job is currently running in memory - prevent rerun of active jobs
+	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
+	if err == nil && jobInterface != nil {
+		job, ok := jobInterface.(*crawler.CrawlJob)
+		if !ok {
+			http.Error(w, "Invalid job type", http.StatusInternalServerError)
+			return
+		}
+		if job.Status == crawler.JobStatusRunning {
+			h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun active job")
+			http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Check if job is marked as running in storage
+	jobFromStorage, err := h.jobStorage.GetJob(ctx, jobID)
+	if err == nil && jobFromStorage != nil {
+		if crawlJob, ok := jobFromStorage.(*crawler.CrawlJob); ok {
+			if crawlJob.Status == crawler.JobStatusRunning {
+				h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun job marked as running in database")
+				http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
+				return
+			}
+		}
 	}
 
 	// Parse optional config update from request body
@@ -299,10 +414,17 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if job is still running
-	job, err := h.crawlerService.GetJobStatus(jobID)
-	if err == nil && job != nil && job.Status == crawler.JobStatusRunning {
-		http.Error(w, "Cannot delete a running job. Cancel it first.", http.StatusBadRequest)
-		return
+	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
+	if err == nil && jobInterface != nil {
+		job, ok := jobInterface.(*crawler.CrawlJob)
+		if !ok {
+			http.Error(w, "Invalid job type", http.StatusInternalServerError)
+			return
+		}
+		if job.Status == crawler.JobStatusRunning {
+			http.Error(w, "Cannot delete a running job. Cancel it first.", http.StatusBadRequest)
+			return
+		}
 	}
 
 	err = h.jobStorage.DeleteJob(ctx, jobID)
@@ -417,7 +539,7 @@ func (h *JobHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Derive seed URLs if not provided
 	seedURLs := req.SeedURLs
 	if len(seedURLs) == 0 {
-		seedURLs = h.deriveSeedURLs(source)
+		seedURLs = common.DeriveSeedURLs(source, h.config.Crawler.UseHTMLSeeds, h.logger)
 		if len(seedURLs) == 0 {
 			http.Error(w, "Failed to derive seed URLs from source configuration", http.StatusBadRequest)
 			return
@@ -663,23 +785,24 @@ func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Get current job status
-	status, err := h.schedulerService.GetJobStatus(jobName)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Job not found: %v", err), http.StatusNotFound)
+	// Update job schedule
+	if err := h.schedulerService.UpdateJobSchedule(jobName, req.Schedule); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to update job schedule")
+		http.Error(w, fmt.Sprintf("Failed to update schedule: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Re-register job with new schedule
-	// Note: This requires the scheduler to expose the job handler
-	// For now, we'll return an error indicating this functionality requires config update
-	h.logger.Warn().
+	h.logger.Info().
 		Str("job_name", jobName).
-		Str("old_schedule", status.Schedule).
 		Str("new_schedule", req.Schedule).
-		Msg("Schedule update requested but requires config file update")
+		Msg("Job schedule updated successfully")
 
-	http.Error(w, "Schedule updates require configuration file modification. Please update quaero.toml and restart the service.", http.StatusNotImplemented)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name": jobName,
+		"schedule": req.Schedule,
+		"message":  "Schedule updated successfully",
+	})
 }
 
 // deriveEntityType derives entity type based on source type
@@ -693,60 +816,5 @@ func (h *JobHandler) deriveEntityType(source *models.SourceConfig) string {
 		return "repos"
 	default:
 		return "all"
-	}
-}
-
-// deriveSeedURLs derives seed URLs from source configuration
-// Normalizes base URL using net/url to handle various path formats properly
-func (h *JobHandler) deriveSeedURLs(source *models.SourceConfig) []string {
-	// Parse base URL using net/url for proper normalization
-	parsedURL, err := url.Parse(source.BaseURL)
-	if err != nil {
-		h.logger.Error().Err(err).Str("base_url", source.BaseURL).Msg("Failed to parse base URL")
-		return []string{}
-	}
-
-	// Normalize the path by removing trailing slashes
-	path := strings.TrimRight(parsedURL.Path, "/")
-
-	// Check if path already contains /rest/ to avoid duplication
-	if strings.Contains(path, "/rest/") {
-		h.logger.Warn().
-			Str("base_url", source.BaseURL).
-			Msg("Base URL already contains /rest/ path, using as-is")
-		return []string{source.BaseURL}
-	}
-
-	// Build base URL with scheme and host
-	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
-
-	switch source.Type {
-	case models.SourceTypeJira:
-		// For Jira, strip any path segments after host and add /rest/api/3/project
-		// Handles: https://example.atlassian.net, https://example.atlassian.net/jira, https://example.atlassian.net/jira/
-		return []string{fmt.Sprintf("%s/rest/api/3/project", baseURL)}
-
-	case models.SourceTypeConfluence:
-		// For Confluence, preserve /wiki root path but drop any additional segments
-		// Handles: https://example.atlassian.net/wiki, https://example.atlassian.net/wiki/, https://example.atlassian.net/wiki/home
-		if strings.HasPrefix(path, "/wiki") {
-			return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
-		}
-		// Fallback if /wiki not in path - add it
-		return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
-
-	case models.SourceTypeGithub:
-		// GitHub repos endpoint (if filters specify org/user)
-		if org, ok := source.Filters["org"].(string); ok {
-			return []string{fmt.Sprintf("%s/orgs/%s/repos", baseURL, org)}
-		}
-		if user, ok := source.Filters["user"].(string); ok {
-			return []string{fmt.Sprintf("%s/users/%s/repos", baseURL, user)}
-		}
-		return []string{}
-
-	default:
-		h.logger.Warn().Str("source_type", source.Type).Msg("Unknown source type, cannot derive seed URLs")
-		return []string{}
 	}
 }

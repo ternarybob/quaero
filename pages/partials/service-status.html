@@ -1,31 +1,31 @@
 <div class="card">
 
-    <div class="card__header">
+    <div class="card-header">
         <h2>Quick Actions</h2>
     </div>
 
-    <div class="content">
+    <div class="card-body">
 
-        <div class="q-d-flex q-gap-2">
-            <a href="/sources" class="btn btn-primary btn--sm outline">
-                <span class="icon"><i class="fas fa-database"></i></span>
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+            <a href="/sources" class="btn btn-sm btn-primary">
+                <i class="fas fa-database"></i>
                 <span>Manage Sources</span>
             </a>
-            <a href="/jobs" class="btn btn-info btn--sm outline">
-                <span class="icon"><i class="fas fa-tasks"></i></span>
+            <a href="/jobs" class="btn btn-sm">
+                <i class="fas fa-tasks"></i>
                 <span>View Jobs</span>
             </a>
-            <a href="/documents" class="btn btn-info btn--sm outline">
-                <span class="icon"><i class="fas fa-file-alt"></i></span>
+            <a href="/documents" class="btn btn-sm">
+                <i class="fas fa-file-alt"></i>
                 <span>Browse Documents</span>
             </a>
-            <a href="/chat" class="btn btn-success btn--sm outline">
-                <span class="icon"><i class="fas fa-comments"></i></span>
+            <a href="/chat" class="btn btn-sm btn-success">
+                <i class="fas fa-comments"></i>
                 <span>Chat</span>
             </a>
         </div>
         <hr>
-        <p class="text-md q-text-muted">
+        <p style="font-size: 0.875rem; color: var(--text-secondary);">
             <strong>Getting Started:</strong> Configure data sources in the <a href="/sources">Sources</a> page,
             then start a crawl job to collect and index data. Use <a href="/chat">Chat</a> to query your data.
         </p>

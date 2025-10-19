@@ -1,19 +1,13 @@
-<div id="snackbar" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: none;"></div>
-
 <script>
-function showSnackbar(message, type = 'info') {
-    const snackbar = document.getElementById('snackbar');
-    if (!snackbar) return;
-
-    snackbar.textContent = message;
-    snackbar.className = 'snackbar snackbar--' + type;
-    snackbar.style.display = 'block';
-
-    setTimeout(function() {
-        snackbar.style.display = 'none';
-    }, 3000);
-}
-
-// Make showNotification globally available as an alias
-window.showNotification = showSnackbar;
+// Create toast container on page load
+// Toast notification function is defined in common.js
+document.addEventListener('DOMContentLoaded', function() {
+    // Create toast container if it doesn't exist
+    if (!document.getElementById('toast-container')) {
+        const toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container';
+        toastContainer.id = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+});
 </script>

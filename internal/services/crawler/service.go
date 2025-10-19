@@ -86,7 +86,33 @@ func (s *Service) Start() error {
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
-func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, config CrawlConfig, sourceID string, refreshSource bool, sourceConfigSnapshot *models.SourceConfig, authSnapshot *models.AuthCredentials) (string, error) {
+func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, configInterface interface{}, sourceID string, refreshSource bool, sourceConfigSnapshotInterface interface{}, authSnapshotInterface interface{}) (string, error) {
+	// Type assert config
+	config, ok := configInterface.(CrawlConfig)
+	if !ok {
+		return "", fmt.Errorf("invalid config type: expected CrawlConfig")
+	}
+
+	// Type assert source config snapshot (can be nil)
+	var sourceConfigSnapshot *models.SourceConfig
+	if sourceConfigSnapshotInterface != nil {
+		snapshot, ok := sourceConfigSnapshotInterface.(*models.SourceConfig)
+		if !ok {
+			return "", fmt.Errorf("invalid source config snapshot type: expected *models.SourceConfig")
+		}
+		sourceConfigSnapshot = snapshot
+	}
+
+	// Type assert auth snapshot (can be nil)
+	var authSnapshot *models.AuthCredentials
+	if authSnapshotInterface != nil {
+		snapshot, ok := authSnapshotInterface.(*models.AuthCredentials)
+		if !ok {
+			return "", fmt.Errorf("invalid auth snapshot type: expected *models.AuthCredentials")
+		}
+		authSnapshot = snapshot
+	}
+
 	jobID := uuid.New().String()
 
 	job := &CrawlJob{
@@ -224,6 +250,21 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status in database")
 		}
+
+		// Initialize heartbeat for the running job
+		if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to initialize job heartbeat")
+		}
+
+		// Append job start log
+		logEntry := models.JobLogEntry{
+			Timestamp: time.Now().Format("15:04:05"),
+			Level:     "info",
+			Message:   "Job started",
+		}
+		if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append job start log")
+		}
 	}
 
 	// Emit started event
@@ -236,48 +277,129 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 }
 
 // GetJobStatus returns the current status of a job
-func (s *Service) GetJobStatus(jobID string) (*CrawlJob, error) {
+func (s *Service) GetJobStatus(jobID string) (interface{}, error) {
+	// Fast path: Check in-memory storage first (for running jobs)
 	s.jobsMu.RLock()
-	defer s.jobsMu.RUnlock()
-
 	job, exists := s.activeJobs[jobID]
-	if !exists {
-		return nil, fmt.Errorf("job not found: %s", jobID)
+	s.jobsMu.RUnlock()
+
+	if exists {
+		return job, nil
 	}
 
-	return job, nil
+	// Database fallback: Query persistent storage for completed/failed/cancelled jobs
+	if s.jobStorage != nil {
+		jobInterface, err := s.jobStorage.GetJob(s.ctx, jobID)
+		if err == nil {
+			// Type assertion to convert interface{} to *CrawlJob
+			if crawlJob, ok := jobInterface.(*CrawlJob); ok {
+				s.logger.Debug().
+					Str("job_id", jobID).
+					Str("status", string(crawlJob.Status)).
+					Msg("Retrieved job from database (not in active jobs)")
+				return crawlJob, nil
+			}
+		} else {
+			// Log non-"not found" errors as they indicate database issues
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "job not found") && !strings.Contains(errMsg, "not found") {
+				s.logger.Warn().
+					Err(err).
+					Str("job_id", jobID).
+					Msg("Database error while retrieving job")
+				return nil, fmt.Errorf("database error retrieving job %s: %w", jobID, err)
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("job not found: %s", jobID)
 }
 
 // CancelJob cancels a running job
 func (s *Service) CancelJob(jobID string) error {
+	// Acquire lock to check job and update status
 	s.jobsMu.Lock()
-	defer s.jobsMu.Unlock()
-
 	job, exists := s.activeJobs[jobID]
 	if !exists {
+		s.jobsMu.Unlock()
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
 	if job.Status != JobStatusRunning {
+		s.jobsMu.Unlock()
 		return fmt.Errorf("job is not running: %s", job.Status)
 	}
 
 	job.Status = JobStatusCancelled
 	job.CompletedAt = time.Now()
+	s.jobsMu.Unlock()
 
-	// Clean up per-job HTTP client
+	// Persist cancellation status to database (outside lock to avoid contention)
+	if s.jobStorage != nil {
+		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job cancellation")
+		}
+	}
+
+	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
+	s.jobsMu.Lock()
 	if _, exists := s.jobClients[jobID]; exists {
 		delete(s.jobClients, jobID)
 		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after cancellation")
 	}
+	// Remove from activeJobs since job is now in terminal state
+	delete(s.activeJobs, jobID)
+	s.logger.Debug().Str("job_id", jobID).Msg("Removed cancelled job from active jobs")
+	s.jobsMu.Unlock()
 
+	// Emit progress after persistence
+	s.emitProgress(job)
+
+	return nil
+}
+
+// FailJob marks a job as failed with a reason (called by scheduler for stale job detection)
+func (s *Service) FailJob(jobID string, reason string) error {
+	// Acquire lock to check job and update status
+	s.jobsMu.Lock()
+	job, exists := s.activeJobs[jobID]
+	if !exists {
+		s.jobsMu.Unlock()
+		return fmt.Errorf("job not found in active jobs: %s", jobID)
+	}
+
+	// Set job status to failed
+	job.Status = JobStatusFailed
+	job.CompletedAt = time.Now()
+	job.Error = reason
+	s.jobsMu.Unlock()
+
+	// Persist failed status to database (outside lock to avoid contention)
+	if s.jobStorage != nil {
+		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job failure")
+		}
+	}
+
+	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
+	s.jobsMu.Lock()
+	if _, exists := s.jobClients[jobID]; exists {
+		delete(s.jobClients, jobID)
+		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after failure")
+	}
+	// Remove from activeJobs since job is now in terminal state
+	delete(s.activeJobs, jobID)
+	s.logger.Debug().Str("job_id", jobID).Str("reason", reason).Msg("Removed failed job from active jobs")
+	s.jobsMu.Unlock()
+
+	// Emit progress after persistence
 	s.emitProgress(job)
 
 	return nil
 }
 
 // GetJobResults returns the results of a completed job
-func (s *Service) GetJobResults(jobID string) ([]*CrawlResult, error) {
+func (s *Service) GetJobResults(jobID string) (interface{}, error) {
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
 
@@ -287,6 +409,34 @@ func (s *Service) GetJobResults(jobID string) ([]*CrawlResult, error) {
 	}
 
 	return results, nil
+}
+
+// GetActiveJobIDs returns a list of all active job IDs
+func (s *Service) GetActiveJobIDs() []string {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobIDs := make([]string, 0, len(s.activeJobs))
+	for jobID := range s.activeJobs {
+		jobIDs = append(jobIDs, jobID)
+	}
+
+	return jobIDs
+}
+
+// GetRunningJobIDs returns a list of job IDs with status = running
+func (s *Service) GetRunningJobIDs() []string {
+	s.jobsMu.RLock()
+	defer s.jobsMu.RUnlock()
+
+	jobIDs := make([]string, 0)
+	for jobID, job := range s.activeJobs {
+		if job.Status == JobStatusRunning {
+			jobIDs = append(jobIDs, jobID)
+		}
+	}
+
+	return jobIDs
 }
 
 // startWorkers launches worker goroutines for a job
@@ -321,6 +471,18 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Int("completed", job.Progress.CompletedURLs).
 				Int("max_pages", config.MaxPages).
 				Msg("Max pages reached, stopping worker")
+
+			// Append max pages log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "info",
+					Message:   fmt.Sprintf("Max pages limit reached (%d/%d)", job.Progress.CompletedURLs, config.MaxPages),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append max pages log")
+				}
+			}
 			return
 		}
 
@@ -343,6 +505,12 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 			return
 		}
 
+		// Check if this URL belongs to our job
+		if itemJobID, ok := item.Metadata["job_id"].(string); !ok || itemJobID != jobID {
+			// URL belongs to different job, skip it (other workers will handle it)
+			continue
+		}
+
 		// Check depth limit
 		if config.MaxDepth > 0 && item.Depth > config.MaxDepth {
 			s.logger.Debug().
@@ -350,6 +518,8 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Int("depth", item.Depth).
 				Int("max_depth", config.MaxDepth).
 				Msg("Skipping URL beyond max depth")
+			// Count as failed to decrement pending count
+			s.updateProgress(jobID, false, true)
 			continue
 		}
 
@@ -381,11 +551,35 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 			}
 		} else {
 			s.updateProgress(jobID, false, true)
+
+			// Append request failure log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "error",
+					Message:   fmt.Sprintf("Request failed: %s - %s", item.URL, result.Error),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append request failure log")
+				}
+			}
 		}
 
 		// Emit progress periodically (every 10 URLs)
 		if (job.Progress.CompletedURLs+job.Progress.FailedURLs)%10 == 0 {
 			s.emitProgress(job)
+
+			// Append progress milestone log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "info",
+					Message:   fmt.Sprintf("Progress: %d completed, %d failed, %d pending", job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append progress log")
+				}
+			}
 		}
 	}
 }
@@ -404,6 +598,15 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 		URL:      item.URL,
 		Duration: duration,
 		Metadata: item.Metadata,
+	}
+
+	// Also set Body field from metadata for dual-pathway support
+	if item.Metadata != nil {
+		if bodyRaw, ok := item.Metadata["response_body"]; ok {
+			if body, ok := bodyRaw.([]byte); ok {
+				result.Body = body
+			}
+		}
 	}
 
 	if err != nil {
@@ -644,12 +847,13 @@ func (s *Service) updateProgress(jobID string, success bool, failed bool) {
 
 	if success {
 		job.Progress.CompletedURLs++
+		job.Progress.PendingURLs-- // Decrement pending when URL is completed
 	}
 	if failed {
 		job.Progress.FailedURLs++
+		job.Progress.PendingURLs-- // Decrement pending when URL fails
 	}
 
-	job.Progress.PendingURLs = s.queue.Len()
 	job.Progress.Percentage = float64(job.Progress.CompletedURLs+job.Progress.FailedURLs) / float64(job.Progress.TotalURLs) * 100
 
 	// Estimate completion
@@ -719,11 +923,15 @@ func (s *Service) monitorCompletion(jobID string) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	heartbeatCounter := 0 // Track ticks for heartbeat updates (every 15 ticks = 30 seconds)
+
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
+			heartbeatCounter++
+
 			s.jobsMu.RLock()
 			job, exists := s.activeJobs[jobID]
 			if !exists {
@@ -731,8 +939,56 @@ func (s *Service) monitorCompletion(jobID string) {
 				return
 			}
 
+			// Check if job is in a terminal state (cancelled or failed) and exit
+			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
+				s.jobsMu.RUnlock()
+
+				// Append terminal state log
+				if s.jobStorage != nil {
+					var message string
+					if job.Status == JobStatusCancelled {
+						message = "Job cancelled"
+					} else {
+						message = fmt.Sprintf("Job failed: %s", job.Error)
+					}
+					logEntry := models.JobLogEntry{
+						Timestamp: time.Now().Format("15:04:05"),
+						Level:     "error",
+						Message:   message,
+					}
+					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append terminal state log")
+					}
+				}
+
+				// Only remove from activeJobs if jobStorage is nil or job was already persisted
+				// When jobStorage is nil, keep job in memory for lookup
+				if s.jobStorage == nil {
+					s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Keeping terminal state job in memory (no job storage)")
+				} else {
+					// Job should have been persisted by CancelJob/FailJob, safe to remove
+					s.jobsMu.Lock()
+					delete(s.activeJobs, jobID)
+					s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Removed terminal state job from active jobs")
+					s.jobsMu.Unlock()
+				}
+
+				s.logger.Debug().Str("job_id", jobID).Str("status", string(job.Status)).Msg("Monitor goroutine exiting for terminal job status")
+				return
+			}
+
+			// Update heartbeat every 30 seconds (15 ticks)
+			if heartbeatCounter >= 15 {
+				if s.jobStorage != nil {
+					if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job heartbeat")
+					}
+				}
+				heartbeatCounter = 0
+			}
+
 			// Check if job is complete
-			if job.Status == JobStatusRunning && s.queue.Len() == 0 && job.Progress.CompletedURLs+job.Progress.FailedURLs >= job.Progress.TotalURLs {
+			if job.Status == JobStatusRunning && job.Progress.PendingURLs == 0 && job.Progress.CompletedURLs+job.Progress.FailedURLs >= job.Progress.TotalURLs {
 				s.jobsMu.RUnlock()
 
 				// Mark job as completed
@@ -744,27 +1000,55 @@ func (s *Service) monitorCompletion(jobID string) {
 				s.jobsMu.Unlock()
 
 				// Persist job completion to database
+				persistSucceeded := false
 				if s.jobStorage != nil {
 					if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
-						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job completion")
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job completion - keeping job in memory")
+					} else {
+						persistSucceeded = true
+					}
+
+					// Append job completion log
+					logEntry := models.JobLogEntry{
+						Timestamp: time.Now().Format("15:04:05"),
+						Level:     "info",
+						Message:   fmt.Sprintf("Job completed: %d successful, %d failed", job.Progress.CompletedURLs, job.Progress.FailedURLs),
+					}
+					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append completion log")
 					}
 				}
 
 				s.emitProgress(job)
 
-				// Clean up per-job HTTP client
-				s.jobsMu.Lock()
-				if _, exists := s.jobClients[jobID]; exists {
-					delete(s.jobClients, jobID)
-					s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
+				// Only remove from activeJobs if persistence succeeded or jobStorage is nil
+				if s.jobStorage == nil {
+					s.logger.Debug().Str("job_id", jobID).Msg("Keeping completed job in memory (no job storage)")
+				} else if persistSucceeded {
+					// Persistence succeeded, safe to clean up and remove from memory
+					s.jobsMu.Lock()
+					if _, exists := s.jobClients[jobID]; exists {
+						delete(s.jobClients, jobID)
+						s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client")
+					}
+					delete(s.activeJobs, jobID)
+					s.logger.Debug().Str("job_id", jobID).Msg("Removed completed job from active jobs")
+					s.jobsMu.Unlock()
+				} else {
+					// Persistence failed, keep job in memory for subsequent lookups
+					s.logger.Debug().Str("job_id", jobID).Msg("Keeping completed job in memory due to persistence failure")
 				}
-				s.jobsMu.Unlock()
 
 				s.logger.Info().
 					Str("job_id", jobID).
 					Int("completed", job.Progress.CompletedURLs).
 					Int("failed", job.Progress.FailedURLs).
 					Msg("Crawl job completed")
+
+				// Continue monitoring if persistence failed (job still in activeJobs)
+				if !persistSucceeded && s.jobStorage != nil {
+					continue
+				}
 
 				return
 			}
@@ -774,7 +1058,7 @@ func (s *Service) monitorCompletion(jobID string) {
 }
 
 // ListJobs returns a list of jobs with optional filtering
-func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*CrawlJob, error) {
+func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
 	if s.jobStorage == nil {
 		return nil, fmt.Errorf("job storage not configured")
 	}
@@ -796,7 +1080,7 @@ func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([
 }
 
 // RerunJob re-executes a previous job with the same or updated configuration
-func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *CrawlConfig) (string, error) {
+func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig interface{}) (string, error) {
 	if s.jobStorage == nil {
 		return "", fmt.Errorf("job storage not configured")
 	}
@@ -815,7 +1099,12 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 	// Use original config or updated config
 	config := originalJob.Config
 	if updateConfig != nil {
-		config = *updateConfig
+		// Type assert to *CrawlConfig
+		crawlConfig, ok := updateConfig.(*CrawlConfig)
+		if !ok {
+			return "", fmt.Errorf("invalid config type: expected *CrawlConfig")
+		}
+		config = *crawlConfig
 	}
 
 	// Use stored seed URLs from original job
@@ -843,26 +1132,78 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 }
 
 // WaitForJob blocks until a job completes or context is cancelled
-func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult, error) {
+//
+// IMPORTANT: This function expects in-process waiting where the job is running in the same
+// service instance and s.jobResults is populated during execution. When GetJobStatus() falls
+// back to the database and retrieves a completed job from another instance or a previous run,
+// the results may not be available in s.jobResults (which is in-memory only).
+//
+// Edge case: If the database returns a completed job but GetJobResults() returns "not found",
+// this indicates the job was completed by a different service instance or the service was
+// restarted. In this case, the function returns an error. Callers should handle this by
+// checking the job's ResultCount field from GetJobStatus() for summary information.
+func (s *Service) WaitForJob(ctx context.Context, jobID string) (interface{}, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+
+	pollCount := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
-			job, err := s.GetJobStatus(jobID)
+			pollCount++
+
+			jobInterface, err := s.GetJobStatus(jobID)
 			if err != nil {
+				s.logger.Debug().
+					Err(err).
+					Str("job_id", jobID).
+					Int("poll_count", pollCount).
+					Msg("Failed to get job status while waiting")
 				return nil, fmt.Errorf("failed to get job status: %w", err)
+			}
+
+			// Type assert to *CrawlJob
+			job, ok := jobInterface.(*CrawlJob)
+			if !ok {
+				s.logger.Error().Str("job_id", jobID).Msg("Unexpected result type from GetJobStatus")
+				return nil, fmt.Errorf("unexpected result type from GetJobStatus")
+			}
+
+			// Periodic status logging every 10 polls
+			if pollCount%10 == 0 {
+				s.logger.Debug().
+					Str("job_id", jobID).
+					Str("status", string(job.Status)).
+					Int("poll_count", pollCount).
+					Msg("Job status polling update")
 			}
 
 			// Check if job is complete
 			if job.Status == JobStatusCompleted || job.Status == JobStatusFailed || job.Status == JobStatusCancelled {
-				results, err := s.GetJobResults(jobID)
+				resultsInterface, err := s.GetJobResults(jobID)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get job results: %w", err)
+					// Edge case: Job completed in another instance or before service restart
+					s.logger.Warn().
+						Err(err).
+						Str("job_id", jobID).
+						Str("status", string(job.Status)).
+						Int("result_count", job.ResultCount).
+						Int("failed_count", job.FailedCount).
+						Msg("Job completed but results not available (completed in different instance or before restart)")
+					return nil, fmt.Errorf("job %s completed but results unavailable (result_count: %d, failed_count: %d): %w",
+						jobID, job.ResultCount, job.FailedCount, err)
 				}
+
+				// Type assert to []*CrawlResult
+				results, ok := resultsInterface.([]*CrawlResult)
+				if !ok {
+					s.logger.Error().Str("job_id", jobID).Msg("Unexpected result type from GetJobResults")
+					return nil, fmt.Errorf("unexpected result type from GetJobResults")
+				}
+
 				return results, nil
 			}
 		}

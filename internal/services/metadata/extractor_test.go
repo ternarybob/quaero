@@ -11,8 +11,8 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Title:   "Fix bug in PROJ-123",
-			Content: "This addresses PROJ-123 and is related to PROJ-456",
+			Title:           "Fix bug in PROJ-123",
+			ContentMarkdown: "This addresses PROJ-123 and is related to PROJ-456",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -41,7 +41,7 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Content: "Please review @alice and cc @bob for approval",
+			ContentMarkdown: "Please review @alice and cc @bob for approval",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -70,7 +70,7 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Content: "Fixes #123 and implements #456",
+			ContentMarkdown: "Fixes #123 and implements #456",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -99,8 +99,8 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Title:   "PROJ-100: Important fix",
-			Content: "Also fixes PROJ-200",
+			Title:           "PROJ-100: Important fix",
+			ContentMarkdown: "Also fixes PROJ-200",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -122,8 +122,8 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Title:   "PROJ-123 PROJ-123",
-			Content: "PROJ-123 mentioned again",
+			Title:           "PROJ-123 PROJ-123",
+			ContentMarkdown: "PROJ-123 mentioned again",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -149,8 +149,8 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Title:   "",
-			Content: "",
+			Title:           "",
+			ContentMarkdown: "",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -167,8 +167,8 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Title:   "Just a regular title",
-			Content: "Regular content with no special patterns",
+			Title:           "Just a regular title",
+			ContentMarkdown: "Regular content with no special patterns",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -185,7 +185,7 @@ func TestExtractor_ExtractMetadata(t *testing.T) {
 		extractor := NewExtractor(nil)
 
 		doc := &models.Document{
-			Content: "See page:123456 and page:789012 for details",
+			ContentMarkdown: "See page:123456 and page:789012 for details",
 		}
 
 		metadata, err := extractor.ExtractMetadata(doc)
@@ -311,7 +311,7 @@ func TestExtractor_Patterns(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			doc := &models.Document{Content: tc.content}
+			doc := &models.Document{ContentMarkdown: tc.content}
 			metadata, err := extractor.ExtractMetadata(doc)
 			if err != nil {
 				t.Fatalf("ExtractMetadata failed for %q: %v", tc.content, err)
@@ -343,7 +343,7 @@ func TestExtractor_Patterns(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			doc := &models.Document{Content: tc.content}
+			doc := &models.Document{ContentMarkdown: tc.content}
 			metadata, err := extractor.ExtractMetadata(doc)
 			if err != nil {
 				t.Fatalf("ExtractMetadata failed for %q: %v", tc.content, err)

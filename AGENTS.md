@@ -1,19 +1,33 @@
-# CLAUDE.md
+# AGENTS.md
 
-> **Note:** This file is maintained for legacy compatibility. For the latest AI agent guidelines, see [AGENTS.md](AGENTS.md).
+This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) when working with code in this repository.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## MOST IMPORTANT INSTRUCTIONS: BUILD AND TEST
+## CRITICAL: BUILD AND TEST
 
 **Failure to follow these instructions will result in your removal from the project.**
 
-### Build and Run Instructions (Windows ONLY)
+### Build Instructions (Windows ONLY)
 
--   **Building, compiling, and running the application MUST be done using the following scripts:**
-    -   `./scripts/build.ps1`
-    -   `./scripts/build.ps1 -Run`
--   **The ONLY exception** is using `go build` for a compile test, with no output binary.
+**Building, compiling, and running the application MUST be done using:**
+- `.\scripts\build.ps1`
+- `.\scripts\build.ps1 -Run`
+- **ONLY exception:** `go build` for compile tests (no output binary)
+
+**Build Commands:**
+
+```powershell
+# Development build
+.\scripts\build.ps1
+
+# Clean build
+.\scripts\build.ps1 -Clean
+
+# Release build (optimized)
+.\scripts\build.ps1 -Release
+
+# Build and run
+.\scripts\build.ps1 -Run
+```
 
 ### Testing Instructions
 
@@ -58,25 +72,30 @@ go test -v ./ui               # UI tests
 - ❌ DO NOT manually start the service before the test runner
 - ✅ Let the test runner control the service lifecycle
 
-## Build & Development Commands
+## Project Overview
 
-### Building
+**Quaero** (Latin: "I seek, I search") - A knowledge collection system with RAG capabilities.
 
-```powershell
-# Development build
-.\scripts\build.ps1
+### Key Features
 
-# Clean build
-.\scripts\build.ps1 -Clean
+- 🔐 **Automatic Authentication** - Chrome extension captures credentials
+- 📊 **Real-time Updates** - WebSocket-based live log streaming
+- 💾 **SQLite Storage** - Local database with full-text search
+- 🌐 **Web Interface** - Browser-based UI for collection and browsing
+- 🤖 **Local LLM** - Offline inference with llama.cpp
+- 🔍 **Vector Search** - 768-dimension embeddings for semantic search
+- ⚡ **Fast Collection** - Efficient scraping and storage
+- ⏰ **Scheduled Jobs** - Automated crawling and document summarization
 
-# Release build (optimized)
-.\scripts\build.ps1 -Release
+### Technology Stack
 
-# Build and run
-.\scripts\build.ps1 -Run
-```
-
-**Note:** For AI agents, use ONLY the build script. Manual `quaero serve` commands are for end-users (see README.md).
+- **Language:** Go 1.25+
+- **Storage:** SQLite with FTS5 (full-text search)
+- **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
+- **LLM:** llama.cpp (offline mode), Mock mode (testing)
+- **Authentication:** Chrome extension → HTTP service
+- **Logging:** github.com/ternarybob/arbor (structured logging)
+- **Configuration:** TOML via github.com/pelletier/go-toml/v2
 
 ## Architecture Overview
 
@@ -462,7 +481,6 @@ pages/
 
 **Alpine.js Usage:**
 - Use Alpine.js for interactive UI components
-- Component definitions in `pages/static/alpine-components.js`
 - Data binding and reactivity via Alpine directives
 
 **Bulma CSS:**
@@ -589,13 +607,12 @@ The Go-native test infrastructure (`test/run_tests.go` and `test/main_test.go`):
 
 1. Create storage interface in `internal/interfaces/`
 2. Implement SQLite storage in `internal/storage/sqlite/`
-
-4. Create scraper service in `internal/services/`
-5. Subscribe to `EventCollectionTriggered` in service constructor
-6. Initialize in `internal/app/app.go` (after EventService)
-7. Add handler in `internal/handlers/`
-8. Register routes in `internal/server/routes.go`
-9. Add UI page in `pages/`
+3. Create scraper service in `internal/services/`
+4. Subscribe to `EventCollectionTriggered` in service constructor
+5. Initialize in `internal/app/app.go` (after EventService)
+6. Add handler in `internal/handlers/`
+7. Register routes in `internal/server/routes.go`
+8. Add UI page in `pages/`
 
 ### Adding a New API Endpoint
 
@@ -613,8 +630,6 @@ To change embedding/chat behavior:
 2. Ensure interface compliance
 3. Update tests in `test/unit/`
 4. Consider mock mode for testing
-
-
 
 ## Important Implementation Notes
 
@@ -731,6 +746,38 @@ Check:
 4. Check logs for subprocess errors
 5. Try mock_mode=true for testing without models
 
+## API Endpoints Reference
+
+### Core Endpoints
+
+**Authentication:**
+- `POST /api/auth` - Capture authentication from Chrome extension
+- `GET /api/auth/status` - Check if authenticated
+
+**Collection (UI-triggered):**
+- `POST /api/scrape` - Trigger collection
+- `POST /api/scrape/projects` - Scrape Jira projects
+- `POST /api/scrape/spaces` - Scrape Confluence spaces
+
+**Documents:**
+- `GET /api/documents/stats` - Document statistics
+- `GET /api/documents` - List documents
+- `POST /api/documents/process` - Process documents
+- `POST /api/documents/force-sync` - Force sync document
+- `POST /api/documents/force-embed` - Force embed document
+
+**Scheduler:**
+- `POST /api/scheduler/trigger-collection` - Trigger collection event
+- `POST /api/scheduler/trigger-embedding` - Trigger embedding event
+
+**System:**
+- `GET /api/version` - API version
+- `GET /api/health` - Health check
+- `WS /ws` - WebSocket for real-time updates
+
+See README.md for complete API documentation.
+
 ## Task Master AI Instructions
-**Import Task Master's development workflow commands and guidelines, treat as if import is in the main CLAUDE.md file.**
+
+**Import Task Master's development workflow commands and guidelines, treat as if import is in the main AGENTS.md file.**
 @./.taskmaster/CLAUDE.md

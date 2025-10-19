@@ -4,10 +4,12 @@
 <!-- Favicon -->
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 
-<!-- Cirrus UI CSS Framework -->
-<link rel="stylesheet" href="https://unpkg.com/cirrus-ui@0.7.1/dist/cirrus.min.css">
+<!-- Spectre CSS Framework -->
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre.min.css">
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-exp.min.css">
+<link rel="stylesheet" href="https://unpkg.com/spectre.css/dist/spectre-icons.min.css">
 
-<!-- Custom Styles - Cirrus UI overrides and brand styling (loads after Cirrus) -->
+<!-- Custom Styles - Spectre CSS custom theming and brand styling (loads after Spectre CSS) -->
 <link rel="stylesheet" href="/static/quaero.css">
 
 <!-- Font Awesome -->
@@ -19,6 +21,11 @@
 <!-- Highlight.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+<!-- Client Debug Flag (from server config) -->
+<script>
+    window.QUAERO_CLIENT_DEBUG = {{.ClientDebug}};
+</script>
 
 <!-- Custom Scripts - Load BEFORE Alpine so components are registered first -->
 <script src="/static/websocket-manager.js"></script>

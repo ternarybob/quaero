@@ -10,11 +10,12 @@ import (
 )
 
 type PageHandler struct {
-	logger    arbor.ILogger
-	templates *template.Template
+	logger      arbor.ILogger
+	templates   *template.Template
+	clientDebug bool
 }
 
-func NewPageHandler(logger arbor.ILogger) *PageHandler {
+func NewPageHandler(logger arbor.ILogger, clientDebug bool) *PageHandler {
 	// Find pages directory (in bin/ after build)
 	pagesDir := findPagesDir()
 
@@ -23,8 +24,9 @@ func NewPageHandler(logger arbor.ILogger) *PageHandler {
 	template.Must(templates.ParseGlob(filepath.Join(pagesDir, "partials", "*.html")))
 
 	return &PageHandler{
-		logger:    logger,
-		templates: templates,
+		logger:      logger,
+		templates:   templates,
+		clientDebug: clientDebug,
 	}
 }
 
@@ -52,7 +54,8 @@ func findPagesDir() string {
 func (h *PageHandler) ServePage(templateName string, pageName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data := map[string]interface{}{
-			"Page": pageName,
+			"Page":        pageName,
+			"ClientDebug": h.clientDebug,
 		}
 
 		if err := h.templates.ExecuteTemplate(w, templateName, data); err != nil {

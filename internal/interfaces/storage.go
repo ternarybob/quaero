@@ -71,9 +71,14 @@ type JobStorage interface {
 	GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
+	UpdateJobHeartbeat(ctx context.Context, jobID string) error
+	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error)
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)
+	CountJobsWithFilters(ctx context.Context, opts *ListOptions) (int, error)
+	AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error
+	GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error)
 }
 
 // SourceStorage - interface for source configuration persistence

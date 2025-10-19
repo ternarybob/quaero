@@ -1,40 +1,127 @@
 // Alpine.js components for Quaero
 // Provides reactive data components for parser status, auth details, and service logs
 
+// Global debug flag - read from server config (injected by template)
+// Can be overridden in browser console: window.QUAERO_DEBUG = false
+window.QUAERO_DEBUG = typeof window.QUAERO_CLIENT_DEBUG !== 'undefined' ? window.QUAERO_CLIENT_DEBUG : false;
+
+// Debug logger helper
+window.debugLog = function(component, message, ...args) {
+  if (window.QUAERO_DEBUG) {
+    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+    console.log(`[${timestamp}] [${component}]`, message, ...args);
+  }
+};
+
+window.debugError = function(component, message, error) {
+  const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+  console.error(`[${timestamp}] [${component}]`, message, error);
+  if (error && error.stack) {
+    console.error(`[${timestamp}] [${component}] Stack:`, error.stack);
+  }
+};
+
 document.addEventListener('alpine:init', () => {
+  window.debugLog('Common', 'Alpine.js init event started');
   // Service Logs Component
   Alpine.data('serviceLogs', () => ({
     logs: [],
     maxLogs: 200,
     autoScroll: true,
     logIdCounter: 0,
+    selectedLogLevel: 'all',
 
     init() {
-      console.log('[ServiceLogs] Initializing component');
+      window.debugLog('ServiceLogs', 'Initializing component');
+      // Load saved filter preference from localStorage
+      const savedFilter = localStorage.getItem('quaero_log_level_filter');
+      const allowedLevels = ['all', 'error', 'warning', 'info', 'debug'];
+
+      // Normalize legacy/alias values
+      const aliasMap = {
+        'warn': 'warning',
+        'errors': 'error',
+        'err': 'error',
+        'dbg': 'debug'
+      };
+
+      let normalizedFilter = savedFilter ? savedFilter.toLowerCase() : null;
+      if (normalizedFilter && aliasMap[normalizedFilter]) {
+        normalizedFilter = aliasMap[normalizedFilter];
+        window.debugLog('ServiceLogs', 'Normalized legacy filter value:', savedFilter, '→', normalizedFilter);
+      }
+
+      if (normalizedFilter && allowedLevels.includes(normalizedFilter)) {
+        this.selectedLogLevel = normalizedFilter;
+        // Update localStorage with normalized value
+        localStorage.setItem('quaero_log_level_filter', normalizedFilter);
+        window.debugLog('ServiceLogs', 'Loaded filter preference:', normalizedFilter);
+      } else {
+        // Reset to 'all' if invalid or missing
+        this.selectedLogLevel = 'all';
+        localStorage.setItem('quaero_log_level_filter', 'all');
+        if (savedFilter) {
+          window.debugLog('ServiceLogs', 'Invalid filter value detected, reset to "all":', savedFilter);
+        }
+      }
       this.loadRecentLogs();
       this.subscribeToWebSocket();
     },
 
+    get filteredLogs() {
+      if (this.selectedLogLevel === 'all') {
+        return this.logs;
+      }
+
+      // Filter logs by selected level with case-insensitive comparison
+      // Handle level name variations (WARN vs WARNING, ERR vs ERROR)
+      return this.logs.filter(log => {
+        const logLevel = log.level.toUpperCase();
+        const filterLevel = this.selectedLogLevel.toUpperCase();
+
+        // Exact match
+        if (logLevel === filterLevel) {
+          return true;
+        }
+
+        // Handle variations
+        if (filterLevel === 'ERROR' && (logLevel === 'ERR' || logLevel === 'ERROR')) {
+          return true;
+        }
+        if (filterLevel === 'WARNING' && (logLevel === 'WARN' || logLevel === 'WARNING')) {
+          return true;
+        }
+
+        return false;
+      });
+    },
+
+    setLogLevel(level) {
+      this.selectedLogLevel = level;
+      localStorage.setItem('quaero_log_level_filter', level);
+      window.debugLog('ServiceLogs', 'Log level filter changed to:', level);
+    },
+
     async loadRecentLogs() {
-      console.log('[ServiceLogs] Loading recent logs...');
+      window.debugLog('ServiceLogs', 'Loading recent logs...');
       try {
         const response = await fetch('/api/logs/recent');
-        console.log('[ServiceLogs] API response status:', response.status);
+        window.debugLog('ServiceLogs', 'API response status:', response.status);
         if (!response.ok) {
-          console.warn('[ServiceLogs] API returned non-OK status:', response.status);
+          window.debugLog('ServiceLogs', 'API returned non-OK status:', response.status);
           return;
         }
 
         const data = await response.json();
-        console.log('[ServiceLogs] Received data:', data);
+        window.debugLog('ServiceLogs', 'Received data:', data);
         if (data.logs && Array.isArray(data.logs)) {
-          console.log('[ServiceLogs] Processing', data.logs.length, 'log entries');
+          window.debugLog('ServiceLogs', 'Processing', data.logs.length, 'log entries');
           this.logs = data.logs.map(log => {
             const entry = this._parseLogEntry(log);
             entry.id = ++this.logIdCounter;
             return entry;
           });
-          console.log('[ServiceLogs] Logs array now contains', this.logs.length, 'entries');
+          window.debugLog('ServiceLogs', 'Logs array now contains', this.logs.length, 'entries');
           // Scroll to bottom after loading recent logs
           this.$nextTick(() => {
             const container = this.$refs.logContainer;
@@ -43,10 +130,10 @@ document.addEventListener('alpine:init', () => {
             }
           });
         } else {
-          console.warn('[ServiceLogs] No logs in response or invalid format');
+          window.debugLog('ServiceLogs', 'No logs in response or invalid format');
         }
       } catch (err) {
-        console.error('[ServiceLogs] Error loading recent logs:', err);
+        window.debugError('ServiceLogs', 'Error loading recent logs:', err);
       }
     },
 
@@ -55,9 +142,9 @@ document.addEventListener('alpine:init', () => {
         WebSocketManager.subscribe('log', (data) => {
           this.addLog(data);
         });
-        console.log('[ServiceLogs] WebSocket subscription established');
+        window.debugLog('ServiceLogs', 'WebSocket subscription established');
       } else {
-        console.error('[ServiceLogs] WebSocketManager not loaded');
+        window.debugError('ServiceLogs', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
       }
     },
 
@@ -121,13 +208,13 @@ document.addEventListener('alpine:init', () => {
 
     _getLevelClass(level) {
       const levelMap = {
-        'ERROR': 'log-level-error',
-        'WARN': 'log-level-warn',
-        'WARNING': 'log-level-warn',
-        'INFO': 'log-level-info',
-        'DEBUG': 'log-level-debug'
+        'ERROR': 'terminal-error',
+        'WARN': 'terminal-warning',
+        'WARNING': 'terminal-warning',
+        'INFO': 'terminal-info',
+        'DEBUG': 'terminal-time'
       };
-      return levelMap[level] || 'log-level-info';
+      return levelMap[level] || 'terminal-info';
     },
 
     clearLogs() {
@@ -150,44 +237,6 @@ document.addEventListener('alpine:init', () => {
     }
   }));
 
-  // Snackbar Notification Component
-  Alpine.data('snackbar', () => ({
-    visible: false,
-    message: '',
-    type: 'info',
-    timeout: null,
-
-    show(message, type = 'info', duration = 3000) {
-      this.message = message;
-      this.type = type;
-      this.visible = true;
-
-      if (this.timeout) clearTimeout(this.timeout);
-
-      this.timeout = setTimeout(() => {
-        this.hide();
-      }, duration);
-    },
-
-    hide() {
-      this.visible = false;
-      if (this.timeout) {
-        clearTimeout(this.timeout);
-        this.timeout = null;
-      }
-    },
-
-    getClass() {
-      const typeMap = {
-        'success': 'is-success',
-        'error': 'is-danger',
-        'warning': 'is-warning',
-        'info': 'is-info'
-      };
-      return typeMap[this.type] || 'is-info';
-    }
-  }));
-
   // Application Status Component
   Alpine.data('appStatus', () => ({
     state: 'Idle',
@@ -195,21 +244,25 @@ document.addEventListener('alpine:init', () => {
     timestamp: null,
 
     init() {
+      window.debugLog('AppStatus', 'Initializing component');
       this.fetchStatus();
       this.subscribeToWebSocket();
     },
 
     async fetchStatus() {
+      window.debugLog('AppStatus', 'Fetching status from /api/status');
       try {
         const response = await fetch('/api/status');
+        window.debugLog('AppStatus', 'Response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch status');
 
         const data = await response.json();
+        window.debugLog('AppStatus', 'Status data received:', data);
         this.state = data.state || 'Idle';
         this.metadata = data.metadata || {};
         this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
       } catch (err) {
-        console.error('[AppStatus] Error fetching status:', err);
+        window.debugError('AppStatus', 'Error fetching status:', err);
         this.state = 'Unknown';
       }
     },
@@ -217,23 +270,23 @@ document.addEventListener('alpine:init', () => {
     subscribeToWebSocket() {
       if (typeof WebSocketManager !== 'undefined') {
         WebSocketManager.subscribe('app_status', (data) => {
-          console.log('[AppStatus] WebSocket update received:', data);
+          window.debugLog('AppStatus', 'WebSocket update received:', data);
           this.state = data.state || 'Idle';
           this.metadata = data.metadata || {};
           this.timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
         });
-        console.log('[AppStatus] WebSocket subscription established');
+        window.debugLog('AppStatus', 'WebSocket subscription established');
       }
     },
 
     getStatusColor(state) {
       const colorMap = {
-        'Idle': 'is-info',
-        'Crawling': 'is-warning',
-        'Offline': 'is-danger',
-        'Unknown': 'is-light'
+        'Idle': 'label-primary',
+        'Crawling': 'label-warning',
+        'Offline': 'label-error',
+        'Unknown': 'label'
       };
-      return colorMap[state] || 'is-light';
+      return colorMap[state] || 'label';
     },
 
     formatTimestamp(timestamp) {
@@ -251,36 +304,45 @@ document.addEventListener('alpine:init', () => {
     showCreateModal: false,
     showEditModal: false,
     loading: true,
+    modalTriggerElement: null,
 
     init() {
+      window.debugLog('SourceManagement', 'Initializing component');
       this.loadSources();
       this.loadAuthentications();
       this.resetCurrentSource();
     },
 
     async loadSources() {
+      window.debugLog('SourceManagement', 'Loading sources from /api/sources');
       try {
         const response = await fetch('/api/sources');
+        window.debugLog('SourceManagement', 'Response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch sources');
 
         const data = await response.json();
+        window.debugLog('SourceManagement', 'Sources data received:', data);
         this.sources = Array.isArray(data) ? data : [];
+        window.debugLog('SourceManagement', 'Sources array:', this.sources, 'Count:', this.sources.length);
         this.loading = false;
       } catch (err) {
-        console.error('[SourceManagement] Error loading sources:', err);
+        window.debugError('SourceManagement', 'Error loading sources:', err);
         this.loading = false;
         window.showNotification('Failed to load sources: ' + err.message, 'error');
       }
     },
 
     async loadAuthentications() {
+      window.debugLog('SourceManagement', 'Loading authentications from /api/auth/list');
       try {
         const response = await fetch('/api/auth/list');
+        window.debugLog('SourceManagement', 'Auth response status:', response.status);
         if (!response.ok) throw new Error('Failed to fetch authentications');
         const data = await response.json();
+        window.debugLog('SourceManagement', 'Authentications received:', data);
         this.authentications = Array.isArray(data) ? data : [];
       } catch (err) {
-        console.error('[SourceManagement] Error loading authentications:', err);
+        window.debugError('SourceManagement', 'Error loading authentications:', err);
         this.authentications = [];
       }
     },
@@ -303,32 +365,57 @@ document.addEventListener('alpine:init', () => {
       };
     },
 
-    editSource(source) {
+    editSource(source, event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
       this.currentSource = JSON.parse(JSON.stringify(source));
       this.showEditModal = true;
+      document.body.classList.add('modal-open');
       // Reload authentications in case they changed
       this.loadAuthentications();
+
+      // Move focus to modal after it renders
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
     },
 
-    openCreateModal() {
+    openCreateModal(event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
       this.resetCurrentSource();
       this.showCreateModal = true;
+      document.body.classList.add('modal-open');
       // Load authentications when opening modal
       this.loadAuthentications();
+
+      // Move focus to modal after it renders
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
     },
 
     async saveSource() {
+      window.debugLog('SourceManagement', 'Saving source:', this.currentSource);
       try {
         const isEdit = this.showEditModal;
         const url = isEdit ? `/api/sources/${this.currentSource.id}` : '/api/sources';
         const method = isEdit ? 'PUT' : 'POST';
 
+        window.debugLog('SourceManagement', `${method} ${url}`);
         const response = await fetch(url, {
           method: method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(this.currentSource)
         });
 
+        window.debugLog('SourceManagement', 'Save response status:', response.status);
         if (!response.ok) {
           const error = await response.json();
           throw new Error(error.error || 'Failed to save source');
@@ -338,7 +425,7 @@ document.addEventListener('alpine:init', () => {
         await this.loadSources();
         this.closeModal();
       } catch (err) {
-        console.error('[SourceManagement] Error saving source:', err);
+        window.debugError('SourceManagement', 'Error saving source:', err);
         window.showNotification('Failed to save source: ' + err.message, 'error');
       }
     },
@@ -348,11 +435,13 @@ document.addEventListener('alpine:init', () => {
         return;
       }
 
+      window.debugLog('SourceManagement', 'Deleting source:', sourceId);
       try {
         const response = await fetch(`/api/sources/${sourceId}`, {
           method: 'DELETE'
         });
 
+        window.debugLog('SourceManagement', 'Delete response status:', response.status);
         if (!response.ok) {
           throw new Error('Failed to delete source');
         }
@@ -360,7 +449,7 @@ document.addEventListener('alpine:init', () => {
         window.showNotification('Source deleted successfully', 'success');
         await this.loadSources();
       } catch (err) {
-        console.error('[SourceManagement] Error deleting source:', err);
+        window.debugError('SourceManagement', 'Error deleting source:', err);
         window.showNotification('Failed to delete source: ' + err.message, 'error');
       }
     },
@@ -368,7 +457,16 @@ document.addEventListener('alpine:init', () => {
     closeModal() {
       this.showCreateModal = false;
       this.showEditModal = false;
+      document.body.classList.remove('modal-open');
       this.resetCurrentSource();
+
+      // Restore focus to trigger element
+      if (this.modalTriggerElement) {
+        this.$nextTick(() => {
+          this.modalTriggerElement.focus();
+          this.modalTriggerElement = null;
+        });
+      }
     },
 
     formatDate(dateStr) {
@@ -379,10 +477,89 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
-// Global notification function for backwards compatibility
+// Global notification function using custom toast system
 window.showNotification = function(message, type = 'info') {
-  const snackbarEl = document.querySelector('[x-data*="snackbar"]');
-  if (snackbarEl && snackbarEl._x_dataStack) {
-    snackbarEl._x_dataStack[0].show(message, type);
+  // Type to class mapping
+  const typeMap = {
+    'info': 'toast-info',
+    'success': 'toast-success',
+    'warning': 'toast-warning',
+    'error': 'toast-error',
+    'danger': 'toast-error'
+  };
+  const toastClass = typeMap[type] || 'toast-info';
+
+  try {
+    // Get or create toast container
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.className = 'toast-container';
+      container.setAttribute('aria-live', 'polite');
+      container.setAttribute('aria-atomic', 'false');
+      document.body.appendChild(container);
+    }
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = 'toast-item ' + toastClass;
+
+    // Set ARIA role and aria-live based on type
+    const isError = type === 'error' || type === 'danger';
+    toast.setAttribute('role', isError ? 'alert' : 'status');
+    toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
+    toast.setAttribute('aria-atomic', 'true');
+
+    // Add icon based on type
+    const icons = {
+      'success': 'fa-check-circle',
+      'error': 'fa-exclamation-circle',
+      'warning': 'fa-exclamation-triangle',
+      'info': 'fa-info-circle'
+    };
+    const iconClass = icons[type] || icons['info'];
+
+    toast.innerHTML = `
+      <i class="fas ${iconClass}" style="margin-right: 0.5rem;"></i>
+      <span>${message}</span>
+      <button class="toast-close-btn" aria-label="Close notification" title="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    `;
+
+    // Add close button event listener
+    const closeBtn = toast.querySelector('.toast-close-btn');
+    closeBtn.addEventListener('click', () => {
+      toast.classList.add('toast-removing');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300);
+    });
+
+    // Append to container
+    container.appendChild(toast);
+
+    // Limit to 5 toasts
+    const toasts = container.querySelectorAll('.toast-item');
+    if (toasts.length > 5) {
+      toasts[0].remove();
+    }
+
+    // Auto-dismiss after 3000ms
+    setTimeout(() => {
+      toast.classList.add('toast-removing');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300); // Allow animation to complete
+    }, 3000);
+  } catch (error) {
+    // Fallback to console if DOM manipulation fails
+    console.warn('Toast notification failed, falling back to console');
+    console.log(`[${type.toUpperCase()}] ${message}`);
   }
 };

@@ -470,8 +470,10 @@ func (h *WebSocketHandler) parseAndBroadcastLog(logLine string) {
 		level = "error"
 	case "WRN", "WARN":
 		level = "warn"
-	case "INF", "INFO", "DBG", "DEBUG":
+	case "INF", "INFO":
 		level = "info"
+	case "DBG", "DEBUG":
+		level = "debug"
 	}
 
 	// Extract just the time from "Oct  2 16:27:13"
@@ -548,8 +550,10 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 				level = "error"
 			case "WRN", "WARN":
 				level = "warn"
-			case "INF", "INFO", "DBG", "DEBUG":
+			case "INF", "INFO":
 				level = "info"
+			case "DBG", "DEBUG":
+				level = "debug"
 			}
 
 			entry := LogEntry{

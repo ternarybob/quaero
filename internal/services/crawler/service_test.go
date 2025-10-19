@@ -8,6 +8,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // Mock AuthService
@@ -128,6 +129,11 @@ func (m *mockJobStorage) CountJobs(ctx context.Context) (int, error) {
 	return len(m.jobs), nil
 }
 
+func (m *mockJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+	// Simple mock implementation - just return total count
+	return m.CountJobs(ctx)
+}
+
 func (m *mockJobStorage) CountJobsByStatus(ctx context.Context, status string) (int, error) {
 	if m.jobs == nil {
 		return 0, nil
@@ -160,6 +166,22 @@ func (m *mockJobStorage) UpdateJobStatus(ctx context.Context, jobID string, stat
 
 func (m *mockJobStorage) UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error {
 	return nil
+}
+
+func (m *mockJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+	return nil
+}
+
+func (m *mockJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+	return []models.JobLogEntry{}, nil
+}
+
+func (m *mockJobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
+	return nil
+}
+
+func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
+	return []interface{}{}, nil
 }
 
 // Helper function to create test service
@@ -324,9 +346,14 @@ func TestStartCrawl(t *testing.T) {
 			}
 
 			// Verify job was created
-			job, err := service.GetJobStatus(jobID)
+			jobInterface, err := service.GetJobStatus(jobID)
 			if err != nil {
 				t.Fatalf("GetJobStatus failed: %v", err)
+			}
+
+			job, ok := jobInterface.(*CrawlJob)
+			if !ok {
+				t.Fatalf("Expected *CrawlJob, got %T", jobInterface)
 			}
 
 			if job.ID != jobID {
@@ -378,9 +405,14 @@ func TestGetJobStatus(t *testing.T) {
 	}
 
 	// Test existing job
-	job, err := service.GetJobStatus(jobID)
+	jobInterface, err := service.GetJobStatus(jobID)
 	if err != nil {
 		t.Fatalf("GetJobStatus failed: %v", err)
+	}
+
+	job, ok := jobInterface.(*CrawlJob)
+	if !ok {
+		t.Fatalf("Expected *CrawlJob, got %T", jobInterface)
 	}
 
 	if job.ID != jobID {
@@ -420,9 +452,14 @@ func TestCancelJob(t *testing.T) {
 	}
 
 	// Verify job status
-	job, err := service.GetJobStatus(jobID)
+	jobInterface, err := service.GetJobStatus(jobID)
 	if err != nil {
 		t.Fatalf("GetJobStatus failed: %v", err)
+	}
+
+	job, ok := jobInterface.(*CrawlJob)
+	if !ok {
+		t.Fatalf("Expected *CrawlJob, got %T", jobInterface)
 	}
 
 	if job.Status != JobStatusCancelled {
@@ -484,9 +521,14 @@ func TestListJobs(t *testing.T) {
 	ctx := context.Background()
 
 	// List jobs when none exist
-	jobs, err := service.ListJobs(ctx, nil)
+	jobsInterface, err := service.ListJobs(ctx, nil)
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
+	}
+
+	jobs, ok := jobsInterface.([]interface{})
+	if !ok {
+		t.Fatalf("Expected []interface{}, got %T", jobsInterface)
 	}
 
 	initialCount := len(jobs)
@@ -508,13 +550,18 @@ func TestListJobs(t *testing.T) {
 	}
 
 	// List all jobs
-	jobs, err = service.ListJobs(ctx, nil)
+	jobsInterface2, err := service.ListJobs(ctx, nil)
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
 
-	if len(jobs) != initialCount+3 {
-		t.Errorf("Expected %d jobs, got %d", initialCount+3, len(jobs))
+	jobs2, ok := jobsInterface2.([]interface{})
+	if !ok {
+		t.Fatalf("Expected []interface{}, got %T", jobsInterface2)
+	}
+
+	if len(jobs2) != initialCount+3 {
+		t.Errorf("Expected %d jobs, got %d", initialCount+3, len(jobs2))
 	}
 
 	// Clean up

@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 	completed_at INTEGER,
 	error TEXT,
 	result_count INTEGER DEFAULT 0,
-	failed_count INTEGER DEFAULT 0
+	failed_count INTEGER DEFAULT 0,
+	logs TEXT DEFAULT '[]'
 );
 
 -- Crawler job indexes
@@ -140,6 +141,15 @@ CREATE TABLE IF NOT EXISTS sources (
 CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled);
 CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id);
+
+-- Job settings table for persisting scheduler job configurations
+CREATE TABLE IF NOT EXISTS job_settings (
+	job_name TEXT PRIMARY KEY,
+	schedule TEXT NOT NULL,
+	enabled INTEGER DEFAULT 1,
+	last_run INTEGER,
+	updated_at INTEGER NOT NULL
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, force_embed_pending);
@@ -196,6 +206,21 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 2: Remove content column and migrate to content_markdown only
 	if err := s.migrateToMarkdownOnly(); err != nil {
+		return err
+	}
+
+	// MIGRATION 3: Add last_heartbeat column to crawl_jobs
+	if err := s.migrateAddHeartbeatColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 4: Add last_run column to job_settings
+	if err := s.migrateAddLastRunColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 5: Add logs column to crawl_jobs
+	if err := s.migrateAddJobLogsColumn(); err != nil {
 		return err
 	}
 
@@ -404,8 +429,26 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 
 	// Step 7: Recreate FTS5 triggers
 	s.logger.Info().Msg("Step 7: Recreating FTS5 triggers")
+
+	// Drop existing triggers first to avoid "trigger already exists" errors
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_insert`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_update`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS documents_fts_delete`)
+	if err != nil {
+		return err
+	}
+
+	// Create new triggers
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_insert AFTER INSERT ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_insert AFTER INSERT ON documents BEGIN
 			INSERT INTO documents_fts(rowid, title, content_markdown)
 			VALUES (new.rowid, new.title, new.content_markdown);
 		END
@@ -415,7 +458,7 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_update AFTER UPDATE ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_update AFTER UPDATE ON documents BEGIN
 			UPDATE documents_fts
 			SET title = new.title, content_markdown = new.content_markdown
 			WHERE rowid = new.rowid;
@@ -426,7 +469,7 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	_, err = s.db.Exec(`
-		CREATE TRIGGER documents_fts_delete AFTER DELETE ON documents BEGIN
+		CREATE TRIGGER IF NOT EXISTS documents_fts_delete AFTER DELETE ON documents BEGIN
 			DELETE FROM documents_fts WHERE rowid = old.rowid;
 		END
 	`)
@@ -442,5 +485,134 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 	}
 
 	s.logger.Info().Msg("Migration to markdown-only storage completed successfully")
+	return nil
+}
+
+// migrateAddHeartbeatColumn adds last_heartbeat column to crawl_jobs table
+func (s *SQLiteDB) migrateAddHeartbeatColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasLastHeartbeat := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "last_heartbeat" {
+			hasLastHeartbeat = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasLastHeartbeat {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding last_heartbeat column to crawl_jobs")
+
+	// Add the last_heartbeat column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN last_heartbeat INTEGER`); err != nil {
+		return err
+	}
+
+	// Set default value to created_at for existing rows
+	s.logger.Info().Msg("Setting default last_heartbeat values for existing jobs")
+	if _, err := s.db.Exec(`UPDATE crawl_jobs SET last_heartbeat = created_at WHERE last_heartbeat IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: last_heartbeat column added successfully")
+	return nil
+}
+
+// migrateAddLastRunColumn adds last_run column to job_settings table
+func (s *SQLiteDB) migrateAddLastRunColumn() error {
+	columnsQuery := `PRAGMA table_info(job_settings)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasLastRun := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "last_run" {
+			hasLastRun = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasLastRun {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding last_run column to job_settings")
+
+	// Add the last_run column
+	if _, err := s.db.Exec(`ALTER TABLE job_settings ADD COLUMN last_run INTEGER`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: last_run column added successfully")
+	return nil
+}
+
+// migrateAddJobLogsColumn adds logs column to crawl_jobs table
+func (s *SQLiteDB) migrateAddJobLogsColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasLogs := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "logs" {
+			hasLogs = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasLogs {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding logs column to crawl_jobs")
+
+	// Add the logs column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN logs TEXT`); err != nil {
+		return err
+	}
+
+	// Set default value to empty JSON array for existing rows
+	s.logger.Info().Msg("Setting default logs values for existing jobs")
+	if _, err := s.db.Exec(`UPDATE crawl_jobs SET logs = '[]' WHERE logs IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: logs column added successfully")
 	return nil
 }

@@ -105,9 +105,9 @@ func TestExtractFromDocuments(t *testing.T) {
 			name: "Extract from metadata",
 			docs: []*models.Document{
 				{
-					ID:      "1",
-					Title:   "Authentication bug",
-					Content: "Session timeout issue",
+					ID:              "1",
+					Title:           "Authentication bug",
+					ContentMarkdown: "Session timeout issue",
 					Metadata: map[string]interface{}{
 						"issue_key": "BUG-123",
 					},
@@ -119,9 +119,9 @@ func TestExtractFromDocuments(t *testing.T) {
 			name: "Extract from referenced issues",
 			docs: []*models.Document{
 				{
-					ID:      "1",
-					Title:   "Design document",
-					Content: "Architecture overview",
+					ID:              "1",
+					Title:           "Design document",
+					ContentMarkdown: "Architecture overview",
 					Metadata: map[string]interface{}{
 						"referenced_issues": []string{"BUG-123", "STORY-456"},
 					},
@@ -133,9 +133,9 @@ func TestExtractFromDocuments(t *testing.T) {
 			name: "Extract from title and content",
 			docs: []*models.Document{
 				{
-					ID:      "1",
-					Title:   "Fix for BUG-123",
-					Content: "This commit resolves STORY-456 and BUG-789",
+					ID:              "1",
+					Title:           "Fix for BUG-123",
+					ContentMarkdown: "This commit resolves STORY-456 and BUG-789",
 				},
 			},
 			expected: []string{"BUG-123", "STORY-456", "BUG-789"},
@@ -144,24 +144,24 @@ func TestExtractFromDocuments(t *testing.T) {
 			name: "Multiple documents with deduplication",
 			docs: []*models.Document{
 				{
-					ID:      "1",
-					Title:   "Jira ticket",
-					Content: "BUG-123 reported",
+					ID:              "1",
+					Title:           "Jira ticket",
+					ContentMarkdown: "BUG-123 reported",
 					Metadata: map[string]interface{}{
 						"issue_key": "BUG-123",
 					},
 				},
 				{
-					ID:       "2",
-					Title:    "Confluence page",
-					Content:  "Documented in BUG-123",
-					Metadata: map[string]interface{}{},
+					ID:              "2",
+					Title:           "Confluence page",
+					ContentMarkdown: "Documented in BUG-123",
+					Metadata:        map[string]interface{}{},
 				},
 				{
-					ID:       "3",
-					Title:    "GitHub commit",
-					Content:  "Fixed BUG-123 and added STORY-456",
-					Metadata: map[string]interface{}{},
+					ID:              "3",
+					Title:           "GitHub commit",
+					ContentMarkdown: "Fixed BUG-123 and added STORY-456",
+					Metadata:        map[string]interface{}{},
 				},
 			},
 			expected: []string{"BUG-123", "STORY-456"}, // BUG-123 deduplicated

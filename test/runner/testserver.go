@@ -39,6 +39,18 @@ func StartTestServer() *http.Server {
 		w.Write([]byte(`{"status":"ok","server":"test","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
 	})
 
+	// Mock Jira REST API endpoint for testing crawl → transform flow
+	mux.HandleFunc("/rest/api/3/project", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"title": "Fixture Project",
+			"description": "Hello world",
+			"_links": {
+				"self": "http://localhost:3333/rest/api/3/project"
+			}
+		}`))
+	})
+
 	server := &http.Server{
 		Addr:    ":3333",
 		Handler: mux,

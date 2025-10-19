@@ -1,656 +1,725 @@
 /* ============================================================================
-   Quaero Custom Styles - Cirrus UI Overrides and Brand Styling
+   Quaero Custom Styles - Spectre CSS Custom Theming
    ============================================================================ */
 
-/* 1. ROOT VARIABLES
+/* 1. ROOT VARIABLES - Extended Color Theming & Layout
    ========================================================================== */
 :root {
-    /* Global Font Size - Reduced from default 16px to 15px */
-    font-size: 15px;
-
-    /* Brand Colors */
+    /* Brand Colors - Software Blue Theme */
     --color-primary: #0757ba;
+    --color-secondary: #6c757d;
     --color-success: #1f883d;
     --color-danger: #d1242f;
     --color-warning: #ffdd57;
     --color-info: #0757ba;
 
-    /* Border Colors */
-    --border-light: #e0e0e0;
-    --border-medium: #d0d0d0;
+    /* GitHub-like Layout Colors */
+    --header-bg: #24292f;
+    --page-bg: #f6f8fa;
+    --content-bg: #ffffff;
+    --text-primary: #1f2328;
+    --text-secondary: #57606a;
+    --btn-primary: #57606a;
+    --border-color: #d0d7de;
+    --border-radius: .275rem;
 
-    /* Spacing Scale (rem) */
-    --spacing-1: 0.25rem;
-    /* 4px */
-    --spacing-2: 0.5rem;
-    /* 8px */
-    --spacing-3: 1rem;
-    /* 16px */
-    --spacing-4: 1.5rem;
-    /* 24px */
-    --spacing-5: 2rem;
-    /* 32px */
-    --spacing-6: 3rem;
-    /* 48px */
+    /* Code Block Colors */
+    --code-bg: #0d1117;
+    --code-color: #c9d1d9;
 
-    /* Fixed Navbar Height */
-    --navbar-height: 3.5rem;
-    /* 56px */
+    /* Typography */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
 }
 
-/* 2. BODY & LAYOUT
+/* 2. SPECTRE CSS BUTTON OVERRIDES
    ========================================================================== */
-html,
-body {
-    height: 100%;
+.btn {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    border-radius: var(--border-radius);
+    color: var(--btn-primary);
+    border-color: var(--border-color);
+    transition: all 0.2s;
+
+    &.btn-primary {
+        background-color: var(--color-primary);
+        border-color: var(--color-primary);
+        color: white;
+    }
+
+    &.btn-primary:hover,
+    &.btn-primary:focus {
+        background-color: #064a9c;
+        border-color: #064a9c;
+    }
+
+    &.btn-success {
+        background-color: var(--color-success);
+        border-color: var(--color-success);
+        color: white;
+    }
+
+    &.btn-success:hover,
+    &.btn-success:focus {
+        background-color: #1a7335;
+        border-color: #1a7335;
+    }
+
+    &.btn-error {
+        background-color: var(--color-danger);
+        border-color: var(--color-danger);
+        color: white;
+    }
+
+    &.btn-error:hover,
+    &.btn-error:focus {
+        background-color: #b31e28;
+        border-color: #b31e28;
+    }
+
+    &.btn-header-primary {
+        background-color: rgba(255, 255, 255, 0.1);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    &.btn-header-primary:hover,
+    &.btn-header-primary:focus {
+        background-color: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.3);
+    }
+
 }
 
-body {
-    padding-top: var(--navbar-height);
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-}
 
-/* Content container - centered max-width layout */
-.content {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 var(--spacing-3);
-    flex: 1;
-}
 
-/* 3. NAVBAR OVERRIDES
+/* 3. SPECTRE CSS LABEL (BADGE) OVERRIDES
    ========================================================================== */
-.header {
-    border-bottom-color: var(--border-light);
+.label {
+    border-radius: var(--border-radius);
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
 }
 
-/* Brand Link Styling */
-.q-brand {
-    font-weight: 600;
-    color: var(--color-primary);
-}
-
-/* Navigation Link Styling */
-.header .nav-item a {
-    transition: color 0.2s ease, border-bottom 0.2s ease;
-}
-
-.header .nav-item a:hover {
-    color: var(--color-primary);
-}
-
-/* Active Navigation Link */
-.header .nav-item a.active {
-    color: var(--color-primary);
-    border-bottom: 2px solid var(--color-primary);
-    font-weight: 600;
-}
-
-/* Mobile Hamburger Button - Hidden by default on desktop */
-.nav-btn {
-    display: none;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0.5rem;
-}
-
-.nav-btn span {
-    display: block;
-    width: 24px;
-    height: 2px;
-    background-color: var(--color-primary);
-    margin: 5px 0;
-    transition: all 0.3s ease;
-}
-
-/* Status Indicator Tags */
-.tag.tag--success {
+.label-success {
     background-color: var(--color-success);
     color: white;
 }
 
-.tag.tag--danger {
+.label-danger,
+.label-error {
     background-color: var(--color-danger);
     color: white;
 }
 
-/* 4. FOOTER OVERRIDES
+.label-warning {
+    background-color: var(--color-warning);
+    color: #333;
+}
+
+.label-info,
+.label-primary {
+    background-color: var(--color-info);
+    color: white;
+}
+
+.label-secondary {
+    background-color: var(--color-secondary);
+    color: white;
+}
+
+.label .btn,
+.label .btn-clear {
+    margin-top: -3px;
+}
+
+/* 4. GITHUB-LIKE LAYOUT STYLES
    ========================================================================== */
-footer {
-    border-top-color: var(--border-light);
-    color: #666;
-    font-size: 0.875rem;
-    margin-top: auto;
-}
 
-/* 5. BORDER UTILITIES
-   ========================================================================== */
-.q-border-bottom {
-    border-bottom: 1px solid var(--border-light);
-}
-
-.q-border-top {
-    border-top: 1px solid var(--border-light);
-}
-
-.q-border-left {
-    border-left: 1px solid var(--border-light);
-}
-
-.q-border-right {
-    border-right: 1px solid var(--border-light);
-}
-
-.q-border {
-    border: 1px solid var(--border-light);
-}
-
-/* 6. TYPOGRAPHY
-   ========================================================================== */
-.q-text-bold {
-    font-weight: 600;
-}
-
-.q-text-bolder {
-    font-weight: 700;
-}
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-    font-weight: 600;
-    line-height: 1.2;
-}
-
-h1 {
-    font-size: 1.5rem;
+/* Body Styling */
+body {
+    font-family: var(--font-sans);
+    background-color: var(--page-bg);
+    color: var(--text-primary);
+    padding-top: 64px;
+    /* Space for fixed header */
 }
 
 h2 {
     font-size: 1.25rem;
 }
 
-/* 7. MOBILE RESPONSIVENESS
-   ========================================================================== */
-@media (max-width: 768px) {
-
-    /* Show hamburger button on mobile */
-    .nav-btn {
-        display: block;
-    }
-
-    /* Hide navigation items by default on mobile */
-    .header-nav .nav-center,
-    .header-nav .nav-right {
-        display: none;
-        width: 100%;
-    }
-
-    /* Show navigation when active */
-    .header-nav.active .nav-center,
-    .header-nav.active .nav-right {
-        display: flex;
-        flex-direction: column;
-    }
-
-    /* Stack navigation items vertically on mobile */
-    .header-nav.active {
-        flex-direction: column;
-    }
-
-    .header-nav .nav-center {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    /* Mobile navigation item styling */
-    .header-nav .nav-item {
-        width: 100%;
-        border-bottom: 1px solid var(--border-light);
-    }
-
-    .header-nav .nav-item a {
-        display: block;
-        width: 100%;
-        padding: 1rem;
-    }
-}
-
-/* 8. COMPONENT OVERRIDES
-   ========================================================================== */
-div {
-    .card__header {
-        padding-left: var(--spacing-3);
-        /* padding-bottom: var(--spacing-2); */
-        margin-bottom: var(--spacing-3);
-        border-bottom: 1px solid var(--border-light);
-    }
-
-}
-
-.frame {
-    border: 1px solid #d0d7de;
-    border-radius: 0.375rem;
-    padding-top: var(--spacing-1);
-    padding-bottom: var(--spacing-3);
-    margin-bottom: var(--spacing-3);
-    background-color: #ffffff;
-
-    .frame__header {
-        padding-top: var(--spacing-2);
-        padding-bottom: var(--spacing-2);
-        border-bottom: 1px solid var(--border-light);
-        margin-bottom: var(--spacing-3);
-
-        p,
-        .tile.tile__container p {
-            margin-bottom: var(--spacing-0);
-        }
-
-        /* .tile {
-            .tile__container {
-                p {
-                    margin-bottom: var(--spacing-0);
-                }
-            }
-        } */
-    }
-
-    .frame__body {
-        margin: 0;
-    }
-
-
-    /* Pre element styling for service logs */
-    pre {
-        background-color: #f6f8fa;
-        border: 1px solid #d0d7de;
-        border-radius: 0.375rem;
-        padding: var(--spacing-3);
-        font-size: 0.75rem;
-        line-height: 1.5;
-        overflow-y: auto;
-        max-height: 500px;
-        font-family: 'Courier New', 'Consolas', monospace;
-        margin: 0;
-        color: #24292f;
-    }
-
-    /* Scrollbar styling for pre elements */
-    pre::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-
-    pre::-webkit-scrollbar-track {
-        background: #f0f0f0;
-        border-radius: 4px;
-    }
-
-    pre::-webkit-scrollbar-thumb {
-        background: #c0c0c0;
-        border-radius: 4px;
-    }
-
-    pre::-webkit-scrollbar-thumb:hover {
-        background: #a0a0a0;
-    }
-}
-
-/* Table Styling */
-.table {
-    border-collapse: collapse;
-    width: 100%;
-    margin-bottom: var(--spacing-4);
-}
-
-.table thead {
-    background-color: #f8f9fa;
-    border-bottom: 2px solid var(--border-light);
-}
-
-.table th {
-    font-weight: 600;
-    text-align: left;
-    padding: var(--spacing-3);
-    color: #333;
-}
-
-.table td {
-    padding: var(--spacing-3);
-    border-bottom: 1px solid var(--border-light);
-}
-
-.table tbody tr:hover {
-    background-color: #f8f9fa;
-}
-
-/* 9. LOG CONTAINER STYLES
-   ========================================================================== */
-.log-container {
-    background-color: #f6f8fa;
-    color: #24292f;
-    font-family: 'Courier New', 'Consolas', monospace;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    padding: var(--spacing-3);
-    border-radius: 0.375rem;
-    max-height: 500px;
-    overflow-y: auto;
-    border-top: 1px solid #d0d7de;
-    border-right: 1px solid #d0d7de;
-    border-bottom: 1px solid #d0d7de;
-    margin: 0;
-}
-
-.log-entry {
-    display: flex;
-    gap: var(--spacing-2);
-    padding: var(--spacing-1) 0;
-    line-height: 1.6;
-}
-
-.log-timestamp {
-    color: #808080;
-    flex-shrink: 0;
-    font-weight: 600;
-}
-
-.log-level {
-    flex-shrink: 0;
-    font-weight: 700;
-    min-width: 60px;
-}
-
-.log-level-error {
-    color: #f44747;
-}
-
-.log-level-warn {
-    color: #ffdd57;
-}
-
-.log-level-info {
-    color: #4fc3f7;
-}
-
-.log-level-debug {
-    color: #b39ddb;
-}
-
-.log-message {
-    flex-grow: 1;
-    word-break: break-word;
-}
-
-/* Log scrollbar styling */
-.log-container::-webkit-scrollbar {
-    width: 8px;
-}
-
-.log-container::-webkit-scrollbar-track {
-    background: #f0f0f0;
-    border-radius: 4px;
-}
-
-.log-container::-webkit-scrollbar-thumb {
-    background: #c0c0c0;
-    border-radius: 4px;
-}
-
-.log-container::-webkit-scrollbar-thumb:hover {
-    background: #a0a0a0;
-}
-
-/* 13. SNACKBAR COMPONENT
-   ========================================================================== */
-.snackbar {
-    padding: var(--spacing-3) var(--spacing-4);
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    color: white;
-    font-weight: 500;
-    min-width: 250px;
-    max-width: 400px;
-    animation: snackbar-fadein 0.3s ease-in-out;
-}
-
-@keyframes snackbar-fadein {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.snackbar.snackbar--info {
-    background-color: var(--color-info);
-}
-
-.snackbar.snackbar--success {
-    background-color: var(--color-success);
-}
-
-.snackbar.snackbar--warning {
-    background-color: var(--color-warning);
-    color: #333;
-}
-
-.snackbar.snackbar--danger,
-.snackbar.snackbar--error {
-    background-color: var(--color-danger);
-}
-
-/* 11. MODAL COMPONENT
-   ========================================================================== */
-.modal {
-    display: none;
+/* App Header */
+.app-header {
     position: fixed;
-    z-index: 9999;
     top: 0;
     left: 0;
     right: 0;
-    bottom: 0;
-    align-items: center;
-    justify-content: center;
+    z-index: 1000;
+    background-color: var(--header-bg);
+    border-bottom: 1px solid #424a53;
+    height: 64px;
 }
 
-.modal.is-active {
-    display: flex;
-}
-
-.modal-background {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-}
-
-.modal-card {
-    position: relative;
-    background-color: white;
-    border-radius: 0.5rem;
-    max-width: 600px;
-    width: 90%;
-    max-height: 90vh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-}
-
-.modal-card-head {
-    background-color: #f8f9fa;
-    padding: var(--spacing-4);
-    border-bottom: 1px solid var(--border-light);
+.app-header-content {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    height: 100%;
 }
 
-.modal-card-title {
+.app-header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.app-header-nav .brand {
+    color: white;
+    text-decoration: none;
     font-size: 1.25rem;
+    margin-right: 1rem;
+}
+
+.nav-links {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nav-links a {
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.nav-links a:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-links a.active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Mobile Menu Toggle */
+.mobile-menu-toggle {
+    display: none;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.5rem;
+}
+
+.mobile-menu-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: var(--border-radius);
+}
+
+/* Mobile Responsive Navbar */
+@media (max-width: 768px) {
+    .mobile-menu-toggle {
+        display: block;
+    }
+
+    .nav-links {
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background-color: var(--header-bg);
+        flex-direction: column;
+        border-bottom: 1px solid #424a53;
+        display: none;
+    }
+
+    .nav-links.mobile-open {
+        display: flex;
+    }
+
+    .nav-links a {
+        padding: 1rem 1.5rem;
+        border-radius: 0;
+    }
+
+    .nav-links a:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+/* Page Container */
+.page-container {
+    max-width: 1280px;
+    margin: 1.5rem auto;
+    padding: 0 1.5rem;
+}
+
+/* Page Title */
+.page-title {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.page-title h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2rem;
     font-weight: 600;
+}
+
+.page-title p {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+/* Content Sections */
+.content-section {
+    background-color: var(--content-bg);
+    border-radius: var(--border-radius);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    margin-bottom: 1.5rem;
+}
+
+.section-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.section-body {
+    padding: 1.5rem;
+}
+
+/* Cards */
+.card {
+    border-radius: var(--border-radius);
+    margin-bottom: 1.5rem;
+
+    &.card-header {
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.8rem;
+    }
+}
+
+.navbar {
+    .navbar-section {
+        h2 {
+            margin-bottom: 0;
+        }
+
+        button:not(:last-child),
+        select:not(:last-child) {
+            margin-right: 0.3rem;
+        }
+    }
+}
+
+/* 5. CUSTOM COMPONENT STYLES
+   ========================================================================== */
+
+/* Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.stat-item {
+    padding: 1.5rem;
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Code Block Styles */
+.code-block {
+    background-color: var(--code-bg);
+    color: var(--code-color);
+    border-radius: 6px;
+    padding: 1rem;
+    font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    overflow-x: auto;
     margin: 0;
 }
 
-.modal-card-body {
-    padding: var(--spacing-4);
+.code-block code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-family: inherit;
+}
+
+/* Terminal Styles for Logs */
+.terminal {
+    background-color: var(--code-bg);
+    color: var(--code-color);
+    border-radius: 6px;
+    padding: 1rem;
+    font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.600rem;
+    line-height: 1.6;
+    max-height: 400px;
     overflow-y: auto;
-    flex: 1;
 }
 
-.modal-card-foot {
-    background-color: #f8f9fa;
-    padding: var(--spacing-4);
-    border-top: 1px solid var(--border-light);
+.terminal-line {
+    margin-bottom: 0.25rem;
+}
+
+.terminal-time {
+    color: #8b949e;
+}
+
+.terminal-info {
+    color: #58a6ff;
+}
+
+.terminal-warning {
+    color: #d29922;
+}
+
+.terminal-error {
+    color: #f85149;
+}
+
+/* Table Styling Overrides */
+.table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.table thead th {
+    background-color: var(--page-bg);
+    border-bottom: 2px solid var(--border-color);
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.table tbody td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.table.striped tbody tr:nth-child(even) {
+    background-color: var(--page-bg);
+}
+
+/* 6. TOAST NOTIFICATION STYLES
+   ========================================================================== */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 9999;
+    max-width: 400px;
+}
+
+.toast-item {
+    background: white;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    animation: slideIn 0.3s ease-out;
     display: flex;
-    gap: var(--spacing-2);
-    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
 }
 
-/* Modal close button */
-.delete {
-    background-color: transparent;
+.toast-close-btn {
+    margin-left: auto;
+    background: transparent;
     border: none;
     cursor: pointer;
-    height: 20px;
-    width: 20px;
-    position: relative;
-    flex-shrink: 0;
-}
-
-.delete::before,
-.delete::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(45deg);
-    background-color: #333;
-    height: 2px;
-    width: 16px;
-}
-
-.delete::after {
-    transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-.delete:hover::before,
-.delete:hover::after {
-    background-color: var(--color-danger);
-}
-
-/* 12. FORM ELEMENTS
-   ========================================================================== */
-.field {
-    margin-bottom: var(--spacing-3);
-}
-
-.label {
-    display: block;
-    font-weight: 600;
-    margin-bottom: var(--spacing-1);
-    color: #333;
-}
-
-.label.is-small {
-    font-size: 0.875rem;
-}
-
-.control {
-    position: relative;
-}
-
-.input,
-.select select {
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border-light);
-    border-radius: 0.25rem;
-    font-size: 1rem;
-    line-height: 1.5;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.input:focus,
-.select select:focus {
-    outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(87, 85, 217, 0.1);
-}
-
-.input.is-small,
-.select.is-small select {
-    font-size: 0.875rem;
-    padding: 0.375rem 0.5rem;
-}
-
-.select {
-    display: inline-block;
-    position: relative;
-}
-
-.select.is-fullwidth {
-    display: block;
-    width: 100%;
-}
-
-.select select {
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23333' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.75rem center;
-    padding-right: 2.5rem;
-}
-
-.checkbox {
-    display: inline-flex;
+    padding: 0.25rem;
+    display: flex;
     align-items: center;
-    cursor: pointer;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    color: currentColor;
+    opacity: 0.7;
 }
 
-.checkbox input[type="checkbox"] {
-    margin-right: var(--spacing-2);
-    cursor: pointer;
+.toast-close-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
 }
 
-.help {
+.toast-close-btn:focus {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+
+.toast-success {
+    background: #d4edda;
+    border-left: 4px solid var(--color-success);
+    color: #155724;
+}
+
+.toast-error {
+    background: #f8d7da;
+    border-left: 4px solid var(--color-danger);
+    color: #721c24;
+}
+
+.toast-warning {
+    background: #fff3cd;
+    border-left: 4px solid var(--color-warning);
+    color: #856404;
+}
+
+.toast-info {
+    background: #d1ecf1;
+    border-left: 4px solid var(--color-info);
+    color: #0c5460;
+}
+
+.toast-removing {
+    animation: slideOut 0.3s ease-out forwards;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateX(400px);
+    }
+}
+
+/* 7. PAGINATION STYLES
+   ========================================================================== */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+}
+
+.pagination-list {
+    display: flex;
+    list-style: none;
+    gap: 0.25rem;
+    padding: 0;
+    margin: 0;
+}
+
+.pagination-item button {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+}
+
+.pagination-item button.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.pagination-item button:hover:not(.active):not(:disabled) {
+    background: var(--page-bg);
+}
+
+.pagination-item button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Alternative pagination classes for anchor-based pagination */
+.pagination {
+    display: flex;
+    list-style: none;
+    gap: 0.25rem;
+    padding: 0;
+    margin: 0;
+}
+
+.page-item a {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+    text-decoration: none;
+    display: inline-block;
+}
+
+.page-item.active a {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+}
+
+.page-item:not(.active):not(.disabled) a:hover {
+    background: var(--page-bg);
+}
+
+.page-item.disabled a {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 8. MODAL ENHANCEMENTS
+   ========================================================================== */
+.modal.active {
+    display: flex;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* 9. FORM CONTROL ENHANCEMENTS
+   ========================================================================== */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-label {
     display: block;
-    margin-top: var(--spacing-1);
-    font-size: 0.875rem;
-    color: #666;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
 }
 
-.help.has-text-warning {
+.form-input:focus,
+.form-select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
+}
+
+.form-input-hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+/* 10. UTILITY CLASSES
+   ========================================================================== */
+
+/* Color Utilities */
+.text-success {
+    color: var(--color-success);
+}
+
+.text-warning {
     color: var(--color-warning);
 }
 
-.help a,
-.help .has-text-link {
+.text-danger,
+.text-error {
+    color: var(--color-danger);
+}
+
+.text-info {
+    color: var(--color-info);
+}
+
+.text-primary {
     color: var(--color-primary);
-    text-decoration: underline;
 }
 
-/* 14. BUTTON OVERRIDES
+.text-secondary,
+.text-muted {
+    color: var(--text-secondary);
+}
+
+/* Background Utilities */
+.bg-gray {
+    background-color: var(--page-bg);
+}
+
+/* Spacing Utilities */
+.mt-4 {
+    margin-top: 1.5rem;
+}
+
+.mb-4 {
+    margin-bottom: 1.5rem;
+}
+
+.p-4 {
+    padding: 1.5rem;
+}
+
+/* 11. LOG LEVEL FILTER DROPDOWN
    ========================================================================== */
-/* Small button height override - maintains icon/text size */
-button.btn.btn--sm {
-    line-height: 1.5;
+.log-level-filter {
+    width: 140px;
+    height: 32px;
+    /* padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--content-bg);
+    color: var(--text-primary);
+    margin-right: 0.5rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    cursor: pointer; */
 }
 
-a.btn.btn--sm {
-    line-height: 2;
+/* .log-level-filter:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
+}
+
+.log-level-filter:hover {
+    border-color: var(--color-primary);
+}  */
+
+/* Ensure navbar section keeps controls inline */
+.navbar-section {
+    display: flex;
+    align-items: center;
+    gap: 0;
 }

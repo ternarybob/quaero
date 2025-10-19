@@ -1,45 +1,43 @@
-<div class="frame" x-data="serviceLogs">
-    <div class="frame__header">
+<div class="card" x-data="serviceLogs">
 
-        <div class="tile">
-            <div class="tile__icon">
-                <figure class="avatar"><img src="https://www.seoclerk.com/pics/319222-1IvI0s1421931178.png"></figure>
-            </div>
-            <div class="tile__container">
-                <p class="tile__title m-0">Robert Downey Jr. shared a post from <b>Stark Industries</b>.</p>
-                <p class="tile__subtitle m-0">Robert shared: 'Stark Industries is proud to announce its brand new suit.'</p><span class="info">23 minutes ago</span>
-            </div>
-            <div class="tile__buttons m-0">
-                <button class="btn-primary btn--sm uppercase">View</button>
-                <button class="btn--sm uppercase">Dismiss</button>
-            </div>
-        </div>
-
-        <div class="u-flex u-items-center u-justify-space-between" style="align-items: center;">
-            <p class="text-lg font-bold">Service Logs</p>
-
-            <div class="u-flex u-items-center">
-
-                <button class="btn btn--sm outline" aria-label="toggle auto-scroll" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                    <span class="icon"><i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i></span>
+    <div class="card-header">
+        <header class="navbar">
+            <section class="navbar-section">
+                <h2>Service Logs</h2>
+            </section>
+            <section class="navbar-section">
+                <select class="form-select select-sm log-level-filter" x-model="selectedLogLevel" @change="setLogLevel($event.target.value)" title="Filter by log level">
+                    <option value="all">All Levels</option>
+                    <option value="error">Error</option>
+                    <option value="warning">Warning</option>
+                    <option value="info">Info</option>
+                    <option value="debug">Debug</option>
+                </select>
+                <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                    <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                 </button>
-
-                <button class="btn btn--sm outline" aria-label="refresh" @click="refresh()" title="Refresh Logs">
-                    <span class="icon"><i class="fa-solid fa-rotate-right"></i></span>
+                <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
+                    <i class="fa-solid fa-rotate-right"></i>
                 </button>
-
-                <button class="btn btn--sm btn-danger outline" aria-label="clear" @click="clearLogs()" title="Clear Logs">
-                    <span class="icon"><i class="fas fa-trash"></i></span>
+                <button class="btn btn-sm btn-error" @click="clearLogs()" title="Clear Logs">
+                    <i class="fas fa-trash"></i>
                 </button>
-
-            </div>
-
-        </div>
-
+            </section>
+        </header>
     </div>
 
-    <div class="frame__body">
-        <pre class="log-container"
-            x-ref="logContainer"><code><template x-if="logs.length === 0"><div class="u-text-center u-text-muted">No logs available</div></template><template x-for="log in logs" :key="log.id"><div class="log-entry"><span class="log-timestamp" x-text="`[${log.timestamp}]`"></span> <span :class="log.levelClass" x-text="`[${log.level}]`"></span> <span class="log-message" x-text="log.message"></span></div></template></code></pre>
+    <div class="card-body">
+        <div class="terminal" x-ref="logContainer">
+            <template x-if="filteredLogs.length === 0">
+                <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
+            </template>
+            <template x-for="log in filteredLogs" :key="log.id">
+                <div class="terminal-line">
+                    <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
+                    <span :class="log.levelClass" x-text="`[${log.level}]`"></span>
+                    <span x-text="log.message"></span>
+                </div>
+            </template>
+        </div>
     </div>
 </div>

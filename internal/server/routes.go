@@ -154,8 +154,13 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Check if it's /api/jobs/{id}/results
-		if len(pathSuffix) > 0 && pathSuffix[len(pathSuffix)-8:] == "/results" {
+		if len(pathSuffix) > 0 && len(pathSuffix) >= 8 && pathSuffix[len(pathSuffix)-8:] == "/results" {
 			s.app.JobHandler.GetJobResultsHandler(w, r)
+			return
+		}
+		// Check if it's /api/jobs/{id}/logs
+		if len(pathSuffix) > 0 && len(pathSuffix) >= 5 && pathSuffix[len(pathSuffix)-5:] == "/logs" {
+			s.app.JobHandler.GetJobLogsHandler(w, r)
 			return
 		}
 		// Otherwise it's /api/jobs/{id}
