@@ -6,27 +6,22 @@
                 <h2>Service Logs</h2>
             </section>
             <section class="navbar-section">
-                <select class="form-select select-sm log-level-filter"
-                        x-model="selectedLogLevel"
-                        @change="setLogLevel($event.target.value)"
-                        title="Filter by log level">
+                <select class="form-select select-sm log-level-filter" x-model="selectedLogLevel" @change="setLogLevel($event.target.value)" title="Filter by log level">
                     <option value="all">All Levels</option>
                     <option value="error">Error</option>
                     <option value="warning">Warning</option>
                     <option value="info">Info</option>
                     <option value="debug">Debug</option>
                 </select>
-                <div class="btn-group">
-                    <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                        <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
-                    </button>
-                    <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
-                        <i class="fa-solid fa-rotate-right"></i>
-                    </button>
-                    <button class="btn btn-sm btn-error" @click="clearLogs()" title="Clear Logs">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
+                <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                    <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
+                </button>
+                <button class="btn btn-sm" @click="refresh()" title="Refresh Logs">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+                <button class="btn btn-sm btn-error" @click="clearLogs()" title="Clear Logs">
+                    <i class="fas fa-trash"></i>
+                </button>
             </section>
         </header>
     </div>

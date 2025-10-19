@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,8 +12,12 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
+
+// ErrJobNotFound is returned when a job is not found in the database
+var ErrJobNotFound = errors.New("job not found")
 
 // unixToTime converts Unix timestamp to time.Time
 func unixToTime(unix int64) time.Time {
@@ -442,7 +447,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("job not found")
+			return nil, ErrJobNotFound
 		}
 		return nil, fmt.Errorf("failed to scan job: %w", err)
 	}
@@ -593,4 +598,84 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 	}
 
 	return jobs, rows.Err()
+}
+
+// AppendJobLog appends a single log entry to the job's logs array
+func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Query current logs
+	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
+	var logsJSON sql.NullString
+	err := s.db.db.QueryRowContext(ctx, query, jobID).Scan(&logsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrJobNotFound
+		}
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to query job logs")
+		return fmt.Errorf("failed to query job logs: %w", err)
+	}
+
+	// Deserialize existing logs
+	var logs []models.JobLogEntry
+	if logsJSON.Valid && logsJSON.String != "" && logsJSON.String != "[]" {
+		if err := json.Unmarshal([]byte(logsJSON.String), &logs); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to deserialize logs, starting with empty array")
+			logs = []models.JobLogEntry{}
+		}
+	}
+
+	// Append new log entry
+	logs = append(logs, logEntry)
+
+	// Limit to last 100 entries to prevent unbounded growth
+	if len(logs) > 100 {
+		logs = logs[len(logs)-100:]
+	}
+
+	// Serialize back to JSON
+	logsBytes, err := json.Marshal(logs)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to serialize logs")
+		return fmt.Errorf("failed to serialize logs: %w", err)
+	}
+
+	// Update database
+	updateQuery := "UPDATE crawl_jobs SET logs = ? WHERE id = ?"
+	_, err = s.db.db.ExecContext(ctx, updateQuery, string(logsBytes), jobID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update job logs")
+		return fmt.Errorf("failed to update job logs: %w", err)
+	}
+
+	s.logger.Debug().Str("job_id", jobID).Int("log_count", len(logs)).Msg("Job log appended")
+	return nil
+}
+
+// GetJobLogs retrieves all log entries for a job
+func (s *JobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
+	var logsJSON sql.NullString
+	err := s.db.db.QueryRowContext(ctx, query, jobID).Scan(&logsJSON)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrJobNotFound
+		}
+		return nil, fmt.Errorf("failed to query job logs: %w", err)
+	}
+
+	// Handle NULL/empty cases by returning empty array
+	if !logsJSON.Valid || logsJSON.String == "" || logsJSON.String == "[]" {
+		return []models.JobLogEntry{}, nil
+	}
+
+	// Deserialize JSON array
+	var logs []models.JobLogEntry
+	if err := json.Unmarshal([]byte(logsJSON.String), &logs); err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to deserialize logs")
+		return nil, fmt.Errorf("failed to deserialize logs: %w", err)
+	}
+
+	return logs, nil
 }

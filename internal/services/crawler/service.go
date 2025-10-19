@@ -86,7 +86,33 @@ func (s *Service) Start() error {
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
-func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, config CrawlConfig, sourceID string, refreshSource bool, sourceConfigSnapshot *models.SourceConfig, authSnapshot *models.AuthCredentials) (string, error) {
+func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, configInterface interface{}, sourceID string, refreshSource bool, sourceConfigSnapshotInterface interface{}, authSnapshotInterface interface{}) (string, error) {
+	// Type assert config
+	config, ok := configInterface.(CrawlConfig)
+	if !ok {
+		return "", fmt.Errorf("invalid config type: expected CrawlConfig")
+	}
+
+	// Type assert source config snapshot (can be nil)
+	var sourceConfigSnapshot *models.SourceConfig
+	if sourceConfigSnapshotInterface != nil {
+		snapshot, ok := sourceConfigSnapshotInterface.(*models.SourceConfig)
+		if !ok {
+			return "", fmt.Errorf("invalid source config snapshot type: expected *models.SourceConfig")
+		}
+		sourceConfigSnapshot = snapshot
+	}
+
+	// Type assert auth snapshot (can be nil)
+	var authSnapshot *models.AuthCredentials
+	if authSnapshotInterface != nil {
+		snapshot, ok := authSnapshotInterface.(*models.AuthCredentials)
+		if !ok {
+			return "", fmt.Errorf("invalid auth snapshot type: expected *models.AuthCredentials")
+		}
+		authSnapshot = snapshot
+	}
+
 	jobID := uuid.New().String()
 
 	job := &CrawlJob{
@@ -229,6 +255,16 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to initialize job heartbeat")
 		}
+
+		// Append job start log
+		logEntry := models.JobLogEntry{
+			Timestamp: time.Now().Format("15:04:05"),
+			Level:     "info",
+			Message:   "Job started",
+		}
+		if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append job start log")
+		}
 	}
 
 	// Emit started event
@@ -241,7 +277,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 }
 
 // GetJobStatus returns the current status of a job
-func (s *Service) GetJobStatus(jobID string) (*CrawlJob, error) {
+func (s *Service) GetJobStatus(jobID string) (interface{}, error) {
 	// Fast path: Check in-memory storage first (for running jobs)
 	s.jobsMu.RLock()
 	job, exists := s.activeJobs[jobID]
@@ -363,7 +399,7 @@ func (s *Service) FailJob(jobID string, reason string) error {
 }
 
 // GetJobResults returns the results of a completed job
-func (s *Service) GetJobResults(jobID string) ([]*CrawlResult, error) {
+func (s *Service) GetJobResults(jobID string) (interface{}, error) {
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
 
@@ -435,6 +471,18 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Int("completed", job.Progress.CompletedURLs).
 				Int("max_pages", config.MaxPages).
 				Msg("Max pages reached, stopping worker")
+
+			// Append max pages log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "info",
+					Message:   fmt.Sprintf("Max pages limit reached (%d/%d)", job.Progress.CompletedURLs, config.MaxPages),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append max pages log")
+				}
+			}
 			return
 		}
 
@@ -503,11 +551,35 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 			}
 		} else {
 			s.updateProgress(jobID, false, true)
+
+			// Append request failure log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "error",
+					Message:   fmt.Sprintf("Request failed: %s - %s", item.URL, result.Error),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append request failure log")
+				}
+			}
 		}
 
 		// Emit progress periodically (every 10 URLs)
 		if (job.Progress.CompletedURLs+job.Progress.FailedURLs)%10 == 0 {
 			s.emitProgress(job)
+
+			// Append progress milestone log
+			if s.jobStorage != nil {
+				logEntry := models.JobLogEntry{
+					Timestamp: time.Now().Format("15:04:05"),
+					Level:     "info",
+					Message:   fmt.Sprintf("Progress: %d completed, %d failed, %d pending", job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs),
+				}
+				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append progress log")
+				}
+			}
 		}
 	}
 }
@@ -526,6 +598,15 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 		URL:      item.URL,
 		Duration: duration,
 		Metadata: item.Metadata,
+	}
+
+	// Also set Body field from metadata for dual-pathway support
+	if item.Metadata != nil {
+		if bodyRaw, ok := item.Metadata["response_body"]; ok {
+			if body, ok := bodyRaw.([]byte); ok {
+				result.Body = body
+			}
+		}
 	}
 
 	if err != nil {
@@ -862,6 +943,24 @@ func (s *Service) monitorCompletion(jobID string) {
 			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
 				s.jobsMu.RUnlock()
 
+				// Append terminal state log
+				if s.jobStorage != nil {
+					var message string
+					if job.Status == JobStatusCancelled {
+						message = "Job cancelled"
+					} else {
+						message = fmt.Sprintf("Job failed: %s", job.Error)
+					}
+					logEntry := models.JobLogEntry{
+						Timestamp: time.Now().Format("15:04:05"),
+						Level:     "error",
+						Message:   message,
+					}
+					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append terminal state log")
+					}
+				}
+
 				// Only remove from activeJobs if jobStorage is nil or job was already persisted
 				// When jobStorage is nil, keep job in memory for lookup
 				if s.jobStorage == nil {
@@ -908,6 +1007,16 @@ func (s *Service) monitorCompletion(jobID string) {
 					} else {
 						persistSucceeded = true
 					}
+
+					// Append job completion log
+					logEntry := models.JobLogEntry{
+						Timestamp: time.Now().Format("15:04:05"),
+						Level:     "info",
+						Message:   fmt.Sprintf("Job completed: %d successful, %d failed", job.Progress.CompletedURLs, job.Progress.FailedURLs),
+					}
+					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append completion log")
+					}
 				}
 
 				s.emitProgress(job)
@@ -949,7 +1058,7 @@ func (s *Service) monitorCompletion(jobID string) {
 }
 
 // ListJobs returns a list of jobs with optional filtering
-func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*CrawlJob, error) {
+func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
 	if s.jobStorage == nil {
 		return nil, fmt.Errorf("job storage not configured")
 	}
@@ -971,7 +1080,7 @@ func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([
 }
 
 // RerunJob re-executes a previous job with the same or updated configuration
-func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *CrawlConfig) (string, error) {
+func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig interface{}) (string, error) {
 	if s.jobStorage == nil {
 		return "", fmt.Errorf("job storage not configured")
 	}
@@ -990,7 +1099,12 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 	// Use original config or updated config
 	config := originalJob.Config
 	if updateConfig != nil {
-		config = *updateConfig
+		// Type assert to *CrawlConfig
+		crawlConfig, ok := updateConfig.(*CrawlConfig)
+		if !ok {
+			return "", fmt.Errorf("invalid config type: expected *CrawlConfig")
+		}
+		config = *crawlConfig
 	}
 
 	// Use stored seed URLs from original job
@@ -1028,7 +1142,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig *Craw
 // this indicates the job was completed by a different service instance or the service was
 // restarted. In this case, the function returns an error. Callers should handle this by
 // checking the job's ResultCount field from GetJobStatus() for summary information.
-func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult, error) {
+func (s *Service) WaitForJob(ctx context.Context, jobID string) (interface{}, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -1041,7 +1155,7 @@ func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult,
 		case <-ticker.C:
 			pollCount++
 
-			job, err := s.GetJobStatus(jobID)
+			jobInterface, err := s.GetJobStatus(jobID)
 			if err != nil {
 				s.logger.Debug().
 					Err(err).
@@ -1049,6 +1163,13 @@ func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult,
 					Int("poll_count", pollCount).
 					Msg("Failed to get job status while waiting")
 				return nil, fmt.Errorf("failed to get job status: %w", err)
+			}
+
+			// Type assert to *CrawlJob
+			job, ok := jobInterface.(*CrawlJob)
+			if !ok {
+				s.logger.Error().Str("job_id", jobID).Msg("Unexpected result type from GetJobStatus")
+				return nil, fmt.Errorf("unexpected result type from GetJobStatus")
 			}
 
 			// Periodic status logging every 10 polls
@@ -1062,7 +1183,7 @@ func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult,
 
 			// Check if job is complete
 			if job.Status == JobStatusCompleted || job.Status == JobStatusFailed || job.Status == JobStatusCancelled {
-				results, err := s.GetJobResults(jobID)
+				resultsInterface, err := s.GetJobResults(jobID)
 				if err != nil {
 					// Edge case: Job completed in another instance or before service restart
 					s.logger.Warn().
@@ -1075,6 +1196,14 @@ func (s *Service) WaitForJob(ctx context.Context, jobID string) ([]*CrawlResult,
 					return nil, fmt.Errorf("job %s completed but results unavailable (result_count: %d, failed_count: %d): %w",
 						jobID, job.ResultCount, job.FailedCount, err)
 				}
+
+				// Type assert to []*CrawlResult
+				results, ok := resultsInterface.([]*CrawlResult)
+				if !ok {
+					s.logger.Error().Str("job_id", jobID).Msg("Unexpected result type from GetJobResults")
+					return nil, fmt.Errorf("unexpected result type from GetJobResults")
+				}
+
 				return results, nil
 			}
 		}

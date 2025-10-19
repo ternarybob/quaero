@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/robfig/cron/v3"
@@ -21,6 +22,7 @@ type Config struct {
 	Processing ProcessingConfig `toml:"processing"`
 	Logging    LoggingConfig    `toml:"logging"`
 	Jobs       JobsConfig       `toml:"jobs"`
+	Crawler    CrawlerConfig    `toml:"crawler"`
 }
 
 type ServerConfig struct {
@@ -149,6 +151,24 @@ type JobConfig struct {
 	Description string `toml:"description"`
 }
 
+// CrawlerConfig contains Firecrawl-inspired HTML scraping configuration
+type CrawlerConfig struct {
+	UserAgent         string        `toml:"user_agent"`          // Default user agent string
+	UserAgentRotation bool          `toml:"user_agent_rotation"` // Enable random user agent rotation
+	MaxConcurrency    int           `toml:"max_concurrency"`     // Maximum concurrent requests per domain
+	RequestDelay      time.Duration `toml:"request_delay"`       // Minimum delay between requests to same domain
+	RandomDelay       time.Duration `toml:"random_delay"`        // Random delay jitter to add
+	RequestTimeout    time.Duration `toml:"request_timeout"`     // HTTP request timeout
+	MaxBodySize       int           `toml:"max_body_size"`       // Maximum response body size in bytes
+	MaxDepth          int           `toml:"max_depth"`           // Maximum crawl depth
+	FollowRobotsTxt   bool          `toml:"follow_robots_txt"`   // Respect robots.txt rules
+	OutputFormat      string        `toml:"output_format"`       // Output format: "markdown", "html", or "both"
+	OnlyMainContent   bool          `toml:"only_main_content"`   // Extract only main content, removing nav/footer/ads
+	IncludeLinks      bool          `toml:"include_links"`       // Include discovered links in scrape results
+	IncludeMetadata   bool          `toml:"include_metadata"`    // Extract and include page metadata
+	UseHTMLSeeds      bool          `toml:"use_html_seeds"`      // Use HTML page URLs instead of REST API endpoints for seed URLs
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -230,6 +250,22 @@ func NewDefaultConfig() *Config {
 				Schedule:    "*/10 * * * *", // Every 10 minutes
 				Description: "Scan markdown documents and generate summaries with metadata",
 			},
+		},
+		Crawler: CrawlerConfig{
+			UserAgent:         "Quaero/1.0 (Web Crawler)",
+			UserAgentRotation: true,
+			MaxConcurrency:    3,
+			RequestDelay:      1 * time.Second,
+			RandomDelay:       500 * time.Millisecond,
+			RequestTimeout:    30 * time.Second,
+			MaxBodySize:       10 * 1024 * 1024, // 10MB
+			MaxDepth:          5,
+			FollowRobotsTxt:   true,
+			OutputFormat:      "markdown",
+			OnlyMainContent:   true,
+			IncludeLinks:      true,
+			IncludeMetadata:   true,
+			UseHTMLSeeds:      true, // Default to HTML page URLs for seed generation
 		},
 	}
 }
@@ -361,6 +397,74 @@ func applyEnvOverrides(config *Config) {
 		}
 		if len(outputs) > 0 {
 			config.Logging.Output = outputs
+		}
+	}
+
+	// Crawler configuration
+	if userAgent := os.Getenv("QUAERO_CRAWLER_USER_AGENT"); userAgent != "" {
+		config.Crawler.UserAgent = userAgent
+	}
+	if userAgentRotation := os.Getenv("QUAERO_CRAWLER_USER_AGENT_ROTATION"); userAgentRotation != "" {
+		if uar, err := strconv.ParseBool(userAgentRotation); err == nil {
+			config.Crawler.UserAgentRotation = uar
+		}
+	}
+	if maxConcurrency := os.Getenv("QUAERO_CRAWLER_MAX_CONCURRENCY"); maxConcurrency != "" {
+		if mc, err := strconv.Atoi(maxConcurrency); err == nil {
+			config.Crawler.MaxConcurrency = mc
+		}
+	}
+	if requestDelay := os.Getenv("QUAERO_CRAWLER_REQUEST_DELAY"); requestDelay != "" {
+		if rd, err := time.ParseDuration(requestDelay); err == nil {
+			config.Crawler.RequestDelay = rd
+		}
+	}
+	if randomDelay := os.Getenv("QUAERO_CRAWLER_RANDOM_DELAY"); randomDelay != "" {
+		if rd, err := time.ParseDuration(randomDelay); err == nil {
+			config.Crawler.RandomDelay = rd
+		}
+	}
+	if requestTimeout := os.Getenv("QUAERO_CRAWLER_REQUEST_TIMEOUT"); requestTimeout != "" {
+		if rt, err := time.ParseDuration(requestTimeout); err == nil {
+			config.Crawler.RequestTimeout = rt
+		}
+	}
+	if maxBodySize := os.Getenv("QUAERO_CRAWLER_MAX_BODY_SIZE"); maxBodySize != "" {
+		if mbs, err := strconv.Atoi(maxBodySize); err == nil {
+			config.Crawler.MaxBodySize = mbs
+		}
+	}
+	if maxDepth := os.Getenv("QUAERO_CRAWLER_MAX_DEPTH"); maxDepth != "" {
+		if md, err := strconv.Atoi(maxDepth); err == nil {
+			config.Crawler.MaxDepth = md
+		}
+	}
+	if followRobotsTxt := os.Getenv("QUAERO_CRAWLER_FOLLOW_ROBOTS_TXT"); followRobotsTxt != "" {
+		if frt, err := strconv.ParseBool(followRobotsTxt); err == nil {
+			config.Crawler.FollowRobotsTxt = frt
+		}
+	}
+	if outputFormat := os.Getenv("QUAERO_CRAWLER_OUTPUT_FORMAT"); outputFormat != "" {
+		config.Crawler.OutputFormat = outputFormat
+	}
+	if onlyMainContent := os.Getenv("QUAERO_CRAWLER_ONLY_MAIN_CONTENT"); onlyMainContent != "" {
+		if omc, err := strconv.ParseBool(onlyMainContent); err == nil {
+			config.Crawler.OnlyMainContent = omc
+		}
+	}
+	if includeLinks := os.Getenv("QUAERO_CRAWLER_INCLUDE_LINKS"); includeLinks != "" {
+		if il, err := strconv.ParseBool(includeLinks); err == nil {
+			config.Crawler.IncludeLinks = il
+		}
+	}
+	if includeMetadata := os.Getenv("QUAERO_CRAWLER_INCLUDE_METADATA"); includeMetadata != "" {
+		if im, err := strconv.ParseBool(includeMetadata); err == nil {
+			config.Crawler.IncludeMetadata = im
+		}
+	}
+	if useHTMLSeeds := os.Getenv("QUAERO_CRAWLER_USE_HTML_SEEDS"); useHTMLSeeds != "" {
+		if uhs, err := strconv.ParseBool(useHTMLSeeds); err == nil {
+			config.Crawler.UseHTMLSeeds = uhs
 		}
 	}
 }

@@ -104,3 +104,30 @@ description = "Crawl and collect website data, store as markdown"
 enabled = true
 schedule = "*/10 * * * *"  # Every 10 minutes
 description = "Scan markdown documents and generate summaries with metadata"
+
+# =============================================================================
+# Crawler Configuration (Firecrawl-style HTML Scraping)
+# =============================================================================
+# Configure HTML scraping behavior for web page crawling.
+# Follows Firecrawl architecture: scrape pages, convert to markdown, extract metadata.
+# Technical parameters have sensible defaults hardcoded in the application.
+# Only uncomment settings you want to override from defaults.
+#
+# Defaults: user_agent="Quaero/1.0 (Web Crawler)", max_concurrency=3,
+#           request_delay=1s, random_delay=500ms, output_format="markdown"
+# Env vars: QUAERO_CRAWLER_USER_AGENT, QUAERO_CRAWLER_MAX_CONCURRENCY, etc.
+
+# [crawler]
+# user_agent = "Quaero/1.0 (Web Crawler)"  # Default: Quaero/1.0 (Web Crawler)
+# user_agent_rotation = true                # Default: true
+# max_concurrency = 3                       # Default: 3
+# request_delay = "1s"                      # Default: 1s
+# random_delay = "500ms"                    # Default: 500ms
+# request_timeout = "30s"                   # Default: 30s
+# max_body_size = 10485760                  # Default: 10MB
+# max_depth = 5                             # Default: 5
+# follow_robots_txt = true                  # Default: true
+# output_format = "markdown"                # Default: markdown (options: markdown, html, both)
+# only_main_content = true                  # Default: true
+# include_links = true                      # Default: true
+# include_metadata = true                   # Default: true

@@ -15,7 +15,7 @@
         <!-- Page Title -->
         <div class="page-title">
             <h1>Document Management</h1>
-            <p>Normalized documents with vector embeddings for semantic search</p>
+            <p>Normalized documents for search and retrieval</p>
         </div>
 
         <!-- Document Statistics -->
@@ -40,10 +40,6 @@
                             <p style="font-size: 1.75rem; font-weight: bold;" id="stat-total">-</p>
                         </div>
                         <div style="text-align: center;">
-                            <p style="font-size: 0.875rem; color: var(--text-secondary);">VECTORIZED</p>
-                            <p style="font-size: 1.75rem; font-weight: bold;" id="stat-vectorized">-</p>
-                        </div>
-                        <div style="text-align: center;">
                             <p style="font-size: 0.875rem; color: var(--text-secondary);">JIRA DOCUMENTS</p>
                             <p style="font-size: 1.75rem; font-weight: bold;" id="stat-jira">-</p>
                         </div>
@@ -64,17 +60,12 @@
                 </div>
                 <div class="card-body">
                     <!-- Filter Controls -->
-                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                         <input type="search" id="search-box" class="form-input" placeholder="Search documents...">
                         <select class="form-select" id="source-filter" onchange="filterDocuments()">
                             <option value="">All Sources</option>
                             <option value="jira">Jira</option>
                             <option value="confluence">Confluence</option>
-                        </select>
-                        <select class="form-select" id="vectorized-filter" onchange="filterDocuments()">
-                            <option value="">All Documents</option>
-                            <option value="true">Vectorized Only</option>
-                            <option value="false">Not Vectorized</option>
                         </select>
                     </div>
 
@@ -85,14 +76,12 @@
                                     <th>SOURCE</th>
                                     <th>SOURCE ID</th>
                                     <th>TITLE</th>
-                                    <th class="text-center">VECTORIZED</th>
                                     <th>UPDATED</th>
-                                    <th class="text-center">ACTIONS</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
                                 <tr>
-                                    <td colspan="6" class="text-center">
+                                    <td colspan="4" class="text-center">
                                         Loading documents...
                                     </td>
                                 </tr>
@@ -177,14 +166,12 @@
                 const stats = await response.json();
 
                 document.getElementById('stat-total').textContent = stats.total_documents || 0;
-                document.getElementById('stat-vectorized').textContent = stats.vectorized_documents || 0;
                 document.getElementById('stat-jira').textContent = stats.jira_documents || 0;
                 document.getElementById('stat-confluence').textContent = stats.confluence_documents || 0;
 
             } catch (error) {
                 console.error('Error loading stats:', error);
                 document.getElementById('stat-total').textContent = 'Error';
-                document.getElementById('stat-vectorized').textContent = 'Error';
                 document.getElementById('stat-jira').textContent = 'Error';
                 document.getElementById('stat-confluence').textContent = 'Error';
             } finally {
@@ -219,7 +206,7 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="text-center" style="color: var(--color-danger);">
+                        <td colspan="4" class="text-center" style="color: var(--color-danger);">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
@@ -231,7 +218,6 @@
         function filterDocuments() {
             const searchTerm = document.getElementById('search-box').value.toLowerCase();
             const sourceFilter = document.getElementById('source-filter').value;
-            const vectorizedFilter = document.getElementById('vectorized-filter').value;
 
             filteredDocuments = allDocuments.filter(doc => {
                 // Search filter
@@ -244,13 +230,7 @@
                 const matchesSource = !sourceFilter ||
                     (doc.source_type && doc.source_type.toLowerCase() === sourceFilter.toLowerCase());
 
-                // Vectorized filter
-                const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
-                const matchesVectorized = !vectorizedFilter ||
-                    (vectorizedFilter === 'true' && hasEmbedding) ||
-                    (vectorizedFilter === 'false' && !hasEmbedding);
-
-                return matchesSearch && matchesSource && matchesVectorized;
+                return matchesSearch && matchesSource;
             });
 
             currentPage = 1; // Reset to first page when filtering
@@ -286,7 +266,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="text-center">
+                        <td colspan="4" class="text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -296,10 +276,6 @@
 
             tbody.innerHTML = pageDocuments.map((doc, pageIndex) => {
                 const globalIndex = startIndex + pageIndex; // Index in filteredDocuments
-                const hasEmbedding = doc.embedding_model && doc.embedding_model !== '';
-                const vectorizedBadge = hasEmbedding
-                    ? '<span class="label label-success">✓</span>'
-                    : '<span class="label label-error">✗</span>';
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
 
@@ -308,16 +284,7 @@
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${globalIndex})" class="text-center" style="cursor: pointer;">${vectorizedBadge}</td>
                         <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${updatedDate}</td>
-                        <td class="text-center">
-                            <button class="btn btn-sm" onclick="event.stopPropagation(); reprocessDocument('${doc.id}')" title="Reprocess" style="margin-right: 0.25rem;">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                            <button class="btn btn-sm btn-error" onclick="event.stopPropagation(); clearEmbedding('${doc.id}')" title="Clear Embedding">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
                     </tr>
                 `;
             }).join('');
@@ -409,109 +376,26 @@
             }
 
             selectedId.textContent = doc.id || 'Unknown';
-            const jsonString = JSON.stringify(doc, null, 2);
+
+            // Build explicit projection of desired fields (excludes embedding, embedding_model)
+            const clean = {
+                id: doc.id,
+                source_type: doc.source_type,
+                source_id: doc.source_id,
+                title: doc.title,
+                content_markdown: doc.content_markdown,
+                url: doc.url,
+                detail_level: doc.detail_level,
+                metadata: doc.metadata,
+                created_at: doc.created_at,
+                updated_at: doc.updated_at
+            };
+
+            const jsonString = JSON.stringify(clean, null, 2);
             codeBlock.textContent = jsonString;
 
             if (typeof hljs !== 'undefined') {
                 hljs.highlightElement(codeBlock);
-            }
-        }
-
-        // Reprocess a single document
-        async function reprocessDocument(docId) {
-            if (!confirm(`Reprocess document ${docId}?\n\nThis will queue the document for re-vectorization.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/documents/${docId}/reprocess`, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to reprocess document');
-                }
-
-                window.showNotification('Document queued for reprocessing', 'success');
-                setTimeout(() => {
-                    loadStats();
-                    loadDocuments();
-                }, 1000);
-            } catch (error) {
-                console.error('Error reprocessing document:', error);
-                window.showNotification('Failed to reprocess document: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // Clear embedding for a single document
-        async function clearEmbedding(docId) {
-            if (!confirm(`Clear embedding for document ${docId}?\n\nThe document will need to be reprocessed.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/documents/${docId}/embedding`, {
-                    method: 'DELETE'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to clear embedding');
-                }
-
-                window.showNotification('Embedding cleared successfully', 'success');
-                setTimeout(() => {
-                    loadStats();
-                    loadDocuments();
-                }, 1000);
-            } catch (error) {
-                console.error('Error clearing embedding:', error);
-                window.showNotification('Failed to clear embedding: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
             }
         }
 

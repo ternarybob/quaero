@@ -34,6 +34,8 @@
 /* 2. SPECTRE CSS BUTTON OVERRIDES
    ========================================================================== */
 .btn {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
     border-radius: var(--border-radius);
     color: var(--btn-primary);
     border-color: var(--border-color);
@@ -86,12 +88,17 @@
         background-color: rgba(255, 255, 255, 0.2);
         border-color: rgba(255, 255, 255, 0.3);
     }
+
 }
+
+
 
 /* 3. SPECTRE CSS LABEL (BADGE) OVERRIDES
    ========================================================================== */
 .label {
     border-radius: var(--border-radius);
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
 }
 
 .label-success {
@@ -119,6 +126,11 @@
 .label-secondary {
     background-color: var(--color-secondary);
     color: white;
+}
+
+.label .btn,
+.label .btn-clear {
+    margin-top: -3px;
 }
 
 /* 4. GITHUB-LIKE LAYOUT STYLES
@@ -288,15 +300,24 @@ h2 {
 .card {
     border-radius: var(--border-radius);
     margin-bottom: 1.5rem;
+
+    &.card-header {
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.8rem;
+    }
 }
 
-.card .card-header {
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 0.8rem;
-}
+.navbar {
+    .navbar-section {
+        h2 {
+            margin-bottom: 0;
+        }
 
-.navbar-section h2 {
-    margin-bottom: 0;
+        button:not(:last-child),
+        select:not(:last-child) {
+            margin-right: 0.3rem;
+        }
+    }
 }
 
 /* 5. CUSTOM COMPONENT STYLES
@@ -675,7 +696,7 @@ body.modal-open {
 .log-level-filter {
     width: 140px;
     height: 32px;
-    padding: 0.375rem 0.75rem;
+    /* padding: 0.375rem 0.75rem;
     font-size: 0.875rem;
     border-radius: var(--border-radius);
     border: 1px solid var(--border-color);
@@ -683,10 +704,10 @@ body.modal-open {
     color: var(--text-primary);
     margin-right: 0.5rem;
     transition: border-color 0.2s, box-shadow 0.2s;
-    cursor: pointer;
+    cursor: pointer; */
 }
 
-.log-level-filter:focus {
+/* .log-level-filter:focus {
     outline: none;
     border-color: var(--color-primary);
     box-shadow: 0 0 0 2px rgba(7, 87, 186, 0.1);
@@ -694,7 +715,7 @@ body.modal-open {
 
 .log-level-filter:hover {
     border-color: var(--color-primary);
-}
+}  */
 
 /* Ensure navbar section keeps controls inline */
 .navbar-section {

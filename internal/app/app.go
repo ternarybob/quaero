@@ -31,6 +31,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
+	"github.com/ternarybob/quaero/internal/services/transformer"
 	"github.com/ternarybob/quaero/internal/storage"
 )
 
@@ -50,9 +51,10 @@ type App struct {
 	ChatService       interfaces.ChatService
 
 	// Event-driven services
-	EventService     interfaces.EventService
-	SchedulerService interfaces.SchedulerService
-	SummaryService   *summary.Service
+	EventService       interfaces.EventService
+	SchedulerService   interfaces.SchedulerService
+	SummaryService     *summary.Service
+	TransformerService *transformer.Service
 
 	// Source-agnostic services
 	StatusService *status.Service
@@ -246,6 +248,17 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Crawler service initialized")
 
+	// 6.6. Initialize generic document transformer (subscribes to collection events)
+	// NOTE: Must be initialized after crawler service to access GetJobResults()
+	a.TransformerService = transformer.NewService(
+		a.StorageManager.JobStorage(),
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.CrawlerService,
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Document transformer initialized and subscribed to collection events")
+
 	// 7. Initialize embedding coordinator
 	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
 	// EmbeddingService kept temporarily for backward compatibility
@@ -284,6 +297,8 @@ func (a *App) initServices() error {
 		a.CrawlerService,
 		a.SourceService,
 		a.StorageManager.AuthStorage(),
+		a.EventService,
+		a.Config,
 		a.Logger,
 	)
 	if err := a.SchedulerService.RegisterJob(
@@ -405,7 +420,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.Config, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)

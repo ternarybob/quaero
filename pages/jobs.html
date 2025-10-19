@@ -27,7 +27,15 @@
                             <h2>Job Statistics</h2>
                         </section>
                         <section class="navbar-section">
-                            <div class="btn-group btn-group-block">
+                            <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>Create Job</span>
+                            </button>
+                            <button class="btn btn-sm" onclick="loadStats()">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+
+                            <!-- <div class="btn-group btn-group-block">
                                 <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
                                     <i class="fa-solid fa-plus"></i>
                                     <span>Create Job</span>
@@ -35,44 +43,44 @@
                                 <button class="btn btn-sm" onclick="loadStats()">
                                     <i class="fa-solid fa-rotate-right"></i>
                                 </button>
-                            </div>
+                            </div> -->
                         </section>
                     </header>
                 </div>
                 <div class="card-body">
-                        <div style="display: flex; justify-content: space-around; align-items: center; gap: 1rem; flex-wrap: wrap;">
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">TOTAL JOBS</p>
-                                <p style="font-size: 1.75rem; font-weight: bold;" id="stat-total">-</p>
-                            </div>
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">PENDING</p>
-                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-warning);" id="stat-pending">-</p>
-                            </div>
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">RUNNING</p>
-                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-primary);" id="stat-running">-</p>
-                            </div>
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">COMPLETED</p>
-                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-success);" id="stat-completed">-</p>
-                            </div>
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">FAILED</p>
-                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-danger);" id="stat-failed">-</p>
-                            </div>
-                            <div style="text-align: center;">
-                                <p style="font-size: 0.875rem; color: var(--text-secondary);">CANCELLED</p>
-                                <p style="font-size: 1.75rem; font-weight: bold; color: var(--color-warning);" id="stat-cancelled">-</p>
-                            </div>
+                    <div class="columns">
+                        <div class="column text-center">
+                            <p class="text-small text-gray">TOTAL JOBS</p>
+                            <p class="h2" id="stat-total">-</p>
+                        </div>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">PENDING</p>
+                            <p class="h2 text-warning" id="stat-pending">-</p>
+                        </div>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">RUNNING</p>
+                            <p class="h2 text-primary" id="stat-running">-</p>
+                        </div>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">COMPLETED</p>
+                            <p class="h2 text-success" id="stat-completed">-</p>
+                        </div>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">FAILED</p>
+                            <p class="h2 text-error" id="stat-failed">-</p>
+                        </div>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">CANCELLED</p>
+                            <p class="h2 text-warning" id="stat-cancelled">-</p>
                         </div>
                     </div>
                 </div>
             </div>
+            </div>
         </section>
 
         <!-- Default Jobs -->
-        <section style="margin-top: 1.5rem;">
+        <section>
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
@@ -87,39 +95,38 @@
                     </header>
                 </div>
                 <div class="card-body">
-                        <table class="table striped border">
-                            <thead>
-                                <tr>
-                                    <th>JOB NAME</th>
-                                    <th>DESCRIPTION</th>
-                                    <th>SCHEDULE</th>
-                                    <th class="text-center">STATUS</th>
-                                    <th>LAST RUN</th>
-                                    <th>NEXT RUN</th>
-                                    <th class="text-center">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody id="default-jobs-table-body">
-                                <tr>
-                                    <td colspan="7" class="text-center">
-                                        Loading default jobs...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="table striped border">
+                        <thead>
+                            <tr>
+                                <th>JOB NAME</th>
+                                <th>DESCRIPTION</th>
+                                <th>SCHEDULE</th>
+                                <th class="text-center">STATUS</th>
+                                <th>LAST RUN</th>
+                                <th>NEXT RUN</th>
+                                <th class="text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="default-jobs-table-body">
+                            <tr>
+                                <td colspan="7" class="text-center">
+                                    Loading default jobs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </section>
 
         <!-- Crawler Jobs -->
-        <section style="margin-top: 1.5rem;">
+        <section>
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
                             <h2>
-                                <span id="job-count" style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Crawler Jobs
+                                <span id="job-count" class="text-gray">0</span> Crawler Jobs
                             </h2>
                         </section>
                         <section class="navbar-section">
@@ -130,115 +137,89 @@
                     </header>
                 </div>
                 <div class="card-body">
-                        <!-- Filter Controls -->
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-                            <!-- Multi-checkbox Status Filter -->
-                            <div style="position: relative;" x-data="{ open: false }">
-                                <button type="button"
-                                        class="form-select"
-                                        @click="open = !open"
-                                        style="text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
-                                    <span id="status-filter-label">Status (2 selected)</span>
-                                    <i class="fas fa-chevron-down" style="font-size: 0.75rem;"></i>
-                                </button>
-                                <div x-show="open"
-                                     @click.outside="open = false"
-                                     style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: var(--border-radius); margin-top: 0.25rem; padding: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 100;">
-                                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
-                                        <button type="button" class="btn btn-sm" onclick="selectAllStatuses()" style="flex: 1;">
-                                            <i class="fas fa-check-double"></i> Select All
-                                        </button>
-                                        <button type="button" class="btn btn-sm" onclick="clearAllStatuses()" style="flex: 1;">
-                                            <i class="fas fa-times"></i> Clear All
-                                        </button>
-                                    </div>
-                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
-                                        <input type="checkbox" class="status-checkbox" value="pending" onchange="updateStatusFilter()" checked>
-                                        <i class="form-icon"></i> Pending
-                                    </label>
-                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
-                                        <input type="checkbox" class="status-checkbox" value="running" onchange="updateStatusFilter()" checked>
-                                        <i class="form-icon"></i> Running
-                                    </label>
-                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
-                                        <input type="checkbox" class="status-checkbox" value="completed" onchange="updateStatusFilter()">
-                                        <i class="form-icon"></i> Completed
-                                    </label>
-                                    <label class="form-checkbox" style="display: block; margin-bottom: 0.5rem;">
-                                        <input type="checkbox" class="status-checkbox" value="failed" onchange="updateStatusFilter()">
-                                        <i class="form-icon"></i> Failed
-                                    </label>
-                                    <label class="form-checkbox" style="display: block; margin-bottom: 0;">
-                                        <input type="checkbox" class="status-checkbox" value="cancelled" onchange="updateStatusFilter()">
-                                        <i class="form-icon"></i> Cancelled
-                                    </label>
-                                </div>
-                            </div>
-                            <select class="form-select" id="source-filter" onchange="filterJobs()">
-                                <option value="">All Sources</option>
-                                <option value="jira">Jira</option>
-                                <option value="confluence">Confluence</option>
-                            </select>
-                            <select class="form-select" id="entity-filter" onchange="filterJobs()">
-                                <option value="">All Entity Types</option>
-                                <option value="projects">Projects</option>
-                                <option value="spaces">Spaces</option>
-                                <option value="repos">Repos</option>
-                            </select>
+                    <!-- Filter Button and Chips -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-sm" onclick="showFilterModal()">
+                            <i class="fas fa-filter"></i> Filter
+                        </button>
+                        <div id="filter-chips-container"></div>
+                        <!-- style="display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;" -->
+                    </div>
+
+                    <!-- Jobs Table -->
+                    <table class="table striped border">
+                        <thead>
+                            <tr>
+                                <th>JOB ID</th>
+                                <th>SOURCE</th>
+                                <th>ENTITY</th>
+                                <th class="text-center">STATUS</th>
+                                <th>PROGRESS</th>
+                                <th>CREATED</th>
+                                <th class="text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobs-table-body">
+                            <tr>
+                                <td colspan="7" class="text-center">
+                                    Loading jobs...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- Pagination Controls -->
+                    <div id="job-pagination-container" class="pagination-container">
+                        <!-- Pagination will be rendered here by renderPagination() -->
+                    </div>
+                </div>
+            </div>
+            </div>
+        </section>
+
+        <!-- Job Detail -->
+        <section>
+            <div class="accordion">
+                <input type="checkbox" id="accordion-job-detail" name="accordion-checkbox" hidden checked>
+                <label class="accordion-header" for="accordion-job-detail">
+                    <i class="icon icon-arrow-right mr-1"></i>
+                    Job Detail
+                    <span id="selected-job-id" class="label label-primary"></span>
+                </label>
+                <div class="accordion-body">
+                    <!-- Tabs -->
+                    <div x-data="{ activeTab: 'json' }">
+                        <ul class="tab tab-block">
+                            <li class="tab-item" :class="{ 'active': activeTab === 'json' }">
+                                <a href="#" @click.prevent="activeTab = 'json'">
+                                    <i class="fa-solid fa-code"></i> Job JSON
+                                </a>
+                            </li>
+                            <li class="tab-item" :class="{ 'active': activeTab === 'logs' }">
+                                <a href="#" @click.prevent="activeTab = 'logs'; loadJobLogsTab()">
+                                    <i class="fa-solid fa-list"></i> Job Logs
+                                </a>
+                            </li>
+                        </ul>
+
+                        <!-- Tab Content: Job JSON -->
+                        <div x-show="activeTab === 'json'">
+                            <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
                         </div>
 
-                        <!-- Jobs Table -->
-                        <table class="table striped border">
-                            <thead>
-                                <tr>
-                                    <th>JOB ID</th>
-                                    <th>SOURCE</th>
-                                    <th>ENTITY</th>
-                                    <th class="text-center">STATUS</th>
-                                    <th>PROGRESS</th>
-                                    <th>CREATED</th>
-                                    <th class="text-center">ACTIONS</th>
-                                </tr>
-                            </thead>
-                            <tbody id="jobs-table-body">
-                                <tr>
-                                    <td colspan="7" class="text-center">
-                                        Loading jobs...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-
-                        <!-- Pagination Controls -->
-                        <div id="job-pagination-container" class="pagination-container" style="margin-top: 1rem;">
-                            <!-- Pagination will be rendered here by renderPagination() -->
+                        <!-- Tab Content: Job Logs -->
+                        <div x-show="activeTab === 'logs'">
+                            <div id="job-logs-container">
+                                <p class="text-muted text-center">Select a job to view its logs</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Job Detail -->
-        <section style="margin-top: 1.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h2>Job Detail</h2>
-                        </section>
-                        <section class="navbar-section">
-                            <span id="selected-job-id" class="label label-primary"></span>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
-                </div>
-            </div>
-        </section>
-
         <!-- Service Logs -->
-        <section style="margin-top: 1.5rem;">
+        <section>
             {{template "service-logs.html" .}}
         </section>
 
@@ -251,7 +232,7 @@
     <!-- Create Job Modal -->
     <div id="create-job-modal" class="modal" @keydown.escape.window="closeCreateJobModal()">
         <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
-        <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
+        <div class="modal-container" role="dialog" aria-modal="true">
             <div class="modal-header">
                 <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
                 <div class="modal-title h5">Create New Job</div>
@@ -285,9 +266,9 @@
                         </div>
 
                         <!-- Loading State -->
-                        <div id="modal-loading" style="display: none; text-align: center; padding: 1rem;">
+                        <div id="modal-loading" class="hide text-center">
                             <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                            <p style="margin-top: 0.5rem;">Creating job...</p>
+                            <p>Creating job...</p>
                         </div>
                     </form>
                 </div>
@@ -295,6 +276,79 @@
             <div class="modal-footer">
                 <button type="button" class="btn" onclick="closeCreateJobModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary" onclick="createJobFromSource(event)">Create Job</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Modal -->
+    <div id="filter-modal" class="modal">
+        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
+        <div class="modal-container" role="dialog" aria-modal="true">
+            <div class="modal-header">
+                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
+                <div class="modal-title h5">Filter Crawler Jobs</div>
+            </div>
+            <div class="modal-body">
+                <div class="content">
+                    <!-- Status Filters -->
+                    <div class="form-group">
+                        <label class="form-label"><strong>Status</strong></label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-status" value="pending" checked>
+                            <i class="form-icon"></i> Pending
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-status" value="running" checked>
+                            <i class="form-icon"></i> Running
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-status" value="completed">
+                            <i class="form-icon"></i> Completed
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-status" value="failed">
+                            <i class="form-icon"></i> Failed
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-status" value="cancelled">
+                            <i class="form-icon"></i> Cancelled
+                        </label>
+                    </div>
+
+                    <!-- Source Type Filters -->
+                    <div class="form-group">
+                        <label class="form-label"><strong>Source Type</strong></label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-source" value="jira">
+                            <i class="form-icon"></i> Jira
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-source" value="confluence">
+                            <i class="form-icon"></i> Confluence
+                        </label>
+                    </div>
+
+                    <!-- Entity Type Filters -->
+                    <div class="form-group">
+                        <label class="form-label"><strong>Entity Type</strong></label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-entity" value="projects">
+                            <i class="form-icon"></i> Projects
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-entity" value="spaces">
+                            <i class="form-icon"></i> Spaces
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-entity" value="repos">
+                            <i class="form-icon"></i> Repos
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="clearAllFilters()">Clear All</button>
+                <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
             </div>
         </div>
     </div>
@@ -309,6 +363,13 @@
         const pageSize = 50;
         let autoRefreshInterval = null;
 
+        // Filter state
+        let activeFilters = {
+            status: new Set(['pending', 'running']),
+            source: new Set(),
+            entity: new Set()
+        };
+
         // Load job statistics
         async function loadStats() {
             console.log('[Jobs] loadStats() called');
@@ -316,7 +377,7 @@
                 console.log('[Jobs] Fetching stats from /api/jobs/stats');
                 const response = await fetch('/api/jobs/stats');
                 console.log('[Jobs] Stats response status:', response.status);
-                
+
                 if (!response.ok) throw new Error('Failed to fetch stats');
 
                 const stats = await response.json();
@@ -359,17 +420,16 @@
                 params.append('order_by', 'created_at');
                 params.append('order_dir', 'DESC');
 
-                // Build comma-separated status values from checkboxes
-                const statusCheckboxes = document.querySelectorAll('.status-checkbox:checked');
-                const statusValues = Array.from(statusCheckboxes).map(cb => cb.value);
-                const statusFilter = statusValues.join(',');
-
-                const sourceFilter = document.getElementById('source-filter').value;
-                const entityFilter = document.getElementById('entity-filter').value;
-
-                if (statusFilter) params.append('status', statusFilter);
-                if (sourceFilter) params.append('source', sourceFilter);
-                if (entityFilter) params.append('entity', entityFilter);
+                // Build filter parameters from activeFilters state
+                if (activeFilters.status.size > 0) {
+                    params.append('status', Array.from(activeFilters.status).join(','));
+                }
+                if (activeFilters.source.size > 0) {
+                    params.append('source', Array.from(activeFilters.source).join(','));
+                }
+                if (activeFilters.entity.size > 0) {
+                    params.append('entity', Array.from(activeFilters.entity).join(','));
+                }
 
                 const response = await fetch(`/api/jobs?${params.toString()}`);
                 if (!response.ok) {
@@ -388,7 +448,7 @@
                 console.error('[Jobs] Error stack:', error.stack);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center" style="color: var(--color-danger);">
+                        <td colspan="7" class="text-center text-error">
                             Failed to load jobs. Please try again.
                         </td>
                     </tr>
@@ -396,41 +456,117 @@
             }
         }
 
-        // Filter jobs based on dropdowns
-        function filterJobs() {
-            currentPage = 1; // Reset to first page when filtering
-            loadJobs(); // Reload with new filters
+        // Show filter modal
+        function showFilterModal() {
+            const modal = document.getElementById('filter-modal');
+
+            // Sync modal checkboxes with activeFilters state
+            document.querySelectorAll('.filter-status').forEach(checkbox => {
+                checkbox.checked = activeFilters.status.has(checkbox.value);
+            });
+            document.querySelectorAll('.filter-source').forEach(checkbox => {
+                checkbox.checked = activeFilters.source.has(checkbox.value);
+            });
+            document.querySelectorAll('.filter-entity').forEach(checkbox => {
+                checkbox.checked = activeFilters.entity.has(checkbox.value);
+            });
+
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
         }
 
-        // Update status filter label and trigger filter
-        function updateStatusFilter() {
-            const checkboxes = document.querySelectorAll('.status-checkbox');
-            const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-            const label = document.getElementById('status-filter-label');
-
-            if (checkedCount === 0) {
-                label.textContent = 'Status (none selected)';
-            } else if (checkedCount === checkboxes.length) {
-                label.textContent = 'Status (all)';
-            } else {
-                label.textContent = `Status (${checkedCount} selected)`;
-            }
-
-            filterJobs();
+        // Close filter modal
+        function closeFilterModal() {
+            const modal = document.getElementById('filter-modal');
+            modal.classList.remove('active');
+            document.body.classList.remove('modal-open');
         }
 
-        // Select all status checkboxes
-        function selectAllStatuses() {
-            const checkboxes = document.querySelectorAll('.status-checkbox');
-            checkboxes.forEach(cb => cb.checked = true);
-            updateStatusFilter();
+        // Apply filters from modal
+        function applyFilters() {
+            // Update activeFilters from modal checkboxes
+            activeFilters.status.clear();
+            document.querySelectorAll('.filter-status:checked').forEach(cb => {
+                activeFilters.status.add(cb.value);
+            });
+
+            activeFilters.source.clear();
+            document.querySelectorAll('.filter-source:checked').forEach(cb => {
+                activeFilters.source.add(cb.value);
+            });
+
+            activeFilters.entity.clear();
+            document.querySelectorAll('.filter-entity:checked').forEach(cb => {
+                activeFilters.entity.add(cb.value);
+            });
+
+            // Close modal and refresh
+            closeFilterModal();
+            renderFilterChips();
+            currentPage = 1;
+            loadJobs();
         }
 
-        // Clear all status checkboxes
-        function clearAllStatuses() {
-            const checkboxes = document.querySelectorAll('.status-checkbox');
-            checkboxes.forEach(cb => cb.checked = false);
-            updateStatusFilter();
+        // Clear all filters
+        function clearAllFilters() {
+            // Uncheck all checkboxes in modal
+            document.querySelectorAll('.filter-status, .filter-source, .filter-entity').forEach(cb => {
+                cb.checked = false;
+            });
+        }
+
+        // Render filter chips
+        function renderFilterChips() {
+            const container = document.getElementById('filter-chips-container');
+            let html = '';
+
+            // Status chips
+            activeFilters.status.forEach(status => {
+                const colorClass = {
+                    'pending': 'label-warning',
+                    'running': 'label-primary',
+                    'completed': 'label-success',
+                    'failed': 'label-error',
+                    'cancelled': 'label-warning'
+                }[status] || 'label-default';
+
+                html += `
+                    <span class="label ${colorClass}">
+                        ${status.charAt(0).toUpperCase() + status.slice(1)}
+                        <a href="#" onclick="event.preventDefault(); removeFilter('status', '${status}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
+                    </span>
+                `;
+            });
+
+            // Source chips
+            activeFilters.source.forEach(source => {
+                html += `
+                    <span class="label label-primary">
+                        ${source.charAt(0).toUpperCase() + source.slice(1)}
+                        <a href="#" onclick="event.preventDefault(); removeFilter('source', '${source}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
+                    </span>
+                `;
+            });
+
+            // Entity chips
+            activeFilters.entity.forEach(entity => {
+                html += `
+                    <span class="label label-primary">
+                        ${entity.charAt(0).toUpperCase() + entity.slice(1)}
+                        <a href="#" onclick="event.preventDefault(); removeFilter('entity', '${entity}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
+                    </span>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // Remove individual filter
+        function removeFilter(category, value) {
+            activeFilters[category].delete(value);
+            renderFilterChips();
+            currentPage = 1;
+            loadJobs();
         }
 
         // Render jobs table
@@ -467,7 +603,7 @@
                 const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
 
                 return `
-                    <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})" style="cursor: pointer;">
+                    <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})">
                         <td title="${job.id || 'N/A'}">${jobIdShort}...</td>
                         <td>${job.source_type || 'N/A'}</td>
                         <td>${job.entity_type || 'N/A'}</td>
@@ -476,12 +612,12 @@
                         <td>${createdDate}</td>
                         <td class="text-center">
                             ${job.status !== 'running' ? `
-                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job" style="margin-right: 0.25rem;">
+                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                             ` : ''}
                             ${job.status === 'running' ? `
-                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job" style="margin-right: 0.25rem;">
+                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job">
                                 <i class="fas fa-stop"></i>
                             </button>
                             ` : ''}
@@ -596,6 +732,7 @@
         function selectJob(index) {
             selectedJob = filteredJobs[index];
             displayJobDetail(selectedJob);
+            loadJobLogsTab();
             renderJobs();
         }
 
@@ -616,6 +753,78 @@
 
             if (typeof hljs !== 'undefined') {
                 hljs.highlightElement(codeBlock);
+            }
+        }
+
+        // Load job logs for the currently selected job
+        async function loadJobLogsTab() {
+            const logsContainer = document.getElementById('job-logs-container');
+
+            if (!selectedJob || !selectedJob.id) {
+                logsContainer.innerHTML = '<p class="text-muted text-center">Select a job to view its logs</p>';
+                return;
+            }
+
+            logsContainer.innerHTML = '<div class="loading loading-lg"></div>';
+
+            try {
+                const response = await fetch(`/api/jobs/${selectedJob.id}/logs`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch job logs');
+                }
+
+                const data = await response.json();
+                const logs = data.logs || [];
+
+                if (logs.length === 0) {
+                    logsContainer.innerHTML = '<p class="text-muted text-center">No logs available for this job</p>';
+                    return;
+                }
+
+                // Build logs table
+                let html = `
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>TIME</th>
+                                <th>LEVEL</th>
+                                <th>MESSAGE</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                logs.forEach(log => {
+                    const levelClass = log.level === 'error' ? 'text-error' : log.level === 'info' ? 'text-primary' : '';
+                    const levelBadge = log.level === 'error'
+                        ? '<span class="label label-error">ERROR</span>'
+                        : log.level === 'info'
+                            ? '<span class="label label-primary">INFO</span>'
+                            : `<span class="label">${log.level.toUpperCase()}</span>`;
+
+                    html += `
+                        <tr>
+                            <td><code>${log.timestamp || 'N/A'}</code></td>
+                            <td>${levelBadge}</td>
+                            <td class="${levelClass}">${log.message || 'N/A'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+
+                logsContainer.innerHTML = html;
+
+            } catch (error) {
+                console.error('Error loading job logs:', error);
+                logsContainer.innerHTML = `
+                    <div class="toast toast-error">
+                        <i class="fa-solid fa-exclamation-circle"></i> Failed to load logs: ${error.message}
+                    </div>
+                `;
             }
         }
 
@@ -791,13 +1000,14 @@
             console.log('[Jobs] DOMContentLoaded event fired');
             console.log('[Jobs] Current URL:', window.location.href);
             console.log('[Jobs] Initializing page components...');
-            
+
+            renderFilterChips(); // Render initial filter chips
             loadStats();
             loadJobs();
             loadJobQueue(); // Load queue data on initial page load
             loadDefaultJobs(); // Load default jobs on initial page load
             startAutoRefresh();
-            
+
             console.log('[Jobs] Page initialization complete');
             console.log('[Jobs] ====================================================');
         });
@@ -859,7 +1069,7 @@
         }
 
         // ESC key handler for modal
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 const modal = document.getElementById('create-job-modal');
                 if (modal && modal.classList.contains('active')) {
@@ -869,7 +1079,7 @@
         });
 
         // Focus trap for modal
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Tab') {
                 const modal = document.getElementById('create-job-modal');
                 if (modal && modal.classList.contains('active')) {
@@ -954,7 +1164,7 @@
             const seedURLs = seedUrlsText ? seedUrlsText.split('\n').map(url => url.trim()).filter(url => url) : [];
 
             // Show loading state
-            modalLoading.style.display = 'block';
+            modalLoading.classList.remove('hide');
             createButton.disabled = true;
 
             let originalIcon = null;
@@ -1003,7 +1213,7 @@
                 console.error('Error creating job:', error);
                 window.showNotification('Failed to create job: ' + error.message, 'error');
             } finally {
-                modalLoading.style.display = 'none';
+                modalLoading.classList.add('hide');
                 createButton.disabled = false;
                 if (iconElement && originalIcon) {
                     iconElement.className = originalIcon;
@@ -1042,7 +1252,7 @@
                 console.log('[Jobs] Fetching default jobs from /api/jobs/default');
                 const response = await fetch('/api/jobs/default');
                 console.log('[Jobs] Response status:', response.status, response.statusText);
-                
+
                 if (!response.ok) {
                     throw new Error('Failed to fetch default jobs');
                 }
@@ -1063,7 +1273,7 @@
                     `;
                     return;
                 }
-                
+
                 console.log('[Jobs] Rendering', jobs.length, 'jobs');
 
                 tbody.innerHTML = jobs.map(job => {
@@ -1081,7 +1291,7 @@
 
                     const isRunning = job.is_running;
                     const runningIndicator = isRunning
-                        ? '<i class="fa-solid fa-spinner fa-pulse" style="color: var(--color-primary); margin-right: 0.5rem;"></i>'
+                        ? '<i class="fa-solid fa-spinner fa-pulse text-primary"></i> '
                         : '';
 
                     return `
@@ -1100,15 +1310,13 @@
                                 <button class="btn btn-sm btn-warning"
                                         onclick="toggleDefaultJob('${job.name}', false)"
                                         title="Disable Job"
-                                        style="margin-right: 0.25rem;"
                                         ${isRunning ? 'disabled' : ''}>
                                     <i class="fa-solid fa-pause"></i>
                                 </button>
                                 ` : `
                                 <button class="btn btn-sm btn-success"
                                         onclick="toggleDefaultJob('${job.name}', true)"
-                                        title="Enable Job"
-                                        style="margin-right: 0.25rem;">
+                                        title="Enable Job">
                                     <i class="fa-solid fa-play"></i>
                                 </button>
                                 `}
@@ -1121,7 +1329,7 @@
                         </tr>
                     `;
                 }).join('');
-                
+
                 console.log('[Jobs] Default jobs table updated successfully');
 
             } catch (error) {
@@ -1129,7 +1337,7 @@
                 console.error('[Jobs] Error stack:', error.stack);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center" style="color: var(--color-danger);">
+                        <td colspan="7" class="text-center text-error">
                             Failed to load default jobs. Please try again.
                         </td>
                     </tr>

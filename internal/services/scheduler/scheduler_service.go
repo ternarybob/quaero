@@ -259,7 +259,7 @@ func (s *Service) EnableJob(name string) error {
 		Msg("Job enabled")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, entry.schedule, true); err != nil {
+	if err := s.saveJobSettings(name, entry.schedule, true, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job enabled status")
 	}
 
@@ -289,7 +289,7 @@ func (s *Service) DisableJob(name string) error {
 		Msg("Job disabled")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, entry.schedule, false); err != nil {
+	if err := s.saveJobSettings(name, entry.schedule, false, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job disabled status")
 	}
 
@@ -352,7 +352,7 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 		Msg("Job schedule updated")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, schedule, entry.enabled); err != nil {
+	if err := s.saveJobSettings(name, schedule, entry.enabled, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job schedule update")
 	}
 
@@ -417,6 +417,11 @@ func (s *Service) GetAllJobStatuses() map[string]*interfaces.JobStatus {
 
 // executeJob wraps job execution with mutex, panic recovery, and status tracking
 func (s *Service) executeJob(name string) {
+	// Variables for panic recovery persistence
+	var capturedSchedule string
+	var capturedEnabled bool
+	var capturedLastRun *time.Time
+
 	// Panic recovery
 	defer func() {
 		if r := recover(); r != nil {
@@ -431,6 +436,11 @@ func (s *Service) executeJob(name string) {
 				entry.lastError = fmt.Sprintf("panic: %v", r)
 			}
 			s.jobMu.Unlock()
+
+			// Persist lastRun timestamp even on panic
+			if err := s.saveJobSettings(name, capturedSchedule, capturedEnabled, capturedLastRun); err != nil {
+				s.logger.Warn().Err(err).Msg("Failed to persist job lastRun timestamp after panic")
+			}
 		}
 	}()
 
@@ -456,16 +466,22 @@ func (s *Service) executeJob(name string) {
 	// Update status
 	entry.isRunning = true
 	now := time.Now()
-	entry.lastRun = &now
 	handler := entry.handler
+
+	// Capture values for persistence before unlocking
+	capturedSchedule = entry.schedule
+	capturedEnabled = entry.enabled
+	capturedLastRun = entry.lastRun
 	s.jobMu.Unlock()
 
 	// Execute job handler
 	err := handler()
 
 	// Update status after execution
+	completionTime := time.Now()
 	s.jobMu.Lock()
 	entry.isRunning = false
+	entry.lastRun = &completionTime
 	if err != nil {
 		entry.lastError = err.Error()
 		s.logger.Error().
@@ -480,7 +496,18 @@ func (s *Service) executeJob(name string) {
 			Dur("duration", time.Since(now)).
 			Msg("✅ Job execution completed successfully")
 	}
+
+	// Capture values for persistence before unlocking
+	lastRun := entry.lastRun
+	capturedLastRun = entry.lastRun
+	schedule := entry.schedule
+	enabled := entry.enabled
 	s.jobMu.Unlock()
+
+	// Persist lastRun timestamp to database
+	if err := s.saveJobSettings(name, schedule, enabled, lastRun); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to persist job lastRun timestamp")
+	}
 }
 
 // runScheduledTask executes the scheduled collection and embedding pipeline (legacy)
@@ -543,22 +570,29 @@ func (s *Service) runScheduledTask() {
 	s.logger.Info().Msg("✅ >>> SCHEDULER: Collection completed successfully")
 }
 
-// saveJobSettings persists job schedule and enabled status to database
-func (s *Service) saveJobSettings(name string, schedule string, enabled bool) error {
+// saveJobSettings persists job schedule, enabled status, and last run timestamp to database
+func (s *Service) saveJobSettings(name string, schedule string, enabled bool, lastRun *time.Time) error {
 	if s.db == nil {
 		return nil // No database available, skip persistence
 	}
 
+	// Convert lastRun to Unix timestamp or NULL
+	var lastRunUnix interface{}
+	if lastRun != nil {
+		lastRunUnix = lastRun.Unix()
+	}
+
 	query := `
-		INSERT INTO job_settings (job_name, schedule, enabled, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO job_settings (job_name, schedule, enabled, last_run, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(job_name) DO UPDATE SET
 			schedule = excluded.schedule,
 			enabled = excluded.enabled,
+			last_run = excluded.last_run,
 			updated_at = excluded.updated_at
 	`
 
-	_, err := s.db.Exec(query, name, schedule, enabled, time.Now().Unix())
+	_, err := s.db.Exec(query, name, schedule, enabled, lastRunUnix, time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("failed to save job settings: %w", err)
 	}
@@ -580,7 +614,7 @@ func (s *Service) LoadJobSettings() error {
 		return nil
 	}
 
-	query := `SELECT job_name, schedule, enabled FROM job_settings`
+	query := `SELECT job_name, schedule, enabled, last_run FROM job_settings`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return fmt.Errorf("failed to load job settings: %w", err)
@@ -591,8 +625,9 @@ func (s *Service) LoadJobSettings() error {
 	for rows.Next() {
 		var name, schedule string
 		var enabled bool
+		var lastRunUnix sql.NullInt64
 
-		if err := rows.Scan(&name, &schedule, &enabled); err != nil {
+		if err := rows.Scan(&name, &schedule, &enabled, &lastRunUnix); err != nil {
 			s.logger.Warn().Err(err).Msg("Failed to scan job setting")
 			continue
 		}
@@ -605,6 +640,14 @@ func (s *Service) LoadJobSettings() error {
 		if !exists {
 			s.logger.Warn().Str("job_name", name).Msg("Job setting found but job not registered, skipping")
 			continue
+		}
+
+		// Restore last_run timestamp
+		if lastRunUnix.Valid {
+			lastRun := time.Unix(lastRunUnix.Int64, 0)
+			s.jobMu.Lock()
+			entry.lastRun = &lastRun
+			s.jobMu.Unlock()
 		}
 
 		// Update schedule if different

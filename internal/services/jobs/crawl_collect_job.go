@@ -3,11 +3,10 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
@@ -19,6 +18,8 @@ type CrawlCollectJob struct {
 	crawlerService *crawler.Service
 	sourceService  *sources.Service
 	authStorage    interfaces.AuthStorage
+	eventService   interfaces.EventService
+	config         *common.Config
 	logger         arbor.ILogger
 }
 
@@ -27,12 +28,16 @@ func NewCrawlCollectJob(
 	crawlerService *crawler.Service,
 	sourceService *sources.Service,
 	authStorage interfaces.AuthStorage,
+	eventService interfaces.EventService,
+	config *common.Config,
 	logger arbor.ILogger,
 ) *CrawlCollectJob {
 	return &CrawlCollectJob{
 		crawlerService: crawlerService,
 		sourceService:  sourceService,
 		authStorage:    authStorage,
+		eventService:   eventService,
+		config:         config,
 		logger:         logger,
 	}
 }
@@ -87,7 +92,7 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Msg("Processing source")
 
 	// Derive seed URLs and entity type
-	seedURLs := j.deriveSeedURLs(source)
+	seedURLs := common.DeriveSeedURLs(source, j.config.Crawler.UseHTMLSeeds, j.logger)
 	if len(seedURLs) == 0 {
 		return fmt.Errorf("failed to derive seed URLs for source")
 	}
@@ -145,9 +150,17 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Msg("Crawl job started, waiting for completion")
 
 	// Wait for job completion
-	results, err := j.crawlerService.WaitForJob(ctx, jobID)
+	resultsInterface, err := j.crawlerService.WaitForJob(ctx, jobID)
 	if err != nil {
 		return fmt.Errorf("crawl job failed: %w", err)
+	}
+
+	// Type assert to []*crawler.CrawlResult
+	results, ok := resultsInterface.([]*crawler.CrawlResult)
+	if !ok {
+		j.logger.Warn().Str("job_id", jobID).Msg("Unexpected result type from WaitForJob")
+		// Continue with empty results count
+		results = nil
 	}
 
 	j.logger.Info().
@@ -156,57 +169,20 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Int("results_count", len(results)).
 		Msg("Crawl job completed successfully")
 
+	// Trigger transformation of crawled data to documents
+	if err := j.eventService.PublishSync(ctx, interfaces.Event{
+		Type: interfaces.EventCollectionTriggered,
+		Payload: map[string]interface{}{
+			"job_id":      jobID,
+			"source_id":   source.ID,
+			"source_type": string(source.Type),
+		},
+	}); err != nil {
+		j.logger.Warn().Err(err).Msg("Failed to publish collection event")
+		// Non-critical - continue
+	}
+
 	return nil
-}
-
-// deriveSeedURLs determines the appropriate seed URLs based on source type
-func (j *CrawlCollectJob) deriveSeedURLs(source *models.SourceConfig) []string {
-	parsedURL, err := url.Parse(source.BaseURL)
-	if err != nil {
-		j.logger.Warn().
-			Err(err).
-			Str("base_url", source.BaseURL).
-			Msg("Failed to parse base URL")
-		return []string{}
-	}
-
-	path := strings.TrimRight(parsedURL.Path, "/")
-
-	// If already a REST API endpoint, use as-is
-	if strings.Contains(path, "/rest/") {
-		return []string{source.BaseURL}
-	}
-
-	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
-
-	switch source.Type {
-	case models.SourceTypeJira:
-		return []string{fmt.Sprintf("%s/rest/api/3/project", baseURL)}
-
-	case models.SourceTypeConfluence:
-		// Handle /wiki prefix
-		if strings.HasPrefix(path, "/wiki") {
-			return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
-		}
-		return []string{fmt.Sprintf("%s/wiki/rest/api/space", baseURL)}
-
-	case models.SourceTypeGithub:
-		// Check for org filter
-		if org, ok := source.Filters["org"].(string); ok {
-			return []string{fmt.Sprintf("%s/orgs/%s/repos", baseURL, org)}
-		}
-		// Check for user filter
-		if user, ok := source.Filters["user"].(string); ok {
-			return []string{fmt.Sprintf("%s/users/%s/repos", baseURL, user)}
-		}
-		return []string{}
-
-	default:
-		j.logger.Warn().
-			Str("source_type", string(source.Type)).
-			Msg("Unknown source type")
-		return []string{}
-	}
 }
 
 // deriveEntityType determines the appropriate entity type based on source type
