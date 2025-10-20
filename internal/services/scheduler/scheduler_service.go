@@ -84,7 +84,14 @@ func (s *Service) Start(cronExpr string) error {
 		cronExpr = "*/1 * * * *" // Default: every 1 minute
 	}
 
-	// Only add legacy scheduled task if no default jobs are registered
+	// Load job definitions from storage and register them BEFORE checking for legacy task
+	// This ensures we don't add the legacy task if job definitions exist
+	if err := s.LoadJobDefinitions(); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to load job definitions from storage")
+		// Non-critical error - continue starting scheduler
+	}
+
+	// Only add legacy scheduled task if no jobs are registered after loading definitions
 	// This prevents duplicate collection when using the new job system
 	s.jobMu.Lock()
 	hasDefaultJobs := len(s.jobs) > 0
@@ -97,16 +104,10 @@ func (s *Service) Start(cronExpr string) error {
 		}
 		s.logger.Info().
 			Str("cron_expr", cronExpr).
-			Msg("Legacy scheduled task enabled (no default jobs registered)")
+			Msg("Legacy scheduled task enabled (no job definitions registered)")
 	} else {
 		s.logger.Info().
-			Msg("Legacy scheduled task disabled (default jobs are registered)")
-	}
-
-	// Load job definitions from storage and register them
-	if err := s.LoadJobDefinitions(); err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to load job definitions from storage")
-		// Non-critical error - continue starting scheduler
+			Msg("Legacy scheduled task disabled (job definitions are registered)")
 	}
 
 	s.cron.Start()
