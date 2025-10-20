@@ -319,6 +319,17 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Crawler actions registered with job type registry")
 
+	// Register summarizer actions with the job type registry
+	summarizerDeps := &actions.SummarizerActionDeps{
+		DocStorage: a.StorageManager.DocumentStorage(),
+		LLMService: a.LLMService,
+		Logger:     a.Logger,
+	}
+	if err = actions.RegisterSummarizerActions(a.JobRegistry, summarizerDeps); err != nil {
+		return fmt.Errorf("failed to register summarizer actions: %w", err)
+	}
+	a.Logger.Info().Msg("Summarizer actions registered with job type registry")
+
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
 
@@ -353,37 +364,6 @@ func (a *App) initServices() error {
 				Str("schedule", a.Config.Jobs.CrawlAndCollect.Schedule).
 				Str("auto_start", fmt.Sprintf("%v", a.Config.Jobs.CrawlAndCollect.AutoStart)).
 				Msg("Registered crawl_and_collect job (enabled)")
-		}
-	}
-
-	// Register scan and summarize job (always register, disable if not enabled in config)
-	scanSummarizeJob := jobs.NewScanSummarizeJob(
-		a.StorageManager.DocumentStorage(),
-		a.LLMService,
-		a.Logger,
-	)
-	if err := a.SchedulerService.RegisterJob(
-		"scan_and_summarize",
-		a.Config.Jobs.ScanAndSummarize.Schedule,
-		a.Config.Jobs.ScanAndSummarize.Description,
-		a.Config.Jobs.ScanAndSummarize.AutoStart,
-		scanSummarizeJob.Execute,
-	); err != nil {
-		a.Logger.Error().Err(err).Msg("Failed to register scan_and_summarize job")
-	} else {
-		jobsRegistered++
-		// Disable if not enabled in config (before scheduler starts)
-		if !a.Config.Jobs.ScanAndSummarize.Enabled {
-			if err := a.SchedulerService.DisableJob("scan_and_summarize"); err != nil {
-				a.Logger.Error().Err(err).Msg("Failed to disable scan_and_summarize job")
-			} else {
-				a.Logger.Info().Msg("Registered scan_and_summarize job (disabled)")
-			}
-		} else {
-			a.Logger.Info().
-				Str("schedule", a.Config.Jobs.ScanAndSummarize.Schedule).
-				Str("auto_start", fmt.Sprintf("%v", a.Config.Jobs.ScanAndSummarize.AutoStart)).
-				Msg("Registered scan_and_summarize job (enabled)")
 		}
 	}
 
