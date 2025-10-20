@@ -8,6 +8,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -388,7 +389,7 @@ func TestExecute_SourceFetchFailure(t *testing.T) {
 	if err == nil {
 		t.Error("Expected source fetch error")
 	}
-	if !contains(err.Error(), "failed to fetch sources") {
+	if !strings.Contains(err.Error(), "failed to fetch sources") {
 		t.Errorf("Expected source fetch error, got: %v", err)
 	}
 }
@@ -449,7 +450,7 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error")
 	}
-	if !contains(err.Error(), "job execution failed at step 0") {
+	if !strings.Contains(err.Error(), "job execution failed at step 0") {
 		t.Errorf("Expected step 0 failure, got: %v", err)
 	}
 }
@@ -513,7 +514,7 @@ func TestExecute_ActionHandlerNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("Expected action not found error")
 	}
-	if !contains(err.Error(), "action handler not found") && !contains(err.Error(), "not found") {
+	if !strings.Contains(err.Error(), "action handler not found") && !strings.Contains(err.Error(), "not found") {
 		t.Errorf("Expected action not found error, got: %v", err)
 	}
 }
@@ -582,7 +583,7 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 	if err == nil {
 		t.Error("Expected aggregated errors")
 	}
-	if !contains(err.Error(), "2 error(s)") {
+	if !strings.Contains(err.Error(), "2 error(s)") {
 		t.Errorf("Expected 2 errors, got: %v", err)
 	}
 }
@@ -600,7 +601,7 @@ func TestHandleStepError_Continue(t *testing.T) {
 
 	ctx := context.Background()
 	testErr := errors.New("test error")
-	err := executor.handleStepError(ctx, jobDef, step, 0, testErr)
+	err := executor.handleStepError(ctx, jobDef, step, 0, testErr, []*models.SourceConfig{})
 
 	if err == nil {
 		t.Error("Expected error for continue strategy (for aggregation)")
@@ -623,7 +624,7 @@ func TestHandleStepError_Fail(t *testing.T) {
 
 	ctx := context.Background()
 	testErr := errors.New("test error")
-	err := executor.handleStepError(ctx, jobDef, step, 0, testErr)
+	err := executor.handleStepError(ctx, jobDef, step, 0, testErr, []*models.SourceConfig{})
 
 	if err == nil {
 		t.Error("Expected error for fail strategy")
@@ -705,7 +706,7 @@ func TestRetryStep_ExhaustedRetries(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error after exhausted retries")
 	}
-	if !contains(err.Error(), "failed after 3 retries") {
+	if !strings.Contains(err.Error(), "failed after 3 retries") {
 		t.Errorf("Expected retry count in error, got: %v", err)
 	}
 }
@@ -755,7 +756,7 @@ func TestFetchSources_SourceNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for nonexistent source")
 	}
-	if !contains(err.Error(), "failed to fetch source") {
+	if !strings.Contains(err.Error(), "failed to fetch source") {
 		t.Errorf("Expected fetch error, got: %v", err)
 	}
 }
