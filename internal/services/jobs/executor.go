@@ -85,6 +85,12 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 
 	// Iterate through steps
 	for stepIndex, step := range definition.Steps {
+		// Check context cancellation before starting step
+		if ctx.Err() != nil {
+			e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", ctx.Err().Error())
+			return ctx.Err()
+		}
+
 		stepStartTime := time.Now()
 
 		// Log step start
@@ -102,7 +108,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		handler, err := e.registry.GetAction(definition.Type, step.Action)
 		if err != nil {
 			stepErr := fmt.Errorf("action handler not found: %w", err)
-			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, stepErr); handledErr != nil {
+			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, stepErr, fetchedSources); handledErr != nil {
 				errors = append(errors, handledErr)
 				if step.OnError == models.ErrorStrategyFail {
 					// Publish failure event
@@ -116,14 +122,20 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		// Execute handler
 		err = handler(ctx, step, fetchedSources)
 		if err != nil {
-			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, err); handledErr != nil {
+			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, err, fetchedSources); handledErr != nil {
 				errors = append(errors, handledErr)
 				if step.OnError == models.ErrorStrategyFail {
 					// Publish failure event
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", handledErr.Error())
 					return fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
 				}
+			} else {
+				// Step succeeded after retry - publish completion event
+				e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
 			}
+		} else {
+			// Step succeeded initially - publish completion event
+			e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
 		}
 
 		// Log step completion
@@ -145,8 +157,8 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 			Dur("duration", totalDuration).
 			Msg("Job execution completed with errors")
 
-		// Publish completion event with errors
-		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", fmt.Sprintf("%d error(s) occurred", len(errors)))
+		// Publish failure event with aggregated error message
+		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "failed", fmt.Sprintf("%d error(s) occurred", len(errors)))
 
 		return fmt.Errorf("job execution completed with %d error(s): %v", len(errors), errors)
 	}
@@ -165,7 +177,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 }
 
 // handleStepError handles errors based on the step's error strategy
-func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.JobDefinition, step models.JobStep, stepIndex int, err error) error {
+func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.JobDefinition, step models.JobStep, stepIndex int, err error, stepSources []*models.SourceConfig) error {
 	// Log error with structured fields
 	logEvent := e.logger.Error().
 		Str("job_id", definition.ID).
@@ -185,6 +197,8 @@ func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.Jo
 			Int("step_index", stepIndex).
 			Err(err).
 			Msg("Step failed but continuing execution (ErrorStrategyContinue)")
+		// Publish step-level failure event
+		e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", err.Error())
 		return err // Return error for aggregation, but execution continues
 
 	case models.ErrorStrategyFail:
@@ -193,8 +207,8 @@ func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.Jo
 		return err
 
 	case models.ErrorStrategyRetry:
-		// Attempt retry
-		retryErr := e.retryStep(ctx, definition, step, nil)
+		// Attempt retry with provided sources
+		retryErr := e.retryStep(ctx, definition, step, stepSources)
 		if retryErr != nil {
 			logEvent.Msg("Step failed after retries (ErrorStrategyRetry)")
 			return retryErr
@@ -256,7 +270,13 @@ func (e *JobExecutor) retryStep(ctx context.Context, definition *models.JobDefin
 
 		// Sleep for backoff duration (skip on first attempt)
 		if attempt > 1 {
-			time.Sleep(backoff)
+			select {
+			case <-time.After(backoff):
+				// Backoff completed
+			case <-ctx.Done():
+				// Context cancelled during backoff
+				return ctx.Err()
+			}
 		}
 
 		// Execute handler
