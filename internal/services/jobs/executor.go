@@ -110,7 +110,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 			stepErr := fmt.Errorf("action handler not found: %w", err)
 			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, stepErr, fetchedSources); handledErr != nil {
 				errors = append(errors, handledErr)
-				if step.OnError == models.ErrorStrategyFail {
+				if shouldStopOnError(step) {
 					// Publish failure event
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", handledErr.Error())
 					return fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
@@ -124,7 +124,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		if err != nil {
 			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, err, fetchedSources); handledErr != nil {
 				errors = append(errors, handledErr)
-				if step.OnError == models.ErrorStrategyFail {
+				if shouldStopOnError(step) {
 					// Publish failure event
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", handledErr.Error())
 					return fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
@@ -174,6 +174,12 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", "")
 
 	return nil
+}
+
+// shouldStopOnError returns true if the step's error strategy should stop execution
+// Treats both ErrorStrategyFail and empty/default strategy as stop conditions
+func shouldStopOnError(step models.JobStep) bool {
+	return step.OnError == models.ErrorStrategyFail || step.OnError == ""
 }
 
 // handleStepError handles errors based on the step's error strategy
