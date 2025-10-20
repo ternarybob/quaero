@@ -22,6 +22,9 @@ type CrawlerActionDeps struct {
 	Logger         arbor.ILogger
 }
 
+// startCrawlJobFunc is a package-level variable that can be swapped in tests
+var startCrawlJobFunc = jobs.StartCrawlJob
+
 // crawlAction performs actual crawling of sources and publishes collection events.
 func crawlAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
@@ -59,8 +62,8 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 			Str("base_url", source.BaseURL).
 			Msg("Starting crawl for source")
 
-		// Start crawl job using helper
-		jobID, err := jobs.StartCrawlJob(
+		// Start crawl job using helper (function variable for testability)
+		jobID, err := startCrawlJobFunc(
 			ctx,
 			source,
 			deps.AuthStorage,
@@ -139,39 +142,8 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 		}
 	}
 
-	// Publish collection events for each source
-	for _, source := range sources {
-		// Find corresponding job ID
-		var jobID string
-		for _, job := range startedJobs {
-			if job.sourceID == source.ID {
-				jobID = job.jobID
-				break
-			}
-		}
-
-		payload := map[string]interface{}{
-			"job_id":      jobID,
-			"source_id":   source.ID,
-			"source_type": string(source.Type),
-		}
-
-		err := deps.EventService.PublishSync(ctx, interfaces.EventCollectionTriggered, payload)
-		if err != nil {
-			deps.Logger.Warn().
-				Err(err).
-				Str("source_id", source.ID).
-				Str("job_id", jobID).
-				Msg("Failed to publish collection event (non-critical)")
-			// Non-critical error, continue
-		} else {
-			deps.Logger.Info().
-				Str("action", "crawl").
-				Str("source_id", source.ID).
-				Str("job_id", jobID).
-				Msg("Published collection triggered event")
-		}
-	}
+	// Note: Event publishing removed from crawlAction to avoid duplication with transformAction.
+	// The dedicated transformAction should be used to trigger document transformation after crawling.
 
 	// Return aggregated errors if any
 	if len(errors) > 0 {
@@ -187,6 +159,8 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 }
 
 // transformAction triggers document transformation via collection events.
+// This action is fire-and-forget: it publishes events but does not wait for processing completion.
+// For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
 func transformAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	jobID := extractString(step.Config, "job_id", "")
@@ -213,7 +187,10 @@ func transformAction(ctx context.Context, step models.JobStep, sources []*models
 			"timestamp":  time.Now(),
 		}
 
-		err := deps.EventService.PublishSync(ctx, interfaces.EventCollectionTriggered, payload)
+		err := deps.EventService.PublishSync(ctx, interfaces.Event{
+			Type:    interfaces.EventCollectionTriggered,
+			Payload: payload,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to publish collection event: %w", err)
 		}
@@ -236,7 +213,10 @@ func transformAction(ctx context.Context, step models.JobStep, sources []*models
 			"timestamp":   time.Now(),
 		}
 
-		err := deps.EventService.PublishSync(ctx, interfaces.EventCollectionTriggered, payload)
+		err := deps.EventService.PublishSync(ctx, interfaces.Event{
+			Type:    interfaces.EventCollectionTriggered,
+			Payload: payload,
+		})
 		if err != nil {
 			return fmt.Errorf("failed to publish collection event for source %s: %w", source.ID, err)
 		}
@@ -259,6 +239,8 @@ func transformAction(ctx context.Context, step models.JobStep, sources []*models
 }
 
 // embedAction triggers embedding generation via embedding events.
+// This action is fire-and-forget: it publishes events but does not wait for processing completion.
+// For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
 func embedAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	forceEmbed := extractBool(step.Config, "force_embed", false)
@@ -297,7 +279,10 @@ func embedAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 	}
 
 	// Publish embedding event
-	err := deps.EventService.PublishSync(ctx, interfaces.EventEmbeddingTriggered, payload)
+	err := deps.EventService.PublishSync(ctx, interfaces.Event{
+		Type:    interfaces.EventEmbeddingTriggered,
+		Payload: payload,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to publish embedding event: %w", err)
 	}
