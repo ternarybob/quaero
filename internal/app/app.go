@@ -319,6 +319,17 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Crawler actions registered with job type registry")
 
+	// Register summarizer actions with the job type registry
+	summarizerDeps := &actions.SummarizerActionDeps{
+		DocStorage: a.StorageManager.DocumentStorage(),
+		LLMService: a.LLMService,
+		Logger:     a.Logger,
+	}
+	if err = actions.RegisterSummarizerActions(a.JobRegistry, summarizerDeps); err != nil {
+		return fmt.Errorf("failed to register summarizer actions: %w", err)
+	}
+	a.Logger.Info().Msg("Summarizer actions registered with job type registry")
+
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
 
