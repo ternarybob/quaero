@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/ternarybob/quaero/test"
 )
 
 type TestSuite struct {
@@ -38,6 +39,7 @@ type TestRunnerConfig struct {
 		TestsDir    string `toml:"tests_dir"`
 		OutputDir   string `toml:"output_dir"`
 		BuildScript string `toml:"build_script"`
+		TestMode    string `toml:"test_mode"`
 	} `toml:"test_runner"`
 	TestServer struct {
 		Port int `toml:"port"`
@@ -98,6 +100,9 @@ func loadConfig() (*TestRunnerConfig, error) {
 			config.TestRunner.BuildScript = "./scripts/build.sh"
 		}
 	}
+	if config.TestRunner.TestMode == "" {
+		config.TestRunner.TestMode = "integration"
+	}
 
 	return &config, nil
 }
@@ -155,7 +160,8 @@ func main() {
 	fmt.Printf("Configuration:\n")
 	fmt.Printf("  Tests Directory: %s\n", config.TestRunner.TestsDir)
 	fmt.Printf("  Output Directory: %s\n", config.TestRunner.OutputDir)
-	fmt.Printf("  Build Script: %s\n\n", config.TestRunner.BuildScript)
+	fmt.Printf("  Build Script: %s\n", config.TestRunner.BuildScript)
+	fmt.Printf("  Test Mode: %s\n\n", config.TestRunner.TestMode)
 
 	// Step 0: Start test server for browser validation
 	fmt.Printf("STEP 0: Starting test server (port %d)...\n", config.TestServer.Port)
@@ -186,52 +192,85 @@ func main() {
 		fmt.Println("✓ Connectivity verified\n")
 	}
 
-	// Step 1: Read service configuration to determine port
-	fmt.Println("STEP 1: Reading service configuration...")
-	fmt.Println(strings.Repeat("-", 80))
-	serviceConfig, err := loadServiceConfig(config.Service.Config)
-	if err != nil {
-		fmt.Printf("ERROR: Failed to load service config: %v\n", err)
-		os.Exit(1)
-	}
+	// Declare variables for service/mock server
+	var serviceURL string
+	var serviceCmd *exec.Cmd
+	var mockServer *test.MockServer
 
-	// Determine actual service port (override if specified in test runner config)
-	servicePort := serviceConfig.Server.Port
-	if config.Service.Port != 0 {
-		servicePort = config.Service.Port
-		fmt.Printf("Using port override from test runner config: %d\n", servicePort)
-	}
-	serviceHost := serviceConfig.Server.Host
-	if serviceHost == "" {
-		serviceHost = "localhost"
-	}
+	// Conditional startup based on test mode
+	if config.TestRunner.TestMode == "mock" {
+		// MOCK MODE: Start mock server
+		fmt.Println("STEP 1+2: Starting mock server...")
+		fmt.Println(strings.Repeat("-", 80))
+		fmt.Println("Running in MOCK mode - using in-memory mock server")
+		fmt.Println("No real database or service required")
 
-	serviceURL := fmt.Sprintf("http://%s:%d", serviceHost, servicePort)
-	fmt.Printf("✓ Service URL: %s\n\n", serviceURL)
+		mockServer = test.NewMockServer(9999)
+		if err := mockServer.Start(); err != nil {
+			fmt.Printf("ERROR: Failed to start mock server: %v\n", err)
+			os.Exit(1)
+		}
+		defer mockServer.Stop()
 
-	// Step 2: Build and start service (build.ps1 will kill any existing services)
-	fmt.Println("STEP 2: Building and starting service...")
-	fmt.Println(strings.Repeat("-", 80))
-	fmt.Println("Building fresh service for testing...")
-	fmt.Println("Note: build.ps1 will automatically stop any existing services")
+		serviceURL = "http://localhost:9999"
 
-	serviceCmd, err := startService(config, servicePort)
-	if err != nil {
-		fmt.Printf("ERROR: Failed to start service: %v\n", err)
-		os.Exit(1)
+		// Wait for mock server to be ready
+		if err := waitForService(serviceURL, 5*time.Second); err != nil {
+			fmt.Printf("ERROR: Mock server did not become ready: %v\n", err)
+			mockServer.Stop()
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Mock server ready on %s\n\n", serviceURL)
+
+	} else {
+		// INTEGRATION MODE: Start real service
+		// Step 1: Read service configuration to determine port
+		fmt.Println("STEP 1: Reading service configuration...")
+		fmt.Println(strings.Repeat("-", 80))
+		serviceConfig, err := loadServiceConfig(config.Service.Config)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to load service config: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Determine actual service port (override if specified in test runner config)
+		servicePort := serviceConfig.Server.Port
+		if config.Service.Port != 0 {
+			servicePort = config.Service.Port
+			fmt.Printf("Using port override from test runner config: %d\n", servicePort)
+		}
+		serviceHost := serviceConfig.Server.Host
+		if serviceHost == "" {
+			serviceHost = "localhost"
+		}
+
+		serviceURL = fmt.Sprintf("http://%s:%d", serviceHost, servicePort)
+		fmt.Printf("✓ Service URL: %s\n\n", serviceURL)
+
+		// Step 2: Build and start service (build.ps1 will kill any existing services)
+		fmt.Println("STEP 2: Building and starting service...")
+		fmt.Println(strings.Repeat("-", 80))
+		fmt.Println("Building fresh service for testing...")
+		fmt.Println("Note: build.ps1 will automatically stop any existing services")
+
+		serviceCmd, err = startService(config, servicePort)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to start service: %v\n", err)
+			os.Exit(1)
+		}
+		defer stopService(serviceCmd)
+
+		// Wait for service to be ready
+		fmt.Println("Waiting for service to be ready...")
+		startupTimeout := time.Duration(config.Service.StartupTimeoutSeconds) * time.Second
+		if err := waitForService(serviceURL, startupTimeout); err != nil {
+			fmt.Printf("ERROR: Service did not become ready: %v\n", err)
+			stopService(serviceCmd)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Service is ready on %s\n", serviceURL)
+		fmt.Println("✓ Service window should be visible\n")
 	}
-	defer stopService(serviceCmd)
-
-	// Wait for service to be ready
-	fmt.Println("Waiting for service to be ready...")
-	startupTimeout := time.Duration(config.Service.StartupTimeoutSeconds) * time.Second
-	if err := waitForService(serviceURL, startupTimeout); err != nil {
-		fmt.Printf("ERROR: Service did not become ready: %v\n", err)
-		stopService(serviceCmd)
-		os.Exit(1)
-	}
-	fmt.Printf("✓ Service is ready on %s\n", serviceURL)
-	fmt.Println("✓ Service window should be visible\n")
 
 	// Step 3: Run tests
 	fmt.Println("STEP 3: Running tests...")
@@ -242,21 +281,30 @@ func main() {
 	apiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "api"))
 	uiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "ui"))
 
+	// Build suites conditionally based on test mode
 	suites := []TestSuite{
 		{
 			Name:    "API Tests",
 			Path:    apiTestPath,
 			Command: []string{"go", "test", "-v", "./" + apiTestPath},
 		},
-		{
+	}
+
+	// Only include UI tests in integration mode
+	if config.TestRunner.TestMode == "integration" {
+		suites = append(suites, TestSuite{
 			Name:    "UI Tests",
 			Path:    uiTestPath,
 			Command: []string{"go", "test", "-v", "./" + uiTestPath},
-		},
+		})
 	}
 
 	fmt.Printf("Test results will be saved to: %s/{testname}-{datetime}/\n", config.TestRunner.OutputDir)
-	fmt.Printf("UI tests will include screenshots for each navigation\n\n")
+	if config.TestRunner.TestMode == "integration" {
+		fmt.Printf("UI tests will include screenshots for each navigation\n\n")
+	} else {
+		fmt.Printf("Running in mock mode - UI tests skipped\n\n")
+	}
 
 	results := make([]TestResult, 0, len(suites))
 	allPassed := true
@@ -265,7 +313,7 @@ func main() {
 		fmt.Printf("Running %s...\n", suite.Name)
 		fmt.Println(strings.Repeat("-", 80))
 
-		result := runTestSuite(suite, config.TestRunner.OutputDir, serviceURL)
+		result := runTestSuite(suite, config.TestRunner.OutputDir, serviceURL, config.TestRunner.TestMode)
 		results = append(results, result)
 
 		if result.Success {
@@ -276,9 +324,18 @@ func main() {
 		}
 	}
 
-	// Step 4: Cleanup (always stop service since we built it for testing)
-	fmt.Println("\nSTEP 4: Stopping service...")
-	stopService(serviceCmd)
+	// Step 4: Cleanup
+	fmt.Println("\nSTEP 4: Cleanup...")
+	if config.TestRunner.TestMode == "mock" {
+		if mockServer != nil {
+			fmt.Println("Stopping mock server...")
+			mockServer.Stop()
+			fmt.Println("✓ Mock server stopped")
+		}
+	} else {
+		// Stop service only in integration mode
+		stopService(serviceCmd)
+	}
 
 	// Print summary
 	printSummary(results, allPassed)
@@ -417,7 +474,7 @@ func waitForService(url string, timeout time.Duration) error {
 	return fmt.Errorf("service did not become ready within %v", timeout)
 }
 
-func runTestSuite(suite TestSuite, outputDir string, serviceURL string) TestResult {
+func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode string) TestResult {
 	startTime := time.Now()
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 
@@ -446,10 +503,19 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string) TestResu
 	cmd := exec.Command(suite.Command[0], suite.Command[1:]...)
 	cmd.Dir = "."
 
+	// Use test mode from config (fallback to URL-based detection if mode is empty)
+	if testMode == "" {
+		testMode = "integration"
+		if strings.Contains(serviceURL, ":9999") {
+			testMode = "mock"
+		}
+	}
+
 	// Pass environment variables to test process with ABSOLUTE paths
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("TEST_RESULTS_DIR=%s", absSuiteDir),
 		fmt.Sprintf("TEST_SERVER_URL=%s", serviceURL),
+		fmt.Sprintf("TEST_MODE=%s", testMode),
 	)
 
 	output, err := cmd.CombinedOutput()

@@ -9,13 +9,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/ternarybob/arbor"
 
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/config"
@@ -31,7 +31,6 @@ import (
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
-	"github.com/ternarybob/quaero/internal/services/transformer"
 	"github.com/ternarybob/quaero/internal/storage"
 )
 
@@ -51,10 +50,13 @@ type App struct {
 	ChatService       interfaces.ChatService
 
 	// Event-driven services
-	EventService       interfaces.EventService
-	SchedulerService   interfaces.SchedulerService
-	SummaryService     *summary.Service
-	TransformerService *transformer.Service
+	EventService     interfaces.EventService
+	SchedulerService interfaces.SchedulerService
+	SummaryService   *summary.Service
+
+	// Specialized transformers
+	JiraTransformer       *atlassian.JiraTransformer
+	ConfluenceTransformer *atlassian.ConfluenceTransformer
 
 	// Source-agnostic services
 	StatusService *status.Service
@@ -233,31 +235,33 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service
-	crawlerConfig := crawler.CrawlConfig{
-		MaxDepth:      3,
-		FollowLinks:   true,
-		Concurrency:   2,
-		RateLimit:     time.Second,
-		DetailLevel:   "full",
-		RetryAttempts: 3,
-		RetryBackoff:  time.Second * 2,
-	}
-	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.Logger, crawlerConfig)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
 	a.Logger.Info().Msg("Crawler service initialized")
 
-	// 6.6. Initialize generic document transformer (subscribes to collection events)
+	// 6.6. Initialize specialized transformers (subscribe to collection events)
 	// NOTE: Must be initialized after crawler service to access GetJobResults()
-	a.TransformerService = transformer.NewService(
+	a.JiraTransformer = atlassian.NewJiraTransformer(
 		a.StorageManager.JobStorage(),
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
-		a.CrawlerService,
+		a.CrawlerService, // Add crawler service parameter
 		a.Logger,
+		true, // enableEmptyOutputFallback
 	)
-	a.Logger.Info().Msg("Document transformer initialized and subscribed to collection events")
+	a.Logger.Info().Msg("Jira transformer initialized and subscribed to collection events")
+
+	a.ConfluenceTransformer = atlassian.NewConfluenceTransformer(
+		a.StorageManager.JobStorage(),
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.CrawlerService, // Add crawler service parameter
+		a.Logger,
+		true, // enableEmptyOutputFallback
+	)
+	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
 
 	// 7. Initialize embedding coordinator
 	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
@@ -366,7 +370,7 @@ func (a *App) initServices() error {
 	}
 
 	// NOTE: Scheduler triggers event-driven processing:
-	// - EventCollectionTriggered: Transforms scraped data (issues/pages → documents)
+	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
 	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
 	// PLUS: Default jobs run on schedule (crawl_and_collect, scan_and_summarize)

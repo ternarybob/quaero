@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -91,54 +90,16 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Str("base_url", source.BaseURL).
 		Msg("Processing source")
 
-	// Derive seed URLs and entity type
-	seedURLs := common.DeriveSeedURLs(source, j.config.Crawler.UseHTMLSeeds, j.logger)
-	if len(seedURLs) == 0 {
-		return fmt.Errorf("failed to derive seed URLs for source")
-	}
-
-	entityType := j.deriveEntityType(source)
-
-	j.logger.Debug().
-		Str("source_id", source.ID).
-		Strs("seed_urls", seedURLs).
-		Str("entity_type", entityType).
-		Msg("Derived crawl parameters")
-
-	// Get auth credentials for this source
-	var authCreds *models.AuthCredentials
-	if source.AuthID != "" {
-		var err error
-		authCreds, err = j.authStorage.GetCredentialsByID(ctx, source.AuthID)
-		if err != nil {
-			return fmt.Errorf("failed to get auth credentials: %w", err)
-		}
-	}
-
-	// Create crawler config
-	crawlerConfig := crawler.CrawlConfig{
-		MaxDepth:        source.CrawlConfig.MaxDepth,
-		MaxPages:        source.CrawlConfig.MaxPages,
-		FollowLinks:     source.CrawlConfig.FollowLinks,
-		Concurrency:     source.CrawlConfig.Concurrency,
-		RateLimit:       time.Duration(source.CrawlConfig.RateLimit) * time.Millisecond,
-		IncludePatterns: source.CrawlConfig.IncludePatterns,
-		ExcludePatterns: source.CrawlConfig.ExcludePatterns,
-		DetailLevel:     "full",
-		RetryAttempts:   3,
-		RetryBackoff:    2 * time.Second,
-	}
-
-	// Start crawl with correct signature
-	jobID, err := j.crawlerService.StartCrawl(
-		source.Type,
-		entityType,
-		seedURLs,
-		crawlerConfig,
-		source.ID,
-		true, // refreshSource
+	// Use shared job helper to start crawl
+	jobID, err := StartCrawlJob(
+		ctx,
 		source,
-		authCreds,
+		j.authStorage,
+		j.crawlerService,
+		j.config,
+		j.logger,
+		nil,  // No seed URL overrides for cron jobs
+		true, // Refresh source config and auth for scheduled runs to ensure latest data
 	)
 	if err != nil {
 		return fmt.Errorf("failed to start crawl: %w", err)
@@ -183,18 +144,4 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 	}
 
 	return nil
-}
-
-// deriveEntityType determines the appropriate entity type based on source type
-func (j *CrawlCollectJob) deriveEntityType(source *models.SourceConfig) string {
-	switch source.Type {
-	case models.SourceTypeJira:
-		return "projects"
-	case models.SourceTypeConfluence:
-		return "spaces"
-	case models.SourceTypeGithub:
-		return "repos"
-	default:
-		return "all"
-	}
 }

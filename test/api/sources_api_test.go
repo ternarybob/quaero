@@ -1,3 +1,10 @@
+// Package api contains API integration tests.
+//
+// These tests can run in two modes:
+// - Mock mode (TEST_MODE=mock): Uses in-memory mock server, fast, isolated
+// - Integration mode (TEST_MODE=integration): Uses real Quaero service, full stack
+//
+// Set TEST_MODE environment variable to control behavior.
 package api
 
 import (

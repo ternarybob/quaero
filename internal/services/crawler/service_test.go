@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -187,12 +188,12 @@ func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes
 // Helper function to create test service
 func createTestService() *Service {
 	logger := arbor.NewLogger()
-	config := CrawlConfig{
-		MaxDepth:    3,
-		MaxPages:    100,
-		Concurrency: 2,
-		RateLimit:   time.Millisecond * 100,
-	}
+	config := common.NewDefaultConfig()
+
+	// Override crawler config for testing
+	config.Crawler.MaxConcurrency = 2
+	config.Crawler.RequestDelay = time.Millisecond * 100
+	config.Crawler.MaxDepth = 3
 
 	return NewService(
 		&mockAuthService{},
@@ -207,80 +208,30 @@ func createTestService() *Service {
 
 // TestNewService tests service initialization
 func TestNewService(t *testing.T) {
-	tests := []struct {
-		name   string
-		config CrawlConfig
-	}{
-		{
-			name: "Default configuration",
-			config: CrawlConfig{
-				MaxDepth:    3,
-				Concurrency: 2,
-				RateLimit:   time.Second,
-			},
-		},
-		{
-			name: "With retry configuration",
-			config: CrawlConfig{
-				MaxDepth:      5,
-				Concurrency:   4,
-				RateLimit:     time.Millisecond * 500,
-				RetryAttempts: 5,
-				RetryBackoff:  time.Second * 2,
-			},
-		},
+	service := createTestService()
+	defer service.Close()
+
+	if service == nil {
+		t.Fatal("Expected non-nil service")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := arbor.NewLogger()
-			service := NewService(
-				&mockAuthService{},
-				nil, // sourceService
-				nil, // authStorage
-				&mockEventService{},
-				&mockJobStorage{},
-				logger,
-				tt.config,
-			)
+	if service.queue == nil {
+		t.Error("Expected queue to be initialized")
+	}
 
-			if service == nil {
-				t.Fatal("Expected non-nil service")
-			}
+	if service.retryPolicy == nil {
+		t.Error("Expected retry policy to be initialized")
+	}
 
-			if service.queue == nil {
-				t.Error("Expected queue to be initialized")
-			}
+	// Note: Rate limiting is now handled by HTMLScraper via Colly's Limit() mechanism,
+	// not by a service-level rateLimiter field
 
-			if service.rateLimiter == nil {
-				t.Error("Expected rate limiter to be initialized")
-			}
+	if service.activeJobs == nil {
+		t.Error("Expected activeJobs map to be initialized")
+	}
 
-			if service.retryPolicy == nil {
-				t.Error("Expected retry policy to be initialized")
-			}
-
-			if service.activeJobs == nil {
-				t.Error("Expected activeJobs map to be initialized")
-			}
-
-			if service.jobResults == nil {
-				t.Error("Expected jobResults map to be initialized")
-			}
-
-			// Verify retry policy configuration
-			if tt.config.RetryAttempts > 0 {
-				if service.retryPolicy.MaxAttempts != tt.config.RetryAttempts {
-					t.Errorf("Expected MaxAttempts=%d, got %d", tt.config.RetryAttempts, service.retryPolicy.MaxAttempts)
-				}
-			}
-
-			if tt.config.RetryBackoff > 0 {
-				if service.retryPolicy.InitialBackoff != tt.config.RetryBackoff {
-					t.Errorf("Expected InitialBackoff=%v, got %v", tt.config.RetryBackoff, service.retryPolicy.InitialBackoff)
-				}
-			}
-		})
+	if service.jobResults == nil {
+		t.Error("Expected jobResults map to be initialized")
 	}
 }
 
@@ -526,12 +477,16 @@ func TestListJobs(t *testing.T) {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
 
-	jobs, ok := jobsInterface.([]interface{})
-	if !ok {
-		t.Fatalf("Expected []interface{}, got %T", jobsInterface)
+	// Handle both []interface{} and []*CrawlJob return types
+	var initialCount int
+	switch v := jobsInterface.(type) {
+	case []interface{}:
+		initialCount = len(v)
+	case []*CrawlJob:
+		initialCount = len(v)
+	default:
+		t.Fatalf("Expected []interface{} or []*CrawlJob, got %T", jobsInterface)
 	}
-
-	initialCount := len(jobs)
 
 	// Create multiple jobs
 	config := CrawlConfig{
@@ -555,13 +510,19 @@ func TestListJobs(t *testing.T) {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
 
-	jobs2, ok := jobsInterface2.([]interface{})
-	if !ok {
-		t.Fatalf("Expected []interface{}, got %T", jobsInterface2)
+	// Handle both []interface{} and []*CrawlJob return types
+	var finalCount int
+	switch v := jobsInterface2.(type) {
+	case []interface{}:
+		finalCount = len(v)
+	case []*CrawlJob:
+		finalCount = len(v)
+	default:
+		t.Fatalf("Expected []interface{} or []*CrawlJob, got %T", jobsInterface2)
 	}
 
-	if len(jobs2) != initialCount+3 {
-		t.Errorf("Expected %d jobs, got %d", initialCount+3, len(jobs2))
+	if finalCount != initialCount+3 {
+		t.Errorf("Expected %d jobs, got %d", initialCount+3, finalCount)
 	}
 
 	// Clean up
@@ -690,5 +651,347 @@ func TestServiceShutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("Shutdown timed out")
+	}
+}
+
+// TestExtractLinksFromHTML tests HTML link extraction with both quoted and unquoted hrefs
+func TestExtractLinksFromHTML(t *testing.T) {
+	service := createTestService()
+
+	tests := []struct {
+		name         string
+		html         string
+		baseURL      string
+		expectedURLs []string
+	}{
+		{
+			name: "Quoted hrefs with double quotes",
+			html: `<html>
+				<a href="https://test.atlassian.net/browse/TEST-123">Issue</a>
+				<a href="https://test.atlassian.net/wiki/spaces/DOC">Space</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://test.atlassian.net/wiki/spaces/DOC",
+			},
+		},
+		{
+			name: "Quoted hrefs with single quotes",
+			html: `<html>
+				<a href='https://test.atlassian.net/browse/TEST-456'>Issue</a>
+				<a href='https://test.atlassian.net/wiki/spaces/ENG'>Space</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-456",
+				"https://test.atlassian.net/wiki/spaces/ENG",
+			},
+		},
+		{
+			name: "Unquoted hrefs",
+			html: `<html>
+				<a href=https://test.atlassian.net/browse/TEST-789>Issue</a>
+				<a href=https://test.atlassian.net/wiki/spaces/DOCS>Space</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-789",
+				"https://test.atlassian.net/wiki/spaces/DOCS",
+			},
+		},
+		{
+			name: "Mixed quoted and unquoted",
+			html: `<html>
+				<a href="https://test.atlassian.net/browse/TEST-1">Issue 1</a>
+				<a href='https://test.atlassian.net/browse/TEST-2'>Issue 2</a>
+				<a href=https://test.atlassian.net/browse/TEST-3>Issue 3</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-1",
+				"https://test.atlassian.net/browse/TEST-2",
+				"https://test.atlassian.net/browse/TEST-3",
+			},
+		},
+		{
+			name: "Relative URLs",
+			html: `<html>
+				<a href="/browse/TEST-100">Relative issue</a>
+				<a href="/wiki/spaces/HOME">Relative space</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-100",
+				"https://test.atlassian.net/wiki/spaces/HOME",
+			},
+		},
+		{
+			name: "Skip unwanted link types",
+			html: `<html>
+				<a href="javascript:void(0)">JS Link</a>
+				<a href="mailto:test@example.com">Email</a>
+				<a href="tel:+1234567890">Phone</a>
+				<a href="#anchor">Anchor</a>
+				<a href="https://test.atlassian.net/file.pdf">PDF</a>
+				<a href="https://test.atlassian.net/valid">Valid</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/valid",
+			},
+		},
+		{
+			name: "Deduplication",
+			html: `<html>
+				<a href="https://test.atlassian.net/browse/TEST-1">First</a>
+				<a href="https://test.atlassian.net/browse/TEST-1">Duplicate</a>
+				<a href="https://test.atlassian.net/browse/TEST-1#comment">With fragment</a>
+			</html>`,
+			baseURL: "https://test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-1",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := service.extractLinksFromHTML(tt.html, tt.baseURL)
+
+			if len(links) != len(tt.expectedURLs) {
+				t.Errorf("Expected %d links, got %d", len(tt.expectedURLs), len(links))
+			}
+
+			// Convert to map for easier comparison (order doesn't matter)
+			linkMap := make(map[string]bool)
+			for _, link := range links {
+				linkMap[link] = true
+			}
+
+			for _, expected := range tt.expectedURLs {
+				if !linkMap[expected] {
+					t.Errorf("Expected link not found: %s", expected)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterJiraLinks tests Jira URL filtering with patterns and host filtering
+func TestFilterJiraLinks(t *testing.T) {
+	service := createTestService()
+
+	tests := []struct {
+		name         string
+		links        []string
+		baseHost     string
+		expectedURLs []string
+	}{
+		{
+			name: "Include Jira issue links",
+			links: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://test.atlassian.net/browse/DEMO-456",
+				"https://test.atlassian.net/projects/TEST",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://test.atlassian.net/browse/DEMO-456",
+				"https://test.atlassian.net/projects/TEST",
+			},
+		},
+		{
+			name: "Exclude REST API endpoints",
+			links: []string{
+				"https://test.atlassian.net/rest/api/3/issue/TEST-123",
+				"https://test.atlassian.net/rest/agile/1.0/board",
+				"https://test.atlassian.net/rest/auth/1/session",
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+		},
+		{
+			name: "Exclude login/logout pages",
+			links: []string{
+				"https://test.atlassian.net/login.jsp",
+				"https://test.atlassian.net/logout",
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+		},
+		{
+			name: "Exclude attachments and plugins",
+			links: []string{
+				"https://test.atlassian.net/secure/attachment/12345/file.pdf",
+				"https://test.atlassian.net/plugins/servlet/test",
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+		},
+		{
+			name: "Filter cross-domain links",
+			links: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://other.atlassian.net/browse/OTHER-456",
+				"https://external.com/page",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+			},
+		},
+		{
+			name: "Include query parameter links",
+			links: []string{
+				"https://test.atlassian.net/issues/?jql=project=TEST",
+				"https://test.atlassian.net/browse/TEST-123?page=com.atlassian.jira.plugin",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/issues/?jql=project=TEST",
+				"https://test.atlassian.net/browse/TEST-123?page=com.atlassian.jira.plugin",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := service.filterJiraLinks(tt.links, tt.baseHost)
+
+			if len(filtered) != len(tt.expectedURLs) {
+				t.Errorf("Expected %d links, got %d. Got: %v", len(tt.expectedURLs), len(filtered), filtered)
+			}
+
+			// Convert to map for easier comparison
+			filteredMap := make(map[string]bool)
+			for _, link := range filtered {
+				filteredMap[link] = true
+			}
+
+			for _, expected := range tt.expectedURLs {
+				if !filteredMap[expected] {
+					t.Errorf("Expected link not found: %s", expected)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterConfluenceLinks tests Confluence URL filtering with patterns and host filtering
+func TestFilterConfluenceLinks(t *testing.T) {
+	service := createTestService()
+
+	tests := []struct {
+		name         string
+		links        []string
+		baseHost     string
+		expectedURLs []string
+	}{
+		{
+			name: "Include Confluence page links",
+			links: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+				"https://test.atlassian.net/wiki/spaces/ENG/overview",
+				"https://test.atlassian.net/wiki/spaces/HOME",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+				"https://test.atlassian.net/wiki/spaces/ENG/overview",
+				"https://test.atlassian.net/wiki/spaces/HOME",
+			},
+		},
+		{
+			name: "Include tiny links",
+			links: []string{
+				"https://test.atlassian.net/x/AbCd123",
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/x/AbCd123",
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+		},
+		{
+			name: "Exclude REST API endpoints",
+			links: []string{
+				"https://test.atlassian.net/wiki/rest/api/space",
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+		},
+		{
+			name: "Exclude attachments and thumbnails",
+			links: []string{
+				"https://test.atlassian.net/wiki/download/attachments/12345/file.pdf",
+				"https://test.atlassian.net/wiki/download/thumbnails/12345/image.png",
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+			},
+		},
+		{
+			name: "Filter cross-domain links",
+			links: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123",
+				"https://other.atlassian.net/wiki/spaces/OTHER/pages/456",
+				"https://external.com/page",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123",
+			},
+		},
+		{
+			name: "Include legacy display format",
+			links: []string{
+				"https://test.atlassian.net/display/DOC/Page+Title",
+				"https://test.atlassian.net/pages/viewpage.action?pageId=123456",
+			},
+			baseHost: "test.atlassian.net",
+			expectedURLs: []string{
+				"https://test.atlassian.net/display/DOC/Page+Title",
+				"https://test.atlassian.net/pages/viewpage.action?pageId=123456",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := service.filterConfluenceLinks(tt.links, tt.baseHost)
+
+			if len(filtered) != len(tt.expectedURLs) {
+				t.Errorf("Expected %d links, got %d. Got: %v", len(tt.expectedURLs), len(filtered), filtered)
+			}
+
+			// Convert to map for easier comparison
+			filteredMap := make(map[string]bool)
+			for _, link := range filtered {
+				filteredMap[link] = true
+			}
+
+			for _, expected := range tt.expectedURLs {
+				if !filteredMap[expected] {
+					t.Errorf("Expected link not found: %s", expected)
+				}
+			}
+		})
 	}
 }

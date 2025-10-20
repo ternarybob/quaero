@@ -174,6 +174,11 @@ func Retry(fn func() error, maxAttempts int, delay time.Duration) error {
 
 // GetTestServerURL returns the test server URL from environment variable or bin/quaero.toml
 func GetTestServerURL() (string, error) {
+	// Check if running in mock mode
+	if IsMockMode() {
+		return "http://localhost:9999", nil
+	}
+
 	// Check environment variable first (highest priority)
 	if url := os.Getenv("TEST_SERVER_URL"); url != "" {
 		return url, nil
@@ -248,4 +253,21 @@ func GetExpectedPort() int {
 	}
 
 	return config.Server.Port
+}
+
+// GetTestMode returns the test mode from environment variable
+// Returns "mock" or "integration" (default: "integration")
+// - mock: Uses in-memory mock server, no real database, fast, isolated
+// - integration: Uses real Quaero service, tests full stack, requires service running
+func GetTestMode() string {
+	mode := os.Getenv("TEST_MODE")
+	if mode == "" {
+		return "integration" // Default for backward compatibility
+	}
+	return mode
+}
+
+// IsMockMode returns true if tests should run in mock mode
+func IsMockMode() bool {
+	return GetTestMode() == "mock"
 }

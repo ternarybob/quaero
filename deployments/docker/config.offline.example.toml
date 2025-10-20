@@ -1,0 +1,166 @@
+# Quaero Production Configuration (Docker)
+# ==========================================
+#
+# This is a full example configuration for production deployment with Docker.
+# Copy this file to config.toml and customize for your environment.
+#
+# Key Production Settings:
+# - environment = "production" (rejects test URLs like localhost)
+# - llm.mode = "offline" (secure, no external API calls)
+# - Proper resource limits and timeouts
+#
+# Configuration Load Order (priority from lowest to highest):
+#   1. Defaults (hardcoded in application)
+#   2. TOML file (this file)
+#   3. Environment variables (QUAERO_*)
+#   4. Command line flags (--port, --host, --config)
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
+# Controls environment mode: "development" or "production"
+# Production mode enforces stricter validation:
+#  - Rejects test URLs (localhost, 127.0.0.1, ::1, port 3333)
+#  - Ensures seed URLs point to real production services
+# Development mode allows test URLs for local testing
+# Env vars: QUAERO_ENV, GO_ENV (highest priority)
+
+environment = "production"  # IMPORTANT: Production mode rejects test URLs
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+[server]
+port = 8080
+host = "0.0.0.0"  # Listen on all interfaces in Docker
+
+# =============================================================================
+# Data Sources Configuration
+# =============================================================================
+# Configure which sources to scrape and what projects/spaces to include.
+# These must be customized for your organization.
+
+[sources.confluence]
+enabled = true
+spaces = ["TEAM", "DOCS", "ENG"]  # Customize: Your Confluence spaces
+
+[sources.jira]
+enabled = true
+projects = ["DATA", "ENG", "OPS"]  # Customize: Your Jira projects
+
+[sources.github]
+enabled = false  # Enable if using GitHub
+# token = "${GITHUB_TOKEN}"  # Use environment variable for security
+# repos = ["your-org/repo1"]
+
+# =============================================================================
+# Storage Configuration
+# =============================================================================
+[storage]
+type = "sqlite"
+
+[storage.sqlite]
+path = "/data/quaero.db"  # Docker volume mount point
+enable_fts5 = true         # Full-text search
+enable_vector = true       # Vector embeddings
+embedding_dimension = 768  # nomic-embed-text dimension
+cache_size_mb = 128        # Production cache size
+wal_mode = true            # Write-Ahead Logging
+busy_timeout_ms = 10000    # 10 seconds for production
+
+[storage.filesystem]
+images = "/data/images"
+attachments = "/data/attachments"
+
+# =============================================================================
+# LLM Configuration
+# =============================================================================
+# Offline mode for production (100% local, secure)
+[llm]
+mode = "offline"  # Secure by default - no data leaves the container
+
+[llm.offline]
+model_dir = "/models"                           # Docker volume mount
+embed_model = "nomic-embed-text-v1.5-q8.gguf"  # Embedding model
+chat_model = "qwen2.5-7b-instruct-q4.gguf"     # Chat model
+context_size = 24000                            # Large context for RAG
+thread_count = 8                                # Production CPU threads
+gpu_layers = 0                                  # CPU-only (adjust if GPU available)
+mock_mode = false                               # Disable mock mode in production
+
+# Audit Logging - Compliance and security
+[llm.audit]
+enabled = true      # Enable audit logging
+log_queries = false # Don't log query text (PII protection)
+
+# =============================================================================
+# RAG Configuration
+# =============================================================================
+[rag]
+max_documents = 20    # Retrieve up to 20 documents
+min_similarity = 0.6  # Minimum similarity threshold
+search_mode = "vector" # Semantic vector search
+
+# =============================================================================
+# Embeddings Configuration
+# =============================================================================
+[embeddings]
+enabled = true
+dimension = 768    # nomic-embed-text dimension
+batch_size = 20    # Production batch size
+
+# =============================================================================
+# Processing Configuration
+# =============================================================================
+[processing]
+enabled = true
+schedule = "0 0 */6 * * *"  # Every 6 hours
+limit = 5000                 # Max documents per run
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+[logging]
+level = "info"                     # Production log level (debug|info|warn|error)
+format = "json"                    # JSON for log aggregation
+output = ["stdout", "file"]        # Log to stdout and file
+client_debug = false               # Disable client debug in production
+
+# =============================================================================
+# Default Jobs Configuration
+# =============================================================================
+# System-managed scheduled tasks
+# Minimum interval is 5 minutes
+# Schedule uses cron format: minute hour day month weekday
+
+[jobs.crawl_and_collect]
+enabled = true
+schedule = "*/5 * * * *"  # Every 5 minutes
+description = "Crawl and collect website data, store as markdown"
+
+[jobs.scan_and_summarize]
+enabled = true
+schedule = "*/10 * * * *"  # Every 10 minutes
+description = "Scan markdown documents and generate summaries with metadata"
+
+# =============================================================================
+# Crawler Configuration (Firecrawl-style HTML Scraping)
+# =============================================================================
+# Production-tuned crawler settings
+[crawler]
+user_agent = "Quaero/1.0 (Web Crawler; +https://your-domain.com/bot)"
+user_agent_rotation = true
+max_concurrency = 5                # Production concurrency
+request_delay = "2s"               # Respectful rate limiting
+random_delay = "1s"                # Random jitter
+request_timeout = "60s"            # Production timeout
+max_body_size = 20971520           # 20MB
+max_depth = 5                      # Crawl depth
+follow_robots_txt = true           # Respect robots.txt
+output_format = "markdown"         # Markdown for LLM consumption
+only_main_content = true           # Extract main content only
+include_links = true               # Discover links
+include_metadata = true            # Extract metadata
+use_html_seeds = true              # Use HTML page URLs (not REST APIs)
+allowed_content_types = ["text/html", "application/json"]  # Allowed content types
+enable_empty_output_fallback = true  # Fallback for empty conversions

@@ -1,3 +1,16 @@
+// Package models defines the core document model for Quaero's knowledge collection system.
+//
+// ARCHITECTURE: Markdown + Metadata Canonical Format
+//
+// All content from sources (Jira, Confluence, GitHub) is transformed into two parts:
+// 1. Generic Markdown (ContentMarkdown field) - Clean, unified text format ideal for AI processing and full-text search
+// 2. Rich Metadata (Metadata field) - Structured JSON with source-specific data for efficient filtering
+//
+// This design enables a two-step query pattern:
+// - Step 1: Filter documents using structured metadata (SQL WHERE clauses on JSON fields)
+// - Step 2: Reason and synthesize answers from clean Markdown content of filtered results
+//
+// See docs/architecture.md for complete documentation of the transformation pipeline.
 package models
 
 import (
@@ -12,8 +25,27 @@ const (
 	DetailLevelFull = "full"
 )
 
-// Document represents a normalized document from any source
-// PRIMARY CONTENT FORMAT: Markdown (ContentMarkdown field)
+// Document represents a normalized document from any source.
+//
+// DESIGN PHILOSOPHY: Markdown-First Content + Structured Metadata
+//
+// ContentMarkdown is the PRIMARY CONTENT field containing clean, unified text format
+// that works seamlessly with:
+// - AI/LLM reasoning and synthesis
+// - Full-text search (SQLite FTS5)
+// - Human readability and debugging
+//
+// Metadata is a flexible map containing source-specific structured data that enables:
+// - Efficient filtering (SQL WHERE clauses on JSON fields)
+// - Faceted search (group by project, status, priority, etc.)
+// - Schema evolution (add fields without database migrations)
+//
+// Example Transformation Pipeline:
+// Jira HTML → ParseJiraIssuePage() → JiraIssueData struct →
+// convertHTMLToMarkdown() → ContentMarkdown + JiraMetadata.ToMap() → Document →
+// SaveDocument() → SQLite (content_markdown + metadata JSON)
+//
+// See docs/architecture.md for complete pipeline documentation.
 type Document struct {
 	// Identity
 	ID         string `json:"id"`          // doc_{uuid}
@@ -87,7 +119,18 @@ type GitHubMetadata struct {
 	PullRequest  string     `json:"pull_request"`  // Associated PR number (if any)
 }
 
-// CrossSourceMetadata contains cross-reference information extracted from content
+// CrossSourceMetadata contains cross-reference information extracted from content.
+//
+// NOTE: Currently unpopulated by transformers. Future enhancement to extract cross-references
+// from content using identifiers/extractor.go service.
+//
+// Planned Implementation:
+//   - After markdown conversion in transformers, call identifierExtractor.ExtractCrossReferences()
+//   - Populate ReferencedIssues (Jira keys like "BUG-123"), ReferencedPRs (GitHub "#123"),
+//     and ReferencedPages (Confluence page IDs)
+//   - Merge into document metadata for relationship tracking and impact analysis
+//
+// See docs/metadata_gaps_analysis.md for detailed implementation plan.
 type CrossSourceMetadata struct {
 	ReferencedIssues []string `json:"referenced_issues"` // Jira keys found in content (e.g., ["BUG-123", "STORY-456"])
 	ReferencedPRs    []string `json:"referenced_prs"`    // GitHub PR numbers (e.g., ["#123", "#456"])

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -16,13 +15,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/workers"
 )
 
-// Service orchestrates URL queue, rate limiting, retries, and worker pool
+// Service orchestrates URL queue, retries, and worker pool
+// Rate limiting strategy: Rate limiting is exclusively managed by HTMLScraper via common.CrawlerConfig mapping.
+// Per-job rate limits are applied via Colly's built-in Limit() mechanism in HTMLScraper to avoid double rate limiting
+// and leverage Colly's efficient per-domain parallelism control.
 type Service struct {
 	authService   interfaces.AuthService
 	sourceService *sources.Service
@@ -30,9 +33,9 @@ type Service struct {
 	eventService  interfaces.EventService
 	jobStorage    interfaces.JobStorage
 	logger        arbor.ILogger
+	config        *common.Config
 
 	queue       *URLQueue
-	rateLimiter *RateLimiter
 	retryPolicy *RetryPolicy
 	workerPool  *workers.Pool
 
@@ -47,7 +50,7 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, logger arbor.ILogger, config CrawlConfig) *Service {
+func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
@@ -57,23 +60,15 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 		eventService:  eventService,
 		jobStorage:    jobStorage,
 		logger:        logger,
+		config:        config,
 		queue:         NewURLQueue(),
-		rateLimiter:   NewRateLimiter(config.RateLimit),
 		retryPolicy:   NewRetryPolicy(),
-		workerPool:    workers.NewPool(config.Concurrency, logger),
+		workerPool:    workers.NewPool(config.Crawler.MaxConcurrency, logger),
 		activeJobs:    make(map[string]*CrawlJob),
 		jobResults:    make(map[string][]*CrawlResult),
 		jobClients:    make(map[string]*http.Client),
 		ctx:           ctx,
 		cancel:        cancel,
-	}
-
-	// Override retry policy if config specifies
-	if config.RetryAttempts > 0 {
-		s.retryPolicy.MaxAttempts = config.RetryAttempts
-	}
-	if config.RetryBackoff > 0 {
-		s.retryPolicy.InitialBackoff = config.RetryBackoff
 	}
 
 	return s
@@ -83,6 +78,95 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 func (s *Service) Start() error {
 	s.logger.Info().Msg("Crawler service started")
 	return nil
+}
+
+// logToDatabase appends a log entry to the job's database logs with consistent error handling
+func (s *Service) logToDatabase(jobID string, level string, message string) {
+	if s.jobStorage == nil {
+		return
+	}
+
+	logEntry := models.JobLogEntry{
+		Timestamp: time.Now().Format("15:04:05"),
+		Level:     level,
+		Message:   message,
+	}
+
+	if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
+		s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append log to database")
+	}
+}
+
+// logInfoToConsoleAndDatabase logs info level to both console and database
+func (s *Service) logInfoToConsoleAndDatabase(jobID string, message string, fields map[string]interface{}) {
+	// Build console log
+	event := s.logger.Info()
+	for key, value := range fields {
+		switch v := value.(type) {
+		case string:
+			event = event.Str(key, v)
+		case int:
+			event = event.Int(key, v)
+		case int64:
+			event = event.Int64(key, v)
+		default:
+			// Convert other types to string
+			event = event.Str(key, fmt.Sprintf("%v", v))
+		}
+	}
+	event.Msg(message)
+
+	// Log to database
+	s.logToDatabase(jobID, "info", message)
+}
+
+// logWarnToConsoleAndDatabase logs warning level to both console and database
+func (s *Service) logWarnToConsoleAndDatabase(jobID string, message string, fields map[string]interface{}) {
+	// Build console log
+	event := s.logger.Warn()
+	for key, value := range fields {
+		switch v := value.(type) {
+		case string:
+			event = event.Str(key, v)
+		case int:
+			event = event.Int(key, v)
+		case int64:
+			event = event.Int64(key, v)
+		default:
+			// Convert other types to string
+			event = event.Str(key, fmt.Sprintf("%v", v))
+		}
+	}
+	event.Msg(message)
+
+	// Log to database
+	s.logToDatabase(jobID, "warn", message)
+}
+
+// logErrorToConsoleAndDatabase logs error level to both console and database
+func (s *Service) logErrorToConsoleAndDatabase(jobID string, message string, err error, fields map[string]interface{}) {
+	// Build console log
+	event := s.logger.Error()
+	if err != nil {
+		event = event.Err(err)
+	}
+	for key, value := range fields {
+		switch v := value.(type) {
+		case string:
+			event = event.Str(key, v)
+		case int:
+			event = event.Int(key, v)
+		case int64:
+			event = event.Int64(key, v)
+		default:
+			// Convert other types to string
+			event = event.Str(key, fmt.Sprintf("%v", v))
+		}
+	}
+	event.Msg(message)
+
+	// Log to database
+	s.logToDatabase(jobID, "error", message)
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
@@ -133,6 +217,78 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		CreatedAt: time.Now(),
 	}
 
+	// Validate seed URLs and detect test URLs
+	testURLCount := 0
+	var testURLWarnings []string
+	for _, seedURL := range seedURLs {
+		isValid, isTestURL, warnings, err := common.ValidateBaseURL(seedURL, s.logger)
+		if !isValid || err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("seed_url", seedURL).
+				Str("job_id", jobID).
+				Msg("Invalid seed URL detected")
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("Invalid seed URL: %s - %v", seedURL, err))
+		}
+		if isTestURL {
+			testURLCount++
+			testURLWarnings = append(testURLWarnings, warnings...)
+		}
+	}
+
+	// Reject test URLs in production mode
+	if s.config.IsProduction() && testURLCount > 0 {
+		errMsg := fmt.Sprintf("Test URLs are not allowed in production mode: %d of %d seed URLs are test URLs (localhost/127.0.0.1). Set environment=\"development\" in config to allow test URLs.", testURLCount, len(seedURLs))
+		s.logger.Error().
+			Str("job_id", jobID).
+			Int("test_url_count", testURLCount).
+			Int("total_urls", len(seedURLs)).
+			Strs("warnings", testURLWarnings).
+			Msg("Job rejected: test URLs detected in production mode")
+		s.logToDatabase(jobID, "error", errMsg)
+		return "", fmt.Errorf("%s", errMsg)
+	}
+
+	// Log test URL warnings if any detected (development mode)
+	if testURLCount > 0 {
+		warningMsg := fmt.Sprintf("Test URLs detected: %d of %d seed URLs are test URLs (localhost/127.0.0.1) - allowed in development mode",
+			testURLCount, len(seedURLs))
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Int("test_url_count", testURLCount).
+			Int("total_urls", len(seedURLs)).
+			Strs("warnings", testURLWarnings).
+			Msg(warningMsg)
+		s.logToDatabase(jobID, "warn", warningMsg)
+	}
+
+	// Log seed URLs configuration (truncate if > 5 URLs)
+	seedURLsMsg := fmt.Sprintf("Seed URLs configured: %d total", len(seedURLs))
+	if len(seedURLs) > 0 && len(seedURLs) <= 5 {
+		seedURLsMsg += fmt.Sprintf(" - %v", seedURLs)
+	} else if len(seedURLs) > 5 {
+		seedURLsMsg += fmt.Sprintf(" - First 5: %v (and %d more)", seedURLs[:5], len(seedURLs)-5)
+	}
+	// Append test URL warning if any detected
+	if testURLCount > 0 {
+		seedURLsMsg += fmt.Sprintf(" ⚠️  WARNING: %d test URLs detected (localhost/127.0.0.1)", testURLCount)
+	}
+	s.logInfoToConsoleAndDatabase(jobID, seedURLsMsg, map[string]interface{}{
+		"seed_url_count": len(seedURLs),
+		"test_url_count": testURLCount,
+	})
+
+	// Log crawler configuration summary
+	configMsg := fmt.Sprintf("Crawler configuration: max_depth=%d, max_pages=%d, concurrency=%d, rate_limit=%dms, follow_links=%v",
+		config.MaxDepth, config.MaxPages, config.Concurrency, config.RateLimit.Milliseconds(), config.FollowLinks)
+	s.logInfoToConsoleAndDatabase(jobID, configMsg, map[string]interface{}{
+		"max_depth":    config.MaxDepth,
+		"max_pages":    config.MaxPages,
+		"concurrency":  config.Concurrency,
+		"rate_limit":   config.RateLimit.Milliseconds(),
+		"follow_links": config.FollowLinks,
+	})
+
 	// Handle snapshot logic
 	// If sourceID is provided and snapshots are nil, fetch from services
 	if sourceID != "" && sourceConfigSnapshot == nil {
@@ -148,6 +304,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 				auth, err := s.authStorage.GetCredentialsByID(s.ctx, sourceConfig.AuthID)
 				if err != nil {
 					s.logger.Warn().Err(err).Str("auth_id", sourceConfig.AuthID).Msg("Failed to fetch auth credentials")
+					// Persist auth fetch failure to database
+					authFailMsg := fmt.Sprintf("Failed to fetch auth credentials: auth_id=%s, error=%v", sourceConfig.AuthID, err)
+					s.logToDatabase(jobID, "warn", authFailMsg)
 				} else {
 					authSnapshot = auth
 				}
@@ -174,6 +333,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			latestAuth, err := s.authStorage.GetCredentialsByID(s.ctx, latestConfig.AuthID)
 			if err != nil {
 				s.logger.Warn().Err(err).Str("auth_id", latestConfig.AuthID).Msg("Failed to refresh auth credentials")
+				// Persist auth refresh failure to database
+				authFailMsg := fmt.Sprintf("Failed to refresh auth credentials: auth_id=%s, error=%v", latestConfig.AuthID, err)
+				s.logToDatabase(jobID, "warn", authFailMsg)
 			} else {
 				authSnapshot = latestAuth
 			}
@@ -183,32 +345,85 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Validate source config snapshot if provided
 	if sourceConfigSnapshot != nil {
 		if err := sourceConfigSnapshot.Validate(); err != nil {
+			// Log validation failure before returning error
+			s.logErrorToConsoleAndDatabase(jobID, "Source config validation failed", err, map[string]interface{}{
+				"error": err.Error(),
+			})
 			return "", fmt.Errorf("source configuration validation failed: %w", err)
 		}
 
 		// Store snapshot in job
 		if err := job.SetSourceConfigSnapshot(sourceConfigSnapshot); err != nil {
+			// Log snapshot serialization failure
+			s.logErrorToConsoleAndDatabase(jobID, "Failed to serialize source config snapshot", err, map[string]interface{}{
+				"error": err.Error(),
+			})
 			return "", fmt.Errorf("failed to set source config snapshot: %w", err)
 		}
+
+		// Log validation success with base URL
+		baseURLInfo := "unknown"
+		if sourceConfigSnapshot.BaseURL != "" {
+			baseURLInfo = sourceConfigSnapshot.BaseURL
+		}
+		s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("Source config validated and stored: base_url=%s", baseURLInfo), map[string]interface{}{
+			"base_url": baseURLInfo,
+		})
+	} else {
+		// Log missing source config snapshot
+		s.logToDatabase(jobID, "info", "No source config snapshot provided")
 	}
 
 	// Store auth snapshot if provided
+	var httpClientType string
 	if authSnapshot != nil {
 		if err := job.SetAuthSnapshot(authSnapshot); err != nil {
+			// Log auth snapshot serialization failure
+			s.logErrorToConsoleAndDatabase(jobID, "Failed to serialize auth snapshot", err, map[string]interface{}{
+				"error": err.Error(),
+			})
 			return "", fmt.Errorf("failed to set auth snapshot: %w", err)
 		}
+
+		// Log auth snapshot presence
+		cookieCount := 0
+		if authSnapshot.Cookies != nil {
+			var cookies []*interfaces.AtlassianExtensionCookie
+			if err := json.Unmarshal(authSnapshot.Cookies, &cookies); err == nil {
+				cookieCount = len(cookies)
+			}
+		}
+		s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("Auth snapshot stored: %d cookies available", cookieCount), map[string]interface{}{
+			"cookie_count": cookieCount,
+		})
 
 		// Build HTTP client from auth snapshot for this job
 		client, err := buildHTTPClientFromAuth(authSnapshot)
 		if err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to build HTTP client from auth snapshot, will use default")
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("Failed to build HTTP client from auth: %v - will use default", err))
+			httpClientType = "default (auth build failed)"
 		} else {
 			s.jobsMu.Lock()
 			s.jobClients[jobID] = client
 			s.jobsMu.Unlock()
 			s.logger.Debug().Str("job_id", jobID).Msg("Per-job HTTP client configured from auth snapshot")
+			httpClientType = "per-job (from auth snapshot)"
 		}
+	} else {
+		// Log missing auth snapshot (Comment 3: downgrade to info if source doesn't declare AuthID)
+		logLevel := "warn"
+		if sourceConfigSnapshot == nil || sourceConfigSnapshot.AuthID == "" {
+			logLevel = "info" // Auth not configured or optional for this source
+		}
+		s.logToDatabase(jobID, logLevel, "No auth snapshot provided - requests will use default HTTP client")
+		httpClientType = "default (no auth)"
 	}
+
+	// Log HTTP client configuration
+	s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("HTTP client configured: type=%s", httpClientType), map[string]interface{}{
+		"client_type": httpClientType,
+	})
 
 	// Persist job to database
 	if s.jobStorage != nil {
@@ -256,15 +471,16 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to initialize job heartbeat")
 		}
 
-		// Append job start log
-		logEntry := models.JobLogEntry{
-			Timestamp: time.Now().Format("15:04:05"),
-			Level:     "info",
-			Message:   "Job started",
+		// Append detailed job initialization summary log
+		authStatus := "no auth"
+		if authSnapshot != nil {
+			authStatus = "authenticated"
 		}
-		if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
-			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append job start log")
-		}
+		jobStartMsg := fmt.Sprintf("Job started: source=%s/%s, seeds=%d, max_depth=%d, max_pages=%d, concurrency=%d, auth=%s",
+			sourceType, entityType, len(seedURLs), config.MaxDepth, config.MaxPages, config.Concurrency, authStatus)
+
+		// Use helper for consistency with other log calls
+		s.logToDatabase(jobID, "info", jobStartMsg)
 	}
 
 	// Emit started event
@@ -339,6 +555,11 @@ func (s *Service) CancelJob(jobID string) error {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job cancellation")
 		}
+
+		// Append cancellation log with progress summary
+		cancelMsg := fmt.Sprintf("Job cancelled by user: %d completed, %d failed, %d pending",
+			job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs)
+		s.logToDatabase(jobID, "warn", cancelMsg)
 	}
 
 	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
@@ -379,6 +600,11 @@ func (s *Service) FailJob(jobID string, reason string) error {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job failure")
 		}
+
+		// Append failure log with progress summary
+		failMsg := fmt.Sprintf("Job failed: %s - %d completed, %d failed, %d pending",
+			reason, job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs)
+		s.logToDatabase(jobID, "error", failMsg)
 	}
 
 	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
@@ -464,6 +690,14 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		}
 		s.jobsMu.RUnlock()
 
+		// Log current queue state at start of worker iteration
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Int("pending_urls", job.Progress.PendingURLs).
+			Int("completed_urls", job.Progress.CompletedURLs).
+			Int("failed_urls", job.Progress.FailedURLs).
+			Msg("Worker iteration - queue state")
+
 		// Check max pages limit
 		if config.MaxPages > 0 && job.Progress.CompletedURLs >= config.MaxPages {
 			s.logger.Debug().
@@ -472,17 +706,9 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Int("max_pages", config.MaxPages).
 				Msg("Max pages reached, stopping worker")
 
-			// Append max pages log
-			if s.jobStorage != nil {
-				logEntry := models.JobLogEntry{
-					Timestamp: time.Now().Format("15:04:05"),
-					Level:     "info",
-					Message:   fmt.Sprintf("Max pages limit reached (%d/%d)", job.Progress.CompletedURLs, config.MaxPages),
-				}
-				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
-					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append max pages log")
-				}
-			}
+			// Use logToDatabase helper for consistency (Comment 2)
+			maxPagesMsg := fmt.Sprintf("Max pages limit reached (%d/%d)", job.Progress.CompletedURLs, config.MaxPages)
+			s.logToDatabase(jobID, "info", maxPagesMsg)
 			return
 		}
 
@@ -511,13 +737,32 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 			continue
 		}
 
+		// Log the popped URL with depth and metadata
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("url", item.URL).
+			Int("depth", item.Depth).
+			Int("priority", item.Priority).
+			Msg("Processing URL from queue")
+
 		// Check depth limit
 		if config.MaxDepth > 0 && item.Depth > config.MaxDepth {
-			s.logger.Debug().
-				Str("url", item.URL).
-				Int("depth", item.Depth).
-				Int("max_depth", config.MaxDepth).
-				Msg("Skipping URL beyond max depth")
+			// Sample depth limit skips: log every 10th skipped URL to avoid spam
+			s.jobsMu.RLock()
+			failedCount := job.Progress.FailedURLs
+			s.jobsMu.RUnlock()
+
+			if failedCount%10 == 0 {
+				s.logger.Debug().
+					Str("url", item.URL).
+					Int("depth", item.Depth).
+					Int("max_depth", config.MaxDepth).
+					Msg("Skipping URL beyond max depth")
+
+				// Persist depth limit skip to database
+				depthSkipMsg := fmt.Sprintf("Depth limit skip: url=%s, depth=%d, max_depth=%d", item.URL, item.Depth, config.MaxDepth)
+				s.logToDatabase(jobID, "warn", depthSkipMsg)
+			}
 			// Count as failed to decrement pending count
 			s.updateProgress(jobID, false, true)
 			continue
@@ -526,11 +771,9 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		// Update current URL
 		s.updateCurrentURL(jobID, item.URL)
 
-		// Apply rate limiting
-		if err := s.rateLimiter.Wait(s.ctx, item.URL); err != nil {
-			s.logger.Debug().Err(err).Str("url", item.URL).Msg("Rate limiter cancelled")
-			return
-		}
+		// Comment 3: Rate limiting is now handled by Colly's Limit() in HTMLScraper
+		// Removed service-level rate limiting to avoid double rate limiting
+		// Colly applies rate limiting more efficiently per-domain with built-in parallelism control
 
 		// Execute request with retry
 		result := s.executeRequest(item, config)
@@ -544,20 +787,60 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		if result.Error == "" {
 			s.updateProgress(jobID, true, false)
 
-			// Discover links if enabled
-			if config.FollowLinks && item.Depth < config.MaxDepth {
+			// Discover links if enabled and within depth limit (0 = unlimited depth)
+			if config.FollowLinks && (config.MaxDepth == 0 || item.Depth < config.MaxDepth) {
 				links := s.discoverLinks(result, item, config)
 				s.enqueueLinks(jobID, links, item)
+			} else {
+				// Log and persist link discovery skip
+				skipMsg := fmt.Sprintf("Link discovery skipped: follow_links=%v, depth=%d/%d", config.FollowLinks, item.Depth, config.MaxDepth)
+
+				s.logger.Debug().
+					Str("job_id", jobID).
+					Str("url", item.URL).
+					Str("follow_links", fmt.Sprintf("%v", config.FollowLinks)).
+					Int("depth", item.Depth).
+					Int("max_depth", config.MaxDepth).
+					Msg("Skipping link discovery - FollowLinks disabled or depth limit reached")
+
+				// Persist to database (sampled: every 20th skip to avoid log spam)
+				s.jobsMu.RLock()
+				completedCount := job.Progress.CompletedURLs
+				s.jobsMu.RUnlock()
+
+				if completedCount%20 == 0 {
+					s.logToDatabase(jobID, "debug", skipMsg)
+				}
 			}
 		} else {
 			s.updateProgress(jobID, false, true)
 
-			// Append request failure log
+			// Categorize errors: timeout, auth (401/403), network, server (5xx)
+			errorCategory := "unknown"
+			statusCode := result.StatusCode
+			errorMsg := result.Error
+
+			if statusCode == 401 || statusCode == 403 {
+				errorCategory = "auth"
+			} else if statusCode >= 500 && statusCode < 600 {
+				errorCategory = "server"
+			} else if statusCode == 0 || strings.Contains(strings.ToLower(errorMsg), "timeout") {
+				errorCategory = "timeout"
+			} else if statusCode >= 400 && statusCode < 500 {
+				errorCategory = "client"
+			} else {
+				errorCategory = "network"
+			}
+
+			// Append categorized request failure log
 			if s.jobStorage != nil {
+				failureMsg := fmt.Sprintf("Request failed: %s - %s: %s (status=%d, category=%s, attempt=%d)",
+					item.URL, errorCategory, errorMsg, statusCode, errorCategory, item.Attempts+1)
+
 				logEntry := models.JobLogEntry{
 					Timestamp: time.Now().Format("15:04:05"),
 					Level:     "error",
-					Message:   fmt.Sprintf("Request failed: %s - %s", item.URL, result.Error),
+					Message:   failureMsg,
 				}
 				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
 					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append request failure log")
@@ -569,17 +852,17 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		if (job.Progress.CompletedURLs+job.Progress.FailedURLs)%10 == 0 {
 			s.emitProgress(job)
 
-			// Append progress milestone log
-			if s.jobStorage != nil {
-				logEntry := models.JobLogEntry{
-					Timestamp: time.Now().Format("15:04:05"),
-					Level:     "info",
-					Message:   fmt.Sprintf("Progress: %d completed, %d failed, %d pending", job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs),
-				}
-				if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
-					s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append progress log")
-				}
+			// Calculate success rate for progress milestone
+			totalProcessed := job.Progress.CompletedURLs + job.Progress.FailedURLs
+			successRate := 0.0
+			if totalProcessed > 0 {
+				successRate = float64(job.Progress.CompletedURLs) / float64(totalProcessed) * 100
 			}
+
+			// Use logToDatabase helper for consistency (Comment 2)
+			progressMsg := fmt.Sprintf("Progress: %d completed, %d failed, %d pending (success_rate=%.1f%%)",
+				job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs, successRate)
+			s.logToDatabase(jobID, "info", progressMsg)
 		}
 	}
 }
@@ -600,11 +883,17 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 		Metadata: item.Metadata,
 	}
 
-	// Also set Body field from metadata for dual-pathway support
+	// Comment 4: Verify HTML propagation path from makeRequest to transformers
+	// Path: makeRequest() → item.Metadata["response_body"] (HTML) → result.Body
+	// Transformers read from: result.Body, metadata["html"], metadata["markdown"], or metadata["response_body"]
+	// This ensures HTML content reaches parsers correctly after Comment 1 changes
 	if item.Metadata != nil {
 		if bodyRaw, ok := item.Metadata["response_body"]; ok {
-			if body, ok := bodyRaw.([]byte); ok {
-				result.Body = body
+			switch v := bodyRaw.(type) {
+			case []byte:
+				result.Body = v
+			case string:
+				result.Body = []byte(v)
 			}
 		}
 	}
@@ -624,28 +913,33 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 	return result
 }
 
-// makeRequest performs HTTP request with auth
+// makeRequest performs HTML scraping using Colly-based HTMLScraper
 func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, error) {
-	req, err := http.NewRequestWithContext(s.ctx, "GET", item.URL, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
-	}
+	startTime := time.Now()
 
-	// Set headers - auth will be handled by the HTTP client with cookies
-	req.Header.Set("User-Agent", "Quaero/1.0")
-	req.Header.Set("Accept", "application/json")
-
-	// Try to use per-job HTTP client from auth snapshot
+	// Extract HTTP client and cookies for auth
 	var client *http.Client
-	if jobID, ok := item.Metadata["job_id"].(string); ok && jobID != "" {
+	var jobID string
+	var clientType string // Track which client type was selected
+	if jid, ok := item.Metadata["job_id"].(string); ok && jid != "" {
+		jobID = jid
 		s.jobsMu.RLock()
 		client = s.jobClients[jobID]
 		s.jobsMu.RUnlock()
+
+		if client != nil {
+			clientType = "per-job"
+			s.logger.Debug().Str("url", item.URL).Str("job_id", jobID).Msg("Using per-job HTTP client with auth")
+		}
 	}
 
 	// Fallback to auth service's HTTP client if no per-job client
 	if client == nil {
 		client = s.authService.GetHTTPClient()
+		if client != nil {
+			clientType = "auth-service"
+			s.logger.Debug().Str("url", item.URL).Msg("Using auth service HTTP client")
+		}
 	}
 
 	// Final fallback to default client
@@ -653,115 +947,366 @@ func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, erro
 		client = &http.Client{
 			Timeout: 30 * time.Second,
 		}
+		clientType = "default"
+		s.logger.Debug().Str("url", item.URL).Msg("Using default HTTP client (no auth)")
 	}
 
-	resp, err := client.Do(req)
+	// Persist HTTP client selection to database (sampled: only at depth=0 to avoid spam)
+	if jobID != "" && item.Depth == 0 {
+		var clientMsg string
+		switch clientType {
+		case "per-job":
+			clientMsg = fmt.Sprintf("Using per-job HTTP client with auth: url=%s, job_id=%s", item.URL, jobID)
+		case "auth-service":
+			clientMsg = fmt.Sprintf("Using auth service HTTP client: url=%s", item.URL)
+		case "default":
+			clientMsg = fmt.Sprintf("Using default HTTP client (no auth): url=%s", item.URL)
+		default:
+			clientMsg = fmt.Sprintf("HTTP client selected: type=%s, url=%s", clientType, item.URL)
+		}
+		s.logToDatabase(jobID, "debug", clientMsg)
+	}
+
+	// Extract cookies from client's cookie jar for the target URL
+	cookies := s.extractCookiesFromClient(client, item.URL)
+	s.logger.Debug().
+		Str("url", item.URL).
+		Int("cookie_count", len(cookies)).
+		Msg("Extracted cookies from client")
+
+	// Warn if no cookies available despite auth being configured
+	if jobID != "" && len(cookies) == 0 {
+		s.jobsMu.RLock()
+		_, hasClient := s.jobClients[jobID]
+		s.jobsMu.RUnlock()
+
+		if hasClient || client.Jar != nil {
+			// Persist warning if auth is configured but cookies are missing
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("No cookies available for request to %s despite auth configuration", item.URL))
+		}
+	}
+
+	// Comment 2: Apply job-level crawl limits to HTMLScraper config
+	// Create a merged config by copying service-level config and overriding with job-specific settings
+	scraperConfig := s.config.Crawler // Start with service-level config
+
+	// Map job-level CrawlConfig fields to common.CrawlerConfig fields
+	if config.RateLimit > 0 {
+		// RateLimit (in CrawlConfig) maps to RequestDelay (in common.CrawlerConfig)
+		scraperConfig.RequestDelay = time.Duration(config.RateLimit) * time.Millisecond
+	}
+	if config.Concurrency > 0 {
+		// Constrain MaxConcurrency per job (don't exceed job's concurrency setting)
+		if config.Concurrency < scraperConfig.MaxConcurrency {
+			scraperConfig.MaxConcurrency = config.Concurrency
+		}
+	}
+	if config.MaxDepth > 0 {
+		// MaxDepth is available in both configs
+		scraperConfig.MaxDepth = config.MaxDepth
+	}
+
+	// Log scraper config (sampled: once per job by checking depth=0)
+	if jobID != "" && item.Depth == 0 {
+		scraperMsg := fmt.Sprintf("Scraper config: request_delay=%dms, max_concurrency=%d, max_depth=%d, user_agent=%s",
+			scraperConfig.RequestDelay.Milliseconds(), scraperConfig.MaxConcurrency, scraperConfig.MaxDepth,
+			func() string {
+				if scraperConfig.UserAgent != "" {
+					return scraperConfig.UserAgent[:min(50, len(scraperConfig.UserAgent))]
+				}
+				return "default"
+			}())
+		s.logToDatabase(jobID, "info", scraperMsg)
+	}
+
+	// Create HTMLScraper instance with merged config
+	scraper := NewHTMLScraper(scraperConfig, s.logger, client, cookies)
+
+	// Execute scraping
+	scrapeResult, err := scraper.ScrapeURL(s.ctx, item.URL)
 	if err != nil {
-		return 0, fmt.Errorf("request failed: %w", err)
+		// Check if context was cancelled
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			s.logger.Debug().Err(err).Str("url", item.URL).Msg("Scraping cancelled")
+			return 0, err
+		}
+		s.logger.Warn().Err(err).Str("url", item.URL).Msg("Scraping failed")
+		return 0, fmt.Errorf("scraping failed: %w", err)
 	}
-	defer resp.Body.Close()
 
-	// Read body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
+	// Convert ScrapeResult to CrawlResult-compatible format
+	crawlResult := scrapeResult.ToCrawlResult()
+
+	// Check for scraper failures (Comment 3)
+	if !scrapeResult.Success || crawlResult.Error != "" {
+		// Failure case: don't default statusCode, return error
+		statusCode := crawlResult.StatusCode
+		errorMsg := crawlResult.Error
+		if errorMsg == "" {
+			errorMsg = "scraping failed"
+		}
+
+		s.logger.Warn().
+			Str("url", item.URL).
+			Int("status_code", statusCode).
+			Str("error", errorMsg).
+			Msg("Scraping failed or returned error")
+
+		// Persist enhanced scraping failure log to database
+		if jobID != "" {
+			failureMsg := fmt.Sprintf("Scraping failed: %s (status=%d, error=%s)", item.URL, statusCode, errorMsg)
+			s.logToDatabase(jobID, "error", failureMsg)
+		}
+
+		return statusCode, fmt.Errorf("%s", errorMsg)
 	}
 
-	// Store body in result metadata for later processing
+	// Success case: continue with processing
+	// Store converted result in metadata for backward compatibility
 	if item.Metadata == nil {
 		item.Metadata = make(map[string]interface{})
 	}
-	item.Metadata["response_body"] = body
-	item.Metadata["status_code"] = resp.StatusCode
 
-	if resp.StatusCode >= 400 {
-		return resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
+	// Comment 1: Store HTML (not markdown) in response_body
+	// Priority: metadata["html"] > Body (if HTML) > nothing
+	if htmlRaw, ok := crawlResult.Metadata["html"]; ok {
+		// Use HTML from metadata if available
+		if htmlStr, isString := htmlRaw.(string); isString && htmlStr != "" {
+			item.Metadata["response_body"] = []byte(htmlStr)
+		} else if htmlBytes, isBytes := htmlRaw.([]byte); isBytes && len(htmlBytes) > 0 {
+			item.Metadata["response_body"] = htmlBytes
+		}
+	} else if crawlResult.Body != nil && len(crawlResult.Body) > 0 {
+		// Fallback: use Body only if it's HTML (check content type or first bytes)
+		// If Body contains markdown (text starting with # or typical markdown), skip it
+		bodyStr := string(crawlResult.Body)
+		// Simple heuristic: if it starts with HTML tags, it's HTML
+		if strings.HasPrefix(strings.TrimSpace(bodyStr), "<") {
+			item.Metadata["response_body"] = crawlResult.Body
+		}
+		// Otherwise, don't store markdown in response_body
 	}
 
-	return resp.StatusCode, nil
+	// Store status code (Comment 4: only default to 200 if scraping was successful)
+	statusCode := crawlResult.StatusCode
+	if statusCode == 0 && scrapeResult.Success {
+		statusCode = 200 // Default to 200 only for successful scrapes
+	}
+	item.Metadata["status_code"] = statusCode
+
+	// Merge scrape result metadata with existing metadata (preserve critical fields)
+	// Note: markdown should be in metadata["markdown"] for RAG use
+	for key, value := range crawlResult.Metadata {
+		// Don't overwrite job_id, source_type, entity_type
+		if key != "job_id" && key != "source_type" && key != "entity_type" {
+			item.Metadata[key] = value
+		}
+	}
+
+	duration := time.Since(startTime)
+	s.logger.Debug().
+		Str("url", item.URL).
+		Int("status_code", statusCode).
+		Dur("duration", duration).
+		Int("body_length", len(crawlResult.Body)).
+		Msg("Scraping completed")
+
+	// Log successful scrapes (sampled: every 50th success)
+	if jobID != "" {
+		s.jobsMu.RLock()
+		completedCount := 0
+		if job, exists := s.activeJobs[jobID]; exists {
+			completedCount = job.Progress.CompletedURLs
+		}
+		s.jobsMu.RUnlock()
+
+		if completedCount%50 == 0 && completedCount > 0 {
+			successMsg := fmt.Sprintf("Scraping successful: %s (status=%d, duration=%dms, body_length=%d)",
+				item.URL, statusCode, duration.Milliseconds(), len(crawlResult.Body))
+			s.logToDatabase(jobID, "info", successMsg)
+		}
+	}
+
+	// Check for HTTP errors
+	if statusCode >= 400 {
+		return statusCode, fmt.Errorf("HTTP %d", statusCode)
+	}
+
+	return statusCode, nil
 }
 
-// discoverLinks extracts links from JSON responses
+// extractCookiesFromClient extracts cookies from HTTP client's cookie jar for a specific URL
+func (s *Service) extractCookiesFromClient(client *http.Client, targetURL string) []*http.Cookie {
+	// Check if client is nil
+	if client == nil {
+		s.logger.Warn().Str("url", targetURL).Msg("Client is nil, cannot extract cookies")
+		return []*http.Cookie{}
+	}
+
+	// Check if client's cookie jar is nil
+	if client.Jar == nil {
+		s.logger.Warn().Str("url", targetURL).Msg("Client cookie jar is nil (auth not configured)")
+		return []*http.Cookie{}
+	}
+
+	// Parse target URL
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("url", targetURL).Msg("Failed to parse target URL for cookie extraction")
+		return []*http.Cookie{}
+	}
+
+	// Get cookies for the URL
+	cookies := client.Jar.Cookies(parsedURL)
+
+	return cookies
+}
+
+// discoverLinks extracts links from HTML responses
 func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, config CrawlConfig) []string {
 	links := make([]string, 0)
 
-	// Get response body from metadata
-	bodyRaw, ok := parent.Metadata["response_body"]
-	if !ok {
-		return links
+	// Comment 6: Check if links are already provided in ScrapeResult metadata
+	var allLinks []string
+	if result.Metadata != nil {
+		if linksRaw, ok := result.Metadata["links"]; ok {
+			// Fast path: []string
+			if linksSlice, ok := linksRaw.([]string); ok && len(linksSlice) > 0 {
+				// Use links provided by ScrapeResult
+				allLinks = linksSlice
+				s.logger.Debug().
+					Str("url", parent.URL).
+					Int("links_count", len(allLinks)).
+					Msg("Using links from ScrapeResult metadata")
+			} else if linksInterface, ok := linksRaw.([]interface{}); ok && len(linksInterface) > 0 {
+				// Defensive fallback: []interface{} -> convert to []string
+				allLinks = make([]string, 0, len(linksInterface))
+				for _, linkRaw := range linksInterface {
+					if linkStr, ok := linkRaw.(string); ok {
+						allLinks = append(allLinks, linkStr)
+					} else {
+						s.logger.Debug().
+							Str("url", parent.URL).
+							Str("type", fmt.Sprintf("%T", linkRaw)).
+							Msg("Skipping non-string element in links metadata")
+					}
+				}
+				if len(allLinks) > 0 {
+					s.logger.Debug().
+						Str("url", parent.URL).
+						Int("links_count", len(allLinks)).
+						Int("total_elements", len(linksInterface)).
+						Msg("Converted []interface{} links to []string")
+				}
+			}
+		}
 	}
 
-	body, ok := bodyRaw.([]byte)
-	if !ok {
-		return links
+	// Fallback: Extract links from HTML if not provided in metadata
+	if len(allLinks) == 0 {
+		// Extract HTML from result.Body or metadata["response_body"]
+		var body []byte
+		if result.Body != nil && len(result.Body) > 0 {
+			body = result.Body
+		} else if bodyRaw, ok := parent.Metadata["response_body"]; ok {
+			switch v := bodyRaw.(type) {
+			case []byte:
+				body = v
+			case string:
+				body = []byte(v)
+			}
+		}
+
+		if len(body) == 0 {
+			return links
+		}
+
+		// Convert to HTML string
+		html := string(body)
+
+		// Extract all links from HTML using regex
+		allLinks = s.extractLinksFromHTML(html, parent.URL)
 	}
 
-	// Parse JSON response
-	var data map[string]interface{}
-	if err := json.Unmarshal(body, &data); err != nil {
-		s.logger.Debug().Err(err).Msg("Failed to parse JSON response for link discovery")
-		return links
+	// Log raw link count and warn on zero links
+	s.logger.Debug().Str("url", parent.URL).Int("raw_links", len(allLinks)).Msg("Raw links extracted before filtering")
+	if len(allLinks) == 0 {
+		s.logger.Warn().Str("url", parent.URL).Msg("Zero links discovered - check page structure or link extraction logic")
+
+		// Persist zero links warning to database - critical for debugging
+		if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("Zero links discovered from %s - check page structure", parent.URL))
+		}
 	}
 
-	// Extract links based on source type
+	// Parse parent URL to get base host for same-host filtering
+	baseHost := ""
+	if parsedParent, err := url.Parse(parent.URL); err == nil {
+		baseHost = strings.ToLower(parsedParent.Host)
+	}
+
+	// Get source type for source-specific filtering
 	sourceType := ""
 	if st, ok := parent.Metadata["source_type"].(string); ok {
 		sourceType = st
+	} else {
+		s.logger.Warn().Str("url", parent.URL).Msg("source_type not found in metadata, skipping source-specific filtering")
 	}
 
+	// Apply source-specific filtering
+	var filteredLinks []string
 	switch sourceType {
-	case "confluence":
-		links = s.extractConfluenceLinks(data, parent.URL)
 	case "jira":
-		links = s.extractJiraLinks(data, parent.URL)
+		filteredLinks = s.filterJiraLinks(allLinks, baseHost)
+	case "confluence":
+		filteredLinks = s.filterConfluenceLinks(allLinks, baseHost)
+	default:
+		// No source-specific filtering for other types
+		filteredLinks = allLinks
 	}
 
-	// Apply include/exclude patterns
-	links = s.filterLinks(links, config)
+	// Apply include/exclude patterns (Comment 9: collect filtered samples)
+	links, excludedSamples, notIncludedSamples := s.filterLinks(filteredLinks, config)
 
-	return links
-}
+	// Log detailed filtering breakdown (Info level for visibility)
+	s.logger.Info().
+		Str("url", parent.URL).
+		Int("total_discovered", len(allLinks)).
+		Int("after_source_filter", len(filteredLinks)).
+		Int("after_pattern_filter", len(links)).
+		Int("filtered_out", len(allLinks)-len(links)).
+		Str("source_type", sourceType).
+		Int("parent_depth", parent.Depth).
+		Str("follow_links", fmt.Sprintf("%v", config.FollowLinks)).
+		Int("max_depth", config.MaxDepth).
+		Msg("Link filtering complete")
 
-// extractConfluenceLinks extracts page links from Confluence API responses
-func (s *Service) extractConfluenceLinks(data map[string]interface{}, baseURL string) []string {
-	links := make([]string, 0)
+	// Persist link filtering summary to database
+	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
+		filteredOutCount := len(allLinks) - len(links)
+		filterMsg := fmt.Sprintf("Link filtering: discovered=%d, source_filter=%d, pattern_filter=%d, filtered_out=%d",
+			len(allLinks), len(filteredLinks), len(links), filteredOutCount)
+		s.logToDatabase(jobID, "info", filterMsg)
 
-	// Extract from _links.next for pagination
-	if linksObj, ok := data["_links"].(map[string]interface{}); ok {
-		if next, ok := linksObj["next"].(string); ok {
-			links = append(links, makeAbsoluteURL(baseURL, next))
-		}
-	}
+		// Warn if all links were filtered out despite discovery (Comment 9: include samples)
+		if len(allLinks) > 0 && len(links) == 0 {
+			warnMsg := fmt.Sprintf("All %d discovered links filtered out - check include/exclude patterns and source filters", len(allLinks))
 
-	// Extract child pages from body.storage.value
-	if body, ok := data["body"].(map[string]interface{}); ok {
-		if storage, ok := body["storage"].(map[string]interface{}); ok {
-			if value, ok := storage["value"].(string); ok {
-				// Extract page links from HTML
-				pageLinks := extractHTMLLinks(value, baseURL)
-				links = append(links, pageLinks...)
+			// Append sample URLs to help diagnose filtering issues
+			if len(excludedSamples) > 0 {
+				warnMsg += fmt.Sprintf(" | Excluded samples: %v", excludedSamples)
 			}
-		}
-	}
-
-	return links
-}
-
-// extractJiraLinks extracts issue links from Jira API responses
-func (s *Service) extractJiraLinks(data map[string]interface{}, baseURL string) []string {
-	links := make([]string, 0)
-
-	// Extract pagination (startAt, maxResults, total)
-	if total, ok := data["total"].(float64); ok {
-		if startAt, ok := data["startAt"].(float64); ok {
-			if maxResults, ok := data["maxResults"].(float64); ok {
-				nextStartAt := int(startAt) + int(maxResults)
-				if nextStartAt < int(total) {
-					// Build next page URL
-					nextURL := fmt.Sprintf("%s&startAt=%d", baseURL, nextStartAt)
-					links = append(links, nextURL)
-				}
+			if len(notIncludedSamples) > 0 {
+				warnMsg += fmt.Sprintf(" | Not included samples: %v", notIncludedSamples)
 			}
+
+			s.logWarnToConsoleAndDatabase(jobID, warnMsg, map[string]interface{}{
+				"url":                  parent.URL,
+				"discovered_count":     len(allLinks),
+				"after_source_filter":  len(filteredLinks),
+				"after_pattern_filter": len(links),
+				"source_type":          sourceType,
+			})
 		}
 	}
 
@@ -769,37 +1314,426 @@ func (s *Service) extractJiraLinks(data map[string]interface{}, baseURL string) 
 }
 
 // filterLinks applies include/exclude patterns
-func (s *Service) filterLinks(links []string, config CrawlConfig) []string {
+// Returns: (filteredLinks, excludedSamples, notIncludedSamples)
+func (s *Service) filterLinks(links []string, config CrawlConfig) ([]string, []string, []string) {
+	// Precompile exclude patterns
+	excludeRegexes := make([]*regexp.Regexp, 0, len(config.ExcludePatterns))
+	for _, pattern := range config.ExcludePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			excludeRegexes = append(excludeRegexes, re)
+		}
+	}
+
+	// Precompile include patterns
+	includeRegexes := make([]*regexp.Regexp, 0, len(config.IncludePatterns))
+	for _, pattern := range config.IncludePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			includeRegexes = append(includeRegexes, re)
+		}
+	}
+
 	filtered := make([]string, 0)
+	var excludedLinks, notIncludedLinks []string
 
 	for _, link := range links {
 		// Apply exclude patterns
 		excluded := false
-		for _, pattern := range config.ExcludePatterns {
-			if matched, _ := regexp.MatchString(pattern, link); matched {
+		var matchedExcludePattern string
+		for _, re := range excludeRegexes {
+			if re.MatchString(link) {
 				excluded = true
+				matchedExcludePattern = re.String()
 				break
 			}
 		}
 		if excluded {
+			excludedLinks = append(excludedLinks, link)
+			s.logger.Debug().
+				Str("link", link).
+				Str("excluded_by_pattern", matchedExcludePattern).
+				Msg("Link excluded by pattern")
 			continue
 		}
 
 		// Apply include patterns (if any)
-		if len(config.IncludePatterns) > 0 {
+		if len(includeRegexes) > 0 {
 			included := false
-			for _, pattern := range config.IncludePatterns {
-				if matched, _ := regexp.MatchString(pattern, link); matched {
+			for _, re := range includeRegexes {
+				if re.MatchString(link) {
 					included = true
 					break
 				}
 			}
 			if !included {
+				notIncludedLinks = append(notIncludedLinks, link)
+				s.logger.Debug().
+					Str("link", link).
+					Msg("Link did not match any include pattern")
 				continue
 			}
 		}
 
 		filtered = append(filtered, link)
+	}
+
+	// Summary log for filtered links
+	if len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
+		s.logger.Debug().
+			Int("excluded_count", len(excludedLinks)).
+			Int("not_included_count", len(notIncludedLinks)).
+			Int("passed_count", len(filtered)).
+			Msg("Pattern filtering summary")
+	}
+
+	// Collect samples for database logging (Comment 9: limit to 2 each to avoid log spam)
+	excludedSamples := []string{}
+	if len(excludedLinks) > 0 {
+		sampleCount := 2
+		if len(excludedLinks) < 2 {
+			sampleCount = len(excludedLinks)
+		}
+		excludedSamples = excludedLinks[:sampleCount]
+	}
+
+	notIncludedSamples := []string{}
+	if len(notIncludedLinks) > 0 {
+		sampleCount := 2
+		if len(notIncludedLinks) < 2 {
+			sampleCount = len(notIncludedLinks)
+		}
+		notIncludedSamples = notIncludedLinks[:sampleCount]
+	}
+
+	return filtered, excludedSamples, notIncludedSamples
+}
+
+// extractLinksFromHTML extracts and normalizes all links from HTML content
+func (s *Service) extractLinksFromHTML(html string, baseURL string) []string {
+	// Parse base URL for resolving relative links
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("base_url", baseURL).Msg("Failed to parse base URL")
+		return []string{}
+	}
+
+	// Extract href attributes using two regex patterns:
+	// 1. Quoted hrefs: href="url" or href='url'
+	// 2. Unquoted hrefs: href=url (value ends at whitespace or >)
+
+	// Use map for deduplication
+	linkMap := make(map[string]bool)
+
+	// Helper function to process href values
+	processHref := func(href string) {
+		// Skip unwanted link types
+		if strings.HasPrefix(href, "javascript:") ||
+			strings.HasPrefix(href, "mailto:") ||
+			strings.HasPrefix(href, "tel:") ||
+			strings.HasPrefix(href, "data:") ||
+			strings.HasPrefix(href, "#") {
+			return
+		}
+
+		// Parse and resolve URL
+		parsedURL, err := url.Parse(href)
+		if err != nil {
+			return
+		}
+
+		// Resolve relative URLs
+		absoluteURL := base.ResolveReference(parsedURL)
+
+		// Normalize URL: lowercase scheme and host
+		absoluteURL.Scheme = strings.ToLower(absoluteURL.Scheme)
+		absoluteURL.Host = strings.ToLower(absoluteURL.Host)
+
+		// Remove fragment
+		absoluteURL.Fragment = ""
+
+		normalizedURL := absoluteURL.String()
+
+		// Skip file downloads (common extensions)
+		lowerURL := strings.ToLower(normalizedURL)
+		if strings.HasSuffix(lowerURL, ".pdf") ||
+			strings.HasSuffix(lowerURL, ".zip") ||
+			strings.HasSuffix(lowerURL, ".rar") ||
+			strings.HasSuffix(lowerURL, ".7z") ||
+			strings.HasSuffix(lowerURL, ".tar") ||
+			strings.HasSuffix(lowerURL, ".gz") ||
+			strings.HasSuffix(lowerURL, ".tar.gz") ||
+			strings.HasSuffix(lowerURL, ".exe") ||
+			strings.HasSuffix(lowerURL, ".dmg") ||
+			strings.HasSuffix(lowerURL, ".pkg") ||
+			strings.HasSuffix(lowerURL, ".deb") ||
+			strings.HasSuffix(lowerURL, ".rpm") ||
+			strings.HasSuffix(lowerURL, ".doc") ||
+			strings.HasSuffix(lowerURL, ".docx") ||
+			strings.HasSuffix(lowerURL, ".xls") ||
+			strings.HasSuffix(lowerURL, ".xlsx") ||
+			strings.HasSuffix(lowerURL, ".ppt") ||
+			strings.HasSuffix(lowerURL, ".pptx") ||
+			strings.HasSuffix(lowerURL, ".csv") ||
+			strings.HasSuffix(lowerURL, ".jpg") ||
+			strings.HasSuffix(lowerURL, ".jpeg") ||
+			strings.HasSuffix(lowerURL, ".png") ||
+			strings.HasSuffix(lowerURL, ".gif") ||
+			strings.HasSuffix(lowerURL, ".svg") ||
+			strings.HasSuffix(lowerURL, ".webp") ||
+			strings.HasSuffix(lowerURL, ".mp4") ||
+			strings.HasSuffix(lowerURL, ".mov") ||
+			strings.HasSuffix(lowerURL, ".avi") {
+			return
+		}
+
+		// Add to map for deduplication
+		linkMap[normalizedURL] = true
+	}
+
+	// Pattern 1: Quoted hrefs (case-insensitive, tolerates whitespace around =)
+	quotedHrefRegex := regexp.MustCompile(`(?i)href\s*=\s*["']([^"']+)["']`)
+	quotedMatches := quotedHrefRegex.FindAllStringSubmatch(html, -1)
+
+	for _, match := range quotedMatches {
+		if len(match) >= 2 {
+			processHref(match[1])
+		}
+	}
+
+	// Pattern 2: Unquoted hrefs (case-insensitive, value ends at whitespace or >)
+	unquotedHrefRegex := regexp.MustCompile(`(?i)href\s*=\s*([^\s">]+)`)
+	unquotedMatches := unquotedHrefRegex.FindAllStringSubmatch(html, -1)
+
+	for _, match := range unquotedMatches {
+		if len(match) >= 2 {
+			processHref(match[1])
+		}
+	}
+
+	// Convert map to slice
+	links := make([]string, 0, len(linkMap))
+	for link := range linkMap {
+		links = append(links, link)
+	}
+
+	return links
+}
+
+// filterJiraLinks filters links to include only Jira content pages on the same host
+func (s *Service) filterJiraLinks(links []string, baseHost string) []string {
+	// Include patterns for Jira content pages
+	includePatterns := []string{
+		`/browse/[A-Z][A-Z0-9]+-\d+`,       // Issue pages: /browse/PROJ-123, /browse/ABC2-456
+		`/browse/[A-Z0-9]+$`,               // Project browse pages
+		`/projects/[A-Z0-9]+`,              // Project pages
+		`(?i)/secure/RapidBoard\.jspa`,     // Agile boards (case-insensitive)
+		`(?i)/secure/IssueNavigator\.jspa`, // Classic issue navigator (case-insensitive)
+		`(?i)/issues/?`,                    // Issue search/list (case-insensitive)
+		`(?i)/issues/\?jql=`,               // JQL query pages (case-insensitive)
+		`(?i)/issues/\?filter=`,            // Filter pages (case-insensitive)
+	}
+
+	// Exclude patterns for non-content pages
+	excludePatterns := []string{
+		`(?i)/rest/api/`,            // API endpoints (case-insensitive)
+		`(?i)/rest/agile/`,          // Agile REST API (case-insensitive)
+		`(?i)/rest/auth/`,           // Auth REST API (case-insensitive)
+		`(?i)/secure/attachment/`,   // File downloads (case-insensitive)
+		`(?i)/plugins/servlet/`,     // Plugin servlets (case-insensitive)
+		`(?i)/secure/admin/`,        // Admin pages (case-insensitive)
+		`(?i)/login(\.jsp|\.jspa)?`, // Login pages (case-insensitive)
+		`(?i)/logout`,               // Logout pages (case-insensitive)
+		`/projects/[^/]+/settings`,  // Project settings pages
+	}
+
+	// Precompile exclude patterns
+	excludeRegexes := make([]*regexp.Regexp, 0, len(excludePatterns))
+	for _, pattern := range excludePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			excludeRegexes = append(excludeRegexes, re)
+		}
+	}
+
+	// Precompile include patterns
+	includeRegexes := make([]*regexp.Regexp, 0, len(includePatterns))
+	for _, pattern := range includePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			includeRegexes = append(includeRegexes, re)
+		}
+	}
+
+	filtered := make([]string, 0)
+	var crossDomainLinks, excludedLinks, notIncludedLinks []string
+
+	for _, link := range links {
+		// Check same-host restriction
+		if baseHost != "" {
+			if parsedLink, err := url.Parse(link); err == nil {
+				linkHost := strings.ToLower(parsedLink.Host)
+				if linkHost != "" && linkHost != baseHost {
+					crossDomainLinks = append(crossDomainLinks, link)
+					s.logger.Debug().
+						Str("link", link).
+						Str("link_host", linkHost).
+						Str("base_host", baseHost).
+						Msg("Jira link excluded - cross-domain")
+					continue // Skip cross-domain links
+				}
+			}
+		}
+
+		// Check exclude patterns first
+		excluded := false
+		var matchedExcludePattern string
+		for _, re := range excludeRegexes {
+			if re.MatchString(link) {
+				excluded = true
+				matchedExcludePattern = re.String()
+				break
+			}
+		}
+		if excluded {
+			excludedLinks = append(excludedLinks, link)
+			s.logger.Debug().
+				Str("link", link).
+				Str("excluded_by_pattern", matchedExcludePattern).
+				Msg("Jira link excluded by pattern")
+			continue
+		}
+
+		// Check include patterns
+		included := false
+		for _, re := range includeRegexes {
+			if re.MatchString(link) {
+				included = true
+				break
+			}
+		}
+		if included {
+			filtered = append(filtered, link)
+		} else {
+			notIncludedLinks = append(notIncludedLinks, link)
+			s.logger.Debug().
+				Str("link", link).
+				Msg("Jira link did not match any include pattern")
+		}
+	}
+
+	// Summary log for Jira filtering
+	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
+		s.logger.Debug().
+			Int("cross_domain_count", len(crossDomainLinks)).
+			Int("excluded_count", len(excludedLinks)).
+			Int("not_included_count", len(notIncludedLinks)).
+			Int("passed_count", len(filtered)).
+			Msg("Jira link filtering summary")
+	}
+
+	return filtered
+}
+
+// filterConfluenceLinks filters links to include only Confluence content pages on the same host
+func (s *Service) filterConfluenceLinks(links []string, baseHost string) []string {
+	// Include patterns for Confluence content pages
+	includePatterns := []string{
+		`(?i)/(?:wiki/)?spaces/[^/]+/pages/\d+`,   // Page with ID: /wiki/spaces/SPACE/pages/123456 or /spaces/SPACE/pages/123456 (case-insensitive)
+		`(?i)/(?:wiki/)?spaces/[^/]+/?$`,          // Space home: /wiki/spaces/SPACE or /spaces/SPACE/ (case-insensitive)
+		`(?i)/(?:wiki/)?spaces/[^/]+/overview`,    // Space overview (case-insensitive)
+		`(?i)/(?:wiki/)?spaces/[^/]+/blog/`,       // Blog posts (case-insensitive)
+		`(?i)/display/[^/]+/.+`,                   // Display format: /display/SPACE/PageTitle (case-insensitive)
+		`(?i)/pages/viewpage\.action\?pageId=\d+`, // Legacy page URLs (case-insensitive)
+		`(?i)/x/[A-Za-z0-9\-]+`,                   // Tiny links: /x/{id} (case-insensitive)
+	}
+
+	// Exclude patterns for non-content pages
+	excludePatterns := []string{
+		`(?i)/rest/api/`,             // API endpoints (case-insensitive)
+		`(?i)/download/attachments/`, // File downloads (case-insensitive)
+		`(?i)/download/thumbnails/`,  // Thumbnail downloads (case-insensitive)
+		`(?i)/(?:wiki/)?admin/`,      // Admin pages (case-insensitive)
+		`(?i)/(?:wiki/)?people/`,     // User profiles (case-insensitive)
+	}
+
+	// Precompile exclude patterns
+	excludeRegexes := make([]*regexp.Regexp, 0, len(excludePatterns))
+	for _, pattern := range excludePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			excludeRegexes = append(excludeRegexes, re)
+		}
+	}
+
+	// Precompile include patterns
+	includeRegexes := make([]*regexp.Regexp, 0, len(includePatterns))
+	for _, pattern := range includePatterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			includeRegexes = append(includeRegexes, re)
+		}
+	}
+
+	filtered := make([]string, 0)
+	var crossDomainLinks, excludedLinks, notIncludedLinks []string
+
+	for _, link := range links {
+		// Check same-host restriction
+		if baseHost != "" {
+			if parsedLink, err := url.Parse(link); err == nil {
+				linkHost := strings.ToLower(parsedLink.Host)
+				if linkHost != "" && linkHost != baseHost {
+					crossDomainLinks = append(crossDomainLinks, link)
+					s.logger.Debug().
+						Str("link", link).
+						Str("link_host", linkHost).
+						Str("base_host", baseHost).
+						Msg("Confluence link excluded - cross-domain")
+					continue // Skip cross-domain links
+				}
+			}
+		}
+
+		// Check exclude patterns first
+		excluded := false
+		var matchedExcludePattern string
+		for _, re := range excludeRegexes {
+			if re.MatchString(link) {
+				excluded = true
+				matchedExcludePattern = re.String()
+				break
+			}
+		}
+		if excluded {
+			excludedLinks = append(excludedLinks, link)
+			s.logger.Debug().
+				Str("link", link).
+				Str("excluded_by_pattern", matchedExcludePattern).
+				Msg("Confluence link excluded by pattern")
+			continue
+		}
+
+		// Check include patterns
+		included := false
+		for _, re := range includeRegexes {
+			if re.MatchString(link) {
+				included = true
+				break
+			}
+		}
+		if included {
+			filtered = append(filtered, link)
+		} else {
+			notIncludedLinks = append(notIncludedLinks, link)
+			s.logger.Debug().
+				Str("link", link).
+				Msg("Confluence link did not match any include pattern")
+		}
+	}
+
+	// Summary log for Confluence filtering
+	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
+		s.logger.Debug().
+			Int("cross_domain_count", len(crossDomainLinks)).
+			Int("excluded_count", len(excludedLinks)).
+			Int("not_included_count", len(notIncludedLinks)).
+			Int("passed_count", len(filtered)).
+			Msg("Confluence link filtering summary")
 	}
 
 	return filtered
@@ -808,6 +1742,7 @@ func (s *Service) filterLinks(links []string, config CrawlConfig) []string {
 // enqueueLinks adds discovered links to queue with depth tracking
 // Propagates source_type and entity_type from parent for link discovery
 func (s *Service) enqueueLinks(jobID string, links []string, parent *URLQueueItem) {
+	var enqueuedCount int
 	for i, link := range links {
 		// Propagate metadata from parent
 		metadata := map[string]interface{}{
@@ -831,7 +1766,27 @@ func (s *Service) enqueueLinks(jobID string, links []string, parent *URLQueueIte
 
 		if s.queue.Push(item) {
 			s.updatePendingCount(jobID, 1)
+			enqueuedCount++
+
+			// Log individual link enqueue decision
+			s.logger.Debug().
+				Str("job_id", jobID).
+				Str("link", link).
+				Int("depth", item.Depth).
+				Str("parent_url", parent.URL).
+				Int("priority", item.Priority).
+				Msg("Link enqueued for processing")
 		}
+	}
+
+	// Summary log for enqueued links
+	if enqueuedCount > 0 {
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("parent_url", parent.URL).
+			Int("enqueued_count", enqueuedCount).
+			Int("total_links", len(links)).
+			Msg("Link enqueueing complete")
 	}
 }
 
@@ -940,26 +1895,9 @@ func (s *Service) monitorCompletion(jobID string) {
 			}
 
 			// Check if job is in a terminal state (cancelled or failed) and exit
+			// Comment 7: Terminal state logs removed - already logged by CancelJob/FailJob with progress details
 			if job.Status == JobStatusCancelled || job.Status == JobStatusFailed {
 				s.jobsMu.RUnlock()
-
-				// Append terminal state log
-				if s.jobStorage != nil {
-					var message string
-					if job.Status == JobStatusCancelled {
-						message = "Job cancelled"
-					} else {
-						message = fmt.Sprintf("Job failed: %s", job.Error)
-					}
-					logEntry := models.JobLogEntry{
-						Timestamp: time.Now().Format("15:04:05"),
-						Level:     "error",
-						Message:   message,
-					}
-					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
-						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append terminal state log")
-					}
-				}
 
 				// Only remove from activeJobs if jobStorage is nil or job was already persisted
 				// When jobStorage is nil, keep job in memory for lookup
@@ -1008,11 +1946,21 @@ func (s *Service) monitorCompletion(jobID string) {
 						persistSucceeded = true
 					}
 
-					// Append job completion log
+					// Comment 8: Append enhanced job completion log with duration and success rate
+					duration := job.CompletedAt.Sub(job.StartedAt)
+					totalProcessed := job.Progress.CompletedURLs + job.Progress.FailedURLs
+					successRate := 0.0
+					if totalProcessed > 0 {
+						successRate = float64(job.Progress.CompletedURLs) / float64(totalProcessed) * 100
+					}
+
+					completionMsg := fmt.Sprintf("Job completed: %d successful, %d failed, duration=%s, success_rate=%.1f%%",
+						job.Progress.CompletedURLs, job.Progress.FailedURLs, duration.Round(time.Second), successRate)
+
 					logEntry := models.JobLogEntry{
 						Timestamp: time.Now().Format("15:04:05"),
 						Level:     "info",
-						Message:   fmt.Sprintf("Job completed: %d successful, %d failed", job.Progress.CompletedURLs, job.Progress.FailedURLs),
+						Message:   completionMsg,
 					}
 					if err := s.jobStorage.AppendJobLog(s.ctx, jobID, logEntry); err != nil {
 						s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append completion log")
@@ -1282,38 +2230,4 @@ func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, e
 	client.Jar.SetCookies(baseURL, httpCookies)
 
 	return client, nil
-}
-
-func makeAbsoluteURL(base, relative string) string {
-	if strings.HasPrefix(relative, "http://") || strings.HasPrefix(relative, "https://") {
-		return relative
-	}
-
-	if strings.HasPrefix(relative, "/") {
-		// Parse base URL to get scheme and host
-		if idx := strings.Index(base, "//"); idx != -1 {
-			if idx2 := strings.Index(base[idx+2:], "/"); idx2 != -1 {
-				return base[:idx+2+idx2] + relative
-			}
-		}
-	}
-
-	return base + relative
-}
-
-func extractHTMLLinks(html, baseURL string) []string {
-	links := make([]string, 0)
-
-	// Simple regex to extract href attributes
-	re := regexp.MustCompile(`href=["']([^"']+)["']`)
-	matches := re.FindAllStringSubmatch(html, -1)
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			link := makeAbsoluteURL(baseURL, match[1])
-			links = append(links, link)
-		}
-	}
-
-	return links
 }

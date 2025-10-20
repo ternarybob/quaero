@@ -130,12 +130,11 @@ type PageMetadata struct {
 }
 
 // ToCrawlResult converts ScrapeResult to CrawlResult for compatibility with existing code
+// Body contains HTML/RawHTML for HTML parsers; markdown is available in metadata["markdown"]
 func (s *ScrapeResult) ToCrawlResult() *CrawlResult {
-	// Prefer markdown over HTML for content
-	content := s.Markdown
-	if content == "" {
-		content = s.HTML
-	}
+	// Prefer HTML/RawHTML for Body to support HTML parsers
+	// Markdown is stored in metadata for consumers that need it
+	content := s.HTML
 	if content == "" {
 		content = s.RawHTML
 	}

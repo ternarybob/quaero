@@ -12,13 +12,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
+	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
@@ -525,81 +524,41 @@ func (h *JobHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch auth credentials if source has auth_id
-	var authCreds *models.AuthCredentials
-	if source.AuthID != "" {
-		authCreds, err = h.authStorage.GetCredentialsByID(ctx, source.AuthID)
-		if err != nil {
-			h.logger.Error().Err(err).Str("auth_id", source.AuthID).Msg("Failed to fetch auth credentials")
-			http.Error(w, "Authentication credentials not found", http.StatusNotFound)
-			return
-		}
-	}
-
-	// Derive seed URLs if not provided
-	seedURLs := req.SeedURLs
-	if len(seedURLs) == 0 {
-		seedURLs = common.DeriveSeedURLs(source, h.config.Crawler.UseHTMLSeeds, h.logger)
-		if len(seedURLs) == 0 {
-			http.Error(w, "Failed to derive seed URLs from source configuration", http.StatusBadRequest)
-			return
-		}
-	}
-
-	// Merge config overrides with source's crawl config
-	// Start with source config, then apply overrides only if explicitly provided
-	crawlConfig := source.CrawlConfig
+	// Apply config overrides if provided
 	if req.ConfigOverrides != nil {
 		if req.ConfigOverrides.MaxDepth != nil {
-			crawlConfig.MaxDepth = *req.ConfigOverrides.MaxDepth
+			source.CrawlConfig.MaxDepth = *req.ConfigOverrides.MaxDepth
 		}
 		if req.ConfigOverrides.Concurrency != nil {
-			crawlConfig.Concurrency = *req.ConfigOverrides.Concurrency
+			source.CrawlConfig.Concurrency = *req.ConfigOverrides.Concurrency
 		}
 		if req.ConfigOverrides.MaxPages != nil {
-			crawlConfig.MaxPages = *req.ConfigOverrides.MaxPages
+			source.CrawlConfig.MaxPages = *req.ConfigOverrides.MaxPages
 		}
 		if req.ConfigOverrides.RateLimit != nil {
-			crawlConfig.RateLimit = *req.ConfigOverrides.RateLimit
+			source.CrawlConfig.RateLimit = *req.ConfigOverrides.RateLimit
 		}
 		if req.ConfigOverrides.FollowLinks != nil {
-			crawlConfig.FollowLinks = *req.ConfigOverrides.FollowLinks
+			source.CrawlConfig.FollowLinks = *req.ConfigOverrides.FollowLinks
 		}
 		if req.ConfigOverrides.IncludePatterns != nil {
-			crawlConfig.IncludePatterns = *req.ConfigOverrides.IncludePatterns
+			source.CrawlConfig.IncludePatterns = *req.ConfigOverrides.IncludePatterns
 		}
 		if req.ConfigOverrides.ExcludePatterns != nil {
-			crawlConfig.ExcludePatterns = *req.ConfigOverrides.ExcludePatterns
+			source.CrawlConfig.ExcludePatterns = *req.ConfigOverrides.ExcludePatterns
 		}
 	}
 
-	// Convert source.CrawlConfig to crawler.CrawlConfig (RateLimit: int ms -> time.Duration)
-	crawlerConfig := crawler.CrawlConfig{
-		MaxDepth:        crawlConfig.MaxDepth,
-		MaxPages:        crawlConfig.MaxPages,
-		FollowLinks:     crawlConfig.FollowLinks,
-		Concurrency:     crawlConfig.Concurrency,
-		RateLimit:       time.Duration(crawlConfig.RateLimit) * time.Millisecond,
-		IncludePatterns: crawlConfig.IncludePatterns,
-		ExcludePatterns: crawlConfig.ExcludePatterns,
-		DetailLevel:     "full",
-		RetryAttempts:   3,
-		RetryBackoff:    2 * time.Second,
-	}
-
-	// Derive entity type based on source type
-	entityType := h.deriveEntityType(source)
-
-	// Start crawl with snapshots
-	jobID, err := h.crawlerService.StartCrawl(
-		source.Type,
-		entityType,
-		seedURLs,
-		crawlerConfig,
-		req.SourceID,
-		req.RefreshSource,
+	// Use shared job helper to start crawl
+	jobID, err := jobs.StartCrawlJob(
+		ctx,
 		source,
-		authCreds,
+		h.authStorage,
+		h.crawlerService,
+		h.config,
+		h.logger,
+		req.SeedURLs,      // Pass user-provided seed URLs
+		req.RefreshSource, // Pass user-provided refreshSource setting
 	)
 	if err != nil {
 		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Failed to start crawl")
@@ -803,18 +762,4 @@ func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *h
 		"schedule": req.Schedule,
 		"message":  "Schedule updated successfully",
 	})
-}
-
-// deriveEntityType derives entity type based on source type
-func (h *JobHandler) deriveEntityType(source *models.SourceConfig) string {
-	switch source.Type {
-	case models.SourceTypeJira:
-		return "projects"
-	case models.SourceTypeConfluence:
-		return "spaces"
-	case models.SourceTypeGithub:
-		return "repos"
-	default:
-		return "all"
-	}
 }

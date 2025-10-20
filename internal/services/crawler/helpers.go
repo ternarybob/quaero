@@ -1,3 +1,6 @@
+// Package crawler provides HTML parsing utilities and helpers.
+// These helpers are used by both the crawler service and specialized transformers
+// (jira_transformer, confluence_transformer) for extracting structured data from HTML.
 package crawler
 
 import (
@@ -6,11 +9,11 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/ternarybob/arbor"
 )
 
-// createDocument creates a goquery.Document from HTML string
-func createDocument(html string) (*goquery.Document, error) {
+// CreateDocument creates a goquery.Document from HTML string.
+// Used by transformers to parse HTML into goquery.Document for CSS selector-based extraction.
+func CreateDocument(html string) (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(strings.NewReader(html))
 }
 
@@ -34,20 +37,21 @@ func filterUIElements(selection *goquery.Selection) *goquery.Selection {
 	return cloned
 }
 
-// extractTextFromDoc tries multiple selectors in priority order and returns text from first match
-func extractTextFromDoc(doc *goquery.Document, selectors []string, logger arbor.ILogger) string {
+// ExtractTextFromDoc tries multiple selectors in priority order and returns text from first match.
+// Used by transformers to extract text using multiple fallback selectors for resilience.
+func ExtractTextFromDoc(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
 		text := strings.TrimSpace(doc.Find(selector).Text())
 		if text != "" {
 			return text
 		}
 	}
-	logger.Debug().Strs("selectors", selectors).Msg("No matching selector found")
 	return ""
 }
 
-// extractMultipleTextsFromDoc collects text from all matching elements for selectors
-func extractMultipleTextsFromDoc(doc *goquery.Document, selectors []string, logger arbor.ILogger) []string {
+// ExtractMultipleTextsFromDoc collects text from all matching elements for selectors.
+// Used by transformers to extract arrays (labels, components) from HTML.
+func ExtractMultipleTextsFromDoc(doc *goquery.Document, selectors []string) []string {
 	textMap := make(map[string]bool)
 	var results []string
 
@@ -67,8 +71,9 @@ func extractMultipleTextsFromDoc(doc *goquery.Document, selectors []string, logg
 	return results
 }
 
-// extractCleanedHTML extracts and cleans HTML from multiple selectors
-func extractCleanedHTML(doc *goquery.Document, selectors []string, logger arbor.ILogger) string {
+// ExtractCleanedHTML extracts and cleans HTML from multiple selectors.
+// Used by transformers to extract and clean HTML content (descriptions, page content).
+func ExtractCleanedHTML(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
 		selection := doc.Find(selector)
 		if selection.Length() > 0 {
@@ -82,20 +87,21 @@ func extractCleanedHTML(doc *goquery.Document, selectors []string, logger arbor.
 	return ""
 }
 
-// extractDateFromDoc extracts date from time element, trying datetime attribute first
-func extractDateFromDoc(doc *goquery.Document, selectors []string, logger arbor.ILogger) string {
+// ExtractDateFromDoc extracts date from time element, trying datetime attribute first.
+// Used by transformers to extract and normalize dates from time elements.
+func ExtractDateFromDoc(doc *goquery.Document, selectors []string) string {
 	for _, selector := range selectors {
 		element := doc.Find(selector)
 		if element.Length() > 0 {
 			if datetime, exists := element.Attr("datetime"); exists && datetime != "" {
-				if normalized := normalizeDateToRFC3339(datetime, logger); normalized != "" {
+				if normalized := normalizeDateToRFC3339(datetime); normalized != "" {
 					return normalized
 				}
 				return datetime
 			}
 			text := strings.TrimSpace(element.Text())
 			if text != "" {
-				if normalized := normalizeDateToRFC3339(text, logger); normalized != "" {
+				if normalized := normalizeDateToRFC3339(text); normalized != "" {
 					return normalized
 				}
 			}
@@ -105,7 +111,7 @@ func extractDateFromDoc(doc *goquery.Document, selectors []string, logger arbor.
 }
 
 // normalizeDateToRFC3339 attempts to parse common date formats and convert to RFC3339 (ISO 8601)
-func normalizeDateToRFC3339(dateStr string, logger arbor.ILogger) string {
+func normalizeDateToRFC3339(dateStr string) string {
 	formats := []string{
 		time.RFC3339, "2006-01-02T15:04:05.999Z", "2006-01-02T15:04:05",
 		"2006-01-02 15:04:05", "2006-01-02",
@@ -120,12 +126,12 @@ func normalizeDateToRFC3339(dateStr string, logger arbor.ILogger) string {
 		}
 	}
 
-	logger.Warn().Str("date_string", dateStr).Msg("Failed to parse date format")
 	return ""
 }
 
-// parseJiraIssueKey extracts issue key from text using regex
-func parseJiraIssueKey(text string) string {
+// ParseJiraIssueKey extracts issue key from text using regex.
+// Used by jira_transformer to extract issue keys from text using regex.
+func ParseJiraIssueKey(text string) string {
 	issueKeyRegex := regexp.MustCompile(`([A-Z][A-Z0-9]+-\d+)`)
 	if match := issueKeyRegex.FindString(text); match != "" {
 		return match
@@ -133,8 +139,9 @@ func parseJiraIssueKey(text string) string {
 	return ""
 }
 
-// parseConfluencePageID extracts page ID from URL path
-func parseConfluencePageID(urlPath string) string {
+// ParseConfluencePageID extracts page ID from URL path.
+// Used by confluence_transformer to extract page IDs from URLs.
+func ParseConfluencePageID(urlPath string) string {
 	pageIDRegex := regexp.MustCompile(`/pages/(\d+)/`)
 	if match := pageIDRegex.FindStringSubmatch(urlPath); len(match) > 1 {
 		return match[1]
@@ -146,8 +153,9 @@ func parseConfluencePageID(urlPath string) string {
 	return ""
 }
 
-// parseSpaceKey extracts space key from URL path
-func parseSpaceKey(urlPath string) string {
+// ParseSpaceKey extracts space key from URL path.
+// Used by confluence_transformer to extract space keys from URLs.
+func ParseSpaceKey(urlPath string) string {
 	spaceKeyRegex := regexp.MustCompile(`(?i)/spaces/([A-Za-z0-9_-]+)/`)
 	if match := spaceKeyRegex.FindStringSubmatch(urlPath); len(match) > 1 {
 		return match[1]
@@ -155,8 +163,9 @@ func parseSpaceKey(urlPath string) string {
 	return ""
 }
 
-// normalizeStatus normalizes common status variations to canonical forms
-func normalizeStatus(status string) string {
+// NormalizeStatus normalizes common status variations to canonical forms.
+// Used by jira_transformer to normalize status values to canonical forms.
+func NormalizeStatus(status string) string {
 	status = strings.TrimSpace(status)
 	statusMap := map[string]string{
 		"TODO": "To Do", "IN PROGRESS": "In Progress",

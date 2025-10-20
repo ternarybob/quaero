@@ -15,57 +15,24 @@ import (
 
 // JiraTransformer transforms Jira crawler results into normalized documents
 type JiraTransformer struct {
-	jobStorage      interfaces.JobStorage
-	documentStorage interfaces.DocumentStorage
-	eventService    interfaces.EventService
-	logger          arbor.ILogger
-}
-
-// JiraMetadata represents Jira-specific metadata
-type JiraMetadata struct {
-	IssueKey   string   `json:"issue_key"`
-	ProjectKey string   `json:"project_key"`
-	IssueType  string   `json:"issue_type"`
-	Status     string   `json:"status"`
-	Priority   string   `json:"priority"`
-	Assignee   string   `json:"assignee,omitempty"`
-	Reporter   string   `json:"reporter,omitempty"`
-	Labels     []string `json:"labels,omitempty"`
-	Components []string `json:"components,omitempty"`
-}
-
-// ToMap converts JiraMetadata to a map for storage
-func (m *JiraMetadata) ToMap() map[string]interface{} {
-	result := make(map[string]interface{})
-	result["issue_key"] = m.IssueKey
-	result["project_key"] = m.ProjectKey
-	result["issue_type"] = m.IssueType
-	result["status"] = m.Status
-	result["priority"] = m.Priority
-
-	if m.Assignee != "" {
-		result["assignee"] = m.Assignee
-	}
-	if m.Reporter != "" {
-		result["reporter"] = m.Reporter
-	}
-	if len(m.Labels) > 0 {
-		result["labels"] = m.Labels
-	}
-	if len(m.Components) > 0 {
-		result["components"] = m.Components
-	}
-
-	return result
+	jobStorage                interfaces.JobStorage
+	documentStorage           interfaces.DocumentStorage
+	eventService              interfaces.EventService
+	crawlerService            interfaces.CrawlerService
+	logger                    arbor.ILogger
+	enableEmptyOutputFallback bool // Controls whether to apply HTML stripping when MD conversion produces empty output
 }
 
 // NewJiraTransformer creates a new Jira transformer and subscribes to collection events
-func NewJiraTransformer(jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, eventService interfaces.EventService, logger arbor.ILogger) *JiraTransformer {
+// enableEmptyOutputFallback controls whether to apply HTML stripping fallback when markdown conversion produces empty output
+func NewJiraTransformer(jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, eventService interfaces.EventService, crawlerService interfaces.CrawlerService, logger arbor.ILogger, enableEmptyOutputFallback bool) *JiraTransformer {
 	t := &JiraTransformer{
-		jobStorage:      jobStorage,
-		documentStorage: documentStorage,
-		eventService:    eventService,
-		logger:          logger,
+		jobStorage:                jobStorage,
+		documentStorage:           documentStorage,
+		eventService:              eventService,
+		crawlerService:            crawlerService,
+		logger:                    logger,
+		enableEmptyOutputFallback: enableEmptyOutputFallback,
 	}
 
 	// Subscribe to collection triggered events
@@ -127,46 +94,70 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJo
 		}
 	}
 
-	// Get job results (note: may be unavailable after restart)
-	results, err := getJobResults(job, t.jobStorage, t.logger)
+	// Get job results (using crawler service)
+	results, err := getJobResults(job, t.crawlerService, t.logger)
 	if err != nil {
-		t.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to get job results")
+		t.logger.Warn().
+			Err(err).
+			Str("job_id", job.ID).
+			Str("source_type", job.SourceType).
+			Msg("Failed to get job results - transformation cannot proceed")
 		return err
 	}
 
 	if len(results) == 0 {
-		t.logger.Debug().Str("job_id", job.ID).Msg("No results available for transformation")
+		t.logger.Warn().
+			Str("job_id", job.ID).
+			Str("source_type", job.SourceType).
+			Int("result_count", job.ResultCount).
+			Msg("No results available for transformation despite job completion")
 		return nil
 	}
 
 	// Transform each result
-	var transformedCount int
+	var transformedCount, failedRequests, emptyContent, parseFailures, saveFailures int
 	for _, result := range results {
 		if result.Error != "" {
+			failedRequests++
+			t.logger.Debug().
+				Str("url", result.URL).
+				Str("error", result.Error).
+				Msg("Skipping failed request result")
 			continue // Skip failed requests
 		}
 
-		// Extract response body
-		bodyRaw, ok := result.Metadata["response_body"]
-		if !ok {
-			continue
-		}
-
-		body, ok := bodyRaw.([]byte)
-		if !ok {
-			continue
+		// Select content using shared helper
+		body := selectResultBody(result)
+		if len(body) == 0 {
+			emptyContent++
+			t.logger.Debug().
+				Str("url", result.URL).
+				Msg("Skipping result with no content body")
+			continue // Skip if no content found
 		}
 
 		// Parse and transform Jira issue
-		doc, err := t.parseJiraIssue(body, sourceConfig)
+		doc, err := t.parseJiraIssue(body, result.URL, result.Metadata, sourceConfig)
 		if err != nil {
-			t.logger.Warn().Err(err).Str("url", result.URL).Msg("Failed to parse Jira issue")
+			parseFailures++
+			t.logger.Warn().
+				Err(err).
+				Str("url", result.URL).
+				Str("error_type", fmt.Sprintf("%T", err)).
+				Int("body_length", len(body)).
+				Msg("Failed to parse Jira issue HTML")
 			continue
 		}
 
 		// Save document
 		if err := t.documentStorage.SaveDocument(doc); err != nil {
-			t.logger.Error().Err(err).Str("issue_key", doc.SourceID).Msg("Failed to save Jira document")
+			saveFailures++
+			t.logger.Error().
+				Err(err).
+				Str("doc_id", doc.ID).
+				Str("issue_key", doc.SourceID).
+				Str("title", doc.Title).
+				Msg("Failed to save Jira document to storage")
 			continue
 		}
 
@@ -177,298 +168,271 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJo
 		Str("job_id", job.ID).
 		Int("transformed_count", transformedCount).
 		Int("total_results", len(results)).
-		Msg("Transformed Jira job results")
+		Int("failed_requests", failedRequests).
+		Int("empty_content", emptyContent).
+		Int("parse_failures", parseFailures).
+		Int("save_failures", saveFailures).
+		Msg("Jira transformation complete")
+
+	// Calculate and log success rate
+	successRate := 0.0
+	if totalResults := len(results); totalResults > 0 {
+		successRate = float64(transformedCount) / float64(totalResults) * 100
+	}
+	t.logger.Info().
+		Str("job_id", job.ID).
+		Int("transformed_count", transformedCount).
+		Int("total_results", len(results)).
+		Float64("success_rate", successRate).
+		Msg("Jira transformation success rate")
 
 	return nil
 }
 
-// parseJiraIssue parses a Jira issue JSON response into a Document
-func (t *JiraTransformer) parseJiraIssue(body []byte, sourceConfig *models.SourceConfig) (*models.Document, error) {
-	var issue struct {
-		ID     string `json:"id"`
-		Key    string `json:"key"`
-		Self   string `json:"self"`
-		Fields struct {
-			Summary     string                 `json:"summary"`
-			Description map[string]interface{} `json:"description"` // ADF format
-			IssueType   struct {
-				Name string `json:"name"`
-			} `json:"issuetype"`
-			Status struct {
-				Name string `json:"name"`
-			} `json:"status"`
-			Priority struct {
-				Name string `json:"name"`
-			} `json:"priority"`
-			Assignee struct {
-				DisplayName string `json:"displayName"`
-			} `json:"assignee"`
-			Reporter struct {
-				DisplayName string `json:"displayName"`
-			} `json:"reporter"`
-			Labels     []string `json:"labels"`
-			Components []struct {
-				Name string `json:"name"`
-			} `json:"components"`
-			Project struct {
-				Key string `json:"key"`
-			} `json:"project"`
-		} `json:"fields"`
+// parseJiraIssue parses a Jira issue HTML page into a Document
+func (t *JiraTransformer) parseJiraIssue(body []byte, pageURL string, metadata map[string]interface{}, sourceConfig *models.SourceConfig) (*models.Document, error) {
+	// Guard against JSON content (backward compatibility check)
+	if len(body) > 0 && (body[0] == '{' || body[0] == '[') {
+		t.logger.Warn().Str("url", pageURL).Msg("Detected JSON content, which is no longer supported; skipping parse")
+		return nil, fmt.Errorf("JSON content is no longer supported")
+	}
+	if contentType, ok := metadata["content_type"]; ok {
+		if ct, isString := contentType.(string); isString && strings.Contains(strings.ToLower(ct), "application/json") {
+			t.logger.Warn().Str("url", pageURL).Str("content_type", ct).Msg("Detected JSON content_type, which is no longer supported; skipping parse")
+			return nil, fmt.Errorf("JSON content_type is no longer supported")
+		}
 	}
 
-	if err := json.Unmarshal(body, &issue); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal Jira issue: %w", err)
+	// Convert body to HTML string
+	html := string(body)
+
+	// Parse HTML inline using shared helpers from crawler package
+	doc, err := crawler.CreateDocument(html)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create goquery document: %w", err)
 	}
 
-	// Convert ADF description to markdown
-	contentMarkdown := t.adfToMarkdown(issue.Fields.Description)
-
-	// Build metadata
-	var componentNames []string
-	for _, comp := range issue.Fields.Components {
-		componentNames = append(componentNames, comp.Name)
+	// Extract IssueKey
+	issueKey := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.issue-base.foundation.breadcrumbs.current-issue.item"]`,
+		`#key-val`,
+		`#issuekey-val`,
+	})
+	// Fallback: Parse from page title
+	if issueKey == "" {
+		titleText := doc.Find("title").First().Text()
+		issueKey = crawler.ParseJiraIssueKey(titleText)
 	}
 
-	metadata := &JiraMetadata{
-		IssueKey:   issue.Key,
-		ProjectKey: issue.Fields.Project.Key,
-		IssueType:  issue.Fields.IssueType.Name,
-		Status:     issue.Fields.Status.Name,
-		Priority:   issue.Fields.Priority.Name,
-		Assignee:   issue.Fields.Assignee.DisplayName,
-		Reporter:   issue.Fields.Reporter.DisplayName,
-		Labels:     issue.Fields.Labels,
-		Components: componentNames,
+	// Extract ProjectKey from IssueKey
+	var projectKey string
+	if issueKey != "" {
+		parts := strings.Split(issueKey, "-")
+		if len(parts) > 0 {
+			projectKey = parts[0]
+		}
 	}
+
+	// Extract Summary
+	summary := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.issue-base.foundation.summary.heading"]`,
+		`#summary-val`,
+		`h1[data-test-id="issue-view-heading"]`,
+	})
+	// Fallback: Extract from title tag
+	if summary == "" {
+		titleText := doc.Find("title").First().Text()
+		summary = strings.TrimSuffix(titleText, " - Jira")
+		summary = strings.TrimSpace(summary)
+	}
+
+	// Extract Description HTML
+	descriptionHTML := crawler.ExtractCleanedHTML(doc, []string{
+		`[data-test-id="issue.views.field.rich-text.description"]`,
+		`#description-val`,
+		`.user-content-block`,
+	})
+
+	// Extract IssueType
+	issueType := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.issue-type"] span`,
+		`#type-val`,
+		`.issue-type-icon`,
+	})
+
+	// Extract Status
+	status := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.status"] span`,
+		`#status-val`,
+		`.status`,
+		`.aui-lozenge`,
+	})
+	status = crawler.NormalizeStatus(status)
+
+	// Extract Priority
+	priority := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.priority"] span`,
+		`#priority-val`,
+		`.priority-icon`,
+	})
+
+	// Extract Assignee
+	assignee := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.assignee"] span`,
+		`#assignee-val`,
+		`.user-hover`,
+	})
+	if strings.Contains(strings.ToLower(assignee), "unassigned") {
+		assignee = ""
+	}
+
+	// Extract Reporter
+	reporter := crawler.ExtractTextFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.reporter"] span`,
+		`#reporter-val`,
+	})
+
+	// Extract Labels
+	labels := crawler.ExtractMultipleTextsFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.labels"] a`,
+		`#labels-val .labels a`,
+		`.labels .lozenge`,
+	})
+
+	// Extract Components
+	components := crawler.ExtractMultipleTextsFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.components"] a`,
+		`#components-val a`,
+	})
+
+	// Extract CreatedDate
+	createdDateStr := crawler.ExtractDateFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.created"] time`,
+		`#created-val time`,
+	})
+
+	// Extract UpdatedDate
+	updatedDateStr := crawler.ExtractDateFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.updated"] time`,
+		`#updated-val time`,
+	})
+
+	// Extract ResolutionDate
+	resolutionDateStr := crawler.ExtractDateFromDoc(doc, []string{
+		`[data-test-id="issue.views.field.resolved"] time`,
+	})
+
+	// Debug logging sampled to reduce noise during large-scale conversions
+	if shouldLogDebug() {
+		t.logger.Debug().
+			Str("issue_key", issueKey).
+			Str("url", pageURL).
+			Msg("Parsed Jira issue from HTML")
+	}
+
+	// Validate critical fields
+	if issueKey == "" {
+		return nil, fmt.Errorf("missing required field: IssueKey")
+	}
+	if summary == "" {
+		return nil, fmt.Errorf("missing required field: Summary")
+	}
+
+	// Resolve document URL early for better link resolution in HTML→MD conversion
+	docURL := resolveDocumentURL(pageURL, pageURL, sourceConfig, t.logger)
+
+	// Convert description HTML to markdown using resolved URL as base for link resolution
+	contentMarkdown := convertHTMLToMarkdown(descriptionHTML, docURL, t.enableEmptyOutputFallback, t.logger)
+
+	// Log markdown quality metrics (empty-output check now handled centrally in helper)
+	// Debug logging sampled to reduce noise
+	if shouldLogDebug() {
+		if strings.TrimSpace(contentMarkdown) == "" && descriptionHTML != "" {
+			t.logger.Debug().
+				Str("issue_key", issueKey).
+				Msg("Markdown conversion produced empty output despite non-empty HTML description")
+		}
+
+		t.logger.Debug().
+			Str("issue_key", issueKey).
+			Int("markdown_length", len(contentMarkdown)).
+			Int("html_length", len(descriptionHTML)).
+			Msg("Jira issue markdown conversion completed")
+	}
+
+	// Parse dates from RFC3339 strings to *time.Time
+	var createdDate, updatedDate, resolutionDate *time.Time
+	if createdDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, createdDateStr); err == nil {
+			createdDate = &parsed
+		} else {
+			t.logger.Warn().Err(err).Str("date", createdDateStr).Msg("Failed to parse created date")
+		}
+	}
+	if updatedDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, updatedDateStr); err == nil {
+			updatedDate = &parsed
+		} else {
+			t.logger.Warn().Err(err).Str("date", updatedDateStr).Msg("Failed to parse updated date")
+		}
+	}
+	if resolutionDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, resolutionDateStr); err == nil {
+			resolutionDate = &parsed
+		} else {
+			t.logger.Warn().Err(err).Str("date", resolutionDateStr).Msg("Failed to parse resolution date")
+		}
+	}
+
+	// Build metadata using central models.JiraMetadata
+	jiraMetadata := &models.JiraMetadata{
+		IssueKey:       issueKey,
+		ProjectKey:     projectKey,
+		IssueType:      issueType,
+		Status:         status,
+		Priority:       priority,
+		Assignee:       assignee,
+		Reporter:       reporter,
+		Labels:         labels,
+		Components:     components,
+		Summary:        summary,
+		CreatedDate:    createdDate,
+		UpdatedDate:    updatedDate,
+		ResolutionDate: resolutionDate,
+	}
+
+	// Log metadata completeness (sampled)
+	if shouldLogDebug() {
+		t.logger.Debug().
+			Str("issue_key", issueKey).
+			Str("has_assignee", fmt.Sprintf("%v", jiraMetadata.Assignee != "")).
+			Str("has_labels", fmt.Sprintf("%v", len(jiraMetadata.Labels) > 0)).
+			Str("has_components", fmt.Sprintf("%v", len(jiraMetadata.Components) > 0)).
+			Msg("Jira metadata populated")
+	}
+
+	// Convert to map for document storage
+	metadataMap, err := jiraMetadata.ToMap()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert metadata to map: %w", err)
+	}
+
+	// Note: docURL already resolved early for HTML→MD conversion
 
 	// Create document
 	now := time.Now()
-	doc := &models.Document{
+	document := &models.Document{
 		ID:              generateDocumentID(),
 		SourceType:      "jira",
-		SourceID:        issue.Key,
-		Title:           issue.Fields.Summary,
+		SourceID:        issueKey,
+		Title:           summary,
 		ContentMarkdown: contentMarkdown,
-		Metadata:        metadata.ToMap(),
-		URL:             issue.Self,
+		Metadata:        metadataMap,
+		URL:             docURL,
 		DetailLevel:     "full",
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
 
-	return doc, nil
-}
-
-// adfToMarkdown converts Atlassian Document Format to markdown
-func (t *JiraTransformer) adfToMarkdown(adf map[string]interface{}) string {
-	if adf == nil {
-		return ""
-	}
-
-	var markdown strings.Builder
-
-	// Extract content array
-	contentRaw, ok := adf["content"]
-	if !ok {
-		return ""
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return ""
-	}
-
-	// Process each content node
-	for _, nodeRaw := range content {
-		node, ok := nodeRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		nodeType, _ := node["type"].(string)
-
-		switch nodeType {
-		case "paragraph":
-			t.processParagraph(node, &markdown)
-			markdown.WriteString("\n\n")
-
-		case "heading":
-			t.processHeading(node, &markdown)
-			markdown.WriteString("\n\n")
-
-		case "bulletList":
-			t.processBulletList(node, &markdown)
-			markdown.WriteString("\n")
-
-		case "orderedList":
-			t.processOrderedList(node, &markdown)
-			markdown.WriteString("\n")
-
-		case "codeBlock":
-			t.processCodeBlock(node, &markdown)
-			markdown.WriteString("\n\n")
-		}
-	}
-
-	return strings.TrimSpace(markdown.String())
-}
-
-// processParagraph processes a paragraph node
-func (t *JiraTransformer) processParagraph(node map[string]interface{}, markdown *strings.Builder) {
-	contentRaw, ok := node["content"]
-	if !ok {
-		return
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return
-	}
-
-	for _, itemRaw := range content {
-		item, ok := itemRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		itemType, _ := item["type"].(string)
-		if itemType == "text" {
-			text, _ := item["text"].(string)
-			markdown.WriteString(text)
-		}
-	}
-}
-
-// processHeading processes a heading node
-func (t *JiraTransformer) processHeading(node map[string]interface{}, markdown *strings.Builder) {
-	level, _ := node["attrs"].(map[string]interface{})["level"].(float64)
-	headingPrefix := strings.Repeat("#", int(level))
-
-	markdown.WriteString(headingPrefix + " ")
-
-	contentRaw, ok := node["content"]
-	if !ok {
-		return
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return
-	}
-
-	for _, itemRaw := range content {
-		item, ok := itemRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		itemType, _ := item["type"].(string)
-		if itemType == "text" {
-			text, _ := item["text"].(string)
-			markdown.WriteString(text)
-		}
-	}
-}
-
-// processBulletList processes a bullet list node
-func (t *JiraTransformer) processBulletList(node map[string]interface{}, markdown *strings.Builder) {
-	contentRaw, ok := node["content"]
-	if !ok {
-		return
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return
-	}
-
-	for _, itemRaw := range content {
-		item, ok := itemRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		markdown.WriteString("- ")
-		t.processListItem(item, markdown)
-		markdown.WriteString("\n")
-	}
-}
-
-// processOrderedList processes an ordered list node
-func (t *JiraTransformer) processOrderedList(node map[string]interface{}, markdown *strings.Builder) {
-	contentRaw, ok := node["content"]
-	if !ok {
-		return
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return
-	}
-
-	for i, itemRaw := range content {
-		item, ok := itemRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		markdown.WriteString(fmt.Sprintf("%d. ", i+1))
-		t.processListItem(item, markdown)
-		markdown.WriteString("\n")
-	}
-}
-
-// processListItem processes a list item node
-func (t *JiraTransformer) processListItem(node map[string]interface{}, markdown *strings.Builder) {
-	contentRaw, ok := node["content"]
-	if !ok {
-		return
-	}
-
-	content, ok := contentRaw.([]interface{})
-	if !ok {
-		return
-	}
-
-	for _, paraRaw := range content {
-		para, ok := paraRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		t.processParagraph(para, markdown)
-	}
-}
-
-// processCodeBlock processes a code block node
-func (t *JiraTransformer) processCodeBlock(node map[string]interface{}, markdown *strings.Builder) {
-	language := ""
-	if attrs, ok := node["attrs"].(map[string]interface{}); ok {
-		if lang, ok := attrs["language"].(string); ok {
-			language = lang
-		}
-	}
-
-	markdown.WriteString("```" + language + "\n")
-
-	contentRaw, ok := node["content"]
-	if ok {
-		content, ok := contentRaw.([]interface{})
-		if ok {
-			for _, itemRaw := range content {
-				item, ok := itemRaw.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				itemType, _ := item["type"].(string)
-				if itemType == "text" {
-					text, _ := item["text"].(string)
-					markdown.WriteString(text)
-				}
-			}
-		}
-	}
-
-	markdown.WriteString("\n```")
+	return document, nil
 }

@@ -15,6 +15,16 @@
 # Only uncomment settings you want to override from defaults.
 
 # =============================================================================
+# Environment Configuration
+# =============================================================================
+# Controls environment mode: "development" or "production"
+# Production mode rejects test URLs (localhost, 127.0.0.1, etc.) for safety
+# Default: development (allows test URLs)
+# Env vars: QUAERO_ENV, GO_ENV (highest priority)
+
+environment = "development"  # "development" or "production"
+
+# =============================================================================
 # Server Configuration
 # =============================================================================
 # Defaults: port=8080, host="localhost"

@@ -600,7 +600,41 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 	return jobs, rows.Err()
 }
 
-// AppendJobLog appends a single log entry to the job's logs array
+// AppendJobLog appends a single log entry to the job's logs array with automatic truncation.
+//
+// Truncation Mechanism:
+//   - Automatically limits job logs to the most recent 100 entries
+//   - When log count exceeds 100, the oldest entries are removed: logs = logs[len(logs)-100:]
+//   - This prevents unbounded growth of the logs JSON column in the database
+//   - Truncation is transparent and atomic (no manual cleanup required)
+//
+// Thread Safety:
+//   - Uses s.mu.Lock() to ensure thread-safe read-modify-write operations
+//   - Multiple concurrent AppendJobLog calls for the same job are serialized
+//   - Lock is held for the entire operation (query, deserialize, append, serialize, update)
+//   - Prevents race conditions when multiple workers log simultaneously
+//
+// Error Handling:
+//   - Returns ErrJobNotFound if the job does not exist in the database
+//   - Logs a warning and starts with an empty array if deserialization fails (resilient to corrupted logs)
+//   - Returns an error if serialization or database update fails (critical failures)
+//   - Non-critical errors (e.g., deserialization) are logged but do not block appending new logs
+//
+// Performance Considerations:
+//   - Each call performs a full read-modify-write cycle (not optimized for high-frequency logging)
+//   - For high-volume logging, consider batching log entries before calling this method
+//   - The 100-entry limit keeps JSON payload size manageable (~10-20KB typical)
+//
+// Usage Example:
+//   logEntry := models.JobLogEntry{
+//       Timestamp: time.Now().Format("15:04:05"),
+//       Level:     "info",
+//       Message:   "Job started: source=jira/issues, seeds=5",
+//   }
+//   if err := jobStorage.AppendJobLog(ctx, jobID, logEntry); err != nil {
+//       logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append log")
+//       // Non-fatal: log the error but continue job execution
+//   }
 func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -626,12 +660,40 @@ func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry mo
 		}
 	}
 
+	// Validate log level (Comment 6: validate level, default to info if invalid)
+	validLevels := map[string]bool{
+		"info":  true,
+		"warn":  true,
+		"error": true,
+		"debug": true,
+	}
+	if !validLevels[logEntry.Level] {
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Str("invalid_level", logEntry.Level).
+			Msg("Invalid log level, defaulting to info")
+		logEntry.Level = "info"
+	}
+
+	// Validate message is not empty (Comment 1: guard against empty messages)
+	if logEntry.Message == "" {
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Msg("Log message is empty, cannot append")
+		return fmt.Errorf("log message cannot be empty")
+	}
+
 	// Append new log entry
 	logs = append(logs, logEntry)
 
 	// Limit to last 100 entries to prevent unbounded growth
+	// Comment 6: warn on truncation for visibility
+	truncated := false
+	entriesTruncated := 0
 	if len(logs) > 100 {
+		entriesTruncated = len(logs) - 100
 		logs = logs[len(logs)-100:]
+		truncated = true
 	}
 
 	// Serialize back to JSON
@@ -647,6 +709,15 @@ func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry mo
 	if err != nil {
 		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update job logs")
 		return fmt.Errorf("failed to update job logs: %w", err)
+	}
+
+	// Log truncation warning if entries were removed (Comment 6)
+	if truncated {
+		s.logger.Warn().
+			Str("job_id", jobID).
+			Int("entries_truncated", entriesTruncated).
+			Int("kept_entries", len(logs)).
+			Msg("Job logs truncated to 100 most recent entries")
 	}
 
 	s.logger.Debug().Str("job_id", jobID).Int("log_count", len(logs)).Msg("Job log appended")

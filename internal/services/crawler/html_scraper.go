@@ -303,7 +303,7 @@ func (s *HTMLScraper) captureResponseHeaders(r *colly.Response, result *ScrapeRe
 	}
 	result.Metadata["headers"] = headers
 
-	// Check Content-Type header (Comment 5)
+	// Check Content-Type header (Comment 5: use AllowedContentTypes whitelist)
 	// http.Header.Get() method works on pointer receivers
 	contentType := ""
 	if r.Headers != nil {
@@ -311,15 +311,30 @@ func (s *HTMLScraper) captureResponseHeaders(r *colly.Response, result *ScrapeRe
 	}
 	result.Metadata["content_type"] = contentType
 
-	// Only mark as success if Content-Type is HTML or empty (default to HTML)
-	isHTML := contentType == "" || strings.HasPrefix(strings.ToLower(contentType), "text/html")
-	if !isHTML {
+	// Check if content type is allowed based on whitelist
+	isAllowed := false
+	if contentType == "" {
+		// Empty content type defaults to HTML (allowed)
+		isAllowed = true
+	} else {
+		// Check against whitelist
+		lowerContentType := strings.ToLower(contentType)
+		for _, allowedType := range s.config.AllowedContentTypes {
+			if strings.HasPrefix(lowerContentType, strings.ToLower(allowedType)) {
+				isAllowed = true
+				break
+			}
+		}
+	}
+
+	if !isAllowed {
 		result.Success = false
-		result.Error = fmt.Sprintf("unsupported content type: %s", contentType)
+		result.Error = fmt.Sprintf("unsupported content type: %s (allowed: %v)", contentType, s.config.AllowedContentTypes)
 		s.logger.Warn().
 			Str("url", result.URL).
 			Str("content_type", contentType).
-			Msg("Non-HTML content type detected")
+			Strs("allowed_types", s.config.AllowedContentTypes).
+			Msg("Content type not in whitelist")
 	} else {
 		result.Success = r.StatusCode >= 200 && r.StatusCode < 300
 	}

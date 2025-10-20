@@ -13,16 +13,17 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server     ServerConfig     `toml:"server"`
-	Sources    SourcesConfig    `toml:"sources"`
-	Storage    StorageConfig    `toml:"storage"`
-	LLM        LLMConfig        `toml:"llm"`
-	RAG        RAGConfig        `toml:"rag"`
-	Embeddings EmbeddingsConfig `toml:"embeddings"`
-	Processing ProcessingConfig `toml:"processing"`
-	Logging    LoggingConfig    `toml:"logging"`
-	Jobs       JobsConfig       `toml:"jobs"`
-	Crawler    CrawlerConfig    `toml:"crawler"`
+	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
+	Server      ServerConfig     `toml:"server"`
+	Sources     SourcesConfig    `toml:"sources"`
+	Storage     StorageConfig    `toml:"storage"`
+	LLM         LLMConfig        `toml:"llm"`
+	RAG         RAGConfig        `toml:"rag"`
+	Embeddings  EmbeddingsConfig `toml:"embeddings"`
+	Processing  ProcessingConfig `toml:"processing"`
+	Logging     LoggingConfig    `toml:"logging"`
+	Jobs        JobsConfig       `toml:"jobs"`
+	Crawler     CrawlerConfig    `toml:"crawler"`
 }
 
 type ServerConfig struct {
@@ -153,20 +154,22 @@ type JobConfig struct {
 
 // CrawlerConfig contains Firecrawl-inspired HTML scraping configuration
 type CrawlerConfig struct {
-	UserAgent         string        `toml:"user_agent"`          // Default user agent string
-	UserAgentRotation bool          `toml:"user_agent_rotation"` // Enable random user agent rotation
-	MaxConcurrency    int           `toml:"max_concurrency"`     // Maximum concurrent requests per domain
-	RequestDelay      time.Duration `toml:"request_delay"`       // Minimum delay between requests to same domain
-	RandomDelay       time.Duration `toml:"random_delay"`        // Random delay jitter to add
-	RequestTimeout    time.Duration `toml:"request_timeout"`     // HTTP request timeout
-	MaxBodySize       int           `toml:"max_body_size"`       // Maximum response body size in bytes
-	MaxDepth          int           `toml:"max_depth"`           // Maximum crawl depth
-	FollowRobotsTxt   bool          `toml:"follow_robots_txt"`   // Respect robots.txt rules
-	OutputFormat      string        `toml:"output_format"`       // Output format: "markdown", "html", or "both"
-	OnlyMainContent   bool          `toml:"only_main_content"`   // Extract only main content, removing nav/footer/ads
-	IncludeLinks      bool          `toml:"include_links"`       // Include discovered links in scrape results
-	IncludeMetadata   bool          `toml:"include_metadata"`    // Extract and include page metadata
-	UseHTMLSeeds      bool          `toml:"use_html_seeds"`      // Use HTML page URLs instead of REST API endpoints for seed URLs
+	UserAgent                 string        `toml:"user_agent"`                   // Default user agent string
+	UserAgentRotation         bool          `toml:"user_agent_rotation"`          // Enable random user agent rotation
+	MaxConcurrency            int           `toml:"max_concurrency"`              // Maximum concurrent requests per domain
+	RequestDelay              time.Duration `toml:"request_delay"`                // Minimum delay between requests to same domain
+	RandomDelay               time.Duration `toml:"random_delay"`                 // Random delay jitter to add
+	RequestTimeout            time.Duration `toml:"request_timeout"`              // HTTP request timeout
+	MaxBodySize               int           `toml:"max_body_size"`                // Maximum response body size in bytes
+	MaxDepth                  int           `toml:"max_depth"`                    // Maximum crawl depth
+	FollowRobotsTxt           bool          `toml:"follow_robots_txt"`            // Respect robots.txt rules
+	OutputFormat              string        `toml:"output_format"`                // Output format: "markdown", "html", or "both"
+	OnlyMainContent           bool          `toml:"only_main_content"`            // Extract only main content, removing nav/footer/ads
+	IncludeLinks              bool          `toml:"include_links"`                // Include discovered links in scrape results
+	IncludeMetadata           bool          `toml:"include_metadata"`             // Extract and include page metadata
+	UseHTMLSeeds              bool          `toml:"use_html_seeds"`               // Use HTML page URLs instead of REST API endpoints for seed URLs
+	AllowedContentTypes       []string      `toml:"allowed_content_types"`        // Comment 5: Whitelist of allowed content types (e.g., "text/html", "application/json")
+	EnableEmptyOutputFallback bool          `toml:"enable_empty_output_fallback"` // Apply HTML stripping fallback when HTML→MD conversion produces empty output (default: true)
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -174,6 +177,7 @@ type CrawlerConfig struct {
 // Only user-facing settings should be exposed in quaero.toml.
 func NewDefaultConfig() *Config {
 	return &Config{
+		Environment: "development", // Default to development mode - allows test URLs
 		Server: ServerConfig{
 			Port:     8080,
 			Host:     "localhost",
@@ -252,20 +256,22 @@ func NewDefaultConfig() *Config {
 			},
 		},
 		Crawler: CrawlerConfig{
-			UserAgent:         "Quaero/1.0 (Web Crawler)",
-			UserAgentRotation: true,
-			MaxConcurrency:    3,
-			RequestDelay:      1 * time.Second,
-			RandomDelay:       500 * time.Millisecond,
-			RequestTimeout:    30 * time.Second,
-			MaxBodySize:       10 * 1024 * 1024, // 10MB
-			MaxDepth:          5,
-			FollowRobotsTxt:   true,
-			OutputFormat:      "markdown",
-			OnlyMainContent:   true,
-			IncludeLinks:      true,
-			IncludeMetadata:   true,
-			UseHTMLSeeds:      true, // Default to HTML page URLs for seed generation
+			UserAgent:                 "Quaero/1.0 (Web Crawler)",
+			UserAgentRotation:         true,
+			MaxConcurrency:            3,
+			RequestDelay:              1 * time.Second,
+			RandomDelay:               500 * time.Millisecond,
+			RequestTimeout:            30 * time.Second,
+			MaxBodySize:               10 * 1024 * 1024, // 10MB
+			MaxDepth:                  5,
+			FollowRobotsTxt:           true,
+			OutputFormat:              "markdown",
+			OnlyMainContent:           true,
+			IncludeLinks:              true,
+			IncludeMetadata:           true,
+			UseHTMLSeeds:              true,                                      // Default to HTML page URLs for seed generation
+			AllowedContentTypes:       []string{"text/html", "application/json"}, // Comment 5: Allow HTML and JSON for Jira/Confluence APIs
+			EnableEmptyOutputFallback: true,                                      // Apply HTML stripping fallback when conversion produces empty output
 		},
 	}
 }
@@ -297,6 +303,13 @@ func LoadFromFile(path string) (*Config, error) {
 
 // applyEnvOverrides applies environment variable overrides to config
 func applyEnvOverrides(config *Config) {
+	// Environment configuration (highest priority: QUAERO_ENV, fallback: GO_ENV)
+	if env := os.Getenv("QUAERO_ENV"); env != "" {
+		config.Environment = env
+	} else if env := os.Getenv("GO_ENV"); env != "" {
+		config.Environment = env
+	}
+
 	// Server configuration
 	if port := os.Getenv("QUAERO_SERVER_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
@@ -467,6 +480,11 @@ func applyEnvOverrides(config *Config) {
 			config.Crawler.UseHTMLSeeds = uhs
 		}
 	}
+	if enableEmptyOutputFallback := os.Getenv("QUAERO_CRAWLER_ENABLE_EMPTY_OUTPUT_FALLBACK"); enableEmptyOutputFallback != "" {
+		if eof, err := strconv.ParseBool(enableEmptyOutputFallback); err == nil {
+			config.Crawler.EnableEmptyOutputFallback = eof
+		}
+	}
 }
 
 // ApplyCLIOverrides applies CLI flag overrides to config
@@ -540,4 +558,16 @@ func ValidateJobSchedule(schedule string) error {
 	}
 
 	return nil
+}
+
+// IsProduction returns true if the environment is set to production
+func (c *Config) IsProduction() bool {
+	env := strings.ToLower(strings.TrimSpace(c.Environment))
+	return env == "production" || env == "prod"
+}
+
+// AllowTestURLs returns true if test URLs (localhost, 127.0.0.1, etc.) are allowed
+// Test URLs are only allowed in development mode
+func (c *Config) AllowTestURLs() bool {
+	return !c.IsProduction()
 }

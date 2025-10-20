@@ -63,8 +63,8 @@ func TestCrawlToDocumentTransformation(t *testing.T) {
 	}
 
 	var initialCount int
-	if total, ok := initialDocs["total"].(float64); ok {
-		initialCount = int(total)
+	if count, ok := initialDocs["count"].(float64); ok {
+		initialCount = int(count)
 	}
 
 	t.Logf("Initial document count: %d", initialCount)
@@ -147,8 +147,8 @@ func TestCrawlToDocumentTransformation(t *testing.T) {
 		}
 
 		var finalCount int
-		if total, ok := finalDocs["total"].(float64); ok {
-			finalCount = int(total)
+		if count, ok := finalDocs["count"].(float64); ok {
+			finalCount = int(count)
 		}
 
 		t.Logf("Final document count: %d (increase: %d)", finalCount, finalCount-initialCount)

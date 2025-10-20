@@ -9,13 +9,112 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
+// ValidateBaseURL validates a base URL and detects test URL patterns
+// Returns: (isValid bool, isTestURL bool, warnings []string, err error)
+func ValidateBaseURL(baseURL string, logger arbor.ILogger) (bool, bool, []string, error) {
+	warnings := []string{}
+
+	// Parse URL
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return false, false, warnings, fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Validate scheme (must be http or https)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return false, false, warnings, fmt.Errorf("invalid URL scheme: %s (expected http or https)", parsedURL.Scheme)
+	}
+
+	// Validate host is not empty
+	if parsedURL.Host == "" {
+		return false, false, warnings, fmt.Errorf("URL host is empty")
+	}
+
+	// Check for test URL patterns
+	isTestURL := false
+	host := strings.ToLower(parsedURL.Host)
+
+	// Pattern 1: localhost (any port)
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "localhost:") {
+		isTestURL = true
+		warnings = append(warnings, fmt.Sprintf("Test URL detected: %s uses localhost", baseURL))
+	}
+
+	// Pattern 2: 127.0.0.1 (any port)
+	if strings.HasPrefix(host, "127.0.0.1") {
+		isTestURL = true
+		warnings = append(warnings, fmt.Sprintf("Test URL detected: %s uses 127.0.0.1", baseURL))
+	}
+
+	// Pattern 3: 0.0.0.0 (any port)
+	if strings.HasPrefix(host, "0.0.0.0") {
+		isTestURL = true
+		warnings = append(warnings, fmt.Sprintf("Test URL detected: %s uses 0.0.0.0", baseURL))
+	}
+
+	// Pattern 4: IPv6 localhost [::1]
+	if strings.HasPrefix(host, "[::1]") {
+		isTestURL = true
+		warnings = append(warnings, fmt.Sprintf("Test URL detected: %s uses IPv6 localhost [::1]", baseURL))
+	}
+
+	// Pattern 5: Specific test server port 3333
+	if strings.Contains(host, ":3333") {
+		isTestURL = true
+		warnings = append(warnings, fmt.Sprintf("Test URL detected: %s uses test server port 3333", baseURL))
+	}
+
+	// Log validation result
+	if isTestURL {
+		logger.Debug().
+			Str("base_url", baseURL).
+			Str("is_test_url", "true").
+			Strs("warnings", warnings).
+			Msg("Base URL validation: test URL detected")
+	} else {
+		logger.Debug().
+			Str("base_url", baseURL).
+			Str("is_test_url", "false").
+			Msg("Base URL validation: production URL")
+	}
+
+	return true, isTestURL, warnings, nil
+}
+
 // DeriveSeedURLs determines the appropriate seed URLs based on source type
 // This is a stateless helper function that can be used by any service or handler
 // The useHTMLSeeds flag controls whether to generate HTML page URLs (true) or REST API URLs (false)
 func DeriveSeedURLs(source *models.SourceConfig, useHTMLSeeds bool, logger arbor.ILogger) []string {
+	// Debug: Log derivation start
+	logger.Debug().
+		Str("source_type", string(source.Type)).
+		Str("base_url", source.BaseURL).
+		Str("use_html_seeds", fmt.Sprintf("%v", useHTMLSeeds)).
+		Msg("Starting seed URL derivation")
+
 	// If useHTMLSeeds is false, fall back to legacy REST API URL generation
 	if !useHTMLSeeds {
+		logger.Debug().Msg("Using legacy REST API URL generation")
 		return deriveLegacySeedURLs(source, logger)
+	}
+
+	// Validate base URL format and detect test URLs
+	isValid, isTestURL, warnings, err := ValidateBaseURL(source.BaseURL, logger)
+	if !isValid || err != nil {
+		logger.Warn().
+			Err(err).
+			Str("base_url", source.BaseURL).
+			Msg("Base URL validation failed")
+		return []string{}
+	}
+
+	// Log test URL warnings if detected
+	if isTestURL && len(warnings) > 0 {
+		for _, warning := range warnings {
+			logger.Warn().
+				Str("base_url", source.BaseURL).
+				Msg(warning)
+		}
 	}
 
 	// Parse base URL using net/url for proper normalization
@@ -27,6 +126,13 @@ func DeriveSeedURLs(source *models.SourceConfig, useHTMLSeeds bool, logger arbor
 			Msg("Failed to parse base URL")
 		return []string{}
 	}
+
+	// Debug: Log parsed URL components
+	logger.Debug().
+		Str("scheme", parsedURL.Scheme).
+		Str("host", parsedURL.Host).
+		Str("path", parsedURL.Path).
+		Msg("Parsed base URL components")
 
 	// Build base components
 	baseRoot := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
@@ -133,6 +239,10 @@ func hasWikiPath(basePath string) bool {
 func deriveJiraSeeds(baseRoot, basePath string, filters map[string]interface{}, logger arbor.ILogger) []string {
 	// Check for projects filter ([]string first, then []interface{})
 	if projects, ok := filters["projects"].([]string); ok {
+		logger.Debug().
+			Int("project_count", len(projects)).
+			Strs("projects", projects).
+			Msg("Using Jira projects filter ([]string)")
 		var seedURLs []string
 		for _, projectKey := range projects {
 			seedURLs = append(seedURLs, joinPath(baseRoot, basePath, "browse", projectKey))
@@ -141,6 +251,9 @@ func deriveJiraSeeds(baseRoot, basePath string, filters map[string]interface{}, 
 			return seedURLs
 		}
 	} else if projects, ok := filters["projects"].([]interface{}); ok {
+		logger.Debug().
+			Int("project_count", len(projects)).
+			Msg("Using Jira projects filter ([]interface{})")
 		var seedURLs []string
 		for _, proj := range projects {
 			if projectKey, ok := proj.(string); ok {
@@ -155,9 +268,13 @@ func deriveJiraSeeds(baseRoot, basePath string, filters map[string]interface{}, 
 	}
 	// Check for project filter (single string)
 	if project, ok := filters["project"].(string); ok {
+		logger.Debug().
+			Str("project", project).
+			Msg("Using Jira project filter (single project)")
 		return []string{joinPath(baseRoot, basePath, "browse", project)}
 	}
 	// No filter - use project listing page
+	logger.Debug().Msg("No Jira filter provided - using default project listing page")
 	return []string{joinPath(baseRoot, basePath, "projects")}
 }
 
@@ -165,9 +282,17 @@ func deriveJiraSeeds(baseRoot, basePath string, filters map[string]interface{}, 
 func deriveConfluenceSeeds(baseRoot, basePath string, filters map[string]interface{}, logger arbor.ILogger) []string {
 	// Determine if basePath already includes /wiki
 	hasWiki := hasWikiPath(basePath)
+	logger.Debug().
+		Str("has_wiki_path", fmt.Sprintf("%v", hasWiki)).
+		Str("base_path", basePath).
+		Msg("Checking Confluence base path for /wiki segment")
 
 	// Check for spaces filter ([]string first, then []interface{})
 	if spaces, ok := filters["spaces"].([]string); ok {
+		logger.Debug().
+			Int("space_count", len(spaces)).
+			Strs("spaces", spaces).
+			Msg("Using Confluence spaces filter ([]string)")
 		var seedURLs []string
 		for _, spaceKey := range spaces {
 			if hasWiki {
@@ -180,6 +305,9 @@ func deriveConfluenceSeeds(baseRoot, basePath string, filters map[string]interfa
 			return seedURLs
 		}
 	} else if spaces, ok := filters["spaces"].([]interface{}); ok {
+		logger.Debug().
+			Int("space_count", len(spaces)).
+			Msg("Using Confluence spaces filter ([]interface{})")
 		var seedURLs []string
 		for _, sp := range spaces {
 			if spaceKey, ok := sp.(string); ok {
@@ -198,12 +326,16 @@ func deriveConfluenceSeeds(baseRoot, basePath string, filters map[string]interfa
 	}
 	// Check for space filter (single string)
 	if space, ok := filters["space"].(string); ok {
+		logger.Debug().
+			Str("space", space).
+			Msg("Using Confluence space filter (single space)")
 		if hasWiki {
 			return []string{joinPath(baseRoot, basePath, "spaces", space)}
 		}
 		return []string{joinPath(baseRoot, basePath, "wiki", "spaces", space)}
 	}
 	// No filter - use space directory page
+	logger.Debug().Msg("No Confluence filter provided - using default space directory page")
 	if hasWiki {
 		return []string{joinPath(baseRoot, basePath, "spaces")}
 	}
@@ -214,11 +346,19 @@ func deriveConfluenceSeeds(baseRoot, basePath string, filters map[string]interfa
 func deriveGitHubSeeds(baseRoot, basePath string, filters map[string]interface{}, logger arbor.ILogger) []string {
 	// Check for org filter
 	if org, ok := filters["org"].(string); ok {
+		logger.Debug().
+			Str("org", org).
+			Msg("Using GitHub org filter")
 		return []string{joinPath(baseRoot, basePath, "orgs", org, "repos")}
 	}
 	// Check for user filter
 	if user, ok := filters["user"].(string); ok {
+		logger.Debug().
+			Str("user", user).
+			Msg("Using GitHub user filter")
 		return []string{joinPath(baseRoot, basePath, "users", user, "repos")}
 	}
+	// No filter - cannot derive URLs without org or user
+	logger.Debug().Msg("No GitHub filter provided - cannot derive seed URLs (org or user required)")
 	return []string{}
 }

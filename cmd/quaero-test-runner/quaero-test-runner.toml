@@ -1,4 +1,5 @@
 # Quaero Test Runner Configuration
+# Supports two test modes: "mock" and "integration"
 
 [test_runner]
 # Directory where test files are located (do not include subdirs like api/ui)
@@ -12,6 +13,13 @@ output_dir = "./test/results"
 # Build script location
 build_script = "./scripts/build.ps1"  # Windows
 # build_script = "./scripts/build.sh" # Linux/Mac
+
+# Test mode: "mock" or "integration"
+# - mock: Uses in-memory mock server, no real database, fast, isolated
+#   Ideal for CI/CD pipelines, fast feedback, unit testing
+# - integration: Uses real Quaero service, tests full stack, requires service running
+#   Ideal for end-to-end testing, pre-release validation
+test_mode = "mock"  # Default to mock for safety
 
 [test_server]
 # Test server binds to this port for serving test resources
