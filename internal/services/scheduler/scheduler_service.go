@@ -12,6 +12,7 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/crawler"
+	"github.com/ternarybob/quaero/internal/services/jobs"
 )
 
 // jobEntry represents a registered job with metadata
@@ -44,6 +45,8 @@ type Service struct {
 	isProcessing   bool
 	running        bool
 	staleJobTicker *time.Ticker // For stale job detection cleanup goroutine
+	jobDefStorage  interfaces.JobDefinitionStorage
+	jobExecutor    *jobs.JobExecutor
 }
 
 // NewService creates a new scheduler service
@@ -57,11 +60,13 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 }
 
 // NewServiceWithDB creates a new scheduler service with database persistence
-func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage) interfaces.SchedulerService {
+func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor *jobs.JobExecutor) interfaces.SchedulerService {
 	return &Service{
 		eventService:   eventService,
 		crawlerService: crawlerService,
 		jobStorage:     jobStorage,
+		jobDefStorage:  jobDefStorage,
+		jobExecutor:    jobExecutor,
 		cron:           cron.New(),
 		logger:         logger,
 		db:             db,
@@ -96,6 +101,12 @@ func (s *Service) Start(cronExpr string) error {
 	} else {
 		s.logger.Info().
 			Msg("Legacy scheduled task disabled (default jobs are registered)")
+	}
+
+	// Load job definitions from storage and register them
+	if err := s.LoadJobDefinitions(); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to load job definitions from storage")
+		// Non-critical error - continue starting scheduler
 	}
 
 	s.cron.Start()
@@ -786,6 +797,77 @@ func (s *Service) LoadJobSettings() error {
 	if settingsLoaded > 0 {
 		s.logger.Info().Int("count", settingsLoaded).Msg("Loaded job settings from database")
 	}
+
+	return nil
+}
+
+// LoadJobDefinitions loads job definitions from storage and registers them with the scheduler.
+// This method should be called after RegisterJob for hardcoded jobs but before Start.
+// Job definitions are registered alongside hardcoded jobs in the scheduler.
+// Returns error if storage query fails, but continues on individual registration failures.
+func (s *Service) LoadJobDefinitions() error {
+	// Graceful degradation if dependencies not available
+	if s.jobDefStorage == nil || s.jobExecutor == nil {
+		s.logger.Debug().Msg("Job definition storage or executor not available, skipping job definitions load")
+		return nil
+	}
+
+	ctx := context.Background()
+
+	// Fetch enabled job definitions
+	jobDefs, err := s.jobDefStorage.GetEnabledJobDefinitions(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load job definitions: %w", err)
+	}
+
+	if len(jobDefs) == 0 {
+		s.logger.Info().Msg("No enabled job definitions found")
+		return nil
+	}
+
+	// Register each job definition
+	registeredCount := 0
+	for _, jobDef := range jobDefs {
+		// Create local copy to avoid closure capture issues
+		jd := jobDef
+
+		s.logger.Info().
+			Str("job_id", jd.ID).
+			Str("job_name", jd.Name).
+			Str("job_type", jd.JobType).
+			Str("schedule", jd.Schedule).
+			Msg("Loading job definition")
+
+		// Validate schedule
+		if err := common.ValidateJobSchedule(jd.Schedule); err != nil {
+			s.logger.Error().
+				Str("job_id", jd.ID).
+				Err(err).
+				Msg("Invalid schedule for job definition, skipping")
+			continue
+		}
+
+		// Create handler closure that captures the job definition
+		handler := func() error {
+			execCtx := context.Background()
+			return s.jobExecutor.Execute(execCtx, jd)
+		}
+
+		// Register job with scheduler
+		if err := s.RegisterJob(jd.ID, jd.Schedule, jd.Description, jd.AutoStart, handler); err != nil {
+			s.logger.Error().
+				Str("job_id", jd.ID).
+				Err(err).
+				Msg("Failed to register job definition")
+			continue
+		}
+
+		registeredCount++
+	}
+
+	s.logger.Info().
+		Int("count", registeredCount).
+		Msg("Job definitions loaded and registered")
 
 	return nil
 }

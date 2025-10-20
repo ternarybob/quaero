@@ -296,9 +296,6 @@ func (a *App) initServices() error {
 		a.Logger.Warn().Err(err).Msg("Failed to generate initial summary document (non-critical)")
 	}
 
-	// 12. Initialize scheduler service with database persistence
-	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB), a.CrawlerService, a.StorageManager.JobStorage())
-
 	// Initialize job executor for job definition execution
 	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
 	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.Logger)
@@ -330,6 +327,17 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to register summarizer actions: %w", err)
 	}
 	a.Logger.Info().Msg("Summarizer actions registered with job type registry")
+
+	// 12. Initialize scheduler service with database persistence and job definition support
+	a.SchedulerService = scheduler.NewServiceWithDB(
+		a.EventService,
+		a.Logger,
+		a.StorageManager.DB().(*sql.DB),
+		a.CrawlerService,
+		a.StorageManager.JobStorage(),
+		a.StorageManager.JobDefinitionStorage(),
+		a.JobExecutor,
+	)
 
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
