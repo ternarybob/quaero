@@ -834,7 +834,7 @@ func (s *Service) LoadJobDefinitions() error {
 		s.logger.Info().
 			Str("job_id", jd.ID).
 			Str("job_name", jd.Name).
-			Str("job_type", jd.JobType).
+			Str("job_type", string(jd.Type)).
 			Str("schedule", jd.Schedule).
 			Msg("Loading job definition")
 

@@ -214,6 +214,12 @@
                             </div>
 
                             <div class="form-group">
+                                <label class="form-label">Seed URLs (Optional)</label>
+                                <textarea class="form-input" x-model="currentSource.seed_urls_text" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
+                                <p class="form-input-hint">One URL per line. Leave empty for auto-discovery from base URL</p>
+                            </div>
+
+                            <div class="form-group">
                                 <label class="form-label">Authentication</label>
                                 <select class="form-select" x-model="currentSource.auth_id">
                                     <option value="">No Authentication</option>
@@ -294,50 +300,6 @@
             </div>
         </section>
 
-        <!-- ============================= JOBS PANEL ============================= -->
-        <section style="margin-top: 1.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3>Jobs</h3>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
-                                <i class="fa-solid fa-plus"></i>
-                                <span>Create Job</span>
-                            </button>
-                            <button class="btn btn-sm" onclick="loadDefaultJobs()" title="Refresh Jobs">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <table class="table striped border">
-                        <thead>
-                            <tr>
-                                <th>JOB NAME</th>
-                                <th>DESCRIPTION</th>
-                                <th>SCHEDULE</th>
-                                <th class="text-center">STATUS</th>
-                                <th>LAST RUN</th>
-                                <th>NEXT RUN</th>
-                                <th class="text-center">ACTIONS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="default-jobs-table-body">
-                            <tr>
-                                <td colspan="7" class="text-center">
-                                    Loading default jobs...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
         <!-- Service Logs -->
         <section style="margin-top: 1.5rem;">
             {{template "service-logs.html" .}}
@@ -378,13 +340,6 @@
                             <p class="form-input-hint">If checked, the job will fetch the latest source configuration before starting</p>
                         </div>
 
-                        <!-- Optional Seed URLs -->
-                        <div class="form-group">
-                            <label class="form-label">Seed URLs (Optional)</label>
-                            <textarea id="seed-urls-textarea" class="form-input" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
-                            <p class="form-input-hint">One URL per line. Leave empty to derive from source configuration</p>
-                        </div>
-
                         <!-- Loading State -->
                         <div id="modal-loading" class="hide text-center">
                             <i class="fas fa-spinner fa-pulse fa-2x"></i>
@@ -396,64 +351,6 @@
             <div class="modal-footer">
                 <button type="button" class="btn" onclick="closeCreateJobModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary" onclick="createJobFromSource(event)">Create Job</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Edit Default Job Modal -->
-    <div id="edit-default-job-modal" class="modal" @keydown.escape.window="closeEditDefaultJobModal()">
-        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeEditDefaultJobModal()"></a>
-        <div class="modal-container" role="dialog" aria-modal="true">
-            <div class="modal-header">
-                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeEditDefaultJobModal()"></a>
-                <div class="modal-title h5">Edit Default Job</div>
-            </div>
-            <div class="modal-body">
-                <div class="content">
-                    <form id="edit-default-job-form">
-                        <!-- Job Name -->
-                        <div class="form-group">
-                            <label class="form-label">Job Name</label>
-                            <input type="text" class="form-input" id="edit-default-job-name" readonly>
-                            <p class="form-input-hint">Default job name (cannot be changed)</p>
-                        </div>
-
-                        <!-- Job Description -->
-                        <div class="form-group">
-                            <label class="form-label">Description</label>
-                            <textarea id="edit-default-job-description" class="form-input" placeholder="Describe what this job does..." rows="4" maxlength="500"></textarea>
-                            <p class="form-input-hint">Optional description explaining the purpose of this job</p>
-                        </div>
-
-                        <!-- Schedule -->
-                        <div class="form-group">
-                            <label class="form-label">Schedule (Cron Expression)</label>
-                            <input type="text" class="form-input" id="edit-default-job-schedule" placeholder="*/5 * * * *">
-                            <p class="form-input-hint">Cron schedule (e.g., */5 * * * * = every 5 minutes, 0 * * * * = hourly)</p>
-                        </div>
-
-                        <!-- Status (Enabled/Disabled) -->
-                        <div class="form-group">
-                            <label class="form-label">Status</label>
-                            <label class="form-switch">
-                                <input type="checkbox" id="edit-default-job-enabled">
-                                <i class="form-icon"></i>
-                                <span id="edit-default-job-status-label">Enabled</span>
-                            </label>
-                            <p class="form-input-hint">Enable or disable automatic job execution</p>
-                        </div>
-
-                        <!-- Loading State -->
-                        <div id="edit-default-modal-loading" class="hide text-center">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                            <p>Updating job...</p>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn" onclick="closeEditDefaultJobModal()">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="updateDefaultJob(event)">Update Job</button>
             </div>
         </div>
     </div>
@@ -528,283 +425,6 @@
                     if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
 
                     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-                }
-            }
-        }
-
-        // ============================= DEFAULT JOBS MANAGEMENT =============================
-
-        // Load default jobs from API
-        async function loadDefaultJobs() {
-            console.log('[Jobs] loadDefaultJobs() called');
-            const tbody = document.getElementById('default-jobs-table-body');
-            console.log('[Jobs] Table body element:', tbody);
-
-            try {
-                console.log('[Jobs] Fetching default jobs from /api/jobs/default');
-                const response = await fetch('/api/jobs/default');
-                console.log('[Jobs] Response status:', response.status, response.statusText);
-
-                if (!response.ok) {
-                    throw new Error('Failed to fetch default jobs');
-                }
-
-                const data = await response.json();
-                console.log('[Jobs] Received data:', data);
-                const jobs = data.jobs || [];
-                console.log('[Jobs] Jobs array:', jobs, 'Count:', jobs.length);
-
-                if (jobs.length === 0) {
-                    console.log('[Jobs] No jobs found, displaying empty message');
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="7" class="text-center">
-                                No default jobs configured.
-                            </td>
-                        </tr>
-                    `;
-                    return;
-                }
-
-                console.log('[Jobs] Rendering', jobs.length, 'jobs');
-
-                tbody.innerHTML = jobs.map(job => {
-                    const statusBadge = job.enabled
-                        ? '<span class="label label-success">Enabled</span>'
-                        : '<span class="label">Disabled</span>';
-
-                    const lastRun = job.last_run
-                        ? new Date(job.last_run).toLocaleString()
-                        : 'Never';
-
-                    const nextRun = job.next_run
-                        ? new Date(job.next_run).toLocaleString()
-                        : 'N/A';
-
-                    const isRunning = job.is_running;
-                    const runningIndicator = isRunning
-                        ? '<i class="fa-solid fa-spinner fa-pulse text-primary"></i> '
-                        : '';
-
-                    // Escape values for onclick attributes
-                    const escapedName = (job.name || '').replace(/'/g, "\\'");
-                    const escapedDescription = (job.description || '').replace(/'/g, "\\'");
-                    const escapedSchedule = (job.schedule || '').replace(/'/g, "\\'");
-
-                    return `
-                        <tr>
-                            <td>
-                                ${runningIndicator}
-                                <strong>${job.name}</strong>
-                            </td>
-                            <td>${job.description || 'N/A'}</td>
-                            <td><code>${job.schedule}</code></td>
-                            <td class="text-center">${statusBadge}</td>
-                            <td>${lastRun}</td>
-                            <td>${nextRun}</td>
-                            <td class="text-center">
-                                <button class="btn btn-sm"
-                                        onclick="showEditDefaultJobModal('${escapedName}', '${escapedDescription}', '${escapedSchedule}', ${job.enabled})"
-                                        title="Edit Job">
-                                    <i class="fa-solid fa-edit"></i>
-                                </button>
-                                <button class="btn btn-sm btn-primary"
-                                        onclick="startDefaultJob('${escapedName}')"
-                                        title="Run Job Now"
-                                        ${isRunning ? 'disabled' : ''}>
-                                    <i class="fa-solid fa-play"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-
-                console.log('[Jobs] Default jobs table updated successfully');
-
-            } catch (error) {
-                console.error('[Jobs] Error loading default jobs:', error);
-                console.error('[Jobs] Error stack:', error.stack);
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="text-center text-error">
-                            Failed to load default jobs. Please try again.
-                        </td>
-                    </tr>
-                `;
-            }
-        }
-
-        // Start default job manually
-        async function startDefaultJob(jobName) {
-            if (!confirm(`Start job "${jobName}" now?\n\nThis will trigger the job immediately.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/jobs/default/${jobName}/start`, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || 'Failed to start job');
-                }
-
-                const result = await response.json();
-                window.showNotification(result.message || 'Job started successfully', 'success');
-
-                // Reload to show updated status
-                loadDefaultJobs();
-
-            } catch (error) {
-                console.error('Error starting job:', error);
-                window.showNotification('Failed to start job: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // ============================= EDIT DEFAULT JOB MODAL FUNCTIONS =============================
-
-        let editingDefaultJobName = null;
-        let editDefaultModalTriggerElement = null;
-
-        // Show edit default job modal
-        async function showEditDefaultJobModal(jobName, description, schedule, enabled) {
-            editDefaultModalTriggerElement = document.activeElement;
-            editingDefaultJobName = jobName;
-
-            // Populate form fields
-            document.getElementById('edit-default-job-name').value = jobName;
-            document.getElementById('edit-default-job-description').value = description || '';
-            document.getElementById('edit-default-job-schedule').value = schedule || '';
-
-            // Set enabled checkbox and label
-            const enabledCheckbox = document.getElementById('edit-default-job-enabled');
-            const statusLabel = document.getElementById('edit-default-job-status-label');
-            enabledCheckbox.checked = enabled;
-            statusLabel.textContent = enabled ? 'Enabled' : 'Disabled';
-
-            // Ensure loading spinner is hidden
-            const loading = document.getElementById('edit-default-modal-loading');
-            if (loading) {
-                loading.classList.add('hide');
-            }
-
-            // Show modal
-            const modal = document.getElementById('edit-default-job-modal');
-            modal.classList.add('active');
-            document.body.classList.add('modal-open');
-
-            // Focus on description textarea
-            setTimeout(() => {
-                const descriptionField = modal.querySelector('#edit-default-job-description');
-                if (descriptionField) descriptionField.focus();
-            }, 100);
-        }
-
-        // Close edit default job modal
-        function closeEditDefaultJobModal() {
-            const modal = document.getElementById('edit-default-job-modal');
-            modal.classList.remove('active');
-            document.body.classList.remove('modal-open');
-
-            // Hide loading spinner
-            const loading = document.getElementById('edit-default-modal-loading');
-            if (loading) {
-                loading.classList.add('hide');
-            }
-
-            // Reset form and state
-            document.getElementById('edit-default-job-form').reset();
-            editingDefaultJobName = null;
-
-            // Restore focus
-            if (editDefaultModalTriggerElement) {
-                setTimeout(() => {
-                    editDefaultModalTriggerElement.focus();
-                    editDefaultModalTriggerElement = null;
-                }, 100);
-            }
-        }
-
-        // Update default job via API
-        async function updateDefaultJob(event) {
-            event.preventDefault();
-
-            if (!editingDefaultJobName) {
-                window.showNotification('No job selected for editing', 'error');
-                return;
-            }
-
-            const description = document.getElementById('edit-default-job-description').value.trim();
-            const schedule = document.getElementById('edit-default-job-schedule').value.trim();
-            const enabled = document.getElementById('edit-default-job-enabled').checked;
-
-            // Show loading spinner
-            const loading = document.getElementById('edit-default-modal-loading');
-            if (loading) {
-                loading.classList.remove('hide');
-            }
-
-            try {
-                const endpoint = `/api/jobs/default/${editingDefaultJobName}`;
-                const response = await fetch(endpoint, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        description: description,
-                        schedule: schedule,
-                        enabled: enabled
-                    })
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || 'Failed to update job');
-                }
-
-                const result = await response.json();
-                window.showNotification(result.message || 'Job updated successfully!', 'success');
-
-                // Close modal and refresh job list
-                closeEditDefaultJobModal();
-
-                // Refresh the jobs list
-                setTimeout(() => {
-                    loadDefaultJobs();
-                }, 500);
-
-            } catch (error) {
-                console.error('Error updating job:', error);
-                window.showNotification('Failed to update job: ' + error.message, 'error');
-            } finally {
-                // Hide the loading spinner
-                if (loading) {
-                    loading.classList.add('hide');
                 }
             }
         }
@@ -888,7 +508,6 @@
 
             const sourceSelect = document.getElementById('job-source-select');
             const refreshCheckbox = document.getElementById('refresh-source-checkbox');
-            const seedUrlsTextarea = document.getElementById('seed-urls-textarea');
             const modalLoading = document.getElementById('modal-loading');
             const createButton = event.target;
 
@@ -899,8 +518,6 @@
             }
 
             const refreshSource = refreshCheckbox.checked;
-            const seedUrlsText = seedUrlsTextarea.value.trim();
-            const seedURLs = seedUrlsText ? seedUrlsText.split('\n').map(url => url.trim()).filter(url => url) : [];
 
             // Show loading state
             modalLoading.classList.remove('hide');
@@ -918,10 +535,6 @@
                     source_id: sourceID,
                     refresh_source: refreshSource
                 };
-
-                if (seedURLs.length > 0) {
-                    payload.seed_urls = seedURLs;
-                }
 
                 const response = await fetch('/api/jobs/create', {
                     method: 'POST',
@@ -965,17 +578,6 @@
             console.log('[Jobs] Current URL:', window.location.href);
             console.log('[Jobs] Initializing page components...');
 
-            loadDefaultJobs();
-
-            // Add event listener for enabled checkbox to update label
-            const enabledCheckbox = document.getElementById('edit-default-job-enabled');
-            const statusLabel = document.getElementById('edit-default-job-status-label');
-            if (enabledCheckbox && statusLabel) {
-                enabledCheckbox.addEventListener('change', function () {
-                    statusLabel.textContent = this.checked ? 'Enabled' : 'Disabled';
-                });
-            }
-
             console.log('[Jobs] Page initialization complete');
             console.log('[Jobs] ====================================================');
         });
@@ -989,14 +591,9 @@
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 const createModal = document.getElementById('create-job-modal');
-                const editModal = document.getElementById('edit-default-job-modal');
 
                 if (createModal && createModal.classList.contains('active')) {
                     closeCreateJobModal();
-                }
-
-                if (editModal && editModal.classList.contains('active')) {
-                    closeEditDefaultJobModal();
                 }
             }
         });

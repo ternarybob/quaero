@@ -352,6 +352,7 @@ document.addEventListener('alpine:init', () => {
         name: '',
         type: 'jira',
         base_url: '',
+        seed_urls_text: '',
         auth_id: '',
         auth_domain: '',
         enabled: true,
@@ -368,20 +369,27 @@ document.addEventListener('alpine:init', () => {
     editSource(source, event) {
       this.modalTriggerElement = event?.target || document.activeElement;
       this.currentSource = JSON.parse(JSON.stringify(source));
-      
+
+      // Convert seed_urls array to newline-separated string for textarea
+      if (Array.isArray(this.currentSource.seed_urls) && this.currentSource.seed_urls.length > 0) {
+        this.currentSource.seed_urls_text = this.currentSource.seed_urls.join('\n');
+      } else {
+        this.currentSource.seed_urls_text = '';
+      }
+
       // Convert filter arrays to comma-separated strings for UI display
       if (this.currentSource.filters) {
         // Convert include patterns array to string
         if (Array.isArray(this.currentSource.filters.include_patterns)) {
           this.currentSource.filters.include_patterns = this.currentSource.filters.include_patterns.join(', ');
         }
-        
+
         // Convert exclude patterns array to string
         if (Array.isArray(this.currentSource.filters.exclude_patterns)) {
           this.currentSource.filters.exclude_patterns = this.currentSource.filters.exclude_patterns.join(', ');
         }
       }
-      
+
       this.showEditModal = true;
       document.body.classList.add('modal-open');
       // Reload authentications in case they changed
@@ -424,7 +432,20 @@ document.addEventListener('alpine:init', () => {
 
         // Process filters before sending to backend
         const sourceToSave = JSON.parse(JSON.stringify(this.currentSource));
-        
+
+        // Convert seed_urls_text to array
+        if (sourceToSave.seed_urls_text) {
+          const seedUrlsText = sourceToSave.seed_urls_text.trim();
+          if (seedUrlsText) {
+            sourceToSave.seed_urls = seedUrlsText.split('\n').map(url => url.trim()).filter(url => url);
+          } else {
+            sourceToSave.seed_urls = [];
+          }
+        } else {
+          sourceToSave.seed_urls = [];
+        }
+        delete sourceToSave.seed_urls_text; // Remove temporary UI field
+
         try {
           // Process URL pattern filters
           if (sourceToSave.filters) {

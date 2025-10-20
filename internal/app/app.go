@@ -339,44 +339,7 @@ func (a *App) initServices() error {
 		a.JobExecutor,
 	)
 
-	// Register default jobs (always register them for UI visibility, then disable if needed)
-	jobsRegistered := 0
-
-	// Register crawl and collect job (always register, disable if not enabled in config)
-	crawlCollectJob := jobs.NewCrawlCollectJob(
-		a.CrawlerService,
-		a.SourceService,
-		a.StorageManager.AuthStorage(),
-		a.EventService,
-		a.Config,
-		a.Logger,
-	)
-	if err := a.SchedulerService.RegisterJob(
-		"crawl_and_collect",
-		a.Config.Jobs.CrawlAndCollect.Schedule,
-		a.Config.Jobs.CrawlAndCollect.Description,
-		a.Config.Jobs.CrawlAndCollect.AutoStart,
-		crawlCollectJob.Execute,
-	); err != nil {
-		a.Logger.Error().Err(err).Msg("Failed to register crawl_and_collect job")
-	} else {
-		jobsRegistered++
-		// Disable if not enabled in config (before scheduler starts)
-		if !a.Config.Jobs.CrawlAndCollect.Enabled {
-			if err := a.SchedulerService.DisableJob("crawl_and_collect"); err != nil {
-				a.Logger.Error().Err(err).Msg("Failed to disable crawl_and_collect job")
-			} else {
-				a.Logger.Info().Msg("Registered crawl_and_collect job (disabled)")
-			}
-		} else {
-			a.Logger.Info().
-				Str("schedule", a.Config.Jobs.CrawlAndCollect.Schedule).
-				Str("auto_start", fmt.Sprintf("%v", a.Config.Jobs.CrawlAndCollect.AutoStart)).
-				Msg("Registered crawl_and_collect job (enabled)")
-		}
-	}
-
-	// Load persisted job settings from database (overrides config)
+	// Load persisted job settings from database
 	if loadSvc, ok := a.SchedulerService.(interface{ LoadJobSettings() error }); ok {
 		if err := loadSvc.LoadJobSettings(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to load job settings from database")
@@ -392,13 +355,10 @@ func (a *App) initServices() error {
 	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
 	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
-	// PLUS: Default jobs run on schedule (crawl_and_collect, scan_and_summarize)
 	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
 	} else {
-		a.Logger.Info().
-			Int("registered_jobs", jobsRegistered).
-			Msg("Scheduler service started with default jobs")
+		a.Logger.Info().Msg("Scheduler service started")
 	}
 
 	return nil

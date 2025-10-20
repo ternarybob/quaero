@@ -96,48 +96,6 @@ func (s *Server) setupRoutes() *http.ServeMux {
 func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// GET /api/jobs/default
-	if r.Method == "GET" && path == "/api/jobs/default" {
-		s.app.JobHandler.GetDefaultJobsHandler(w, r)
-		return
-	}
-
-	// Handle default job routes
-	if strings.Contains(path, "/default/") {
-		// POST /api/jobs/default/{name}/enable
-		if r.Method == "POST" && strings.HasSuffix(path, "/enable") {
-			s.app.JobHandler.EnableDefaultJobHandler(w, r)
-			return
-		}
-
-		// POST /api/jobs/default/{name}/disable
-		if r.Method == "POST" && strings.HasSuffix(path, "/disable") {
-			s.app.JobHandler.DisableDefaultJobHandler(w, r)
-			return
-		}
-
-		// PUT /api/jobs/default/{name}/schedule
-		if r.Method == "PUT" && strings.HasSuffix(path, "/schedule") {
-			s.app.JobHandler.UpdateDefaultJobScheduleHandler(w, r)
-			return
-		}
-
-		// POST /api/jobs/default/{name}/start
-		if r.Method == "POST" && strings.HasSuffix(path, "/start") {
-			s.app.JobHandler.StartDefaultJobHandler(w, r)
-			return
-		}
-
-		// PUT /api/jobs/default/{name} - Update default job (description, schedule, enabled)
-		if r.Method == "PUT" && !strings.HasSuffix(path, "/enable") && !strings.HasSuffix(path, "/disable") && !strings.HasSuffix(path, "/schedule") && !strings.HasSuffix(path, "/start") {
-			s.app.JobHandler.UpdateDefaultJobHandler(w, r)
-			return
-		}
-
-		http.Error(w, "Not found", http.StatusNotFound)
-		return
-	}
-
 	// POST /api/jobs/create
 	if r.Method == "POST" && len(path) > len("/api/jobs/") {
 		pathSuffix := path[len("/api/jobs/"):]
