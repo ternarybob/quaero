@@ -23,6 +23,18 @@ var stopWords = map[string]bool{
 	"was": true, "will": true, "with": true,
 }
 
+// Optimized markdown syntax remover using strings.Replacer
+var markdownReplacer = strings.NewReplacer(
+	"#", "",
+	"*", "",
+	"_", "",
+	"`", "",
+	"[", "",
+	"]", "",
+	"(", "",
+	")", "",
+)
+
 // SummarizerActionDeps holds dependencies needed by summarizer action handlers.
 type SummarizerActionDeps struct {
 	DocStorage interfaces.DocumentStorage
@@ -30,74 +42,79 @@ type SummarizerActionDeps struct {
 	Logger     arbor.ILogger
 }
 
+// batchConfig holds common configuration for batch processing
+type batchConfig struct {
+	batchSize        int
+	offset           int
+	maxDocuments     int
+	filterSourceType string
+}
+
+// extractBatchConfig extracts common batch processing configuration from step config
+func extractBatchConfig(config map[string]interface{}) batchConfig {
+	return batchConfig{
+		batchSize:        extractInt(config, "batch_size", 100),
+		offset:           extractInt(config, "offset", 0),
+		maxDocuments:     extractInt(config, "max_documents", 0),
+		filterSourceType: extractString(config, "filter_source_type", ""),
+	}
+}
+
+// buildListOptions creates ListOptions from batch config
+func buildListOptions(cfg batchConfig) *interfaces.ListOptions {
+	opts := &interfaces.ListOptions{
+		Limit:    cfg.batchSize,
+		Offset:   cfg.offset,
+		OrderBy:  "updated_at",
+		OrderDir: "desc",
+	}
+	if cfg.filterSourceType != "" {
+		opts.SourceType = cfg.filterSourceType
+	}
+	return opts
+}
+
 // scanAction performs scanning of documents to identify those needing summarization.
-// This action is responsible for SCANNING (identifying documents), not processing them.
 func scanAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
-	// Extract configuration parameters
-	batchSize := extractInt(step.Config, "batch_size", 100)
-	offset := extractInt(step.Config, "offset", 0)
-	maxDocuments := extractInt(step.Config, "max_documents", 0)
-	filterSourceType := extractString(step.Config, "filter_source_type", "")
+	cfg := extractBatchConfig(step.Config)
 	skipWithSummary := extractBool(step.Config, "skip_with_summary", true)
 	skipEmptyContent := extractBool(step.Config, "skip_empty_content", true)
 
 	deps.Logger.Info().
 		Str("action", "scan").
-		Int("batch_size", batchSize).
-		Int("offset", offset).
-		Int("max_documents", maxDocuments).
-		Str("filter_source_type", filterSourceType).
+		Int("batch_size", cfg.batchSize).
+		Int("offset", cfg.offset).
+		Int("max_documents", cfg.maxDocuments).
+		Str("filter_source_type", cfg.filterSourceType).
 		Bool("skip_with_summary", skipWithSummary).
 		Bool("skip_empty_content", skipEmptyContent).
 		Msg("Starting scan action")
 
-	// Initialize tracking
 	processedCount := 0
 	skippedCount := 0
-	var errors []error
 
-	// Batch processing loop
 	for {
-		// Build list options
-		opts := &interfaces.ListOptions{
-			Limit:    batchSize,
-			Offset:   offset,
-			OrderBy:  "updated_at",
-			OrderDir: "desc",
-		}
-
-		// Apply source type filter if specified
-		if filterSourceType != "" {
-			opts.SourceType = filterSourceType
-		}
-
-		// Get batch of documents
+		opts := buildListOptions(cfg)
 		docs, err := deps.DocStorage.ListDocuments(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list documents: %w", err)
 		}
 
-		// Break if no more documents
 		if len(docs) == 0 {
 			break
 		}
 
 		deps.Logger.Debug().
 			Int("batch_size", len(docs)).
-			Int("offset", offset).
+			Int("offset", cfg.offset).
 			Msg("Processing document batch")
 
-		// Process each document in batch
 		for _, doc := range docs {
-			// Skip if already has summary
-			if skipWithSummary {
-				if summary, exists := doc.Metadata["summary"]; exists && summary != "" {
-					skippedCount++
-					continue
-				}
+			// Skip documents based on criteria
+			if skipWithSummary && hasNonEmptyMetadata(doc, "summary") {
+				skippedCount++
+				continue
 			}
-
-			// Skip if no markdown content
 			if skipEmptyContent && doc.ContentMarkdown == "" {
 				skippedCount++
 				continue
@@ -105,7 +122,6 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 
 			processedCount++
 
-			// Log progress every 10 documents
 			if processedCount%10 == 0 {
 				deps.Logger.Info().
 					Int("processed", processedCount).
@@ -114,18 +130,11 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 			}
 		}
 
-		// Increment offset for next batch
-		offset += batchSize
+		cfg.offset += cfg.batchSize
 
-		// Check max documents limit
-		if maxDocuments > 0 && processedCount >= maxDocuments {
+		if cfg.maxDocuments > 0 && processedCount >= cfg.maxDocuments {
 			break
 		}
-	}
-
-	// Return aggregated errors if any
-	if len(errors) > 0 {
-		return fmt.Errorf("scan action completed with %d error(s): %v", len(errors), errors)
 	}
 
 	deps.Logger.Info().
@@ -139,11 +148,7 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 
 // summarizeAction performs summarization on documents using LLM.
 func summarizeAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
-	// Extract configuration parameters
-	batchSize := extractInt(step.Config, "batch_size", 100)
-	offset := extractInt(step.Config, "offset", 0)
-	maxDocuments := extractInt(step.Config, "max_documents", 0)
-	filterSourceType := extractString(step.Config, "filter_source_type", "")
+	cfg := extractBatchConfig(step.Config)
 	skipWithSummary := extractBool(step.Config, "skip_with_summary", true)
 	contentLimit := extractInt(step.Config, "content_limit", 2000)
 	systemPrompt := extractString(step.Config, "system_prompt", "You are a helpful assistant that generates concise summaries. Provide a 2-3 sentence summary of the following content.")
@@ -153,64 +158,32 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 
 	deps.Logger.Info().
 		Str("action", "summarize").
-		Int("batch_size", batchSize).
-		Int("offset", offset).
-		Int("max_documents", maxDocuments).
-		Str("filter_source_type", filterSourceType).
-		Bool("skip_with_summary", skipWithSummary).
+		Int("batch_size", cfg.batchSize).
 		Int("content_limit", contentLimit).
 		Bool("include_keywords", includeKeywords).
 		Bool("include_word_count", includeWordCount).
-		Int("top_n_keywords", topNKeywords).
 		Msg("Starting summarize action")
 
-	// Initialize tracking
 	processedCount := 0
 	skippedCount := 0
-	var errors []error
+	errors := make([]error, 0)
 
-	// Batch processing loop
 	for {
-		// Build list options
-		opts := &interfaces.ListOptions{
-			Limit:    batchSize,
-			Offset:   offset,
-			OrderBy:  "updated_at",
-			OrderDir: "desc",
-		}
-
-		// Apply source type filter if specified
-		if filterSourceType != "" {
-			opts.SourceType = filterSourceType
-		}
-
-		// Get batch of documents
+		opts := buildListOptions(cfg)
 		docs, err := deps.DocStorage.ListDocuments(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list documents: %w", err)
 		}
 
-		// Break if no more documents
 		if len(docs) == 0 {
 			break
 		}
 
-		deps.Logger.Debug().
-			Int("batch_size", len(docs)).
-			Int("offset", offset).
-			Msg("Processing document batch")
-
-		// Process each document
 		for _, doc := range docs {
-			// Skip if already has summary
-			if skipWithSummary {
-				if summary, exists := doc.Metadata["summary"]; exists && summary != "" {
-					skippedCount++
-					continue
-				}
+			if skipWithSummary && hasNonEmptyMetadata(doc, "summary") {
+				skippedCount++
+				continue
 			}
-
-			// Skip if no markdown content
 			if doc.ContentMarkdown == "" {
 				skippedCount++
 				continue
@@ -219,32 +192,16 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 			// Generate summary
 			summary, err := generateSummary(ctx, doc.ContentMarkdown, contentLimit, systemPrompt, deps.LLMService, deps.Logger)
 			if err != nil {
-				deps.Logger.Warn().
-					Err(err).
-					Str("doc_id", doc.ID).
-					Msg("Failed to generate summary, using placeholder")
+				deps.Logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to generate summary")
 				summary = "Summary not available"
 				errors = append(errors, fmt.Errorf("document %s: %w", doc.ID, err))
 
-				// Check error strategy
 				if step.OnError == models.ErrorStrategyFail {
 					return fmt.Errorf("failed to generate summary for document %s: %w", doc.ID, err)
 				}
 			}
 
-			// Calculate word count if enabled
-			var wordCount int
-			if includeWordCount {
-				wordCount = calculateWordCount(doc.ContentMarkdown)
-			}
-
-			// Extract keywords if enabled
-			var keywords []string
-			if includeKeywords {
-				keywords = extractKeywords(doc.ContentMarkdown, topNKeywords, 3, stopWords, deps.Logger)
-			}
-
-			// Initialize metadata if nil
+			// Initialize metadata if needed
 			if doc.Metadata == nil {
 				doc.Metadata = make(map[string]interface{})
 			}
@@ -252,23 +209,19 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 			// Update metadata
 			doc.Metadata["summary"] = summary
 			if includeWordCount {
-				doc.Metadata["word_count"] = wordCount
+				doc.Metadata["word_count"] = calculateWordCount(doc.ContentMarkdown)
 			}
 			if includeKeywords {
-				doc.Metadata["keywords"] = keywords
+				doc.Metadata["keywords"] = extractKeywords(doc.ContentMarkdown, topNKeywords, 3, stopWords)
 			}
 			doc.Metadata["last_summarized"] = time.Now().Format(time.RFC3339)
 
 			// Save document
 			if err := deps.DocStorage.UpdateDocument(doc); err != nil {
 				errMsg := fmt.Errorf("failed to update document %s: %w", doc.ID, err)
-				deps.Logger.Error().
-					Err(err).
-					Str("doc_id", doc.ID).
-					Msg("Failed to update document")
+				deps.Logger.Error().Err(err).Str("doc_id", doc.ID).Msg("Failed to update document")
 				errors = append(errors, errMsg)
 
-				// Check error strategy
 				if step.OnError == models.ErrorStrategyFail {
 					return errMsg
 				}
@@ -276,7 +229,6 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 
 			processedCount++
 
-			// Log progress every 10 documents
 			if processedCount%10 == 0 {
 				deps.Logger.Info().
 					Int("processed", processedCount).
@@ -285,16 +237,13 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 			}
 		}
 
-		// Increment offset for next batch
-		offset += batchSize
+		cfg.offset += cfg.batchSize
 
-		// Check max documents limit
-		if maxDocuments > 0 && processedCount >= maxDocuments {
+		if cfg.maxDocuments > 0 && processedCount >= cfg.maxDocuments {
 			break
 		}
 	}
 
-	// Return aggregated errors if any
 	if len(errors) > 0 {
 		deps.Logger.Warn().
 			Int("error_count", len(errors)).
@@ -314,105 +263,58 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 
 // extractKeywordsAction performs keyword extraction on documents.
 func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
-	// Extract configuration parameters
-	batchSize := extractInt(step.Config, "batch_size", 100)
-	offset := extractInt(step.Config, "offset", 0)
-	maxDocuments := extractInt(step.Config, "max_documents", 0)
-	filterSourceType := extractString(step.Config, "filter_source_type", "")
+	cfg := extractBatchConfig(step.Config)
 	topN := extractInt(step.Config, "top_n", 10)
 	minWordLength := extractInt(step.Config, "min_word_length", 3)
 	skipWithKeywords := extractBool(step.Config, "skip_with_keywords", false)
 
 	deps.Logger.Info().
 		Str("action", "extract_keywords").
-		Int("batch_size", batchSize).
-		Int("offset", offset).
-		Int("max_documents", maxDocuments).
-		Str("filter_source_type", filterSourceType).
+		Int("batch_size", cfg.batchSize).
 		Int("top_n", topN).
 		Int("min_word_length", minWordLength).
 		Bool("skip_with_keywords", skipWithKeywords).
 		Msg("Starting extract keywords action")
 
-	// Initialize tracking
 	processedCount := 0
 	skippedCount := 0
-	var errors []error
+	errors := make([]error, 0)
 
-	// Batch processing loop
 	for {
-		// Build list options
-		opts := &interfaces.ListOptions{
-			Limit:    batchSize,
-			Offset:   offset,
-			OrderBy:  "updated_at",
-			OrderDir: "desc",
-		}
-
-		// Apply source type filter if specified
-		if filterSourceType != "" {
-			opts.SourceType = filterSourceType
-		}
-
-		// Get batch of documents
+		opts := buildListOptions(cfg)
 		docs, err := deps.DocStorage.ListDocuments(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list documents: %w", err)
 		}
 
-		// Break if no more documents
 		if len(docs) == 0 {
 			break
 		}
 
-		deps.Logger.Debug().
-			Int("batch_size", len(docs)).
-			Int("offset", offset).
-			Msg("Processing document batch")
-
-		// Process each document
 		for _, doc := range docs {
-			// Skip if already has keywords
-			if skipWithKeywords {
-				if keywords, exists := doc.Metadata["keywords"]; exists && keywords != nil {
-					if kwSlice, ok := keywords.([]interface{}); ok && len(kwSlice) > 0 {
-						skippedCount++
-						continue
-					} else if kwArr, ok := keywords.([]string); ok && len(kwArr) > 0 {
-						skippedCount++
-						continue
-					}
-				}
+			if skipWithKeywords && hasNonEmptyKeywords(doc) {
+				skippedCount++
+				continue
 			}
-
-			// Skip if no markdown content
 			if doc.ContentMarkdown == "" {
 				skippedCount++
 				continue
 			}
 
-			// Extract keywords
-			keywords := extractKeywords(doc.ContentMarkdown, topN, minWordLength, stopWords, deps.Logger)
+			keywords := extractKeywords(doc.ContentMarkdown, topN, minWordLength, stopWords)
 
-			// Initialize metadata if nil
 			if doc.Metadata == nil {
 				doc.Metadata = make(map[string]interface{})
 			}
 
-			// Update metadata
 			doc.Metadata["keywords"] = keywords
 			doc.Metadata["last_keyword_extraction"] = time.Now().Format(time.RFC3339)
 
-			// Save document
 			if err := deps.DocStorage.UpdateDocument(doc); err != nil {
 				errMsg := fmt.Errorf("failed to update document %s: %w", doc.ID, err)
-				deps.Logger.Error().
-					Err(err).
-					Str("doc_id", doc.ID).
-					Msg("Failed to update document")
+				deps.Logger.Error().Err(err).Str("doc_id", doc.ID).Msg("Failed to update document")
 				errors = append(errors, errMsg)
 
-				// Check error strategy
 				if step.OnError == models.ErrorStrategyFail {
 					return errMsg
 				}
@@ -420,7 +322,6 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 
 			processedCount++
 
-			// Log progress every 10 documents
 			if processedCount%10 == 0 {
 				deps.Logger.Info().
 					Int("processed", processedCount).
@@ -429,16 +330,13 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 			}
 		}
 
-		// Increment offset for next batch
-		offset += batchSize
+		cfg.offset += cfg.batchSize
 
-		// Check max documents limit
-		if maxDocuments > 0 && processedCount >= maxDocuments {
+		if cfg.maxDocuments > 0 && processedCount >= cfg.maxDocuments {
 			break
 		}
 	}
 
-	// Return aggregated errors if any
 	if len(errors) > 0 {
 		deps.Logger.Warn().
 			Int("error_count", len(errors)).
@@ -458,6 +356,41 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 
 // Helper functions
 
+// hasNonEmptyMetadata checks if document has non-empty metadata value for a given key
+func hasNonEmptyMetadata(doc *models.Document, key string) bool {
+	if doc.Metadata == nil {
+		return false
+	}
+	value, exists := doc.Metadata[key]
+	if !exists || value == nil {
+		return false
+	}
+	if str, ok := value.(string); ok {
+		return str != ""
+	}
+	return true
+}
+
+// hasNonEmptyKeywords checks if document has non-empty keywords array
+func hasNonEmptyKeywords(doc *models.Document) bool {
+	if doc.Metadata == nil {
+		return false
+	}
+	keywords, exists := doc.Metadata["keywords"]
+	if !exists || keywords == nil {
+		return false
+	}
+	// Check both []interface{} and []string types
+	switch kw := keywords.(type) {
+	case []interface{}:
+		return len(kw) > 0
+	case []string:
+		return len(kw) > 0
+	default:
+		return false
+	}
+}
+
 // generateSummary generates a summary using the LLM service
 func generateSummary(ctx context.Context, content string, contentLimit int, systemPrompt string, llmService interfaces.LLMService, logger arbor.ILogger) (string, error) {
 	// Limit content to specified character limit
@@ -466,15 +399,11 @@ func generateSummary(ctx context.Context, content string, contentLimit int, syst
 		summaryContent = content[:contentLimit] + "..."
 	}
 
-	// Create chat messages
-	userPrompt := fmt.Sprintf("Summarize this content:\n\n%s", summaryContent)
-
 	messages := []interfaces.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
+		{Role: "user", Content: "Summarize this content:\n\n" + summaryContent},
 	}
 
-	// Generate summary using LLM
 	summary, err := llmService.Chat(ctx, messages)
 	if err != nil {
 		return "", fmt.Errorf("llm chat failed: %w", err)
@@ -484,21 +413,18 @@ func generateSummary(ctx context.Context, content string, contentLimit int, syst
 }
 
 // extractKeywords performs frequency analysis to extract keywords
-func extractKeywords(content string, topN int, minWordLength int, stopWords map[string]bool, logger arbor.ILogger) []string {
-	// Normalize content to lowercase
+func extractKeywords(content string, topN int, minWordLength int, stopWords map[string]bool) []string {
+	// Normalize and clean content
 	content = strings.ToLower(content)
+	content = strings.ReplaceAll(content, "#", " ")
+	content = strings.ReplaceAll(content, "*", " ")
+	content = strings.ReplaceAll(content, "_", " ")
+	content = strings.ReplaceAll(content, "`", " ")
 
-	// Remove common markdown syntax
-	content = strings.ReplaceAll(content, "#", "")
-	content = strings.ReplaceAll(content, "*", "")
-	content = strings.ReplaceAll(content, "_", "")
-	content = strings.ReplaceAll(content, "`", "")
-
-	// Split into words
+	// Split into words and count frequency
 	words := strings.Fields(content)
+	frequency := make(map[string]int, len(words)/2) // Pre-allocate with estimated capacity
 
-	// Count word frequency
-	frequency := make(map[string]int)
 	for _, word := range words {
 		// Clean word (remove punctuation)
 		word = strings.Trim(word, ".,;:!?()[]{}\"'")
@@ -511,13 +437,16 @@ func extractKeywords(content string, topN int, minWordLength int, stopWords map[
 		frequency[word]++
 	}
 
-	// Convert to sorted slice
+	if len(frequency) == 0 {
+		return []string{}
+	}
+
+	// Convert to sorted slice with pre-allocated capacity
 	type wordFreq struct {
 		word  string
 		count int
 	}
-
-	var freqList []wordFreq
+	freqList := make([]wordFreq, 0, len(frequency))
 	for word, count := range frequency {
 		freqList = append(freqList, wordFreq{word, count})
 	}
@@ -528,9 +457,14 @@ func extractKeywords(content string, topN int, minWordLength int, stopWords map[
 	})
 
 	// Extract top N keywords
-	keywords := make([]string, 0, topN)
-	for i := 0; i < len(freqList) && i < topN; i++ {
-		keywords = append(keywords, freqList[i].word)
+	limit := topN
+	if limit > len(freqList) {
+		limit = len(freqList)
+	}
+
+	keywords := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		keywords[i] = freqList[i].word
 	}
 
 	return keywords
@@ -538,19 +472,11 @@ func extractKeywords(content string, topN int, minWordLength int, stopWords map[
 
 // calculateWordCount counts words in markdown content
 func calculateWordCount(content string) int {
-	// Remove markdown syntax for accurate word count
-	content = strings.ReplaceAll(content, "#", "")
-	content = strings.ReplaceAll(content, "*", "")
-	content = strings.ReplaceAll(content, "_", "")
-	content = strings.ReplaceAll(content, "`", "")
-	content = strings.ReplaceAll(content, "[", "")
-	content = strings.ReplaceAll(content, "]", "")
-	content = strings.ReplaceAll(content, "(", "")
-	content = strings.ReplaceAll(content, ")", "")
+	// Remove markdown syntax using optimized replacer
+	content = markdownReplacer.Replace(content)
 
 	// Split into words and count
-	words := strings.Fields(content)
-	return len(words)
+	return len(strings.Fields(content))
 }
 
 // RegisterSummarizerActions registers all summarizer-related actions with the job type registry.
@@ -573,34 +499,28 @@ func RegisterSummarizerActions(registry *jobs.JobTypeRegistry, deps *SummarizerA
 	}
 
 	// Create closure functions that capture dependencies
-	scanActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
-		return scanAction(ctx, step, sources, deps)
+	actions := map[string]func(context.Context, models.JobStep, []*models.SourceConfig) error{
+		"scan": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+			return scanAction(ctx, step, sources, deps)
+		},
+		"summarize": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+			return summarizeAction(ctx, step, sources, deps)
+		},
+		"extract_keywords": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+			return extractKeywordsAction(ctx, step, sources, deps)
+		},
 	}
 
-	summarizeActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
-		return summarizeAction(ctx, step, sources, deps)
-	}
-
-	extractKeywordsActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
-		return extractKeywordsAction(ctx, step, sources, deps)
-	}
-
-	// Register actions
-	if err := registry.RegisterAction(models.JobTypeSummarizer, "scan", scanActionHandler); err != nil {
-		return fmt.Errorf("failed to register scan action: %w", err)
-	}
-
-	if err := registry.RegisterAction(models.JobTypeSummarizer, "summarize", summarizeActionHandler); err != nil {
-		return fmt.Errorf("failed to register summarize action: %w", err)
-	}
-
-	if err := registry.RegisterAction(models.JobTypeSummarizer, "extract_keywords", extractKeywordsActionHandler); err != nil {
-		return fmt.Errorf("failed to register extract_keywords action: %w", err)
+	// Register all actions
+	for name, handler := range actions {
+		if err := registry.RegisterAction(models.JobTypeSummarizer, name, handler); err != nil {
+			return fmt.Errorf("failed to register %s action: %w", name, err)
+		}
 	}
 
 	deps.Logger.Info().
 		Str("job_type", string(models.JobTypeSummarizer)).
-		Int("action_count", 3).
+		Int("action_count", len(actions)).
 		Msg("Summarizer actions registered successfully")
 
 	return nil

@@ -874,10 +874,9 @@ func TestGenerateSummary_LLMError(t *testing.T) {
 }
 
 func TestExtractKeywords_Normal(t *testing.T) {
-	deps, _, _ := createTestSummarizerDeps()
 	content := "technology development automation testing software engineering"
 
-	keywords := extractKeywords(content, 3, 3, stopWords, deps.Logger)
+	keywords := extractKeywords(content, 3, 3, stopWords)
 
 	if len(keywords) == 0 {
 		t.Error("Expected keywords to be extracted")
@@ -889,10 +888,9 @@ func TestExtractKeywords_Normal(t *testing.T) {
 }
 
 func TestExtractKeywords_WithMarkdown(t *testing.T) {
-	deps, _, _ := createTestSummarizerDeps()
 	content := "# Heading\n**bold** _italic_ `code` technology development"
 
-	keywords := extractKeywords(content, 10, 3, stopWords, deps.Logger)
+	keywords := extractKeywords(content, 10, 3, stopWords)
 
 	// Should exclude markdown syntax and extract meaningful words
 	for _, keyword := range keywords {
@@ -903,8 +901,7 @@ func TestExtractKeywords_WithMarkdown(t *testing.T) {
 }
 
 func TestExtractKeywords_EmptyContent(t *testing.T) {
-	deps, _, _ := createTestSummarizerDeps()
-	keywords := extractKeywords("", 10, 3, stopWords, deps.Logger)
+	keywords := extractKeywords("", 10, 3, stopWords)
 
 	if len(keywords) != 0 {
 		t.Errorf("Expected empty keywords for empty content, got %d", len(keywords))
@@ -912,10 +909,9 @@ func TestExtractKeywords_EmptyContent(t *testing.T) {
 }
 
 func TestExtractKeywords_TopNGreaterThanAvailable(t *testing.T) {
-	deps, _, _ := createTestSummarizerDeps()
 	content := "technology development"
 
-	keywords := extractKeywords(content, 100, 3, stopWords, deps.Logger)
+	keywords := extractKeywords(content, 100, 3, stopWords)
 
 	// Should return all available keywords (max 2 in this case)
 	if len(keywords) > 2 {

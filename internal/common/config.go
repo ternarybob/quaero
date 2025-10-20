@@ -141,8 +141,7 @@ type LoggingConfig struct {
 
 // JobsConfig contains configuration for default scheduled jobs
 type JobsConfig struct {
-	CrawlAndCollect  JobConfig `toml:"crawl_and_collect"`
-	ScanAndSummarize JobConfig `toml:"scan_and_summarize"`
+	CrawlAndCollect JobConfig `toml:"crawl_and_collect"`
 }
 
 // JobConfig defines configuration for a single job
@@ -250,12 +249,6 @@ func NewDefaultConfig() *Config {
 				AutoStart:   false,
 				Schedule:    "*/5 * * * *", // Every 5 minutes
 				Description: "Crawl and collect website data, store as markdown",
-			},
-			ScanAndSummarize: JobConfig{
-				Enabled:     true,
-				AutoStart:   false,
-				Schedule:    "*/10 * * * *", // Every 10 minutes
-				Description: "Scan markdown documents and generate summaries with metadata",
 			},
 		},
 		Crawler: CrawlerConfig{
