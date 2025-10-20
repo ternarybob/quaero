@@ -617,7 +617,17 @@ document.addEventListener('alpine:init', () => {
 
         const data = await response.json();
         window.debugLog('JobDefinitionsManagement', 'Job definitions received:', data);
-        this.jobDefinitions = Array.isArray(data) ? data : [];
+
+        // API returns { job_definitions: [...], total_count: N }
+        if (data && data.job_definitions) {
+          this.jobDefinitions = Array.isArray(data.job_definitions) ? data.job_definitions : [];
+        } else if (Array.isArray(data)) {
+          // Fallback for direct array response
+          this.jobDefinitions = data;
+        } else {
+          this.jobDefinitions = [];
+        }
+
         this.loading = false;
       } catch (err) {
         window.debugError('JobDefinitionsManagement', 'Error loading job definitions:', err);
