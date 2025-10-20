@@ -88,10 +88,6 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 		WriteError(w, http.StatusBadRequest, "Job definition type is required")
 		return
 	}
-	if jobDef.Schedule == "" {
-		WriteError(w, http.StatusBadRequest, "Job definition schedule is required")
-		return
-	}
 	if len(jobDef.Steps) == 0 {
 		WriteError(w, http.StatusBadRequest, "Job definition must have at least one step")
 		return

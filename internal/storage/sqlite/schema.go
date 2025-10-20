@@ -128,9 +128,9 @@ CREATE TABLE IF NOT EXISTS sources (
 	name TEXT NOT NULL,
 	type TEXT NOT NULL,
 	base_url TEXT NOT NULL,
+	seed_urls TEXT,
 	enabled INTEGER DEFAULT 1,
 	auth_id TEXT,
-	auth_domain TEXT,
 	crawl_config TEXT NOT NULL,
 	filters TEXT,
 	created_at INTEGER NOT NULL,
@@ -258,6 +258,11 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 8: Add job_definitions table
 	if err := s.migrateAddJobDefinitionsTable(); err != nil {
+		return err
+	}
+
+	// MIGRATION 9: Add seed_urls column to sources table
+	if err := s.migrateAddSourcesSeedURLsColumn(); err != nil {
 		return err
 	}
 
@@ -790,5 +795,50 @@ func (s *SQLiteDB) migrateAddJobDefinitionsTable() error {
 	}
 
 	s.logger.Info().Msg("Migration: job_definitions table and indexes created successfully")
+	return nil
+}
+
+// migrateAddSourcesSeedURLsColumn adds seed_urls column to sources table
+func (s *SQLiteDB) migrateAddSourcesSeedURLsColumn() error {
+	columnsQuery := `PRAGMA table_info(sources)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasSeedURLs := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "seed_urls" {
+			hasSeedURLs = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasSeedURLs {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding seed_urls column to sources")
+
+	// Add the seed_urls column
+	if _, err := s.db.Exec(`ALTER TABLE sources ADD COLUMN seed_urls TEXT`); err != nil {
+		return err
+	}
+
+	// Set default value to empty JSON array for existing rows
+	s.logger.Info().Msg("Setting default seed_urls values for existing sources")
+	if _, err := s.db.Exec(`UPDATE sources SET seed_urls = '[]' WHERE seed_urls IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: seed_urls column added successfully")
 	return nil
 }

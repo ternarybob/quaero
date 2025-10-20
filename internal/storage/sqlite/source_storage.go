@@ -51,8 +51,8 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 	}
 
 	query := `
-		INSERT INTO sources (id, name, type, base_url, seed_urls, enabled, auth_id, auth_domain, crawl_config, filters, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO sources (id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, filters, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -60,7 +60,6 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 			seed_urls = excluded.seed_urls,
 			enabled = excluded.enabled,
 			auth_id = excluded.auth_id,
-			auth_domain = excluded.auth_domain,
 			crawl_config = excluded.crawl_config,
 			filters = excluded.filters,
 			updated_at = excluded.updated_at
@@ -81,7 +80,6 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 		string(seedURLsJSON),
 		enabled,
 		authID,
-		source.AuthDomain,
 		string(crawlConfigJSON),
 		string(filtersJSON),
 		source.CreatedAt.Unix(),
@@ -104,7 +102,7 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 // GetSource retrieves a source by ID
 func (s *SourceStorage) GetSource(ctx context.Context, id string) (*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, auth_domain, crawl_config, filters, created_at, updated_at
+		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE id = ?
 	`
@@ -124,7 +122,7 @@ func (s *SourceStorage) GetSource(ctx context.Context, id string) (*models.Sourc
 // ListSources retrieves all sources ordered by created_at DESC
 func (s *SourceStorage) ListSources(ctx context.Context) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, auth_domain, crawl_config, filters, created_at, updated_at
+		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		ORDER BY created_at DESC
 	`
@@ -163,7 +161,7 @@ func (s *SourceStorage) DeleteSource(ctx context.Context, id string) error {
 // GetSourcesByType retrieves sources filtered by type
 func (s *SourceStorage) GetSourcesByType(ctx context.Context, sourceType string) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, auth_domain, crawl_config, filters, created_at, updated_at
+		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE type = ?
 		ORDER BY created_at DESC
@@ -181,7 +179,7 @@ func (s *SourceStorage) GetSourcesByType(ctx context.Context, sourceType string)
 // GetEnabledSources retrieves only enabled sources
 func (s *SourceStorage) GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, auth_domain, crawl_config, filters, created_at, updated_at
+		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE enabled = 1
 		ORDER BY created_at DESC
@@ -212,7 +210,6 @@ func (s *SourceStorage) scanSource(row *sql.Row) (*models.SourceConfig, error) {
 		&seedURLsJSON,
 		&enabled,
 		&authID,
-		&source.AuthDomain,
 		&crawlConfigJSON,
 		&filtersJSON,
 		&createdAt,
@@ -269,7 +266,6 @@ func (s *SourceStorage) scanSources(rows *sql.Rows) ([]*models.SourceConfig, err
 			&seedURLsJSON,
 			&enabled,
 			&authID,
-			&source.AuthDomain,
 			&crawlConfigJSON,
 			&filtersJSON,
 			&createdAt,

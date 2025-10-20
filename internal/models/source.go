@@ -32,8 +32,7 @@ type SourceConfig struct {
 	BaseURL     string      `json:"base_url"`
 	SeedURLs    []string    `json:"seed_urls,omitempty"` // Optional seed URLs for crawling (one per line). Leave empty for auto-discovery from base URL.
 	Enabled     bool        `json:"enabled"`
-	AuthID      string      `json:"auth_id"`     // Reference to auth_credentials.id
-	AuthDomain  string      `json:"auth_domain"` // Deprecated: kept for backward compatibility
+	AuthID      string      `json:"auth_id"` // Reference to auth_credentials.id
 	CrawlConfig CrawlConfig `json:"crawl_config"`
 	// Filters contains URL pattern filtering criteria for link crawling.
 	// Supported filter keys:

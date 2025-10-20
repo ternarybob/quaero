@@ -74,9 +74,7 @@
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2>
-                                <span id="job-count" class="text-gray">0</span> Job Queue
-                            </h2>
+                            <h2> Job Queue </h2>
                         </section>
                         <section class="navbar-section">
                             <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none;">
@@ -981,7 +979,7 @@
             startAutoRefresh();
 
             // Add ESC key handler for filter modal
-            document.addEventListener('keydown', function(e) {
+            document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') {
                     const modal = document.getElementById('filter-modal');
                     if (modal && modal.classList.contains('active')) {

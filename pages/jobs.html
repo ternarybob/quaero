@@ -300,6 +300,167 @@
             </div>
         </section>
 
+        <!-- ============================= JOB DEFINITIONS PANEL ============================= -->
+
+        <!-- Job Definitions Management Component -->
+        <section style="margin-top: 1.5rem;" x-data="jobDefinitionsManagement">
+            <!-- Job Definitions List -->
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Job Definitions</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <div class="btn-group btn-group-block">
+                                <button class="btn btn-sm btn-primary" @click="openCreateModal($event)">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Add Job Definition</span>
+                                </button>
+                                <button class="btn btn-sm" @click="loadJobDefinitions()" title="Refresh Job Definitions">
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                </button>
+                            </div>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <!-- Job Definitions Table -->
+                    <table class="table striped border">
+                        <thead>
+                            <tr>
+                                <th>NAME</th>
+                                <th>TYPE</th>
+                                <th>DESCRIPTION</th>
+                                <th>SOURCES</th>
+                                <th>SCHEDULE</th>
+                                <th class="text-center">STATUS</th>
+                                <th class="text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-if="jobDefinitions.length === 0">
+                                <tr>
+                                    <td colspan="7" class="text-center">
+                                        No job definitions configured. Click "Add Job Definition" to create one.
+                                    </td>
+                                </tr>
+                            </template>
+                            <template x-for="jobDef in jobDefinitions" :key="jobDef.id">
+                                <tr>
+                                    <td x-text="jobDef.name"></td>
+                                    <td>
+                                        <span class="label label-primary" x-text="jobDef.type"></span>
+                                    </td>
+                                    <td x-text="jobDef.description || '-'"></td>
+                                    <td>
+                                        <span class="label label-secondary" x-text="formatSourcesList(jobDef.sources)"></span>
+                                    </td>
+                                    <td>
+                                        <template x-if="jobDef.schedule">
+                                            <code x-text="jobDef.schedule"></code>
+                                        </template>
+                                        <template x-if="!jobDef.schedule">
+                                            <span class="text-secondary">Manual</span>
+                                        </template>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="label" :class="jobDef.enabled ? 'label-success' : 'label-warning'" x-text="jobDef.enabled ? 'Enabled' : 'Disabled'"></span>
+                                    </td>
+                                    <td class="text-center">
+                                        <button class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)" :disabled="!jobDef.enabled" title="Execute Job" style="margin-right: 0.25rem;">
+                                            <i class="fas fa-play"></i>
+                                        </button>
+                                        <button class="btn btn-sm" @click="editJobDefinition(jobDef, $event)" title="Edit Job Definition" style="margin-right: 0.25rem;">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)" title="Delete Job Definition">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Create/Edit Job Definition Modal -->
+            <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
+                <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
+                <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
+                        <div class="modal-title h5" x-text="showEditModal ? 'Edit Job Definition' : 'Add New Job Definition'"></div>
+                    </div>
+                    <div class="modal-body">
+                        <div class="content">
+                            <div class="form-group">
+                                <label class="form-label">Name</label>
+                                <input class="form-input" type="text" x-model="currentJobDefinition.name" placeholder="My Crawl Job">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Type</label>
+                                <select class="form-select" x-model="currentJobDefinition.type" @change="updateJobTypeSteps(currentJobDefinition.type)">
+                                    <option value="crawler">Crawler</option>
+                                    <option value="summarizer">Summarizer</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <p class="form-input-hint">Job type determines the default actions that will be executed</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Description</label>
+                                <textarea class="form-input" x-model="currentJobDefinition.description" placeholder="Brief description of what this job does" rows="2"></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Sources</label>
+                                <select class="form-select" x-model="currentJobDefinition.sources" multiple size="5">
+                                    <template x-for="source in sources" :key="source.id">
+                                        <option :value="source.id" x-text="`${source.name} (${source.type})`"></option>
+                                    </template>
+                                </select>
+                                <p class="form-input-hint">Select one or more sources for this job (hold Ctrl/Cmd to select multiple)</p>
+                                <template x-if="sources.length === 0">
+                                    <p class="form-input-hint text-warning">
+                                        No sources available. Add sources first.
+                                    </p>
+                                </template>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Schedule (Optional)</label>
+                                <input class="form-input" type="text" x-model="currentJobDefinition.schedule" placeholder="0 */6 * * * (every 6 hours)">
+                                <p class="form-input-hint">Cron expression for scheduled execution. Leave empty for on-demand jobs (manual execution only).</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-checkbox">
+                                    <input type="checkbox" x-model="currentJobDefinition.enabled">
+                                    <i class="form-icon"></i> Enabled
+                                </label>
+                                <p class="form-input-hint">Only enabled jobs can be executed or scheduled</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-checkbox">
+                                    <input type="checkbox" x-model="currentJobDefinition.auto_start">
+                                    <i class="form-icon"></i> Auto Start
+                                </label>
+                                <p class="form-input-hint">Automatically start this job when the application starts</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" @click="saveJobDefinition()">Save</button>
+                        <button class="btn" @click="closeModal()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Service Logs -->
         <section style="margin-top: 1.5rem;">
             {{template "service-logs.html" .}}

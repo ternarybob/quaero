@@ -590,6 +590,258 @@ document.addEventListener('alpine:init', () => {
       return parts.join(', ');
     }
   }));
+
+  // Job Definitions Management Component
+  Alpine.data('jobDefinitionsManagement', () => ({
+    jobDefinitions: [],
+    sources: [],
+    currentJobDefinition: null,
+    showCreateModal: false,
+    showEditModal: false,
+    loading: true,
+    modalTriggerElement: null,
+
+    init() {
+      window.debugLog('JobDefinitionsManagement', 'Initializing component');
+      this.loadJobDefinitions();
+      this.loadSources();
+      this.resetCurrentJobDefinition();
+    },
+
+    async loadJobDefinitions() {
+      window.debugLog('JobDefinitionsManagement', 'Loading job definitions from /api/job-definitions');
+      try {
+        const response = await fetch('/api/job-definitions');
+        window.debugLog('JobDefinitionsManagement', 'Response status:', response.status);
+        if (!response.ok) throw new Error('Failed to fetch job definitions');
+
+        const data = await response.json();
+        window.debugLog('JobDefinitionsManagement', 'Job definitions received:', data);
+        this.jobDefinitions = Array.isArray(data) ? data : [];
+        this.loading = false;
+      } catch (err) {
+        window.debugError('JobDefinitionsManagement', 'Error loading job definitions:', err);
+        this.loading = false;
+        window.showNotification('Failed to load job definitions: ' + err.message, 'error');
+      }
+    },
+
+    async loadSources() {
+      window.debugLog('JobDefinitionsManagement', 'Loading sources from /api/sources');
+      try {
+        const response = await fetch('/api/sources');
+        if (!response.ok) throw new Error('Failed to fetch sources');
+        const data = await response.json();
+        this.sources = Array.isArray(data) ? data : [];
+      } catch (err) {
+        window.debugError('JobDefinitionsManagement', 'Error loading sources:', err);
+        this.sources = [];
+      }
+    },
+
+    resetCurrentJobDefinition() {
+      this.currentJobDefinition = {
+        id: this.generateID(),
+        name: '',
+        type: 'crawler',
+        description: '',
+        sources: [],
+        steps: this.getDefaultSteps('crawler'),
+        schedule: '',  // Optional: empty for on-demand jobs
+        enabled: true,
+        auto_start: false,
+        config: {}
+      };
+    },
+
+    generateID() {
+      // Generate a random ID (UUID-like format)
+      return 'job_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    },
+
+    getDefaultSteps(jobType) {
+      // Return default steps based on job type
+      switch (jobType) {
+        case 'crawler':
+          return [
+            {
+              name: 'crawl_source',
+              action: 'crawl',
+              config: {},
+              on_error: 'fail'
+            },
+            {
+              name: 'collect_documents',
+              action: 'collect',
+              config: {},
+              on_error: 'continue'
+            }
+          ];
+        case 'summarizer':
+          return [
+            {
+              name: 'summarize_documents',
+              action: 'summarize',
+              config: {},
+              on_error: 'fail'
+            }
+          ];
+        case 'custom':
+          return [
+            {
+              name: 'custom_action',
+              action: 'execute',
+              config: {},
+              on_error: 'fail'
+            }
+          ];
+        default:
+          return [];
+      }
+    },
+
+    updateJobTypeSteps(jobType) {
+      // Update steps when job type changes
+      this.currentJobDefinition.steps = this.getDefaultSteps(jobType);
+    },
+
+    openCreateModal(event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
+      this.resetCurrentJobDefinition();
+      this.showCreateModal = true;
+      document.body.classList.add('modal-open');
+      this.loadSources();
+
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
+    },
+
+    editJobDefinition(jobDef, event) {
+      this.modalTriggerElement = event?.target || document.activeElement;
+      this.currentJobDefinition = JSON.parse(JSON.stringify(jobDef));
+      this.showEditModal = true;
+      document.body.classList.add('modal-open');
+      this.loadSources();
+
+      this.$nextTick(() => {
+        const modal = document.querySelector('.modal.active .modal-container');
+        if (modal) {
+          const firstFocusable = modal.querySelector('input, select, textarea, button');
+          if (firstFocusable) firstFocusable.focus();
+        }
+      });
+    },
+
+    async saveJobDefinition() {
+      window.debugLog('JobDefinitionsManagement', 'Saving job definition:', this.currentJobDefinition);
+      try {
+        const isEdit = this.showEditModal;
+        const url = isEdit ? `/api/job-definitions/${this.currentJobDefinition.id}` : '/api/job-definitions';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const jobDefToSave = JSON.parse(JSON.stringify(this.currentJobDefinition));
+
+        window.debugLog('JobDefinitionsManagement', `${method} ${url}`, 'Job definition:', jobDefToSave);
+        const response = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(jobDefToSave)
+        });
+
+        window.debugLog('JobDefinitionsManagement', 'Save response status:', response.status);
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to save job definition');
+        }
+
+        window.showNotification(`Job definition ${isEdit ? 'updated' : 'created'} successfully`, 'success');
+        await this.loadJobDefinitions();
+        this.closeModal();
+      } catch (err) {
+        window.debugError('JobDefinitionsManagement', 'Error saving job definition:', err);
+        window.showNotification('Failed to save job definition: ' + err.message, 'error');
+      }
+    },
+
+    async deleteJobDefinition(jobDefId) {
+      if (!confirm('Are you sure you want to delete this job definition?')) {
+        return;
+      }
+
+      window.debugLog('JobDefinitionsManagement', 'Deleting job definition:', jobDefId);
+      try {
+        const response = await fetch(`/api/job-definitions/${jobDefId}`, {
+          method: 'DELETE'
+        });
+
+        window.debugLog('JobDefinitionsManagement', 'Delete response status:', response.status);
+        if (!response.ok) {
+          throw new Error('Failed to delete job definition');
+        }
+
+        window.showNotification('Job definition deleted successfully', 'success');
+        await this.loadJobDefinitions();
+      } catch (err) {
+        window.debugError('JobDefinitionsManagement', 'Error deleting job definition:', err);
+        window.showNotification('Failed to delete job definition: ' + err.message, 'error');
+      }
+    },
+
+    async executeJobDefinition(jobDefId, jobDefName) {
+      if (!confirm(`Are you sure you want to execute "${jobDefName}"?`)) {
+        return;
+      }
+
+      window.debugLog('JobDefinitionsManagement', 'Executing job definition:', jobDefId);
+      try {
+        const response = await fetch(`/api/job-definitions/${jobDefId}/execute`, {
+          method: 'POST'
+        });
+
+        window.debugLog('JobDefinitionsManagement', 'Execute response status:', response.status);
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to execute job definition');
+        }
+
+        const result = await response.json();
+        window.showNotification(`Job started successfully! Job ID: ${result.job_id}`, 'success');
+      } catch (err) {
+        window.debugError('JobDefinitionsManagement', 'Error executing job definition:', err);
+        window.showNotification('Failed to execute job: ' + err.message, 'error');
+      }
+    },
+
+    closeModal() {
+      this.showCreateModal = false;
+      this.showEditModal = false;
+      document.body.classList.remove('modal-open');
+      this.resetCurrentJobDefinition();
+
+      if (this.modalTriggerElement) {
+        this.$nextTick(() => {
+          this.modalTriggerElement.focus();
+          this.modalTriggerElement = null;
+        });
+      }
+    },
+
+    formatDate(dateStr) {
+      if (!dateStr) return 'N/A';
+      const date = new Date(dateStr);
+      return date.toLocaleString();
+    },
+
+    formatSourcesList(sources) {
+      if (!sources || sources.length === 0) return 'None';
+      return `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
+    }
+  }));
 });
 
 // Global notification function using custom toast system

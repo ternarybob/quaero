@@ -70,8 +70,7 @@ type JobDefinition struct {
 }
 
 // Validate validates the job definition
-// Note: Schedule is always required regardless of Enabled status.
-// This ensures job definitions have a valid schedule configuration even when disabled.
+// Note: Schedule is optional. When empty, the job can only be triggered manually.
 func (j *JobDefinition) Validate() error {
 	// Validate required fields
 	if j.ID == "" {
@@ -82,9 +81,6 @@ func (j *JobDefinition) Validate() error {
 	}
 	if j.Type == "" {
 		return errors.New("job definition type is required")
-	}
-	if j.Schedule == "" {
-		return errors.New("job definition schedule is required")
 	}
 
 	// Validate JobType is one of the allowed constants
@@ -104,10 +100,12 @@ func (j *JobDefinition) Validate() error {
 		}
 	}
 
-	// Validate cron schedule format
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	if _, err := parser.Parse(j.Schedule); err != nil {
-		return fmt.Errorf("invalid cron schedule '%s': %w", j.Schedule, err)
+	// Validate cron schedule format (only if provided)
+	if j.Schedule != "" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if _, err := parser.Parse(j.Schedule); err != nil {
+			return fmt.Errorf("invalid cron schedule '%s': %w", j.Schedule, err)
+		}
 	}
 
 	return nil
