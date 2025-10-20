@@ -24,6 +24,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	"github.com/ternarybob/quaero/internal/services/jobs"
+	"github.com/ternarybob/quaero/internal/services/jobs/actions"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -55,6 +56,7 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution
+	JobRegistry *jobs.JobTypeRegistry
 	JobExecutor *jobs.JobExecutor
 
 	// Specialized transformers
@@ -297,13 +299,25 @@ func (a *App) initServices() error {
 	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB), a.CrawlerService, a.StorageManager.JobStorage())
 
 	// Initialize job executor for job definition execution
-	jobRegistry := jobs.NewJobTypeRegistry(a.Logger)
-	a.JobExecutor, err = jobs.NewJobExecutor(jobRegistry, a.SourceService, a.EventService, a.Logger)
+	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
+	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize job executor: %w", err)
 	}
 	a.Logger.Info().Msg("Job executor initialized")
-	// TODO: Register action handlers in Phase 3 (crawler actions) and Phase 4 (summarizer actions)
+
+	// Register crawler actions with the job type registry
+	crawlerDeps := &actions.CrawlerActionDeps{
+		CrawlerService: a.CrawlerService,
+		AuthStorage:    a.StorageManager.AuthStorage(),
+		EventService:   a.EventService,
+		Config:         a.Config,
+		Logger:         a.Logger,
+	}
+	if err = actions.RegisterCrawlerActions(a.JobRegistry, crawlerDeps); err != nil {
+		return fmt.Errorf("failed to register crawler actions: %w", err)
+	}
+	a.Logger.Info().Msg("Crawler actions registered with job type registry")
 
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0
