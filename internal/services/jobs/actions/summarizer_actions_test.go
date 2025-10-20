@@ -1167,9 +1167,9 @@ func TestSummarizeAction_NegativeTopNKeywords(t *testing.T) {
 
 func TestExtractKeywordsAction_NegativeValues(t *testing.T) {
 	tests := []struct {
-		name          string
-		config        map[string]interface{}
-		expectError   bool
+		name             string
+		config           map[string]interface{}
+		expectError      bool
 		validateKeywords func(*testing.T, []string)
 	}{
 		{

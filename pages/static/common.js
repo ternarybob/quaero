@@ -661,18 +661,27 @@ document.addEventListener('alpine:init', () => {
 
     getDefaultSteps(jobType) {
       // Return default steps based on job type
+      // Actions must match registered actions in backend:
+      // - crawler: crawl, transform, embed
+      // - summarizer: scan, summarize, extract_keywords
       switch (jobType) {
         case 'crawler':
           return [
             {
-              name: 'crawl_source',
+              name: 'crawl_sources',
               action: 'crawl',
               config: {},
               on_error: 'fail'
             },
             {
-              name: 'collect_documents',
-              action: 'collect',
+              name: 'transform_to_documents',
+              action: 'transform',
+              config: {},
+              on_error: 'fail'
+            },
+            {
+              name: 'generate_embeddings',
+              action: 'embed',
               config: {},
               on_error: 'continue'
             }
@@ -680,17 +689,23 @@ document.addEventListener('alpine:init', () => {
         case 'summarizer':
           return [
             {
-              name: 'summarize_documents',
-              action: 'summarize',
+              name: 'scan_documents',
+              action: 'scan',
               config: {},
               on_error: 'fail'
+            },
+            {
+              name: 'summarize_content',
+              action: 'summarize',
+              config: {},
+              on_error: 'continue'
             }
           ];
         case 'custom':
           return [
             {
-              name: 'custom_action',
-              action: 'execute',
+              name: 'custom_step',
+              action: 'crawl',
               config: {},
               on_error: 'fail'
             }
