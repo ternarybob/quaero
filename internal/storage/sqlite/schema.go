@@ -224,6 +224,11 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 6: Add name and description columns to crawl_jobs
+	if err := s.migrateAddJobNameDescriptionColumns(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -614,5 +619,50 @@ func (s *SQLiteDB) migrateAddJobLogsColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: logs column added successfully")
+	return nil
+}
+
+// migrateAddJobNameDescriptionColumns adds name and description columns to crawl_jobs table
+func (s *SQLiteDB) migrateAddJobNameDescriptionColumns() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasName := false
+	hasDescription := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		switch name {
+		case "name":
+			hasName = true
+		case "description":
+			hasDescription = true
+		}
+	}
+
+	// Add missing columns
+	if !hasName {
+		s.logger.Info().Msg("Running migration: Adding name column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN name TEXT DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+
+	if !hasDescription {
+		s.logger.Info().Msg("Running migration: Adding description column to crawl_jobs")
+		if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN description TEXT DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+
+	s.logger.Info().Msg("Migration: name and description columns added successfully")
 	return nil
 }

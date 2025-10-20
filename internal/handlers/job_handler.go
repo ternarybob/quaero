@@ -763,3 +763,127 @@ func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *h
 		"message":  "Schedule updated successfully",
 	})
 }
+
+// StartDefaultJobHandler manually triggers a default job
+// POST /api/jobs/default/{name}/start
+func (h *JobHandler) StartDefaultJobHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract job name from path: /api/jobs/default/{name}/start
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Job name is required", http.StatusBadRequest)
+		return
+	}
+	jobName := pathParts[3]
+
+	// Check if job exists and get its status
+	status, err := h.schedulerService.GetJobStatus(jobName)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Job not found")
+		http.Error(w, fmt.Sprintf("Job '%s' not found", jobName), http.StatusNotFound)
+		return
+	}
+
+	// Check if job is already running
+	if status.IsRunning {
+		h.logger.Warn().Str("job_name", jobName).Msg("Cannot start job that is already running")
+		http.Error(w, "Job is already running", http.StatusBadRequest)
+		return
+	}
+
+	// For now, we'll use TriggerCollectionNow which triggers the scheduler
+	// In a more advanced implementation, we could add a method to trigger specific jobs
+	if err := h.schedulerService.TriggerCollectionNow(); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to trigger job")
+		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("job_name", jobName).Msg("Job triggered manually")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name": jobName,
+		"message":  "Job started successfully",
+	})
+}
+
+// UpdateJobHandler updates job metadata like name and description
+// PUT /api/jobs/{id}
+func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		Name        *string `json:"name,omitempty"`
+		Description *string `json:"description,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to parse request body")
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate at least one field is provided
+	if req.Name == nil && req.Description == nil {
+		http.Error(w, "At least one field (name or description) must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// Get existing job from storage
+	jobInterface, err := h.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job from storage")
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	job, ok := jobInterface.(*crawler.CrawlJob)
+	if !ok {
+		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type")
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
+	}
+
+	// Update fields if provided
+	if req.Name != nil {
+		job.Name = *req.Name
+	}
+	if req.Description != nil {
+		job.Description = *req.Description
+	}
+
+	// Update job in storage
+	if err := h.jobStorage.UpdateJob(ctx, job); err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update job")
+		http.Error(w, "Failed to update job", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().
+		Str("job_id", jobID).
+		Str("name", job.Name).
+		Str("description", job.Description).
+		Msg("Job updated successfully")
+
+	// Return updated job (masked)
+	masked := job.MaskSensitiveData()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job":     masked,
+		"message": "Job updated successfully",
+	})
+}

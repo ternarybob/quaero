@@ -25,14 +25,15 @@ package models
 //   - "debug": Detailed diagnostic information (link discovery, configuration)
 //
 // Usage Example:
-//   logEntry := models.JobLogEntry{
-//       Timestamp: time.Now().Format("15:04:05"),
-//       Level:     "info",
-//       Message:   "Job started: source=jira/issues, seeds=5, max_depth=3",
-//   }
-//   if err := jobStorage.AppendJobLog(ctx, jobID, logEntry); err != nil {
-//       logger.Warn().Err(err).Msg("Failed to append log")
-//   }
+//
+//	logEntry := models.JobLogEntry{
+//	    Timestamp: time.Now().Format("15:04:05"),
+//	    Level:     "info",
+//	    Message:   "Job started: source=jira/issues, seeds=5, max_depth=3",
+//	}
+//	if err := jobStorage.AppendJobLog(ctx, jobID, logEntry); err != nil {
+//	    logger.Warn().Err(err).Msg("Failed to append log")
+//	}
 type JobLogEntry struct {
 	Timestamp string `json:"timestamp"` // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
 	Level     string `json:"level"`     // Log level: "info", "warn", "error", "debug"

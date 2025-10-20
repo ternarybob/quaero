@@ -6,6 +6,7 @@ import "time"
 type JobStatus struct {
 	Name        string
 	Enabled     bool
+	AutoStart   bool
 	Schedule    string
 	Description string
 	LastRun     *time.Time
@@ -29,7 +30,7 @@ type SchedulerService interface {
 	IsRunning() bool
 
 	// RegisterJob registers a new job with the scheduler
-	RegisterJob(name string, schedule string, description string, handler func() error) error
+	RegisterJob(name string, schedule string, description string, autoStart bool, handler func() error) error
 
 	// EnableJob enables a disabled job
 	EnableJob(name string) error

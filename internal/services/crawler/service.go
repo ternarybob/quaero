@@ -678,9 +678,40 @@ func (s *Service) startWorkers(jobID string, config CrawlConfig) {
 
 // workerLoop processes URLs from the queue
 func (s *Service) workerLoop(jobID string, config CrawlConfig) {
-	defer s.wg.Done()
+	workerStartTime := time.Now()
+	urlsProcessed := 0
+
+	// Log worker start
+	s.logger.Debug().
+		Str("job_id", jobID).
+		Int("concurrency", config.Concurrency).
+		Msg("Worker started")
+
+	// Defer worker exit logging
+	defer func() {
+		s.wg.Done()
+		duration := time.Since(workerStartTime)
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Int("urls_processed", urlsProcessed).
+			Dur("duration", duration).
+			Msg("Worker exiting")
+	}()
+
+	// Periodic diagnostics ticker (every 30 seconds)
+	diagnosticsTicker := time.NewTicker(30 * time.Second)
+	defer diagnosticsTicker.Stop()
 
 	for {
+		// Check diagnostics ticker
+		select {
+		case <-diagnosticsTicker.C:
+			// Log queue diagnostics periodically
+			s.logQueueDiagnostics(jobID)
+		default:
+			// Continue with normal processing
+		}
+
 		// Check if job is still active
 		s.jobsMu.RLock()
 		job, exists := s.activeJobs[jobID]
@@ -713,13 +744,36 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		}
 
 		// Pop URL from queue (blocking with timeout)
+		queueLen := s.queue.Len()
 		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 		item, err := s.queue.Pop(ctx)
 		cancel()
 
 		if err != nil {
 			if err == context.DeadlineExceeded {
-				// No items available, check if job is complete
+				// Distinguish between timeout and empty queue
+				s.jobsMu.RLock()
+				pendingURLs := job.Progress.PendingURLs
+				s.jobsMu.RUnlock()
+
+				// Check if queue is actually empty and no pending URLs
+				if queueLen == 0 && pendingURLs == 0 {
+					s.logger.Debug().
+						Str("job_id", jobID).
+						Msg("Queue empty and no pending URLs - worker exiting gracefully")
+					return
+				}
+
+				// Queue has items but timeout occurred - log warning and continue with backoff
+				if queueLen > 0 {
+					s.logger.Warn().
+						Str("job_id", jobID).
+						Int("queue_len", queueLen).
+						Int("pending_urls", pendingURLs).
+						Msg("Queue has items but Pop() timed out - possible queue health issue")
+				}
+
+				// Continue to retry
 				continue
 			}
 			s.logger.Debug().Err(err).Msg("Error popping from queue")
@@ -781,7 +835,25 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		// Store result
 		s.jobsMu.Lock()
 		s.jobResults[jobID] = append(s.jobResults[jobID], result)
+		totalResults := len(s.jobResults[jobID])
 		s.jobsMu.Unlock()
+
+		// Increment URLs processed counter
+		urlsProcessed++
+
+		// Log result storage (sampled: every 10th result to avoid spam)
+		if totalResults%10 == 0 {
+			bodySize := len(result.Body)
+			s.logger.Debug().
+				Str("job_id", jobID).
+				Str("url", result.URL).
+				Int("status_code", result.StatusCode).
+				Int("body_size", bodySize).
+				Str("error", result.Error).
+				Int("total_results", totalResults).
+				Dur("duration", result.Duration).
+				Msg("Result stored")
+		}
 
 		// Update progress
 		if result.Error == "" {
@@ -871,6 +943,22 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlResult {
 	startTime := time.Now()
 
+	// Extract job ID for logging
+	jobID := ""
+	if item.Metadata != nil {
+		if jid, ok := item.Metadata["job_id"].(string); ok {
+			jobID = jid
+		}
+	}
+
+	// Log request start
+	s.logger.Debug().
+		Str("job_id", jobID).
+		Str("url", item.URL).
+		Int("depth", item.Depth).
+		Int("attempt", item.Attempts+1).
+		Msg("Starting request with retry policy")
+
 	statusCode, err := s.retryPolicy.ExecuteWithRetry(s.ctx, s.logger, func() (int, error) {
 		return s.makeRequest(item, config)
 	})
@@ -902,12 +990,34 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 		result.Error = err.Error()
 		result.StatusCode = statusCode
 		s.logger.Debug().
+			Str("job_id", jobID).
 			Str("url", item.URL).
 			Int("status_code", statusCode).
+			Dur("duration", duration).
 			Err(err).
 			Msg("Request failed after retries")
 	} else {
 		result.StatusCode = statusCode
+
+		// Validate response body - warn if empty but status is 200
+		bodySize := len(result.Body)
+		if statusCode == 200 && bodySize == 0 {
+			s.logger.Warn().
+				Str("job_id", jobID).
+				Str("url", item.URL).
+				Int("status_code", statusCode).
+				Dur("duration", duration).
+				Msg("Response body is empty despite HTTP 200 status")
+		}
+
+		// Log successful request completion
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("url", item.URL).
+			Int("status_code", statusCode).
+			Int("body_size", bodySize).
+			Dur("duration", duration).
+			Msg("Request completed successfully")
 	}
 
 	return result
@@ -1228,14 +1338,37 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 		allLinks = s.extractLinksFromHTML(html, parent.URL)
 	}
 
-	// Log raw link count and warn on zero links
-	s.logger.Debug().Str("url", parent.URL).Int("raw_links", len(allLinks)).Msg("Raw links extracted before filtering")
+	// Apply URL pattern filtering using source filters
+	links, filteredCount := s.applyURLPatternFilters(allLinks, parent, config)
+
+	// Log stepped filtering process as requested
+	s.logger.Info().
+		Str("url", parent.URL).
+		Int("found_links", len(allLinks)).
+		Int("filtered_links", filteredCount).
+		Int("following_links", len(links)).
+		Msg("Found X links, filtered Y, following Z")
+
+	// Persist stepped filtering to database
+	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
+		filterMsg := fmt.Sprintf("Found %d links, filtered %d, following %d", len(allLinks), filteredCount, len(links))
+		s.logToDatabase(jobID, "info", filterMsg)
+	}
+
+	// Warn on zero links discovered
 	if len(allLinks) == 0 {
 		s.logger.Warn().Str("url", parent.URL).Msg("Zero links discovered - check page structure or link extraction logic")
-
-		// Persist zero links warning to database - critical for debugging
 		if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
 			s.logToDatabase(jobID, "warn", fmt.Sprintf("Zero links discovered from %s - check page structure", parent.URL))
+		}
+		return links
+	}
+
+	// Warn if all links were filtered out
+	if len(links) == 0 {
+		s.logger.Warn().Str("url", parent.URL).Int("total_found", len(allLinks)).Msg("All discovered links were filtered out - check filter patterns")
+		if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("All %d discovered links from %s were filtered out - check filter patterns", len(allLinks), parent.URL))
 		}
 	}
 
@@ -2079,6 +2212,100 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 	return newJobID, nil
 }
 
+// applyURLPatternFilters applies generic URL pattern filtering from source filters
+// Returns filtered links and count of links that were filtered out
+func (s *Service) applyURLPatternFilters(allLinks []string, parent *URLQueueItem, config CrawlConfig) ([]string, int) {
+	// Get source config from parent metadata to access filters
+	var sourceConfig *models.SourceConfig
+	if configSnapshot, ok := parent.Metadata["source_config"].(string); ok {
+		// Deserialize source config snapshot
+		var config models.SourceConfig
+		if err := json.Unmarshal([]byte(configSnapshot), &config); err == nil {
+			sourceConfig = &config
+		}
+	}
+
+	if sourceConfig == nil || sourceConfig.Filters == nil {
+		// No filters configured - return all links
+		return allLinks, 0
+	}
+
+	// Extract include and exclude patterns from source filters
+	var includePatterns, excludePatterns []string
+
+	if includeRaw, exists := sourceConfig.Filters["include_patterns"]; exists {
+		switch patterns := includeRaw.(type) {
+		case []string:
+			includePatterns = patterns
+		case []interface{}:
+			for _, p := range patterns {
+				if str, ok := p.(string); ok {
+					includePatterns = append(includePatterns, str)
+				}
+			}
+		case string:
+			includePatterns = []string{patterns}
+		}
+	}
+
+	if excludeRaw, exists := sourceConfig.Filters["exclude_patterns"]; exists {
+		switch patterns := excludeRaw.(type) {
+		case []string:
+			excludePatterns = patterns
+		case []interface{}:
+			for _, p := range patterns {
+				if str, ok := p.(string); ok {
+					excludePatterns = append(excludePatterns, str)
+				}
+			}
+		case string:
+			excludePatterns = []string{patterns}
+		}
+	}
+
+	if len(includePatterns) == 0 && len(excludePatterns) == 0 {
+		// No patterns configured - return all links
+		return allLinks, 0
+	}
+
+	// Apply pattern filtering
+	filtered := make([]string, 0, len(allLinks))
+	filteredCount := 0
+
+linkLoop:
+	for _, link := range allLinks {
+		// Check exclude patterns first
+		for _, pattern := range excludePatterns {
+			if strings.Contains(strings.ToLower(link), strings.ToLower(pattern)) {
+				s.logger.Debug().Str("link", link).Str("pattern", pattern).Msg("Link excluded by pattern")
+				filteredCount++
+				continue linkLoop
+			}
+		}
+
+		// Check include patterns (if any)
+		if len(includePatterns) > 0 {
+			included := false
+			for _, pattern := range includePatterns {
+				if strings.Contains(strings.ToLower(link), strings.ToLower(pattern)) {
+					included = true
+					break
+				}
+			}
+			if !included {
+				s.logger.Debug().Str("link", link).Msg("Link not included by any pattern")
+				filteredCount++
+				continue linkLoop
+			}
+		}
+
+		// Link passed all filters
+		filtered = append(filtered, link)
+	}
+
+	return filtered, filteredCount
+}
+
 // WaitForJob blocks until a job completes or context is cancelled
 //
 // IMPORTANT: This function expects in-process waiting where the job is running in the same
@@ -2230,4 +2457,72 @@ func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, e
 	client.Jar.SetCookies(baseURL, httpCookies)
 
 	return client, nil
+}
+
+// logQueueDiagnostics logs current queue state and job progress for debugging
+// This method helps diagnose queue health issues, stalled jobs, and worker activity
+func (s *Service) logQueueDiagnostics(jobID string) {
+	// Get current queue length
+	queueLen := s.queue.Len()
+
+	// Get job progress with lock
+	s.jobsMu.RLock()
+	job, exists := s.activeJobs[jobID]
+	if !exists {
+		s.jobsMu.RUnlock()
+		return
+	}
+
+	pendingURLs := job.Progress.PendingURLs
+	completedURLs := job.Progress.CompletedURLs
+	failedURLs := job.Progress.FailedURLs
+	totalURLs := job.Progress.TotalURLs
+	s.jobsMu.RUnlock()
+
+	// Calculate queue health indicators
+	queueHealthy := true
+	var healthIssues []string
+
+	// Issue 1: Queue has items but pending count is zero
+	if queueLen > 0 && pendingURLs == 0 {
+		queueHealthy = false
+		healthIssues = append(healthIssues, "queue_has_items_but_pending_zero")
+	}
+
+	// Issue 2: Pending count is non-zero but queue is empty
+	if queueLen == 0 && pendingURLs > 0 {
+		queueHealthy = false
+		healthIssues = append(healthIssues, "pending_nonzero_but_queue_empty")
+	}
+
+	// Issue 3: Total processed (completed + failed) doesn't match expected
+	totalProcessed := completedURLs + failedURLs
+	expectedProcessed := totalURLs - pendingURLs
+	if totalProcessed != expectedProcessed {
+		queueHealthy = false
+		healthIssues = append(healthIssues, fmt.Sprintf("count_mismatch_processed=%d_expected=%d", totalProcessed, expectedProcessed))
+	}
+
+	// Log queue diagnostics with health status
+	logEvent := s.logger.Info().
+		Str("job_id", jobID).
+		Int("queue_len", queueLen).
+		Int("pending_urls", pendingURLs).
+		Int("completed_urls", completedURLs).
+		Int("failed_urls", failedURLs).
+		Int("total_urls", totalURLs).
+		Str("queue_healthy", fmt.Sprintf("%v", queueHealthy))
+
+	if !queueHealthy {
+		logEvent = logEvent.Strs("health_issues", healthIssues)
+	}
+
+	logEvent.Msg("Queue diagnostics")
+
+	// Persist diagnostics to database if health issues detected
+	if !queueHealthy && s.jobStorage != nil {
+		diagMsg := fmt.Sprintf("Queue health issues detected: queue_len=%d, pending=%d, completed=%d, failed=%d, issues=%v",
+			queueLen, pendingURLs, completedURLs, failedURLs, healthIssues)
+		s.logToDatabase(jobID, "warn", diagMsg)
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // URLQueue implements a priority queue with deduplication using Go's heap and sync primitives
@@ -83,22 +84,15 @@ func (q *URLQueue) Push(item *URLQueueItem) bool {
 }
 
 // Pop removes and returns the highest priority URL (blocking with context support)
+// CRITICAL FIX: Uses timeout-based wait instead of goroutines to prevent goroutine leaks
 func (q *URLQueue) Pop(ctx context.Context) (*URLQueueItem, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// Context cancellation check
-	done := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		q.mu.Lock()
-		q.cond.Broadcast()
-		q.mu.Unlock()
-		close(done)
-	}()
+	const maxWaitTimeout = 10 * time.Second // Maximum wait time before checking context again
 
 	for {
-		// Check context cancellation
+		// Check context cancellation first
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -116,8 +110,19 @@ func (q *URLQueue) Pop(ctx context.Context) (*URLQueueItem, error) {
 			return item, nil
 		}
 
-		// Wait for signal
+		// No items available - wait with timeout to prevent indefinite blocking
+		// Set up timeout to broadcast and wake up after maxWaitTimeout
+		timer := time.AfterFunc(maxWaitTimeout, func() {
+			q.cond.Broadcast()
+		})
+
+		// Wait for signal (will be woken by Push(), Close(), or timer)
 		q.cond.Wait()
+
+		// Stop timer if it hasn't fired yet
+		timer.Stop()
+
+		// Loop will re-check context, closed status, and items
 	}
 }
 

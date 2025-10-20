@@ -148,6 +148,7 @@ type JobsConfig struct {
 // JobConfig defines configuration for a single job
 type JobConfig struct {
 	Enabled     bool   `toml:"enabled"`
+	AutoStart   bool   `toml:"auto_start"`
 	Schedule    string `toml:"schedule"`
 	Description string `toml:"description"`
 }
@@ -246,11 +247,13 @@ func NewDefaultConfig() *Config {
 		Jobs: JobsConfig{
 			CrawlAndCollect: JobConfig{
 				Enabled:     true,
+				AutoStart:   false,
 				Schedule:    "*/5 * * * *", // Every 5 minutes
 				Description: "Crawl and collect website data, store as markdown",
 			},
 			ScanAndSummarize: JobConfig{
 				Enabled:     true,
+				AutoStart:   false,
 				Schedule:    "*/10 * * * *", // Every 10 minutes
 				Description: "Scan markdown documents and generate summaries with metadata",
 			},

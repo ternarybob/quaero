@@ -67,6 +67,7 @@ type DocumentStorage interface {
 type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
+	UpdateJob(ctx context.Context, job interface{}) error
 	ListJobs(ctx context.Context, opts *ListOptions) ([]interface{}, error)
 	GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error

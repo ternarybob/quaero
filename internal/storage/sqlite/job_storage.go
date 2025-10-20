@@ -116,10 +116,12 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 
 	query := `
 		INSERT INTO crawl_jobs (
-			id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+			id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 			status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			description = excluded.description,
 			status = excluded.status,
 			progress_json = excluded.progress_json,
 			started_at = excluded.started_at,
@@ -135,6 +137,8 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 
 	_, err = s.db.db.ExecContext(ctx, query,
 		crawlJob.ID,
+		crawlJob.Name,
+		crawlJob.Description,
 		crawlJob.SourceType,
 		crawlJob.EntityType,
 		configJSON,
@@ -157,6 +161,32 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 		return fmt.Errorf("failed to save job: %w", err)
 	}
 
+	// Validate result count matches progress for completed jobs
+	if crawlJob.Status == crawler.JobStatusCompleted || crawlJob.Status == crawler.JobStatusFailed || crawlJob.Status == crawler.JobStatusCancelled {
+		expectedResultCount := crawlJob.Progress.CompletedURLs
+		expectedFailedCount := crawlJob.Progress.FailedURLs
+
+		if crawlJob.ResultCount != expectedResultCount {
+			s.logger.Warn().
+				Str("job_id", crawlJob.ID).
+				Str("status", string(crawlJob.Status)).
+				Int("stored_result_count", crawlJob.ResultCount).
+				Int("progress_completed_urls", expectedResultCount).
+				Int("mismatch", crawlJob.ResultCount-expectedResultCount).
+				Msg("Result count mismatch detected")
+		}
+
+		if crawlJob.FailedCount != expectedFailedCount {
+			s.logger.Warn().
+				Str("job_id", crawlJob.ID).
+				Str("status", string(crawlJob.Status)).
+				Int("stored_failed_count", crawlJob.FailedCount).
+				Int("progress_failed_urls", expectedFailedCount).
+				Int("mismatch", crawlJob.FailedCount-expectedFailedCount).
+				Msg("Failed count mismatch detected")
+		}
+	}
+
 	s.logger.Debug().Str("job_id", crawlJob.ID).Str("status", string(crawlJob.Status)).Msg("Job saved")
 	return nil
 }
@@ -164,7 +194,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 // GetJob retrieves a job by ID
 func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	query := `
-		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE id = ?
@@ -177,7 +207,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 // ListJobs lists jobs with pagination and filters
 func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]interface{}, error) {
 	query := `
-		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE 1=1
@@ -259,7 +289,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 // GetJobsByStatus filters jobs by status
 func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error) {
 	query := `
-		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = ?
@@ -336,7 +366,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 // GetStaleJobs returns jobs with stale heartbeats (older than threshold)
 func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
 	query := `
-		SELECT id, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = 'running'
@@ -430,18 +460,18 @@ func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.
 // scanJob scans a single row into CrawlJob
 func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	var (
-		id, sourceType, entityType, configJSON, status, progressJSON string
-		sourceConfigSnapshot, authSnapshot                           sql.NullString
-		refreshSource                                                int
-		errorMsg                                                     sql.NullString
-		createdAt                                                    int64
-		startedAt, completedAt                                       sql.NullInt64
-		resultCount, failedCount                                     int
-		seedURLsJSON                                                 sql.NullString
+		id, name, description, sourceType, entityType, configJSON, status, progressJSON string
+		sourceConfigSnapshot, authSnapshot                                              sql.NullString
+		refreshSource                                                                   int
+		errorMsg                                                                        sql.NullString
+		createdAt                                                                       int64
+		startedAt, completedAt                                                          sql.NullInt64
+		resultCount, failedCount                                                        int
+		seedURLsJSON                                                                    sql.NullString
 	)
 
 	err := row.Scan(
-		&id, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+		&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 		&status, &progressJSON, &createdAt, &startedAt, &completedAt, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 	)
 
@@ -466,6 +496,8 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	// Build CrawlJob
 	job := &crawler.CrawlJob{
 		ID:                   id,
+		Name:                 name,
+		Description:          description,
 		SourceType:           sourceType,
 		EntityType:           entityType,
 		Config:               *config,
@@ -517,18 +549,18 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 
 	for rows.Next() {
 		var (
-			id, sourceType, entityType, configJSON, status, progressJSON string
-			sourceConfigSnapshot, authSnapshot                           sql.NullString
-			refreshSource                                                int
-			errorMsg                                                     sql.NullString
-			createdAt                                                    int64
-			startedAt, completedAt                                       sql.NullInt64
-			resultCount, failedCount                                     int
-			seedURLsJSON                                                 sql.NullString
+			id, name, description, sourceType, entityType, configJSON, status, progressJSON string
+			sourceConfigSnapshot, authSnapshot                                              sql.NullString
+			refreshSource                                                                   int
+			errorMsg                                                                        sql.NullString
+			createdAt                                                                       int64
+			startedAt, completedAt                                                          sql.NullInt64
+			resultCount, failedCount                                                        int
+			seedURLsJSON                                                                    sql.NullString
 		)
 
 		err := rows.Scan(
-			&id, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+			&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 			&status, &progressJSON, &createdAt, &startedAt, &completedAt, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 		)
 
@@ -552,6 +584,8 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 		// Build CrawlJob
 		job := &crawler.CrawlJob{
 			ID:                   id,
+			Name:                 name,
+			Description:          description,
 			SourceType:           sourceType,
 			EntityType:           entityType,
 			Config:               *config,
@@ -600,6 +634,32 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 	return jobs, rows.Err()
 }
 
+// UpdateJob updates a job's metadata fields like name and description
+func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	crawlJob, ok := job.(*crawler.CrawlJob)
+	if !ok {
+		return fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+	}
+
+	query := `
+		UPDATE crawl_jobs
+		SET name = ?, description = ?
+		WHERE id = ?
+	`
+
+	_, err := s.db.db.ExecContext(ctx, query, crawlJob.Name, crawlJob.Description, crawlJob.ID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", crawlJob.ID).Msg("Failed to update job")
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+
+	s.logger.Debug().Str("job_id", crawlJob.ID).Str("name", crawlJob.Name).Str("description", crawlJob.Description).Msg("Job updated")
+	return nil
+}
+
 // AppendJobLog appends a single log entry to the job's logs array with automatic truncation.
 //
 // Truncation Mechanism:
@@ -626,15 +686,16 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 //   - The 100-entry limit keeps JSON payload size manageable (~10-20KB typical)
 //
 // Usage Example:
-//   logEntry := models.JobLogEntry{
-//       Timestamp: time.Now().Format("15:04:05"),
-//       Level:     "info",
-//       Message:   "Job started: source=jira/issues, seeds=5",
-//   }
-//   if err := jobStorage.AppendJobLog(ctx, jobID, logEntry); err != nil {
-//       logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append log")
-//       // Non-fatal: log the error but continue job execution
-//   }
+//
+//	logEntry := models.JobLogEntry{
+//	    Timestamp: time.Now().Format("15:04:05"),
+//	    Level:     "info",
+//	    Message:   "Job started: source=jira/issues, seeds=5",
+//	}
+//	if err := jobStorage.AppendJobLog(ctx, jobID, logEntry); err != nil {
+//	    logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append log")
+//	    // Non-fatal: log the error but continue job execution
+//	}
 func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

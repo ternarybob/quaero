@@ -104,14 +104,26 @@ log_queries = false # Don't log query text (PII protection)
 # Minimum interval is 5 minutes.
 # Schedule uses cron format: minute hour day month weekday
 # Jobs run independently but not concurrently (mutex-protected).
+#
+# The `auto_start` option controls whether jobs execute immediately when the service starts.
+# Set `auto_start = true` to run jobs on startup (useful for initial data collection).
+# Set `auto_start = false` (default) to only run jobs on schedule or manual trigger.
+# Auto-start is independent of the cron schedule.
+#
+# Examples:
+# To collect data immediately on startup, set `auto_start = true` for crawl_and_collect.
+# Jobs with `auto_start = false` will wait for their first scheduled run.
+# Manual job triggering via API/UI works regardless of auto_start setting.
 
 [jobs.crawl_and_collect]
 enabled = true
+auto_start = false  # Execute immediately on service startup (default: false)
 schedule = "*/5 * * * *"  # Every 5 minutes
 description = "Crawl and collect website data, store as markdown"
 
 [jobs.scan_and_summarize]
 enabled = true
+auto_start = false  # Execute immediately on service startup (default: false)
 schedule = "*/10 * * * *"  # Every 10 minutes
 description = "Scan markdown documents and generate summaries with metadata"
 

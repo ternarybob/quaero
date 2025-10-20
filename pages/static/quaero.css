@@ -646,6 +646,11 @@ body.modal-open {
 /* 10. UTILITY CLASSES
    ========================================================================== */
 
+/* Display Utilities */
+.hide {
+    display: none !important;
+}
+
 /* Color Utilities */
 .text-success {
     color: var(--color-success);

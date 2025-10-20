@@ -117,6 +117,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// POST /api/jobs/default/{name}/start
+		if r.Method == "POST" && strings.HasSuffix(path, "/start") {
+			s.app.JobHandler.StartDefaultJobHandler(w, r)
+			return
+		}
+
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
@@ -165,6 +171,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		// Otherwise it's /api/jobs/{id}
 		s.app.JobHandler.GetJobHandler(w, r)
+		return
+	}
+
+	// PUT /api/jobs/{id}
+	if r.Method == "PUT" && len(path) > len("/api/jobs/") {
+		s.app.JobHandler.UpdateJobHandler(w, r)
 		return
 	}
 

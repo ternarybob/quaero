@@ -32,6 +32,8 @@ const (
 // Configuration is snapshot at job creation time for self-contained, re-runnable jobs
 type CrawlJob struct {
 	ID                   string        `json:"id"`
+	Name                 string        `json:"name"`                   // User-friendly name for the job
+	Description          string        `json:"description"`            // User-provided description
 	SourceType           string        `json:"source_type"`            // "jira", "confluence", "github"
 	EntityType           string        `json:"entity_type"`            // "projects", "issues", "spaces", "pages"
 	Config               CrawlConfig   `json:"config"`                 // Snapshot of configuration at job creation time

@@ -74,6 +74,7 @@
                                     <th>NAME</th>
                                     <th>TYPE</th>
                                     <th>BASE URL</th>
+                                    <th>FILTERS</th>
                                     <th>AUTHENTICATION</th>
                                     <th class="text-center">STATUS</th>
                                     <th>CREATED</th>
@@ -83,7 +84,7 @@
                             <tbody>
                                 <template x-if="sources.length === 0">
                                     <tr>
-                                        <td colspan="7" class="text-center">
+                                        <td colspan="8" class="text-center">
                                             No sources configured. Click "Add Source" to get started.
                                         </td>
                                     </tr>
@@ -98,6 +99,14 @@
                                                 }" x-text="source.type.toUpperCase()"></span>
                                         </td>
                                         <td x-text="source.base_url"></td>
+                                        <td>
+                                            <template x-if="formatFilterDisplay(source.filters, source.type)">
+                                                <span class="label label-secondary" x-text="formatFilterDisplay(source.filters, source.type)"></span>
+                                            </template>
+                                            <template x-if="!formatFilterDisplay(source.filters, source.type)">
+                                                <span class="text-secondary">All</span>
+                                            </template>
+                                        </td>
                                         <td>
                                             <template x-if="source.auth_id">
                                                 <span class="label label-success">Configured</span>
@@ -177,6 +186,29 @@
                                     <input type="checkbox" x-model="currentSource.enabled">
                                     <i class="form-icon"></i> Enabled
                                 </label>
+                            </div>
+
+                            <!-- Filters Section -->
+                            <div class="form-group">
+                                <label class="form-label">URL Pattern Filters</label>
+                                <p class="form-input-hint">Filter links by URL patterns. Only links containing these patterns will be followed during crawling.</p>
+                                
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Include Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.include_patterns" placeholder="browse, projects, spaces">
+                                    <p class="form-input-hint">URL patterns to include (comma-separated). Example: "browse, project" will only follow links containing these words.</p>
+                                </div>
+                                
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Exclude Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.exclude_patterns" placeholder="logout, admin, settings">
+                                    <p class="form-input-hint">URL patterns to exclude (comma-separated). These links will be ignored even if they match include patterns.</p>
+                                </div>
+                                
+                                <p class="form-input-hint" style="margin-top: 1rem;"><strong>Examples:</strong><br>
+                                • Jira: "browse" to crawl project pages<br>
+                                • Confluence: "spaces" to crawl space pages<br>
+                                • GitHub: "issues, pulls" to crawl issues and pull requests</p>
                             </div>
 
                             <div class="form-group">

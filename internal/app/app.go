@@ -309,6 +309,7 @@ func (a *App) initServices() error {
 		"crawl_and_collect",
 		a.Config.Jobs.CrawlAndCollect.Schedule,
 		a.Config.Jobs.CrawlAndCollect.Description,
+		a.Config.Jobs.CrawlAndCollect.AutoStart,
 		crawlCollectJob.Execute,
 	); err != nil {
 		a.Logger.Error().Err(err).Msg("Failed to register crawl_and_collect job")
@@ -324,6 +325,7 @@ func (a *App) initServices() error {
 		} else {
 			a.Logger.Info().
 				Str("schedule", a.Config.Jobs.CrawlAndCollect.Schedule).
+				Str("auto_start", fmt.Sprintf("%v", a.Config.Jobs.CrawlAndCollect.AutoStart)).
 				Msg("Registered crawl_and_collect job (enabled)")
 		}
 	}
@@ -338,6 +340,7 @@ func (a *App) initServices() error {
 		"scan_and_summarize",
 		a.Config.Jobs.ScanAndSummarize.Schedule,
 		a.Config.Jobs.ScanAndSummarize.Description,
+		a.Config.Jobs.ScanAndSummarize.AutoStart,
 		scanSummarizeJob.Execute,
 	); err != nil {
 		a.Logger.Error().Err(err).Msg("Failed to register scan_and_summarize job")
@@ -353,6 +356,7 @@ func (a *App) initServices() error {
 		} else {
 			a.Logger.Info().
 				Str("schedule", a.Config.Jobs.ScanAndSummarize.Schedule).
+				Str("auto_start", fmt.Sprintf("%v", a.Config.Jobs.ScanAndSummarize.AutoStart)).
 				Msg("Registered scan_and_summarize job (enabled)")
 		}
 	}

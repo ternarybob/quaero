@@ -21,6 +21,7 @@ type jobEntry struct {
 	description string
 	handler     func() error
 	enabled     bool
+	autoStart   bool
 	cronID      cron.EntryID
 	lastRun     *time.Time
 	nextRun     *time.Time
@@ -109,6 +110,9 @@ func (s *Service) Start(cronExpr string) error {
 
 	s.logger.Info().Msg("Scheduler started")
 
+	// Execute auto-start jobs in background
+	go s.executeAutoStartJobs()
+
 	return nil
 }
 
@@ -169,6 +173,38 @@ func (s *Service) Stop() error {
 	return nil
 }
 
+// executeAutoStartJobs executes all jobs with autoStart=true immediately after scheduler starts
+func (s *Service) executeAutoStartJobs() {
+	// Wait a brief moment for scheduler to be fully started
+	time.Sleep(100 * time.Millisecond)
+
+	// Collect auto-start job names while holding lock
+	s.jobMu.Lock()
+	autoStartJobs := make([]string, 0)
+	for name, entry := range s.jobs {
+		if entry.enabled && entry.autoStart {
+			autoStartJobs = append(autoStartJobs, name)
+		}
+	}
+	s.jobMu.Unlock()
+
+	// Execute auto-start jobs (without holding lock)
+	for _, jobName := range autoStartJobs {
+		s.logger.Info().
+			Str("job_name", jobName).
+			Msg("Executing auto-start job")
+		go s.executeJob(jobName)
+	}
+
+	if len(autoStartJobs) > 0 {
+		s.logger.Info().
+			Int("count", len(autoStartJobs)).
+			Msg("Auto-start jobs initiated")
+	} else {
+		s.logger.Debug().Msg("No auto-start jobs configured")
+	}
+}
+
 // TriggerCollectionNow manually triggers collection
 func (s *Service) TriggerCollectionNow() error {
 	s.logger.Info().Msg("Manual collection trigger requested")
@@ -188,7 +224,7 @@ func (s *Service) IsRunning() bool {
 }
 
 // RegisterJob registers a new job with the scheduler
-func (s *Service) RegisterJob(name string, schedule string, description string, handler func() error) error {
+func (s *Service) RegisterJob(name string, schedule string, description string, autoStart bool, handler func() error) error {
 	// Validate schedule before attempting to register
 	if err := common.ValidateJobSchedule(schedule); err != nil {
 		return fmt.Errorf("invalid schedule: %w", err)
@@ -208,6 +244,7 @@ func (s *Service) RegisterJob(name string, schedule string, description string, 
 		description: description,
 		handler:     handler,
 		enabled:     true,
+		autoStart:   autoStart,
 	}
 
 	// Add to cron scheduler with wrapper
@@ -384,6 +421,7 @@ func (s *Service) GetJobStatus(name string) (*interfaces.JobStatus, error) {
 	return &interfaces.JobStatus{
 		Name:        entry.name,
 		Enabled:     entry.enabled,
+		AutoStart:   entry.autoStart,
 		Schedule:    entry.schedule,
 		Description: entry.description,
 		LastRun:     entry.lastRun,
