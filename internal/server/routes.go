@@ -76,6 +76,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/jobs", s.app.JobHandler.ListJobsHandler)
 	mux.HandleFunc("/api/jobs/", s.handleJobRoutes) // Handles /api/jobs/{id} and subpaths
 
+	// API routes - Job Definitions (configurable job management)
+	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)   // GET (list), POST (create)
+	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes) // GET/PUT/DELETE /{id}, POST /{id}/execute
+
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
@@ -251,6 +255,41 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Not found", http.StatusNotFound)
+}
+
+// handleJobDefinitionsRoute routes /api/job-definitions requests (list and create)
+func (s *Server) handleJobDefinitionsRoute(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		s.app.JobDefinitionHandler.ListJobDefinitionsHandler(w, r)
+	case "POST":
+		s.app.JobDefinitionHandler.CreateJobDefinitionHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleJobDefinitionRoutes routes /api/job-definitions/{id} requests
+func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Check for /execute suffix
+	if strings.HasSuffix(path, "/execute") && r.Method == "POST" {
+		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)
+		return
+	}
+
+	// Standard CRUD operations
+	switch r.Method {
+	case "GET":
+		s.app.JobDefinitionHandler.GetJobDefinitionHandler(w, r)
+	case "PUT":
+		s.app.JobDefinitionHandler.UpdateJobDefinitionHandler(w, r)
+	case "DELETE":
+		s.app.JobDefinitionHandler.DeleteJobDefinitionHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup
