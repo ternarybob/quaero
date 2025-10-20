@@ -40,8 +40,8 @@ func (m *mockDocumentStorage) UpdateDocument(doc *models.Document) error {
 }
 
 // Implement remaining DocumentStorage interface methods as no-ops
-func (m *mockDocumentStorage) SaveDocument(doc *models.Document) error        { return nil }
-func (m *mockDocumentStorage) SaveDocuments(docs []*models.Document) error    { return nil }
+func (m *mockDocumentStorage) SaveDocument(doc *models.Document) error         { return nil }
+func (m *mockDocumentStorage) SaveDocuments(docs []*models.Document) error     { return nil }
 func (m *mockDocumentStorage) GetDocument(id string) (*models.Document, error) { return nil, nil }
 func (m *mockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
 	return nil, nil
@@ -56,12 +56,12 @@ func (m *mockDocumentStorage) SearchByIdentifier(identifier string, excludeSourc
 func (m *mockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
 	return nil, nil
 }
-func (m *mockDocumentStorage) CountDocuments() (int, error)                       { return 0, nil }
+func (m *mockDocumentStorage) CountDocuments() (int, error)                          { return 0, nil }
 func (m *mockDocumentStorage) CountDocumentsBySource(sourceType string) (int, error) { return 0, nil }
-func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error)           { return nil, nil }
-func (m *mockDocumentStorage) ClearAll() error                                    { return nil }
-func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error { return nil }
-func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) { return nil, nil }
+func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error)              { return nil, nil }
+func (m *mockDocumentStorage) ClearAll() error                                       { return nil }
+func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error     { return nil }
+func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error)    { return nil, nil }
 
 type mockLLMService struct {
 	chatFunc      func(context.Context, []interfaces.Message) (string, error)

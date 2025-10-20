@@ -16,9 +16,9 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
-	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))
-	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("sources.html", "sources"))
-	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))
+	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("jobs.html", "auth"))       // Combined Jobs page
+	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("jobs.html", "sources")) // Combined Jobs page
+	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Combined Jobs page
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
 	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))

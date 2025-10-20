@@ -15,20 +15,378 @@
         <!-- Page Title -->
         <div class="page-title">
             <h1>Job Management</h1>
-            <p>Create and configure job definitions for Jira and Confluence data collection</p>
-            <div class="text-small text-gray" style="margin-top: 0.5rem;">
-                <i class="fa-solid fa-lightbulb"></i>
-                To monitor running jobs and view execution details, visit the <a href="/queue">Queue</a> page
-            </div>
+            <p>Manage authentication, sources, and job definitions for data collection</p>
         </div>
 
-        <!-- Jobs -->
-        <section>
+        <!-- ============================= AUTHENTICATION PANEL ============================= -->
+        <section id="authentication-panel">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Authentication Management</h2>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Manage authentication credentials for data sources</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Instructions Card -->
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h3>How to Add Authentication</h3>
+                </div>
+                <div class="card-body">
+                    <ol>
+                        <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
+                        <li>Log in to your account</li>
+                        <li>Click the Quaero Chrome extension icon</li>
+                        <li>The extension will automatically capture and store your authentication</li>
+                        <li>Authentication for the same site will be automatically updated when recaptured</li>
+                    </ol>
+                    <div class="toast toast-primary" style="margin-top: 1rem;">
+                        <strong>Note:</strong> Each site domain can have only one set of credentials.
+                        Capturing new authentication for an existing site will override the previous credentials.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Authentication List -->
+        <section style="margin-top: 1.5rem;" x-data="authPage()">
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2>Jobs</h2>
+                            <h3>Stored Authentications</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" @click="loadAuthentications" title="Refresh Authentications">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <!-- Loading State -->
+                    <div x-show="loading" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading authentications...</p>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div x-show="!loading && authentications.length === 0" class="text-center p-5">
+                        <span class="icon text-muted">
+                            <i class="fas fa-lock fa-3x"></i>
+                        </span>
+                        <p class="mt-3 text-muted">No authentication credentials stored</p>
+                        <p class="text-muted">Use the Chrome extension to capture authentication from your sites</p>
+                    </div>
+
+                    <!-- Authentication Table -->
+                    <div x-show="!loading && authentications.length > 0">
+                        <table class="table striped border">
+                            <thead>
+                                <tr>
+                                    <th>Site</th>
+                                    <th>Name</th>
+                                    <th>Service Type</th>
+                                    <th>Last Updated</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="auth in authentications" :key="auth.id">
+                                    <tr>
+                                        <td>
+                                            <strong x-text="auth.site_domain"></strong>
+                                            <br>
+                                            <small class="text-muted" x-text="auth.base_url"></small>
+                                        </td>
+                                        <td x-text="auth.name || '-'"></td>
+                                        <td>
+                                            <span class="label label-primary" x-text="auth.service_type.toUpperCase()"></span>
+                                        </td>
+                                        <td>
+                                            <small x-text="formatDate(auth.updated_at)"></small>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-error" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
+                                                <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= SOURCES PANEL ============================= -->
+        <section id="sources-panel" style="margin-top: 2.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Source Management</h2>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Configure data sources for collection and indexing</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Application Status -->
+        <section style="margin-top: 1.5rem;" x-data="appStatus">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Application Status</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <span :class="'label ' + getStatusColor(state)" x-text="state"></span>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <p><strong>Current State:</strong> <span x-text="state"></span></p>
+                    <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
+                    <div x-show="Object.keys(metadata).length > 0">
+                        <p><strong>Details:</strong></p>
+                        <pre class="code-block" x-text="JSON.stringify(metadata, null, 2)"></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Sources Management Component (wrap card and modal in shared scope) -->
+        <section style="margin-top: 1.5rem;" x-data="sourceManagement">
+            <!-- Sources List -->
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>
+                                <span x-text="sources.length" style="color: var(--text-secondary); margin-right: 0.5rem;"></span>Sources
+                            </h3>
+                        </section>
+                        <section class="navbar-section">
+                            <div class="btn-group btn-group-block">
+                                <button class="btn btn-sm btn-primary" @click="openCreateModal($event)">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Add Source</span>
+                                </button>
+                                <button class="btn btn-sm" @click="loadSources()" title="Refresh Sources">
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                </button>
+                            </div>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <!-- Sources Table -->
+                    <table class="table striped border">
+                        <thead>
+                            <tr>
+                                <th>NAME</th>
+                                <th>TYPE</th>
+                                <th>BASE URL</th>
+                                <th>FILTERS</th>
+                                <th>AUTHENTICATION</th>
+                                <th class="text-center">STATUS</th>
+                                <th>CREATED</th>
+                                <th class="text-center">ACTIONS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-if="sources.length === 0">
+                                <tr>
+                                    <td colspan="8" class="text-center">
+                                        No sources configured. Click "Add Source" to get started.
+                                    </td>
+                                </tr>
+                            </template>
+                            <template x-for="source in sources" :key="source.id">
+                                <tr>
+                                    <td x-text="source.name"></td>
+                                    <td>
+                                        <span class="label" :class="{
+                                                'label-primary': ['jira', 'confluence'].includes(source.type),
+                                                'label-secondary': source.type === 'github'
+                                            }" x-text="source.type.toUpperCase()"></span>
+                                    </td>
+                                    <td x-text="source.base_url"></td>
+                                    <td>
+                                        <template x-if="formatFilterDisplay(source.filters, source.type)">
+                                            <span class="label label-secondary" x-text="formatFilterDisplay(source.filters, source.type)"></span>
+                                        </template>
+                                        <template x-if="!formatFilterDisplay(source.filters, source.type)">
+                                            <span class="text-secondary">All</span>
+                                        </template>
+                                    </td>
+                                    <td>
+                                        <template x-if="source.auth_id">
+                                            <span class="label label-success">Configured</span>
+                                        </template>
+                                        <template x-if="!source.auth_id">
+                                            <span class="label">None</span>
+                                        </template>
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="label" :class="source.enabled ? 'label-success' : 'label-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
+                                    </td>
+                                    <td x-text="formatDate(source.created_at)"></td>
+                                    <td class="text-center">
+                                        <button class="btn btn-sm" @click="editSource(source, $event)" title="Edit Source" style="margin-right: 0.25rem;">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-error" @click="deleteSource(source.id)" title="Delete Source">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Create/Edit Source Modal -->
+            <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
+                <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
+                <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
+                        <div class="modal-title h5" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></div>
+                    </div>
+                    <div class="modal-body">
+                        <div class="content">
+                            <div class="form-group">
+                                <label class="form-label">Name</label>
+                                <input class="form-input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Type</label>
+                                <select class="form-select" x-model="currentSource.type">
+                                    <option value="jira">Jira</option>
+                                    <option value="confluence">Confluence</option>
+                                    <option value="github">GitHub</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Base URL</label>
+                                <input class="form-input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Authentication</label>
+                                <select class="form-select" x-model="currentSource.auth_id">
+                                    <option value="">No Authentication</option>
+                                    <template x-for="auth in authentications" :key="auth.id">
+                                        <option :value="auth.id" x-text="`${auth.name} (${auth.site_domain})`"></option>
+                                    </template>
+                                </select>
+                                <p class="form-input-hint">Select authentication credentials for this source</p>
+                                <template x-if="authentications.length === 0">
+                                    <p class="form-input-hint text-warning">
+                                        No authentication configured. Scroll up to add authentication first.
+                                    </p>
+                                </template>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-checkbox">
+                                    <input type="checkbox" x-model="currentSource.enabled">
+                                    <i class="form-icon"></i> Enabled
+                                </label>
+                            </div>
+
+                            <!-- Filters Section -->
+                            <div class="form-group">
+                                <label class="form-label">URL Pattern Filters</label>
+                                <p class="form-input-hint">Filter links by URL patterns. Only links containing these patterns will be followed during crawling.</p>
+
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Include Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.include_patterns" placeholder="browse, projects, spaces">
+                                    <p class="form-input-hint">URL patterns to include (comma-separated). Example: "browse, project" will only follow links containing these words.</p>
+                                </div>
+
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Exclude Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.exclude_patterns" placeholder="logout, admin, settings">
+                                    <p class="form-input-hint">URL patterns to exclude (comma-separated). These links will be ignored even if they match include patterns.</p>
+                                </div>
+
+                                <p class="form-input-hint" style="margin-top: 1rem;"><strong>Examples:</strong><br>
+                                • Jira: "browse" to crawl project pages<br>
+                                • Confluence: "spaces" to crawl space pages<br>
+                                • GitHub: "issues, pulls" to crawl issues and pull requests</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Crawl Configuration</label>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Max Depth</label>
+                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
+                                </div>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Concurrency</label>
+                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
+                                </div>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Detail Level</label>
+                                    <select class="form-select" x-model="currentSource.crawl_config.detail_level">
+                                        <option value="minimal">Minimal</option>
+                                        <option value="basic">Basic</option>
+                                        <option value="full">Full</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
+                                        <i class="form-icon"></i> Follow Links
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" @click="saveSource()">Save</button>
+                        <button class="btn" @click="closeModal()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= JOBS PANEL ============================= -->
+        <section id="jobs-panel" style="margin-top: 2.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Job Definitions</h2>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Create and configure job definitions for data collection</p>
+                    <div class="text-small text-gray" style="margin-top: 0.5rem;">
+                        <i class="fa-solid fa-lightbulb"></i>
+                        To monitor running jobs and view execution details, visit the <a href="/queue">Queue</a> page
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Jobs -->
+        <section style="margin-top: 1.5rem;">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Jobs</h3>
                         </section>
                         <section class="navbar-section">
                             <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
@@ -67,7 +425,7 @@
         </section>
 
         <!-- Service Logs -->
-        <section>
+        <section style="margin-top: 1.5rem;">
             {{template "service-logs.html" .}}
         </section>
 
@@ -187,7 +545,80 @@
     </div>
 
     <script>
-        // ===== DEFAULT JOBS MANAGEMENT =====
+        // ============================= AUTH PAGE COMPONENT =============================
+        function authPage() {
+            return {
+                authentications: [],
+                loading: true,
+                deleting: null,
+
+                init() {
+                    this.loadAuthentications();
+                },
+
+                async loadAuthentications() {
+                    this.loading = true;
+                    try {
+                        const response = await fetch('/api/auth/list');
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        const data = await response.json();
+                        this.authentications = Array.isArray(data) ? data : [];
+                    } catch (error) {
+                        console.error('Failed to load authentications:', error);
+                        window.showNotification('Failed to load authentications', 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async deleteAuthentication(id, siteDomain) {
+                    if (!confirm(`Are you sure you want to delete authentication for ${siteDomain}?\n\nAny sources using this authentication will need to be updated.`)) {
+                        return;
+                    }
+
+                    this.deleting = id;
+                    try {
+                        const response = await fetch(`/api/auth/${id}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+
+                        // Remove from local array
+                        this.authentications = this.authentications.filter(auth => auth.id !== id);
+                        window.showNotification('Authentication deleted successfully', 'success');
+                    } catch (error) {
+                        console.error('Failed to delete authentication:', error);
+                        window.showNotification('Failed to delete authentication', 'error');
+                    } finally {
+                        this.deleting = null;
+                    }
+                },
+
+                formatDate(timestamp) {
+                    if (!timestamp) return '-';
+                    const date = new Date(timestamp * 1000);
+                    const now = new Date();
+                    const diffMs = now - date;
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const diffHours = Math.floor(diffMs / 3600000);
+                    const diffDays = Math.floor(diffMs / 86400000);
+
+                    if (diffMins < 1) return 'Just now';
+                    if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+                    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+                    if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+
+                    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                }
+            }
+        }
+
+        // ============================= DEFAULT JOBS MANAGEMENT =============================
 
         // Load default jobs from API
         async function loadDefaultJobs() {
@@ -340,7 +771,7 @@
             }
         }
 
-        // ===== EDIT DEFAULT JOB MODAL FUNCTIONS =====
+        // ============================= EDIT DEFAULT JOB MODAL FUNCTIONS =============================
 
         let editingDefaultJobName = null;
         let editDefaultModalTriggerElement = null;
@@ -464,7 +895,7 @@
             }
         }
 
-        // ===== CREATE JOB MODAL FUNCTIONS =====
+        // ============================= CREATE JOB MODAL FUNCTIONS =============================
 
         let modalTriggerElement = null;
 
@@ -611,7 +1042,7 @@
             }
         }
 
-        // ===== PAGE INITIALIZATION =====
+        // ============================= PAGE INITIALIZATION =============================
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function () {
@@ -679,6 +1110,46 @@
                                 firstFocusable.focus();
                                 e.preventDefault();
                             }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Plain JavaScript ESC key handler for source modal (backup for Alpine directive)
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.querySelector('.modal.active');
+                if (modal) {
+                    // Trigger Alpine's closeModal method if available
+                    const sourceSection = document.querySelector('[x-data="sourceManagement"]');
+                    if (sourceSection && sourceSection.__x) {
+                        sourceSection.__x.$data.closeModal();
+                    }
+                }
+            }
+        });
+
+        // Focus trap for source modal
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Tab') {
+                const modal = document.querySelector('.modal.active .modal-container');
+                if (modal) {
+                    const focusableElements = modal.querySelectorAll(
+                        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
+                    );
+                    const firstFocusable = focusableElements[0];
+                    const lastFocusable = focusableElements[focusableElements.length - 1];
+
+                    if (e.shiftKey) {
+                        if (document.activeElement === firstFocusable) {
+                            lastFocusable.focus();
+                            e.preventDefault();
+                        }
+                    } else {
+                        if (document.activeElement === lastFocusable) {
+                            firstFocusable.focus();
+                            e.preventDefault();
                         }
                     }
                 }
