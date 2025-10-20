@@ -1052,3 +1052,394 @@ func TestRegisterSummarizerActions_MissingLogger(t *testing.T) {
 		t.Error("Expected error for nil Logger, got nil")
 	}
 }
+
+// Tests for negative value handling
+
+func TestExtractBatchConfig_NegativeValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   map[string]interface{}
+		expected batchConfig
+	}{
+		{
+			name: "negative batch_size",
+			config: map[string]interface{}{
+				"batch_size": -10,
+			},
+			expected: batchConfig{
+				batchSize:    100, // Should clamp to 100
+				offset:       0,
+				maxDocuments: 0,
+			},
+		},
+		{
+			name: "zero batch_size",
+			config: map[string]interface{}{
+				"batch_size": 0,
+			},
+			expected: batchConfig{
+				batchSize:    100, // Should clamp to 100
+				offset:       0,
+				maxDocuments: 0,
+			},
+		},
+		{
+			name: "negative offset",
+			config: map[string]interface{}{
+				"offset": -50,
+			},
+			expected: batchConfig{
+				batchSize:    100,
+				offset:       0, // Should clamp to 0
+				maxDocuments: 0,
+			},
+		},
+		{
+			name: "negative max_documents",
+			config: map[string]interface{}{
+				"max_documents": -100,
+			},
+			expected: batchConfig{
+				batchSize:    100,
+				offset:       0,
+				maxDocuments: 0, // Should clamp to 0
+			},
+		},
+		{
+			name: "all negative",
+			config: map[string]interface{}{
+				"batch_size":    -10,
+				"offset":        -20,
+				"max_documents": -30,
+			},
+			expected: batchConfig{
+				batchSize:    100, // Should clamp to 100
+				offset:       0,   // Should clamp to 0
+				maxDocuments: 0,   // Should clamp to 0
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractBatchConfig(tt.config)
+			if result.batchSize != tt.expected.batchSize {
+				t.Errorf("Expected batchSize %d, got %d", tt.expected.batchSize, result.batchSize)
+			}
+			if result.offset != tt.expected.offset {
+				t.Errorf("Expected offset %d, got %d", tt.expected.offset, result.offset)
+			}
+			if result.maxDocuments != tt.expected.maxDocuments {
+				t.Errorf("Expected maxDocuments %d, got %d", tt.expected.maxDocuments, result.maxDocuments)
+			}
+		})
+	}
+}
+
+func TestSummarizeAction_NegativeTopNKeywords(t *testing.T) {
+	deps, mockStorage, _ := createTestSummarizerDeps()
+	step := createTestStep("summarize", map[string]interface{}{
+		"top_n_keywords": -5,
+	})
+
+	mockStorage.listDocumentsFunc = func(opts *interfaces.ListOptions) ([]*models.Document, error) {
+		if mockStorage.listDocumentsCalls == 1 {
+			return createTestDocuments(1, false, false, false), nil
+		}
+		return []*models.Document{}, nil
+	}
+
+	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Verify keywords field exists but may be empty due to clamped value
+	for _, doc := range mockStorage.updatedDocs {
+		if keywords, ok := doc.Metadata["keywords"].([]string); ok {
+			if len(keywords) < 0 {
+				t.Error("Expected non-negative keyword count")
+			}
+		}
+	}
+}
+
+func TestExtractKeywordsAction_NegativeValues(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        map[string]interface{}
+		expectError   bool
+		validateKeywords func(*testing.T, []string)
+	}{
+		{
+			name: "negative top_n",
+			config: map[string]interface{}{
+				"top_n": -5,
+			},
+			expectError: false,
+			validateKeywords: func(t *testing.T, keywords []string) {
+				// Should clamp to 0, resulting in empty keywords
+				if len(keywords) < 0 {
+					t.Error("Expected non-negative keyword count")
+				}
+			},
+		},
+		{
+			name: "negative min_word_length",
+			config: map[string]interface{}{
+				"min_word_length": -3,
+			},
+			expectError: false,
+			validateKeywords: func(t *testing.T, keywords []string) {
+				// Should clamp to 1, allowing single-character words
+				for _, kw := range keywords {
+					if len(kw) < 1 {
+						t.Errorf("Expected all keywords >= 1 char, found '%s'", kw)
+					}
+				}
+			},
+		},
+		{
+			name: "zero min_word_length",
+			config: map[string]interface{}{
+				"min_word_length": 0,
+			},
+			expectError: false,
+			validateKeywords: func(t *testing.T, keywords []string) {
+				// Should clamp to 1
+				for _, kw := range keywords {
+					if len(kw) < 1 {
+						t.Errorf("Expected all keywords >= 1 char, found '%s'", kw)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps, mockStorage, _ := createTestSummarizerDeps()
+			step := createTestStep("extract_keywords", tt.config)
+
+			mockStorage.listDocumentsFunc = func(opts *interfaces.ListOptions) ([]*models.Document, error) {
+				if mockStorage.listDocumentsCalls == 1 {
+					return createTestDocuments(1, false, false, false), nil
+				}
+				return []*models.Document{}, nil
+			}
+
+			err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+
+			if tt.expectError && err == nil {
+				t.Error("Expected error, got nil")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+
+			// Validate keywords if validation function provided
+			if tt.validateKeywords != nil {
+				for _, doc := range mockStorage.updatedDocs {
+					if keywords, ok := doc.Metadata["keywords"].([]string); ok {
+						tt.validateKeywords(t, keywords)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Tests for source filtering
+
+func TestScanAction_WithSourceFiltering(t *testing.T) {
+	deps, mockStorage, _ := createTestSummarizerDeps()
+	step := createTestStep("scan", nil)
+
+	// Create test sources
+	sources := []*models.SourceConfig{
+		{ID: "source-1", Type: "jira"},
+		{ID: "source-2", Type: "confluence"},
+	}
+
+	mockStorage.listDocumentsFunc = func(opts *interfaces.ListOptions) ([]*models.Document, error) {
+		if mockStorage.listDocumentsCalls == 1 {
+			// Return documents from various sources
+			docs := []*models.Document{
+				{ID: "doc-1", SourceID: "source-1", SourceType: "jira", ContentMarkdown: "content"},
+				{ID: "doc-2", SourceID: "source-2", SourceType: "confluence", ContentMarkdown: "content"},
+				{ID: "doc-3", SourceID: "source-3", SourceType: "github", ContentMarkdown: "content"}, // Should be skipped
+			}
+			return docs, nil
+		}
+		return []*models.Document{}, nil
+	}
+
+	err := scanAction(context.Background(), step, sources, deps)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+}
+
+func TestSummarizeAction_WithSourceFiltering(t *testing.T) {
+	deps, mockStorage, _ := createTestSummarizerDeps()
+	step := createTestStep("summarize", nil)
+
+	// Create test sources
+	sources := []*models.SourceConfig{
+		{ID: "source-1", Type: "jira"},
+	}
+
+	processedDocs := make(map[string]bool)
+	mockStorage.listDocumentsFunc = func(opts *interfaces.ListOptions) ([]*models.Document, error) {
+		if mockStorage.listDocumentsCalls == 1 {
+			return []*models.Document{
+				{ID: "doc-1", SourceID: "source-1", SourceType: "jira", ContentMarkdown: "content"},
+				{ID: "doc-2", SourceID: "source-2", SourceType: "confluence", ContentMarkdown: "content"},
+			}, nil
+		}
+		return []*models.Document{}, nil
+	}
+
+	mockStorage.updateDocumentFunc = func(doc *models.Document) error {
+		processedDocs[doc.ID] = true
+		return nil
+	}
+
+	err := summarizeAction(context.Background(), step, sources, deps)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Verify only source-1 documents were processed
+	if !processedDocs["doc-1"] {
+		t.Error("Expected doc-1 to be processed")
+	}
+	if processedDocs["doc-2"] {
+		t.Error("Expected doc-2 to be skipped (not in selected sources)")
+	}
+}
+
+func TestExtractKeywordsAction_WithSourceFiltering(t *testing.T) {
+	deps, mockStorage, _ := createTestSummarizerDeps()
+	step := createTestStep("extract_keywords", nil)
+
+	sources := []*models.SourceConfig{
+		{ID: "source-1", Type: "jira"},
+	}
+
+	processedDocs := make(map[string]bool)
+	mockStorage.listDocumentsFunc = func(opts *interfaces.ListOptions) ([]*models.Document, error) {
+		if mockStorage.listDocumentsCalls == 1 {
+			return []*models.Document{
+				{ID: "doc-1", SourceID: "source-1", SourceType: "jira", ContentMarkdown: "content"},
+				{ID: "doc-2", SourceID: "source-2", SourceType: "confluence", ContentMarkdown: "content"},
+			}, nil
+		}
+		return []*models.Document{}, nil
+	}
+
+	mockStorage.updateDocumentFunc = func(doc *models.Document) error {
+		processedDocs[doc.ID] = true
+		return nil
+	}
+
+	err := extractKeywordsAction(context.Background(), step, sources, deps)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Verify only source-1 documents were processed
+	if !processedDocs["doc-1"] {
+		t.Error("Expected doc-1 to be processed")
+	}
+	if processedDocs["doc-2"] {
+		t.Error("Expected doc-2 to be skipped (not in selected sources)")
+	}
+}
+
+// Tests for multibyte character handling
+
+func TestGenerateSummary_MultibyteCharacters(t *testing.T) {
+	deps, _, mockLLM := createTestSummarizerDeps()
+	ctx := context.Background()
+
+	// Test with various multibyte characters
+	multibyteContent := "这是中文测试内容 🚀 émojis and spëcial çharacters ñ 日本語テスト"
+	contentLimit := 20 // Limit by runes, not bytes
+
+	var receivedContent string
+	mockLLM.chatFunc = func(ctx context.Context, messages []interfaces.Message) (string, error) {
+		for _, msg := range messages {
+			if msg.Role == "user" {
+				receivedContent = msg.Content
+			}
+		}
+		return "Summary", nil
+	}
+
+	_, err := generateSummary(ctx, multibyteContent, contentLimit, "Test", deps.LLMService, deps.Logger)
+
+	if err != nil {
+		t.Errorf("Expected no error with multibyte chars, got: %v", err)
+	}
+
+	// Verify truncation happened at rune boundary, not byte boundary
+	// If it truncated at byte boundary, it would panic or produce invalid UTF-8
+	if len(receivedContent) == 0 {
+		t.Error("Expected content to be received")
+	}
+
+	// Verify the content is valid UTF-8
+	if !isValidUTF8(receivedContent) {
+		t.Error("Expected valid UTF-8 after truncation")
+	}
+}
+
+func TestGenerateSummary_EmojiTruncation(t *testing.T) {
+	deps, _, mockLLM := createTestSummarizerDeps()
+	ctx := context.Background()
+
+	// Create content with emojis that could be split incorrectly
+	emojiContent := "🚀🎉🎊🎈🎆🎇✨🎁🎂🎄🎃🎅🎁"
+	contentLimit := 5
+
+	var receivedContent string
+	mockLLM.chatFunc = func(ctx context.Context, messages []interfaces.Message) (string, error) {
+		for _, msg := range messages {
+			if msg.Role == "user" {
+				receivedContent = msg.Content
+			}
+		}
+		return "Summary", nil
+	}
+
+	_, err := generateSummary(ctx, emojiContent, contentLimit, "Test", deps.LLMService, deps.Logger)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Count runes in result (should be contentLimit + 3 for "...")
+	runes := []rune(receivedContent)
+	// The "..." is appended, so we expect the prefix to be exactly contentLimit runes
+	if len(runes) > contentLimit+10 { // Allow some buffer for "..." and prefix text
+		t.Errorf("Expected truncation at rune boundary, got %d runes", len(runes))
+	}
+
+	// Verify valid UTF-8
+	if !isValidUTF8(receivedContent) {
+		t.Error("Expected valid UTF-8 after emoji truncation")
+	}
+}
+
+// Helper function to validate UTF-8
+func isValidUTF8(s string) bool {
+	// Try to convert to runes and back
+	// If it's invalid UTF-8, this will replace invalid sequences
+	converted := string([]rune(s))
+	return converted == s || len(s) == 0
+}

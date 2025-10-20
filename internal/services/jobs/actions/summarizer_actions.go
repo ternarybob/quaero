@@ -52,10 +52,25 @@ type batchConfig struct {
 
 // extractBatchConfig extracts common batch processing configuration from step config
 func extractBatchConfig(config map[string]interface{}) batchConfig {
+	batchSize := extractInt(config, "batch_size", 100)
+	offset := extractInt(config, "offset", 0)
+	maxDocuments := extractInt(config, "max_documents", 0)
+
+	// Clamp to safe minimums to prevent panics and invalid queries
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if maxDocuments < 0 {
+		maxDocuments = 0
+	}
+
 	return batchConfig{
-		batchSize:        extractInt(config, "batch_size", 100),
-		offset:           extractInt(config, "offset", 0),
-		maxDocuments:     extractInt(config, "max_documents", 0),
+		batchSize:        batchSize,
+		offset:           offset,
+		maxDocuments:     maxDocuments,
 		filterSourceType: extractString(config, "filter_source_type", ""),
 	}
 }
@@ -80,6 +95,14 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 	skipWithSummary := extractBool(step.Config, "skip_with_summary", true)
 	skipEmptyContent := extractBool(step.Config, "skip_empty_content", true)
 
+	// Build set of allowed source IDs
+	allowedSources := make(map[string]string) // sourceID -> sourceType
+	if len(sources) > 0 {
+		for _, src := range sources {
+			allowedSources[src.ID] = src.Type
+		}
+	}
+
 	deps.Logger.Info().
 		Str("action", "scan").
 		Int("batch_size", cfg.batchSize).
@@ -88,10 +111,12 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 		Str("filter_source_type", cfg.filterSourceType).
 		Bool("skip_with_summary", skipWithSummary).
 		Bool("skip_empty_content", skipEmptyContent).
+		Int("selected_sources", len(allowedSources)).
 		Msg("Starting scan action")
 
 	processedCount := 0
 	skippedCount := 0
+	skippedSourceCount := 0
 
 	for {
 		opts := buildListOptions(cfg)
@@ -110,6 +135,15 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 			Msg("Processing document batch")
 
 		for _, doc := range docs {
+			// Skip documents not in selected sources
+			if len(allowedSources) > 0 {
+				expectedType, inSources := allowedSources[doc.SourceID]
+				if !inSources || (expectedType != "" && doc.SourceType != expectedType) {
+					skippedSourceCount++
+					continue
+				}
+			}
+
 			// Skip documents based on criteria
 			if skipWithSummary && hasNonEmptyMetadata(doc, "summary") {
 				skippedCount++
@@ -126,6 +160,7 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 				deps.Logger.Info().
 					Int("processed", processedCount).
 					Int("skipped", skippedCount).
+					Int("skipped_source", skippedSourceCount).
 					Msg("Scan progress")
 			}
 		}
@@ -141,6 +176,7 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 		Str("action", "scan").
 		Int("processed", processedCount).
 		Int("skipped", skippedCount).
+		Int("skipped_source", skippedSourceCount).
 		Msg("Scan action completed successfully")
 
 	return nil
@@ -156,16 +192,31 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 	includeWordCount := extractBool(step.Config, "include_word_count", true)
 	topNKeywords := extractInt(step.Config, "top_n_keywords", 10)
 
+	// Clamp to safe minimum
+	if topNKeywords < 0 {
+		topNKeywords = 0
+	}
+
+	// Build set of allowed source IDs
+	allowedSources := make(map[string]string) // sourceID -> sourceType
+	if len(sources) > 0 {
+		for _, src := range sources {
+			allowedSources[src.ID] = src.Type
+		}
+	}
+
 	deps.Logger.Info().
 		Str("action", "summarize").
 		Int("batch_size", cfg.batchSize).
 		Int("content_limit", contentLimit).
 		Bool("include_keywords", includeKeywords).
 		Bool("include_word_count", includeWordCount).
+		Int("selected_sources", len(allowedSources)).
 		Msg("Starting summarize action")
 
 	processedCount := 0
 	skippedCount := 0
+	skippedSourceCount := 0
 	errors := make([]error, 0)
 
 	for {
@@ -180,6 +231,15 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 		}
 
 		for _, doc := range docs {
+			// Skip documents not in selected sources
+			if len(allowedSources) > 0 {
+				expectedType, inSources := allowedSources[doc.SourceID]
+				if !inSources || (expectedType != "" && doc.SourceType != expectedType) {
+					skippedSourceCount++
+					continue
+				}
+			}
+
 			if skipWithSummary && hasNonEmptyMetadata(doc, "summary") {
 				skippedCount++
 				continue
@@ -233,6 +293,7 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 				deps.Logger.Info().
 					Int("processed", processedCount).
 					Int("skipped", skippedCount).
+					Int("skipped_source", skippedSourceCount).
 					Msg("Summarize progress")
 			}
 		}
@@ -248,6 +309,7 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 		deps.Logger.Warn().
 			Int("error_count", len(errors)).
 			Int("processed", processedCount).
+			Int("skipped_source", skippedSourceCount).
 			Msg("Summarize action completed with errors")
 		return fmt.Errorf("summarize action completed with %d error(s): %v", len(errors), errors)
 	}
@@ -256,6 +318,7 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 		Str("action", "summarize").
 		Int("processed", processedCount).
 		Int("skipped", skippedCount).
+		Int("skipped_source", skippedSourceCount).
 		Msg("Summarize action completed successfully")
 
 	return nil
@@ -268,16 +331,34 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 	minWordLength := extractInt(step.Config, "min_word_length", 3)
 	skipWithKeywords := extractBool(step.Config, "skip_with_keywords", false)
 
+	// Clamp to safe minimums
+	if topN < 0 {
+		topN = 0
+	}
+	if minWordLength < 1 {
+		minWordLength = 1
+	}
+
+	// Build set of allowed source IDs
+	allowedSources := make(map[string]string) // sourceID -> sourceType
+	if len(sources) > 0 {
+		for _, src := range sources {
+			allowedSources[src.ID] = src.Type
+		}
+	}
+
 	deps.Logger.Info().
 		Str("action", "extract_keywords").
 		Int("batch_size", cfg.batchSize).
 		Int("top_n", topN).
 		Int("min_word_length", minWordLength).
 		Bool("skip_with_keywords", skipWithKeywords).
+		Int("selected_sources", len(allowedSources)).
 		Msg("Starting extract keywords action")
 
 	processedCount := 0
 	skippedCount := 0
+	skippedSourceCount := 0
 	errors := make([]error, 0)
 
 	for {
@@ -292,6 +373,15 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 		}
 
 		for _, doc := range docs {
+			// Skip documents not in selected sources
+			if len(allowedSources) > 0 {
+				expectedType, inSources := allowedSources[doc.SourceID]
+				if !inSources || (expectedType != "" && doc.SourceType != expectedType) {
+					skippedSourceCount++
+					continue
+				}
+			}
+
 			if skipWithKeywords && hasNonEmptyKeywords(doc) {
 				skippedCount++
 				continue
@@ -326,6 +416,7 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 				deps.Logger.Info().
 					Int("processed", processedCount).
 					Int("skipped", skippedCount).
+					Int("skipped_source", skippedSourceCount).
 					Msg("Extract keywords progress")
 			}
 		}
@@ -341,6 +432,7 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 		deps.Logger.Warn().
 			Int("error_count", len(errors)).
 			Int("processed", processedCount).
+			Int("skipped_source", skippedSourceCount).
 			Msg("Extract keywords action completed with errors")
 		return fmt.Errorf("extract keywords action completed with %d error(s): %v", len(errors), errors)
 	}
@@ -349,6 +441,7 @@ func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*
 		Str("action", "extract_keywords").
 		Int("processed", processedCount).
 		Int("skipped", skippedCount).
+		Int("skipped_source", skippedSourceCount).
 		Msg("Extract keywords action completed successfully")
 
 	return nil
@@ -393,10 +486,11 @@ func hasNonEmptyKeywords(doc *models.Document) bool {
 
 // generateSummary generates a summary using the LLM service
 func generateSummary(ctx context.Context, content string, contentLimit int, systemPrompt string, llmService interfaces.LLMService, logger arbor.ILogger) (string, error) {
-	// Limit content to specified character limit
+	// Limit content to specified rune limit (UTF-8 safe)
 	summaryContent := content
-	if len(content) > contentLimit {
-		summaryContent = content[:contentLimit] + "..."
+	runes := []rune(content)
+	if len(runes) > contentLimit {
+		summaryContent = string(runes[:contentLimit]) + "..."
 	}
 
 	messages := []interfaces.Message{
