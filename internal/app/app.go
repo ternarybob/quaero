@@ -82,11 +82,12 @@ type App struct {
 	SchedulerHandler  *handlers.SchedulerHandler
 	ChatHandler       *handlers.ChatHandler
 	MCPHandler        *handlers.MCPHandler
-	JobHandler        *handlers.JobHandler
-	SourcesHandler    *handlers.SourcesHandler
-	StatusHandler     *handlers.StatusHandler
-	ConfigHandler     *handlers.ConfigHandler
-	PageHandler       *handlers.PageHandler
+	JobHandler           *handlers.JobHandler
+	SourcesHandler       *handlers.SourcesHandler
+	StatusHandler        *handlers.StatusHandler
+	ConfigHandler        *handlers.ConfigHandler
+	PageHandler          *handlers.PageHandler
+	JobDefinitionHandler *handlers.JobDefinitionHandler
 }
 
 // New initializes the application with all dependencies
@@ -447,6 +448,16 @@ func (a *App) initHandlers() error {
 
 	// Initialize page handler for serving HTML templates
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)
+
+	// Initialize job definition handler
+	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
+		a.StorageManager.JobDefinitionStorage(),
+		a.JobExecutor,
+		a.SourceService,
+		a.JobRegistry,
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Job definition handler initialized")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
