@@ -439,6 +439,8 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	s.jobsMu.Unlock()
 
 	// Seed queue with metadata for link discovery
+	// Track how many URLs are actually added (excluding duplicates)
+	actuallyEnqueued := 0
 	for i, url := range seedURLs {
 		item := &URLQueueItem{
 			URL:      url,
@@ -451,8 +453,17 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 				"entity_type": entityType,
 			},
 		}
-		s.queue.Push(item)
+		// Check if URL was actually added (not a duplicate)
+		if s.queue.Push(item) {
+			actuallyEnqueued++
+		}
 	}
+
+	// Update PendingURLs and TotalURLs to match actual queue state
+	s.jobsMu.Lock()
+	job.Progress.PendingURLs = actuallyEnqueued
+	job.Progress.TotalURLs = actuallyEnqueued
+	s.jobsMu.Unlock()
 
 	// Update job status
 	s.jobsMu.Lock()
@@ -1084,15 +1095,16 @@ func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, erro
 		Int("cookie_count", len(cookies)).
 		Msg("Extracted cookies from client")
 
-	// Warn if no cookies available despite auth being configured
-	if jobID != "" && len(cookies) == 0 {
+	// Warn if no cookies available on seed URLs (depth 0) despite auth being configured
+	// Only warn on initial requests to avoid noise - cookies may not be set for all URLs
+	if jobID != "" && len(cookies) == 0 && item.Depth == 0 {
 		s.jobsMu.RLock()
 		_, hasClient := s.jobClients[jobID]
 		s.jobsMu.RUnlock()
 
 		if hasClient || client.Jar != nil {
-			// Persist warning if auth is configured but cookies are missing
-			s.logToDatabase(jobID, "warn", fmt.Sprintf("No cookies available for request to %s despite auth configuration", item.URL))
+			// Persist warning if auth is configured but cookies are missing on seed URL
+			s.logToDatabase(jobID, "warn", fmt.Sprintf("No cookies available for seed URL %s despite auth configuration", item.URL))
 		}
 	}
 
@@ -1338,6 +1350,20 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 		allLinks = s.extractLinksFromHTML(html, parent.URL)
 	}
 
+	// Log all discovered links for debugging
+	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" && len(allLinks) > 0 {
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("parent_url", parent.URL).
+			Int("count", len(allLinks)).
+			Msg("Extracted links from page")
+
+		// Log each discovered URL
+		for i, link := range allLinks {
+			s.logToDatabase(jobID, "debug", fmt.Sprintf("Discovered link %d/%d: %s", i+1, len(allLinks), link))
+		}
+	}
+
 	// Apply URL pattern filtering using source filters
 	links, filteredCount := s.applyURLPatternFilters(allLinks, parent, config)
 
@@ -1390,7 +1416,7 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 	var filteredLinks []string
 	switch sourceType {
 	case "jira":
-		filteredLinks = s.filterJiraLinks(allLinks, baseHost)
+		filteredLinks = s.filterJiraLinks(allLinks, baseHost, config)
 	case "confluence":
 		filteredLinks = s.filterConfluenceLinks(allLinks, baseHost)
 	default:
@@ -1651,18 +1677,25 @@ func (s *Service) extractLinksFromHTML(html string, baseURL string) []string {
 	return links
 }
 
-// filterJiraLinks filters links to include only Jira content pages on the same host
-func (s *Service) filterJiraLinks(links []string, baseHost string) []string {
-	// Include patterns for Jira content pages
-	includePatterns := []string{
-		`/browse/[A-Z][A-Z0-9]+-\d+`,       // Issue pages: /browse/PROJ-123, /browse/ABC2-456
-		`/browse/[A-Z0-9]+$`,               // Project browse pages
-		`/projects/[A-Z0-9]+`,              // Project pages
-		`(?i)/secure/RapidBoard\.jspa`,     // Agile boards (case-insensitive)
-		`(?i)/secure/IssueNavigator\.jspa`, // Classic issue navigator (case-insensitive)
-		`(?i)/issues/?`,                    // Issue search/list (case-insensitive)
-		`(?i)/issues/\?jql=`,               // JQL query pages (case-insensitive)
-		`(?i)/issues/\?filter=`,            // Filter pages (case-insensitive)
+// filterJiraLinks filters links to exclude bad Jira URLs (admin, API, etc.) on the same host
+// Include pattern matching is handled by filterLinks() which runs after this
+func (s *Service) filterJiraLinks(links []string, baseHost string, config CrawlConfig) []string {
+	// Only apply include patterns if NO user patterns are provided
+	// If user has custom patterns, skip include filtering here and let filterLinks() handle it
+	var includePatterns []string
+	if len(config.IncludePatterns) == 0 {
+		// No user patterns - use default Jira patterns
+		includePatterns = []string{
+			`/browse/[A-Z][A-Z0-9]+-\d+`,       // Issue pages: /browse/PROJ-123, /browse/ABC2-456
+			`/browse/[A-Z0-9]+(?:[?#/]|$)`,     // Project browse pages (with optional query/fragment/slash)
+			`/projects/[A-Z0-9]+`,              // Project pages
+			`/jira/projects`,                   // Projects listing page
+			`(?i)/secure/RapidBoard\.jspa`,     // Agile boards (case-insensitive)
+			`(?i)/secure/IssueNavigator\.jspa`, // Classic issue navigator (case-insensitive)
+			`(?i)/issues/?`,                    // Issue search/list (case-insensitive)
+			`(?i)/issues/\?jql=`,               // JQL query pages (case-insensitive)
+			`(?i)/issues/\?filter=`,            // Filter pages (case-insensitive)
+		}
 	}
 
 	// Exclude patterns for non-content pages
@@ -1733,21 +1766,29 @@ func (s *Service) filterJiraLinks(links []string, baseHost string) []string {
 			continue
 		}
 
-		// Check include patterns
-		included := false
-		for _, re := range includeRegexes {
-			if re.MatchString(link) {
-				included = true
-				break
+		// If no user patterns were provided, check default include patterns
+		// Otherwise, accept all non-excluded links (user patterns will be checked in filterLinks)
+		if len(includeRegexes) > 0 {
+			// Check include patterns (only when using defaults)
+			included := false
+			for _, re := range includeRegexes {
+				if re.MatchString(link) {
+					included = true
+					break
+				}
 			}
-		}
-		if included {
-			filtered = append(filtered, link)
+			if included {
+				filtered = append(filtered, link)
+			} else {
+				notIncludedLinks = append(notIncludedLinks, link)
+				s.logger.Debug().
+					Str("link", link).
+					Msg("Jira link did not match any include pattern")
+			}
 		} else {
-			notIncludedLinks = append(notIncludedLinks, link)
-			s.logger.Debug().
-				Str("link", link).
-				Msg("Jira link did not match any include pattern")
+			// User provided custom patterns - accept all non-excluded links
+			// (user patterns will be applied in filterLinks)
+			filtered = append(filtered, link)
 		}
 	}
 

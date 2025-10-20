@@ -41,6 +41,9 @@ type SchedulerService interface {
 	// UpdateJobSchedule updates the schedule of an existing job
 	UpdateJobSchedule(name string, schedule string) error
 
+	// UpdateJob updates job settings (description, schedule, enabled status)
+	UpdateJob(name string, description, schedule *string, enabled *bool) error
+
 	// GetJobStatus returns the status of a specific job
 	GetJobStatus(name string) (*JobStatus, error)
 
@@ -49,4 +52,7 @@ type SchedulerService interface {
 
 	// CleanupOrphanedJobs marks orphaned running jobs as failed after service restart
 	CleanupOrphanedJobs() error
+
+	// TriggerJob manually triggers a specific job to run immediately
+	TriggerJob(name string) error
 }

@@ -764,6 +764,77 @@ func (h *JobHandler) UpdateDefaultJobScheduleHandler(w http.ResponseWriter, r *h
 	})
 }
 
+// UpdateDefaultJobHandler updates a default job's settings (description, schedule, enabled)
+// PUT /api/jobs/default/{name}
+func (h *JobHandler) UpdateDefaultJobHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract job name from path: /api/jobs/default/{name}
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Job name is required", http.StatusBadRequest)
+		return
+	}
+	jobName := pathParts[3]
+
+	// Parse request body
+	var req struct {
+		Description *string `json:"description,omitempty"`
+		Schedule    *string `json:"schedule,omitempty"`
+		Enabled     *bool   `json:"enabled,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate at least one field is provided
+	if req.Description == nil && req.Schedule == nil && req.Enabled == nil {
+		http.Error(w, "At least one field (description, schedule, or enabled) must be provided", http.StatusBadRequest)
+		return
+	}
+
+	// Validate schedule format if provided
+	if req.Schedule != nil && *req.Schedule != "" {
+		if err := common.ValidateJobSchedule(*req.Schedule); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid schedule: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Update job settings
+	if err := h.schedulerService.UpdateJob(jobName, req.Description, req.Schedule, req.Enabled); err != nil {
+		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to update job")
+		http.Error(w, fmt.Sprintf("Failed to update job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().
+		Str("job_name", jobName).
+		Msg("Job updated successfully")
+
+	// Get updated job status for response
+	status, err := h.schedulerService.GetJobStatus(jobName)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("job_name", jobName).Msg("Failed to get updated job status")
+		// Still return success since update worked
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"job_name": jobName,
+			"message":  "Job updated successfully",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"job_name":    jobName,
+		"description": status.Description,
+		"schedule":    status.Schedule,
+		"enabled":     status.Enabled,
+		"message":     "Job updated successfully",
+	})
+}
+
 // StartDefaultJobHandler manually triggers a default job
 // POST /api/jobs/default/{name}/start
 func (h *JobHandler) StartDefaultJobHandler(w http.ResponseWriter, r *http.Request) {
@@ -790,9 +861,8 @@ func (h *JobHandler) StartDefaultJobHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// For now, we'll use TriggerCollectionNow which triggers the scheduler
-	// In a more advanced implementation, we could add a method to trigger specific jobs
-	if err := h.schedulerService.TriggerCollectionNow(); err != nil {
+	// Trigger the specific job manually
+	if err := h.schedulerService.TriggerJob(jobName); err != nil {
 		h.logger.Error().Err(err).Str("job_name", jobName).Msg("Failed to trigger job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)
 		return

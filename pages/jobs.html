@@ -15,69 +15,12 @@
         <!-- Page Title -->
         <div class="page-title">
             <h1>Job Management</h1>
-            <p>Monitor and manage crawler jobs for Jira and Confluence data collection</p>
+            <p>Create and configure job definitions for Jira and Confluence data collection</p>
+            <div class="text-small text-gray" style="margin-top: 0.5rem;">
+                <i class="fa-solid fa-lightbulb"></i>
+                To monitor running jobs and view execution details, visit the <a href="/queue">Queue</a> page
+            </div>
         </div>
-
-        <!-- Job Statistics -->
-        <section>
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h2>Job Statistics</h2>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
-                                <i class="fa-solid fa-plus"></i>
-                                <span>Create Job</span>
-                            </button>
-                            <button class="btn btn-sm" onclick="loadStats()">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-
-                            <!-- <div class="btn-group btn-group-block">
-                                <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
-                                    <i class="fa-solid fa-plus"></i>
-                                    <span>Create Job</span>
-                                </button>
-                                <button class="btn btn-sm" onclick="loadStats()">
-                                    <i class="fa-solid fa-rotate-right"></i>
-                                </button>
-                            </div> -->
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <div class="columns">
-                        <div class="column text-center">
-                            <p class="text-small text-gray">TOTAL JOBS</p>
-                            <p class="h2" id="stat-total">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">PENDING</p>
-                            <p class="h2 text-warning" id="stat-pending">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">RUNNING</p>
-                            <p class="h2 text-primary" id="stat-running">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">COMPLETED</p>
-                            <p class="h2 text-success" id="stat-completed">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">FAILED</p>
-                            <p class="h2 text-error" id="stat-failed">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">CANCELLED</p>
-                            <p class="h2 text-warning" id="stat-cancelled">-</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            </div>
-        </section>
 
         <!-- Jobs -->
         <section>
@@ -88,6 +31,10 @@
                             <h2>Jobs</h2>
                         </section>
                         <section class="navbar-section">
+                            <button class="btn btn-sm btn-primary" onclick="showCreateJobModal()">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>Create Job</span>
+                            </button>
                             <button class="btn btn-sm" onclick="loadDefaultJobs()" title="Refresh Jobs">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
@@ -115,115 +62,6 @@
                             </tr>
                         </tbody>
                     </table>
-                </div>
-            </div>
-        </section>
-
-        <!-- Job Status -->
-        <section>
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h2>
-                                <span id="job-count" class="text-gray">0</span> Job Status
-                            </h2>
-                        </section>
-                        <section class="navbar-section">
-                            <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none;">
-                                <i class="fa-solid fa-trash"></i>
-                                <span>Delete Selected</span>
-                            </button>
-                            <button class="btn btn-sm" onclick="loadJobs()" title="Refresh Jobs">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <!-- Filter Button and Chips -->
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                        <button type="button" class="btn btn-sm" onclick="showFilterModal()">
-                            <i class="fas fa-filter"></i> Filter
-                        </button>
-                        <div id="filter-chips-container"></div>
-                        <!-- style="display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;" -->
-                    </div>
-
-                    <!-- Jobs Table -->
-                    <table class="table striped border">
-                        <thead>
-                            <tr>
-                                <th>
-                                    <label class="form-checkbox">
-                                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
-                                        <i class="form-icon"></i>
-                                    </label>
-                                </th>
-                                <th>JOB ID</th>
-                                <th>SOURCE</th>
-                                <th>ENTITY</th>
-                                <th class="text-center">STATUS</th>
-                                <th>PROGRESS</th>
-                                <th>CREATED</th>
-                                <th class="text-center">ACTIONS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="jobs-table-body">
-                            <tr>
-                                <td colspan="8" class="text-center">
-                                    Loading jobs...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <!-- Pagination Controls -->
-                    <div id="job-pagination-container" class="pagination-container">
-                        <!-- Pagination will be rendered here by renderPagination() -->
-                    </div>
-                </div>
-            </div>
-            </div>
-        </section>
-
-        <!-- Job Detail -->
-        <section>
-            <div class="accordion">
-                <input type="checkbox" id="accordion-job-detail" name="accordion-checkbox" hidden checked>
-                <label class="accordion-header" for="accordion-job-detail">
-                    <i class="icon icon-arrow-right mr-1"></i>
-                    Job Detail
-                    <span id="selected-job-id" class="label label-primary"></span>
-                </label>
-                <div class="accordion-body">
-                    <!-- Tabs -->
-                    <div x-data="{ activeTab: 'json' }">
-                        <ul class="tab tab-block">
-                            <li class="tab-item" :class="{ 'active': activeTab === 'json' }">
-                                <a href="#" @click.prevent="activeTab = 'json'">
-                                    <i class="fa-solid fa-code"></i> Job JSON
-                                </a>
-                            </li>
-                            <li class="tab-item" :class="{ 'active': activeTab === 'logs' }">
-                                <a href="#" @click.prevent="activeTab = 'logs'; loadJobLogsTab()">
-                                    <i class="fa-solid fa-list"></i> Job Logs
-                                </a>
-                            </li>
-                        </ul>
-
-                        <!-- Tab Content: Job JSON -->
-                        <div x-show="activeTab === 'json'">
-                            <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
-                        </div>
-
-                        <!-- Tab Content: Job Logs -->
-                        <div x-show="activeTab === 'logs'">
-                            <div id="job-logs-container">
-                                <p class="text-muted text-center">Select a job to view its logs</p>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </section>
@@ -290,79 +128,6 @@
         </div>
     </div>
 
-    <!-- Filter Modal -->
-    <div id="filter-modal" class="modal">
-        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
-        <div class="modal-container" role="dialog" aria-modal="true">
-            <div class="modal-header">
-                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
-                <div class="modal-title h5">Filter Crawler Jobs</div>
-            </div>
-            <div class="modal-body">
-                <div class="content">
-                    <!-- Status Filters -->
-                    <div class="form-group">
-                        <label class="form-label"><strong>Status</strong></label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-status" value="pending" checked>
-                            <i class="form-icon"></i> Pending
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-status" value="running" checked>
-                            <i class="form-icon"></i> Running
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-status" value="completed" checked>
-                            <i class="form-icon"></i> Completed
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-status" value="failed" checked>
-                            <i class="form-icon"></i> Failed
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-status" value="cancelled" checked>
-                            <i class="form-icon"></i> Cancelled
-                        </label>
-                    </div>
-
-                    <!-- Source Type Filters -->
-                    <div class="form-group">
-                        <label class="form-label"><strong>Source Type</strong></label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-source" value="jira">
-                            <i class="form-icon"></i> Jira
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-source" value="confluence">
-                            <i class="form-icon"></i> Confluence
-                        </label>
-                    </div>
-
-                    <!-- Entity Type Filters -->
-                    <div class="form-group">
-                        <label class="form-label"><strong>Entity Type</strong></label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-entity" value="projects">
-                            <i class="form-icon"></i> Projects
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-entity" value="spaces">
-                            <i class="form-icon"></i> Spaces
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-entity" value="repos">
-                            <i class="form-icon"></i> Repos
-                        </label>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn" onclick="clearAllFilters()">Clear All</button>
-                <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Edit Default Job Modal -->
     <div id="edit-default-job-modal" class="modal" @keydown.escape.window="closeEditDefaultJobModal()">
         <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeEditDefaultJobModal()"></a>
@@ -422,1120 +187,6 @@
     </div>
 
     <script>
-        // State management
-        let allJobs = [];
-        let filteredJobs = [];
-        let selectedJob = null;
-        let selectedJobIds = new Set(); // Track selected jobs for batch operations
-        let currentPage = 1;
-        let totalJobs = 0;
-        const pageSize = 50;
-        let autoRefreshInterval = null;
-
-        // Filter state - will be loaded from localStorage or defaults
-        let activeFilters = {
-            status: new Set(),
-            source: new Set(),
-            entity: new Set()
-        };
-
-        // Default filters - include all statuses
-        const defaultFilters = {
-            status: new Set(['pending', 'running', 'completed', 'failed', 'cancelled']),
-            source: new Set(),
-            entity: new Set()
-        };
-
-        // Load filters from localStorage
-        function loadFiltersFromStorage() {
-            try {
-                const stored = localStorage.getItem('quaero-job-filters');
-                if (stored) {
-                    const parsed = JSON.parse(stored);
-                    activeFilters.status = new Set(parsed.status || []);
-                    activeFilters.source = new Set(parsed.source || []);
-                    activeFilters.entity = new Set(parsed.entity || []);
-                    
-                    // If no filters were saved, use defaults
-                    if (activeFilters.status.size === 0 && activeFilters.source.size === 0 && activeFilters.entity.size === 0) {
-                        activeFilters = {
-                            status: new Set(defaultFilters.status),
-                            source: new Set(defaultFilters.source),
-                            entity: new Set(defaultFilters.entity)
-                        };
-                    }
-                } else {
-                    // Use defaults for first time users
-                    activeFilters = {
-                        status: new Set(defaultFilters.status),
-                        source: new Set(defaultFilters.source),
-                        entity: new Set(defaultFilters.entity)
-                    };
-                }
-            } catch (error) {
-                console.warn('Failed to load filters from localStorage:', error);
-                // Use defaults on error
-                activeFilters = {
-                    status: new Set(defaultFilters.status),
-                    source: new Set(defaultFilters.source),
-                    entity: new Set(defaultFilters.entity)
-                };
-            }
-        }
-
-        // Save filters to localStorage
-        function saveFiltersToStorage() {
-            try {
-                const toSave = {
-                    status: Array.from(activeFilters.status),
-                    source: Array.from(activeFilters.source),
-                    entity: Array.from(activeFilters.entity)
-                };
-                localStorage.setItem('quaero-job-filters', JSON.stringify(toSave));
-            } catch (error) {
-                console.warn('Failed to save filters to localStorage:', error);
-            }
-        }
-
-        // Load job statistics
-        async function loadStats() {
-            console.log('[Jobs] loadStats() called');
-            try {
-                console.log('[Jobs] Fetching stats from /api/jobs/stats');
-                const response = await fetch('/api/jobs/stats');
-                console.log('[Jobs] Stats response status:', response.status);
-
-                if (!response.ok) throw new Error('Failed to fetch stats');
-
-                const stats = await response.json();
-                console.log('[Jobs] Stats data:', stats);
-
-                document.getElementById('stat-total').textContent = stats.total_jobs || 0;
-                document.getElementById('stat-pending').textContent = stats.pending_jobs || 0;
-                document.getElementById('stat-running').textContent = stats.running_jobs || 0;
-                document.getElementById('stat-completed').textContent = stats.completed_jobs || 0;
-                document.getElementById('stat-failed').textContent = stats.failed_jobs || 0;
-                document.getElementById('stat-cancelled').textContent = stats.cancelled_jobs || 0;
-
-            } catch (error) {
-                console.error('Error loading stats:', error);
-                document.getElementById('stat-total').textContent = 'Error';
-                document.getElementById('stat-running').textContent = 'Error';
-                document.getElementById('stat-completed').textContent = 'Error';
-                document.getElementById('stat-failed').textContent = 'Error';
-                document.getElementById('stat-cancelled').textContent = 'Error';
-            } finally {
-                if (statsBtn) {
-                    statsBtn.disabled = false;
-                    const iconElement = statsBtn.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // Load all jobs
-        async function loadJobs() {
-            const tbody = document.getElementById('jobs-table-body');
-
-            try {
-                // Build query parameters from filters
-                const params = new URLSearchParams();
-                params.append('limit', pageSize);
-                params.append('offset', (currentPage - 1) * pageSize);
-                params.append('order_by', 'created_at');
-                params.append('order_dir', 'DESC');
-
-                // Build filter parameters from activeFilters state
-                if (activeFilters.status.size > 0) {
-                    params.append('status', Array.from(activeFilters.status).join(','));
-                }
-                if (activeFilters.source.size > 0) {
-                    params.append('source', Array.from(activeFilters.source).join(','));
-                }
-                if (activeFilters.entity.size > 0) {
-                    params.append('entity', Array.from(activeFilters.entity).join(','));
-                }
-
-                const response = await fetch(`/api/jobs?${params.toString()}`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch jobs');
-                }
-
-                const data = await response.json();
-                allJobs = data.jobs || [];
-                totalJobs = data.total_count || 0;
-                filteredJobs = [...allJobs];
-
-                renderJobs();
-
-            } catch (error) {
-                console.error('[Jobs] Error loading jobs:', error);
-                console.error('[Jobs] Error stack:', error.stack);
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="text-center text-error">
-                            Failed to load jobs. Please try again.
-                        </td>
-                    </tr>
-                `;
-            }
-        }
-
-        // Show filter modal
-        function showFilterModal() {
-            const modal = document.getElementById('filter-modal');
-
-            // Sync modal checkboxes with activeFilters state
-            document.querySelectorAll('.filter-status').forEach(checkbox => {
-                checkbox.checked = activeFilters.status.has(checkbox.value);
-            });
-            document.querySelectorAll('.filter-source').forEach(checkbox => {
-                checkbox.checked = activeFilters.source.has(checkbox.value);
-            });
-            document.querySelectorAll('.filter-entity').forEach(checkbox => {
-                checkbox.checked = activeFilters.entity.has(checkbox.value);
-            });
-
-            modal.classList.add('active');
-            document.body.classList.add('modal-open');
-        }
-
-        // Close filter modal
-        function closeFilterModal() {
-            const modal = document.getElementById('filter-modal');
-            modal.classList.remove('active');
-            document.body.classList.remove('modal-open');
-        }
-
-        // Apply filters from modal
-        function applyFilters() {
-            // Update activeFilters from modal checkboxes
-            activeFilters.status.clear();
-            document.querySelectorAll('.filter-status:checked').forEach(cb => {
-                activeFilters.status.add(cb.value);
-            });
-
-            activeFilters.source.clear();
-            document.querySelectorAll('.filter-source:checked').forEach(cb => {
-                activeFilters.source.add(cb.value);
-            });
-
-            activeFilters.entity.clear();
-            document.querySelectorAll('.filter-entity:checked').forEach(cb => {
-                activeFilters.entity.add(cb.value);
-            });
-
-            // Save filters to localStorage
-            saveFiltersToStorage();
-
-            // Close modal and refresh
-            closeFilterModal();
-            renderFilterChips();
-            currentPage = 1;
-            loadJobs();
-        }
-
-        // Clear all filters
-        function clearAllFilters() {
-            // Uncheck all checkboxes in modal
-            document.querySelectorAll('.filter-status, .filter-source, .filter-entity').forEach(cb => {
-                cb.checked = false;
-            });
-        }
-
-        // Render filter chips
-        function renderFilterChips() {
-            const container = document.getElementById('filter-chips-container');
-            let html = '';
-
-            // Status chips
-            activeFilters.status.forEach(status => {
-                const colorClass = {
-                    'pending': 'label-warning',
-                    'running': 'label-primary',
-                    'completed': 'label-success',
-                    'failed': 'label-error',
-                    'cancelled': 'label-warning'
-                }[status] || 'label-default';
-
-                html += `
-                    <span class="label ${colorClass}">
-                        ${status.charAt(0).toUpperCase() + status.slice(1)}
-                        <a href="#" onclick="event.preventDefault(); removeFilter('status', '${status}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
-                    </span>
-                `;
-            });
-
-            // Source chips
-            activeFilters.source.forEach(source => {
-                html += `
-                    <span class="label label-primary">
-                        ${source.charAt(0).toUpperCase() + source.slice(1)}
-                        <a href="#" onclick="event.preventDefault(); removeFilter('source', '${source}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
-                    </span>
-                `;
-            });
-
-            // Entity chips
-            activeFilters.entity.forEach(entity => {
-                html += `
-                    <span class="label label-primary">
-                        ${entity.charAt(0).toUpperCase() + entity.slice(1)}
-                        <a href="#" onclick="event.preventDefault(); removeFilter('entity', '${entity}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
-                    </span>
-                `;
-            });
-
-            container.innerHTML = html;
-        }
-
-        // Remove individual filter
-        function removeFilter(category, value) {
-            activeFilters[category].delete(value);
-            saveFiltersToStorage(); // Save after removing filter
-            renderFilterChips();
-            currentPage = 1;
-            loadJobs();
-        }
-
-        // Render jobs table
-        function renderJobs() {
-            const tbody = document.getElementById('jobs-table-body');
-            const countElement = document.getElementById('document-count');
-            const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
-
-            // Update count display
-            if (countElement) {
-                countElement.textContent = `${totalJobs}`;
-            }
-            document.getElementById('job-count').textContent = `${totalJobs}`;
-
-            // Update custom pagination
-            renderPagination(totalPages);
-
-            if (!filteredJobs || filteredJobs.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="text-center">
-                            No jobs found matching the current filters.
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-
-            tbody.innerHTML = filteredJobs.map((job, index) => {
-                const statusBadge = getStatusBadge(job.status);
-                const progressText = getProgressText(job);
-                const createdDate = job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A';
-                const isSelected = selectedJob && selectedJob.id === job.id;
-                const isChecked = selectedJobIds.has(job.id);
-                const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
-
-                return `
-                    <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})">
-                        <td onclick="event.stopPropagation()">
-                            <label class="form-checkbox">
-                                <input type="checkbox" class="job-checkbox" data-job-id="${job.id}" 
-                                       onchange="toggleJobSelection('${job.id}')" ${isChecked ? 'checked' : ''}>
-                                <i class="form-icon"></i>
-                            </label>
-                        </td>
-                        <td title="${job.id || 'N/A'}">${jobIdShort}...</td>
-                        <td>${job.source_type || 'N/A'}</td>
-                        <td>${job.entity_type || 'N/A'}</td>
-                        <td class="text-center">${statusBadge}</td>
-                        <td>${progressText}</td>
-                        <td>${createdDate}</td>
-                        <td class="text-center">
-                            ${job.status !== 'running' ? `
-                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                            ` : ''}
-                            ${job.status === 'running' ? `
-                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job">
-                                <i class="fas fa-stop"></i>
-                            </button>
-                            ` : ''}
-                            ${job.status !== 'running' ? `
-                            <button class="btn btn-sm btn-error" onclick="event.stopPropagation(); deleteJob('${job.id}')" title="Delete Job">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                            ` : ''}
-                        </td>
-                    </tr>
-                `;
-            }).join('');
-
-            // Update delete selected button visibility
-            updateDeleteSelectedButtonVisibility();
-        }
-
-        // Get status badge HTML
-        function getStatusBadge(status) {
-            const badges = {
-                'pending': '<span class="label label-warning">Pending</span>',
-                'running': '<span class="label label-primary">Running</span>',
-                'completed': '<span class="label label-success">Completed</span>',
-                'failed': '<span class="label label-error">Failed</span>',
-                'cancelled': '<span class="label">Cancelled</span>'
-            };
-            return badges[status] || '<span class="label">Unknown</span>';
-        }
-
-        // Get progress text
-        function getProgressText(job) {
-            if (!job.progress) return 'N/A';
-
-            const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
-
-            if (progress.percentage !== undefined) {
-                return `${Math.round(progress.percentage)}%`;
-            }
-
-            if (progress.completed_urls !== undefined && progress.total_urls !== undefined) {
-                return `${progress.completed_urls}/${progress.total_urls} URLs`;
-            }
-
-            return 'N/A';
-        }
-
-        // Custom pagination rendering
-        function renderPagination(totalPages) {
-            const container = document.getElementById('job-pagination-container');
-            if (!container) return;
-
-            if (totalPages <= 1) {
-                container.innerHTML = '';
-                return;
-            }
-
-            let html = '<ul class="pagination">';
-
-            // Previous button
-            if (currentPage > 1) {
-                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage - 1})">Previous</a></li>`;
-            } else {
-                html += '<li class="page-item disabled"><a href="#">Previous</a></li>';
-            }
-
-            // Page numbers (show max 7 pages)
-            const maxVisible = 7;
-            let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-            if (endPage - startPage < maxVisible - 1) {
-                startPage = Math.max(1, endPage - maxVisible + 1);
-            }
-
-            if (startPage > 1) {
-                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(1)">1</a></li>`;
-                if (startPage > 2) {
-                    html += '<li class="page-item disabled"><a href="#">...</a></li>';
-                }
-            }
-
-            for (let i = startPage; i <= endPage; i++) {
-                if (i === currentPage) {
-                    html += `<li class="page-item active"><a href="#">${i}</a></li>`;
-                } else {
-                    html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${i})">${i}</a></li>`;
-                }
-            }
-
-            if (endPage < totalPages) {
-                if (endPage < totalPages - 1) {
-                    html += '<li class="page-item disabled"><a href="#">...</a></li>';
-                }
-                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${totalPages})">${totalPages}</a></li>`;
-            }
-
-            // Next button
-            if (currentPage < totalPages) {
-                html += `<li class="page-item"><a href="#" onclick="event.preventDefault(); changePage(${currentPage + 1})">Next</a></li>`;
-            } else {
-                html += '<li class="page-item disabled"><a href="#">Next</a></li>';
-            }
-
-            html += '</ul>';
-            container.innerHTML = html;
-        }
-
-        // Pagination page change handler
-        function changePage(pageNumber) {
-            currentPage = pageNumber;
-            loadJobs();
-        }
-
-        // Select and display job details
-        function selectJob(index) {
-            selectedJob = filteredJobs[index];
-            displayJobDetail(selectedJob);
-            loadJobLogsTab();
-            renderJobs();
-        }
-
-        function displayJobDetail(job) {
-            const selectedId = document.getElementById('selected-job-id');
-            const detailPre = document.getElementById('job-detail-json');
-            const codeBlock = detailPre.querySelector('code');
-
-            if (!job) {
-                selectedId.textContent = '';
-                codeBlock.textContent = '';
-                return;
-            }
-
-            selectedId.textContent = job.id || 'Unknown';
-            const jsonString = JSON.stringify(job, null, 2);
-            codeBlock.textContent = jsonString;
-
-            if (typeof hljs !== 'undefined') {
-                hljs.highlightElement(codeBlock);
-            }
-        }
-
-        // Load job logs for the currently selected job
-        async function loadJobLogsTab() {
-            const logsContainer = document.getElementById('job-logs-container');
-
-            if (!selectedJob || !selectedJob.id) {
-                logsContainer.innerHTML = '<p class="text-muted text-center">Select a job to view its logs</p>';
-                return;
-            }
-
-            logsContainer.innerHTML = '<div class="loading loading-lg"></div>';
-
-            try {
-                const response = await fetch(`/api/jobs/${selectedJob.id}/logs`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch job logs');
-                }
-
-                const data = await response.json();
-                const logs = data.logs || [];
-
-                if (logs.length === 0) {
-                    logsContainer.innerHTML = '<p class="text-muted text-center">No logs available for this job</p>';
-                    return;
-                }
-
-                // Build logs table
-                let html = `
-                    <table class="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th>TIME</th>
-                                <th>LEVEL</th>
-                                <th>MESSAGE</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-
-                logs.forEach(log => {
-                    const levelClass = log.level === 'error' ? 'text-error' : log.level === 'info' ? 'text-primary' : '';
-                    const levelBadge = log.level === 'error'
-                        ? '<span class="label label-error">ERROR</span>'
-                        : log.level === 'info'
-                            ? '<span class="label label-primary">INFO</span>'
-                            : `<span class="label">${log.level.toUpperCase()}</span>`;
-
-                    html += `
-                        <tr>
-                            <td><code>${log.timestamp || 'N/A'}</code></td>
-                            <td>${levelBadge}</td>
-                            <td class="${levelClass}">${log.message || 'N/A'}</td>
-                        </tr>
-                    `;
-                });
-
-                html += `
-                        </tbody>
-                    </table>
-                `;
-
-                logsContainer.innerHTML = html;
-
-            } catch (error) {
-                console.error('Error loading job logs:', error);
-                logsContainer.innerHTML = `
-                    <div class="toast toast-error">
-                        <i class="fa-solid fa-exclamation-circle"></i> Failed to load logs: ${error.message}
-                    </div>
-                `;
-            }
-        }
-
-        // Rerun a job
-        async function rerunJob(jobId) {
-            if (!confirm(`Rerun job ${jobId.substring(0, 8)}?\n\nThis will create a new job with the same configuration.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/jobs/${jobId}/rerun`, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to rerun job');
-                }
-
-                const result = await response.json();
-                window.showNotification(`Job rerun started successfully! New Job ID: ${result.new_job_id}`, 'success');
-                setTimeout(() => {
-                    loadStats();
-                    loadJobs();
-                }, 1000);
-            } catch (error) {
-                console.error('Error rerunning job:', error);
-                window.showNotification('Failed to rerun job: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // Cancel a running job
-        async function cancelJob(jobId) {
-            if (!confirm(`Cancel job ${jobId.substring(0, 8)}?\n\nThe job will be stopped immediately.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/jobs/${jobId}/cancel`, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to cancel job');
-                }
-
-                window.showNotification('Job cancelled successfully', 'success');
-                setTimeout(() => {
-                    loadStats();
-                    loadJobs();
-                }, 1000);
-            } catch (error) {
-                console.error('Error cancelling job:', error);
-                window.showNotification('Failed to cancel job: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // Delete a job
-        async function deleteJob(jobId) {
-            if (!confirm(`Delete job ${jobId.substring(0, 8)}?\n\nThis will permanently remove the job from the database.`)) {
-                return;
-            }
-
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
-            let originalIcon = null;
-            if (button) {
-                button.disabled = true;
-                const iconElement = button.querySelector('i');
-                if (iconElement) {
-                    originalIcon = iconElement.className;
-                    iconElement.className = 'fas fa-spinner fa-pulse';
-                }
-            }
-
-            try {
-                const response = await fetch(`/api/jobs/${jobId}`, {
-                    method: 'DELETE'
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to delete job');
-                }
-
-                window.showNotification('Job deleted successfully', 'success');
-                setTimeout(() => {
-                    loadStats();
-                    loadJobs();
-                }, 1000);
-            } catch (error) {
-                console.error('Error deleting job:', error);
-                window.showNotification('Failed to delete job: ' + error.message, 'error');
-            } finally {
-                if (button) {
-                    button.disabled = false;
-                    const iconElement = button.querySelector('i');
-                    if (iconElement && originalIcon) {
-                        iconElement.className = originalIcon;
-                    }
-                }
-            }
-        }
-
-        // Auto-refresh for running jobs
-        function startAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
-
-            autoRefreshInterval = setInterval(() => {
-                // Check if there are any running jobs
-                const hasRunningJobs = allJobs.some(job => job.status === 'running');
-                if (hasRunningJobs) {
-                    loadJobs(); // Silently refresh
-                    loadStats(); // Update stats
-                    loadJobQueue(); // Update queue data
-                    loadDefaultJobs(); // Update default jobs status
-                }
-            }, 5000); // Refresh every 5 seconds
-        }
-
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function () {
-            console.log('[Jobs] ==================== PAGE LOAD ====================');
-            console.log('[Jobs] DOMContentLoaded event fired');
-            console.log('[Jobs] Current URL:', window.location.href);
-            console.log('[Jobs] Initializing page components...');
-
-            // Load filters from localStorage first
-            loadFiltersFromStorage();
-            console.log('[Jobs] Loaded filters from storage:', activeFilters);
-
-            renderFilterChips(); // Render initial filter chips
-            loadStats();
-            loadJobs();
-            loadJobQueue(); // Load queue data on initial page load
-            loadDefaultJobs(); // Load default jobs on initial page load
-            startAutoRefresh();
-
-            // Add event listener for enabled checkbox to update label
-            const enabledCheckbox = document.getElementById('edit-default-job-enabled');
-            const statusLabel = document.getElementById('edit-default-job-status-label');
-            if (enabledCheckbox && statusLabel) {
-                enabledCheckbox.addEventListener('change', function() {
-                    statusLabel.textContent = this.checked ? 'Enabled' : 'Disabled';
-                });
-            }
-
-            console.log('[Jobs] Page initialization complete');
-            console.log('[Jobs] ====================================================');
-        });
-
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', function () {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
-        });
-
-        // Ensure Alpine.js is fully initialized
-        document.addEventListener('alpine:init', function () {
-            console.log('[Jobs] Alpine.js initialized');
-        });
-
-        // Toggle job selection for batch operations
-        function toggleJobSelection(jobId) {
-            if (selectedJobIds.has(jobId)) {
-                selectedJobIds.delete(jobId);
-            } else {
-                selectedJobIds.add(jobId);
-            }
-            updateDeleteSelectedButtonVisibility();
-            updateSelectAllCheckbox();
-        }
-
-        // Toggle select all checkbox
-        function toggleSelectAll() {
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            const jobCheckboxes = document.querySelectorAll('.job-checkbox');
-
-            if (selectAllCheckbox.checked) {
-                // Select all visible jobs
-                jobCheckboxes.forEach(checkbox => {
-                    const jobId = checkbox.dataset.jobId;
-                    selectedJobIds.add(jobId);
-                    checkbox.checked = true;
-                });
-            } else {
-                // Deselect all visible jobs
-                jobCheckboxes.forEach(checkbox => {
-                    const jobId = checkbox.dataset.jobId;
-                    selectedJobIds.delete(jobId);
-                    checkbox.checked = false;
-                });
-            }
-
-            updateDeleteSelectedButtonVisibility();
-        }
-
-        // Update select all checkbox state based on individual selections
-        function updateSelectAllCheckbox() {
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            const jobCheckboxes = document.querySelectorAll('.job-checkbox');
-            const checkedCount = Array.from(jobCheckboxes).filter(cb => cb.checked).length;
-
-            if (checkedCount === 0) {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = false;
-            } else if (checkedCount === jobCheckboxes.length) {
-                selectAllCheckbox.checked = true;
-                selectAllCheckbox.indeterminate = false;
-            } else {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = true;
-            }
-        }
-
-        // Update visibility of delete selected button
-        function updateDeleteSelectedButtonVisibility() {
-            const deleteButton = document.getElementById('delete-selected-btn');
-            const buttonSpan = deleteButton.querySelector('span');
-            if (selectedJobIds.size > 0) {
-                deleteButton.style.display = 'inline-block';
-                if (buttonSpan) {
-                    buttonSpan.textContent = `Delete Selected (${selectedJobIds.size})`;
-                }
-            } else {
-                deleteButton.style.display = 'none';
-                if (buttonSpan) {
-                    buttonSpan.textContent = 'Delete Selected';
-                }
-            }
-        }
-
-        // Delete multiple selected jobs
-        async function deleteSelectedJobs() {
-            if (selectedJobIds.size === 0) {
-                window.showNotification('No jobs selected', 'warning');
-                return;
-            }
-
-            const jobCount = selectedJobIds.size;
-            const jobList = Array.from(selectedJobIds).map(id => id.substring(0, 8) + '...').join(', ');
-
-            if (!confirm(`Delete ${jobCount} selected job${jobCount > 1 ? 's' : ''}?\n\nJobs: ${jobList}\n\nThis will permanently remove the job${jobCount > 1 ? 's' : ''} from the database.`)) {
-                return;
-            }
-
-            const deleteButton = document.getElementById('delete-selected-btn');
-            const buttonSpan = deleteButton.querySelector('span');
-            const originalText = buttonSpan ? buttonSpan.textContent : 'Delete Selected';
-            deleteButton.disabled = true;
-            deleteButton.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> <span>Deleting...</span>';
-
-            const results = {
-                successful: [],
-                failed: []
-            };
-
-            // Delete each job
-            for (const jobId of selectedJobIds) {
-                try {
-                    const response = await fetch(`/api/jobs/${jobId}`, {
-                        method: 'DELETE'
-                    });
-
-                    if (response.ok) {
-                        results.successful.push(jobId);
-                    } else {
-                        const errorText = await response.text();
-                        results.failed.push({ jobId, error: errorText });
-                    }
-                } catch (error) {
-                    results.failed.push({ jobId, error: error.message });
-                }
-            }
-
-            // Clear selections
-            selectedJobIds.clear();
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            selectAllCheckbox.checked = false;
-            selectAllCheckbox.indeterminate = false;
-
-            // Reset button
-            deleteButton.disabled = false;
-            deleteButton.innerHTML = `<i class="fa-solid fa-trash"></i> <span>${originalText}</span>`;
-            updateDeleteSelectedButtonVisibility();
-
-            // Show results
-            if (results.successful.length > 0) {
-                window.showNotification(`Successfully deleted ${results.successful.length} job${results.successful.length > 1 ? 's' : ''}`, 'success');
-            }
-
-            if (results.failed.length > 0) {
-                window.showNotification(`Failed to delete ${results.failed.length} job${results.failed.length > 1 ? 's' : ''}: ${results.failed[0].error}`, 'error');
-                console.error('Failed deletions:', results.failed);
-            }
-
-            // Refresh data
-            setTimeout(() => {
-                loadStats();
-                loadJobs();
-            }, 1000);
-        }
-
-        // Initialize highlight.js - only for job detail, not service logs
-        if (typeof hljs !== 'undefined') {
-            const codeBlock = document.querySelector('#job-detail-json code');
-            if (codeBlock) {
-                hljs.highlightElement(codeBlock);
-            }
-        }
-
-        // Job creation modal functions
-        let modalTriggerElement = null;
-
-        async function showCreateJobModal() {
-            modalTriggerElement = document.activeElement;
-            const modal = document.getElementById('create-job-modal');
-            modal.classList.add('active');
-            document.body.classList.add('modal-open');
-            await loadSourcesForJobCreation();
-
-            // Move focus to first focusable element in modal
-            setTimeout(() => {
-                const modalContainer = modal.querySelector('.modal-container');
-                if (modalContainer) {
-                    const firstFocusable = modalContainer.querySelector('input, select, textarea, button');
-                    if (firstFocusable) firstFocusable.focus();
-                }
-            }, 100);
-        }
-
-        function closeCreateJobModal() {
-            const modal = document.getElementById('create-job-modal');
-            modal.classList.remove('active');
-            document.body.classList.remove('modal-open');
-            // Reset form
-            document.getElementById('create-job-form').reset();
-
-            // Restore focus to trigger element
-            if (modalTriggerElement) {
-                setTimeout(() => {
-                    modalTriggerElement.focus();
-                    modalTriggerElement = null;
-                }, 100);
-            }
-        }
-
-        // ESC key handler for modal
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                const modal = document.getElementById('create-job-modal');
-                if (modal && modal.classList.contains('active')) {
-                    closeCreateJobModal();
-                }
-            }
-        });
-
-        // Focus trap for modal
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Tab') {
-                const modal = document.getElementById('create-job-modal');
-                if (modal && modal.classList.contains('active')) {
-                    const modalContainer = modal.querySelector('.modal-container');
-                    if (modalContainer) {
-                        const focusableElements = modalContainer.querySelectorAll(
-                            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
-                        );
-                        const firstFocusable = focusableElements[0];
-                        const lastFocusable = focusableElements[focusableElements.length - 1];
-
-                        if (e.shiftKey) {
-                            if (document.activeElement === firstFocusable) {
-                                lastFocusable.focus();
-                                e.preventDefault();
-                            }
-                        } else {
-                            if (document.activeElement === lastFocusable) {
-                                firstFocusable.focus();
-                                e.preventDefault();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        async function loadSourcesForJobCreation() {
-            const sourceSelect = document.getElementById('job-source-select');
-
-            try {
-                const response = await fetch('/api/sources');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch sources');
-                }
-
-                const sources = await response.json();
-
-                // Clear existing options except the first placeholder
-                sourceSelect.innerHTML = '<option value="">Select a source...</option>';
-
-                if (!sources || sources.length === 0) {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'No sources available - create a source first';
-                    option.disabled = true;
-                    sourceSelect.appendChild(option);
-                    return;
-                }
-
-                // Add sources to dropdown
-                sources.forEach(source => {
-                    const option = document.createElement('option');
-                    option.value = source.id;
-                    option.textContent = `${source.name} (${source.type})`;
-                    option.dataset.sourceType = source.type;
-                    sourceSelect.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading sources:', error);
-                window.showNotification('Failed to load sources: ' + error.message, 'error');
-            }
-        }
-
-        async function createJobFromSource(event) {
-            event.preventDefault();
-
-            const sourceSelect = document.getElementById('job-source-select');
-            const refreshCheckbox = document.getElementById('refresh-source-checkbox');
-            const seedUrlsTextarea = document.getElementById('seed-urls-textarea');
-            const modalLoading = document.getElementById('modal-loading');
-            const createButton = event.target;
-
-            const sourceID = sourceSelect.value;
-            if (!sourceID) {
-                window.showNotification('Please select a source', 'warning');
-                return;
-            }
-
-            const refreshSource = refreshCheckbox.checked;
-            const seedUrlsText = seedUrlsTextarea.value.trim();
-            const seedURLs = seedUrlsText ? seedUrlsText.split('\n').map(url => url.trim()).filter(url => url) : [];
-
-            // Show loading state
-            modalLoading.classList.remove('hide');
-            createButton.disabled = true;
-
-            let originalIcon = null;
-            const iconElement = createButton.querySelector('i');
-            if (iconElement) {
-                originalIcon = iconElement.className;
-                iconElement.className = 'fas fa-spinner fa-pulse';
-            }
-
-            try {
-                const payload = {
-                    source_id: sourceID,
-                    refresh_source: refreshSource
-                };
-
-                if (seedURLs.length > 0) {
-                    payload.seed_urls = seedURLs;
-                }
-
-                const response = await fetch('/api/jobs/create', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
-                }
-
-                const result = await response.json();
-
-                // Show success message
-                window.showNotification(`Job created successfully! Job ID: ${result.job_id}`, 'success');
-
-                // Close modal and refresh
-                closeCreateJobModal();
-                setTimeout(() => {
-                    loadStats();
-                    loadJobs();
-                }, 500);
-
-            } catch (error) {
-                console.error('Error creating job:', error);
-                window.showNotification('Failed to create job: ' + error.message, 'error');
-            } finally {
-                modalLoading.classList.add('hide');
-                createButton.disabled = false;
-                if (iconElement && originalIcon) {
-                    iconElement.className = originalIcon;
-                }
-            }
-        }
-
-        // Load queue data (optional enhancement)
-        async function loadJobQueue() {
-            try {
-                const response = await fetch('/api/jobs/queue');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch job queue');
-                }
-
-                const queue = await response.json();
-
-                // Update pending and running counts in stats
-                document.getElementById('stat-pending').textContent = queue.pending ? queue.pending.length : 0;
-                document.getElementById('stat-running').textContent = queue.running ? queue.running.length : 0;
-
-            } catch (error) {
-                console.error('Error loading job queue:', error);
-            }
-        }
-
         // ===== DEFAULT JOBS MANAGEMENT =====
 
         // Load default jobs from API
@@ -1638,54 +289,6 @@
             }
         }
 
-        // Toggle default job enabled/disabled status
-        async function toggleDefaultJob(jobName, enable) {
-            const action = enable ? 'enable' : 'disable';
-            const endpoint = `/api/jobs/default/${jobName}/${action}`;
-
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || `Failed to ${action} job`);
-                }
-
-                const result = await response.json();
-
-                window.showNotification(result.message || `Job ${enable ? 'enabled' : 'disabled'} successfully`, 'success');
-
-                // Reload default jobs to reflect changes
-                setTimeout(() => loadDefaultJobs(), 500);
-
-            } catch (error) {
-                console.error(`Error ${action}ing job:`, error);
-                window.showNotification(`Failed to ${action} job: ` + error.message, 'error');
-            }
-        }
-
-        // Edit job schedule (shows prompt)
-        function editJobSchedule(jobName, currentSchedule) {
-            const newSchedule = prompt(
-                `Edit schedule for "${jobName}"\n\n` +
-                `Current schedule: ${currentSchedule}\n\n` +
-                `Enter new cron schedule (format: minute hour day month weekday):\n` +
-                `Examples:\n` +
-                `  */5 * * * *  = Every 5 minutes\n` +
-                `  */10 * * * * = Every 10 minutes\n` +
-                `  0 * * * *    = Every hour\n` +
-                `  0 0 * * *    = Every day at midnight\n\n` +
-                `Note: Minimum interval is 5 minutes`,
-                currentSchedule
-            );
-
-            if (newSchedule && newSchedule !== currentSchedule) {
-                updateJobSchedule(jobName, newSchedule);
-            }
-        }
-
         // Start default job manually
         async function startDefaultJob(jobName) {
             if (!confirm(`Start job "${jobName}" now?\n\nThis will trigger the job immediately.`)) {
@@ -1720,12 +323,8 @@
                 const result = await response.json();
                 window.showNotification(result.message || 'Job started successfully', 'success');
 
-                // Reload default jobs to reflect changes
-                setTimeout(() => {
-                    loadDefaultJobs();
-                    loadStats();
-                    loadJobs();
-                }, 1000);
+                // Reload to show updated status
+                loadDefaultJobs();
 
             } catch (error) {
                 console.error('Error starting job:', error);
@@ -1740,47 +339,6 @@
                 }
             }
         }
-
-        // Update job schedule via API
-        async function updateJobSchedule(jobName, schedule) {
-            const endpoint = `/api/jobs/default/${jobName}/schedule`;
-
-            try {
-                const response = await fetch(endpoint, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ schedule: schedule })
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || 'Failed to update schedule');
-                }
-
-                const result = await response.json();
-
-                window.showNotification(result.message || 'Schedule updated successfully', 'success');
-
-                // Reload default jobs to reflect changes
-                setTimeout(() => loadDefaultJobs(), 500);
-
-            } catch (error) {
-                console.error('Error updating schedule:', error);
-                window.showNotification('Failed to update schedule: ' + error.message, 'error');
-            }
-        }
-
-        // ESC key handler for edit modal
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                const defaultModal = document.getElementById('edit-default-job-modal');
-                if (defaultModal && defaultModal.classList.contains('active')) {
-                    closeEditDefaultJobModal();
-                }
-            }
-        });
 
         // ===== EDIT DEFAULT JOB MODAL FUNCTIONS =====
 
@@ -1905,6 +463,227 @@
                 }
             }
         }
+
+        // ===== CREATE JOB MODAL FUNCTIONS =====
+
+        let modalTriggerElement = null;
+
+        async function showCreateJobModal() {
+            modalTriggerElement = document.activeElement;
+            const modal = document.getElementById('create-job-modal');
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
+            await loadSourcesForJobCreation();
+
+            // Move focus to first focusable element in modal
+            setTimeout(() => {
+                const modalContainer = modal.querySelector('.modal-container');
+                if (modalContainer) {
+                    const firstFocusable = modalContainer.querySelector('input, select, textarea, button');
+                    if (firstFocusable) firstFocusable.focus();
+                }
+            }, 100);
+        }
+
+        function closeCreateJobModal() {
+            const modal = document.getElementById('create-job-modal');
+            modal.classList.remove('active');
+            document.body.classList.remove('modal-open');
+            // Reset form
+            document.getElementById('create-job-form').reset();
+
+            // Restore focus to trigger element
+            if (modalTriggerElement) {
+                setTimeout(() => {
+                    modalTriggerElement.focus();
+                    modalTriggerElement = null;
+                }, 100);
+            }
+        }
+
+        async function loadSourcesForJobCreation() {
+            const sourceSelect = document.getElementById('job-source-select');
+
+            try {
+                const response = await fetch('/api/sources');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch sources');
+                }
+
+                const sources = await response.json();
+
+                // Clear existing options except the first placeholder
+                sourceSelect.innerHTML = '<option value="">Select a source...</option>';
+
+                if (!sources || sources.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No sources available - create a source first';
+                    option.disabled = true;
+                    sourceSelect.appendChild(option);
+                    return;
+                }
+
+                // Add sources to dropdown
+                sources.forEach(source => {
+                    const option = document.createElement('option');
+                    option.value = source.id;
+                    option.textContent = `${source.name} (${source.type})`;
+                    option.dataset.sourceType = source.type;
+                    sourceSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading sources:', error);
+                window.showNotification('Failed to load sources: ' + error.message, 'error');
+            }
+        }
+
+        async function createJobFromSource(event) {
+            event.preventDefault();
+
+            const sourceSelect = document.getElementById('job-source-select');
+            const refreshCheckbox = document.getElementById('refresh-source-checkbox');
+            const seedUrlsTextarea = document.getElementById('seed-urls-textarea');
+            const modalLoading = document.getElementById('modal-loading');
+            const createButton = event.target;
+
+            const sourceID = sourceSelect.value;
+            if (!sourceID) {
+                window.showNotification('Please select a source', 'warning');
+                return;
+            }
+
+            const refreshSource = refreshCheckbox.checked;
+            const seedUrlsText = seedUrlsTextarea.value.trim();
+            const seedURLs = seedUrlsText ? seedUrlsText.split('\n').map(url => url.trim()).filter(url => url) : [];
+
+            // Show loading state
+            modalLoading.classList.remove('hide');
+            createButton.disabled = true;
+
+            let originalIcon = null;
+            const iconElement = createButton.querySelector('i');
+            if (iconElement) {
+                originalIcon = iconElement.className;
+                iconElement.className = 'fas fa-spinner fa-pulse';
+            }
+
+            try {
+                const payload = {
+                    source_id: sourceID,
+                    refresh_source: refreshSource
+                };
+
+                if (seedURLs.length > 0) {
+                    payload.seed_urls = seedURLs;
+                }
+
+                const response = await fetch('/api/jobs/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // Show success message
+                window.showNotification(`Job created successfully! Job ID: ${result.job_id}`, 'success');
+
+                // Close modal
+                closeCreateJobModal();
+
+            } catch (error) {
+                console.error('Error creating job:', error);
+                window.showNotification('Failed to create job: ' + error.message, 'error');
+            } finally {
+                modalLoading.classList.add('hide');
+                createButton.disabled = false;
+                if (iconElement && originalIcon) {
+                    iconElement.className = originalIcon;
+                }
+            }
+        }
+
+        // ===== PAGE INITIALIZATION =====
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('[Jobs] ==================== PAGE LOAD ====================');
+            console.log('[Jobs] DOMContentLoaded event fired');
+            console.log('[Jobs] Current URL:', window.location.href);
+            console.log('[Jobs] Initializing page components...');
+
+            loadDefaultJobs();
+
+            // Add event listener for enabled checkbox to update label
+            const enabledCheckbox = document.getElementById('edit-default-job-enabled');
+            const statusLabel = document.getElementById('edit-default-job-status-label');
+            if (enabledCheckbox && statusLabel) {
+                enabledCheckbox.addEventListener('change', function () {
+                    statusLabel.textContent = this.checked ? 'Enabled' : 'Disabled';
+                });
+            }
+
+            console.log('[Jobs] Page initialization complete');
+            console.log('[Jobs] ====================================================');
+        });
+
+        // Ensure Alpine.js is fully initialized
+        document.addEventListener('alpine:init', function () {
+            console.log('[Jobs] Alpine.js initialized');
+        });
+
+        // ESC key handler for modals
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                const createModal = document.getElementById('create-job-modal');
+                const editModal = document.getElementById('edit-default-job-modal');
+
+                if (createModal && createModal.classList.contains('active')) {
+                    closeCreateJobModal();
+                }
+
+                if (editModal && editModal.classList.contains('active')) {
+                    closeEditDefaultJobModal();
+                }
+            }
+        });
+
+        // Focus trap for create job modal
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Tab') {
+                const modal = document.getElementById('create-job-modal');
+                if (modal && modal.classList.contains('active')) {
+                    const modalContainer = modal.querySelector('.modal-container');
+                    if (modalContainer) {
+                        const focusableElements = modalContainer.querySelectorAll(
+                            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
+                        );
+                        const firstFocusable = focusableElements[0];
+                        const lastFocusable = focusableElements[focusableElements.length - 1];
+
+                        if (e.shiftKey) {
+                            if (document.activeElement === firstFocusable) {
+                                lastFocusable.focus();
+                                e.preventDefault();
+                            }
+                        } else {
+                            if (document.activeElement === lastFocusable) {
+                                firstFocusable.focus();
+                                e.preventDefault();
+                            }
+                        }
+                    }
+                }
+            }
+        });
     </script>
 </body>
 

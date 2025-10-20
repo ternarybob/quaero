@@ -54,6 +54,20 @@ const (
 	//   - source_name: string
 	//   - timestamp: time.Time
 	EventSourceDeleted EventType = "source_deleted"
+
+	// EventJobProgress is published during job definition execution with progress updates.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (job definition ID)
+	//   - job_name: string (job definition name)
+	//   - job_type: string ("crawler", "summarizer", "custom")
+	//   - step_index: int (current step index, 0-based)
+	//   - step_name: string (current step name)
+	//   - step_action: string (current step action)
+	//   - total_steps: int (total number of steps)
+	//   - status: string ("running", "completed", "failed")
+	//   - error: string (error message if status is "failed")
+	//   - timestamp: time.Time
+	EventJobProgress EventType = "job_progress"
 )
 
 // Event represents a system event

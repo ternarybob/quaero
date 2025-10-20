@@ -54,6 +54,9 @@ type App struct {
 	SchedulerService interfaces.SchedulerService
 	SummaryService   *summary.Service
 
+	// Job execution
+	JobExecutor *jobs.JobExecutor
+
 	// Specialized transformers
 	JiraTransformer       *atlassian.JiraTransformer
 	ConfluenceTransformer *atlassian.ConfluenceTransformer
@@ -292,6 +295,15 @@ func (a *App) initServices() error {
 
 	// 12. Initialize scheduler service with database persistence
 	a.SchedulerService = scheduler.NewServiceWithDB(a.EventService, a.Logger, a.StorageManager.DB().(*sql.DB), a.CrawlerService, a.StorageManager.JobStorage())
+
+	// Initialize job executor for job definition execution
+	jobRegistry := jobs.NewJobTypeRegistry(a.Logger)
+	a.JobExecutor, err = jobs.NewJobExecutor(jobRegistry, a.SourceService, a.EventService, a.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to initialize job executor: %w", err)
+	}
+	a.Logger.Info().Msg("Job executor initialized")
+	// TODO: Register action handlers in Phase 3 (crawler actions) and Phase 4 (summarizer actions)
 
 	// Register default jobs (always register them for UI visibility, then disable if needed)
 	jobsRegistered := 0

@@ -92,12 +92,35 @@ type SourceStorage interface {
 	GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error)
 }
 
+// JobDefinitionListOptions represents filtering and pagination options for listing job definitions
+type JobDefinitionListOptions struct {
+	Type     string // Filter by job type (crawler, summarizer, custom)
+	Enabled  *bool  // Filter by enabled status (nil = no filter, true = enabled only, false = disabled only)
+	OrderBy  string // Order by field (created_at, updated_at, name)
+	OrderDir string // Order direction (ASC, DESC)
+	Limit    int    // Maximum number of results to return
+	Offset   int    // Number of results to skip for pagination
+}
+
+// JobDefinitionStorage - interface for job definition persistence
+type JobDefinitionStorage interface {
+	SaveJobDefinition(ctx context.Context, jobDef *models.JobDefinition) error
+	UpdateJobDefinition(ctx context.Context, jobDef *models.JobDefinition) error
+	GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error)
+	ListJobDefinitions(ctx context.Context, opts *JobDefinitionListOptions) ([]*models.JobDefinition, error)
+	GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error)
+	GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error)
+	DeleteJobDefinition(ctx context.Context, id string) error
+	CountJobDefinitions(ctx context.Context) (int, error)
+}
+
 // StorageManager - composite interface for all storage operations
 type StorageManager interface {
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
 	JobStorage() JobStorage
 	SourceStorage() SourceStorage
+	JobDefinitionStorage() JobDefinitionStorage
 	DB() interface{}
 	Close() error
 }

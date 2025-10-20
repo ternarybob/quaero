@@ -19,6 +19,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))
 	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("sources.html", "sources"))
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))
+	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
 	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))
 	mux.HandleFunc("/settings", s.app.PageHandler.ServePage("settings.html", "settings"))
@@ -120,6 +121,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 		// POST /api/jobs/default/{name}/start
 		if r.Method == "POST" && strings.HasSuffix(path, "/start") {
 			s.app.JobHandler.StartDefaultJobHandler(w, r)
+			return
+		}
+
+		// PUT /api/jobs/default/{name} - Update default job (description, schedule, enabled)
+		if r.Method == "PUT" && !strings.HasSuffix(path, "/enable") && !strings.HasSuffix(path, "/disable") && !strings.HasSuffix(path, "/schedule") && !strings.HasSuffix(path, "/start") {
+			s.app.JobHandler.UpdateDefaultJobHandler(w, r)
 			return
 		}
 

@@ -296,7 +296,7 @@ func (s *Service) EnableJob(name string) error {
 		Msg("Job enabled")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, entry.schedule, true, entry.lastRun); err != nil {
+	if err := s.saveJobSettings(name, entry.schedule, entry.description, true, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job enabled status")
 	}
 
@@ -326,7 +326,7 @@ func (s *Service) DisableJob(name string) error {
 		Msg("Job disabled")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, entry.schedule, false, entry.lastRun); err != nil {
+	if err := s.saveJobSettings(name, entry.schedule, entry.description, false, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job disabled status")
 	}
 
@@ -389,8 +389,65 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 		Msg("Job schedule updated")
 
 	// Persist to database
-	if err := s.saveJobSettings(name, schedule, entry.enabled, entry.lastRun); err != nil {
+	if err := s.saveJobSettings(name, schedule, entry.description, entry.enabled, entry.lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job schedule update")
+	}
+
+	return nil
+}
+
+// UpdateJob updates job settings (description, schedule, enabled status)
+// Use nil pointers to skip updating specific fields
+func (s *Service) UpdateJob(name string, description, schedule *string, enabled *bool) error {
+	s.jobMu.Lock()
+	entry, exists := s.jobs[name]
+	if !exists {
+		s.jobMu.Unlock()
+		return fmt.Errorf("job %s not found", name)
+	}
+	s.jobMu.Unlock()
+
+	// Update description if provided
+	if description != nil {
+		s.jobMu.Lock()
+		entry.description = *description
+		s.jobMu.Unlock()
+		s.logger.Info().
+			Str("job_name", name).
+			Str("new_description", *description).
+			Msg("Job description updated")
+	}
+
+	// Update schedule if provided
+	if schedule != nil {
+		if err := s.UpdateJobSchedule(name, *schedule); err != nil {
+			return fmt.Errorf("failed to update schedule: %w", err)
+		}
+	}
+
+	// Update enabled status if provided
+	if enabled != nil {
+		if *enabled {
+			if err := s.EnableJob(name); err != nil {
+				return fmt.Errorf("failed to enable job: %w", err)
+			}
+		} else {
+			if err := s.DisableJob(name); err != nil {
+				return fmt.Errorf("failed to disable job: %w", err)
+			}
+		}
+	}
+
+	// If only description was updated, persist it manually
+	// (schedule and enabled changes are already persisted by their respective methods)
+	if description != nil && schedule == nil && enabled == nil {
+		s.jobMu.Lock()
+		if err := s.saveJobSettings(name, entry.schedule, entry.description, entry.enabled, entry.lastRun); err != nil {
+			s.jobMu.Unlock()
+			s.logger.Warn().Err(err).Msg("Failed to persist job description update")
+		} else {
+			s.jobMu.Unlock()
+		}
 	}
 
 	return nil
@@ -457,6 +514,7 @@ func (s *Service) GetAllJobStatuses() map[string]*interfaces.JobStatus {
 func (s *Service) executeJob(name string) {
 	// Variables for panic recovery persistence
 	var capturedSchedule string
+	var capturedDescription string
 	var capturedEnabled bool
 	var capturedLastRun *time.Time
 
@@ -476,7 +534,7 @@ func (s *Service) executeJob(name string) {
 			s.jobMu.Unlock()
 
 			// Persist lastRun timestamp even on panic
-			if err := s.saveJobSettings(name, capturedSchedule, capturedEnabled, capturedLastRun); err != nil {
+			if err := s.saveJobSettings(name, capturedSchedule, capturedDescription, capturedEnabled, capturedLastRun); err != nil {
 				s.logger.Warn().Err(err).Msg("Failed to persist job lastRun timestamp after panic")
 			}
 		}
@@ -508,6 +566,7 @@ func (s *Service) executeJob(name string) {
 
 	// Capture values for persistence before unlocking
 	capturedSchedule = entry.schedule
+	capturedDescription = entry.description
 	capturedEnabled = entry.enabled
 	capturedLastRun = entry.lastRun
 	s.jobMu.Unlock()
@@ -539,11 +598,12 @@ func (s *Service) executeJob(name string) {
 	lastRun := entry.lastRun
 	capturedLastRun = entry.lastRun
 	schedule := entry.schedule
+	description := entry.description
 	enabled := entry.enabled
 	s.jobMu.Unlock()
 
 	// Persist lastRun timestamp to database
-	if err := s.saveJobSettings(name, schedule, enabled, lastRun); err != nil {
+	if err := s.saveJobSettings(name, schedule, description, enabled, lastRun); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to persist job lastRun timestamp")
 	}
 }
@@ -608,8 +668,8 @@ func (s *Service) runScheduledTask() {
 	s.logger.Info().Msg("✅ >>> SCHEDULER: Collection completed successfully")
 }
 
-// saveJobSettings persists job schedule, enabled status, and last run timestamp to database
-func (s *Service) saveJobSettings(name string, schedule string, enabled bool, lastRun *time.Time) error {
+// saveJobSettings persists job schedule, description, enabled status, and last run timestamp to database
+func (s *Service) saveJobSettings(name string, schedule string, description string, enabled bool, lastRun *time.Time) error {
 	if s.db == nil {
 		return nil // No database available, skip persistence
 	}
@@ -621,16 +681,17 @@ func (s *Service) saveJobSettings(name string, schedule string, enabled bool, la
 	}
 
 	query := `
-		INSERT INTO job_settings (job_name, schedule, enabled, last_run, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO job_settings (job_name, schedule, description, enabled, last_run, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(job_name) DO UPDATE SET
 			schedule = excluded.schedule,
+			description = excluded.description,
 			enabled = excluded.enabled,
 			last_run = excluded.last_run,
 			updated_at = excluded.updated_at
 	`
 
-	_, err := s.db.Exec(query, name, schedule, enabled, lastRunUnix, time.Now().Unix())
+	_, err := s.db.Exec(query, name, schedule, description, enabled, lastRunUnix, time.Now().Unix())
 	if err != nil {
 		return fmt.Errorf("failed to save job settings: %w", err)
 	}
@@ -638,6 +699,7 @@ func (s *Service) saveJobSettings(name string, schedule string, enabled bool, la
 	s.logger.Debug().
 		Str("job_name", name).
 		Str("schedule", schedule).
+		Str("description", description).
 		Str("enabled", fmt.Sprintf("%t", enabled)).
 		Msg("Job settings persisted to database")
 
@@ -652,7 +714,7 @@ func (s *Service) LoadJobSettings() error {
 		return nil
 	}
 
-	query := `SELECT job_name, schedule, enabled, last_run FROM job_settings`
+	query := `SELECT job_name, schedule, description, enabled, last_run FROM job_settings`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return fmt.Errorf("failed to load job settings: %w", err)
@@ -662,10 +724,11 @@ func (s *Service) LoadJobSettings() error {
 	settingsLoaded := 0
 	for rows.Next() {
 		var name, schedule string
+		var description sql.NullString
 		var enabled bool
 		var lastRunUnix sql.NullInt64
 
-		if err := rows.Scan(&name, &schedule, &enabled, &lastRunUnix); err != nil {
+		if err := rows.Scan(&name, &schedule, &description, &enabled, &lastRunUnix); err != nil {
 			s.logger.Warn().Err(err).Msg("Failed to scan job setting")
 			continue
 		}
@@ -686,6 +749,14 @@ func (s *Service) LoadJobSettings() error {
 			s.jobMu.Lock()
 			entry.lastRun = &lastRun
 			s.jobMu.Unlock()
+		}
+
+		// Update description if provided and different
+		if description.Valid && entry.description != description.String {
+			s.jobMu.Lock()
+			entry.description = description.String
+			s.jobMu.Unlock()
+			settingsLoaded++
 		}
 
 		// Update schedule if different
@@ -835,4 +906,30 @@ func (s *Service) staleJobDetectorLoop() {
 			s.logger.Error().Err(err).Msg("Stale job detection failed")
 		}
 	}
+}
+
+// TriggerJob manually triggers a specific job to run immediately
+func (s *Service) TriggerJob(name string) error {
+	s.jobMu.Lock()
+	entry, exists := s.jobs[name]
+	if !exists {
+		s.jobMu.Unlock()
+		return fmt.Errorf("job %s not found", name)
+	}
+
+	// Check if already running
+	if entry.isRunning {
+		s.jobMu.Unlock()
+		return fmt.Errorf("job %s is already running", name)
+	}
+	s.jobMu.Unlock()
+
+	s.logger.Info().
+		Str("job_name", name).
+		Msg("Manually triggering job execution")
+
+	// Execute job in background goroutine
+	go s.executeJob(name)
+
+	return nil
 }

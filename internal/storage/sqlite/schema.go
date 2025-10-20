@@ -146,10 +146,32 @@ CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id);
 CREATE TABLE IF NOT EXISTS job_settings (
 	job_name TEXT PRIMARY KEY,
 	schedule TEXT NOT NULL,
+	description TEXT DEFAULT '',
 	enabled INTEGER DEFAULT 1,
 	last_run INTEGER,
 	updated_at INTEGER NOT NULL
 );
+
+-- Job definitions table for configurable, database-persisted job definitions
+CREATE TABLE IF NOT EXISTS job_definitions (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	type TEXT NOT NULL,
+	description TEXT,
+	sources TEXT NOT NULL,
+	steps TEXT NOT NULL,
+	schedule TEXT NOT NULL,
+	enabled INTEGER DEFAULT 1,
+	auto_start INTEGER DEFAULT 0,
+	config TEXT,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+-- Job definitions indexes
+CREATE INDEX IF NOT EXISTS idx_job_definitions_type ON job_definitions(type, enabled);
+CREATE INDEX IF NOT EXISTS idx_job_definitions_enabled ON job_definitions(enabled, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_definitions_schedule ON job_definitions(schedule);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_source ON documents(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_documents_sync ON documents(force_sync_pending, force_embed_pending);
@@ -226,6 +248,16 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 6: Add name and description columns to crawl_jobs
 	if err := s.migrateAddJobNameDescriptionColumns(); err != nil {
+		return err
+	}
+
+	// MIGRATION 7: Add description column to job_settings
+	if err := s.migrateAddJobSettingsDescriptionColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 8: Add job_definitions table
+	if err := s.migrateAddJobDefinitionsTable(); err != nil {
 		return err
 	}
 
@@ -664,5 +696,99 @@ func (s *SQLiteDB) migrateAddJobNameDescriptionColumns() error {
 	}
 
 	s.logger.Info().Msg("Migration: name and description columns added successfully")
+	return nil
+}
+
+// migrateAddJobSettingsDescriptionColumn adds description column to job_settings table
+func (s *SQLiteDB) migrateAddJobSettingsDescriptionColumn() error {
+	columnsQuery := `PRAGMA table_info(job_settings)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasDescription := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "description" {
+			hasDescription = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasDescription {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding description column to job_settings")
+
+	// Add the description column
+	if _, err := s.db.Exec(`ALTER TABLE job_settings ADD COLUMN description TEXT DEFAULT ''`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: description column added successfully")
+	return nil
+}
+
+// migrateAddJobDefinitionsTable adds job_definitions table if it doesn't exist
+func (s *SQLiteDB) migrateAddJobDefinitionsTable() error {
+	// Check if table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='job_definitions'`).Scan(&tableName)
+	if err == nil {
+		// Table already exists
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Creating job_definitions table")
+
+	// Create the table
+	_, err = s.db.Exec(`
+		CREATE TABLE job_definitions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			description TEXT,
+			sources TEXT NOT NULL,
+			steps TEXT NOT NULL,
+			schedule TEXT NOT NULL,
+			enabled INTEGER DEFAULT 1,
+			auto_start INTEGER DEFAULT 0,
+			config TEXT,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Create indexes
+	s.logger.Info().Msg("Creating indexes for job_definitions table")
+
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_type ON job_definitions(type, enabled)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_enabled ON job_definitions(enabled, created_at DESC)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_schedule ON job_definitions(schedule)`)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: job_definitions table and indexes created successfully")
 	return nil
 }
