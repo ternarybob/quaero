@@ -77,7 +77,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/jobs/", s.handleJobRoutes) // Handles /api/jobs/{id} and subpaths
 
 	// API routes - Job Definitions (configurable job management)
-	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)   // GET (list), POST (create)
+	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)  // GET (list), POST (create)
 	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes) // GET/PUT/DELETE /{id}, POST /{id}/execute
 
 	// API routes - System

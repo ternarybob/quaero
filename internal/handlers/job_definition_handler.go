@@ -3,26 +3,28 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
+var ErrJobDefinitionNotFound = errors.New("job definition not found")
+
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage  interfaces.JobDefinitionStorage
-	jobExecutor    *jobs.JobExecutor
-	sourceService  *sources.Service
-	jobRegistry    *jobs.JobTypeRegistry
-	logger         arbor.ILogger
+	jobDefStorage interfaces.JobDefinitionStorage
+	jobExecutor   *jobs.JobExecutor
+	sourceService *sources.Service
+	jobRegistry   *jobs.JobTypeRegistry
+	logger        arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler
@@ -52,11 +54,11 @@ func NewJobDefinitionHandler(
 	logger.Info().Msg("Job definition handler initialized")
 
 	return &JobDefinitionHandler{
-		jobDefStorage:  jobDefStorage,
-		jobExecutor:    jobExecutor,
-		sourceService:  sourceService,
-		jobRegistry:    jobRegistry,
-		logger:         logger,
+		jobDefStorage: jobDefStorage,
+		jobExecutor:   jobExecutor,
+		sourceService: sourceService,
+		jobRegistry:   jobRegistry,
+		logger:        logger,
 	}
 }
 
@@ -69,36 +71,36 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 	var jobDef models.JobDefinition
 	if err := json.NewDecoder(r.Body).Decode(&jobDef); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to decode job definition")
-		WriteError(w, "Invalid request body", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// Validate required fields
 	if jobDef.ID == "" {
-		WriteError(w, "Job definition ID is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
 		return
 	}
 	if jobDef.Name == "" {
-		WriteError(w, "Job definition name is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition name is required")
 		return
 	}
 	if jobDef.Type == "" {
-		WriteError(w, "Job definition type is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition type is required")
 		return
 	}
 	if jobDef.Schedule == "" {
-		WriteError(w, "Job definition schedule is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition schedule is required")
 		return
 	}
 	if len(jobDef.Steps) == 0 {
-		WriteError(w, "Job definition must have at least one step", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition must have at least one step")
 		return
 	}
 
 	// Validate job definition
 	if err := jobDef.Validate(); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Job definition validation failed")
-		WriteError(w, fmt.Sprintf("Invalid job definition: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid job definition: %v", err))
 		return
 	}
 
@@ -106,21 +108,21 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 	ctx := r.Context()
 	if err := h.validateSourceIDs(ctx, jobDef.Sources); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Source validation failed")
-		WriteError(w, fmt.Sprintf("Invalid source: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid source: %v", err))
 		return
 	}
 
 	// Validate step actions are registered
 	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Action validation failed")
-		WriteError(w, fmt.Sprintf("Invalid action: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
 		return
 	}
 
 	// Save job definition
 	if err := h.jobDefStorage.SaveJobDefinition(ctx, &jobDef); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save job definition")
-		WriteError(w, "Failed to save job definition", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
 		return
 	}
 
@@ -147,7 +149,7 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 
 	// Parse type filter
 	if typeStr := query.Get("type"); typeStr != "" {
-		opts.Type = (*models.JobType)(&typeStr)
+		opts.Type = typeStr
 	}
 
 	// Parse enabled filter
@@ -182,10 +184,10 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 	}
 
 	// Fetch job definitions
-	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx, opts)
+	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx, &opts)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to list job definitions")
-		WriteError(w, "Failed to list job definitions", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to list job definitions")
 		return
 	}
 
@@ -193,7 +195,7 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 	totalCount, err := h.jobDefStorage.CountJobDefinitions(ctx)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to count job definitions")
-		WriteError(w, "Failed to count job definitions", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to count job definitions")
 		return
 	}
 
@@ -222,20 +224,20 @@ func (h *JobDefinitionHandler) GetJobDefinitionHandler(w http.ResponseWriter, r 
 
 	id := extractJobDefinitionID(r.URL.Path)
 	if id == "" {
-		WriteError(w, "Job definition ID is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
 		return
 	}
 
 	ctx := r.Context()
 	jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
 	if err != nil {
-		if err == interfaces.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
-			WriteError(w, "Job definition not found", http.StatusNotFound)
+			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
 		}
 		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to get job definition")
-		WriteError(w, "Failed to get job definition", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get job definition")
 		return
 	}
 
@@ -251,14 +253,14 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 
 	id := extractJobDefinitionID(r.URL.Path)
 	if id == "" {
-		WriteError(w, "Job definition ID is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
 		return
 	}
 
 	var jobDef models.JobDefinition
 	if err := json.NewDecoder(r.Body).Decode(&jobDef); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to decode job definition")
-		WriteError(w, "Invalid request body", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -268,7 +270,7 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 	// Validate job definition
 	if err := jobDef.Validate(); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Job definition validation failed")
-		WriteError(w, fmt.Sprintf("Invalid job definition: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid job definition: %v", err))
 		return
 	}
 
@@ -276,26 +278,26 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 	ctx := r.Context()
 	if err := h.validateSourceIDs(ctx, jobDef.Sources); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Source validation failed")
-		WriteError(w, fmt.Sprintf("Invalid source: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid source: %v", err))
 		return
 	}
 
 	// Validate step actions are registered
 	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Action validation failed")
-		WriteError(w, fmt.Sprintf("Invalid action: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
 		return
 	}
 
 	// Update job definition
 	if err := h.jobDefStorage.UpdateJobDefinition(ctx, &jobDef); err != nil {
-		if err == interfaces.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
-			WriteError(w, "Job definition not found", http.StatusNotFound)
+			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
 		}
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to update job definition")
-		WriteError(w, "Failed to update job definition", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to update job definition")
 		return
 	}
 
@@ -311,19 +313,19 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 
 	id := extractJobDefinitionID(r.URL.Path)
 	if id == "" {
-		WriteError(w, "Job definition ID is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
 		return
 	}
 
 	ctx := r.Context()
 	if err := h.jobDefStorage.DeleteJobDefinition(ctx, id); err != nil {
-		if err == interfaces.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
-			WriteError(w, "Job definition not found", http.StatusNotFound)
+			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
 		}
 		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to delete job definition")
-		WriteError(w, "Failed to delete job definition", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to delete job definition")
 		return
 	}
 
@@ -339,33 +341,33 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 
 	id := extractJobDefinitionID(r.URL.Path)
 	if id == "" {
-		WriteError(w, "Job definition ID is required", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
 		return
 	}
 
 	ctx := r.Context()
 	jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
 	if err != nil {
-		if err == interfaces.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
-			WriteError(w, "Job definition not found", http.StatusNotFound)
+			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
 		}
 		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to get job definition")
-		WriteError(w, "Failed to get job definition", http.StatusInternalServerError)
+		WriteError(w, http.StatusInternalServerError, "Failed to get job definition")
 		return
 	}
 
 	// Pre-execution validation
 	if !jobDef.Enabled {
 		h.logger.Warn().Str("job_def_id", id).Msg("Job definition is disabled")
-		WriteError(w, "Job definition is disabled", http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, "Job definition is disabled")
 		return
 	}
 
 	if err := jobDef.Validate(); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Job definition validation failed")
-		WriteError(w, fmt.Sprintf("Invalid job definition: %v", err), http.StatusBadRequest)
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid job definition: %v", err))
 		return
 	}
 

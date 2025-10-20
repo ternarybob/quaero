@@ -18,47 +18,13 @@
             <p>Manage authentication, sources, and job definitions for data collection</p>
         </div>
 
-        <!-- ============================= AUTHENTICATION PANEL ============================= -->
-        <section id="authentication-panel">
-            <div class="card">
-                <div class="card-header">
-                    <h2>Authentication Management</h2>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted">Manage authentication credentials for data sources</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Instructions Card -->
-        <section style="margin-top: 1.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <h3>How to Add Authentication</h3>
-                </div>
-                <div class="card-body">
-                    <ol>
-                        <li>Navigate to your Atlassian site (Jira or Confluence) in Chrome</li>
-                        <li>Log in to your account</li>
-                        <li>Click the Quaero Chrome extension icon</li>
-                        <li>The extension will automatically capture and store your authentication</li>
-                        <li>Authentication for the same site will be automatically updated when recaptured</li>
-                    </ol>
-                    <div class="toast toast-primary" style="margin-top: 1rem;">
-                        <strong>Note:</strong> Each site domain can have only one set of credentials.
-                        Capturing new authentication for an existing site will override the previous credentials.
-                    </div>
-                </div>
-            </div>
-        </section>
-
         <!-- Authentication List -->
         <section style="margin-top: 1.5rem;" x-data="authPage()">
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h3>Stored Authentications</h3>
+                            <h3>Authentication</h3>
                         </section>
                         <section class="navbar-section">
                             <button class="btn btn-sm" @click="loadAuthentications" title="Refresh Authentications">
@@ -127,40 +93,6 @@
         </section>
 
         <!-- ============================= SOURCES PANEL ============================= -->
-        <section id="sources-panel" style="margin-top: 2.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <h2>Source Management</h2>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted">Configure data sources for collection and indexing</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Application Status -->
-        <section style="margin-top: 1.5rem;" x-data="appStatus">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3>Application Status</h3>
-                        </section>
-                        <section class="navbar-section">
-                            <span :class="'label ' + getStatusColor(state)" x-text="state"></span>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <p><strong>Current State:</strong> <span x-text="state"></span></p>
-                    <p><strong>Last Updated:</strong> <span x-text="formatTimestamp(timestamp)"></span></p>
-                    <div x-show="Object.keys(metadata).length > 0">
-                        <p><strong>Details:</strong></p>
-                        <pre class="code-block" x-text="JSON.stringify(metadata, null, 2)"></pre>
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <!-- Sources Management Component (wrap card and modal in shared scope) -->
         <section style="margin-top: 1.5rem;" x-data="sourceManagement">
@@ -169,9 +101,7 @@
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h3>
-                                <span x-text="sources.length" style="color: var(--text-secondary); margin-right: 0.5rem;"></span>Sources
-                            </h3>
+                            <h3> Sources </h3>
                         </section>
                         <section class="navbar-section">
                             <div class="btn-group btn-group-block">
@@ -324,9 +254,9 @@
                                 </div>
 
                                 <p class="form-input-hint" style="margin-top: 1rem;"><strong>Examples:</strong><br>
-                                • Jira: "browse" to crawl project pages<br>
-                                • Confluence: "spaces" to crawl space pages<br>
-                                • GitHub: "issues, pulls" to crawl issues and pull requests</p>
+                                    • Jira: "browse" to crawl project pages<br>
+                                    • Confluence: "spaces" to crawl space pages<br>
+                                    • GitHub: "issues, pulls" to crawl issues and pull requests</p>
                             </div>
 
                             <div class="form-group">
@@ -365,22 +295,6 @@
         </section>
 
         <!-- ============================= JOBS PANEL ============================= -->
-        <section id="jobs-panel" style="margin-top: 2.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <h2>Job Definitions</h2>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted">Create and configure job definitions for data collection</p>
-                    <div class="text-small text-gray" style="margin-top: 0.5rem;">
-                        <i class="fa-solid fa-lightbulb"></i>
-                        To monitor running jobs and view execution details, visit the <a href="/queue">Queue</a> page
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Jobs -->
         <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
@@ -1117,7 +1031,7 @@
         });
 
         // Plain JavaScript ESC key handler for source modal (backup for Alpine directive)
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 const modal = document.querySelector('.modal.active');
                 if (modal) {
@@ -1131,7 +1045,7 @@
         });
 
         // Focus trap for source modal
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Tab') {
                 const modal = document.querySelector('.modal.active .modal-container');
                 if (modal) {

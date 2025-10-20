@@ -74,14 +74,14 @@ type App struct {
 	CrawlerService *crawler.Service
 
 	// HTTP handlers
-	APIHandler        *handlers.APIHandler
-	AuthHandler       *handlers.AuthHandler
-	WSHandler         *handlers.WebSocketHandler
-	CollectionHandler *handlers.CollectionHandler
-	DocumentHandler   *handlers.DocumentHandler
-	SchedulerHandler  *handlers.SchedulerHandler
-	ChatHandler       *handlers.ChatHandler
-	MCPHandler        *handlers.MCPHandler
+	APIHandler           *handlers.APIHandler
+	AuthHandler          *handlers.AuthHandler
+	WSHandler            *handlers.WebSocketHandler
+	CollectionHandler    *handlers.CollectionHandler
+	DocumentHandler      *handlers.DocumentHandler
+	SchedulerHandler     *handlers.SchedulerHandler
+	ChatHandler          *handlers.ChatHandler
+	MCPHandler           *handlers.MCPHandler
 	JobHandler           *handlers.JobHandler
 	SourcesHandler       *handlers.SourcesHandler
 	StatusHandler        *handlers.StatusHandler
