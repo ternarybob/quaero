@@ -31,6 +31,11 @@ func NewDocumentStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.DocumentS
 
 // SaveDocument saves a single document
 func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
+	// Serialize write operations to prevent SQLITE_BUSY errors when multiple
+	// goroutines try to write simultaneously
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	// Serialize metadata
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {

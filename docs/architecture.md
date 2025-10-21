@@ -129,7 +129,177 @@ sequenceDiagram
 - Creates FTS5 full-text search index on title + content_markdown
 - Deserializes metadata JSON on read
 
-## 4. Document Model
+## 4. Markdown Storage Pipeline
+
+Quaero converts HTML content to markdown format for LLM consumption and search indexing. The pipeline consists of five stages that ensure robust markdown generation and storage.
+
+### Pipeline Stages
+
+**1. HTML Scraping** (`html_scraper.go`)
+
+The HTML scraper fetches and processes HTML content:
+- Fetches HTML content from URLs via authenticated HTTP client
+- Converts HTML to markdown using `github.com/JohannesKaufmann/html-to-markdown`
+- Stores markdown in `ScrapeResult.Markdown` field (line 384)
+- Uses base URL for resolving relative links in markdown
+- Generates markdown for all successful page scrapes
+
+**2. Metadata Storage** (`types.go`)
+
+The `ToCrawlResult()` method converts scrape results to crawler results:
+- Stores markdown in `CrawlResult.Metadata["markdown"]` (line 155)
+- Also stores HTML in `metadata["html"]` for transformer parsing
+- Stores plain text in `metadata["text_content"]` for fallback
+- Body field contains HTML (not markdown) for backward compatibility with transformers
+- All metadata fields preserved during conversion
+
+**3. Metadata Propagation** (`service.go`)
+
+The crawler service ensures metadata flows through the pipeline:
+- Executes HTML scraping via `scraper.ScrapeURL()` (lines 1148-1158)
+- Converts `ScrapeResult` to `CrawlResult` via `ToCrawlResult()` (line 1160)
+- Merges scrape metadata (including markdown) into `item.Metadata` (lines 1219-1226)
+- Propagates metadata to final `CrawlResult.Metadata` (lines 986-998)
+- Markdown flows: `ScrapeResult` → `CrawlResult` → `item.Metadata` → final result
+- Preserves job-specific metadata (job_id, source_type, entity_type)
+
+**4. Document Transformation** (`jira_transformer.go`, `confluence_transformer.go`)
+
+Transformers extract and convert content for document creation:
+- Extract HTML from `CrawlResult` via `selectResultBody()` helper
+- **Jira**: Extract description HTML (line 250), convert to markdown (line 345), store in document (line 429)
+- **Confluence**: Extract content HTML (line 255), convert to markdown (line 325), store in document (line 398)
+- Use `convertHTMLToMarkdown()` helper with base URL for link resolution
+- Fallback to `stripHTMLTags()` if conversion produces empty output (configurable)
+- Log conversion quality metrics for troubleshooting
+
+**5. Database Persistence** (`document_storage.go`)
+
+The storage layer handles markdown persistence:
+- `SaveDocument()` persists `doc.ContentMarkdown` to `content_markdown` column (line 84)
+- Smart upsert preserves full content when upserting metadata-only documents (lines 56-61)
+- `scanDocument()` retrieves `contentMarkdown` from database (line 544)
+- Populates `doc.ContentMarkdown` field on read (line 560)
+- Batch scanning retrieves markdown for multiple documents (lines 628-629)
+
+### Data Flow Diagram
+
+```
+HTML Page → HTMLScraper → ScrapeResult.Markdown
+          ↓
+          ToCrawlResult() → CrawlResult.Metadata["markdown"]
+          ↓
+          Metadata Merge → item.Metadata["markdown"]
+          ↓
+          Transformer → convertHTMLToMarkdown()
+          ↓
+          Document.ContentMarkdown → Database (content_markdown column)
+```
+
+### Configuration Options
+
+**Output Format** - Controls markdown generation mode:
+- `config.OutputFormat = "markdown"` - Generate markdown only
+- `config.OutputFormat = "html"` - Store HTML only
+- `config.OutputFormat = "both"` - Generate and store both formats
+
+**Fallback Behavior** - Controls empty output handling:
+- `enableEmptyOutputFallback = true` - Strip HTML tags if conversion produces empty output
+- `enableEmptyOutputFallback = false` - Store empty markdown (default)
+
+**Base URL** - Used for resolving relative links:
+- Passed to markdown converter for link resolution
+- Ensures internal links work correctly in markdown output
+- Configured per-source based on `source.BaseURL`
+
+### Conversion Helper Functions
+
+**convertHTMLToMarkdown()** (`helpers.go` lines 198-266)
+
+Main conversion function with quality logging:
+- Creates markdown converter with base URL (line 209)
+- Converts HTML to markdown using library (line 210)
+- Handles conversion errors with fallback (lines 211-220)
+- Detects empty output and applies fallback if enabled (lines 232-252)
+- Logs quality metrics: input/output lengths, compression ratio, warnings (lines 222-263)
+
+**stripHTMLTags()** (`helpers.go` lines 179-193)
+
+Fallback function for failed conversions:
+- Removes HTML tags using regex
+- Cleans up whitespace
+- Decodes HTML entities
+- Returns plain text as last resort
+
+**selectResultBody()** (`helpers.go` lines 107-140)
+
+Helper for extracting HTML from crawler results:
+- Prioritizes `metadata["html"]` for cleaned HTML parsing
+- Falls back to `metadata["response_body"]` for backward compatibility
+- Uses `result.Body` if it looks like HTML
+- Does NOT fall back to markdown (preserves HTML for parsers)
+
+### Troubleshooting
+
+**Check Conversion Success:**
+```bash
+# Look for conversion log messages
+grep "Converting HTML to markdown" service.log
+grep "Markdown conversion completed" service.log
+```
+
+**Check for Empty Output:**
+```bash
+# Look for empty output warnings
+grep "Markdown conversion produced empty output" service.log
+```
+
+**Verify Database Storage:**
+```sql
+-- Check markdown content in database
+SELECT id, source_type, source_id, title,
+       LENGTH(content_markdown) as markdown_length,
+       SUBSTR(content_markdown, 1, 100) as markdown_preview
+FROM documents
+WHERE source_type IN ('jira', 'confluence')
+LIMIT 10;
+```
+
+**Expected Results:**
+- `markdown_length` should be > 0 for most documents
+- `markdown_preview` should show markdown syntax (`#`, `*`, `[links]()`)
+- No HTML tags (`<div>`, `<p>`) in markdown preview
+
+**Quality Metrics:**
+
+The pipeline logs conversion quality for troubleshooting:
+- Input HTML length (bytes)
+- Output markdown length (bytes)
+- Compression ratio (output/input)
+- Empty output warnings
+- Conversion errors and fallback usage
+
+### Known Limitations
+
+**1. Markdown in CrawlResult.Metadata**
+
+The markdown stored in `CrawlResult.Metadata["markdown"]` is generated by the initial HTML scraper and may differ from the final document markdown because:
+- Transformers re-convert HTML using source-specific content extraction
+- Different HTML regions may be selected (description vs full page content)
+- This is by design - scraped markdown is generic, document markdown is source-specific
+
+**2. Empty Output Fallback**
+
+The `enableEmptyOutputFallback` configuration is currently hardcoded in transformers. Future enhancement: make this configurable per-source or per-job.
+
+**3. Link Resolution**
+
+Relative links are resolved using base URL, but:
+- Links may still be broken if they reference dynamic content
+- Some Jira/Confluence internal links may not work outside the platform
+- Future enhancement: validate and mark broken links in markdown
+
+## 5. Document Model
 
 The core `Document` struct (`internal/models/document.go`) has these key fields:
 
@@ -1016,6 +1186,583 @@ if filtersJSON.Valid && filtersJSON.String != "" {
 - **Test incrementally:** Start with broad patterns, refine based on results
 - **Document patterns:** Comment on why specific patterns are included/excluded
 - **Monitor logs:** Check crawler logs for filter match statistics
+
+## 14. Crawler Service Logging
+
+The crawler service provides comprehensive INFO-level logging to diagnose crawl behavior, link discovery decisions, and filtering effectiveness. Enhanced logging helps troubleshoot issues and optimize crawl configurations.
+
+### Log Levels
+
+- **INFO:** Summaries, decisions, milestones (link discovery, filtering, enqueueing)
+- **DEBUG:** Individual item processing, detailed traces (each link, each filter match)
+- **WARN:** Unexpected conditions (zero links, all filtered, auth issues)
+- **ERROR:** Failures requiring attention (scraping errors, database errors)
+
+### Key INFO Logs to Monitor
+
+#### 1. Link Discovery Decision (workerLoop)
+
+**Message:** `"Link discovery enabled - will extract and follow links"`
+
+**When:** Before extracting links from a successfully processed page
+
+**Fields:**
+- `job_id` - Job identifier
+- `url` - Current URL being processed
+- `follow_links` - Configuration value (true/false)
+- `depth` - Current depth in the crawl tree
+- `max_depth` - Maximum allowed depth (0 = unlimited)
+- `will_discover_links` - Explicit decision indicator (always true for this log)
+
+**Purpose:** Confirms recursive crawling is active and shows the decision point clearly
+
+**Database Persistence:** Sampled (every 10th URL) to avoid database bloat
+
+**Example:**
+```json
+{
+  "level": "info",
+  "job_id": "job_abc123",
+  "url": "https://company.atlassian.net/browse/BUG-123",
+  "follow_links": true,
+  "depth": 1,
+  "max_depth": 3,
+  "will_discover_links": true,
+  "message": "Link discovery enabled - will extract and follow links"
+}
+```
+
+#### 2. Link Filtering Complete (discoverLinks)
+
+**Message:** `"Link filtering complete"`
+
+**When:** After applying all filters (source-specific + include/exclude patterns) to discovered links
+
+**Fields:**
+- `total_discovered` - Total links found on the page
+- `after_source_filter` - Links remaining after Jira/Confluence source filtering
+- `after_pattern_filter` - Links remaining after include/exclude pattern filtering
+- `filtered_out` - Total number of links filtered (= total_discovered - after_pattern_filter)
+- `source_type` - Source type (jira, confluence, etc.)
+- `parent_depth` - Depth of the page containing these links
+- `follow_links` - Configuration value
+- `max_depth` - Maximum allowed depth
+
+**Purpose:** Shows filtering effectiveness, helps tune include/exclude patterns
+
+**Database Persistence:** Always persisted for every page with links
+
+**Example:**
+```json
+{
+  "level": "info",
+  "total_discovered": 25,
+  "after_source_filter": 20,
+  "after_pattern_filter": 12,
+  "filtered_out": 13,
+  "source_type": "jira",
+  "parent_depth": 1,
+  "follow_links": "true",
+  "max_depth": 3,
+  "message": "Link filtering complete"
+}
+```
+
+#### 3. Link Enqueueing Complete (enqueueLinks)
+
+**Message:** `"Link enqueueing complete"`
+
+**When:** After adding filtered links to the crawl queue
+
+**Fields:**
+- `job_id` - Job identifier
+- `parent_url` - URL of the page containing these links
+- `enqueued_count` - Number of links successfully enqueued
+- `total_links` - Total number of links passed to enqueue function
+- `sample_urls` - Array of first 3 URLs (for visibility without log spam)
+
+**Purpose:** Confirms links are being followed, shows examples of discovered links
+
+**Database Persistence:** Always persisted with sample URLs
+
+**Example:**
+```json
+{
+  "level": "info",
+  "job_id": "job_abc123",
+  "parent_url": "https://company.atlassian.net/browse/BUG-123",
+  "enqueued_count": 12,
+  "total_links": 12,
+  "sample_urls": [
+    "https://company.atlassian.net/browse/BUG-124",
+    "https://company.atlassian.net/browse/BUG-125",
+    "https://company.atlassian.net/projects/BUG"
+  ],
+  "message": "Link enqueueing complete"
+}
+```
+
+#### 4. Pattern Filtering Summary (filterLinks)
+
+**Message:** `"Pattern filtering summary"`
+
+**When:** After applying include/exclude patterns to discovered links
+
+**Fields:**
+- `excluded_count` - Number of links excluded by exclude_patterns
+- `not_included_count` - Number of links not matching any include_patterns
+- `passed_count` - Number of links that passed filtering
+
+**Purpose:** Shows pattern effectiveness, helps diagnose over-filtering or permissive patterns
+
+**Database Persistence:** Not persisted directly (included in parent discoverLinks log)
+
+**Example:**
+```json
+{
+  "level": "info",
+  "excluded_count": 3,
+  "not_included_count": 5,
+  "passed_count": 12,
+  "message": "Pattern filtering summary"
+}
+```
+
+### Troubleshooting Guide
+
+#### Problem: Job completes with only 1 result (seed URL)
+
+**Check:**
+1. Look for `"Link discovery enabled"` log - is it appearing?
+2. Check `follow_links` field - is it `true`?
+3. Check `depth` vs `max_depth` - is depth limit reached?
+4. Look for `"Link filtering complete"` log - are links being discovered?
+
+**Common Causes:**
+- `follow_links=false` in job or source configuration
+- `max_depth=0` or `max_depth=1` (too restrictive)
+- Seed URL has no links
+- All links filtered out by patterns
+
+#### Problem: All links filtered out
+
+**Check:**
+1. Look for `"Link filtering complete"` log
+   - Compare `total_discovered` vs `after_pattern_filter`
+   - Check `filtered_out` count
+2. Look for `"Pattern filtering summary"` log
+   - Check `excluded_count` and `not_included_count`
+   - Compare with `passed_count`
+3. Check WARNING log with sample URLs
+   - Shows which links were filtered and why
+
+**Action:**
+- Adjust `include_patterns` to be more permissive
+- Review `exclude_patterns` for overly broad matches
+- Check source-level filters for conflicts
+
+#### Problem: Links discovered but not followed
+
+**Check:**
+1. Look for `"Link enqueueing complete"` log
+   - Is `enqueued_count` > 0?
+   - Check `sample_urls` - are they correct?
+2. Check queue diagnostics
+   - Is queue growing?
+   - Are there queue capacity issues?
+3. Check worker logs
+   - Are workers processing enqueued URLs?
+   - Look for errors during URL processing
+
+**Common Causes:**
+- Queue at capacity (check `queue_capacity` setting)
+- Workers stopped or crashed
+- Rate limiting blocking workers
+- Authentication failures
+
+#### Problem: Unexpected filtering behavior
+
+**Check:**
+1. Review filter configuration in job step config
+2. Review source-level default filters
+3. Check priority order: Job config > Source filters > No filtering
+4. Look for `"Using follow_links from job config"` or `"Using follow_links from source default"` logs
+
+**Action:**
+- Verify include/exclude patterns are comma-separated strings
+- Test patterns in isolation (empty one, populate the other)
+- Check logs for pattern match details
+
+### Database Logs
+
+All INFO level logs are persisted to the job database and accessible via:
+
+**API Endpoint:** `GET /api/jobs/{job_id}/logs`
+- Returns array of log entries with level, message, timestamp
+- Filterable by level (`level=info`)
+- Sortable by timestamp
+
+**UI:** Job details page, logs tab
+- Displays logs in chronological order
+- Color-coded by level (info=blue, warn=yellow, error=red)
+- Search and filter capabilities
+
+**Database:** `job_logs` table
+- Columns: `job_id`, `level`, `message`, `timestamp`
+- Indexed by `job_id` for fast retrieval
+- Query: `SELECT * FROM job_logs WHERE job_id = ? AND level = 'info' ORDER BY timestamp`
+
+**Example Query:**
+```sql
+-- Get all INFO logs for a specific job
+SELECT timestamp, message
+FROM job_logs
+WHERE job_id = 'job_abc123'
+  AND level = 'info'
+ORDER BY timestamp;
+
+-- Count INFO logs by message type
+SELECT
+  CASE
+    WHEN message LIKE '%Link discovery enabled%' THEN 'discovery'
+    WHEN message LIKE '%Link filtering complete%' THEN 'filtering'
+    WHEN message LIKE '%Link enqueueing complete%' THEN 'enqueueing'
+    ELSE 'other'
+  END as log_type,
+  COUNT(*) as count
+FROM job_logs
+WHERE job_id = 'job_abc123'
+  AND level = 'info'
+GROUP BY log_type;
+```
+
+### Performance Notes
+
+**Log Volume:**
+- Link discovery decision: 1 log per processed URL (sampled for database: every 10th)
+- Link filtering: 1 log per page with links (always persisted)
+- Link enqueueing: 1 log per batch of links (always persisted with samples)
+- Pattern filtering: 1 log per filtering operation (not persisted directly)
+
+**Total:** Approximately 3-5 INFO logs per crawled page (reasonable for diagnostics)
+
+**Database Impact:**
+- Sampled persistence reduces database writes (every 10th URL for discovery logs)
+- Sample URLs limited to 3 to avoid log spam
+- Individual link logs remain at DEBUG level (not persisted by default)
+
+**Console Output:**
+- All INFO logs appear in console/stdout for real-time monitoring
+- Structured JSON format for easy parsing and log aggregation
+- Compatible with log aggregation tools (Splunk, ELK, etc.)
+
+### Log Examples in Context
+
+#### Successful Crawl with Link Following
+
+```
+[INFO] Link discovery enabled - will extract and follow links
+  job_id=job_abc123 url=https://company.atlassian.net/browse/BUG-123
+  follow_links=true depth=1 max_depth=3 will_discover_links=true
+
+[INFO] Link filtering complete
+  total_discovered=25 after_source_filter=20 after_pattern_filter=12
+  filtered_out=13 source_type=jira parent_depth=1
+
+[INFO] Pattern filtering summary
+  excluded_count=3 not_included_count=5 passed_count=12
+
+[INFO] Link enqueueing complete
+  job_id=job_abc123 parent_url=https://company.atlassian.net/browse/BUG-123
+  enqueued_count=12 total_links=12
+  sample_urls=[...BUG-124, ...BUG-125, ...projects/BUG]
+```
+
+#### All Links Filtered Out (Warning)
+
+```
+[INFO] Link discovery enabled - will extract and follow links
+  job_id=job_abc123 url=https://company.atlassian.net/browse/BUG-123
+  follow_links=true depth=1 max_depth=3
+
+[INFO] Link filtering complete
+  total_discovered=25 after_source_filter=20 after_pattern_filter=0
+  filtered_out=25 source_type=jira
+
+[WARN] All links filtered out from page
+  url=https://company.atlassian.net/browse/BUG-123
+  excluded_samples=[...admin, ...logout]
+  not_included_samples=[...settings, ...profile]
+  message="Check include/exclude patterns"
+```
+
+#### Link Discovery Skipped (DEBUG Level)
+
+```
+[DEBUG] Skipping link discovery - FollowLinks disabled or depth limit reached
+  job_id=job_abc123 url=https://company.atlassian.net/browse/BUG-123
+  follow_links=false depth=2 max_depth=2
+```
+
+### Configuration Options
+
+**Enable/Disable Follow Links:**
+```json
+{
+  "step": {
+    "config": {
+      "follow_links": true,
+      "max_depth": 3
+    }
+  }
+}
+```
+
+**Configure Link Filtering:**
+```json
+{
+  "step": {
+    "config": {
+      "include_patterns": ["browse", "projects", "issues"],
+      "exclude_patterns": ["admin", "logout", "settings"]
+    }
+  }
+}
+```
+
+**Adjust Polling Interval (Affects Log Frequency):**
+```toml
+[crawler]
+worker_count = 5
+queue_capacity = 1000
+request_timeout = 30
+```
+
+## 15. Immediate Document Saving During Crawling
+
+The crawler service now saves documents immediately after successful page crawls, eliminating the 5+ minute delay previously caused by the transformer-based approach. This provides instant document availability for search and chat while maintaining backward compatibility with transformers for metadata enhancement.
+
+### Architecture Change
+
+**Previous Flow (Async, Deferred):**
+1. Crawler fetches and stores raw HTML in memory
+2. Scheduler publishes `EventCollectionTriggered` every 5 minutes
+3. Transformers (Jira/Confluence) process stored results
+4. Transformers create documents with markdown
+5. Documents available after 5+ minute delay
+
+**New Flow (Immediate, Synchronous):**
+1. Crawler fetches HTML and extracts markdown
+2. **NEW**: Create document immediately after successful crawl
+3. **NEW**: Save document to database synchronously
+4. Document available within milliseconds
+5. Transformers can still enhance documents later
+
+### Implementation Details
+
+**Location:** `internal/services/crawler/service.go` lines 871-964 (in `workerLoop()`)
+
+**Trigger:** After result is stored in memory and before progress update
+
+**Conditions for Saving:**
+1. `result.Error == ""` (successful crawl)
+2. `result.Metadata["markdown"]` exists and is non-empty
+3. Document saving error doesn't fail the crawl job
+
+### Document Creation Logic
+
+**Source Type Extraction:**
+- **Priority 1:** `item.Metadata["source_type"]` (from job metadata)
+- **Priority 2:** URL pattern matching (e.g., "atlassian.net/wiki" → "confluence")
+- **Default:** "crawler" if unable to determine
+
+**Title Extraction:**
+- **Priority 1:** `result.Metadata["title"]` (from HTML scraper)
+- **Priority 2:** Last segment of URL path
+- **Default:** Full URL
+
+**Document Structure:**
+```go
+doc := models.Document{
+    ID:              "doc_" + uuid.New().String(),
+    SourceType:      sourceType,
+    SourceID:        item.URL, // Enables deduplication
+    Title:           title,
+    ContentMarkdown: markdown,
+    DetailLevel:     models.DetailLevelFull,
+    Metadata:        result.Metadata, // Preserves all scraped metadata
+    URL:             item.URL,
+    CreatedAt:       time.Now(),
+    UpdatedAt:       time.Now(),
+}
+```
+
+### Deduplication Strategy
+
+**Database UNIQUE Constraint:** `(source_type, source_id)`
+
+**Using URL as SourceID:**
+- Same URL crawled multiple times → same `source_id`
+- Database upsert behavior automatically handles duplicates
+- No manual deduplication logic needed
+
+### Error Handling
+
+**Non-Blocking Errors:**
+- Document save failures are logged at ERROR level
+- Crawl job continues processing other URLs
+- Failed document saves don't affect crawler progress
+
+**Logging:**
+```go
+// On success (INFO level):
+s.logger.Info().
+    Str("job_id", jobID).
+    Str("document_id", doc.ID).
+    Str("title", doc.Title).
+    Str("url", doc.URL).
+    Int("markdown_length", len(doc.ContentMarkdown)).
+    Str("source_type", doc.SourceType).
+    Msg("Document saved immediately after crawling")
+
+// On failure (ERROR level):
+s.logger.Error().
+    Err(err).
+    Str("job_id", jobID).
+    Str("document_id", doc.ID).
+    Str("title", doc.Title).
+    Str("url", doc.URL).
+    Msg("Failed to save document immediately after crawling")
+```
+
+**Database Persistence:** Success/failure messages are persisted to job logs (sampled: every 10th document to avoid bloat)
+
+### Relationship with Transformers
+
+**Transformers Remain Operational:**
+- Jira/Confluence transformers continue to run on schedule
+- Extract structured metadata (issue keys, page IDs, etc.)
+- Enhance documents with source-specific data
+- Database upsert ensures no duplicates
+
+**Enhancement Workflow:**
+1. **Immediate Save:** Basic document with markdown content (instant availability)
+2. **Transformer Enhancement:** Adds structured metadata fields later
+3. **Database Upsert:** Updates existing document without duplication
+
+**Example:**
+
+```
+Time 0ms: Crawler saves document
+{
+  "id": "doc_abc123",
+  "source_type": "crawler",
+  "title": "BUG-123",
+  "content_markdown": "# Bug Description\n..."
+}
+
+Time 5min: Jira transformer enhances document
+{
+  "id": "doc_abc123",
+  "source_type": "jira",
+  "title": "BUG-123: Login fails",
+  "content_markdown": "# Bug Description\n...",
+  "metadata": {
+    "issue_key": "BUG-123",
+    "status": "In Progress",
+    "priority": "High"
+  }
+}
+```
+
+### Performance Impact
+
+**Overhead:**
+- ~1-2ms per URL (single database write)
+- Negligible compared to HTTP request time (100-1000ms)
+- No blocking operations or goroutines
+
+**Benefits:**
+- Documents available immediately for search
+- Chat can use documents within milliseconds
+- No 5-minute wait for transformers
+- Better user experience during crawls
+
+**Database Considerations:**
+- SQLite write performance: ~1ms for small documents
+- Mutex in DocumentStorage prevents SQLITE_BUSY errors
+- No additional locking or concurrency management needed
+
+### Configuration
+
+**No Additional Config Required:**
+- Feature is always enabled during crawling
+- Relies on existing `documentStorage` dependency
+- Uses same database connection as transformers
+
+**Dependency Injection:**
+- Added `documentStorage` field to crawler `Service` struct
+- Passed via constructor parameter
+- Initialized in `internal/app/app.go` line 244
+
+### Testing Considerations
+
+**Verify:**
+1. Documents saved immediately after crawling (query database during job)
+2. Markdown content populated correctly
+3. Source type correctly identified
+4. Title extraction works for various URL patterns
+5. Error handling doesn't crash crawler
+6. Database persistence via job logs
+7. Transformers can still update documents
+8. No duplicate documents created
+
+**Test Coverage:**
+- Unit tests in `internal/services/crawler/service_test.go`
+- Mock DocumentStorage implementation for isolation
+- Integration tests verify end-to-end flow
+
+### Troubleshooting
+
+**Problem: Documents not appearing immediately**
+
+**Check:**
+1. Look for `"Document saved immediately after crawling"` INFO logs
+2. Verify markdown exists in `result.Metadata["markdown"]`
+3. Check for ERROR logs indicating save failures
+4. Query database directly: `SELECT * FROM documents WHERE url LIKE '%pattern%'`
+
+**Problem: Duplicate documents created**
+
+**Check:**
+1. Verify UNIQUE constraint on `(source_type, source_id)` exists
+2. Check that URL is being used as `source_id`
+3. Review upsert behavior in DocumentStorage
+
+**Problem: Document save errors**
+
+**Check:**
+1. ERROR logs with document details
+2. Database connection status
+3. Mutex deadlocks (unlikely but check logs)
+4. Disk space and permissions
+
+### Backward Compatibility
+
+**Transformers:**
+- No changes needed to existing transformer code
+- Continue to operate on scheduled events
+- Upsert behavior prevents conflicts
+
+**Job Execution:**
+- No changes to job configuration required
+- Works with all existing job types
+- Compatible with manual and scheduled jobs
+
+**Database Schema:**
+- Uses existing `documents` table
+- No new columns or indexes needed
+- Leverages UNIQUE constraint for deduplication
 
 ## Conclusion
 

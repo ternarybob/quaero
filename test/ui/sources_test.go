@@ -58,9 +58,9 @@ func TestSourcesPageElements(t *testing.T) {
 		name     string
 		selector string
 	}{
-		{"Hero section", "section.hero"},
+		{"Page title", ".page-title"},
 		{"Sources list card", ".card"},
-		{"Add Source button", "button.is-small.is-info"},
+		{"Add Source button", "button.btn.btn-sm.btn-primary"},
 		{"Sources table", "table.table"},
 	}
 
@@ -100,9 +100,9 @@ func TestSourcesNavbar(t *testing.T) {
 	err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
-		chromedp.WaitVisible(`nav.navbar`, chromedp.ByQuery),
-		chromedp.Evaluate(`document.querySelector('nav.navbar') !== null`, &navbarVisible),
-		chromedp.Evaluate(`Array.from(document.querySelectorAll('.navbar-item')).map(el => el.textContent.trim())`, &menuItems),
+		chromedp.WaitVisible(`.nav-links`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('.nav-links') !== null`, &navbarVisible),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('.nav-links a')).map(el => el.textContent.trim())`, &menuItems),
 	)
 
 	if err != nil {
@@ -113,8 +113,8 @@ func TestSourcesNavbar(t *testing.T) {
 		t.Error("Navbar not found on page")
 	}
 
-	// Check for SOURCES menu item
-	expectedItems := []string{"HOME", "AUTHENTICATION", "SOURCES", "JOBS", "DOCUMENTS", "CHAT", "SETTINGS"}
+	// Check for menu items (JOBS includes sources page)
+	expectedItems := []string{"HOME", "JOBS", "QUEUE", "DOCUMENTS", "CHAT", "SETTINGS"}
 	for _, expected := range expectedItems {
 		found := false
 		for _, item := range menuItems {
@@ -128,19 +128,19 @@ func TestSourcesNavbar(t *testing.T) {
 		}
 	}
 
-	// Verify SOURCES item is active on sources page
-	var sourcesActive bool
+	// Verify JOBS item is active on sources page (sources page is under JOBS menu)
+	var jobsActive bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('.navbar-item.is-active[href="/sources"]') !== null`, &sourcesActive),
+		chromedp.Evaluate(`document.querySelector('.nav-links a.active[href="/jobs"]') !== null`, &jobsActive),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check active menu item: %v", err)
 	}
-	if !sourcesActive {
-		t.Error("SOURCES menu item should be active on sources page")
+	if !jobsActive {
+		t.Error("JOBS menu item should be active on sources page")
 	}
 
-	t.Log("✓ Navbar displays correctly with SOURCES item")
+	t.Log("✓ Navbar displays correctly with JOBS item active")
 }
 
 func TestSourcesModalWithAuthentication(t *testing.T) {
@@ -156,9 +156,9 @@ func TestSourcesModalWithAuthentication(t *testing.T) {
 	err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
-		chromedp.WaitVisible(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.Click(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.WaitVisible(`.modal.is-active`, chromedp.ByQuery),
+		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 	)
 
 	if err != nil {
@@ -187,8 +187,8 @@ func TestSourcesModalWithAuthentication(t *testing.T) {
 	// Check for authentication help text
 	var helpTextPresent bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('.help') !== null &&
-			document.querySelector('.help').textContent.includes('Select authentication')`, &helpTextPresent),
+		chromedp.Evaluate(`document.querySelector('.form-input-hint') !== null &&
+			document.querySelector('.form-input-hint').textContent.includes('Select authentication')`, &helpTextPresent),
 	)
 
 	if err == nil && !helpTextPresent {
@@ -250,9 +250,9 @@ func TestSourcesFilterInputFieldsVisible(t *testing.T) {
 	err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
-		chromedp.WaitVisible(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.Click(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.WaitVisible(`.modal.is-active`, chromedp.ByQuery),
+		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 	)
 
 	if err != nil {
@@ -315,7 +315,7 @@ func TestSourcesFilterInputFieldsVisible(t *testing.T) {
 	// Check for hint text about comma-separated format
 	var hintTextPresent bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`Array.from(document.querySelectorAll('.help')).some(el => el.textContent.includes('Comma-separated'))`, &hintTextPresent),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('.form-input-hint')).some(el => el.textContent.includes('Comma-separated'))`, &hintTextPresent),
 	)
 
 	if err == nil && !hintTextPresent {
@@ -338,9 +338,9 @@ func TestSourcesCreateWithFilters(t *testing.T) {
 	err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
-		chromedp.WaitVisible(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.Click(`button.is-small.is-info`, chromedp.ByQuery),
-		chromedp.WaitVisible(`.modal.is-active`, chromedp.ByQuery),
+		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 	)
 
 	if err != nil {
@@ -377,7 +377,7 @@ func TestSourcesCreateWithFilters(t *testing.T) {
 
 	// Click Save button
 	err = chromedp.Run(ctx,
-		chromedp.Click(`button[x-on:click="saveSource()"]`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-primary[x-on\\:click="saveSource()"]`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Wait for save to complete
 	)
 
@@ -389,7 +389,7 @@ func TestSourcesCreateWithFilters(t *testing.T) {
 	var modalClosed bool
 	err = chromedp.Run(ctx,
 		chromedp.Sleep(1*time.Second),
-		chromedp.Evaluate(`document.querySelector('.modal.is-active') === null`, &modalClosed),
+		chromedp.Evaluate(`document.querySelector('.modal.active') === null`, &modalClosed),
 	)
 
 	if err == nil && !modalClosed {
@@ -493,11 +493,11 @@ func TestSourcesEditFilters(t *testing.T) {
 			var rows = Array.from(document.querySelectorAll('tbody tr'));
 			var testRow = rows.find(row => row.textContent.includes('Source to Edit Filters UI'));
 			if (testRow) {
-				var editButton = testRow.querySelector('button.is-warning');
+				var editButton = testRow.querySelector('button.btn.btn-sm i.fa-edit')?.closest('button');
 				if (editButton) editButton.click();
 			}
 		`, nil),
-		chromedp.WaitVisible(`.modal.is-active`, chromedp.ByQuery),
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second), // Wait for modal to populate
 	)
 
@@ -547,7 +547,7 @@ func TestSourcesEditFilters(t *testing.T) {
 
 	// Save changes
 	err = chromedp.Run(ctx,
-		chromedp.Click(`button[x-on:click="saveSource()"]`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-primary[x-on\\:click="saveSource()"]`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Wait for save
 	)
 
@@ -647,7 +647,7 @@ func TestSourcesClearFilters(t *testing.T) {
 			var rows = Array.from(document.querySelectorAll('tbody tr'));
 			var testRow = rows.find(row => row.textContent.includes('Source to Clear Filters UI'));
 			if (testRow) {
-				var editButton = testRow.querySelector('button.is-warning');
+				var editButton = testRow.querySelector('button.btn.btn-sm i.fa-edit')?.closest('button');
 				if (editButton) editButton.click();
 			}
 		`, nil),
@@ -676,7 +676,7 @@ func TestSourcesClearFilters(t *testing.T) {
 
 	// Save changes
 	err = chromedp.Run(ctx,
-		chromedp.Click(`button[x-on:click="saveSource()"]`, chromedp.ByQuery),
+		chromedp.Click(`button.btn.btn-primary[x-on\\:click="saveSource()"]`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second),
 	)
 

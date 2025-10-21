@@ -67,6 +67,19 @@ const (
 	//   - status: string ("running", "completed", "failed")
 	//   - error: string (error message if status is "failed")
 	//   - timestamp: time.Time
+	//
+	// For crawl actions, additional fields may be included:
+	//   - crawl_job_id: string (crawler service job ID)
+	//   - source_id: string (source being crawled)
+	//   - source_type: string (jira, confluence, github)
+	//   - total_urls: int (total URLs discovered)
+	//   - completed_urls: int (URLs successfully crawled)
+	//   - failed_urls: int (URLs that failed)
+	//   - pending_urls: int (URLs in queue)
+	//   - percentage: float64 (completion percentage)
+	//   - current_url: string (currently processing URL)
+	//
+	// These fields are populated during async polling of crawl jobs
 	EventJobProgress EventType = "job_progress"
 )
 

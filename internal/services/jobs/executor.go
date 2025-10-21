@@ -14,20 +14,26 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
 // JobExecutor orchestrates the execution of job definitions by iterating through steps,
 // retrieving action handlers from the registry, and implementing error handling strategies
 type JobExecutor struct {
-	registry      *JobTypeRegistry
-	sourceService *sources.Service
-	eventService  interfaces.EventService
-	logger        arbor.ILogger
+	registry       *JobTypeRegistry
+	sourceService  *sources.Service
+	eventService   interfaces.EventService
+	crawlerService interfaces.CrawlerService
+	logger         arbor.ILogger
+
+	// Context for lifecycle management
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewJobExecutor creates a new job executor instance
-func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, eventService interfaces.EventService, logger arbor.ILogger) (*JobExecutor, error) {
+func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, eventService interfaces.EventService, crawlerService interfaces.CrawlerService, logger arbor.ILogger) (*JobExecutor, error) {
 	// Validate inputs
 	if registry == nil {
 		return nil, fmt.Errorf("registry cannot be nil")
@@ -38,20 +44,35 @@ func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, e
 	if eventService == nil {
 		return nil, fmt.Errorf("eventService cannot be nil")
 	}
+	if crawlerService == nil {
+		return nil, fmt.Errorf("crawlerService cannot be nil")
+	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
 	}
 
+	// Create cancellable context for lifecycle management
+	ctx, cancel := context.WithCancel(context.Background())
+
 	executor := &JobExecutor{
-		registry:      registry,
-		sourceService: sourceService,
-		eventService:  eventService,
-		logger:        logger,
+		registry:       registry,
+		sourceService:  sourceService,
+		eventService:   eventService,
+		crawlerService: crawlerService,
+		logger:         logger,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	logger.Info().Msg("Job executor initialized")
 
 	return executor, nil
+}
+
+// Shutdown gracefully stops the executor and cancels all background tasks
+func (e *JobExecutor) Shutdown() {
+	e.logger.Info().Msg("Shutting down job executor - cancelling background tasks")
+	e.cancel()
 }
 
 // Execute executes a job definition by iterating through its steps
@@ -82,6 +103,9 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 
 	// Initialize error slice for aggregation
 	errors := make([]error, 0)
+
+	// Track if any async polling was launched for this execution
+	asyncPollingLaunched := false
 
 	// Iterate through steps
 	for stepIndex, step := range definition.Steps {
@@ -119,8 +143,8 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 			continue
 		}
 
-		// Execute handler
-		err = handler(ctx, step, fetchedSources)
+		// Execute handler (pass pointer to allow step.Config modifications)
+		err = handler(ctx, &step, fetchedSources)
 		if err != nil {
 			if handledErr := e.handleStepError(ctx, definition, step, stepIndex, err, fetchedSources); handledErr != nil {
 				errors = append(errors, handledErr)
@@ -134,8 +158,75 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 				e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
 			}
 		} else {
-			// Step succeeded initially - publish completion event
-			e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
+			// Check if this is a crawl action with wait_for_completion enabled
+			if step.Action == "crawl" && extractBool(step.Config, "wait_for_completion", true) {
+				// Extract job IDs from step config (action handler must populate this)
+				jobIDs := extractCrawlJobIDs(step.Config)
+				if len(jobIDs) > 0 {
+					// Set flag indicating async polling was launched
+					asyncPollingLaunched = true
+
+					e.logger.Info().
+						Str("job_id", definition.ID).
+						Int("step_index", stepIndex).
+						Str("step_name", step.Name).
+						Int("crawl_job_count", len(jobIDs)).
+						Msg("Launching async polling for crawl jobs")
+
+					// Extract timeout from step config (default: 30 minutes)
+					timeoutSeconds := extractInt(step.Config, "polling_timeout_seconds", 1800)
+					pollingTimeout := time.Duration(timeoutSeconds) * time.Second
+
+					// Launch async polling in goroutine
+					go func() {
+						// Create a context with timeout derived from executor context
+						// This allows polling to be cancelled via executor.Shutdown()
+						pollingCtx, cancel := context.WithTimeout(e.ctx, pollingTimeout)
+						defer cancel()
+
+						// Poll until all jobs complete
+						pollErr := e.pollCrawlJobs(pollingCtx, definition, stepIndex, step, jobIDs)
+						if pollErr != nil {
+							// Publish step-level failure event
+							e.publishProgressEvent(pollingCtx, definition, stepIndex, step.Name, step.Action, "failed", pollErr.Error())
+							// Publish final job-level failure event
+							e.publishProgressEvent(pollingCtx, definition, len(definition.Steps)-1, "", "", "failed", pollErr.Error())
+							e.logger.Error().
+								Err(pollErr).
+								Str("job_id", definition.ID).
+								Int("step_index", stepIndex).
+								Msg("Async crawl polling failed")
+						} else {
+							// Publish step-level completion event
+							e.publishProgressEvent(pollingCtx, definition, stepIndex, step.Name, step.Action, "completed", "")
+							// Publish final job-level completion event (deferred from Execute)
+							e.publishProgressEvent(pollingCtx, definition, len(definition.Steps)-1, "", "", "completed", "")
+							e.logger.Info().
+								Str("job_id", definition.ID).
+								Int("step_index", stepIndex).
+								Msg("Async crawl polling completed successfully")
+						}
+					}()
+
+					// Immediately return - polling continues in background
+					e.logger.Info().
+						Str("job_id", definition.ID).
+						Int("step_index", stepIndex).
+						Msg("Crawl step completed (polling in background)")
+					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "running", "")
+				} else {
+					// No job IDs found, but step succeeded - publish completion event
+					e.logger.Warn().
+						Str("job_id", definition.ID).
+						Int("step_index", stepIndex).
+						Str("step_name", step.Name).
+						Msg("Crawl action completed but no job IDs found for polling")
+					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
+				}
+			} else {
+				// Step succeeded initially - publish completion event
+				e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "completed", "")
+			}
 		}
 
 		// Log step completion
@@ -170,8 +261,15 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		Dur("duration", totalDuration).
 		Msg("Job execution completed successfully")
 
-	// Publish completion event
-	e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", "")
+	// Publish completion event only if no async polling was launched
+	// If async polling was launched, the polling goroutine will publish the final completion event
+	if !asyncPollingLaunched {
+		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", "")
+	} else {
+		e.logger.Info().
+			Str("job_id", definition.ID).
+			Msg("Async polling in progress - completion event deferred to polling goroutine")
+	}
 
 	return nil
 }
@@ -285,8 +383,8 @@ func (e *JobExecutor) retryStep(ctx context.Context, definition *models.JobDefin
 			}
 		}
 
-		// Execute handler
-		err = handler(ctx, step, sources)
+		// Execute handler (pass pointer to allow step.Config modifications)
+		err = handler(ctx, &step, sources)
 		if err == nil {
 			// Success
 			e.logger.Info().
@@ -356,6 +454,292 @@ func (e *JobExecutor) publishProgressEvent(ctx context.Context, definition *mode
 	})
 }
 
+// pollCrawlJobs polls multiple crawl jobs until all reach terminal state
+func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobDefinition, stepIndex int, step models.JobStep, jobIDs []string) error {
+	// Create ticker with 5-second interval
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Track completion status for each job ID
+	completionStatus := make(map[string]bool)
+	for _, jobID := range jobIDs {
+		completionStatus[jobID] = false
+	}
+
+	// Track previous status for logging changes
+	previousStatus := make(map[string]string)
+
+	// Track failed/cancelled job IDs and their errors persistently across ticks
+	failed := make(map[string]string)
+
+	// Track consecutive errors per job (for failure threshold)
+	consecutiveErrors := make(map[string]int)
+	maxConsecutiveErrors := 5 // Fail after 5 consecutive GetJobStatus errors
+
+	e.logger.Info().
+		Str("job_id", definition.ID).
+		Int("step_index", stepIndex).
+		Str("step_name", step.Name).
+		Int("crawl_job_count", len(jobIDs)).
+		Msg("Starting async polling for crawl jobs")
+
+	// Loop until all jobs reach terminal state
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled or timeout
+			if ctx.Err() == context.DeadlineExceeded {
+				e.logger.Error().
+					Str("job_id", definition.ID).
+					Int("step_index", stepIndex).
+					Msg("Polling timeout exceeded")
+				return fmt.Errorf("polling timeout exceeded")
+			}
+			if ctx.Err() == context.Canceled {
+				e.logger.Info().
+					Str("job_id", definition.ID).
+					Int("step_index", stepIndex).
+					Msg("Polling cancelled via executor shutdown")
+				return fmt.Errorf("polling cancelled")
+			}
+			return ctx.Err()
+		case <-ticker.C:
+			// Poll each incomplete job
+			allComplete := true
+
+			for _, jobID := range jobIDs {
+				// Skip already completed jobs
+				if completionStatus[jobID] {
+					continue
+				}
+
+				// Get job status from crawler service
+				result, err := e.crawlerService.GetJobStatus(jobID)
+				if err != nil {
+					// Increment consecutive error count
+					consecutiveErrors[jobID]++
+
+					e.logger.Warn().
+						Err(err).
+						Str("crawl_job_id", jobID).
+						Int("consecutive_errors", consecutiveErrors[jobID]).
+						Int("max_consecutive_errors", maxConsecutiveErrors).
+						Msg("Failed to get crawl job status")
+
+					// Check if threshold exceeded
+					if consecutiveErrors[jobID] >= maxConsecutiveErrors {
+						// Mark job as failed due to repeated GetJobStatus errors
+						if _, exists := failed[jobID]; !exists {
+							failed[jobID] = fmt.Sprintf("exceeded failure threshold (%d consecutive errors)", maxConsecutiveErrors)
+						}
+						completionStatus[jobID] = true
+						e.logger.Error().
+							Str("crawl_job_id", jobID).
+							Int("consecutive_errors", consecutiveErrors[jobID]).
+							Msg("Job marked as failed due to repeated GetJobStatus errors")
+					}
+					continue
+				}
+
+				// Type assert result to *crawler.CrawlJob with safety check
+				cj, ok := result.(*crawler.CrawlJob)
+				if !ok {
+					// Increment consecutive error count for type assertion failure
+					consecutiveErrors[jobID]++
+
+					e.logger.Warn().
+						Str("crawl_job_id", jobID).
+						Int("consecutive_errors", consecutiveErrors[jobID]).
+						Msgf("GetJobStatus returned unexpected type: %T", result)
+
+					// Check if threshold exceeded
+					if consecutiveErrors[jobID] >= maxConsecutiveErrors {
+						if _, exists := failed[jobID]; !exists {
+							failed[jobID] = fmt.Sprintf("type assertion failed after %d attempts", maxConsecutiveErrors)
+						}
+						completionStatus[jobID] = true
+						e.logger.Error().
+							Str("crawl_job_id", jobID).
+							Msg("Job marked as failed due to repeated type assertion failures")
+					}
+					continue
+				}
+
+				// Reset consecutive error count on success
+				consecutiveErrors[jobID] = 0
+
+				// Extract status
+				statusStr := string(cj.Status)
+
+				// Log status changes
+				if prevStatus, exists := previousStatus[jobID]; !exists || prevStatus != statusStr {
+					e.logger.Info().
+						Str("crawl_job_id", jobID).
+						Str("previous_status", prevStatus).
+						Str("new_status", statusStr).
+						Msg("Crawl job status changed")
+					previousStatus[jobID] = statusStr
+				}
+
+				// Check for terminal states
+				switch cj.Status {
+				case crawler.JobStatusCompleted:
+					completionStatus[jobID] = true
+					e.logger.Info().
+						Str("crawl_job_id", jobID).
+						Msg("Crawl job completed successfully")
+					// Emit progress event with crawl-specific details
+					e.publishCrawlProgressEvent(ctx, definition, stepIndex, step, jobID, cj, "completed")
+				case crawler.JobStatusFailed:
+					completionStatus[jobID] = true
+					if _, exists := failed[jobID]; !exists {
+						failed[jobID] = cj.Error
+					}
+					e.logger.Error().
+						Str("crawl_job_id", jobID).
+						Str("error", cj.Error).
+						Msg("Crawl job failed")
+					// Emit progress event with error
+					e.publishCrawlProgressEvent(ctx, definition, stepIndex, step, jobID, cj, "failed")
+				case crawler.JobStatusCancelled:
+					completionStatus[jobID] = true
+					if _, exists := failed[jobID]; !exists {
+						failed[jobID] = "job was cancelled"
+					}
+					e.logger.Warn().
+						Str("crawl_job_id", jobID).
+						Msg("Crawl job was cancelled")
+					// Emit progress event
+					e.publishCrawlProgressEvent(ctx, definition, stepIndex, step, jobID, cj, "cancelled")
+				case crawler.JobStatusRunning, crawler.JobStatusPending:
+					// Still in progress
+					allComplete = false
+					// Emit progress event with current status
+					e.publishCrawlProgressEvent(ctx, definition, stepIndex, step, jobID, cj, statusStr)
+				default:
+					// Unknown status - keep polling
+					allComplete = false
+				}
+			}
+
+			// Check if all jobs are complete
+			if allComplete {
+				// Check persistent failure map
+				if len(failed) > 0 {
+					// Build error list from persistent failures
+					var errors []error
+					for jobID, errMsg := range failed {
+						errors = append(errors, fmt.Errorf("crawl job %s: %s", jobID, errMsg))
+					}
+
+					// Check step's OnError strategy
+					if step.OnError == models.ErrorStrategyFail || step.OnError == "" {
+						return fmt.Errorf("crawl polling completed with %d error(s): %v", len(errors), errors)
+					}
+					// Continue strategy - log warnings but return success
+					e.logger.Warn().
+						Int("error_count", len(errors)).
+						Msg("Crawl polling completed with errors (continuing)")
+					return nil
+				}
+
+				e.logger.Info().
+					Str("job_id", definition.ID).
+					Int("step_index", stepIndex).
+					Int("crawl_job_count", len(jobIDs)).
+					Msg("All crawl jobs completed successfully")
+				return nil
+			}
+		}
+	}
+}
+
+// publishCrawlProgressEvent publishes a job progress event with crawl-specific details
+func (e *JobExecutor) publishCrawlProgressEvent(ctx context.Context, definition *models.JobDefinition, stepIndex int, step models.JobStep, crawlJobID string, cj *crawler.CrawlJob, status string) {
+	payload := map[string]interface{}{
+		"job_id":        definition.ID,
+		"job_name":      definition.Name,
+		"job_type":      string(definition.Type),
+		"step_index":    stepIndex,
+		"step_name":     step.Name,
+		"step_action":   step.Action,
+		"total_steps":   len(definition.Steps),
+		"status":        status,
+		"timestamp":     time.Now(),
+		"crawl_job_id":  crawlJobID,
+	}
+
+	// Populate source_type from CrawlJob
+	payload["source_type"] = cj.SourceType
+
+	// Populate progress fields from CrawlJob.Progress
+	payload["total_urls"] = cj.Progress.TotalURLs
+	payload["completed_urls"] = cj.Progress.CompletedURLs
+	payload["failed_urls"] = cj.Progress.FailedURLs
+	payload["pending_urls"] = cj.Progress.PendingURLs
+	payload["percentage"] = cj.Progress.Percentage
+	payload["current_url"] = cj.Progress.CurrentURL
+
+	// Add error if present
+	if cj.Error != "" {
+		payload["error"] = cj.Error
+	}
+
+	// Publish event (non-blocking)
+	e.eventService.Publish(ctx, interfaces.Event{
+		Type:    interfaces.EventJobProgress,
+		Payload: payload,
+	})
+}
+
+// extractCrawlJobIDs extracts job IDs from step config after crawl action completes
+func extractCrawlJobIDs(stepConfig map[string]interface{}) []string {
+	if stepConfig == nil {
+		return []string{}
+	}
+
+	jobIDsRaw, ok := stepConfig["crawl_job_ids"]
+	if !ok {
+		return []string{}
+	}
+
+	// Try direct []string
+	if jobIDsSlice, ok := jobIDsRaw.([]string); ok {
+		return jobIDsSlice
+	}
+
+	// Try []interface{} with string elements
+	if jobIDsIface, ok := jobIDsRaw.([]interface{}); ok {
+		result := make([]string, 0, len(jobIDsIface))
+		for _, item := range jobIDsIface {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+
+	return []string{}
+}
+
+// extractBool extracts a boolean from config map with type assertion
+func extractBool(config map[string]interface{}, key string, defaultValue bool) bool {
+	if config == nil {
+		return defaultValue
+	}
+
+	value, ok := config[key]
+	if !ok {
+		return defaultValue
+	}
+
+	if boolVal, ok := value.(bool); ok {
+		return boolVal
+	}
+
+	return defaultValue
+}
+
 // extractRetryConfig extracts retry configuration from step config with defaults
 func extractRetryConfig(config map[string]interface{}) (maxRetries int, initialBackoff time.Duration, maxBackoff time.Duration, multiplier float64) {
 	// Default values
@@ -417,4 +801,28 @@ func extractRetryConfig(config map[string]interface{}) (maxRetries int, initialB
 	}
 
 	return
+}
+
+// extractInt extracts an integer from config map with type assertion
+func extractInt(config map[string]interface{}, key string, defaultValue int) int {
+	if config == nil {
+		return defaultValue
+	}
+
+	value, ok := config[key]
+	if !ok {
+		return defaultValue
+	}
+
+	// Try direct int
+	if intVal, ok := value.(int); ok {
+		return intVal
+	}
+
+	// Try float64 (JSON unmarshaling)
+	if floatVal, ok := value.(float64); ok {
+		return int(floatVal)
+	}
+
+	return defaultValue
 }

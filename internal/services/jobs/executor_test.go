@@ -15,6 +15,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
@@ -168,10 +169,151 @@ func (m *mockEventService) Close() error {
 	return nil
 }
 
+// mockCrawlerService implements a mock crawler service
+type mockCrawlerService struct {
+	jobs map[string]map[string]interface{}
+}
+
+func (m *mockCrawlerService) Start() error {
+	return nil
+}
+
+func (m *mockCrawlerService) StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error) {
+	return "mock-job-id", nil
+}
+
+func (m *mockCrawlerService) GetJobStatus(jobID string) (interface{}, error) {
+	if job, ok := m.jobs[jobID]; ok {
+		// Convert legacy map format to CrawlJob for backward compatibility
+		status := job["status"].(string)
+		return createCrawlJob(jobID, status, 100, 0, "jira"), nil
+	}
+	// Default: return completed job
+	return createCrawlJob(jobID, "completed", 100, 0, "jira"), nil
+}
+
+func (m *mockCrawlerService) CancelJob(jobID string) error {
+	return nil
+}
+
+func (m *mockCrawlerService) GetJobResults(jobID string) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockCrawlerService) RerunJob(ctx context.Context, jobID string, updateConfig interface{}) (string, error) {
+	return "mock-rerun-job-id", nil
+}
+
+func (m *mockCrawlerService) WaitForJob(ctx context.Context, jobID string) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *mockCrawlerService) Close() error {
+	return nil
+}
+
+// statefulMockCrawlerService implements deterministic state transitions for async polling tests
+type statefulMockCrawlerService struct {
+	callCounts map[string]int
+	states     map[string][]interface{} // jobID -> ordered states
+}
+
+func newStatefulMockCrawlerService() *statefulMockCrawlerService {
+	return &statefulMockCrawlerService{
+		callCounts: make(map[string]int),
+		states:     make(map[string][]interface{}),
+	}
+}
+
+func (m *statefulMockCrawlerService) Start() error {
+	return nil
+}
+
+func (m *statefulMockCrawlerService) StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error) {
+	return "mock-job-id", nil
+}
+
+func (m *statefulMockCrawlerService) GetJobStatus(jobID string) (interface{}, error) {
+	states, ok := m.states[jobID]
+	if !ok {
+		// Return completed by default for unknown jobs
+		return createCrawlJob(jobID, "completed", 100, 0, "jira"), nil
+	}
+
+	callCount := m.callCounts[jobID]
+	m.callCounts[jobID]++
+
+	// Return state at call index, or last state if beyond end
+	if callCount >= len(states) {
+		return states[len(states)-1].(*crawler.CrawlJob), nil
+	}
+	return states[callCount].(*crawler.CrawlJob), nil
+}
+
+func (m *statefulMockCrawlerService) CancelJob(jobID string) error {
+	return nil
+}
+
+func (m *statefulMockCrawlerService) GetJobResults(jobID string) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *statefulMockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *statefulMockCrawlerService) RerunJob(ctx context.Context, jobID string, updateConfig interface{}) (string, error) {
+	return "mock-rerun-job-id", nil
+}
+
+func (m *statefulMockCrawlerService) WaitForJob(ctx context.Context, jobID string) (interface{}, error) {
+	return nil, nil
+}
+
+func (m *statefulMockCrawlerService) Close() error {
+	return nil
+}
+
+func (m *statefulMockCrawlerService) setJobStates(jobID string, states []interface{}) {
+	m.states[jobID] = states
+}
+
+// createCrawlJob helper creates a CrawlJob with specified state and progress
+func createCrawlJob(jobID string, status string, completedURLs, failedURLs int, sourceType string) *crawler.CrawlJob {
+	totalURLs := 100
+	pendingURLs := totalURLs - completedURLs - failedURLs
+	percentage := (float64(completedURLs) / float64(totalURLs)) * 100.0
+
+	job := &crawler.CrawlJob{
+		ID:         jobID,
+		SourceType: sourceType,
+		Status:     crawler.JobStatus(status),
+		Progress: crawler.CrawlProgress{
+			TotalURLs:     totalURLs,
+			CompletedURLs: completedURLs,
+			FailedURLs:    failedURLs,
+			PendingURLs:   pendingURLs,
+			Percentage:    percentage,
+			CurrentURL:    "https://example.com/page-1",
+		},
+	}
+
+	// Set error message for failed jobs
+	if status == "failed" {
+		job.Error = "crawl job failed"
+	}
+
+	return job
+}
+
 // mockActionHandler creates a mock action handler
 func createMockActionHandler(shouldFail bool, failCount int) ActionHandler {
 	callCount := 0
-	return func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	return func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		callCount++
 		if shouldFail && callCount <= failCount {
 			return errors.New("mock action failed")
@@ -196,12 +338,15 @@ func createTestExecutor() (*JobExecutor, *mockSourceStorage, *mockEventService, 
 		data:    make([]interface{}, 0),
 		evtFull: make([]interfaces.Event, 0),
 	}
+	crawlerSvc := &mockCrawlerService{
+		jobs: make(map[string]map[string]interface{}),
+	}
 
 	// Create real sources.Service with mock storage
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
 
 	// Create executor with real dependencies
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
 
 	return executor, sourceStorage, eventSvc, registry
 }
@@ -267,10 +412,11 @@ func TestNewJobExecutor(t *testing.T) {
 	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
 	authStorage := &mockAuthStorage{}
 	eventSvc := &mockEventService{}
+	crawlerSvc := &mockCrawlerService{jobs: make(map[string]map[string]interface{})}
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
 
 	t.Run("successful initialization", func(t *testing.T) {
-		executor, err := NewJobExecutor(registry, sourceService, eventSvc, logger)
+		executor, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
 		if err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
@@ -286,28 +432,35 @@ func TestNewJobExecutor(t *testing.T) {
 	})
 
 	t.Run("nil registry", func(t *testing.T) {
-		_, err := NewJobExecutor(nil, sourceService, eventSvc, logger)
+		_, err := NewJobExecutor(nil, sourceService, eventSvc, crawlerSvc, logger)
 		if err == nil {
 			t.Error("Expected error for nil registry")
 		}
 	})
 
 	t.Run("nil source service", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, nil, eventSvc, logger)
+		_, err := NewJobExecutor(registry, nil, eventSvc, crawlerSvc, logger)
 		if err == nil {
 			t.Error("Expected error for nil source service")
 		}
 	})
 
 	t.Run("nil event service", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, sourceService, nil, logger)
+		_, err := NewJobExecutor(registry, sourceService, nil, crawlerSvc, logger)
 		if err == nil {
 			t.Error("Expected error for nil event service")
 		}
 	})
 
+	t.Run("nil crawler service", func(t *testing.T) {
+		_, err := NewJobExecutor(registry, sourceService, eventSvc, nil, logger)
+		if err == nil {
+			t.Error("Expected error for nil crawler service")
+		}
+	})
+
 	t.Run("nil logger", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, sourceService, eventSvc, nil)
+		_, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, nil)
 		if err == nil {
 			t.Error("Expected error for nil logger")
 		}
@@ -528,7 +681,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 	sourceStorage.sources["source-1"] = sources[0]
 
 	// Register action handler that checks context
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -838,4 +991,462 @@ func TestExtractRetryConfig(t *testing.T) {
 			t.Errorf("Expected max_backoff=2m, got %v", maxBackoff)
 		}
 	})
+}
+
+// TestAsyncPolling_SuccessfulCompletion tests successful async polling to completion
+func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
+	logger := arbor.NewLogger()
+	registry := NewJobTypeRegistry(logger)
+
+	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
+	authStorage := &mockAuthStorage{}
+	eventSvc := &mockEventService{
+		events:  make([]interfaces.EventType, 0),
+		data:    make([]interface{}, 0),
+		evtFull: make([]interfaces.Event, 0),
+	}
+
+	// Create stateful crawler service with job progressing from running to completed
+	crawlerSvc := newStatefulMockCrawlerService()
+	crawlerSvc.setJobStates("crawl-job-1", []interface{}{
+		createCrawlJob("crawl-job-1", "running", 50, 0, "jira"),
+		createCrawlJob("crawl-job-1", "completed", 100, 0, "jira"),
+	})
+
+	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+
+	// Setup source
+	sourcesData := createTestSources()
+	sourceStorage.sources["source-1"] = sourcesData[0]
+
+	// Register action handler that stores job IDs for polling
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+		// Simulate crawler action storing job IDs
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["crawl_job_ids"] = []string{"crawl-job-1"}
+		step.Config["wait_for_completion"] = true
+		return nil
+	})
+
+	// Create job definition
+	steps := []models.JobStep{
+		{
+			Name:    "crawl-step",
+			Action:  "crawl",
+			OnError: models.ErrorStrategyFail,
+			Config: map[string]interface{}{
+				"wait_for_completion": true,
+			},
+		},
+	}
+	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+
+	// Execute job
+	ctx := context.Background()
+	err := executor.Execute(ctx, jobDef)
+
+	// Verify success
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)
+	time.Sleep(11 * time.Second)
+
+	// Verify EventJobProgress events were emitted with crawl-specific fields
+	crawlProgressEventCount := 0
+	for _, evt := range eventSvc.evtFull {
+		if evt.Type == interfaces.EventJobProgress {
+			payload, ok := evt.Payload.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Check if this is a crawl-specific progress event (has crawl_job_id)
+			if crawlJobID, ok := payload["crawl_job_id"].(string); ok {
+				crawlProgressEventCount++
+
+				// Verify crawl-specific fields are present
+				if crawlJobID == "" {
+					t.Error("EventJobProgress crawl_job_id is empty")
+				}
+				if sourceType, ok := payload["source_type"].(string); !ok || sourceType != "jira" {
+					t.Errorf("EventJobProgress source_type incorrect, got: %v", payload["source_type"])
+				}
+				if _, ok := payload["total_urls"]; !ok {
+					t.Error("EventJobProgress missing total_urls field")
+				}
+				if _, ok := payload["completed_urls"]; !ok {
+					t.Error("EventJobProgress missing completed_urls field")
+				}
+				if _, ok := payload["percentage"]; !ok {
+					t.Error("EventJobProgress missing percentage field")
+				}
+			}
+		}
+	}
+
+	if crawlProgressEventCount < 2 {
+		t.Errorf("Expected at least 2 crawl progress events (with crawl_job_id), got %d", crawlProgressEventCount)
+	}
+}
+
+// TestAsyncPolling_JobFailure tests async polling handling a job failure
+func TestAsyncPolling_JobFailure(t *testing.T) {
+	logger := arbor.NewLogger()
+	registry := NewJobTypeRegistry(logger)
+
+	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
+	authStorage := &mockAuthStorage{}
+	eventSvc := &mockEventService{
+		events:  make([]interfaces.EventType, 0),
+		data:    make([]interface{}, 0),
+		evtFull: make([]interfaces.Event, 0),
+	}
+
+	// Create stateful crawler service with job progressing from running to failed
+	crawlerSvc := newStatefulMockCrawlerService()
+	crawlerSvc.setJobStates("crawl-job-2", []interface{}{
+		createCrawlJob("crawl-job-2", "running", 50, 5, "confluence"),
+		createCrawlJob("crawl-job-2", "failed", 60, 10, "confluence"),
+	})
+
+	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+
+	// Setup source
+	sourcesData := createTestSources()
+	sourceStorage.sources["source-2"] = sourcesData[1]
+
+	// Register action handler that stores job IDs for polling
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["crawl_job_ids"] = []string{"crawl-job-2"}
+		step.Config["wait_for_completion"] = true
+		return nil
+	})
+
+	// Create job definition with Continue error strategy
+	steps := []models.JobStep{
+		{
+			Name:    "crawl-step",
+			Action:  "crawl",
+			OnError: models.ErrorStrategyContinue,
+			Config: map[string]interface{}{
+				"wait_for_completion": true,
+			},
+		},
+	}
+	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-2"}, steps)
+
+	// Execute job
+	ctx := context.Background()
+	err := executor.Execute(ctx, jobDef)
+
+	// Async polling: Execute returns immediately, errors reported via events only
+	if err != nil {
+		t.Errorf("Expected no immediate error (async polling), got: %v", err)
+	}
+
+	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)
+	time.Sleep(11 * time.Second)
+
+	// Verify EventJobProgress events were emitted including failure status
+	failedEventFound := false
+	for _, evt := range eventSvc.evtFull {
+		if evt.Type == interfaces.EventJobProgress {
+			payload, ok := evt.Payload.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			status, ok := payload["status"].(string)
+			if ok && status == "failed" {
+				failedEventFound = true
+
+				// Verify error field is present
+				if errMsg, ok := payload["error"].(string); !ok || errMsg == "" {
+					t.Error("Failed event missing error message")
+				}
+
+				// Verify failed_urls field
+				if failedURLs, ok := payload["failed_urls"].(int); !ok || failedURLs == 0 {
+					t.Error("Failed event should have failed_urls > 0")
+				}
+			}
+		}
+	}
+
+	if !failedEventFound {
+		t.Error("Expected to find failed status in EventJobProgress")
+	}
+}
+
+// TestAsyncPolling_ContextCancellation tests context cancellation during polling
+func TestAsyncPolling_ContextCancellation(t *testing.T) {
+	logger := arbor.NewLogger()
+	registry := NewJobTypeRegistry(logger)
+
+	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
+	authStorage := &mockAuthStorage{}
+	eventSvc := &mockEventService{
+		events:  make([]interfaces.EventType, 0),
+		data:    make([]interface{}, 0),
+		evtFull: make([]interfaces.Event, 0),
+	}
+
+	// Create stateful crawler service that stays running indefinitely
+	crawlerSvc := newStatefulMockCrawlerService()
+	crawlerSvc.setJobStates("crawl-job-3", []interface{}{
+		createCrawlJob("crawl-job-3", "running", 10, 0, "jira"),
+		createCrawlJob("crawl-job-3", "running", 20, 0, "jira"),
+		createCrawlJob("crawl-job-3", "running", 30, 0, "jira"),
+		createCrawlJob("crawl-job-3", "running", 40, 0, "jira"),
+		createCrawlJob("crawl-job-3", "running", 50, 0, "jira"),
+		createCrawlJob("crawl-job-3", "running", 60, 0, "jira"),
+	})
+
+	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+
+	// Setup source
+	sourcesData := createTestSources()
+	sourceStorage.sources["source-1"] = sourcesData[0]
+
+	// Register action handler
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["crawl_job_ids"] = []string{"crawl-job-3"}
+		step.Config["wait_for_completion"] = true
+		return nil
+	})
+
+	// Create job definition
+	steps := []models.JobStep{
+		{
+			Name:    "crawl-step",
+			Action:  "crawl",
+			OnError: models.ErrorStrategyFail,
+			Config: map[string]interface{}{
+				"wait_for_completion": true,
+			},
+		},
+	}
+	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+
+	// Execute job with cancellable context
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	err := executor.Execute(ctx, jobDef)
+
+	// Note: Polling happens in background goroutine with context.Background(),
+	// so cancelling request context won't affect polling. This test verifies
+	// that the main execute returns immediately even if polling continues.
+	// In production, polling would continue until jobs complete or service stops.
+
+	// Verify execution completed (possibly with timeout if action checks context)
+	if err != nil && !strings.Contains(err.Error(), "context") {
+		// Error is acceptable if it's context-related
+		t.Logf("Execute returned error: %v", err)
+	}
+}
+
+// TestAsyncPolling_SkipWhenWaitForCompletionFalse tests skipping polling when wait_for_completion is false
+func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
+	logger := arbor.NewLogger()
+	registry := NewJobTypeRegistry(logger)
+
+	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
+	authStorage := &mockAuthStorage{}
+	eventSvc := &mockEventService{
+		events:  make([]interfaces.EventType, 0),
+		data:    make([]interface{}, 0),
+		evtFull: make([]interfaces.Event, 0),
+	}
+
+	// Create stateful crawler service
+	crawlerSvc := newStatefulMockCrawlerService()
+
+	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+
+	// Setup source
+	sourcesData := createTestSources()
+	sourceStorage.sources["source-1"] = sourcesData[0]
+
+	// Register action handler that stores job IDs but sets wait_for_completion = false
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["crawl_job_ids"] = []string{"crawl-job-4"}
+		step.Config["wait_for_completion"] = false
+		return nil
+	})
+
+	// Create job definition with wait_for_completion = false
+	steps := []models.JobStep{
+		{
+			Name:    "crawl-step",
+			Action:  "crawl",
+			OnError: models.ErrorStrategyFail,
+			Config: map[string]interface{}{
+				"wait_for_completion": false,
+			},
+		},
+	}
+	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+
+	// Execute job
+	ctx := context.Background()
+	err := executor.Execute(ctx, jobDef)
+
+	// Verify success (no polling happened)
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Wait a bit to ensure polling doesn't happen
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify GetJobStatus was NOT called (because polling was skipped)
+	if crawlerSvc.callCounts["crawl-job-4"] > 0 {
+		t.Errorf("Expected polling to be skipped, but GetJobStatus was called %d times", crawlerSvc.callCounts["crawl-job-4"])
+	}
+
+	// Verify no crawl-specific progress events (no polling happened)
+	crawlProgressEventCount := 0
+	for _, evt := range eventSvc.evtFull {
+		if evt.Type == interfaces.EventJobProgress {
+			payload, ok := evt.Payload.(map[string]interface{})
+			if ok {
+				// Check if this is a crawl-specific progress event (has crawl_job_id)
+				if _, hasCrawlJobID := payload["crawl_job_id"]; hasCrawlJobID {
+					crawlProgressEventCount++
+				}
+			}
+		}
+	}
+
+	// Should have NO crawl-specific progress events since polling was skipped
+	if crawlProgressEventCount > 0 {
+		t.Errorf("Expected no crawl progress events (polling skipped), got %d", crawlProgressEventCount)
+	}
+}
+
+// TestAsyncPolling_MultipleJobsWithMixedOutcomes tests polling multiple jobs with different outcomes
+func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
+	logger := arbor.NewLogger()
+	registry := NewJobTypeRegistry(logger)
+
+	sourceStorage := &mockSourceStorage{sources: make(map[string]*models.SourceConfig)}
+	authStorage := &mockAuthStorage{}
+	eventSvc := &mockEventService{
+		events:  make([]interfaces.EventType, 0),
+		data:    make([]interface{}, 0),
+		evtFull: make([]interfaces.Event, 0),
+	}
+
+	// Create stateful crawler service with multiple jobs
+	crawlerSvc := newStatefulMockCrawlerService()
+
+	// Job 1: Completes successfully
+	crawlerSvc.setJobStates("crawl-job-5", []interface{}{
+		createCrawlJob("crawl-job-5", "running", 50, 0, "jira"),
+		createCrawlJob("crawl-job-5", "completed", 100, 0, "jira"),
+	})
+
+	// Job 2: Fails
+	crawlerSvc.setJobStates("crawl-job-6", []interface{}{
+		createCrawlJob("crawl-job-6", "running", 30, 0, "confluence"),
+		createCrawlJob("crawl-job-6", "failed", 50, 20, "confluence"),
+	})
+
+	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+
+	// Setup sources
+	sourcesData := createTestSources()
+	sourceStorage.sources["source-1"] = sourcesData[0]
+	sourceStorage.sources["source-2"] = sourcesData[1]
+
+	// Register action handler that stores multiple job IDs
+	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["crawl_job_ids"] = []string{"crawl-job-5", "crawl-job-6"}
+		step.Config["wait_for_completion"] = true
+		return nil
+	})
+
+	// Create job definition with Continue error strategy
+	steps := []models.JobStep{
+		{
+			Name:    "crawl-step",
+			Action:  "crawl",
+			OnError: models.ErrorStrategyContinue,
+			Config: map[string]interface{}{
+				"wait_for_completion": true,
+			},
+		},
+	}
+	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1", "source-2"}, steps)
+
+	// Execute job
+	ctx := context.Background()
+	err := executor.Execute(ctx, jobDef)
+
+	// Async polling: Execute returns immediately, errors reported via events only
+	if err != nil {
+		t.Errorf("Expected no immediate error (async polling), got: %v", err)
+	}
+
+	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)
+	time.Sleep(11 * time.Second)
+
+	// Verify both jobs were polled
+	if crawlerSvc.callCounts["crawl-job-5"] == 0 {
+		t.Error("Expected crawl-job-5 to be polled")
+	}
+	if crawlerSvc.callCounts["crawl-job-6"] == 0 {
+		t.Error("Expected crawl-job-6 to be polled")
+	}
+
+	// Verify progress events for both jobs
+	foundJob5Completed := false
+	foundJob6Failed := false
+	for _, evt := range eventSvc.evtFull {
+		if evt.Type == interfaces.EventJobProgress {
+			payload, ok := evt.Payload.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			crawlJobID, _ := payload["crawl_job_id"].(string)
+			status, _ := payload["status"].(string)
+
+			if crawlJobID == "crawl-job-5" && status == "completed" {
+				foundJob5Completed = true
+			}
+			if crawlJobID == "crawl-job-6" && status == "failed" {
+				foundJob6Failed = true
+			}
+		}
+	}
+
+	if !foundJob5Completed {
+		t.Error("Expected to find completed status for crawl-job-5")
+	}
+	if !foundJob6Failed {
+		t.Error("Expected to find failed status for crawl-job-6")
+	}
 }

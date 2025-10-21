@@ -22,12 +22,12 @@ func createTestRegistry() *JobTypeRegistry {
 }
 
 // Test helper - mockActionHandler is a mock action handler for testing
-func mockActionHandler(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+func mockActionHandler(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 	return nil
 }
 
 // Test helper - mockFailingActionHandler is a mock action handler that returns an error
-func mockFailingActionHandler(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+func mockFailingActionHandler(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 	return fmt.Errorf("mock action failed")
 }
 
@@ -234,7 +234,7 @@ func TestGetAction(t *testing.T) {
 					ctx := context.Background()
 					step := models.JobStep{Name: "test", Action: tt.actionName}
 					sources := []*models.SourceConfig{}
-					err := handler(ctx, step, sources)
+					err := handler(ctx, &step, sources)
 					if err != nil {
 						t.Errorf("Handler execution failed: %v", err)
 					}
@@ -448,7 +448,7 @@ func TestActionHandlerExecution(t *testing.T) {
 		ctx := context.Background()
 		step := models.JobStep{Name: "test", Action: "crawl"}
 		sources := []*models.SourceConfig{}
-		err = handler(ctx, step, sources)
+		err = handler(ctx, &step, sources)
 
 		if err != nil {
 			t.Errorf("Handler execution failed: %v", err)
@@ -468,7 +468,7 @@ func TestActionHandlerExecution(t *testing.T) {
 		ctx := context.Background()
 		step := models.JobStep{Name: "test", Action: "fail"}
 		sources := []*models.SourceConfig{}
-		err = handler(ctx, step, sources)
+		err = handler(ctx, &step, sources)
 
 		if err == nil {
 			t.Error("Expected error from failing handler, got nil")

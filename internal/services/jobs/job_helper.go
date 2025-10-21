@@ -181,6 +181,78 @@ func StartCrawlJob(
 		Str("detail_level", crawlerConfig.DetailLevel).
 		Msg("Crawler configuration merged and validated")
 
+	// 6a. Determine configuration source for each field (for INFO logging)
+	var followLinksSource string
+	if crawlerConfig.FollowLinks {
+		followLinksSource = "job"
+	} else if source.CrawlConfig.FollowLinks {
+		followLinksSource = "source"
+	} else {
+		followLinksSource = "default"
+	}
+
+	var maxDepthSource string
+	if jobCrawlConfig.MaxDepth > 0 {
+		maxDepthSource = "job"
+	} else if source.CrawlConfig.MaxDepth > 0 {
+		maxDepthSource = "source"
+	} else {
+		maxDepthSource = "default"
+	}
+
+	var maxPagesSource string
+	if jobCrawlConfig.MaxPages > 0 {
+		maxPagesSource = "job"
+	} else if source.CrawlConfig.MaxPages > 0 {
+		maxPagesSource = "source"
+	} else {
+		maxPagesSource = "default"
+	}
+
+	var concurrencySource string
+	if jobCrawlConfig.Concurrency > 0 {
+		concurrencySource = "job"
+	} else if source.CrawlConfig.Concurrency > 0 {
+		concurrencySource = "source"
+	} else {
+		concurrencySource = "default"
+	}
+
+	var includePatternsSource string
+	if len(jobCrawlConfig.IncludePatterns) > 0 {
+		includePatternsSource = "job"
+	} else if len(crawlerConfig.IncludePatterns) > 0 {
+		includePatternsSource = "source"
+	} else {
+		includePatternsSource = "none"
+	}
+
+	var excludePatternsSource string
+	if len(jobCrawlConfig.ExcludePatterns) > 0 {
+		excludePatternsSource = "job"
+	} else if len(crawlerConfig.ExcludePatterns) > 0 {
+		excludePatternsSource = "source"
+	} else {
+		excludePatternsSource = "none"
+	}
+
+	// 6b. Log final configuration with source attribution at INFO level
+	logger.Info().
+		Str("source_id", source.ID).
+		Bool("follow_links", crawlerConfig.FollowLinks).
+		Str("follow_links_source", followLinksSource).
+		Int("max_depth", crawlerConfig.MaxDepth).
+		Str("max_depth_source", maxDepthSource).
+		Int("max_pages", crawlerConfig.MaxPages).
+		Str("max_pages_source", maxPagesSource).
+		Int("concurrency", crawlerConfig.Concurrency).
+		Str("concurrency_source", concurrencySource).
+		Int("include_patterns_count", len(crawlerConfig.IncludePatterns)).
+		Str("include_patterns_source", includePatternsSource).
+		Int("exclude_patterns_count", len(crawlerConfig.ExcludePatterns)).
+		Str("exclude_patterns_source", excludePatternsSource).
+		Msg("Final crawler configuration for job")
+
 	// 7. Warn about limiting crawl settings
 	if !crawlerConfig.FollowLinks {
 		logger.Warn().Str("source_id", source.ID).Msg("FollowLinks is disabled - crawler will only process initial URLs")

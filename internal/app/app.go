@@ -241,7 +241,7 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service
-	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.Logger, a.Config)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -298,7 +298,7 @@ func (a *App) initServices() error {
 
 	// Initialize job executor for job definition execution
 	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
-	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.Logger)
+	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.CrawlerService, a.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize job executor: %w", err)
 	}
@@ -440,6 +440,12 @@ func (a *App) Close() error {
 		if err := a.SchedulerService.Stop(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to stop scheduler service")
 		}
+	}
+
+	// Shutdown job executor (cancels all background polling tasks)
+	if a.JobExecutor != nil {
+		a.JobExecutor.Shutdown()
+		a.Logger.Info().Msg("Job executor shutdown complete")
 	}
 
 	// Close crawler service

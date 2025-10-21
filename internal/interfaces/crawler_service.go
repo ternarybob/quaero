@@ -6,8 +6,7 @@ import (
 
 // CrawlerService defines the interface for the unified crawler service
 // that handles crawling operations for all data sources (Jira, Confluence, GitHub)
-// Note: The interface uses interface{} for types to avoid import cycles
-// Implementations should use concrete crawler types
+// Note: Most methods use interface{} for types to avoid import cycles
 type CrawlerService interface {
 	// Start initializes the crawler service
 	Start() error
@@ -25,6 +24,8 @@ type CrawlerService interface {
 	StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error)
 
 	// GetJobStatus retrieves the current status of a crawl job
+	// Returns: *crawler.CrawlJob - caller must perform type assertion with proper error handling
+	// Example: job, ok := result.(*crawler.CrawlJob); if !ok { handle error }
 	GetJobStatus(jobID string) (interface{}, error)
 
 	// CancelJob cancels a running crawl job

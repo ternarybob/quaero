@@ -48,7 +48,8 @@ type CrawlJob struct {
 	Error                string        `json:"error,omitempty"`
 	ResultCount          int           `json:"result_count"`
 	FailedCount          int           `json:"failed_count"`
-	SeedURLs             []string      `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
+	DocumentsSaved       int           `json:"documents_saved"`         // Number of documents successfully saved to storage
+	SeedURLs             []string      `json:"seed_urls,omitempty"`     // Initial URLs used to start the crawl (for rerun capability)
 }
 
 // CrawlConfig defines crawl behavior

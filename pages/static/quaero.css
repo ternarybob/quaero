@@ -31,6 +31,110 @@
     --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
 }
 
+/* Body Styling */
+body {
+    font-family: var(--font-sans);
+    background-color: var(--page-bg);
+    color: var(--text-primary);
+    padding-top: 64px;
+    /* Space for fixed header */
+}
+
+h2 {
+    font-size: 1.25rem;
+}
+
+/* App Header */
+.app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background-color: var(--header-bg);
+    border-bottom: 1px solid #424a53;
+    height: 64px;
+}
+
+.app-header-content {
+    /* max-width: 1280px; */
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 100%;
+}
+
+.app-header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.app-header-nav .brand {
+    color: white;
+    text-decoration: none;
+    font-size: 1.25rem;
+    margin-right: 1rem;
+}
+
+.nav-links {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nav-links a {
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.nav-links a:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.nav-links a.active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.navbar {
+    .navbar-section {
+
+        h2,
+        h3 {
+            margin-bottom: 0;
+        }
+
+        button:not(:last-child),
+        select:not(:last-child) {
+            margin-right: 0.3rem;
+        }
+    }
+}
+
+/* Cards */
+.card {
+    border-radius: var(--border-radius);
+    margin-bottom: 1.5rem;
+
+    .card-header {
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.5rem;
+        padding-top: 0.5rem;
+
+        h2,
+        h3 {
+            margin-bottom: 0;
+        }
+
+    }
+}
+
 /* 2. SPECTRE CSS BUTTON OVERRIDES
    ========================================================================== */
 .btn {
@@ -133,80 +237,6 @@
     margin-top: -3px;
 }
 
-/* 4. GITHUB-LIKE LAYOUT STYLES
-   ========================================================================== */
-
-/* Body Styling */
-body {
-    font-family: var(--font-sans);
-    background-color: var(--page-bg);
-    color: var(--text-primary);
-    padding-top: 64px;
-    /* Space for fixed header */
-}
-
-h2 {
-    font-size: 1.25rem;
-}
-
-/* App Header */
-.app-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    background-color: var(--header-bg);
-    border-bottom: 1px solid #424a53;
-    height: 64px;
-}
-
-.app-header-content {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 0 1.5rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 100%;
-}
-
-.app-header-nav {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.app-header-nav .brand {
-    color: white;
-    text-decoration: none;
-    font-size: 1.25rem;
-    margin-right: 1rem;
-}
-
-.nav-links {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.nav-links a {
-    color: white;
-    text-decoration: none;
-    padding: 0.5rem 1rem;
-    border-radius: var(--border-radius);
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: background-color 0.2s;
-}
-
-.nav-links a:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.nav-links a.active {
-    background-color: rgba(255, 255, 255, 0.15);
-}
-
 /* Mobile Menu Toggle */
 .mobile-menu-toggle {
     display: none;
@@ -256,7 +286,7 @@ h2 {
 
 /* Page Container */
 .page-container {
-    max-width: 1280px;
+    /* max-width: 1280px; */
     margin: 1.5rem auto;
     padding: 0 1.5rem;
 }
@@ -295,33 +325,6 @@ h2 {
 .section-body {
     padding: 1.5rem;
 }
-
-/* Cards */
-.card {
-    border-radius: var(--border-radius);
-    margin-bottom: 1.5rem;
-
-    &.card-header {
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 0.8rem;
-    }
-}
-
-.navbar {
-    .navbar-section {
-        h2 {
-            margin-bottom: 0;
-        }
-
-        button:not(:last-child),
-        select:not(:last-child) {
-            margin-right: 0.3rem;
-        }
-    }
-}
-
-/* 5. CUSTOM COMPONENT STYLES
-   ========================================================================== */
 
 /* Statistics Grid */
 .stats-grid {
@@ -410,24 +413,30 @@ h2 {
 .table {
     border-collapse: collapse;
     width: 100%;
-}
 
-.table thead th {
-    background-color: var(--page-bg);
-    border-bottom: 2px solid var(--border-color);
-    padding: 0.45rem 1rem;
-    text-align: left;
-    font-weight: 600;
-    color: var(--text-primary);
-}
+    thead th {
+        background-color: var(--page-bg);
+        border-bottom: 2px solid var(--border-color);
+        padding: 0.45rem 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
 
-.table tbody td {
-    padding: 0.45rem 1rem;
-    border-bottom: 1px solid var(--border-color);
-}
+    th:last-child,
+    td:last-child {
+        text-align: right;
+    }
 
-.table.striped tbody tr:nth-child(even) {
-    background-color: var(--page-bg);
+    tbody td {
+        padding: 0.45rem 1rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .striped tbody tr:nth-child(even) {
+        background-color: var(--page-bg);
+    }
+
 }
 
 /* 6. TOAST NOTIFICATION STYLES

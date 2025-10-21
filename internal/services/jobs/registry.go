@@ -16,8 +16,9 @@ import (
 )
 
 // ActionHandler is a function that executes a job step action
-// It receives the execution context, the step configuration, and the list of sources to operate on
-type ActionHandler func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error
+// It receives the execution context, a pointer to the step configuration (allowing modifications),
+// and the list of sources to operate on
+type ActionHandler func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error
 
 // JobTypeRegistry manages the registration and retrieval of action handlers for different job types
 type JobTypeRegistry struct {

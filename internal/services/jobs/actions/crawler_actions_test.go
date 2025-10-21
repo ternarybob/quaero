@@ -18,35 +18,20 @@ import (
 
 // mockStartCrawlJobFunc is used to track and mock StartCrawlJob calls in tests
 type mockStartCrawlJobFunc struct {
-	startCrawlFunc  func(context.Context, *models.SourceConfig, interfaces.AuthStorage, *crawler.Service, *common.Config, arbor.ILogger, []string, bool) (string, error)
-	waitForJobFunc  func(context.Context, string) (interface{}, error)
+	startCrawlFunc  func(context.Context, *models.SourceConfig, interfaces.AuthStorage, *crawler.Service, *common.Config, arbor.ILogger, crawler.CrawlConfig, bool) (string, error)
 	startCrawlCalls int
-	waitForJobCalls int
 	jobIDs          []string
 	crawlerService  *crawler.Service
 }
 
-func (m *mockStartCrawlJobFunc) startCrawl(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, seedURLOverrides []string, refreshSource bool) (string, error) {
+func (m *mockStartCrawlJobFunc) startCrawl(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, jobCrawlConfig crawler.CrawlConfig, refreshSource bool) (string, error) {
 	m.startCrawlCalls++
 	if m.startCrawlFunc != nil {
-		return m.startCrawlFunc(ctx, source, authStorage, crawlerService, config, logger, seedURLOverrides, refreshSource)
+		return m.startCrawlFunc(ctx, source, authStorage, crawlerService, config, logger, jobCrawlConfig, refreshSource)
 	}
 	jobID := fmt.Sprintf("job-%d", m.startCrawlCalls)
 	m.jobIDs = append(m.jobIDs, jobID)
 	return jobID, nil
-}
-
-func (m *mockStartCrawlJobFunc) waitForJob(ctx context.Context, jobID string) (interface{}, error) {
-	m.waitForJobCalls++
-	if m.waitForJobFunc != nil {
-		return m.waitForJobFunc(ctx, jobID)
-	}
-	// Return mock crawl results
-	results := []*crawler.CrawlResult{
-		{URL: "https://example.com/page1", Title: "Page 1"},
-		{URL: "https://example.com/page2", Title: "Page 2"},
-	}
-	return results, nil
 }
 
 type mockAuthStorage struct {
@@ -253,7 +238,7 @@ func TestCrawlAction_StartCrawlFailure(t *testing.T) {
 	originalFunc := startCrawlJobFunc
 	defer func() { startCrawlJobFunc = originalFunc }()
 
-	mockStartCrawl.startCrawlFunc = func(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, seedURLOverrides []string, refreshSource bool) (string, error) {
+	mockStartCrawl.startCrawlFunc = func(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, jobCrawlConfig crawler.CrawlConfig, refreshSource bool) (string, error) {
 		return "", fmt.Errorf("crawl failed")
 	}
 	startCrawlJobFunc = mockStartCrawl.startCrawl
@@ -285,6 +270,54 @@ func TestCrawlAction_WithRefreshSourceFalse(t *testing.T) {
 // TestCrawlAction_WithWaitForCompletionFalse - Skipped: Cannot mock WaitForJob
 func TestCrawlAction_WithWaitForCompletionFalse(t *testing.T) {
 	t.Skip("Skipped: Cannot mock CrawlerService.WaitForJob (concrete type)")
+}
+
+// TestCrawlAction_NoBlocking verifies that crawl action returns immediately without blocking
+func TestCrawlAction_NoBlocking(t *testing.T) {
+	deps, mockStartCrawl, _, _ := createTestDeps()
+	sources := createTestSources()
+	step := createTestStep("crawl", map[string]interface{}{
+		"wait_for_completion": true,
+	})
+
+	// Mock the startCrawlJobFunc
+	originalFunc := startCrawlJobFunc
+	defer func() { startCrawlJobFunc = originalFunc }()
+	startCrawlJobFunc = mockStartCrawl.startCrawl
+
+	// Measure execution time
+	start := time.Now()
+	err := crawlAction(context.Background(), step, sources, deps)
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+
+	// Verify action returned quickly (< 1 second)
+	if duration > 1*time.Second {
+		t.Errorf("Expected action to return quickly, took %v", duration)
+	}
+
+	// Verify job IDs are stored in step config
+	jobIDs, ok := step.Config["crawl_job_ids"].([]string)
+	if !ok {
+		t.Fatal("Expected crawl_job_ids in step config")
+	}
+
+	if len(jobIDs) != len(sources) {
+		t.Errorf("Expected %d job IDs in config, got %d", len(sources), len(jobIDs))
+	}
+
+	// Verify job IDs match what was generated
+	for i, jobID := range jobIDs {
+		expectedID := fmt.Sprintf("job-%d", i+1)
+		if jobID != expectedID {
+			t.Errorf("Expected job ID %s, got %s", expectedID, jobID)
+		}
+	}
+
+	// Note: Non-blocking behavior is verified by the duration check above
 }
 
 // TestCrawlAction_EventPublishFailure - No longer applicable: event publishing removed from crawlAction
@@ -914,7 +947,7 @@ func TestCrawlAction_MultipleSourcesWithError(t *testing.T) {
 	defer func() { startCrawlJobFunc = originalFunc }()
 
 	callCount := 0
-	mockStartCrawl.startCrawlFunc = func(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, seedURLOverrides []string, refreshSource bool) (string, error) {
+	mockStartCrawl.startCrawlFunc = func(ctx context.Context, source *models.SourceConfig, authStorage interfaces.AuthStorage, crawlerService *crawler.Service, config *common.Config, logger arbor.ILogger, jobCrawlConfig crawler.CrawlConfig, refreshSource bool) (string, error) {
 		callCount++
 		if callCount == 1 {
 			return "", fmt.Errorf("first source failed")

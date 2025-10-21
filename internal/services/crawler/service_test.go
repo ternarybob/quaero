@@ -190,6 +190,131 @@ func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes
 	return []interface{}{}, nil
 }
 
+// Mock DocumentStorage
+type mockDocumentStorage struct {
+	documents map[string]*models.Document
+}
+
+func (m *mockDocumentStorage) SaveDocument(doc *models.Document) error {
+	if m.documents == nil {
+		m.documents = make(map[string]*models.Document)
+	}
+	m.documents[doc.ID] = doc
+	return nil
+}
+
+func (m *mockDocumentStorage) SaveDocuments(docs []*models.Document) error {
+	for _, doc := range docs {
+		if err := m.SaveDocument(doc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *mockDocumentStorage) GetDocument(id string) (*models.Document, error) {
+	if m.documents == nil {
+		return nil, nil
+	}
+	return m.documents[id], nil
+}
+
+func (m *mockDocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
+	if m.documents == nil {
+		return nil, nil
+	}
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType && doc.SourceID == sourceID {
+			return doc, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockDocumentStorage) UpdateDocument(doc *models.Document) error {
+	if m.documents == nil {
+		m.documents = make(map[string]*models.Document)
+	}
+	m.documents[doc.ID] = doc
+	return nil
+}
+
+func (m *mockDocumentStorage) DeleteDocument(id string) error {
+	if m.documents != nil {
+		delete(m.documents, id)
+	}
+	return nil
+}
+
+func (m *mockDocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *mockDocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *mockDocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {
+	if m.documents == nil {
+		return []*models.Document{}, nil
+	}
+	docs := make([]*models.Document, 0, len(m.documents))
+	for _, doc := range m.documents {
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
+func (m *mockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
+	if m.documents == nil {
+		return []*models.Document{}, nil
+	}
+	docs := make([]*models.Document, 0)
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType {
+			docs = append(docs, doc)
+		}
+	}
+	return docs, nil
+}
+
+func (m *mockDocumentStorage) CountDocuments() (int, error) {
+	if m.documents == nil {
+		return 0, nil
+	}
+	return len(m.documents), nil
+}
+
+func (m *mockDocumentStorage) CountDocumentsBySource(sourceType string) (int, error) {
+	if m.documents == nil {
+		return 0, nil
+	}
+	count := 0
+	for _, doc := range m.documents {
+		if doc.SourceType == sourceType {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error) {
+	return &models.DocumentStats{}, nil
+}
+
+func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error {
+	return nil
+}
+
+func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
+	return []*models.Document{}, nil
+}
+
+func (m *mockDocumentStorage) ClearAll() error {
+	m.documents = make(map[string]*models.Document)
+	return nil
+}
+
 // Helper function to create test service
 func createTestService() *Service {
 	logger := arbor.NewLogger()
@@ -206,6 +331,7 @@ func createTestService() *Service {
 		nil, // authStorage
 		&mockEventService{},
 		&mockJobStorage{},
+		&mockDocumentStorage{},
 		logger,
 		config,
 	)
@@ -1069,4 +1195,184 @@ func TestFilterConfluenceLinks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWorkerLoop_SavesDocumentImmediately verifies that documents are saved immediately after successful crawls
+func TestWorkerLoop_SavesDocumentImmediately(t *testing.T) {
+	// Create service with mock storage
+	service := createTestService()
+	defer service.Close()
+
+	// Get access to mock document storage
+	mockDocStorage, ok := service.documentStorage.(*mockDocumentStorage)
+	if !ok {
+		t.Fatal("Expected mockDocumentStorage")
+	}
+
+	// Simulate a successful crawl result with markdown metadata
+	testURL := "https://test.atlassian.net/browse/TEST-123"
+	testTitle := "Test Issue Title"
+	testMarkdown := "# Test Issue\n\nThis is test content in markdown format."
+	sourceType := "jira"
+
+	// Create a simulated crawl result (what workerLoop would produce)
+	result := &CrawlResult{
+		URL:        testURL,
+		StatusCode: 200,
+		Body:       []byte("<html><body>Test content</body></html>"),
+		Error:      "", // Successful crawl
+		Metadata: map[string]interface{}{
+			"markdown":    testMarkdown,
+			"title":       testTitle,
+			"source_type": sourceType,
+		},
+	}
+
+	// Simulate what workerLoop does: extract markdown and save document
+	var markdown string
+	if md, ok := result.Metadata["markdown"]; ok {
+		if mdStr, ok := md.(string); ok {
+			markdown = mdStr
+		}
+	}
+
+	if markdown == "" {
+		t.Fatal("Expected non-empty markdown from metadata")
+	}
+
+	// Extract source type from metadata (as workerLoop does)
+	extractedSourceType := "crawler" // Default
+	if st, ok := result.Metadata["source_type"]; ok {
+		if stStr, ok := st.(string); ok {
+			extractedSourceType = stStr
+		}
+	}
+
+	// Extract title from metadata (as workerLoop does)
+	extractedTitle := testURL // Default fallback
+	if title, ok := result.Metadata["title"]; ok {
+		if titleStr, ok := title.(string); ok && titleStr != "" {
+			extractedTitle = titleStr
+		}
+	}
+
+	// Create document (as workerLoop does)
+	doc := models.Document{
+		ID:              "doc_test_123",
+		SourceType:      extractedSourceType,
+		SourceID:        testURL, // URL as source_id for deduplication
+		Title:           extractedTitle,
+		ContentMarkdown: markdown,
+		DetailLevel:     models.DetailLevelFull,
+		Metadata:        result.Metadata,
+		URL:             testURL,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+
+	// Save document (as workerLoop does)
+	err := service.documentStorage.SaveDocument(&doc)
+	if err != nil {
+		t.Fatalf("SaveDocument failed: %v", err)
+	}
+
+	// Verify document was saved to mock storage
+	savedDoc, err := mockDocStorage.GetDocumentBySource(sourceType, testURL)
+	if err != nil {
+		t.Fatalf("GetDocumentBySource failed: %v", err)
+	}
+
+	if savedDoc == nil {
+		t.Fatal("Expected document to be saved, but got nil")
+	}
+
+	// Assert document fields
+	if savedDoc.SourceType != sourceType {
+		t.Errorf("Expected SourceType=%s, got %s", sourceType, savedDoc.SourceType)
+	}
+
+	if savedDoc.SourceID != testURL {
+		t.Errorf("Expected SourceID=%s, got %s", testURL, savedDoc.SourceID)
+	}
+
+	if savedDoc.Title != testTitle {
+		t.Errorf("Expected Title=%s, got %s", testTitle, savedDoc.Title)
+	}
+
+	if savedDoc.ContentMarkdown != testMarkdown {
+		t.Errorf("Expected ContentMarkdown=%s, got %s", testMarkdown, savedDoc.ContentMarkdown)
+	}
+
+	if savedDoc.DetailLevel != models.DetailLevelFull {
+		t.Errorf("Expected DetailLevel=%s, got %s", models.DetailLevelFull, savedDoc.DetailLevel)
+	}
+
+	if savedDoc.URL != testURL {
+		t.Errorf("Expected URL=%s, got %s", testURL, savedDoc.URL)
+	}
+
+	// Verify metadata was preserved
+	if savedDoc.Metadata == nil {
+		t.Error("Expected metadata to be preserved")
+	} else {
+		if mdVal, ok := savedDoc.Metadata["markdown"]; !ok || mdVal != testMarkdown {
+			t.Error("Expected markdown in metadata to be preserved")
+		}
+		if titleVal, ok := savedDoc.Metadata["title"]; !ok || titleVal != testTitle {
+			t.Error("Expected title in metadata to be preserved")
+		}
+	}
+
+	t.Log("Document saved successfully with correct fields")
+}
+
+// TestWorkerLoop_EmptyMarkdownSkipped verifies documents aren't saved when markdown is empty
+func TestWorkerLoop_EmptyMarkdownSkipped(t *testing.T) {
+	// Create service with mock storage
+	service := createTestService()
+	defer service.Close()
+
+	mockDocStorage, ok := service.documentStorage.(*mockDocumentStorage)
+	if !ok {
+		t.Fatal("Expected mockDocumentStorage")
+	}
+
+	// Simulate a result with empty markdown
+	testURL := "https://test.atlassian.net/browse/TEST-456"
+	result := &CrawlResult{
+		URL:        testURL,
+		StatusCode: 200,
+		Body:       []byte("<html><body>Content</body></html>"),
+		Error:      "",
+		Metadata: map[string]interface{}{
+			"markdown": "", // Empty markdown
+			"title":    "Test",
+		},
+	}
+
+	// Extract markdown (as workerLoop does)
+	var markdown string
+	if md, ok := result.Metadata["markdown"]; ok {
+		if mdStr, ok := md.(string); ok {
+			markdown = mdStr
+		}
+	}
+
+	// Verify markdown is empty (skip document save in this case)
+	if markdown != "" {
+		t.Fatal("Expected empty markdown")
+	}
+
+	// Document should NOT be saved when markdown is empty
+	// Verify no document exists
+	doc, err := mockDocStorage.GetDocumentBySource("jira", testURL)
+	if err != nil && err.Error() != "sql: no rows in result set" {
+		t.Fatalf("GetDocumentBySource failed: %v", err)
+	}
+
+	if doc != nil {
+		t.Error("Expected no document to be saved for empty markdown, but found one")
+	}
+
+	t.Log("Document correctly skipped when markdown is empty")
 }

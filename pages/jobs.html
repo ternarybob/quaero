@@ -60,7 +60,7 @@
                                     <th>Name</th>
                                     <th>Service Type</th>
                                     <th>Last Updated</th>
-                                    <th>Actions</th>
+                                    <th class="text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -73,12 +73,10 @@
                                         </td>
                                         <td x-text="auth.name || '-'"></td>
                                         <td>
-                                            <span class="label label-primary" x-text="auth.service_type.toUpperCase()"></span>
+                                            <span class="label label-secondary" x-text="auth.service_type.toUpperCase()"></span>
                                         </td>
-                                        <td>
-                                            <small x-text="formatDate(auth.updated_at)"></small>
-                                        </td>
-                                        <td>
+                                        <td x-text="formatDate(auth.updated_at)"> </td>
+                                        <td class="text-right">
                                             <button class="btn btn-sm btn-error" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
                                                 <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
                                             </button>
@@ -156,11 +154,11 @@
                                             <span class="label">None</span>
                                         </template>
                                     </td>
-                                    <td class="text-center">
+                                    <td>
                                         <span class="label" :class="source.enabled ? 'label-success' : 'label-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
                                     </td>
                                     <td x-text="formatDate(source.created_at)"></td>
-                                    <td class="text-center">
+                                    <td>
                                         <button class="btn btn-sm" @click="editSource(source, $event)" title="Edit Source" style="margin-right: 0.25rem;">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -318,10 +316,10 @@
                                             <span class="text-secondary">Manual</span>
                                         </template>
                                     </td>
-                                    <td class="text-center">
+                                    <td>
                                         <span class="label" :class="jobDef.enabled ? 'label-success' : 'label-warning'" x-text="jobDef.enabled ? 'Enabled' : 'Disabled'"></span>
                                     </td>
-                                    <td class="text-center">
+                                    <td>
                                         <button class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)" :disabled="!jobDef.enabled" title="Execute Job" style="margin-right: 0.25rem;">
                                             <i class="fas fa-play"></i>
                                         </button>

@@ -27,13 +27,14 @@ import (
 // Per-job rate limits are applied via Colly's built-in Limit() mechanism in HTMLScraper to avoid double rate limiting
 // and leverage Colly's efficient per-domain parallelism control.
 type Service struct {
-	authService   interfaces.AuthService
-	sourceService *sources.Service
-	authStorage   interfaces.AuthStorage
-	eventService  interfaces.EventService
-	jobStorage    interfaces.JobStorage
-	logger        arbor.ILogger
-	config        *common.Config
+	authService     interfaces.AuthService
+	sourceService   *sources.Service
+	authStorage     interfaces.AuthStorage
+	eventService    interfaces.EventService
+	jobStorage      interfaces.JobStorage
+	documentStorage interfaces.DocumentStorage // Used for immediate document persistence during crawling
+	logger          arbor.ILogger
+	config          *common.Config
 
 	queue       *URLQueue
 	retryPolicy *RetryPolicy
@@ -50,17 +51,18 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, logger arbor.ILogger, config *common.Config) *Service {
+func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
-		authService:   authService,
-		sourceService: sourceService,
-		authStorage:   authStorage,
-		eventService:  eventService,
-		jobStorage:    jobStorage,
-		logger:        logger,
-		config:        config,
+		authService:     authService,
+		sourceService:   sourceService,
+		authStorage:     authStorage,
+		eventService:    eventService,
+		jobStorage:      jobStorage,
+		documentStorage: documentStorage,
+		logger:          logger,
+		config:          config,
 		queue:         NewURLQueue(),
 		retryPolicy:   NewRetryPolicy(),
 		workerPool:    workers.NewPool(config.Crawler.MaxConcurrency, logger),
@@ -866,12 +868,137 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				Msg("Result stored")
 		}
 
+		// Save document immediately if crawl was successful and markdown is available
+		if result.Error == "" {
+			// Extract markdown from result metadata
+			var markdown string
+			if md, ok := result.Metadata["markdown"]; ok {
+				if mdStr, ok := md.(string); ok {
+					markdown = mdStr
+				}
+			}
+
+			// Only save document if markdown is non-empty
+			if markdown != "" {
+				// Extract source type from item metadata with fallback logic
+				sourceType := "crawler" // Default fallback
+				if st, ok := item.Metadata["source_type"]; ok {
+					if stStr, ok := st.(string); ok {
+						sourceType = stStr
+					}
+				} else {
+					// Fallback: Extract from URL domain
+					if strings.Contains(item.URL, "atlassian.net") {
+						if strings.Contains(item.URL, "/wiki/") {
+							sourceType = "confluence"
+						} else if strings.Contains(item.URL, "/browse/") || strings.Contains(item.URL, "/jira/") {
+							sourceType = "jira"
+						}
+					}
+				}
+
+				// Extract title with priority order: metadata["title"] > URL path > URL
+				title := item.URL // Default fallback
+				if t, ok := result.Metadata["title"]; ok {
+					if tStr, ok := t.(string); ok && tStr != "" {
+						title = tStr
+					}
+				} else {
+					// Extract from URL path (last segment)
+					if u, err := url.Parse(item.URL); err == nil && u.Path != "" {
+						pathSegments := strings.Split(strings.Trim(u.Path, "/"), "/")
+						if len(pathSegments) > 0 {
+							lastSegment := pathSegments[len(pathSegments)-1]
+							if lastSegment != "" {
+								title = lastSegment
+							}
+						}
+					}
+				}
+
+				// Create document with generated UUID
+				doc := models.Document{
+					ID:              "doc_" + uuid.New().String(),
+					SourceType:      sourceType,
+					SourceID:        item.URL, // Use URL as source_id for deduplication
+					Title:           title,
+					ContentMarkdown: markdown,
+					DetailLevel:     models.DetailLevelFull,
+					Metadata:        result.Metadata, // Preserve all scraped metadata
+					URL:             item.URL,
+					CreatedAt:       time.Now(),
+					UpdatedAt:       time.Now(),
+				}
+
+				// Save document to database
+				if err := s.documentStorage.SaveDocument(&doc); err != nil {
+					// Log error but don't fail the crawl job
+					s.logger.Error().
+						Err(err).
+						Str("job_id", jobID).
+						Str("document_id", doc.ID).
+						Str("title", doc.Title).
+						Str("url", doc.URL).
+						Str("source_type", doc.SourceType).
+						Msg("Failed to save document immediately after crawling")
+
+					// Persist error to database
+					s.logToDatabase(jobID, "error", fmt.Sprintf("Document save failed: %s (url=%s)", err.Error(), doc.URL))
+				} else {
+					// Increment documents saved counter (under lock)
+					s.jobsMu.Lock()
+					if job, ok := s.activeJobs[jobID]; ok {
+						job.DocumentsSaved++
+						docsSaved := job.DocumentsSaved
+						s.jobsMu.Unlock()
+
+						// Log success at INFO level
+						s.logger.Info().
+							Str("job_id", jobID).
+							Str("document_id", doc.ID).
+							Str("title", doc.Title).
+							Str("url", doc.URL).
+							Int("markdown_length", len(doc.ContentMarkdown)).
+							Str("source_type", doc.SourceType).
+							Int("documents_saved", docsSaved).
+							Msg("Document saved immediately after crawling")
+
+						// Persist success to database (sampled: every 10th successful document save)
+						if docsSaved%10 == 0 {
+							s.logToDatabase(jobID, "info", fmt.Sprintf("Document saved: %s (url=%s, markdown_length=%d, total_saved=%d)", doc.Title, doc.URL, len(doc.ContentMarkdown), docsSaved))
+						}
+					} else {
+						s.jobsMu.Unlock()
+					}
+				}
+			}
+		}
+
 		// Update progress
 		if result.Error == "" {
 			s.updateProgress(jobID, true, false)
 
 			// Discover links if enabled and within depth limit (0 = unlimited depth)
 			if config.FollowLinks && (config.MaxDepth == 0 || item.Depth < config.MaxDepth) {
+				// Log link discovery decision at INFO level
+				s.logger.Info().
+					Str("job_id", jobID).
+					Str("url", item.URL).
+					Bool("follow_links", config.FollowLinks).
+					Int("depth", item.Depth).
+					Int("max_depth", config.MaxDepth).
+					Bool("will_discover_links", true).
+					Msg("Link discovery enabled - will extract and follow links")
+
+				// Persist to database (sampled: every 10th URL to avoid database bloat)
+				s.jobsMu.RLock()
+				completedCount := job.Progress.CompletedURLs
+				s.jobsMu.RUnlock()
+
+				if completedCount%10 == 0 {
+					s.logToDatabase(jobID, "info", fmt.Sprintf("Link discovery: follow_links=true, depth=%d/%d, url=%s", item.Depth, config.MaxDepth, item.URL))
+				}
+
 				links := s.discoverLinks(result, item, config)
 				s.enqueueLinks(jobID, links, item)
 			} else {
@@ -1400,7 +1527,12 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 	}
 
 	// Apply include/exclude patterns (Comment 9: collect filtered samples)
-	links, excludedSamples, notIncludedSamples := s.filterLinks(filteredLinks, config)
+	// Extract jobID from parent metadata for database persistence
+	jobID := ""
+	if jid, ok := parent.Metadata["job_id"].(string); ok {
+		jobID = jid
+	}
+	links, excludedSamples, notIncludedSamples := s.filterLinks(jobID, filteredLinks, config)
 
 	// Log detailed filtering breakdown (Info level for visibility)
 	s.logger.Info().
@@ -1453,7 +1585,7 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 
 // filterLinks applies include/exclude patterns
 // Returns: (filteredLinks, excludedSamples, notIncludedSamples)
-func (s *Service) filterLinks(links []string, config CrawlConfig) ([]string, []string, []string) {
+func (s *Service) filterLinks(jobID string, links []string, config CrawlConfig) ([]string, []string, []string) {
 	// Precompile exclude patterns
 	excludeRegexes := make([]*regexp.Regexp, 0, len(config.ExcludePatterns))
 	for _, pattern := range config.ExcludePatterns {
@@ -1516,11 +1648,18 @@ func (s *Service) filterLinks(links []string, config CrawlConfig) ([]string, []s
 
 	// Summary log for filtered links
 	if len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
-		s.logger.Debug().
+		s.logger.Info().
 			Int("excluded_count", len(excludedLinks)).
 			Int("not_included_count", len(notIncludedLinks)).
 			Int("passed_count", len(filtered)).
 			Msg("Pattern filtering summary")
+
+		// Persist pattern filtering summary to database
+		if jobID != "" {
+			filterMsg := fmt.Sprintf("Pattern filtering: excluded=%d, not_included=%d, passed=%d",
+				len(excludedLinks), len(notIncludedLinks), len(filtered))
+			s.logToDatabase(jobID, "info", filterMsg)
+		}
 	}
 
 	// Collect samples for database logging (Comment 9: limit to 2 each to avoid log spam)
@@ -1852,12 +1991,32 @@ func (s *Service) enqueueLinks(jobID string, links []string, parent *URLQueueIte
 
 	// Summary log for enqueued links
 	if enqueuedCount > 0 {
-		s.logger.Debug().
+		// Collect sample URLs (first 3)
+		sampleURLs := []string{}
+		if len(links) > 0 {
+			sampleCount := 3
+			if len(links) < 3 {
+				sampleCount = len(links)
+			}
+			sampleURLs = links[:sampleCount]
+		}
+
+		s.logger.Info().
 			Str("job_id", jobID).
 			Str("parent_url", parent.URL).
 			Int("enqueued_count", enqueuedCount).
 			Int("total_links", len(links)).
+			Strs("sample_urls", sampleURLs).
 			Msg("Link enqueueing complete")
+
+		// Persist to database
+		if jobID != "" {
+			enqueueMsg := fmt.Sprintf("Enqueued %d links from %s (depth=%d)", enqueuedCount, parent.URL, parent.Depth+1)
+			if len(sampleURLs) > 0 {
+				enqueueMsg += fmt.Sprintf(" | Samples: %v", sampleURLs)
+			}
+			s.logToDatabase(jobID, "info", enqueueMsg)
+		}
 	}
 }
 

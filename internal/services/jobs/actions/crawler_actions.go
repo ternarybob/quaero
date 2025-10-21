@@ -26,7 +26,7 @@ type CrawlerActionDeps struct {
 var startCrawlJobFunc = jobs.StartCrawlJob
 
 // crawlAction performs actual crawling of sources and publishes collection events.
-func crawlAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
+func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	// Note: seed_url_overrides removed - crawling based on source configuration
 	refreshSource := extractBool(step.Config, "refresh_source", true)
@@ -43,7 +43,7 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 
 	// Check if follow_links is explicitly provided in config
 	_, followLinksProvided := step.Config["follow_links"]
-	followLinks := extractBool(step.Config, "follow_links", false)
+	followLinks := extractBool(step.Config, "follow_links", true)
 
 	// Validate sources
 	if len(sources) == 0 {
@@ -60,8 +60,10 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 
 	// Track started jobs
 	type jobInfo struct {
-		jobID    string
-		sourceID string
+		jobID      string
+		sourceID   string
+		sourceName string
+		sourceType string
 	}
 	var startedJobs []jobInfo
 	var errors []error
@@ -70,19 +72,29 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 	for _, source := range sources {
 		startTime := time.Now()
 
-		// Build CrawlConfig for this source, using source defaults for follow_links if not explicitly set
+		// Build CrawlConfig for this source
 		jobCrawlConfig := crawler.CrawlConfig{
 			IncludePatterns: includePatterns,
 			ExcludePatterns: excludePatterns,
 			MaxDepth:        maxDepth,
 			MaxPages:        maxPages,
 			Concurrency:     concurrency,
-			FollowLinks:     followLinks, // Will be overridden by source default if not provided
+			FollowLinks:     followLinks,
 		}
 
-		// If follow_links was not provided in job config, use source default
-		if !followLinksProvided {
-			jobCrawlConfig.FollowLinks = source.CrawlConfig.FollowLinks
+		// Log the decision path for follow_links configuration
+		if followLinksProvided {
+			deps.Logger.Info().
+				Str("source_id", source.ID).
+				Str("source_name", source.Name).
+				Bool("follow_links", jobCrawlConfig.FollowLinks).
+				Msg("Using follow_links from job config")
+		} else {
+			deps.Logger.Info().
+				Str("source_id", source.ID).
+				Str("source_name", source.Name).
+				Bool("follow_links", jobCrawlConfig.FollowLinks).
+				Msg("Using follow_links from source default")
 		}
 
 		deps.Logger.Info().
@@ -125,7 +137,12 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 			continue
 		}
 
-		startedJobs = append(startedJobs, jobInfo{jobID: jobID, sourceID: source.ID})
+		startedJobs = append(startedJobs, jobInfo{
+			jobID:      jobID,
+			sourceID:   source.ID,
+			sourceName: source.Name,
+			sourceType: string(source.Type),
+		})
 
 		deps.Logger.Info().
 			Str("action", "crawl").
@@ -135,47 +152,30 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 			Msg("Crawl job started successfully")
 	}
 
-	// Wait for completion if enabled
-	if waitForCompletion {
-		for _, job := range startedJobs {
-			deps.Logger.Info().
-				Str("action", "crawl").
-				Str("job_id", job.jobID).
-				Str("source_id", job.sourceID).
-				Msg("Waiting for crawl job completion")
-
-			results, err := deps.CrawlerService.WaitForJob(ctx, job.jobID)
-			if err != nil {
-				errMsg := fmt.Errorf("failed to wait for crawl job %s (source %s): %w", job.jobID, job.sourceID, err)
-				deps.Logger.Error().
-					Err(err).
-					Str("job_id", job.jobID).
-					Str("source_id", job.sourceID).
-					Msg("Failed to wait for crawl job")
-
-				errors = append(errors, errMsg)
-
-				if step.OnError == models.ErrorStrategyFail {
-					return errMsg
-				}
-				continue
-			}
-
-			crawlResults, ok := results.([]*crawler.CrawlResult)
-			if !ok {
-				deps.Logger.Warn().
-					Str("job_id", job.jobID).
-					Msg("Unexpected result type from WaitForJob")
-			} else {
-				deps.Logger.Info().
-					Str("action", "crawl").
-					Str("job_id", job.jobID).
-					Str("source_id", job.sourceID).
-					Int("results_count", len(crawlResults)).
-					Msg("Crawl job completed successfully")
-			}
-		}
+	// Store job IDs in step config for executor polling
+	jobIDs := make([]string, len(startedJobs))
+	for i, job := range startedJobs {
+		jobIDs[i] = job.jobID
 	}
+
+	// Guard against nil map
+	if step.Config == nil {
+		step.Config = make(map[string]interface{})
+	}
+	step.Config["crawl_job_ids"] = jobIDs
+
+	// Log job IDs stored for async polling
+	// Compute limit for logging (show first 3 job IDs)
+	limit := 3
+	if len(jobIDs) < limit {
+		limit = len(jobIDs)
+	}
+
+	deps.Logger.Debug().
+		Str("action", "crawl").
+		Int("job_count", len(jobIDs)).
+		Strs("job_ids", jobIDs[:limit]).
+		Msg("Stored crawl job IDs in step config for async polling")
 
 	// Note: Event publishing removed from crawlAction to avoid duplication with transformAction.
 	// The dedicated transformAction should be used to trigger document transformation after crawling.
@@ -188,7 +188,9 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 	deps.Logger.Info().
 		Str("action", "crawl").
 		Int("source_count", len(sources)).
-		Msg("Crawl action completed successfully")
+		Int("jobs_started", len(startedJobs)).
+		Bool("wait_for_completion", waitForCompletion).
+		Msg("Crawl action started successfully - jobs running asynchronously")
 
 	return nil
 }
@@ -196,7 +198,7 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 // transformAction triggers document transformation via collection events.
 // This action is fire-and-forget: it publishes events but does not wait for processing completion.
 // For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
-func transformAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
+func transformAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	jobID := extractString(step.Config, "job_id", "")
 	forceSync := extractBool(step.Config, "force_sync", false)
@@ -276,7 +278,7 @@ func transformAction(ctx context.Context, step models.JobStep, sources []*models
 // embedAction triggers embedding generation via embedding events.
 // This action is fire-and-forget: it publishes events but does not wait for processing completion.
 // For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
-func embedAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
+func embedAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	forceEmbed := extractBool(step.Config, "force_embed", false)
 	batchSize := extractInt(step.Config, "batch_size", 50)
@@ -361,15 +363,15 @@ func RegisterCrawlerActions(registry *jobs.JobTypeRegistry, deps *CrawlerActionD
 	}
 
 	// Create closure functions that capture dependencies
-	crawlActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	crawlActionHandler := func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		return crawlAction(ctx, step, sources, deps)
 	}
 
-	transformActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	transformActionHandler := func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		return transformAction(ctx, step, sources, deps)
 	}
 
-	embedActionHandler := func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	embedActionHandler := func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		return embedAction(ctx, step, sources, deps)
 	}
 

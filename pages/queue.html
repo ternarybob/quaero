@@ -28,7 +28,7 @@
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2>Job Statistics</h2>
+                            <h3>Job Statistics</h3>
                         </section>
                         <section class="navbar-section">
                             <button class="btn btn-sm" onclick="loadStats()">
@@ -74,7 +74,7 @@
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2> Job Queue </h2>
+                            <h3> Job Queue </h3>
                         </section>
                         <section class="navbar-section">
                             <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none;">
@@ -134,14 +134,12 @@
 
         <!-- Job Detail -->
         <section>
-            <div class="accordion">
-                <input type="checkbox" id="accordion-job-detail" name="accordion-checkbox" hidden checked>
-                <label class="accordion-header" for="accordion-job-detail">
-                    <i class="icon icon-arrow-right mr-1"></i>
-                    Job Detail
+            <div class="card">
+                <div class="card-header">
                     <span id="selected-job-id" class="label label-primary"></span>
-                </label>
-                <div class="accordion-body">
+                </div>
+                <div class="card-body">
+
                     <!-- Tabs -->
                     <div x-data="{ activeTab: 'json' }">
                         <ul class="tab tab-block">
@@ -169,8 +167,11 @@
                             </div>
                         </div>
                     </div>
+
                 </div>
+
             </div>
+
         </section>
 
         <!-- Service Logs -->

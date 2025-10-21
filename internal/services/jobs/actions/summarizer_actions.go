@@ -90,7 +90,7 @@ func buildListOptions(cfg batchConfig) *interfaces.ListOptions {
 }
 
 // scanAction performs scanning of documents to identify those needing summarization.
-func scanAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
+func scanAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
 	cfg := extractBatchConfig(step.Config)
 	skipWithSummary := extractBool(step.Config, "skip_with_summary", true)
 	skipEmptyContent := extractBool(step.Config, "skip_empty_content", true)
@@ -183,7 +183,7 @@ func scanAction(ctx context.Context, step models.JobStep, sources []*models.Sour
 }
 
 // summarizeAction performs summarization on documents using LLM.
-func summarizeAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
+func summarizeAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
 	cfg := extractBatchConfig(step.Config)
 	skipWithSummary := extractBool(step.Config, "skip_with_summary", true)
 	contentLimit := extractInt(step.Config, "content_limit", 2000)
@@ -325,7 +325,7 @@ func summarizeAction(ctx context.Context, step models.JobStep, sources []*models
 }
 
 // extractKeywordsAction performs keyword extraction on documents.
-func extractKeywordsAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
+func extractKeywordsAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *SummarizerActionDeps) error {
 	cfg := extractBatchConfig(step.Config)
 	topN := extractInt(step.Config, "top_n", 10)
 	minWordLength := extractInt(step.Config, "min_word_length", 3)
@@ -593,14 +593,14 @@ func RegisterSummarizerActions(registry *jobs.JobTypeRegistry, deps *SummarizerA
 	}
 
 	// Create closure functions that capture dependencies
-	actions := map[string]func(context.Context, models.JobStep, []*models.SourceConfig) error{
-		"scan": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+	actions := map[string]func(context.Context, *models.JobStep, []*models.SourceConfig) error{
+		"scan": func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 			return scanAction(ctx, step, sources, deps)
 		},
-		"summarize": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+		"summarize": func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 			return summarizeAction(ctx, step, sources, deps)
 		},
-		"extract_keywords": func(ctx context.Context, step models.JobStep, sources []*models.SourceConfig) error {
+		"extract_keywords": func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 			return extractKeywordsAction(ctx, step, sources, deps)
 		},
 	}

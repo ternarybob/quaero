@@ -149,7 +149,30 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJo
 			continue
 		}
 
-		// Save document
+		// Check if document already exists by URL (to avoid duplicates from crawler immediate save)
+		existingDoc, err := t.documentStorage.GetDocumentBySource("jira", result.URL)
+		if err != nil && err.Error() != "sql: no rows in result set" {
+			t.logger.Warn().
+				Err(err).
+				Str("url", result.URL).
+				Msg("Failed to check for existing document by URL")
+		}
+
+		// If document exists, update it instead of creating new
+		if existingDoc != nil {
+			// Preserve existing ID, update content and metadata
+			doc.ID = existingDoc.ID
+			doc.DetailLevel = models.DetailLevelFull
+			doc.CreatedAt = existingDoc.CreatedAt // Preserve original creation time
+
+			t.logger.Debug().
+				Str("doc_id", doc.ID).
+				Str("issue_key", doc.SourceID).
+				Str("url", result.URL).
+				Msg("Updating existing document created by crawler")
+		}
+
+		// Save document (upsert logic in SaveDocument handles conflict resolution)
 		if err := t.documentStorage.SaveDocument(doc); err != nil {
 			saveFailures++
 			t.logger.Error().
