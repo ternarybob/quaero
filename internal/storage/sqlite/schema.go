@@ -132,7 +132,6 @@ CREATE TABLE IF NOT EXISTS sources (
 	enabled INTEGER DEFAULT 1,
 	auth_id TEXT,
 	crawl_config TEXT NOT NULL,
-	filters TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
@@ -263,6 +262,11 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 9: Add seed_urls column to sources table
 	if err := s.migrateAddSourcesSeedURLsColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 10: Remove filters column from sources table
+	if err := s.migrateRemoveSourcesFiltersColumn(); err != nil {
 		return err
 	}
 
@@ -840,5 +844,103 @@ func (s *SQLiteDB) migrateAddSourcesSeedURLsColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: seed_urls column added successfully")
+	return nil
+}
+
+// migrateRemoveSourcesFiltersColumn removes the filters column from sources table
+func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
+	// Check if filters column exists
+	columnsQuery := `PRAGMA table_info(sources)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasFilters := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "filters" {
+			hasFilters = true
+			break
+		}
+	}
+
+	// If column doesn't exist, migration already completed
+	if !hasFilters {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Removing filters column from sources table")
+
+	// Step 1: Create new sources table without filters column
+	s.logger.Info().Msg("Step 1: Creating new sources table without filters column")
+	_, err = s.db.Exec(`
+		CREATE TABLE sources_new (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL,
+			base_url TEXT NOT NULL,
+			seed_urls TEXT,
+			enabled INTEGER DEFAULT 1,
+			auth_id TEXT,
+			crawl_config TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL,
+			FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Copy data from old table to new table (excluding filters column)
+	s.logger.Info().Msg("Step 2: Copying data to new table")
+	_, err = s.db.Exec(`
+		INSERT INTO sources_new
+		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		FROM sources
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Drop old table
+	s.logger.Info().Msg("Step 3: Dropping old sources table")
+	_, err = s.db.Exec(`DROP TABLE sources`)
+	if err != nil {
+		return err
+	}
+
+	// Step 4: Rename new table to sources
+	s.logger.Info().Msg("Step 4: Renaming sources_new to sources")
+	_, err = s.db.Exec(`ALTER TABLE sources_new RENAME TO sources`)
+	if err != nil {
+		return err
+	}
+
+	// Step 5: Recreate indexes
+	s.logger.Info().Msg("Step 5: Recreating indexes")
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id)`)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: filters column removed successfully")
 	return nil
 }
