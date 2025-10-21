@@ -53,6 +53,31 @@ type JobStep struct {
 	Condition string                 `json:"condition,omitempty"` // Optional conditional execution expression (for future use)
 }
 
+// Config keys for "crawl" action:
+//   - start_urls ([]string): Initial URLs to begin crawling. Required if source doesn't provide seed URLs.
+//   - include_patterns ([]string): Regex patterns for URLs to include. If empty, all discovered links are included (subject to exclude patterns).
+//   - exclude_patterns ([]string): Regex patterns for URLs to exclude. Applied before include patterns.
+//   - max_depth (int): Maximum crawl depth. Overrides source default if provided.
+//   - max_pages (int): Maximum pages to crawl. Overrides source default if provided.
+//   - concurrency (int): Number of concurrent workers. Overrides source default if provided.
+//   - follow_links (bool): Whether to follow discovered links. Overrides source default if provided.
+//   - refresh_source (bool): Whether to refresh source config and auth before crawling. Default: true.
+//   - wait_for_completion (bool): Whether to block until crawl completes. Default: true.
+//
+// Example:
+//   {
+//     "name": "crawl",
+//     "action": "crawl",
+//     "config": {
+//       "start_urls": ["https://company.atlassian.net/browse"],
+//       "include_patterns": ["/browse/[A-Z]+-[0-9]+", "/projects/"],
+//       "exclude_patterns": ["/admin", "/logout"],
+//       "max_depth": 3,
+//       "follow_links": true
+//     },
+//     "on_error": "continue"
+//   }
+
 // JobDefinition represents a configurable job definition
 type JobDefinition struct {
 	ID          string                 `json:"id"`          // Unique identifier for the job definition
@@ -62,6 +87,7 @@ type JobDefinition struct {
 	Sources     []string               `json:"sources"`     // Array of source IDs this job operates on
 	Steps       []JobStep              `json:"steps"`       // Ordered array of execution steps
 	Schedule    string                 `json:"schedule"`    // Cron expression for scheduling
+	Timeout     string                 `json:"timeout"`     // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
 	Enabled     bool                   `json:"enabled"`     // Whether the job is enabled
 	AutoStart   bool                   `json:"auto_start"`  // Whether to auto-start on scheduler initialization
 	Config      map[string]interface{} `json:"config"`      // Job-specific configuration
@@ -105,6 +131,13 @@ func (j *JobDefinition) Validate() error {
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 		if _, err := parser.Parse(j.Schedule); err != nil {
 			return fmt.Errorf("invalid cron schedule '%s': %w", j.Schedule, err)
+		}
+	}
+
+	// Validate timeout duration format (only if provided)
+	if j.Timeout != "" {
+		if _, err := time.ParseDuration(j.Timeout); err != nil {
+			return fmt.Errorf("invalid timeout duration '%s': %w", j.Timeout, err)
 		}
 	}
 

@@ -75,6 +75,7 @@
                                     <th>TYPE</th>
                                     <th>BASE URL</th>
                                     <th>AUTHENTICATION</th>
+                                    <th>FILTERS</th>
                                     <th class="text-center">STATUS</th>
                                     <th>CREATED</th>
                                     <th class="text-center">ACTIONS</th>
@@ -83,7 +84,7 @@
                             <tbody>
                                 <template x-if="sources.length === 0">
                                     <tr>
-                                        <td colspan="7" class="text-center">
+                                        <td colspan="8" class="text-center">
                                             No sources configured. Click "Add Source" to get started.
                                         </td>
                                     </tr>
@@ -105,6 +106,9 @@
                                             <template x-if="!source.auth_id">
                                                 <span class="label">None</span>
                                             </template>
+                                        </td>
+                                        <td>
+                                            <span x-text="formatFilterDisplay(source.filters)" style="font-size: 0.875rem; color: var(--text-secondary);"></span>
                                         </td>
                                         <td class="text-center">
                                             <span class="label" :class="source.enabled ? 'label-success' : 'label-warning'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
@@ -189,19 +193,25 @@
                                     <label class="form-label" style="font-size: 0.875rem;">Concurrency</label>
                                     <input class="form-input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
                                 </div>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label class="form-label" style="font-size: 0.875rem;">Detail Level</label>
-                                    <select class="form-select" x-model="currentSource.crawl_config.detail_level">
-                                        <option value="minimal">Minimal</option>
-                                        <option value="basic">Basic</option>
-                                        <option value="full">Full</option>
-                                    </select>
-                                </div>
                                 <div>
                                     <label class="form-checkbox">
                                         <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
                                         <i class="form-icon"></i> Follow Links
                                     </label>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Link Filtering</label>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Include Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.include_patterns" placeholder="browse,projects,issues">
+                                    <p class="form-input-hint">Comma-separated patterns. Only links matching these patterns will be followed.</p>
+                                </div>
+                                <div>
+                                    <label class="form-label" style="font-size: 0.875rem;">Exclude Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.exclude_patterns" placeholder="admin,logout,settings">
+                                    <p class="form-input-hint">Comma-separated patterns. Links matching these patterns will be skipped.</p>
                                 </div>
                             </div>
                         </div>

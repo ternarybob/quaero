@@ -34,6 +34,15 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 		return fmt.Errorf("failed to marshal crawl config: %w", err)
 	}
 
+	// Serialize Filters as JSON
+	var filtersJSON []byte
+	if source.Filters != nil {
+		filtersJSON, err = json.Marshal(source.Filters)
+		if err != nil {
+			return fmt.Errorf("failed to marshal filters: %w", err)
+		}
+	}
+
 	// Convert bool to int for SQLite
 	enabled := 0
 	if source.Enabled {
@@ -41,8 +50,8 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 	}
 
 	query := `
-		INSERT INTO sources (id, name, type, base_url, enabled, auth_id, crawl_config, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO sources (id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -50,6 +59,7 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 			enabled = excluded.enabled,
 			auth_id = excluded.auth_id,
 			crawl_config = excluded.crawl_config,
+			filters = excluded.filters,
 			updated_at = excluded.updated_at
 	`
 
@@ -57,6 +67,12 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 	var authID sql.NullString
 	if source.AuthID != "" {
 		authID = sql.NullString{String: source.AuthID, Valid: true}
+	}
+
+	// Handle nullable filters
+	var filtersStr sql.NullString
+	if len(filtersJSON) > 0 {
+		filtersStr = sql.NullString{String: string(filtersJSON), Valid: true}
 	}
 
 	_, err = s.db.DB().Exec(
@@ -68,6 +84,7 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 		enabled,
 		authID,
 		string(crawlConfigJSON),
+		filtersStr,
 		source.CreatedAt.Unix(),
 		source.UpdatedAt.Unix(),
 	)
@@ -88,7 +105,7 @@ func (s *SourceStorage) SaveSource(ctx context.Context, source *models.SourceCon
 // GetSource retrieves a source by ID
 func (s *SourceStorage) GetSource(ctx context.Context, id string) (*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE id = ?
 	`
@@ -108,7 +125,7 @@ func (s *SourceStorage) GetSource(ctx context.Context, id string) (*models.Sourc
 // ListSources retrieves all sources ordered by created_at DESC
 func (s *SourceStorage) ListSources(ctx context.Context) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		ORDER BY created_at DESC
 	`
@@ -147,7 +164,7 @@ func (s *SourceStorage) DeleteSource(ctx context.Context, id string) error {
 // GetSourcesByType retrieves sources filtered by type
 func (s *SourceStorage) GetSourcesByType(ctx context.Context, sourceType string) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE type = ?
 		ORDER BY created_at DESC
@@ -165,7 +182,7 @@ func (s *SourceStorage) GetSourcesByType(ctx context.Context, sourceType string)
 // GetEnabledSources retrieves only enabled sources
 func (s *SourceStorage) GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error) {
 	query := `
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at
 		FROM sources
 		WHERE enabled = 1
 		ORDER BY created_at DESC
@@ -185,6 +202,7 @@ func (s *SourceStorage) scanSource(row *sql.Row) (*models.SourceConfig, error) {
 	var source models.SourceConfig
 	var enabled int
 	var crawlConfigJSON string
+	var filtersJSON sql.NullString
 	var createdAt, updatedAt int64
 	var authID sql.NullString
 
@@ -196,6 +214,7 @@ func (s *SourceStorage) scanSource(row *sql.Row) (*models.SourceConfig, error) {
 		&enabled,
 		&authID,
 		&crawlConfigJSON,
+		&filtersJSON,
 		&createdAt,
 		&updatedAt,
 	)
@@ -216,6 +235,13 @@ func (s *SourceStorage) scanSource(row *sql.Row) (*models.SourceConfig, error) {
 		return nil, fmt.Errorf("failed to unmarshal crawl config: %w", err)
 	}
 
+	// Deserialize filters if present
+	if filtersJSON.Valid && filtersJSON.String != "" {
+		if err := json.Unmarshal([]byte(filtersJSON.String), &source.Filters); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal filters: %w", err)
+		}
+	}
+
 	// Convert timestamps
 	source.CreatedAt = timeFromUnix(createdAt)
 	source.UpdatedAt = timeFromUnix(updatedAt)
@@ -231,6 +257,7 @@ func (s *SourceStorage) scanSources(rows *sql.Rows) ([]*models.SourceConfig, err
 		var source models.SourceConfig
 		var enabled int
 		var crawlConfigJSON string
+		var filtersJSON sql.NullString
 		var createdAt, updatedAt int64
 		var authID sql.NullString
 
@@ -242,6 +269,7 @@ func (s *SourceStorage) scanSources(rows *sql.Rows) ([]*models.SourceConfig, err
 			&enabled,
 			&authID,
 			&crawlConfigJSON,
+			&filtersJSON,
 			&createdAt,
 			&updatedAt,
 		)
@@ -260,6 +288,13 @@ func (s *SourceStorage) scanSources(rows *sql.Rows) ([]*models.SourceConfig, err
 		// Deserialize JSON fields
 		if err := json.Unmarshal([]byte(crawlConfigJSON), &source.CrawlConfig); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal crawl config: %w", err)
+		}
+
+		// Deserialize filters if present
+		if filtersJSON.Valid && filtersJSON.String != "" {
+			if err := json.Unmarshal([]byte(filtersJSON.String), &source.Filters); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal filters: %w", err)
+			}
 		}
 
 		// Convert timestamps

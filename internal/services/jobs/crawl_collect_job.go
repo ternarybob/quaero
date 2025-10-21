@@ -91,6 +91,7 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		Msg("Processing source")
 
 	// Use shared job helper to start crawl
+	// Note: This is a scheduled job, so it uses source defaults (empty job config)
 	jobID, err := StartCrawlJob(
 		ctx,
 		source,
@@ -98,8 +99,8 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		j.crawlerService,
 		j.config,
 		j.logger,
-		nil,  // No seed URL overrides for cron jobs
-		true, // Refresh source config and auth for scheduled runs to ensure latest data
+		crawler.CrawlConfig{}, // Empty config means use source defaults
+		true,                  // Refresh source config and auth for scheduled runs to ensure latest data
 	)
 	if err != nil {
 		return fmt.Errorf("failed to start crawl: %w", err)

@@ -1,5 +1,7 @@
 package sqlite
 
+import "fmt"
+
 const schemaSQL = `
 -- Authentication table
 -- Site-based authentication for multiple service instances
@@ -131,6 +133,7 @@ CREATE TABLE IF NOT EXISTS sources (
 	enabled INTEGER DEFAULT 1,
 	auth_id TEXT,
 	crawl_config TEXT NOT NULL,
+	filters TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
@@ -159,6 +162,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	sources TEXT NOT NULL,
 	steps TEXT NOT NULL,
 	schedule TEXT NOT NULL,
+	timeout TEXT,
 	enabled INTEGER DEFAULT 1,
 	auto_start INTEGER DEFAULT 0,
 	config TEXT,
@@ -271,6 +275,61 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 11: Add timeout column to job_definitions table
+	if err := s.migrateAddJobDefinitionsTimeoutColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 12: Add back filters column to sources table
+	if err := s.migrateAddBackSourcesFiltersColumn(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// migrateAddJobDefinitionsTimeoutColumn adds timeout column to job_definitions table
+func (s *SQLiteDB) migrateAddJobDefinitionsTimeoutColumn() error {
+	columnsQuery := `PRAGMA table_info(job_definitions)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasTimeout := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "timeout" {
+			hasTimeout = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasTimeout {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding timeout column to job_definitions")
+
+	// Add the timeout column
+	if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN timeout TEXT`); err != nil {
+		return err
+	}
+
+	// Backfill existing rows with empty string
+	s.logger.Info().Msg("Backfilling existing rows with empty timeout")
+	if _, err := s.db.Exec(`UPDATE job_definitions SET timeout = '' WHERE timeout IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: timeout column added successfully")
 	return nil
 }
 
@@ -813,9 +872,10 @@ func (s *SQLiteDB) migrateAddSourcesSeedURLsColumn() error {
 }
 */
 
-// migrateRemoveSourcesFilteringColumns removes the filters and seed_urls columns from sources table
+// migrateRemoveSourcesFilteringColumns removes ONLY the seed_urls column from sources table
+// IMPORTANT: This migration preserves the filters column to prevent data loss
 func (s *SQLiteDB) migrateRemoveSourcesFilteringColumns() error {
-	// Check if filters or seed_urls columns exist
+	// Check if seed_urls column exists (only column we want to remove)
 	columnsQuery := `PRAGMA table_info(sources)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -840,16 +900,33 @@ func (s *SQLiteDB) migrateRemoveSourcesFilteringColumns() error {
 		}
 	}
 
-	// If neither column exists, migration already completed
-	if !hasFilters && !hasSeedURLs {
+	// If seed_urls column doesn't exist, migration already completed
+	if !hasSeedURLs {
 		return nil
 	}
 
-	s.logger.Info().Msg("Running migration: Removing filters and seed_urls columns from sources table")
+	s.logger.Info().Msg("Running migration: Removing seed_urls column from sources table (preserving filters)")
 
-	// Step 1: Create new sources table without filters and seed_urls columns
-	s.logger.Info().Msg("Step 1: Creating new sources table without filters and seed_urls columns")
-	_, err = s.db.Exec(`
+	// Begin transaction
+	s.logger.Info().Msg("Beginning migration transaction")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Ensure rollback on error
+	defer func() {
+		if err != nil {
+			s.logger.Warn().Msg("Rolling back migration transaction due to error")
+			if rbErr := tx.Rollback(); rbErr != nil {
+				s.logger.Error().Err(rbErr).Msg("Failed to rollback transaction")
+			}
+		}
+	}()
+
+	// Step 1: Create new sources table without seed_urls but WITH filters (if it existed)
+	s.logger.Info().Msg("Step 1: Creating new sources table without seed_urls column")
+	createTableSQL := `
 		CREATE TABLE sources_new (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -857,58 +934,132 @@ func (s *SQLiteDB) migrateRemoveSourcesFilteringColumns() error {
 			base_url TEXT NOT NULL,
 			enabled INTEGER DEFAULT 1,
 			auth_id TEXT,
-			crawl_config TEXT NOT NULL,
+			crawl_config TEXT NOT NULL,`
+
+	// Include filters column if it existed in original table
+	if hasFilters {
+		createTableSQL += `
+			filters TEXT,`
+		s.logger.Info().Msg("Including filters column in new table schema")
+	}
+
+	createTableSQL += `
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL,
 			FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
 		)
-	`)
+	`
+
+	_, err = tx.Exec(createTableSQL)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create new sources table: %w", err)
 	}
 
-	// Step 2: Copy data from old table to new table (excluding filters and seed_urls columns)
+	// Step 2: Copy data from old table to new table (excluding only seed_urls)
 	s.logger.Info().Msg("Step 2: Copying data to new table")
-	_, err = s.db.Exec(`
-		INSERT INTO sources_new
-		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, created_at, updated_at
-		FROM sources
-	`)
+	var copyDataSQL string
+	if hasFilters {
+		// Include filters column in copy
+		copyDataSQL = `
+			INSERT INTO sources_new
+			SELECT id, name, type, base_url, enabled, auth_id, crawl_config, filters, created_at, updated_at
+			FROM sources
+		`
+		s.logger.Info().Msg("Copying data including filters column")
+	} else {
+		// No filters column to copy
+		copyDataSQL = `
+			INSERT INTO sources_new
+			SELECT id, name, type, base_url, enabled, auth_id, crawl_config, created_at, updated_at
+			FROM sources
+		`
+	}
+
+	_, err = tx.Exec(copyDataSQL)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to copy data to new table: %w", err)
 	}
 
 	// Step 3: Drop old table
 	s.logger.Info().Msg("Step 3: Dropping old sources table")
-	_, err = s.db.Exec(`DROP TABLE sources`)
+	_, err = tx.Exec(`DROP TABLE sources`)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to drop old sources table: %w", err)
 	}
 
 	// Step 4: Rename new table to sources
 	s.logger.Info().Msg("Step 4: Renaming sources_new to sources")
-	_, err = s.db.Exec(`ALTER TABLE sources_new RENAME TO sources`)
+	_, err = tx.Exec(`ALTER TABLE sources_new RENAME TO sources`)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to rename sources_new to sources: %w", err)
 	}
 
 	// Step 5: Recreate indexes
 	s.logger.Info().Msg("Step 5: Recreating indexes")
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled)`)
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_sources_type: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_sources_enabled: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_sources_auth: %w", err)
+	}
+
+	// Commit transaction
+	s.logger.Info().Msg("Committing migration transaction")
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if hasFilters {
+		s.logger.Info().Msg("Migration: seed_urls column removed successfully (filters column preserved)")
+	} else {
+		s.logger.Info().Msg("Migration: seed_urls column removed successfully")
+	}
+	return nil
+}
+
+// migrateAddBackSourcesFiltersColumn adds back the filters column to sources table
+func (s *SQLiteDB) migrateAddBackSourcesFiltersColumn() error {
+	columnsQuery := `PRAGMA table_info(sources)`
+	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC)`)
-	if err != nil {
+	hasFilters := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "filters" {
+			hasFilters = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasFilters {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding back filters column to sources table")
+
+	// Add the filters column
+	if _, err := s.db.Exec(`ALTER TABLE sources ADD COLUMN filters TEXT`); err != nil {
 		return err
 	}
 
-	_, err = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id)`)
-	if err != nil {
-		return err
-	}
-
-	s.logger.Info().Msg("Migration: filters and seed_urls columns removed successfully")
+	s.logger.Info().Msg("Migration: filters column added back successfully")
 	return nil
 }

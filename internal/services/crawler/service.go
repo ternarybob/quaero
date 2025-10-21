@@ -1393,7 +1393,7 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 	case "jira":
 		filteredLinks = s.filterJiraLinks(allLinks, baseHost, config)
 	case "confluence":
-		filteredLinks = s.filterConfluenceLinks(allLinks, baseHost)
+		filteredLinks = s.filterConfluenceLinks(allLinks, baseHost, config)
 	default:
 		// No source-specific filtering for other types
 		filteredLinks = allLinks
@@ -1657,27 +1657,9 @@ func (s *Service) extractLinksFromHTML(html string, baseURL string) []string {
 }
 
 // filterJiraLinks filters links to exclude bad Jira URLs (admin, API, etc.) on the same host
-// Include pattern matching is handled by filterLinks() which runs after this
+// Only applies universal exclude patterns. Include pattern matching is handled by filterLinks().
 func (s *Service) filterJiraLinks(links []string, baseHost string, config CrawlConfig) []string {
-	// Only apply include patterns if NO user patterns are provided
-	// If user has custom patterns, skip include filtering here and let filterLinks() handle it
-	var includePatterns []string
-	if len(config.IncludePatterns) == 0 {
-		// No user patterns - use default Jira patterns
-		includePatterns = []string{
-			`/browse/[A-Z][A-Z0-9]+-\d+`,       // Issue pages: /browse/PROJ-123, /browse/ABC2-456
-			`/browse/[A-Z0-9]+(?:[?#/]|$)`,     // Project browse pages (with optional query/fragment/slash)
-			`/projects/[A-Z0-9]+`,              // Project pages
-			`/jira/projects`,                   // Projects listing page
-			`(?i)/secure/RapidBoard\.jspa`,     // Agile boards (case-insensitive)
-			`(?i)/secure/IssueNavigator\.jspa`, // Classic issue navigator (case-insensitive)
-			`(?i)/issues/?`,                    // Issue search/list (case-insensitive)
-			`(?i)/issues/\?jql=`,               // JQL query pages (case-insensitive)
-			`(?i)/issues/\?filter=`,            // Filter pages (case-insensitive)
-		}
-	}
-
-	// Exclude patterns for non-content pages
+	// Exclude patterns for non-content pages (universal exclusions for Jira)
 	excludePatterns := []string{
 		`(?i)/rest/api/`,            // API endpoints (case-insensitive)
 		`(?i)/rest/agile/`,          // Agile REST API (case-insensitive)
@@ -1698,16 +1680,8 @@ func (s *Service) filterJiraLinks(links []string, baseHost string, config CrawlC
 		}
 	}
 
-	// Precompile include patterns
-	includeRegexes := make([]*regexp.Regexp, 0, len(includePatterns))
-	for _, pattern := range includePatterns {
-		if re, err := regexp.Compile(pattern); err == nil {
-			includeRegexes = append(includeRegexes, re)
-		}
-	}
-
 	filtered := make([]string, 0)
-	var crossDomainLinks, excludedLinks, notIncludedLinks []string
+	var crossDomainLinks, excludedLinks []string
 
 	for _, link := range links {
 		// Check same-host restriction
@@ -1745,38 +1719,15 @@ func (s *Service) filterJiraLinks(links []string, baseHost string, config CrawlC
 			continue
 		}
 
-		// If no user patterns were provided, check default include patterns
-		// Otherwise, accept all non-excluded links (user patterns will be checked in filterLinks)
-		if len(includeRegexes) > 0 {
-			// Check include patterns (only when using defaults)
-			included := false
-			for _, re := range includeRegexes {
-				if re.MatchString(link) {
-					included = true
-					break
-				}
-			}
-			if included {
-				filtered = append(filtered, link)
-			} else {
-				notIncludedLinks = append(notIncludedLinks, link)
-				s.logger.Debug().
-					Str("link", link).
-					Msg("Jira link did not match any include pattern")
-			}
-		} else {
-			// User provided custom patterns - accept all non-excluded links
-			// (user patterns will be applied in filterLinks)
-			filtered = append(filtered, link)
-		}
+		// Accept all non-excluded links (include filtering handled by filterLinks)
+		filtered = append(filtered, link)
 	}
 
 	// Summary log for Jira filtering
-	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
+	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 {
 		s.logger.Debug().
 			Int("cross_domain_count", len(crossDomainLinks)).
 			Int("excluded_count", len(excludedLinks)).
-			Int("not_included_count", len(notIncludedLinks)).
 			Int("passed_count", len(filtered)).
 			Msg("Jira link filtering summary")
 	}
@@ -1784,20 +1735,10 @@ func (s *Service) filterJiraLinks(links []string, baseHost string, config CrawlC
 	return filtered
 }
 
-// filterConfluenceLinks filters links to include only Confluence content pages on the same host
-func (s *Service) filterConfluenceLinks(links []string, baseHost string) []string {
-	// Include patterns for Confluence content pages
-	includePatterns := []string{
-		`(?i)/(?:wiki/)?spaces/[^/]+/pages/\d+`,   // Page with ID: /wiki/spaces/SPACE/pages/123456 or /spaces/SPACE/pages/123456 (case-insensitive)
-		`(?i)/(?:wiki/)?spaces/[^/]+/?$`,          // Space home: /wiki/spaces/SPACE or /spaces/SPACE/ (case-insensitive)
-		`(?i)/(?:wiki/)?spaces/[^/]+/overview`,    // Space overview (case-insensitive)
-		`(?i)/(?:wiki/)?spaces/[^/]+/blog/`,       // Blog posts (case-insensitive)
-		`(?i)/display/[^/]+/.+`,                   // Display format: /display/SPACE/PageTitle (case-insensitive)
-		`(?i)/pages/viewpage\.action\?pageId=\d+`, // Legacy page URLs (case-insensitive)
-		`(?i)/x/[A-Za-z0-9\-]+`,                   // Tiny links: /x/{id} (case-insensitive)
-	}
-
-	// Exclude patterns for non-content pages
+// filterConfluenceLinks filters links to exclude non-content Confluence URLs on the same host
+// Only applies universal exclude patterns. Include pattern matching is handled by filterLinks().
+func (s *Service) filterConfluenceLinks(links []string, baseHost string, config CrawlConfig) []string {
+	// Exclude patterns for non-content pages (universal exclusions for Confluence)
 	excludePatterns := []string{
 		`(?i)/rest/api/`,             // API endpoints (case-insensitive)
 		`(?i)/download/attachments/`, // File downloads (case-insensitive)
@@ -1814,16 +1755,8 @@ func (s *Service) filterConfluenceLinks(links []string, baseHost string) []strin
 		}
 	}
 
-	// Precompile include patterns
-	includeRegexes := make([]*regexp.Regexp, 0, len(includePatterns))
-	for _, pattern := range includePatterns {
-		if re, err := regexp.Compile(pattern); err == nil {
-			includeRegexes = append(includeRegexes, re)
-		}
-	}
-
 	filtered := make([]string, 0)
-	var crossDomainLinks, excludedLinks, notIncludedLinks []string
+	var crossDomainLinks, excludedLinks []string
 
 	for _, link := range links {
 		// Check same-host restriction
@@ -1861,30 +1794,15 @@ func (s *Service) filterConfluenceLinks(links []string, baseHost string) []strin
 			continue
 		}
 
-		// Check include patterns
-		included := false
-		for _, re := range includeRegexes {
-			if re.MatchString(link) {
-				included = true
-				break
-			}
-		}
-		if included {
-			filtered = append(filtered, link)
-		} else {
-			notIncludedLinks = append(notIncludedLinks, link)
-			s.logger.Debug().
-				Str("link", link).
-				Msg("Confluence link did not match any include pattern")
-		}
+		// Accept all non-excluded links (include filtering handled by filterLinks)
+		filtered = append(filtered, link)
 	}
 
 	// Summary log for Confluence filtering
-	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
+	if len(crossDomainLinks) > 0 || len(excludedLinks) > 0 {
 		s.logger.Debug().
 			Int("cross_domain_count", len(crossDomainLinks)).
 			Int("excluded_count", len(excludedLinks)).
-			Int("not_included_count", len(notIncludedLinks)).
 			Int("passed_count", len(filtered)).
 			Msg("Confluence link filtering summary")
 	}
@@ -2230,100 +2148,6 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 		Msg("Job rerun started")
 
 	return newJobID, nil
-}
-
-// applyURLPatternFilters applies generic URL pattern filtering from source filters
-// Returns filtered links and count of links that were filtered out
-func (s *Service) applyURLPatternFilters(allLinks []string, parent *URLQueueItem, config CrawlConfig) ([]string, int) {
-	// Get source config from parent metadata to access filters
-	var sourceConfig *models.SourceConfig
-	if configSnapshot, ok := parent.Metadata["source_config"].(string); ok {
-		// Deserialize source config snapshot
-		var config models.SourceConfig
-		if err := json.Unmarshal([]byte(configSnapshot), &config); err == nil {
-			sourceConfig = &config
-		}
-	}
-
-	if sourceConfig == nil || sourceConfig.Filters == nil {
-		// No filters configured - return all links
-		return allLinks, 0
-	}
-
-	// Extract include and exclude patterns from source filters
-	var includePatterns, excludePatterns []string
-
-	if includeRaw, exists := sourceConfig.Filters["include_patterns"]; exists {
-		switch patterns := includeRaw.(type) {
-		case []string:
-			includePatterns = patterns
-		case []interface{}:
-			for _, p := range patterns {
-				if str, ok := p.(string); ok {
-					includePatterns = append(includePatterns, str)
-				}
-			}
-		case string:
-			includePatterns = []string{patterns}
-		}
-	}
-
-	if excludeRaw, exists := sourceConfig.Filters["exclude_patterns"]; exists {
-		switch patterns := excludeRaw.(type) {
-		case []string:
-			excludePatterns = patterns
-		case []interface{}:
-			for _, p := range patterns {
-				if str, ok := p.(string); ok {
-					excludePatterns = append(excludePatterns, str)
-				}
-			}
-		case string:
-			excludePatterns = []string{patterns}
-		}
-	}
-
-	if len(includePatterns) == 0 && len(excludePatterns) == 0 {
-		// No patterns configured - return all links
-		return allLinks, 0
-	}
-
-	// Apply pattern filtering
-	filtered := make([]string, 0, len(allLinks))
-	filteredCount := 0
-
-linkLoop:
-	for _, link := range allLinks {
-		// Check exclude patterns first
-		for _, pattern := range excludePatterns {
-			if strings.Contains(strings.ToLower(link), strings.ToLower(pattern)) {
-				s.logger.Debug().Str("link", link).Str("pattern", pattern).Msg("Link excluded by pattern")
-				filteredCount++
-				continue linkLoop
-			}
-		}
-
-		// Check include patterns (if any)
-		if len(includePatterns) > 0 {
-			included := false
-			for _, pattern := range includePatterns {
-				if strings.Contains(strings.ToLower(link), strings.ToLower(pattern)) {
-					included = true
-					break
-				}
-			}
-			if !included {
-				s.logger.Debug().Str("link", link).Msg("Link not included by any pattern")
-				filteredCount++
-				continue linkLoop
-			}
-		}
-
-		// Link passed all filters
-		filtered = append(filtered, link)
-	}
-
-	return filtered, filteredCount
 }
 
 // WaitForJob blocks until a job completes or context is cancelled

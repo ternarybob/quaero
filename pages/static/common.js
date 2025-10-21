@@ -352,15 +352,17 @@ document.addEventListener('alpine:init', () => {
         name: '',
         type: 'jira',
         base_url: '',
-        seed_urls_text: '',
         auth_id: '',
         auth_domain: '',
         enabled: true,
         crawl_config: {
           max_depth: 3,
           follow_links: true,
-          concurrency: 2,
-          detail_level: 'full'
+          concurrency: 2
+        },
+        filters: {
+          include_patterns: '',
+          exclude_patterns: ''
         }
       };
     },
@@ -369,11 +371,17 @@ document.addEventListener('alpine:init', () => {
       this.modalTriggerElement = event?.target || document.activeElement;
       this.currentSource = JSON.parse(JSON.stringify(source));
 
-      // Convert seed_urls array to newline-separated string for textarea
-      if (Array.isArray(this.currentSource.seed_urls) && this.currentSource.seed_urls.length > 0) {
-        this.currentSource.seed_urls_text = this.currentSource.seed_urls.join('\n');
+      // Ensure filters field exists and contains strings (not objects)
+      if (!this.currentSource.filters) {
+        this.currentSource.filters = { include_patterns: '', exclude_patterns: '' };
       } else {
-        this.currentSource.seed_urls_text = '';
+        // Convert filter object to strings if needed
+        if (typeof this.currentSource.filters.include_patterns !== 'string') {
+          this.currentSource.filters.include_patterns = '';
+        }
+        if (typeof this.currentSource.filters.exclude_patterns !== 'string') {
+          this.currentSource.filters.exclude_patterns = '';
+        }
       }
 
       this.showEditModal = true;
@@ -419,18 +427,15 @@ document.addEventListener('alpine:init', () => {
         // Process filters before sending to backend
         const sourceToSave = JSON.parse(JSON.stringify(this.currentSource));
 
-        // Convert seed_urls_text to array
-        if (sourceToSave.seed_urls_text) {
-          const seedUrlsText = sourceToSave.seed_urls_text.trim();
-          if (seedUrlsText) {
-            sourceToSave.seed_urls = seedUrlsText.split('\n').map(url => url.trim()).filter(url => url);
-          } else {
-            sourceToSave.seed_urls = [];
+        // Ensure filters are properly formatted (empty strings become null for backend)
+        if (sourceToSave.filters) {
+          if (!sourceToSave.filters.include_patterns || sourceToSave.filters.include_patterns.trim() === '') {
+            sourceToSave.filters.include_patterns = '';
           }
-        } else {
-          sourceToSave.seed_urls = [];
+          if (!sourceToSave.filters.exclude_patterns || sourceToSave.filters.exclude_patterns.trim() === '') {
+            sourceToSave.filters.exclude_patterns = '';
+          }
         }
-        delete sourceToSave.seed_urls_text; // Remove temporary UI field
 
         window.debugLog('SourceManagement', `${method} ${url}`, 'Processed source:', sourceToSave);
         const response = await fetch(url, {
@@ -497,6 +502,22 @@ document.addEventListener('alpine:init', () => {
       if (!dateStr) return 'N/A';
       const date = new Date(dateStr);
       return date.toLocaleString();
+    },
+
+    formatFilterDisplay(filters) {
+      if (!filters) return 'None';
+
+      const parts = [];
+      if (filters.include_patterns && filters.include_patterns.trim()) {
+        const count = filters.include_patterns.split(',').filter(p => p.trim()).length;
+        parts.push(`Include: ${count}`);
+      }
+      if (filters.exclude_patterns && filters.exclude_patterns.trim()) {
+        const count = filters.exclude_patterns.split(',').filter(p => p.trim()).length;
+        parts.push(`Exclude: ${count}`);
+      }
+
+      return parts.length > 0 ? parts.join(', ') : 'None';
     }
   }));
 
@@ -567,6 +588,7 @@ document.addEventListener('alpine:init', () => {
         sources: [],
         steps: this.getDefaultSteps('crawler'),
         schedule: '',  // Optional: empty for on-demand jobs
+        timeout: '',   // Optional: duration string like "10m", "1h", "30s"
         enabled: true,
         auto_start: false,
         config: {}

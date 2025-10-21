@@ -87,9 +87,9 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	// Insert or update using ON CONFLICT
 	query := `
 		INSERT INTO job_definitions (
-			id, name, type, description, sources, steps, schedule,
+			id, name, type, description, sources, steps, schedule, timeout,
 			enabled, auto_start, config, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -97,6 +97,7 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 			sources = excluded.sources,
 			steps = excluded.steps,
 			schedule = excluded.schedule,
+			timeout = excluded.timeout,
 			enabled = excluded.enabled,
 			auto_start = excluded.auto_start,
 			config = excluded.config,
@@ -105,7 +106,7 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.ID, jobDef.Name, string(jobDef.Type), jobDef.Description,
-		sourcesJSON, stepsJSON, jobDef.Schedule,
+		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
 		enabled, autoStart, configJSON, createdAt, updatedAt,
 	)
 	if err != nil {
@@ -184,6 +185,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 			sources = ?,
 			steps = ?,
 			schedule = ?,
+			timeout = ?,
 			enabled = ?,
 			auto_start = ?,
 			config = ?,
@@ -193,7 +195,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.Name, string(jobDef.Type), jobDef.Description,
-		sourcesJSON, stepsJSON, jobDef.Schedule,
+		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
 		enabled, autoStart, configJSON, updatedAt, jobDef.ID,
 	)
 	if err != nil {
@@ -211,7 +213,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 // GetJobDefinition retrieves a job definition by ID
 func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule,
+		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, created_at, updated_at
 		FROM job_definitions
 		WHERE id = ?
@@ -232,7 +234,7 @@ func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) 
 // ListJobDefinitions lists job definitions with optional filtering and pagination
 func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule,
+		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, created_at, updated_at
 		FROM job_definitions
 		WHERE 1=1
@@ -297,7 +299,7 @@ func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *int
 // GetJobDefinitionsByType retrieves all job definitions of a specific type
 func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule,
+		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, created_at, updated_at
 		FROM job_definitions
 		WHERE type = ?
@@ -316,7 +318,7 @@ func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobT
 // GetEnabledJobDefinitions retrieves all enabled job definitions
 func (s *JobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule,
+		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, created_at, updated_at
 		FROM job_definitions
 		WHERE enabled = 1
@@ -374,13 +376,13 @@ func (s *JobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, er
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
-		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, configJSON string
-		enabled, autoStart                                                           int
-		createdAt, updatedAt                                                         int64
+		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON string
+		enabled, autoStart                                                                    int
+		createdAt, updatedAt                                                                  int64
 	)
 
 	err := row.Scan(
-		&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule,
+		&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
 		&enabled, &autoStart, &configJSON, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -394,6 +396,7 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 		Type:        models.JobType(jobType),
 		Description: description,
 		Schedule:    schedule,
+		Timeout:     timeout,
 		Enabled:     enabled == 1,
 		AutoStart:   autoStart == 1,
 		CreatedAt:   time.Unix(createdAt, 0),
@@ -436,13 +439,13 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 
 	for rows.Next() {
 		var (
-			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, configJSON string
-			enabled, autoStart                                                           int
-			createdAt, updatedAt                                                         int64
+			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON string
+			enabled, autoStart                                                                    int
+			createdAt, updatedAt                                                                  int64
 		)
 
 		err := rows.Scan(
-			&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule,
+			&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
 			&enabled, &autoStart, &configJSON, &createdAt, &updatedAt,
 		)
 		if err != nil {
@@ -459,6 +462,7 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 			Type:        models.JobType(jobType),
 			Description: description,
 			Schedule:    schedule,
+			Timeout:     timeout,
 			Enabled:     enabled == 1,
 			AutoStart:   autoStart == 1,
 			CreatedAt:   time.Unix(createdAt, 0),

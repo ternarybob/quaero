@@ -98,6 +98,11 @@ func (m *mockJobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	return nil
 }
 
+func (m *mockJobStorage) UpdateJob(ctx context.Context, job interface{}) error {
+	// Same as SaveJob for mock purposes
+	return m.SaveJob(ctx, job)
+}
+
 func (m *mockJobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	if m.jobs == nil {
 		return nil, nil
@@ -786,6 +791,7 @@ func TestFilterJiraLinks(t *testing.T) {
 		name         string
 		links        []string
 		baseHost     string
+		config       CrawlConfig
 		expectedURLs []string
 	}{
 		{
@@ -796,6 +802,9 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://test.atlassian.net/projects/TEST",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/browse/[A-Z]+-[0-9]+`, `/projects/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/browse/TEST-123",
 				"https://test.atlassian.net/browse/DEMO-456",
@@ -811,6 +820,9 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://test.atlassian.net/browse/TEST-123",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/browse/[A-Z]+-[0-9]+`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/browse/TEST-123",
 			},
@@ -823,6 +835,9 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://test.atlassian.net/browse/TEST-123",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/browse/[A-Z]+-[0-9]+`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/browse/TEST-123",
 			},
@@ -835,6 +850,9 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://test.atlassian.net/browse/TEST-123",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/browse/[A-Z]+-[0-9]+`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/browse/TEST-123",
 			},
@@ -847,6 +865,9 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://external.com/page",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/browse/[A-Z]+-[0-9]+`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/browse/TEST-123",
 			},
@@ -858,16 +879,35 @@ func TestFilterJiraLinks(t *testing.T) {
 				"https://test.atlassian.net/browse/TEST-123?page=com.atlassian.jira.plugin",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/issues/`, `/browse/[A-Z]+-[0-9]+`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/issues/?jql=project=TEST",
 				"https://test.atlassian.net/browse/TEST-123?page=com.atlassian.jira.plugin",
+			},
+		},
+		{
+			name: "No patterns provided - accept all non-excluded links",
+			links: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://test.atlassian.net/projects/TEST",
+				"https://test.atlassian.net/rest/api/3/issue/TEST-123",
+			},
+			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{},
+			},
+			expectedURLs: []string{
+				"https://test.atlassian.net/browse/TEST-123",
+				"https://test.atlassian.net/projects/TEST",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filtered := service.filterJiraLinks(tt.links, tt.baseHost)
+			filtered := service.filterJiraLinks(tt.links, tt.baseHost, tt.config)
 
 			if len(filtered) != len(tt.expectedURLs) {
 				t.Errorf("Expected %d links, got %d. Got: %v", len(tt.expectedURLs), len(filtered), filtered)
@@ -896,6 +936,7 @@ func TestFilterConfluenceLinks(t *testing.T) {
 		name         string
 		links        []string
 		baseHost     string
+		config       CrawlConfig
 		expectedURLs []string
 	}{
 		{
@@ -906,6 +947,9 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://test.atlassian.net/wiki/spaces/HOME",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/wiki/spaces/`, `/spaces/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 				"https://test.atlassian.net/wiki/spaces/ENG/overview",
@@ -919,6 +963,9 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/x/`, `/wiki/spaces/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/x/AbCd123",
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
@@ -931,6 +978,9 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/wiki/spaces/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 			},
@@ -943,6 +993,9 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/wiki/spaces/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
 			},
@@ -955,6 +1008,9 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://external.com/page",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/wiki/spaces/`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/wiki/spaces/DOC/pages/123",
 			},
@@ -966,16 +1022,35 @@ func TestFilterConfluenceLinks(t *testing.T) {
 				"https://test.atlassian.net/pages/viewpage.action?pageId=123456",
 			},
 			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{`/display/`, `/pages/viewpage`},
+			},
 			expectedURLs: []string{
 				"https://test.atlassian.net/display/DOC/Page+Title",
 				"https://test.atlassian.net/pages/viewpage.action?pageId=123456",
+			},
+		},
+		{
+			name: "No patterns provided - accept all non-excluded links",
+			links: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+				"https://test.atlassian.net/display/DOC/Page",
+				"https://test.atlassian.net/wiki/rest/api/space",
+			},
+			baseHost: "test.atlassian.net",
+			config: CrawlConfig{
+				IncludePatterns: []string{},
+			},
+			expectedURLs: []string{
+				"https://test.atlassian.net/wiki/spaces/DOC/pages/123456",
+				"https://test.atlassian.net/display/DOC/Page",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filtered := service.filterConfluenceLinks(tt.links, tt.baseHost)
+			filtered := service.filterConfluenceLinks(tt.links, tt.baseHost, tt.config)
 
 			if len(filtered) != len(tt.expectedURLs) {
 				t.Errorf("Expected %d links, got %d. Got: %v", len(tt.expectedURLs), len(filtered), filtered)

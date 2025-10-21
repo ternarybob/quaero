@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -87,6 +86,9 @@ func (h *SourcesHandler) CreateSourceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Sanitize filters before validation and saving
+	sanitizeSourceFilters(&source)
+
 	if err := h.sourceService.CreateSource(r.Context(), &source); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to create source")
 		if strings.Contains(err.Error(), "validation failed") {
@@ -122,6 +124,9 @@ func (h *SourcesHandler) UpdateSourceHandler(w http.ResponseWriter, r *http.Requ
 
 	// Set ID from path to prevent ID mismatch
 	source.ID = id
+
+	// Sanitize filters before validation and saving
+	sanitizeSourceFilters(&source)
 
 	if err := h.sourceService.UpdateSource(r.Context(), &source); err != nil {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to update source")
@@ -173,4 +178,57 @@ func extractIDFromPath(path, prefix string) string {
 	id := strings.TrimPrefix(path, prefix)
 	id = strings.TrimSuffix(id, "/")
 	return id
+}
+
+// sanitizeSourceFilters normalizes filter pattern strings by:
+// - Trimming overall whitespace
+// - Converting empty/whitespace-only strings to empty string
+// - Trimming whitespace around individual comma-delimited tokens
+func sanitizeSourceFilters(source *models.SourceConfig) {
+	if source.Filters == nil {
+		return
+	}
+
+	// Sanitize include_patterns
+	if val, ok := source.Filters["include_patterns"]; ok && val != nil {
+		if strVal, isString := val.(string); isString {
+			source.Filters["include_patterns"] = sanitizePatternString(strVal)
+		}
+	}
+
+	// Sanitize exclude_patterns
+	if val, ok := source.Filters["exclude_patterns"]; ok && val != nil {
+		if strVal, isString := val.(string); isString {
+			source.Filters["exclude_patterns"] = sanitizePatternString(strVal)
+		}
+	}
+}
+
+// sanitizePatternString trims whitespace and normalizes comma-delimited patterns
+func sanitizePatternString(pattern string) string {
+	// Trim overall whitespace
+	pattern = strings.TrimSpace(pattern)
+
+	// If empty after trim, return empty string
+	if pattern == "" {
+		return ""
+	}
+
+	// Split by comma, trim each token, and rejoin
+	tokens := strings.Split(pattern, ",")
+	var cleaned []string
+	for _, token := range tokens {
+		trimmed := strings.TrimSpace(token)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+
+	// Return empty string if no valid tokens
+	if len(cleaned) == 0 {
+		return ""
+	}
+
+	// Join back with comma
+	return strings.Join(cleaned, ",")
 }

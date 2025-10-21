@@ -28,9 +28,22 @@ var startCrawlJobFunc = jobs.StartCrawlJob
 // crawlAction performs actual crawling of sources and publishes collection events.
 func crawlAction(ctx context.Context, step models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
-	seedURLOverrides := extractStringSlice(step.Config, "seed_url_overrides")
+	// Note: seed_url_overrides removed - crawling based on source configuration
 	refreshSource := extractBool(step.Config, "refresh_source", true)
 	waitForCompletion := extractBool(step.Config, "wait_for_completion", true)
+
+	// Extract filtering patterns from job step config (shared across all sources)
+	includePatterns := extractStringSlice(step.Config, "include_patterns")
+	excludePatterns := extractStringSlice(step.Config, "exclude_patterns")
+
+	// Extract optional crawl settings that override source defaults (shared across all sources)
+	maxDepth := extractInt(step.Config, "max_depth", 0)
+	maxPages := extractInt(step.Config, "max_pages", 0)
+	concurrency := extractInt(step.Config, "concurrency", 0)
+
+	// Check if follow_links is explicitly provided in config
+	_, followLinksProvided := step.Config["follow_links"]
+	followLinks := extractBool(step.Config, "follow_links", false)
 
 	// Validate sources
 	if len(sources) == 0 {
@@ -41,6 +54,8 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 		Str("action", "crawl").
 		Int("source_count", len(sources)).
 		Bool("wait_for_completion", waitForCompletion).
+		Int("include_pattern_count", len(includePatterns)).
+		Int("exclude_pattern_count", len(excludePatterns)).
 		Msg("Starting crawl action")
 
 	// Track started jobs
@@ -55,14 +70,34 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 	for _, source := range sources {
 		startTime := time.Now()
 
+		// Build CrawlConfig for this source, using source defaults for follow_links if not explicitly set
+		jobCrawlConfig := crawler.CrawlConfig{
+			IncludePatterns: includePatterns,
+			ExcludePatterns: excludePatterns,
+			MaxDepth:        maxDepth,
+			MaxPages:        maxPages,
+			Concurrency:     concurrency,
+			FollowLinks:     followLinks, // Will be overridden by source default if not provided
+		}
+
+		// If follow_links was not provided in job config, use source default
+		if !followLinksProvided {
+			jobCrawlConfig.FollowLinks = source.CrawlConfig.FollowLinks
+		}
+
 		deps.Logger.Info().
 			Str("action", "crawl").
 			Str("source_id", source.ID).
 			Str("source_type", string(source.Type)).
 			Str("base_url", source.BaseURL).
+			Int("include_patterns", len(includePatterns)).
+			Int("exclude_patterns", len(excludePatterns)).
+			Bool("follow_links", jobCrawlConfig.FollowLinks).
+			Bool("follow_links_from_job", followLinksProvided).
 			Msg("Starting crawl for source")
 
 		// Start crawl job using helper (function variable for testability)
+		// Note: Seed URLs removed - crawling based on source base_url and type
 		jobID, err := startCrawlJobFunc(
 			ctx,
 			source,
@@ -70,7 +105,7 @@ func crawlAction(ctx context.Context, step models.JobStep, sources []*models.Sou
 			deps.CrawlerService,
 			deps.Config,
 			deps.Logger,
-			seedURLOverrides,
+			jobCrawlConfig,
 			refreshSource,
 		)
 

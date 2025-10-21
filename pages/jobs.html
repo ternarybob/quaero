@@ -205,12 +205,6 @@
                             </div>
 
                             <div class="form-group">
-                                <label class="form-label">Seed URLs (Optional)</label>
-                                <textarea class="form-input" x-model="currentSource.seed_urls_text" placeholder="https://example.atlassian.net/rest/api/3/project&#10;https://example.atlassian.net/rest/api/space" rows="3"></textarea>
-                                <p class="form-input-hint">One URL per line. Leave empty for auto-discovery from base URL</p>
-                            </div>
-
-                            <div class="form-group">
                                 <label class="form-label">Authentication</label>
                                 <select class="form-select" x-model="currentSource.auth_id">
                                     <option value="">No Authentication</option>
@@ -242,14 +236,6 @@
                                 <div style="margin-bottom: 0.5rem;">
                                     <label class="form-label" style="font-size: 0.875rem;">Concurrency</label>
                                     <input class="form-input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
-                                </div>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label class="form-label" style="font-size: 0.875rem;">Detail Level</label>
-                                    <select class="form-select" x-model="currentSource.crawl_config.detail_level">
-                                        <option value="minimal">Minimal</option>
-                                        <option value="basic">Basic</option>
-                                        <option value="full">Full</option>
-                                    </select>
                                 </div>
                                 <div>
                                     <label class="form-checkbox">
@@ -405,6 +391,12 @@
                             </div>
 
                             <div class="form-group">
+                                <label class="form-label">Timeout (Optional)</label>
+                                <input class="form-input" type="text" x-model="currentJobDefinition.timeout" placeholder="10m (e.g., 10m, 1h, 30s)">
+                                <p class="form-input-hint">Maximum execution time for this job. Use duration format: 10m (minutes), 1h (hours), 30s (seconds). Leave empty for no timeout.</p>
+                            </div>
+
+                            <div class="form-group">
                                 <label class="form-checkbox">
                                     <input type="checkbox" x-model="currentJobDefinition.enabled">
                                     <i class="form-icon"></i> Enabled
@@ -439,50 +431,6 @@
     {{template "footer.html" .}}
 
     {{template "snackbar.html" .}}
-
-    <!-- Create Job Modal -->
-    <div id="create-job-modal" class="modal" @keydown.escape.window="closeCreateJobModal()">
-        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
-        <div class="modal-container" role="dialog" aria-modal="true">
-            <div class="modal-header">
-                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeCreateJobModal()"></a>
-                <div class="modal-title h5">Create New Job</div>
-            </div>
-            <div class="modal-body">
-                <div class="content">
-                    <form id="create-job-form">
-                        <!-- Source Selection -->
-                        <div class="form-group">
-                            <label class="form-label">Source</label>
-                            <select class="form-select" id="job-source-select" required>
-                                <option value="">Select a source...</option>
-                            </select>
-                            <p class="form-input-hint">Select the data source for this job</p>
-                        </div>
-
-                        <!-- Refresh Source Checkbox -->
-                        <div class="form-group">
-                            <label class="form-checkbox">
-                                <input type="checkbox" id="refresh-source-checkbox">
-                                <i class="form-icon"></i> Refresh source configuration before execution
-                            </label>
-                            <p class="form-input-hint">If checked, the job will fetch the latest source configuration before starting</p>
-                        </div>
-
-                        <!-- Loading State -->
-                        <div id="modal-loading" class="hide text-center">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                            <p>Creating job...</p>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn" onclick="closeCreateJobModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary" onclick="createJobFromSource(event)">Create Job</button>
-            </div>
-        </div>
-    </div>
 
     <script>
         // ============================= AUTH PAGE COMPONENT =============================
@@ -558,146 +506,6 @@
             }
         }
 
-        // ============================= CREATE JOB MODAL FUNCTIONS =============================
-
-        let modalTriggerElement = null;
-
-        async function showCreateJobModal() {
-            modalTriggerElement = document.activeElement;
-            const modal = document.getElementById('create-job-modal');
-            modal.classList.add('active');
-            document.body.classList.add('modal-open');
-            await loadSourcesForJobCreation();
-
-            // Move focus to first focusable element in modal
-            setTimeout(() => {
-                const modalContainer = modal.querySelector('.modal-container');
-                if (modalContainer) {
-                    const firstFocusable = modalContainer.querySelector('input, select, textarea, button');
-                    if (firstFocusable) firstFocusable.focus();
-                }
-            }, 100);
-        }
-
-        function closeCreateJobModal() {
-            const modal = document.getElementById('create-job-modal');
-            modal.classList.remove('active');
-            document.body.classList.remove('modal-open');
-            // Reset form
-            document.getElementById('create-job-form').reset();
-
-            // Restore focus to trigger element
-            if (modalTriggerElement) {
-                setTimeout(() => {
-                    modalTriggerElement.focus();
-                    modalTriggerElement = null;
-                }, 100);
-            }
-        }
-
-        async function loadSourcesForJobCreation() {
-            const sourceSelect = document.getElementById('job-source-select');
-
-            try {
-                const response = await fetch('/api/sources');
-                if (!response.ok) {
-                    throw new Error('Failed to fetch sources');
-                }
-
-                const sources = await response.json();
-
-                // Clear existing options except the first placeholder
-                sourceSelect.innerHTML = '<option value="">Select a source...</option>';
-
-                if (!sources || sources.length === 0) {
-                    const option = document.createElement('option');
-                    option.value = '';
-                    option.textContent = 'No sources available - create a source first';
-                    option.disabled = true;
-                    sourceSelect.appendChild(option);
-                    return;
-                }
-
-                // Add sources to dropdown
-                sources.forEach(source => {
-                    const option = document.createElement('option');
-                    option.value = source.id;
-                    option.textContent = `${source.name} (${source.type})`;
-                    option.dataset.sourceType = source.type;
-                    sourceSelect.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading sources:', error);
-                window.showNotification('Failed to load sources: ' + error.message, 'error');
-            }
-        }
-
-        async function createJobFromSource(event) {
-            event.preventDefault();
-
-            const sourceSelect = document.getElementById('job-source-select');
-            const refreshCheckbox = document.getElementById('refresh-source-checkbox');
-            const modalLoading = document.getElementById('modal-loading');
-            const createButton = event.target;
-
-            const sourceID = sourceSelect.value;
-            if (!sourceID) {
-                window.showNotification('Please select a source', 'warning');
-                return;
-            }
-
-            const refreshSource = refreshCheckbox.checked;
-
-            // Show loading state
-            modalLoading.classList.remove('hide');
-            createButton.disabled = true;
-
-            let originalIcon = null;
-            const iconElement = createButton.querySelector('i');
-            if (iconElement) {
-                originalIcon = iconElement.className;
-                iconElement.className = 'fas fa-spinner fa-pulse';
-            }
-
-            try {
-                const payload = {
-                    source_id: sourceID,
-                    refresh_source: refreshSource
-                };
-
-                const response = await fetch('/api/jobs/create', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
-                }
-
-                const result = await response.json();
-
-                // Show success message
-                window.showNotification(`Job created successfully! Job ID: ${result.job_id}`, 'success');
-
-                // Close modal
-                closeCreateJobModal();
-
-            } catch (error) {
-                console.error('Error creating job:', error);
-                window.showNotification('Failed to create job: ' + error.message, 'error');
-            } finally {
-                modalLoading.classList.add('hide');
-                createButton.disabled = false;
-                if (iconElement && originalIcon) {
-                    iconElement.className = originalIcon;
-                }
-            }
-        }
-
         // ============================= PAGE INITIALIZATION =============================
 
         // Initialize on page load
@@ -714,46 +522,6 @@
         // Ensure Alpine.js is fully initialized
         document.addEventListener('alpine:init', function () {
             console.log('[Jobs] Alpine.js initialized');
-        });
-
-        // ESC key handler for modals
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                const createModal = document.getElementById('create-job-modal');
-
-                if (createModal && createModal.classList.contains('active')) {
-                    closeCreateJobModal();
-                }
-            }
-        });
-
-        // Focus trap for create job modal
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Tab') {
-                const modal = document.getElementById('create-job-modal');
-                if (modal && modal.classList.contains('active')) {
-                    const modalContainer = modal.querySelector('.modal-container');
-                    if (modalContainer) {
-                        const focusableElements = modalContainer.querySelectorAll(
-                            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
-                        );
-                        const firstFocusable = focusableElements[0];
-                        const lastFocusable = focusableElements[focusableElements.length - 1];
-
-                        if (e.shiftKey) {
-                            if (document.activeElement === firstFocusable) {
-                                lastFocusable.focus();
-                                e.preventDefault();
-                            }
-                        } else {
-                            if (document.activeElement === lastFocusable) {
-                                firstFocusable.focus();
-                                e.preventDefault();
-                            }
-                        }
-                    }
-                }
-            }
         });
 
         // Plain JavaScript ESC key handler for source modal (backup for Alpine directive)

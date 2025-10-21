@@ -8,7 +8,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/crawler"
-	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
@@ -506,94 +504,15 @@ type ConfigOverrides struct {
 
 // CreateJobHandler creates a new job from a source configuration
 // POST /api/jobs/create
+// DEPRECATED: Direct job creation from sources is deprecated. Use Job Definitions to specify start URLs.
 func (h *JobHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	// Parse request body
-	var req struct {
-		SourceID        string           `json:"source_id"`
-		RefreshSource   bool             `json:"refresh_source"`
-		ConfigOverrides *ConfigOverrides `json:"config_overrides"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Error().Err(err).Msg("Failed to parse request body")
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	// Validate required fields
-	if req.SourceID == "" {
-		http.Error(w, "source_id is required", http.StatusBadRequest)
-		return
-	}
-
-	// Fetch source configuration
-	source, err := h.sourceService.GetSource(ctx, req.SourceID)
-	if err != nil {
-		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Failed to fetch source")
-		http.Error(w, "Source not found", http.StatusNotFound)
-		return
-	}
-
-	// Validate source configuration
-	if err := source.Validate(); err != nil {
-		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Source validation failed")
-		http.Error(w, fmt.Sprintf("Invalid source configuration: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Apply config overrides if provided
-	if req.ConfigOverrides != nil {
-		if req.ConfigOverrides.MaxDepth != nil {
-			source.CrawlConfig.MaxDepth = *req.ConfigOverrides.MaxDepth
-		}
-		if req.ConfigOverrides.Concurrency != nil {
-			source.CrawlConfig.Concurrency = *req.ConfigOverrides.Concurrency
-		}
-		if req.ConfigOverrides.MaxPages != nil {
-			source.CrawlConfig.MaxPages = *req.ConfigOverrides.MaxPages
-		}
-		if req.ConfigOverrides.RateLimit != nil {
-			source.CrawlConfig.RateLimit = *req.ConfigOverrides.RateLimit
-		}
-		if req.ConfigOverrides.FollowLinks != nil {
-			source.CrawlConfig.FollowLinks = *req.ConfigOverrides.FollowLinks
-		}
-		// TODO: Include/exclude patterns will be handled at job definition level in subsequent phases
-	}
-
-	// Use shared job helper to start crawl
-	jobID, err := jobs.StartCrawlJob(
-		ctx,
-		source,
-		h.authStorage,
-		h.crawlerService,
-		h.config,
-		h.logger,
-		source.SeedURLs,   // Use seed URLs from source configuration
-		req.RefreshSource, // Pass user-provided refreshSource setting
-	)
-	if err != nil {
-		h.logger.Error().Err(err).Str("source_id", req.SourceID).Msg("Failed to start crawl")
-		http.Error(w, fmt.Sprintf("Failed to create job: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	h.logger.Info().
-		Str("job_id", jobID).
-		Str("source_id", req.SourceID).
-		Str("refresh_source", fmt.Sprintf("%t", req.RefreshSource)).
-		Msg("Job created successfully")
+	h.logger.Warn().Msg("CreateJobHandler called - endpoint is deprecated")
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusNotImplemented)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"job_id":         jobID,
-		"source_id":      req.SourceID,
-		"source_type":    source.Type,
-		"refresh_source": req.RefreshSource,
-		"message":        "Job created successfully",
+		"error":   "Not Implemented",
+		"message": "Direct job creation from sources is deprecated. Please use Job Definitions to specify start URLs and crawl parameters.",
 	})
 }
 

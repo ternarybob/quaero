@@ -2,7 +2,6 @@ package models
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -33,8 +32,11 @@ type SourceConfig struct {
 	Enabled     bool        `json:"enabled"`
 	AuthID      string      `json:"auth_id"` // Reference to auth_credentials.id
 	CrawlConfig CrawlConfig `json:"crawl_config"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	// Filters contains include_patterns and exclude_patterns as comma-delimited strings
+	// Example: {"include_patterns": "browse,projects", "exclude_patterns": "admin,logout"}
+	Filters   map[string]interface{} `json:"filters"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // Validate validates the source configuration
@@ -72,6 +74,34 @@ func (s *SourceConfig) Validate() error {
 
 	if s.CrawlConfig.MaxPages < 0 {
 		return fmt.Errorf("max pages must be non-negative")
+	}
+
+	// Validate filters
+	if err := s.validateFilters(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateFilters validates the Filters map structure
+func (s *SourceConfig) validateFilters() error {
+	if s.Filters == nil {
+		return nil // Filters are optional
+	}
+
+	// Check include_patterns if present
+	if val, ok := s.Filters["include_patterns"]; ok && val != nil {
+		if _, isString := val.(string); !isString {
+			return fmt.Errorf("include_patterns must be a string")
+		}
+	}
+
+	// Check exclude_patterns if present
+	if val, ok := s.Filters["exclude_patterns"]; ok && val != nil {
+		if _, isString := val.(string); !isString {
+			return fmt.Errorf("exclude_patterns must be a string")
+		}
 	}
 
 	return nil
