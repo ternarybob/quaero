@@ -87,22 +87,6 @@ func (h *SourcesHandler) CreateSourceHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Validate filters before processing
-	if err := validateSourceFilters(&source); err != nil {
-		h.logger.Warn().Err(err).Str("type", string(source.Type)).Msg("Filter validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Filter validation failed: %s", err.Error()))
-		return
-	}
-
-	// Log filter configuration for debugging (without sensitive data)
-	if source.Filters != nil && len(source.Filters) > 0 {
-		filterKeys := make([]string, 0, len(source.Filters))
-		for key := range source.Filters {
-			filterKeys = append(filterKeys, key)
-		}
-		h.logger.Debug().Str("type", string(source.Type)).Strs("filter_keys", filterKeys).Msg("Filter validation passed")
-	}
-
 	if err := h.sourceService.CreateSource(r.Context(), &source); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to create source")
 		if strings.Contains(err.Error(), "validation failed") {
@@ -138,22 +122,6 @@ func (h *SourcesHandler) UpdateSourceHandler(w http.ResponseWriter, r *http.Requ
 
 	// Set ID from path to prevent ID mismatch
 	source.ID = id
-
-	// Validate filters before processing
-	if err := validateSourceFilters(&source); err != nil {
-		h.logger.Warn().Err(err).Str("id", id).Str("type", string(source.Type)).Msg("Filter validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Filter validation failed: %s", err.Error()))
-		return
-	}
-
-	// Log filter configuration for debugging (without sensitive data)
-	if source.Filters != nil && len(source.Filters) > 0 {
-		filterKeys := make([]string, 0, len(source.Filters))
-		for key := range source.Filters {
-			filterKeys = append(filterKeys, key)
-		}
-		h.logger.Debug().Str("id", id).Str("type", string(source.Type)).Strs("filter_keys", filterKeys).Msg("Filter validation passed")
-	}
 
 	if err := h.sourceService.UpdateSource(r.Context(), &source); err != nil {
 		h.logger.Error().Err(err).Str("id", id).Msg("Failed to update source")
@@ -194,67 +162,6 @@ func (h *SourcesHandler) DeleteSourceHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// validateSourceFilters validates URL pattern filter format
-func validateSourceFilters(source *models.SourceConfig) error {
-	if source.Filters == nil {
-		return nil // No filters is valid
-	}
-
-	// Validate include patterns
-	if includePatterns, exists := source.Filters["include_patterns"]; exists {
-		if err := validateURLPatterns(includePatterns, "include patterns"); err != nil {
-			return err
-		}
-	}
-
-	// Validate exclude patterns
-	if excludePatterns, exists := source.Filters["exclude_patterns"]; exists {
-		if err := validateURLPatterns(excludePatterns, "exclude patterns"); err != nil {
-			return err
-		}
-	}
-
-	// Check for unsupported filter keys
-	for key := range source.Filters {
-		if key != "include_patterns" && key != "exclude_patterns" {
-			return fmt.Errorf("unsupported filter key: %s (supported: include_patterns, exclude_patterns)", key)
-		}
-	}
-
-	return nil
-}
-
-// validateURLPatterns validates that patterns are properly formatted
-func validateURLPatterns(patterns interface{}, patternType string) error {
-	switch v := patterns.(type) {
-	case []interface{}:
-		if len(v) == 0 {
-			return fmt.Errorf("%s cannot be empty array", patternType)
-		}
-		for i, pattern := range v {
-			if str, ok := pattern.(string); !ok || strings.TrimSpace(str) == "" {
-				return fmt.Errorf("%s item %d must be non-empty string", patternType, i)
-			}
-		}
-	case []string:
-		if len(v) == 0 {
-			return fmt.Errorf("%s cannot be empty array", patternType)
-		}
-		for i, pattern := range v {
-			if strings.TrimSpace(pattern) == "" {
-				return fmt.Errorf("%s item %d cannot be empty", patternType, i)
-			}
-		}
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return fmt.Errorf("%s cannot be empty string", patternType)
-		}
-	default:
-		return fmt.Errorf("%s must be array of strings or single string", patternType)
-	}
-	return nil
 }
 
 // extractIDFromPath extracts the ID from a URL path

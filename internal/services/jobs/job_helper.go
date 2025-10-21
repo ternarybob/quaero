@@ -102,14 +102,15 @@ func StartCrawlJob(
 	}
 
 	// 5. Build crawler config
+	// TODO: Extract filtering configuration from job step config in subsequent phases
 	crawlerConfig := crawler.CrawlConfig{
 		MaxDepth:        source.CrawlConfig.MaxDepth,
 		MaxPages:        source.CrawlConfig.MaxPages,
 		FollowLinks:     source.CrawlConfig.FollowLinks,
 		Concurrency:     source.CrawlConfig.Concurrency,
 		RateLimit:       time.Duration(source.CrawlConfig.RateLimit) * time.Millisecond,
-		IncludePatterns: source.CrawlConfig.IncludePatterns,
-		ExcludePatterns: source.CrawlConfig.ExcludePatterns,
+		IncludePatterns: []string{}, // Will be populated from job definition config in future phases
+		ExcludePatterns: []string{}, // Will be populated from job definition config in future phases
 		DetailLevel:     "full",
 		RetryAttempts:   3,
 		RetryBackoff:    2 * time.Second,
@@ -123,10 +124,6 @@ func StartCrawlJob(
 		Str("follow_links", fmt.Sprintf("%v", crawlerConfig.FollowLinks)).
 		Int("concurrency", crawlerConfig.Concurrency).
 		Dur("rate_limit", crawlerConfig.RateLimit).
-		Int("include_patterns_count", len(crawlerConfig.IncludePatterns)).
-		Int("exclude_patterns_count", len(crawlerConfig.ExcludePatterns)).
-		Strs("include_patterns", crawlerConfig.IncludePatterns).
-		Strs("exclude_patterns", crawlerConfig.ExcludePatterns).
 		Str("detail_level", crawlerConfig.DetailLevel).
 		Msg("Crawler configuration validated and ready")
 
