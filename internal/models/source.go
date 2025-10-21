@@ -23,12 +23,13 @@ type CrawlConfig struct {
 }
 
 // SourceConfig represents a data source configuration
+// Sources define connection details only: base URL, authentication, and source type.
+// Crawling behavior (start URLs, filtering, depth) is specified at the job level.
 type SourceConfig struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
 	Type        string      `json:"type"`
 	BaseURL     string      `json:"base_url"`
-	SeedURLs    []string    `json:"seed_urls,omitempty"` // Optional seed URLs for crawling (one per line). Leave empty for auto-discovery from base URL.
 	Enabled     bool        `json:"enabled"`
 	AuthID      string      `json:"auth_id"` // Reference to auth_credentials.id
 	CrawlConfig CrawlConfig `json:"crawl_config"`

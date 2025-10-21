@@ -128,7 +128,6 @@ CREATE TABLE IF NOT EXISTS sources (
 	name TEXT NOT NULL,
 	type TEXT NOT NULL,
 	base_url TEXT NOT NULL,
-	seed_urls TEXT,
 	enabled INTEGER DEFAULT 1,
 	auth_id TEXT,
 	crawl_config TEXT NOT NULL,
@@ -260,13 +259,15 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
-	// MIGRATION 9: Add seed_urls column to sources table
-	if err := s.migrateAddSourcesSeedURLsColumn(); err != nil {
-		return err
-	}
+	// MIGRATION 9: (deprecated) Add seed_urls column to sources table
+	// This migration is no longer needed as seed URLs are job-level configuration
+	// Kept commented for historical reference
+	// if err := s.migrateAddSourcesSeedURLsColumn(); err != nil {
+	// 	return err
+	// }
 
-	// MIGRATION 10: Remove filters column from sources table
-	if err := s.migrateRemoveSourcesFiltersColumn(); err != nil {
+	// MIGRATION 10: Remove filters and seed_urls columns from sources table
+	if err := s.migrateRemoveSourcesFilteringColumns(); err != nil {
 		return err
 	}
 
@@ -802,54 +803,19 @@ func (s *SQLiteDB) migrateAddJobDefinitionsTable() error {
 	return nil
 }
 
-// migrateAddSourcesSeedURLsColumn adds seed_urls column to sources table
+// NOTE: migrateAddSourcesSeedURLsColumn is deprecated - seed URLs are now job-level configuration
+// This function is kept for historical reference but is no longer called
+/*
 func (s *SQLiteDB) migrateAddSourcesSeedURLsColumn() error {
-	columnsQuery := `PRAGMA table_info(sources)`
-	rows, err := s.db.Query(columnsQuery)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	hasSeedURLs := false
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notnull, dfltValue, pk interface{}
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "seed_urls" {
-			hasSeedURLs = true
-			break
-		}
-	}
-
-	// If column already exists, migration already completed
-	if hasSeedURLs {
-		return nil
-	}
-
-	s.logger.Info().Msg("Running migration: Adding seed_urls column to sources")
-
-	// Add the seed_urls column
-	if _, err := s.db.Exec(`ALTER TABLE sources ADD COLUMN seed_urls TEXT`); err != nil {
-		return err
-	}
-
-	// Set default value to empty JSON array for existing rows
-	s.logger.Info().Msg("Setting default seed_urls values for existing sources")
-	if _, err := s.db.Exec(`UPDATE sources SET seed_urls = '[]' WHERE seed_urls IS NULL`); err != nil {
-		return err
-	}
-
-	s.logger.Info().Msg("Migration: seed_urls column added successfully")
+	// This migration has been superseded by migrateRemoveSourcesFilteringColumns
+	// which removes both filters and seed_urls columns
 	return nil
 }
+*/
 
-// migrateRemoveSourcesFiltersColumn removes the filters column from sources table
-func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
-	// Check if filters column exists
+// migrateRemoveSourcesFilteringColumns removes the filters and seed_urls columns from sources table
+func (s *SQLiteDB) migrateRemoveSourcesFilteringColumns() error {
+	// Check if filters or seed_urls columns exist
 	columnsQuery := `PRAGMA table_info(sources)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -858,6 +824,7 @@ func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
 	defer rows.Close()
 
 	hasFilters := false
+	hasSeedURLs := false
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -867,26 +834,27 @@ func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
 		}
 		if name == "filters" {
 			hasFilters = true
-			break
+		}
+		if name == "seed_urls" {
+			hasSeedURLs = true
 		}
 	}
 
-	// If column doesn't exist, migration already completed
-	if !hasFilters {
+	// If neither column exists, migration already completed
+	if !hasFilters && !hasSeedURLs {
 		return nil
 	}
 
-	s.logger.Info().Msg("Running migration: Removing filters column from sources table")
+	s.logger.Info().Msg("Running migration: Removing filters and seed_urls columns from sources table")
 
-	// Step 1: Create new sources table without filters column
-	s.logger.Info().Msg("Step 1: Creating new sources table without filters column")
+	// Step 1: Create new sources table without filters and seed_urls columns
+	s.logger.Info().Msg("Step 1: Creating new sources table without filters and seed_urls columns")
 	_, err = s.db.Exec(`
 		CREATE TABLE sources_new (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			type TEXT NOT NULL,
 			base_url TEXT NOT NULL,
-			seed_urls TEXT,
 			enabled INTEGER DEFAULT 1,
 			auth_id TEXT,
 			crawl_config TEXT NOT NULL,
@@ -899,11 +867,11 @@ func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
 		return err
 	}
 
-	// Step 2: Copy data from old table to new table (excluding filters column)
+	// Step 2: Copy data from old table to new table (excluding filters and seed_urls columns)
 	s.logger.Info().Msg("Step 2: Copying data to new table")
 	_, err = s.db.Exec(`
 		INSERT INTO sources_new
-		SELECT id, name, type, base_url, seed_urls, enabled, auth_id, crawl_config, created_at, updated_at
+		SELECT id, name, type, base_url, enabled, auth_id, crawl_config, created_at, updated_at
 		FROM sources
 	`)
 	if err != nil {
@@ -941,6 +909,6 @@ func (s *SQLiteDB) migrateRemoveSourcesFiltersColumn() error {
 		return err
 	}
 
-	s.logger.Info().Msg("Migration: filters column removed successfully")
+	s.logger.Info().Msg("Migration: filters and seed_urls columns removed successfully")
 	return nil
 }
