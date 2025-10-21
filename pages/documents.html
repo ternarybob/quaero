@@ -56,7 +56,16 @@
         <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
-                    <h2><span id="document-count" style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Documents</h2>
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h2><span id="document-count" style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Documents</h2>
+                        </section>
+                        <section class="navbar-section">
+                            <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedDocuments()" style="display: none;">
+                                <i class="fas fa-trash"></i> Delete Selected (<span id="selected-count">0</span>)
+                            </button>
+                        </section>
+                    </header>
                 </div>
                 <div class="card-body">
                     <!-- Filter Controls -->
@@ -73,6 +82,9 @@
                         <table class="table striped border">
                             <thead>
                                 <tr>
+                                    <th style="width: 50px; text-align: center;">
+                                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
+                                    </th>
                                     <th>SOURCE</th>
                                     <th>SOURCE ID</th>
                                     <th>TITLE</th>
@@ -81,7 +93,7 @@
                             </thead>
                             <tbody id="documents-table-body">
                                 <tr>
-                                    <td colspan="4" class="text-center">
+                                    <td colspan="5" class="text-center">
                                         Loading documents...
                                     </td>
                                 </tr>
@@ -132,9 +144,10 @@
         let allDocuments = [];
         let filteredDocuments = [];
         let selectedDocument = null;
+        let selectedDocumentIds = new Set(); // Track selected documents for batch operations
         let currentPage = 1;
         let totalDocuments = 0; // Total documents from API
-        const pageSize = 100;
+        const pageSize = 50; // Server-side pagination page size
 
         // Load document statistics
         async function loadStats(button) {
@@ -185,20 +198,30 @@
             }
         }
 
-        // Load all documents
+        // Load documents with server-side pagination
         async function loadDocuments() {
             const tbody = document.getElementById('documents-table-body');
+            const sourceFilter = document.getElementById('source-filter').value;
 
             try {
-                const response = await fetch('/api/documents');
+                // Build query parameters for server-side pagination
+                const params = new URLSearchParams();
+                params.append('limit', pageSize);
+                params.append('offset', (currentPage - 1) * pageSize);
+
+                if (sourceFilter) {
+                    params.append('sourceType', sourceFilter);
+                }
+
+                const response = await fetch(`/api/documents?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error('Failed to fetch documents');
                 }
 
                 const data = await response.json();
                 allDocuments = data.documents || [];
-                totalDocuments = data.total || allDocuments.length; // Use API total, fallback to count
-                filteredDocuments = [...allDocuments];
+                totalDocuments = data.total_count || 0; // Server-side total count
+                filteredDocuments = [...allDocuments]; // For local display
 
                 renderDocuments();
 
@@ -206,7 +229,7 @@
                 console.error('Error loading documents:', error);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="4" class="text-center" style="color: var(--color-danger);">
+                        <td colspan="5" class="text-center" style="color: var(--color-danger);">
                             Failed to load documents. Please try again.
                         </td>
                     </tr>
@@ -214,59 +237,45 @@
             }
         }
 
-        // Filter documents based on search and filters
+        // Filter documents based on source filter (server-side)
         function filterDocuments() {
-            const searchTerm = document.getElementById('search-box').value.toLowerCase();
-            const sourceFilter = document.getElementById('source-filter').value;
-
-            filteredDocuments = allDocuments.filter(doc => {
-                // Search filter
-                const matchesSearch = !searchTerm ||
-                    (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
-                    (doc.content && doc.content.toLowerCase().includes(searchTerm)) ||
-                    (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
-
-                // Source filter
-                const matchesSource = !sourceFilter ||
-                    (doc.source_type && doc.source_type.toLowerCase() === sourceFilter.toLowerCase());
-
-                return matchesSearch && matchesSource;
-            });
-
             currentPage = 1; // Reset to first page when filtering
+            loadDocuments(); // Reload from server with new filter
+        }
+
+        // Client-side search within current page
+        function searchDocuments() {
+            const searchTerm = document.getElementById('search-box').value.toLowerCase();
+
+            if (!searchTerm) {
+                filteredDocuments = [...allDocuments];
+            } else {
+                filteredDocuments = allDocuments.filter(doc => {
+                    return (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
+                           (doc.content_markdown && doc.content_markdown.toLowerCase().includes(searchTerm)) ||
+                           (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
+                });
+            }
+
             renderDocuments();
         }
 
-        // Render documents table
+        // Render documents table with server-side pagination
         function renderDocuments() {
             const tbody = document.getElementById('documents-table-body');
             const countElement = document.getElementById('document-count');
-            const filteredCount = filteredDocuments.length;
-            const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+            const totalPages = Math.max(1, Math.ceil(totalDocuments / pageSize));
 
-            // Ensure currentPage is within valid range
-            if (currentPage > totalPages) {
-                currentPage = totalPages;
-            }
-            if (currentPage < 1) {
-                currentPage = 1;
-            }
-
-            // Calculate pagination
-            const startIndex = (currentPage - 1) * pageSize;
-            const endIndex = Math.min(startIndex + pageSize, filteredCount);
-            const pageDocuments = filteredDocuments.slice(startIndex, endIndex);
-
-            // Update count display - show API total count (not filtered count)
+            // Update count display - show server-side total count
             countElement.textContent = `${totalDocuments}`;
 
-            // Update custom pagination
+            // Update pagination
             renderPagination(totalPages);
 
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="4" class="text-center">
+                        <td colspan="5" class="text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -274,17 +283,23 @@
                 return;
             }
 
-            tbody.innerHTML = pageDocuments.map((doc, pageIndex) => {
-                const globalIndex = startIndex + pageIndex; // Index in filteredDocuments
+            tbody.innerHTML = filteredDocuments.map((doc, index) => {
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
+                const isChecked = selectedDocumentIds.has(doc.id);
 
                 return `
                     <tr class="${isSelected ? 'bg-gray' : ''}">
-                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
-                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
-                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
-                        <td onclick="selectDocument(${globalIndex})" style="cursor: pointer;">${updatedDate}</td>
+                        <td style="text-align: center;">
+                            <input type="checkbox"
+                                   ${isChecked ? 'checked' : ''}
+                                   onchange="toggleDocumentSelection('${doc.id}')"
+                                   onclick="event.stopPropagation()">
+                        </td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                     </tr>
                 `;
             }).join('');
@@ -351,10 +366,118 @@
             container.innerHTML = html;
         }
 
-        // Pagination page change handler
+        // Pagination page change handler - reload from server
         function changePage(pageNumber) {
             currentPage = pageNumber;
+            loadDocuments(); // Reload from server with new page
+        }
+
+        // Toggle individual document selection
+        function toggleDocumentSelection(docId) {
+            if (selectedDocumentIds.has(docId)) {
+                selectedDocumentIds.delete(docId);
+            } else {
+                selectedDocumentIds.add(docId);
+            }
+            updateSelectAllCheckbox();
+            updateDeleteButton();
             renderDocuments();
+        }
+
+        // Toggle select all documents on current page
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (selectAllCheckbox.checked) {
+                // Select all on current page
+                filteredDocuments.forEach(doc => selectedDocumentIds.add(doc.id));
+            } else {
+                // Deselect all on current page
+                filteredDocuments.forEach(doc => selectedDocumentIds.delete(doc.id));
+            }
+            updateDeleteButton();
+            renderDocuments();
+        }
+
+        // Update select all checkbox state based on current page selections
+        function updateSelectAllCheckbox() {
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (!selectAllCheckbox) return;
+
+            const allSelected = filteredDocuments.length > 0 &&
+                                filteredDocuments.every(doc => selectedDocumentIds.has(doc.id));
+            selectAllCheckbox.checked = allSelected;
+        }
+
+        // Update delete button visibility and count
+        function updateDeleteButton() {
+            const deleteBtn = document.getElementById('delete-selected-btn');
+            const countSpan = document.getElementById('selected-count');
+            if (deleteBtn && countSpan) {
+                const count = selectedDocumentIds.size;
+                if (count > 0) {
+                    deleteBtn.style.display = 'inline-block';
+                    countSpan.textContent = count;
+                } else {
+                    deleteBtn.style.display = 'none';
+                }
+            }
+        }
+
+        // Delete selected documents
+        async function deleteSelectedDocuments() {
+            const count = selectedDocumentIds.size;
+            if (count === 0) return;
+
+            if (!confirm(`Are you sure you want to delete ${count} document(s)? This action cannot be undone.`)) {
+                return;
+            }
+
+            const deleteBtn = document.getElementById('delete-selected-btn');
+            if (deleteBtn) {
+                deleteBtn.disabled = true;
+                deleteBtn.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Deleting...';
+            }
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const docId of selectedDocumentIds) {
+                try {
+                    const response = await fetch(`/api/documents/${docId}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                    } else {
+                        errorCount++;
+                        console.error(`Failed to delete document ${docId}`);
+                    }
+                } catch (error) {
+                    errorCount++;
+                    console.error(`Error deleting document ${docId}:`, error);
+                }
+            }
+
+            // Clear selection
+            selectedDocumentIds.clear();
+
+            // Show result message
+            if (errorCount === 0) {
+                showSnackbar(`Successfully deleted ${successCount} document(s)`, 'success');
+            } else {
+                showSnackbar(`Deleted ${successCount} document(s), ${errorCount} failed`, 'warning');
+            }
+
+            // Reload documents and stats
+            await loadDocuments();
+            await loadStats();
+
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteBtn.innerHTML = '<i class="fas fa-trash"></i> Delete Selected (<span id="selected-count">0</span>)';
+                deleteBtn.style.display = 'none';
+            }
         }
 
         // Select and display document details
@@ -399,8 +522,8 @@
             }
         }
 
-        // Search box event listener
-        document.getElementById('search-box').addEventListener('input', filterDocuments);
+        // Search box event listener - client-side search within current page
+        document.getElementById('search-box').addEventListener('input', searchDocuments);
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function () {

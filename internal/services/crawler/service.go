@@ -8,10 +8,12 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 
@@ -39,6 +41,13 @@ type Service struct {
 	queue       *URLQueue
 	retryPolicy *RetryPolicy
 	workerPool  *workers.Pool
+
+	// Browser pool for chromedp (reusable browser instances)
+	browserPool      []context.Context
+	browserCancels   []context.CancelFunc
+	allocatorCancels []context.CancelFunc
+	browserPoolMu    sync.Mutex
+	browserPoolSize  int
 
 	activeJobs map[string]*CrawlJob
 	jobResults map[string][]*CrawlResult
@@ -80,6 +89,105 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 func (s *Service) Start() error {
 	s.logger.Info().Msg("Crawler service started")
 	return nil
+}
+
+// initBrowserPool creates a pool of reusable browser instances for efficient JavaScript rendering
+// This prevents resource exhaustion from creating a new browser for every URL
+func (s *Service) initBrowserPool(poolSize int) error {
+	s.browserPoolMu.Lock()
+	defer s.browserPoolMu.Unlock()
+
+	s.browserPoolSize = poolSize
+	s.browserPool = make([]context.Context, 0, poolSize)
+	s.browserCancels = make([]context.CancelFunc, 0, poolSize)
+	s.allocatorCancels = make([]context.CancelFunc, 0, poolSize)
+
+	s.logger.Info().
+		Int("pool_size", poolSize).
+		Msg("Initializing browser pool for chromedp")
+
+	for i := 0; i < poolSize; i++ {
+		// Create allocator context (long-lived browser process)
+		allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
+			context.Background(),
+			append(
+				chromedp.DefaultExecAllocatorOptions[:],
+				chromedp.Flag("headless", true),
+				chromedp.Flag("disable-gpu", true),
+				chromedp.Flag("no-sandbox", true),
+				chromedp.Flag("disable-dev-shm-usage", true),
+				chromedp.UserAgent(s.config.Crawler.UserAgent),
+			)...,
+		)
+
+		// Create browser context from allocator
+		browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
+
+		s.browserPool = append(s.browserPool, browserCtx)
+		s.browserCancels = append(s.browserCancels, browserCancel)
+		s.allocatorCancels = append(s.allocatorCancels, allocatorCancel)
+
+		s.logger.Debug().
+			Int("browser_index", i).
+			Msg("Browser instance created in pool")
+	}
+
+	s.logger.Info().
+		Int("browsers_created", len(s.browserPool)).
+		Msg("Browser pool initialized successfully")
+
+	return nil
+}
+
+// getBrowserFromPool returns a browser context from the pool (round-robin)
+func (s *Service) getBrowserFromPool(workerIndex int) (context.Context, context.CancelFunc) {
+	s.browserPoolMu.Lock()
+	defer s.browserPoolMu.Unlock()
+
+	if len(s.browserPool) == 0 {
+		return nil, nil
+	}
+
+	// Use worker index for consistent browser assignment
+	index := workerIndex % len(s.browserPool)
+	return s.browserPool[index], s.browserCancels[index]
+}
+
+// shutdownBrowserPool cleans up all browser instances in the pool
+func (s *Service) shutdownBrowserPool() {
+	s.browserPoolMu.Lock()
+	defer s.browserPoolMu.Unlock()
+
+	s.logger.Info().
+		Int("browser_count", len(s.browserPool)).
+		Msg("Shutting down browser pool")
+
+	// Cancel all browser contexts
+	for i, cancel := range s.browserCancels {
+		if cancel != nil {
+			cancel()
+			s.logger.Debug().
+				Int("browser_index", i).
+				Msg("Browser context cancelled")
+		}
+	}
+
+	// Cancel all allocator contexts
+	for i, cancel := range s.allocatorCancels {
+		if cancel != nil {
+			cancel()
+			s.logger.Debug().
+				Int("browser_index", i).
+				Msg("Browser allocator cancelled")
+		}
+	}
+
+	// Clear the pools
+	s.browserPool = nil
+	s.browserCancels = nil
+	s.allocatorCancels = nil
+
+	s.logger.Info().Msg("Browser pool shut down successfully")
 }
 
 // logToDatabase appends a log entry to the job's database logs with consistent error handling
@@ -499,6 +607,14 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Emit started event
 	s.emitProgress(job)
 
+	// Initialize browser pool if JavaScript rendering is enabled
+	if s.config.Crawler.EnableJavaScript {
+		if err := s.initBrowserPool(config.Concurrency); err != nil {
+			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to initialize browser pool")
+			return "", fmt.Errorf("failed to initialize browser pool: %w", err)
+		}
+	}
+
 	// Start workers
 	s.startWorkers(jobID, config)
 
@@ -682,7 +798,7 @@ func (s *Service) GetRunningJobIDs() []string {
 func (s *Service) startWorkers(jobID string, config CrawlConfig) {
 	for i := 0; i < config.Concurrency; i++ {
 		s.wg.Add(1)
-		go s.workerLoop(jobID, config)
+		go s.workerLoop(jobID, i, config)
 	}
 
 	// Monitor completion
@@ -690,13 +806,14 @@ func (s *Service) startWorkers(jobID string, config CrawlConfig) {
 }
 
 // workerLoop processes URLs from the queue
-func (s *Service) workerLoop(jobID string, config CrawlConfig) {
+func (s *Service) workerLoop(jobID string, workerIndex int, config CrawlConfig) {
 	workerStartTime := time.Now()
 	urlsProcessed := 0
 
 	// Log worker start
 	s.logger.Debug().
 		Str("job_id", jobID).
+		Int("worker_index", workerIndex).
 		Int("concurrency", config.Concurrency).
 		Msg("Worker started")
 
@@ -843,7 +960,7 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 		// Colly applies rate limiting more efficiently per-domain with built-in parallelism control
 
 		// Execute request with retry
-		result := s.executeRequest(item, config)
+		result := s.executeRequest(item, workerIndex, config)
 
 		// Store result
 		s.jobsMu.Lock()
@@ -876,6 +993,23 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 				if mdStr, ok := md.(string); ok {
 					markdown = mdStr
 				}
+			}
+
+			// Log markdown extraction status
+			if markdown != "" {
+				s.logger.Info().
+					Str("job_id", jobID).
+					Str("url", item.URL).
+					Int("markdown_length", len(markdown)).
+					Msg("Markdown extracted successfully from page")
+			} else {
+				s.logger.Warn().
+					Str("job_id", jobID).
+					Str("url", item.URL).
+					Msg("Markdown is empty - document will NOT be saved (check OnlyMainContent setting and page structure)")
+
+				// Persist warning to database
+				s.logToDatabase(jobID, "warn", fmt.Sprintf("Empty markdown from %s - document not saved", item.URL))
 			}
 
 			// Only save document if markdown is non-empty
@@ -1078,7 +1212,7 @@ func (s *Service) workerLoop(jobID string, config CrawlConfig) {
 }
 
 // executeRequest wraps makeRequest with retry policy
-func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlResult {
+func (s *Service) executeRequest(item *URLQueueItem, workerIndex int, config CrawlConfig) *CrawlResult {
 	startTime := time.Now()
 
 	// Extract job ID for logging
@@ -1094,11 +1228,12 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 		Str("job_id", jobID).
 		Str("url", item.URL).
 		Int("depth", item.Depth).
+		Int("worker_index", workerIndex).
 		Int("attempt", item.Attempts+1).
 		Msg("Starting request with retry policy")
 
 	statusCode, err := s.retryPolicy.ExecuteWithRetry(s.ctx, s.logger, func() (int, error) {
-		return s.makeRequest(item, config)
+		return s.makeRequest(item, workerIndex, config)
 	})
 
 	duration := time.Since(startTime)
@@ -1161,8 +1296,8 @@ func (s *Service) executeRequest(item *URLQueueItem, config CrawlConfig) *CrawlR
 	return result
 }
 
-// makeRequest performs HTML scraping using Colly-based HTMLScraper
-func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, error) {
+// makeRequest performs HTML scraping using chromedp-based HTMLScraper with browser pooling
+func (s *Service) makeRequest(item *URLQueueItem, workerIndex int, config CrawlConfig) (int, error) {
 	startTime := time.Now()
 
 	// Extract HTTP client and cookies for auth
@@ -1269,10 +1404,38 @@ func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, erro
 	}
 
 	// Create HTMLScraper instance with merged config
-	scraper := NewHTMLScraper(scraperConfig, s.logger, client, cookies)
+	var scraper *HTMLScraper
+
+	// Use browser pool if JavaScript rendering is enabled
+	if s.config.Crawler.EnableJavaScript {
+		browserCtx, browserCancel := s.getBrowserFromPool(workerIndex)
+		if browserCtx != nil {
+			scraper = NewHTMLScraperWithBrowser(scraperConfig, s.logger, client, cookies, browserCtx, browserCancel)
+			s.logger.Debug().
+				Str("url", item.URL).
+				Int("worker_index", workerIndex).
+				Msg("Using pooled browser for scraping")
+		} else {
+			// Fallback if pool not initialized
+			scraper = NewHTMLScraper(scraperConfig, s.logger, client, cookies)
+			s.logger.Warn().
+				Str("url", item.URL).
+				Msg("Browser pool not available, creating new browser instance")
+		}
+	} else {
+		// JavaScript disabled, use regular scraper
+		scraper = NewHTMLScraper(scraperConfig, s.logger, client, cookies)
+	}
 
 	// Execute scraping
 	scrapeResult, err := scraper.ScrapeURL(s.ctx, item.URL)
+
+	// DIAGNOSTIC: Log immediately after ScrapeURL returns
+	s.logger.Debug().Str("url", item.URL).Msg("DIAGNOSTIC: ScrapeURL returned")
+
+	// DIAGNOSTIC: Check if err is nil before accessing it
+	s.logger.Debug().Str("url", item.URL).Bool("err_is_nil", err == nil).Msg("DIAGNOSTIC: Checking err")
+
 	if err != nil {
 		// Check if context was cancelled
 		if err == context.Canceled || err == context.DeadlineExceeded {
@@ -1283,8 +1446,44 @@ func (s *Service) makeRequest(item *URLQueueItem, config CrawlConfig) (int, erro
 		return 0, fmt.Errorf("scraping failed: %w", err)
 	}
 
-	// Convert ScrapeResult to CrawlResult-compatible format
-	crawlResult := scrapeResult.ToCrawlResult()
+	// DIAGNOSTIC: Check if scrapeResult is nil before accessing it
+	s.logger.Debug().Str("url", item.URL).Bool("result_is_nil", scrapeResult == nil).Msg("DIAGNOSTIC: Checking scrapeResult")
+
+	// Log scrape result details before conversion
+	s.logger.Debug().
+		Str("url", item.URL).
+		Bool("success", scrapeResult.Success).
+		Int("status", scrapeResult.StatusCode).
+		Int("html_length", len(scrapeResult.RawHTML)).
+		Int("markdown_length", len(scrapeResult.Markdown)).
+		Int("links_count", len(scrapeResult.Links)).
+		Msg("About to convert ScrapeResult to CrawlResult")
+
+	// Convert ScrapeResult to CrawlResult-compatible format with panic recovery
+	var crawlResult *CrawlResult
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger.Error().
+					Str("url", item.URL).
+					Str("panic", fmt.Sprintf("%v", r)).
+					Str("stack", string(debug.Stack())).
+					Msg("PANIC in ToCrawlResult()")
+			}
+		}()
+		crawlResult = scrapeResult.ToCrawlResult()
+	}()
+
+	if crawlResult == nil {
+		s.logger.Error().Str("url", item.URL).Msg("ToCrawlResult returned nil")
+		return 0, fmt.Errorf("result conversion failed")
+	}
+
+	s.logger.Debug().
+		Str("url", item.URL).
+		Int("body_length", len(crawlResult.Body)).
+		Int("metadata_keys", len(crawlResult.Metadata)).
+		Msg("Successfully converted to CrawlResult")
 
 	// Check for scraper failures (Comment 3)
 	if !scrapeResult.Success || crawlResult.Error != "" {
@@ -1477,17 +1676,26 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 		allLinks = s.extractLinksFromHTML(html, parent.URL)
 	}
 
-	// Log all discovered links for debugging
+	// Log discovered links summary with samples
 	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" && len(allLinks) > 0 {
-		s.logger.Debug().
+		s.logger.Info().
 			Str("job_id", jobID).
 			Str("parent_url", parent.URL).
-			Int("count", len(allLinks)).
-			Msg("Extracted links from page")
+			Int("total_discovered", len(allLinks)).
+			Msg("Discovered links from page")
 
-		// Log each discovered URL
-		for i, link := range allLinks {
-			s.logToDatabase(jobID, "debug", fmt.Sprintf("Discovered link %d/%d: %s", i+1, len(allLinks), link))
+		// Log sample of discovered URLs (first 5)
+		sampleSize := 5
+		if len(allLinks) < sampleSize {
+			sampleSize = len(allLinks)
+		}
+
+		s.logToDatabase(jobID, "info", fmt.Sprintf("Discovered %d links from %s (showing first %d):", len(allLinks), parent.URL, sampleSize))
+		for i := 0; i < sampleSize; i++ {
+			s.logToDatabase(jobID, "info", fmt.Sprintf("  - %s", allLinks[i]))
+		}
+		if len(allLinks) > sampleSize {
+			s.logToDatabase(jobID, "info", fmt.Sprintf("  ... and %d more links", len(allLinks)-sampleSize))
 		}
 	}
 
@@ -1577,6 +1785,22 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 				"after_pattern_filter": len(links),
 				"source_type":          sourceType,
 			})
+		}
+
+		// Log sample of filtered links that WILL be followed (first 5)
+		if len(links) > 0 {
+			sampleSize := 5
+			if len(links) < sampleSize {
+				sampleSize = len(links)
+			}
+
+			s.logToDatabase(jobID, "info", fmt.Sprintf("Will follow %d filtered links from %s (showing first %d):", len(links), parent.URL, sampleSize))
+			for i := 0; i < sampleSize; i++ {
+				s.logToDatabase(jobID, "info", fmt.Sprintf("  -> %s", links[i]))
+			}
+			if len(links) > sampleSize {
+				s.logToDatabase(jobID, "info", fmt.Sprintf("  ... and %d more links to follow", len(links)-sampleSize))
+			}
 		}
 	}
 
@@ -2394,6 +2618,9 @@ func (s *Service) Shutdown() error {
 	s.queue.Close()
 	s.wg.Wait()
 
+	// Shutdown browser pool
+	s.shutdownBrowserPool()
+
 	// Clean up all per-job HTTP clients
 	s.jobsMu.Lock()
 	clientCount := len(s.jobClients)
@@ -2431,7 +2658,7 @@ func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, e
 		Timeout: 30 * time.Second,
 	}
 
-	// Parse base URL and set cookies
+	// Parse base URL for fallback
 	baseURL, err := url.Parse(authCreds.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
@@ -2443,21 +2670,54 @@ func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, e
 		return nil, fmt.Errorf("failed to unmarshal cookies: %w", err)
 	}
 
-	// Convert to http.Cookie
-	httpCookies := make([]*http.Cookie, 0, len(cookies))
+	// Group cookies by domain to set them with appropriate URLs
+	// This ensures cookie jar accepts cookies based on their declared domain
+	cookiesByDomain := make(map[string][]*http.Cookie)
 	for _, c := range cookies {
-		httpCookies = append(httpCookies, &http.Cookie{
+		// Calculate expiration time
+		// If expiration is 0 or in the past, treat as session cookie (no expiration)
+		// This prevents cookie jar from rejecting cookies with zero/invalid timestamps
+		var expires time.Time
+		if c.Expires > 0 {
+			expires = time.Unix(c.Expires, 0)
+			// If cookie expired more than a day ago, treat as session cookie
+			if expires.Before(time.Now().Add(-24 * time.Hour)) {
+				expires = time.Time{} // Zero value = session cookie
+			}
+		}
+		// Zero time.Time = session cookie (no expiration)
+
+		httpCookie := &http.Cookie{
 			Name:     c.Name,
 			Value:    c.Value,
 			Domain:   c.Domain,
 			Path:     c.Path,
-			Expires:  time.Unix(c.Expires, 0),
+			Expires:  expires,
 			Secure:   c.Secure,
 			HttpOnly: c.HTTPOnly,
-		})
+		}
+
+		// Use cookie's domain, removing leading dot if present
+		domain := strings.TrimPrefix(c.Domain, ".")
+		if domain == "" {
+			domain = baseURL.Host // Fallback to base URL host
+		}
+
+		cookiesByDomain[domain] = append(cookiesByDomain[domain], httpCookie)
 	}
 
-	client.Jar.SetCookies(baseURL, httpCookies)
+	// Set cookies for each domain using a URL that matches that domain
+	for domain, domainCookies := range cookiesByDomain {
+		// Build URL for this domain (always use https for Atlassian)
+		domainURL, err := url.Parse(fmt.Sprintf("https://%s/", domain))
+		if err != nil {
+			// Log warning and skip this domain
+			continue
+		}
+
+		// Set cookies for this domain
+		client.Jar.SetCookies(domainURL, domainCookies)
+	}
 
 	return client, nil
 }

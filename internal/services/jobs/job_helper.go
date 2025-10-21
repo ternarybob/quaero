@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -96,9 +97,9 @@ func StartCrawlJob(
 		MaxPages:    jobCrawlConfig.MaxPages,
 		Concurrency: jobCrawlConfig.Concurrency,
 		FollowLinks: jobCrawlConfig.FollowLinks,
-		// Filtering patterns always come from job config
-		IncludePatterns: jobCrawlConfig.IncludePatterns,
-		ExcludePatterns: jobCrawlConfig.ExcludePatterns,
+		// Filtering patterns will be populated from source configuration below
+		IncludePatterns: []string{},
+		ExcludePatterns: []string{},
 		// Source-level defaults for unspecified values
 		RateLimit:     time.Duration(source.CrawlConfig.RateLimit) * time.Millisecond,
 		DetailLevel:   "full",
@@ -118,23 +119,30 @@ func StartCrawlJob(
 	}
 	// Note: FollowLinks defaults to false, so we use job config value directly
 
-	// 5a. Extract filters from source if present and job config doesn't override
+	// 5a. Extract filters from source configuration (filters are source-level only)
 	if source.Filters != nil && len(source.Filters) > 0 {
 		// Extract include_patterns from source
 		if includeVal, ok := source.Filters["include_patterns"]; ok && includeVal != nil {
 			if includeStr, ok := includeVal.(string); ok && includeStr != "" {
 				// Parse comma-delimited patterns
 				patterns := strings.Split(includeStr, ",")
-				var cleanedPatterns []string
+				var cleanedKeywords []string
 				for _, pattern := range patterns {
 					trimmed := strings.TrimSpace(pattern)
 					if trimmed != "" {
-						cleanedPatterns = append(cleanedPatterns, trimmed)
+						cleanedKeywords = append(cleanedKeywords, trimmed)
 					}
 				}
-				// Only use source filters if job config didn't specify any
-				if len(crawlerConfig.IncludePatterns) == 0 && len(cleanedPatterns) > 0 {
-					crawlerConfig.IncludePatterns = cleanedPatterns
+				// Convert keywords to regex patterns
+				regexPatterns := convertKeywordsToRegex(cleanedKeywords, logger)
+
+				if len(regexPatterns) > 0 {
+					crawlerConfig.IncludePatterns = regexPatterns
+					logger.Info().
+						Str("source_id", source.ID).
+						Strs("keywords", cleanedKeywords).
+						Strs("regex_patterns", regexPatterns).
+						Msg("Converted source include keywords to regex patterns")
 				}
 			}
 		}
@@ -144,16 +152,23 @@ func StartCrawlJob(
 			if excludeStr, ok := excludeVal.(string); ok && excludeStr != "" {
 				// Parse comma-delimited patterns
 				patterns := strings.Split(excludeStr, ",")
-				var cleanedPatterns []string
+				var cleanedKeywords []string
 				for _, pattern := range patterns {
 					trimmed := strings.TrimSpace(pattern)
 					if trimmed != "" {
-						cleanedPatterns = append(cleanedPatterns, trimmed)
+						cleanedKeywords = append(cleanedKeywords, trimmed)
 					}
 				}
-				// Only use source filters if job config didn't specify any
-				if len(crawlerConfig.ExcludePatterns) == 0 && len(cleanedPatterns) > 0 {
-					crawlerConfig.ExcludePatterns = cleanedPatterns
+				// Convert keywords to regex patterns
+				regexPatterns := convertKeywordsToRegex(cleanedKeywords, logger)
+
+				if len(regexPatterns) > 0 {
+					crawlerConfig.ExcludePatterns = regexPatterns
+					logger.Info().
+						Str("source_id", source.ID).
+						Strs("keywords", cleanedKeywords).
+						Strs("regex_patterns", regexPatterns).
+						Msg("Converted source exclude keywords to regex patterns")
 				}
 			}
 		}
@@ -165,7 +180,7 @@ func StartCrawlJob(
 			Int("exclude_patterns_count", len(crawlerConfig.ExcludePatterns)).
 			Strs("include_patterns", crawlerConfig.IncludePatterns).
 			Strs("exclude_patterns", crawlerConfig.ExcludePatterns).
-			Msg("Extracted filters from source configuration")
+			Msg("Extracted and converted filters from source configuration")
 	}
 
 	// 6. Log detailed crawler configuration for debugging
@@ -218,19 +233,16 @@ func StartCrawlJob(
 		concurrencySource = "default"
 	}
 
+	// Filters always come from source configuration
 	var includePatternsSource string
-	if len(jobCrawlConfig.IncludePatterns) > 0 {
-		includePatternsSource = "job"
-	} else if len(crawlerConfig.IncludePatterns) > 0 {
+	if len(crawlerConfig.IncludePatterns) > 0 {
 		includePatternsSource = "source"
 	} else {
 		includePatternsSource = "none"
 	}
 
 	var excludePatternsSource string
-	if len(jobCrawlConfig.ExcludePatterns) > 0 {
-		excludePatternsSource = "job"
-	} else if len(crawlerConfig.ExcludePatterns) > 0 {
+	if len(crawlerConfig.ExcludePatterns) > 0 {
 		excludePatternsSource = "source"
 	} else {
 		excludePatternsSource = "none"
@@ -357,4 +369,44 @@ func generateSeedURLs(source *models.SourceConfig, logger arbor.ILogger) ([]stri
 		Msg("Using base URL as single starting point for crawl")
 
 	return []string{normalizedURL}, nil
+}
+
+// convertKeywordsToRegex converts simple comma-delimited keywords to regex patterns
+// If a pattern already looks like regex (contains regex metacharacters), it's used as-is
+// Otherwise, simple keywords are converted to substring matching patterns
+func convertKeywordsToRegex(keywords []string, logger arbor.ILogger) []string {
+	regexPatterns := make([]string, 0, len(keywords))
+
+	for _, keyword := range keywords {
+		if keyword == "" {
+			continue
+		}
+
+		// Check if pattern already looks like regex (contains regex metacharacters)
+		isRegex := strings.ContainsAny(keyword, ".+*?[]{}()^$|\\")
+
+		if isRegex {
+			// Validate the regex
+			_, err := regexp.Compile(keyword)
+			if err != nil {
+				// Invalid regex, treat as literal keyword
+				logger.Warn().
+					Str("keyword", keyword).
+					Err(err).
+					Msg("Invalid regex pattern, treating as literal keyword")
+				escapedKeyword := regexp.QuoteMeta(keyword)
+				regexPatterns = append(regexPatterns, ".*"+escapedKeyword+".*")
+			} else {
+				// Valid regex, use as-is
+				regexPatterns = append(regexPatterns, keyword)
+			}
+		} else {
+			// Simple keyword, convert to substring matching pattern
+			// Escape any special characters and wrap in .*pattern.*
+			escapedKeyword := regexp.QuoteMeta(keyword)
+			regexPatterns = append(regexPatterns, ".*"+escapedKeyword+".*")
+		}
+	}
+
+	return regexPatterns
 }

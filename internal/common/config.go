@@ -170,6 +170,8 @@ type CrawlerConfig struct {
 	UseHTMLSeeds              bool          `toml:"use_html_seeds"`               // Use HTML page URLs instead of REST API endpoints for seed URLs
 	AllowedContentTypes       []string      `toml:"allowed_content_types"`        // Comment 5: Whitelist of allowed content types (e.g., "text/html", "application/json")
 	EnableEmptyOutputFallback bool          `toml:"enable_empty_output_fallback"` // Apply HTML stripping fallback when HTML→MD conversion produces empty output (default: true)
+	EnableJavaScript          bool          `toml:"enable_javascript"`            // Enable JavaScript rendering with chromedp (default: true for SPAs like Jira)
+	JavaScriptWaitTime        time.Duration `toml:"javascript_wait_time"`         // Time to wait for JavaScript to render (default: 3s)
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -268,6 +270,8 @@ func NewDefaultConfig() *Config {
 			UseHTMLSeeds:              true,                                      // Default to HTML page URLs for seed generation
 			AllowedContentTypes:       []string{"text/html", "application/json"}, // Comment 5: Allow HTML and JSON for Jira/Confluence APIs
 			EnableEmptyOutputFallback: true,                                      // Apply HTML stripping fallback when conversion produces empty output
+			EnableJavaScript:          true,                                      // Enable JavaScript rendering for SPAs like Jira
+			JavaScriptWaitTime:        3 * time.Second,                           // Wait 3 seconds for JavaScript to render
 		},
 	}
 }

@@ -53,7 +53,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
-	mux.HandleFunc("/api/documents/", s.app.DocumentHandler.ReprocessDocumentHandler) // Handles /api/documents/{id}/reprocess
+	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes) // Handles /api/documents/{id} and subpaths
 
 	// API routes - Chat (RAG-enabled chat)
 	mux.HandleFunc("/api/chat", s.app.ChatHandler.ChatHandler)
@@ -251,3 +251,25 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 }
 
 // NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup
+
+// handleDocumentRoutes routes document-related requests to the appropriate handler
+func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// POST /api/documents/{id}/reprocess
+	if r.Method == "POST" && len(path) > len("/api/documents/") {
+		pathSuffix := path[len("/api/documents/"):]
+		if len(pathSuffix) > 10 && pathSuffix[len(pathSuffix)-10:] == "/reprocess" {
+			s.app.DocumentHandler.ReprocessDocumentHandler(w, r)
+			return
+		}
+	}
+
+	// DELETE /api/documents/{id}
+	if r.Method == "DELETE" && len(path) > len("/api/documents/") {
+		s.app.DocumentHandler.DeleteDocumentHandler(w, r)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}

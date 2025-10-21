@@ -8,103 +8,28 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/chromedp"
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/gocolly/colly/v2"
-	"github.com/gocolly/colly/v2/extensions"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 )
 
-// HTMLScraper provides Firecrawl-inspired HTML scraping with Colly v2
+// HTMLScraper provides JavaScript-enabled HTML scraping with chromedp
 type HTMLScraper struct {
-	collector  *colly.Collector
-	config     common.CrawlerConfig
-	logger     arbor.ILogger
-	httpClient *http.Client
-	cookies    []*http.Cookie
+	config        common.CrawlerConfig
+	logger        arbor.ILogger
+	httpClient    *http.Client
+	cookies       []*http.Cookie
+	browserCtx    context.Context // Optional: reusable browser context from pool
+	browserCancel context.CancelFunc
 }
 
-// contextAwareTransport wraps an http.RoundTripper to support context cancellation
-type contextAwareTransport struct {
-	base http.RoundTripper
-	ctx  context.Context
-}
-
-// RoundTrip implements http.RoundTripper with context cancellation support
-func (t *contextAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Check if context is already cancelled before starting request
-	select {
-	case <-t.ctx.Done():
-		return nil, t.ctx.Err()
-	default:
-	}
-
-	// Clone request with context to enable in-flight cancellation
-	req = req.WithContext(t.ctx)
-
-	// Delegate to underlying transport
-	return t.base.RoundTrip(req)
-}
-
-// NewHTMLScraper creates a new HTML scraper with Colly and markdown conversion
+// NewHTMLScraper creates a new HTML scraper with chromedp and markdown conversion
 func NewHTMLScraper(config common.CrawlerConfig, logger arbor.ILogger, httpClient *http.Client, cookies []*http.Cookie) *HTMLScraper {
-	// Create Colly collector with Firecrawl-inspired options
-	collectorOpts := []colly.CollectorOption{
-		colly.Async(true),
-		colly.MaxDepth(config.MaxDepth),
-		colly.UserAgent(config.UserAgent),
-	}
-
-	// Add IgnoreRobotsTxt if configured to ignore robots.txt
-	if !config.FollowRobotsTxt {
-		collectorOpts = append(collectorOpts, colly.IgnoreRobotsTxt())
-	}
-
-	c := colly.NewCollector(collectorOpts...)
-
-	// Configure MaxBodySize after collector creation (Comment 4)
-	c.MaxBodySize = config.MaxBodySize
-
-	// Configure request timeout
-	c.SetRequestTimeout(config.RequestTimeout)
-
-	// Apply rate limiting
-	err := c.Limit(&colly.LimitRule{
-		DomainGlob:  "*",
-		Parallelism: config.MaxConcurrency,
-		Delay:       config.RequestDelay,
-		RandomDelay: config.RandomDelay,
-	})
-	if err != nil {
-		logger.Warn().Err(err).Msg("Failed to set rate limit on collector")
-	}
-
-	// Apply user agent rotation and referer if enabled
-	if config.UserAgentRotation {
-		extensions.RandomUserAgent(c)
-		extensions.Referer(c)
-	}
-
-	// Use custom HTTP client if provided
-	if httpClient != nil {
-		// Attach CookieJar for full cookie lifecycle management (Comment 3)
-		// This ensures cookies are persisted across redirects and subrequests.
-		// We still seed initial cookies via setupCookies() for explicit auth data.
-		if httpClient.Jar != nil {
-			c.SetCookieJar(httpClient.Jar)
-		}
-
-		// Use custom transport if provided
-		if httpClient.Transport != nil {
-			c.WithTransport(httpClient.Transport)
-		}
-	}
-
 	return &HTMLScraper{
-		collector:  c,
 		config:     config,
 		logger:     logger,
 		httpClient: httpClient,
@@ -112,7 +37,20 @@ func NewHTMLScraper(config common.CrawlerConfig, logger arbor.ILogger, httpClien
 	}
 }
 
-// ScrapeURL scrapes a single URL and returns Firecrawl-style results
+// NewHTMLScraperWithBrowser creates a scraper with a pre-allocated browser context
+// This is more efficient for scraping multiple URLs as it reuses the same browser instance
+func NewHTMLScraperWithBrowser(config common.CrawlerConfig, logger arbor.ILogger, httpClient *http.Client, cookies []*http.Cookie, browserCtx context.Context, browserCancel context.CancelFunc) *HTMLScraper {
+	return &HTMLScraper{
+		config:        config,
+		logger:        logger,
+		httpClient:    httpClient,
+		cookies:       cookies,
+		browserCtx:    browserCtx,
+		browserCancel: browserCancel,
+	}
+}
+
+// ScrapeURL scrapes a single URL with JavaScript rendering and returns results
 func (s *HTMLScraper) ScrapeURL(ctx context.Context, targetURL string) (*ScrapeResult, error) {
 	startTime := time.Now()
 
@@ -124,327 +62,423 @@ func (s *HTMLScraper) ScrapeURL(ctx context.Context, targetURL string) (*ScrapeR
 		Metadata:  make(map[string]interface{}),
 	}
 
-	// Clone collector to avoid handler accumulation (Comment 1)
-	c := s.collector.Clone()
+	// Determine which browser context to use
+	var browserCtx context.Context
+	var browserCancel context.CancelFunc
+	var allocatorCancel context.CancelFunc
+	var shouldDeferCancel bool = false
 
-	// Apply context-aware transport for in-flight cancellation (Comment 2)
-	// Get base transport from httpClient or use default
-	baseTransport := http.DefaultTransport
-	if s.httpClient != nil && s.httpClient.Transport != nil {
-		baseTransport = s.httpClient.Transport
+	if s.browserCtx != nil {
+		// Use pre-allocated browser from pool (efficient for multiple URLs)
+		browserCtx = s.browserCtx
+		s.logger.Debug().Str("url", targetURL).Msg("Using pooled browser context")
+	} else {
+		// Create new browser instance (fallback for compatibility)
+		var allocatorCtx context.Context
+		allocatorCtx, allocatorCancel = chromedp.NewExecAllocator(
+			context.Background(),
+			append(
+				chromedp.DefaultExecAllocatorOptions[:],
+				chromedp.Flag("headless", true),
+				chromedp.Flag("disable-gpu", true),
+				chromedp.Flag("no-sandbox", true),
+				chromedp.Flag("disable-dev-shm-usage", true),
+				chromedp.UserAgent(s.config.UserAgent),
+			)...,
+		)
+		shouldDeferCancel = true
+
+		// Create browser context from allocator
+		browserCtx, browserCancel = chromedp.NewContext(allocatorCtx)
+		s.logger.Debug().Str("url", targetURL).Msg("Created new browser instance (not pooled)")
 	}
-	// Wrap transport with context-aware wrapper
-	contextTransport := &contextAwareTransport{
-		base: baseTransport,
-		ctx:  ctx,
+
+	// Cleanup if we created a new browser (not from pool)
+	if shouldDeferCancel {
+		defer func() {
+			if browserCancel != nil {
+				browserCancel()
+			}
+			if allocatorCancel != nil {
+				allocatorCancel()
+			}
+		}()
 	}
-	c.WithTransport(contextTransport)
 
-	// Create markdown converter with base URL for relative links (Comment 4)
-	mdConverter := md.NewConverter(targetURL, true, nil)
+	// Determine context for chromedp operations
+	// For pooled browsers, use the browser context directly to avoid cancellation issues
+	// For new browsers, apply request timeout
+	var chromedpCtx context.Context
+	var chromedpCancel context.CancelFunc
 
-	// Error channel for async error handling
-	errChan := make(chan error, 1)
+	if s.browserCtx != nil {
+		// Using pooled browser - use browser context directly without timeout wrapper
+		// The pool manages the lifecycle, and individual request timeouts could interfere
+		chromedpCtx = browserCtx
+		chromedpCancel = nil
+		s.logger.Debug().Str("url", targetURL).Msg("Using pooled browser context without timeout wrapper")
+	} else {
+		// Using new browser - apply request timeout as before
+		chromedpCtx, chromedpCancel = context.WithTimeout(browserCtx, s.config.RequestTimeout)
+		defer chromedpCancel()
+		s.logger.Debug().Str("url", targetURL).Msg("Using new browser with timeout wrapper")
+	}
 
-	// Track context cancellation (Comment 2)
-	var cancelled atomic.Bool
+	// Apply configured cookies to browser context
+	if err := s.setupCookies(browserCtx, targetURL); err != nil {
+		s.logger.Warn().Err(err).Str("url", targetURL).Msg("Failed to setup cookies")
+	}
 
-	// Setup cookies - check for cookie jar first (Comment 7)
-	s.setupCookies(c, targetURL)
+	// Navigate to URL and wait for JavaScript rendering
+	var htmlContent string
+	var statusCode int64
+	var responseHeaders map[string]interface{}
 
-	// Register OnRequest callback with context cancellation check (Comment 2)
-	c.OnRequest(func(r *colly.Request) {
-		// Check if context was cancelled
-		if ctx.Err() != nil {
-			cancelled.Store(true)
-			r.Abort()
-			return
-		}
+	err := chromedp.Run(chromedpCtx,
+		chromedp.Navigate(targetURL),
+		chromedp.Sleep(s.config.JavaScriptWaitTime), // Wait for JavaScript to render
+		chromedp.OuterHTML("html", &htmlContent),
+		chromedp.Evaluate(`({
+			statusCode: window.performance?.getEntriesByType?.('navigation')?.[0]?.responseStatus || 200,
+			headers: {}
+		})`, &responseHeaders),
+	)
 
-		// Set additional headers
-		r.Headers.Set("Accept-Language", "en-US,en;q=0.9")
-		r.Headers.Set("Accept-Encoding", "gzip, deflate")
-
-		s.logger.Debug().
-			Str("url", r.URL.String()).
-			Int("depth", r.Depth).
-			Msg("Scraping URL")
-	})
-
-	// Register OnError callback to populate result (Comment 3)
-	c.OnError(func(r *colly.Response, err error) {
-		result.Error = err.Error()
-		result.Success = false
-		if r != nil && r.StatusCode > 0 {
-			result.StatusCode = r.StatusCode
-		}
-
-		s.logger.Error().
-			Err(err).
-			Str("url", r.Request.URL.String()).
-			Int("status_code", r.StatusCode).
-			Msg("Scraping error")
-
-		// Send error to channel
-		select {
-		case errChan <- err:
-		default:
-		}
-	})
-
-	// Register OnResponse callback with Content-Type checking (Comment 5)
-	c.OnResponse(func(r *colly.Response) {
-		s.captureResponseHeaders(r, result)
-	})
-
-	// Register OnHTML callback to extract content (Comment 6 - using helpers)
-	c.OnHTML("html", func(e *colly.HTMLElement) {
-		// Extract and populate metadata
-		s.extractAndPopulateMetadata(e, result)
-
-		// Convert content to markdown
-		s.convertContentToMarkdown(e, targetURL, mdConverter, result)
-
-		// Store cleaned HTML if configured
-		s.storeCleanHTML(e, result)
-
-		// Extract plain text
-		s.extractPlainText(e, result)
-
-		// Extract links for result
-		s.extractLinksForResult(e, targetURL, result)
-
-		// Set success flag if content extraction completed without errors (Comment 5)
-		if result.Error == "" {
-			result.Success = (result.StatusCode >= 200 && result.StatusCode < 300)
-		}
-	})
-
-	// Start context cancellation watcher goroutine (Comment 2)
-	// The contextAwareTransport wrapper now handles in-flight request cancellation
-	// This goroutine sets the cancelled flag for post-processing checks
-	go func() {
-		<-ctx.Done()
-		cancelled.Store(true)
-	}()
-
-	// Visit the URL
-	err := c.Visit(targetURL)
 	if err != nil {
 		result.Error = err.Error()
 		result.Success = false
-		errChan <- err
+		s.logger.Error().Err(err).Str("url", targetURL).Msg("Failed to scrape URL with chromedp")
+		return result, err
 	}
 
-	// Wait for completion
-	c.Wait()
+	// Extract status code from response
+	if sc, ok := responseHeaders["statusCode"].(float64); ok {
+		statusCode = int64(sc)
+	} else {
+		statusCode = 200 // Default to 200 if we got HTML
+	}
+
+	result.StatusCode = int(statusCode)
+	result.RawHTML = htmlContent
+	result.Success = statusCode >= 200 && statusCode < 300
+
+	s.logger.Debug().
+		Str("url", targetURL).
+		Int("status", int(statusCode)).
+		Int("html_length", len(htmlContent)).
+		Msg("Successfully scraped URL with JavaScript rendering")
+
+	// Extract metadata
+	if s.config.IncludeMetadata {
+		metadata := s.extractMetadataFromHTML(htmlContent, targetURL)
+		result.Metadata = metadata
+
+		// Populate top-level fields
+		if title, ok := metadata["title"].(string); ok {
+			result.Title = title
+		}
+		if desc, ok := metadata["description"].(string); ok {
+			result.Description = desc
+		}
+		if lang, ok := metadata["language"].(string); ok {
+			result.Language = lang
+		}
+	}
+
+	// Convert to markdown
+	if s.config.OutputFormat == OutputFormatMarkdown || s.config.OutputFormat == OutputFormatBoth {
+		markdown := s.convertHTMLToMarkdown(htmlContent, targetURL)
+		result.Markdown = markdown
+
+		if markdown == "" {
+			s.logger.Warn().
+				Str("url", targetURL).
+				Int("html_length", len(htmlContent)).
+				Msg("Markdown conversion produced empty result")
+		} else {
+			s.logger.Info().
+				Str("url", targetURL).
+				Int("html_length", len(htmlContent)).
+				Int("markdown_length", len(markdown)).
+				Msg("Successfully converted HTML to markdown")
+		}
+	}
+
+	// Store cleaned HTML if configured
+	if s.config.OutputFormat == OutputFormatHTML || s.config.OutputFormat == OutputFormatBoth {
+		cleanedHTML := s.extractMainContentFromHTML(htmlContent)
+		result.HTML = cleanedHTML
+	}
+
+	// Extract plain text
+	result.TextContent = s.extractPlainTextFromHTML(htmlContent)
+
+	// Extract links
+	if s.config.IncludeLinks {
+		links := s.extractLinksFromHTML(htmlContent, targetURL)
+		result.Links = links
+	}
 
 	// Calculate duration
 	result.Duration = time.Since(startTime)
 
-	// Check for cancellation
-	if cancelled.Load() {
-		result.Error = "context cancelled"
-		result.Success = false
-		return result, context.Canceled
-	}
-
-	// Check for errors
-	select {
-	case err := <-errChan:
-		return result, err
-	default:
-		// Only set generic error if no specific error was captured
-		if !result.Success && result.Error == "" && result.StatusCode > 0 {
-			result.Error = fmt.Sprintf("HTTP status code: %d", result.StatusCode)
-		}
-		return result, nil
-	}
+	return result, nil
 }
 
-// setupCookies handles cookie injection from both cookies slice and http.Client jar (Comment 7)
-func (s *HTMLScraper) setupCookies(c *colly.Collector, targetURL string) {
-	allCookies := make([]*http.Cookie, 0, len(s.cookies))
+// setupCookies applies cookies to chromedp browser context
+func (s *HTMLScraper) setupCookies(ctx context.Context, targetURL string) error {
+	if len(s.cookies) == 0 && (s.httpClient == nil || s.httpClient.Jar == nil) {
+		return nil // No cookies to set
+	}
 
-	// Add explicitly provided cookies
+	// Parse target URL to get domain
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse URL for cookies: %w", err)
+	}
+
+	// Collect all cookies
+	allCookies := make([]*http.Cookie, 0, len(s.cookies))
 	allCookies = append(allCookies, s.cookies...)
 
-	// Check if httpClient has a cookie jar and extract cookies for target URL
+	// Add cookies from httpClient jar if available
 	if s.httpClient != nil && s.httpClient.Jar != nil {
-		parsedURL, err := url.Parse(targetURL)
-		if err == nil {
-			jarCookies := s.httpClient.Jar.Cookies(parsedURL)
-			allCookies = append(allCookies, jarCookies...)
-		} else {
-			s.logger.Warn().Err(err).Str("url", targetURL).Msg("Failed to parse URL for cookie jar extraction")
-		}
+		jarCookies := s.httpClient.Jar.Cookies(parsedURL)
+		allCookies = append(allCookies, jarCookies...)
 	}
 
-	// Set all collected cookies
+	// Convert to chromedp cookie format and apply
 	if len(allCookies) > 0 {
-		c.SetCookies(targetURL, allCookies)
+		// Use chromedp.ActionFunc to set all cookies
+		if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+			for _, c := range allCookies {
+				// Determine domain - use cookie's domain or fall back to URL host
+				domain := c.Domain
+				if domain == "" {
+					domain = parsedURL.Host
+				} else {
+					domain = strings.TrimPrefix(domain, ".") // Remove leading dot
+				}
+
+				// Set cookie using network.SetCookie
+				// Note: chromedp handles cookie expiration internally, so we don't explicitly set WithExpires
+				err := network.SetCookie(c.Name, c.Value).
+					WithDomain(domain).
+					WithPath(c.Path).
+					WithHTTPOnly(c.HttpOnly).
+					WithSecure(c.Secure).
+					Do(ctx)
+
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})); err != nil {
+			return fmt.Errorf("failed to set cookies: %w", err)
+		}
+
+		s.logger.Debug().
+			Int("cookie_count", len(allCookies)).
+			Str("url", targetURL).
+			Msg("Applied cookies to browser context")
 	}
+
+	return nil
 }
 
-// captureResponseHeaders captures response details and checks Content-Type (Comment 5)
-func (s *HTMLScraper) captureResponseHeaders(r *colly.Response, result *ScrapeResult) {
-	result.StatusCode = r.StatusCode
-	result.RawHTML = string(r.Body)
+// extractMetadataFromHTML extracts metadata from raw HTML string
+func (s *HTMLScraper) extractMetadataFromHTML(htmlContent, baseURL string) map[string]interface{} {
+	metadata := make(map[string]interface{})
 
-	// Store response headers in metadata
-	// Note: In Colly v2.2.0, r.Headers is *http.Header (pointer to map), requiring dereferencing
-	headers := make(map[string]string)
-	if r.Headers != nil && len(*r.Headers) > 0 {
-		for key, values := range *r.Headers {
-			if len(values) > 0 {
-				headers[key] = values[0]
+	// Use regex to extract basic metadata (title, description, etc.)
+	// This is a simplified implementation - for production, consider using a proper HTML parser
+
+	// Extract title
+	titleRegex := regexp.MustCompile(`<title[^>]*>(.*?)</title>`)
+	if matches := titleRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		metadata["title"] = strings.TrimSpace(matches[1])
+	}
+
+	// Extract meta description
+	descRegex := regexp.MustCompile(`<meta\s+name=["']description["']\s+content=["']([^"']+)["']`)
+	if matches := descRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		metadata["description"] = matches[1]
+	}
+
+	// Extract language
+	langRegex := regexp.MustCompile(`<html[^>]+lang=["']([^"']+)["']`)
+	if matches := langRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		metadata["language"] = matches[1]
+	}
+
+	// Extract Open Graph tags
+	openGraph := make(map[string]string)
+	ogRegex := regexp.MustCompile(`<meta\s+property=["'](og:[^"']+)["']\s+content=["']([^"']+)["']`)
+	for _, matches := range ogRegex.FindAllStringSubmatch(htmlContent, -1) {
+		if len(matches) > 2 {
+			openGraph[matches[1]] = matches[2]
+		}
+	}
+	if len(openGraph) > 0 {
+		metadata["open_graph"] = openGraph
+	}
+
+	// Extract Twitter Card tags
+	twitterCard := make(map[string]string)
+	twitterRegex := regexp.MustCompile(`<meta\s+name=["'](twitter:[^"']+)["']\s+content=["']([^"']+)["']`)
+	for _, matches := range twitterRegex.FindAllStringSubmatch(htmlContent, -1) {
+		if len(matches) > 2 {
+			twitterCard[matches[1]] = matches[2]
+		}
+	}
+	if len(twitterCard) > 0 {
+		metadata["twitter_card"] = twitterCard
+	}
+
+	// Extract canonical URL
+	canonicalRegex := regexp.MustCompile(`<link\s+rel=["']canonical["']\s+href=["']([^"']+)["']`)
+	if matches := canonicalRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		metadata["canonical_url"] = matches[1]
+	}
+
+	// Extract JSON-LD
+	jsonLDRegex := regexp.MustCompile(`<script\s+type=["']application/ld\+json["'][^>]*>(.*?)</script>`)
+	jsonLDScripts := []interface{}{}
+	for _, matches := range jsonLDRegex.FindAllStringSubmatch(htmlContent, -1) {
+		if len(matches) > 1 {
+			var data interface{}
+			if err := json.Unmarshal([]byte(matches[1]), &data); err == nil {
+				switch v := data.(type) {
+				case []interface{}:
+					jsonLDScripts = append(jsonLDScripts, v...)
+				case map[string]interface{}:
+					jsonLDScripts = append(jsonLDScripts, v)
+				}
 			}
 		}
 	}
-	result.Metadata["headers"] = headers
-
-	// Check Content-Type header (Comment 5: use AllowedContentTypes whitelist)
-	// http.Header.Get() method works on pointer receivers
-	contentType := ""
-	if r.Headers != nil {
-		contentType = r.Headers.Get("Content-Type")
-	}
-	result.Metadata["content_type"] = contentType
-
-	// Check if content type is allowed based on whitelist
-	isAllowed := false
-	if contentType == "" {
-		// Empty content type defaults to HTML (allowed)
-		isAllowed = true
-	} else {
-		// Check against whitelist
-		lowerContentType := strings.ToLower(contentType)
-		for _, allowedType := range s.config.AllowedContentTypes {
-			if strings.HasPrefix(lowerContentType, strings.ToLower(allowedType)) {
-				isAllowed = true
-				break
-			}
-		}
+	if len(jsonLDScripts) > 0 {
+		metadata["json_ld"] = jsonLDScripts
 	}
 
-	if !isAllowed {
-		result.Success = false
-		result.Error = fmt.Sprintf("unsupported content type: %s (allowed: %v)", contentType, s.config.AllowedContentTypes)
+	return metadata
+}
+
+// convertHTMLToMarkdown converts HTML to markdown
+func (s *HTMLScraper) convertHTMLToMarkdown(htmlContent, baseURL string) string {
+	// Extract main content first if configured
+	if s.config.OnlyMainContent {
+		htmlContent = s.extractMainContentFromHTML(htmlContent)
+	}
+
+	// Create markdown converter
+	mdConverter := md.NewConverter(baseURL, true, nil)
+
+	// Convert to markdown
+	markdown, err := mdConverter.ConvertString(htmlContent)
+	if err != nil {
 		s.logger.Warn().
-			Str("url", result.URL).
-			Str("content_type", contentType).
-			Strs("allowed_types", s.config.AllowedContentTypes).
-			Msg("Content type not in whitelist")
-	} else {
-		result.Success = r.StatusCode >= 200 && r.StatusCode < 300
+			Err(err).
+			Str("url", baseURL).
+			Msg("Failed to convert HTML to markdown")
+
+		// Try fallback without main content extraction
+		if s.config.EnableEmptyOutputFallback && s.config.OnlyMainContent {
+			s.logger.Info().Str("url", baseURL).Msg("Retrying markdown conversion without main content extraction")
+			markdown, err = mdConverter.ConvertString(htmlContent)
+			if err != nil {
+				s.logger.Error().Err(err).Str("url", baseURL).Msg("Fallback markdown conversion also failed")
+				return ""
+			}
+		} else {
+			return ""
+		}
 	}
+
+	return markdown
 }
 
-// extractAndPopulateMetadata extracts metadata and populates top-level fields (Comment 6)
-func (s *HTMLScraper) extractAndPopulateMetadata(e *colly.HTMLElement, result *ScrapeResult) {
-	if !s.config.IncludeMetadata {
-		return
+// extractMainContentFromHTML extracts main content from HTML string
+func (s *HTMLScraper) extractMainContentFromHTML(htmlContent string) string {
+	// Try to find main content using regex
+	// Look for <main>, <article>, or role=main
+	// Note: Go regexp doesn't support backreferences, so we try each tag separately
+	mainTagRegex := regexp.MustCompile(`<main[^>]*>(.*?)</main>`)
+	if matches := mainTagRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		s.logger.Debug().Msg("Found <main> content tag")
+		return matches[1]
 	}
 
-	metadata := s.ExtractMetadata(e)
-	result.Metadata = metadata
+	articleTagRegex := regexp.MustCompile(`<article[^>]*>(.*?)</article>`)
+	if matches := articleTagRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		s.logger.Debug().Msg("Found <article> content tag")
+		return matches[1]
+	}
 
-	// Extract top-level fields from metadata
-	if title, ok := metadata["title"].(string); ok {
-		result.Title = title
+	// Try role=main
+	roleMainRegex := regexp.MustCompile(`<[^>]+role=["']main["'][^>]*>(.*?)</[^>]+>`)
+	if matches := roleMainRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		s.logger.Debug().Msg("Found role=main content")
+		return matches[1]
 	}
-	if desc, ok := metadata["description"].(string); ok {
-		result.Description = desc
+
+	// Fallback: extract body and remove boilerplate
+	bodyRegex := regexp.MustCompile(`<body[^>]*>(.*?)</body>`)
+	if matches := bodyRegex.FindStringSubmatch(htmlContent); len(matches) > 1 {
+		body := matches[1]
+
+		// Remove common boilerplate elements
+		// Note: Go regexp doesn't support backreferences, so we remove each tag type separately
+		body = regexp.MustCompile(`<nav[^>]*>.*?</nav>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<header[^>]*>.*?</header>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<footer[^>]*>.*?</footer>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<aside[^>]*>.*?</aside>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<script[^>]*>.*?</script>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<style[^>]*>.*?</style>`).ReplaceAllString(body, "")
+		body = regexp.MustCompile(`<noscript[^>]*>.*?</noscript>`).ReplaceAllString(body, "")
+
+		// Remove ad/promo divs
+		adRegex := regexp.MustCompile(`<div[^>]+(class|id)=["'][^"']*(ad|promo|sidebar)[^"']*["'][^>]*>.*?</div>`)
+		body = adRegex.ReplaceAllString(body, "")
+
+		s.logger.Debug().Msg("Using body with boilerplate removal")
+		return body
 	}
-	if lang, ok := metadata["language"].(string); ok {
-		result.Language = lang
-	}
+
+	// Last resort: return original content
+	s.logger.Warn().Msg("No body tag found, using full HTML")
+	return htmlContent
 }
 
-// convertContentToMarkdown converts HTML to markdown (Comment 6)
-func (s *HTMLScraper) convertContentToMarkdown(e *colly.HTMLElement, targetURL string, mdConverter *md.Converter, result *ScrapeResult) {
-	if s.config.OutputFormat != OutputFormatMarkdown && s.config.OutputFormat != OutputFormatBoth {
-		return
-	}
-
-	htmlContent := s.extractMainContent(e)
-
-	cleanedHTML, err := htmlContent.DOM.Html()
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to extract HTML for markdown conversion")
-		return
-	}
-
-	markdown, err := mdConverter.ConvertString(cleanedHTML)
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to convert HTML to markdown")
-		return
-	}
-
-	result.Markdown = markdown
-}
-
-// storeCleanHTML stores cleaned HTML if configured (Comment 6)
-func (s *HTMLScraper) storeCleanHTML(e *colly.HTMLElement, result *ScrapeResult) {
-	if s.config.OutputFormat != OutputFormatHTML && s.config.OutputFormat != OutputFormatBoth {
-		return
-	}
-
-	htmlContent := s.extractMainContent(e)
-
-	cleanedHTML, err := htmlContent.DOM.Html()
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to extract cleaned HTML")
-		return
-	}
-
-	result.HTML = cleanedHTML
-}
-
-// extractPlainText extracts plain text content (Comment 6)
-func (s *HTMLScraper) extractPlainText(e *colly.HTMLElement, result *ScrapeResult) {
-	result.TextContent = s.ExtractContent(e)
-}
-
-// extractLinksForResult extracts links if configured (Comment 6)
-func (s *HTMLScraper) extractLinksForResult(e *colly.HTMLElement, targetURL string, result *ScrapeResult) {
-	if !s.config.IncludeLinks {
-		return
-	}
-
-	result.Links = s.ExtractLinks(e, targetURL)
-}
-
-// extractMainContent extracts and cleans main content from HTML element
-func (s *HTMLScraper) extractMainContent(e *colly.HTMLElement) *colly.HTMLElement {
-	htmlContent := e.DOM
-
+// extractPlainTextFromHTML extracts plain text from HTML
+func (s *HTMLScraper) extractPlainTextFromHTML(htmlContent string) string {
 	// Extract main content if configured
 	if s.config.OnlyMainContent {
-		// Try to find main content container
-		mainContent := htmlContent.Find("main, article, [role=main]").First()
-		if mainContent.Length() > 0 {
-			// Create new HTMLElement with main content
-			return &colly.HTMLElement{
-				Name:     "main",
-				Text:     "",
-				Request:  e.Request,
-				Response: e.Response,
-				DOM:      mainContent,
-				Index:    0,
-			}
-		}
-
-		// Remove boilerplate elements from full DOM
-		htmlContent.Find("nav, header, footer, aside, script, style, noscript").Remove()
-		htmlContent.Find("[class*=ad], [id*=ad], [class*=promo], [class*=sidebar]").Remove()
+		htmlContent = s.extractMainContentFromHTML(htmlContent)
 	}
 
-	return e
+	// Remove script and style tags
+	// Note: Go regexp doesn't support backreferences, so we remove each tag type separately
+	text := regexp.MustCompile(`<script[^>]*>.*?</script>`).ReplaceAllString(htmlContent, "")
+	text = regexp.MustCompile(`<style[^>]*>.*?</style>`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`<noscript[^>]*>.*?</noscript>`).ReplaceAllString(text, "")
+
+	// Remove HTML tags
+	tagRegex := regexp.MustCompile(`<[^>]+>`)
+	text = tagRegex.ReplaceAllString(text, " ")
+
+	// Decode HTML entities
+	text = s.decodeHTMLEntities(text)
+
+	// Clean whitespace
+	text = s.cleanWhitespace(text)
+
+	return text
 }
 
-// ExtractLinks discovers and extracts links from HTML
-func (s *HTMLScraper) ExtractLinks(htmlElement *colly.HTMLElement, baseURL string) []string {
+// extractLinksFromHTML extracts links from HTML string
+func (s *HTMLScraper) extractLinksFromHTML(htmlContent, baseURL string) []string {
 	parsedBase, err := url.Parse(baseURL)
 	if err != nil {
 		s.logger.Warn().Err(err).Str("base_url", baseURL).Msg("Failed to parse base URL")
@@ -454,44 +488,44 @@ func (s *HTMLScraper) ExtractLinks(htmlElement *colly.HTMLElement, baseURL strin
 	linkMap := make(map[string]bool)
 	links := []string{}
 
-	// Iterate over all anchor tags
-	htmlElement.ForEach("a[href]", func(_ int, el *colly.HTMLElement) {
-		href := el.Attr("href")
-		if href == "" {
-			return
+	// Extract all href attributes
+	hrefRegex := regexp.MustCompile(`<a[^>]+href=["']([^"']+)["']`)
+	for _, matches := range hrefRegex.FindAllStringSubmatch(htmlContent, -1) {
+		if len(matches) > 1 {
+			href := matches[1]
+
+			// Skip unwanted link types
+			if strings.HasPrefix(href, "javascript:") ||
+				strings.HasPrefix(href, "#") ||
+				strings.HasPrefix(href, "mailto:") ||
+				strings.HasPrefix(href, "tel:") {
+				continue
+			}
+
+			// Parse and resolve relative URLs
+			parsedHref, err := url.Parse(href)
+			if err != nil {
+				continue
+			}
+
+			// Resolve relative URLs
+			absoluteURL := parsedBase.ResolveReference(parsedHref)
+
+			// Normalize URL
+			normalizedURL := s.normalizeURL(absoluteURL)
+
+			// Skip file downloads
+			if s.isFileDownload(normalizedURL) {
+				continue
+			}
+
+			// Deduplicate
+			if !linkMap[normalizedURL] {
+				linkMap[normalizedURL] = true
+				links = append(links, normalizedURL)
+			}
 		}
-
-		// Skip unwanted link types
-		if strings.HasPrefix(href, "javascript:") ||
-			strings.HasPrefix(href, "#") ||
-			strings.HasPrefix(href, "mailto:") ||
-			strings.HasPrefix(href, "tel:") {
-			return
-		}
-
-		// Parse and resolve relative URLs
-		parsedHref, err := url.Parse(href)
-		if err != nil {
-			return
-		}
-
-		// Resolve relative URLs
-		absoluteURL := parsedBase.ResolveReference(parsedHref)
-
-		// Normalize URL
-		normalizedURL := s.normalizeURL(absoluteURL)
-
-		// Skip file downloads (configurable list)
-		if s.isFileDownload(normalizedURL) {
-			return
-		}
-
-		// Deduplicate
-		if !linkMap[normalizedURL] {
-			linkMap[normalizedURL] = true
-			links = append(links, normalizedURL)
-		}
-	})
+	}
 
 	s.logger.Debug().
 		Int("total_discovered", len(links)).
@@ -499,140 +533,6 @@ func (s *HTMLScraper) ExtractLinks(htmlElement *colly.HTMLElement, baseURL strin
 		Msg("Extracted links")
 
 	return links
-}
-
-// ExtractContent extracts plain text content from HTML
-func (s *HTMLScraper) ExtractContent(htmlElement *colly.HTMLElement) string {
-	// Get the body element
-	body := htmlElement.DOM.Find("body")
-	if body.Length() == 0 {
-		s.logger.Warn().Msg("No body tag found in HTML")
-		return ""
-	}
-
-	// If only main content is configured, find it
-	if s.config.OnlyMainContent {
-		mainContent := body.Find("main, article, [role=main]").First()
-		if mainContent.Length() > 0 {
-			body = mainContent
-		}
-	}
-
-	// Remove unwanted elements
-	body.Find("script, style, noscript").Remove()
-	body.Find("nav, header, footer, aside").Remove()
-	body.Find("[class*=ad], [id*=ad], [class*=promo]").Remove()
-
-	// Extract text
-	text := body.Text()
-
-	// Clean up whitespace
-	text = s.cleanWhitespace(text)
-
-	return text
-}
-
-// ExtractMetadata extracts page metadata including Open Graph and JSON-LD
-func (s *HTMLScraper) ExtractMetadata(htmlElement *colly.HTMLElement) map[string]interface{} {
-	metadata := make(map[string]interface{})
-
-	// Extract title
-	title := htmlElement.DOM.Find("title").First().Text()
-	if title != "" {
-		metadata["title"] = strings.TrimSpace(title)
-	}
-
-	// Extract standard meta tags
-	htmlElement.ForEach("meta[name]", func(_ int, el *colly.HTMLElement) {
-		name := el.Attr("name")
-		content := el.Attr("content")
-		if name != "" && content != "" {
-			switch strings.ToLower(name) {
-			case "description":
-				metadata["description"] = content
-			case "keywords":
-				metadata["keywords"] = strings.Split(content, ",")
-			case "author":
-				metadata["author"] = content
-			}
-		}
-	})
-
-	// Extract language
-	lang := htmlElement.DOM.Find("html").AttrOr("lang", "")
-	if lang == "" {
-		htmlElement.ForEach("meta[http-equiv='content-language']", func(_ int, el *colly.HTMLElement) {
-			lang = el.Attr("content")
-		})
-	}
-	if lang != "" {
-		metadata["language"] = lang
-	}
-
-	// Extract Open Graph tags
-	openGraph := make(map[string]string)
-	htmlElement.ForEach("meta[property^='og:']", func(_ int, el *colly.HTMLElement) {
-		property := el.Attr("property")
-		content := el.Attr("content")
-		if property != "" && content != "" {
-			openGraph[property] = content
-		}
-	})
-	if len(openGraph) > 0 {
-		metadata["open_graph"] = openGraph
-	}
-
-	// Extract Twitter Card tags
-	twitterCard := make(map[string]string)
-	htmlElement.ForEach("meta[name^='twitter:']", func(_ int, el *colly.HTMLElement) {
-		name := el.Attr("name")
-		content := el.Attr("content")
-		if name != "" && content != "" {
-			twitterCard[name] = content
-		}
-	})
-	if len(twitterCard) > 0 {
-		metadata["twitter_card"] = twitterCard
-	}
-
-	// Extract canonical URL
-	canonical := htmlElement.DOM.Find("link[rel='canonical']").AttrOr("href", "")
-	if canonical != "" {
-		metadata["canonical_url"] = canonical
-	}
-
-	// Extract JSON-LD structured data (handles both objects and arrays)
-	jsonLDScripts := []interface{}{}
-	htmlElement.ForEach("script[type='application/ld+json']", func(_ int, el *colly.HTMLElement) {
-		jsonText := el.Text
-		if jsonText == "" {
-			return
-		}
-
-		// Try to unmarshal as generic interface{} to detect type
-		var data interface{}
-		if err := json.Unmarshal([]byte(jsonText), &data); err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to parse JSON-LD script")
-			return
-		}
-
-		// Handle both array and object formats
-		switch v := data.(type) {
-		case []interface{}:
-			// JSON-LD is an array - append all entries
-			jsonLDScripts = append(jsonLDScripts, v...)
-		case map[string]interface{}:
-			// JSON-LD is a single object - append it
-			jsonLDScripts = append(jsonLDScripts, v)
-		default:
-			s.logger.Warn().Msg("Unexpected JSON-LD format (not object or array)")
-		}
-	})
-	if len(jsonLDScripts) > 0 {
-		metadata["json_ld"] = jsonLDScripts
-	}
-
-	return metadata
 }
 
 // Close cleans up scraper resources
@@ -682,4 +582,40 @@ func (s *HTMLScraper) cleanWhitespace(text string) string {
 	text = strings.TrimSpace(text)
 
 	return text
+}
+
+func (s *HTMLScraper) decodeHTMLEntities(text string) string {
+	// Common HTML entities
+	entities := map[string]string{
+		"&amp;":   "&",
+		"&lt;":    "<",
+		"&gt;":    ">",
+		"&quot;":  "\"",
+		"&apos;":  "'",
+		"&nbsp;":  " ",
+		"&ndash;": "–",
+		"&mdash;": "—",
+	}
+
+	for entity, replacement := range entities {
+		text = strings.ReplaceAll(text, entity, replacement)
+	}
+
+	return text
+}
+
+// ExtractLinks is kept for backward compatibility with existing code
+// It's a wrapper around extractLinksFromHTML for chromedp implementation
+func (s *HTMLScraper) ExtractLinks(htmlContent, baseURL string) []string {
+	return s.extractLinksFromHTML(htmlContent, baseURL)
+}
+
+// ExtractContent is kept for backward compatibility
+func (s *HTMLScraper) ExtractContent(htmlContent string) string {
+	return s.extractPlainTextFromHTML(htmlContent)
+}
+
+// ExtractMetadata is kept for backward compatibility
+func (s *HTMLScraper) ExtractMetadata(htmlContent, baseURL string) map[string]interface{} {
+	return s.extractMetadataFromHTML(htmlContent, baseURL)
 }

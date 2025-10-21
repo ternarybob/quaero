@@ -8,6 +8,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -56,13 +58,30 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Parse query parameters
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
 	sourceType := r.URL.Query().Get("sourceType")
-	limit := 100 // Default limit
+
+	// Set defaults
+	limit := 50
+	offset := 0
+
+	if limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil {
+			limit = parsed
+		}
+	}
+
+	if offsetStr != "" {
+		if parsed, err := strconv.Atoi(offsetStr); err == nil {
+			offset = parsed
+		}
+	}
 
 	opts := &interfaces.ListOptions{
 		SourceType: sourceType,
 		Limit:      limit,
-		Offset:     0,
+		Offset:     offset,
 	}
 
 	documents, err := h.documentService.List(ctx, opts)
@@ -81,9 +100,11 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"documents": documents,
-		"count":     len(documents), // Number of documents in current response
-		"total":     totalCount,     // Total number of documents in database
+		"documents":   documents,
+		"count":       len(documents), // Number of documents in current response
+		"total_count": totalCount,     // Total number of documents in database
+		"limit":       limit,
+		"offset":      offset,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -123,5 +144,42 @@ func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *htt
 		"success": true,
 		"message": "Document marked for reprocessing",
 		"doc_id":  docID,
+	})
+}
+
+// DeleteDocumentHandler handles DELETE /api/documents/{id}
+// Deletes a document from the database
+func (h *DocumentHandler) DeleteDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract document ID from path: /api/documents/{id}
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
+	docID := pathParts[2]
+
+	if docID == "" {
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
+
+	err := h.documentStorage.DeleteDocument(docID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("doc_id", docID).Msg("Failed to delete document")
+		http.Error(w, "Failed to delete document", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("doc_id", docID).Msg("Document deleted")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"doc_id":  docID,
+		"message": "Document deleted successfully",
 	})
 }

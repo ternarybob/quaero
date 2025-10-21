@@ -63,7 +63,7 @@ func NewURLQueue() *URLQueue {
 	return q
 }
 
-// Push adds a URL to the queue with deduplication check
+// Push adds a URL to the queue with deduplication check (per-job deduplication)
 func (q *URLQueue) Push(item *URLQueueItem) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -72,12 +72,23 @@ func (q *URLQueue) Push(item *URLQueueItem) bool {
 		return false
 	}
 
-	normalized := normalizeURL(item.URL)
-	if q.seen[normalized] {
-		return false // Already seen
+	// Build deduplication key: job_id + normalized_url
+	// This ensures URLs can be crawled again in different jobs
+	jobID := ""
+	if item.Metadata != nil {
+		if jid, ok := item.Metadata["job_id"].(string); ok {
+			jobID = jid
+		}
 	}
 
-	q.seen[normalized] = true
+	normalized := normalizeURL(item.URL)
+	dedupKey := jobID + "|" + normalized
+
+	if q.seen[dedupKey] {
+		return false // Already seen in this job
+	}
+
+	q.seen[dedupKey] = true
 	heap.Push(q.items, item)
 	q.cond.Signal() // Wake up one waiting Pop
 	return true

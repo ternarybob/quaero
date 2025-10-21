@@ -242,6 +242,20 @@
                                     </label>
                                 </div>
                             </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Link Filtering</label>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label class="form-label" style="font-size: 0.875rem;">Include Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.include_patterns" placeholder="browse,projects,issues">
+                                    <p class="form-input-hint">Comma-separated keywords. Only links matching these patterns will be followed.</p>
+                                </div>
+                                <div>
+                                    <label class="form-label" style="font-size: 0.875rem;">Exclude Patterns</label>
+                                    <input class="form-input" type="text" x-model="currentSource.filters.exclude_patterns" placeholder="admin,logout,settings">
+                                    <p class="form-input-hint">Comma-separated keywords. Links matching these patterns will be skipped.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -374,7 +388,7 @@
                                         <option :value="source.id" x-text="`${source.name} (${source.type})`"></option>
                                     </template>
                                 </select>
-                                <p class="form-input-hint">Select one or more sources for this job (hold Ctrl/Cmd to select multiple)</p>
+                                <p class="form-input-hint">Select one or more sources for this job (hold Ctrl/Cmd to select multiple). Link filtering is configured at the source level.</p>
                                 <template x-if="sources.length === 0">
                                     <p class="form-input-hint text-warning">
                                         No sources available. Add sources first.
