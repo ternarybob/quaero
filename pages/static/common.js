@@ -680,7 +680,9 @@ document.addEventListener('alpine:init', () => {
             {
               name: 'crawl_sources',
               action: 'crawl',
-              config: {},
+              config: {
+                wait_for_completion: true  // CRITICAL: Wait for crawl to finish before transform
+              },
               on_error: 'fail'
             },
             {

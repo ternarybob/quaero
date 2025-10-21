@@ -538,9 +538,6 @@
             const tbody = document.getElementById('jobs-table-body');
             const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
 
-            // Update count display
-            document.getElementById('job-count').textContent = `${totalJobs}`;
-
             // Update custom pagination
             renderPagination(totalPages);
 
@@ -806,7 +803,7 @@
 
         // Rerun a job
         async function rerunJob(jobId) {
-            if (!confirm(`Rerun job ${jobId.substring(0, 8)}?\n\nThis will create a new job with the same configuration.`)) {
+            if (!confirm(`Rerun job ${jobId.substring(0, 8)}?\n\nThis will create a NEW job (copy) with the same configuration.\nThe original job will remain unchanged.`)) {
                 return;
             }
 
@@ -835,9 +832,35 @@
                 }
 
                 const result = await response.json();
-                window.showNotification(`Job rerun started successfully! New Job ID: ${result.new_job_id}`, 'success');
+                const newJobIdShort = result.new_job_id.substring(0, 8);
+
+                // Show clear notification about the NEW job created
+                window.showNotification(
+                    `New job created successfully!\n` +
+                    `Original: ${jobId.substring(0, 8)}... (unchanged)\n` +
+                    `New Copy: ${newJobIdShort}... (queued)`,
+                    'success'
+                );
+
+                // Refresh stats immediately
                 loadStats();
-                loadJobs();
+
+                // Wait a moment for the new job to be inserted, then refresh and highlight
+                setTimeout(async () => {
+                    await loadJobs();
+
+                    // Try to find and highlight the new job row
+                    const newJobRow = document.querySelector(`td[title="${result.new_job_id}"]`)?.closest('tr');
+                    if (newJobRow) {
+                        // Briefly highlight the new job with animation
+                        newJobRow.style.backgroundColor = '#48c774';
+                        newJobRow.style.transition = 'background-color 2s ease-out';
+                        setTimeout(() => {
+                            newJobRow.style.backgroundColor = '';
+                        }, 2000);
+                    }
+                }, 500);
+
             } catch (error) {
                 console.error('Error rerunning job:', error);
                 window.showNotification('Failed to rerun job: ' + error.message, 'error');

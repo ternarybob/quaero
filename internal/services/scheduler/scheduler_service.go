@@ -828,6 +828,7 @@ func (s *Service) LoadJobDefinitions() error {
 
 	// Register each job definition
 	registeredCount := 0
+	onDemandCount := 0
 	for _, jobDef := range jobDefs {
 		// Create local copy to avoid closure capture issues
 		jd := jobDef
@@ -839,7 +840,17 @@ func (s *Service) LoadJobDefinitions() error {
 			Str("schedule", jd.Schedule).
 			Msg("Loading job definition")
 
-		// Validate schedule
+		// Check if this is an on-demand job (empty schedule)
+		if jd.Schedule == "" {
+			s.logger.Info().
+				Str("job_id", jd.ID).
+				Str("job_name", jd.Name).
+				Msg("On-demand job definition (no schedule) - can be triggered manually")
+			onDemandCount++
+			continue
+		}
+
+		// Validate schedule for scheduled jobs
 		if err := common.ValidateJobSchedule(jd.Schedule); err != nil {
 			s.logger.Error().
 				Str("job_id", jd.ID).
@@ -867,8 +878,9 @@ func (s *Service) LoadJobDefinitions() error {
 	}
 
 	s.logger.Info().
-		Int("count", registeredCount).
-		Msg("Job definitions loaded and registered")
+		Int("scheduled_count", registeredCount).
+		Int("on_demand_count", onDemandCount).
+		Msg("Job definitions loaded")
 
 	return nil
 }

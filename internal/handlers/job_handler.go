@@ -294,15 +294,36 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Log the incoming request for debugging
+	h.logger.Debug().
+		Str("method", r.Method).
+		Str("url_path", r.URL.Path).
+		Str("raw_path", r.URL.RawPath).
+		Msg("Rerun job request received")
+
 	// Extract job ID from path: /api/jobs/{id}/rerun
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	h.logger.Debug().
+		Strs("path_parts", pathParts).
+		Int("parts_length", len(pathParts)).
+		Msg("Path parts after split")
+
 	if len(pathParts) < 3 {
+		h.logger.Warn().
+			Str("url_path", r.URL.Path).
+			Int("parts_length", len(pathParts)).
+			Msg("Invalid path: not enough segments")
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
 		return
 	}
 	jobID := pathParts[2]
 
+	h.logger.Debug().
+		Str("extracted_job_id", jobID).
+		Msg("Extracted job ID from path")
+
 	if jobID == "" {
+		h.logger.Warn().Msg("Job ID is empty after extraction")
 		http.Error(w, "Job ID is required", http.StatusBadRequest)
 		return
 	}

@@ -1364,38 +1364,13 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 		}
 	}
 
-	// Apply URL pattern filtering using source filters
-	links, filteredCount := s.applyURLPatternFilters(allLinks, parent, config)
-
-	// Log stepped filtering process as requested
-	s.logger.Info().
-		Str("url", parent.URL).
-		Int("found_links", len(allLinks)).
-		Int("filtered_links", filteredCount).
-		Int("following_links", len(links)).
-		Msg("Found X links, filtered Y, following Z")
-
-	// Persist stepped filtering to database
-	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
-		filterMsg := fmt.Sprintf("Found %d links, filtered %d, following %d", len(allLinks), filteredCount, len(links))
-		s.logToDatabase(jobID, "info", filterMsg)
-	}
-
 	// Warn on zero links discovered
 	if len(allLinks) == 0 {
 		s.logger.Warn().Str("url", parent.URL).Msg("Zero links discovered - check page structure or link extraction logic")
 		if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
 			s.logToDatabase(jobID, "warn", fmt.Sprintf("Zero links discovered from %s - check page structure", parent.URL))
 		}
-		return links
-	}
-
-	// Warn if all links were filtered out
-	if len(links) == 0 {
-		s.logger.Warn().Str("url", parent.URL).Int("total_found", len(allLinks)).Msg("All discovered links were filtered out - check filter patterns")
-		if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
-			s.logToDatabase(jobID, "warn", fmt.Sprintf("All %d discovered links from %s were filtered out - check filter patterns", len(allLinks), parent.URL))
-		}
+		return nil
 	}
 
 	// Parse parent URL to get base host for same-host filtering
@@ -1442,9 +1417,13 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 
 	// Persist link filtering summary to database
 	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" {
-		filteredOutCount := len(allLinks) - len(links)
-		filterMsg := fmt.Sprintf("Link filtering: discovered=%d, source_filter=%d, pattern_filter=%d, filtered_out=%d",
-			len(allLinks), len(filteredLinks), len(links), filteredOutCount)
+		sourceFilteredOut := len(allLinks) - len(filteredLinks)
+		patternFilteredOut := len(filteredLinks) - len(links)
+		totalFilteredOut := len(allLinks) - len(links)
+
+		// Clear message: discovered -> after source filter -> after pattern filter -> following
+		filterMsg := fmt.Sprintf("Found %d links, filtered %d (source:%d + pattern:%d), following %d",
+			len(allLinks), totalFilteredOut, sourceFilteredOut, patternFilteredOut, len(links))
 		s.logToDatabase(jobID, "info", filterMsg)
 
 		// Warn if all links were filtered out despite discovery (Comment 9: include samples)
