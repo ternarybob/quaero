@@ -361,8 +361,7 @@ document.addEventListener('alpine:init', () => {
           follow_links: true,
           concurrency: 2,
           detail_level: 'full'
-        },
-        filters: {}
+        }
       };
     },
 
@@ -375,19 +374,6 @@ document.addEventListener('alpine:init', () => {
         this.currentSource.seed_urls_text = this.currentSource.seed_urls.join('\n');
       } else {
         this.currentSource.seed_urls_text = '';
-      }
-
-      // Convert filter arrays to comma-separated strings for UI display
-      if (this.currentSource.filters) {
-        // Convert include patterns array to string
-        if (Array.isArray(this.currentSource.filters.include_patterns)) {
-          this.currentSource.filters.include_patterns = this.currentSource.filters.include_patterns.join(', ');
-        }
-
-        // Convert exclude patterns array to string
-        if (Array.isArray(this.currentSource.filters.exclude_patterns)) {
-          this.currentSource.filters.exclude_patterns = this.currentSource.filters.exclude_patterns.join(', ');
-        }
       }
 
       this.showEditModal = true;
@@ -445,35 +431,6 @@ document.addEventListener('alpine:init', () => {
           sourceToSave.seed_urls = [];
         }
         delete sourceToSave.seed_urls_text; // Remove temporary UI field
-
-        try {
-          // Process URL pattern filters
-          if (sourceToSave.filters) {
-            // Process include patterns
-            if (sourceToSave.filters.include_patterns) {
-              sourceToSave.filters.include_patterns = this.parseFilterInput(sourceToSave.filters.include_patterns, 'array');
-              if (!sourceToSave.filters.include_patterns) {
-                delete sourceToSave.filters.include_patterns;
-              }
-            }
-            
-            // Process exclude patterns
-            if (sourceToSave.filters.exclude_patterns) {
-              sourceToSave.filters.exclude_patterns = this.parseFilterInput(sourceToSave.filters.exclude_patterns, 'array');
-              if (!sourceToSave.filters.exclude_patterns) {
-                delete sourceToSave.filters.exclude_patterns;
-              }
-            }
-            
-            // Clean up empty filter object
-            if (Object.keys(sourceToSave.filters).length === 0) {
-              sourceToSave.filters = {};
-            }
-          }
-        } catch (filterErr) {
-          window.showNotification('Filter validation error: ' + filterErr.message, 'error');
-          return;
-        }
 
         window.debugLog('SourceManagement', `${method} ${url}`, 'Processed source:', sourceToSave);
         const response = await fetch(url, {
@@ -540,54 +497,6 @@ document.addEventListener('alpine:init', () => {
       if (!dateStr) return 'N/A';
       const date = new Date(dateStr);
       return date.toLocaleString();
-    },
-
-    // Helper method to parse comma-separated filter input to array
-    parseFilterInput(input, filterType) {
-      if (!input || typeof input !== 'string') return undefined;
-      const trimmed = input.trim();
-      if (!trimmed) return undefined;
-      
-      // For single-value filters (GitHub org/user), return string directly
-      if (filterType === 'single') {
-        return trimmed;
-      }
-      
-      // For array filters, split by comma and clean up
-      return trimmed.split(',').map(s => s.trim()).filter(s => s.length > 0);
-    },
-
-    // Helper method to format filter display for table
-    formatFilterDisplay(filters, sourceType) {
-      if (!filters || typeof filters !== 'object') return '';
-      
-      const parts = [];
-      
-      // Check include patterns
-      if (filters.include_patterns) {
-        const patterns = Array.isArray(filters.include_patterns) 
-          ? filters.include_patterns 
-          : (typeof filters.include_patterns === 'string' 
-              ? filters.include_patterns.split(',').map(s => s.trim()).filter(s => s) 
-              : []);
-        if (patterns.length > 0) {
-          parts.push(`Include: ${patterns.length}`);
-        }
-      }
-      
-      // Check exclude patterns
-      if (filters.exclude_patterns) {
-        const patterns = Array.isArray(filters.exclude_patterns) 
-          ? filters.exclude_patterns 
-          : (typeof filters.exclude_patterns === 'string' 
-              ? filters.exclude_patterns.split(',').map(s => s.trim()).filter(s => s) 
-              : []);
-        if (patterns.length > 0) {
-          parts.push(`Exclude: ${patterns.length}`);
-        }
-      }
-      
-      return parts.join(', ');
     }
   }));
 

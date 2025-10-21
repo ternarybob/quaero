@@ -495,14 +495,13 @@ func (h *JobHandler) GetJobStatsHandler(w http.ResponseWriter, r *http.Request) 
 
 // ConfigOverrides allows selective overriding of crawl configuration
 // Using pointers to detect presence of fields
+// TODO: Filtering configuration will be handled at the job definition level in subsequent phases
 type ConfigOverrides struct {
-	MaxDepth        *int      `json:"max_depth,omitempty"`
-	MaxPages        *int      `json:"max_pages,omitempty"`
-	Concurrency     *int      `json:"concurrency,omitempty"`
-	RateLimit       *int      `json:"rate_limit,omitempty"` // milliseconds
-	FollowLinks     *bool     `json:"follow_links,omitempty"`
-	IncludePatterns *[]string `json:"include_patterns,omitempty"`
-	ExcludePatterns *[]string `json:"exclude_patterns,omitempty"`
+	MaxDepth    *int  `json:"max_depth,omitempty"`
+	MaxPages    *int  `json:"max_pages,omitempty"`
+	Concurrency *int  `json:"concurrency,omitempty"`
+	RateLimit   *int  `json:"rate_limit,omitempty"` // milliseconds
+	FollowLinks *bool `json:"follow_links,omitempty"`
 }
 
 // CreateJobHandler creates a new job from a source configuration
@@ -561,12 +560,7 @@ func (h *JobHandler) CreateJobHandler(w http.ResponseWriter, r *http.Request) {
 		if req.ConfigOverrides.FollowLinks != nil {
 			source.CrawlConfig.FollowLinks = *req.ConfigOverrides.FollowLinks
 		}
-		if req.ConfigOverrides.IncludePatterns != nil {
-			source.CrawlConfig.IncludePatterns = *req.ConfigOverrides.IncludePatterns
-		}
-		if req.ConfigOverrides.ExcludePatterns != nil {
-			source.CrawlConfig.ExcludePatterns = *req.ConfigOverrides.ExcludePatterns
-		}
+		// TODO: Include/exclude patterns will be handled at job definition level in subsequent phases
 	}
 
 	// Use shared job helper to start crawl
