@@ -34,20 +34,22 @@
                     </header>
                 </div>
                 <div class="card-body">
-                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-                        <div style="text-align: center;">
-                            <p style="font-size: 0.875rem; color: var(--text-secondary);">TOTAL DOCUMENTS</p>
-                            <p style="font-size: 1.75rem; font-weight: bold;" id="stat-total">-</p>
+
+                    <div class="columns">
+                        <div class="column text-center">
+                            <p class="text-small text-gray">TOTAL DOCUMENTS</p>
+                            <p class="h2" id="stat-total">-</p>
                         </div>
-                        <div style="text-align: center;">
-                            <p style="font-size: 0.875rem; color: var(--text-secondary);">JIRA DOCUMENTS</p>
-                            <p style="font-size: 1.75rem; font-weight: bold;" id="stat-jira">-</p>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">JIRA DOCUMENTS</p>
+                            <p class="h2" id="stat-jira">-</p>
                         </div>
-                        <div style="text-align: center;">
-                            <p style="font-size: 0.875rem; color: var(--text-secondary);">CONFLUENCE DOCUMENTS</p>
-                            <p style="font-size: 1.75rem; font-weight: bold;" id="stat-confluence">-</p>
+                        <div class="column text-center">
+                            <p class="text-small text-gray">CONFLUENCE DOCUMENTS</p>
+                            <p class="h2" id="stat-confluence">-</p>
                         </div>
                     </div>
+
                 </div>
             </div>
         </section>
@@ -78,34 +80,34 @@
                         </select>
                     </div>
 
-                        <!-- Documents Table -->
-                        <table class="table striped border">
-                            <thead>
-                                <tr>
-                                    <th style="width: 50px; text-align: center;">
-                                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
-                                    </th>
-                                    <th>SOURCE</th>
-                                    <th>SOURCE ID</th>
-                                    <th>TITLE</th>
-                                    <th>UPDATED</th>
-                                </tr>
-                            </thead>
-                            <tbody id="documents-table-body">
-                                <tr>
-                                    <td colspan="5" class="text-center">
-                                        Loading documents...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <!-- Documents Table -->
+                    <table class="table striped border">
+                        <thead>
+                            <tr>
+                                <th style="width: 50px; text-align: center;">
+                                    <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
+                                </th>
+                                <th>SOURCE</th>
+                                <th>SOURCE ID</th>
+                                <th>TITLE</th>
+                                <th>UPDATED</th>
+                            </tr>
+                        </thead>
+                        <tbody id="documents-table-body">
+                            <tr>
+                                <td colspan="5" class="text-center">
+                                    Loading documents...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
 
-                        <!-- Pagination Controls -->
-                        <div id="document-pagination-container" class="pagination-container" style="margin-top: 1rem;">
-                            <!-- Pagination will be rendered here by renderPagination() -->
-                        </div>
+                    <!-- Pagination Controls -->
+                    <div id="document-pagination-container" class="pagination-container" style="margin-top: 1rem;">
+                        <!-- Pagination will be rendered here by renderPagination() -->
                     </div>
                 </div>
+            </div>
             </div>
         </section>
 
@@ -252,8 +254,8 @@
             } else {
                 filteredDocuments = allDocuments.filter(doc => {
                     return (doc.title && doc.title.toLowerCase().includes(searchTerm)) ||
-                           (doc.content_markdown && doc.content_markdown.toLowerCase().includes(searchTerm)) ||
-                           (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
+                        (doc.content_markdown && doc.content_markdown.toLowerCase().includes(searchTerm)) ||
+                        (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
                 });
             }
 
@@ -404,7 +406,7 @@
             if (!selectAllCheckbox) return;
 
             const allSelected = filteredDocuments.length > 0 &&
-                                filteredDocuments.every(doc => selectedDocumentIds.has(doc.id));
+                filteredDocuments.every(doc => selectedDocumentIds.has(doc.id));
             selectAllCheckbox.checked = allSelected;
         }
 

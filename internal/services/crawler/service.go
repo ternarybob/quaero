@@ -279,6 +279,29 @@ func (s *Service) logErrorToConsoleAndDatabase(jobID string, message string, err
 	s.logToDatabase(jobID, "error", message)
 }
 
+// logDebugToConsoleAndDatabase logs debug level to both console and database
+func (s *Service) logDebugToConsoleAndDatabase(jobID string, message string, fields map[string]interface{}) {
+	// Build console log
+	event := s.logger.Debug()
+	for key, value := range fields {
+		switch v := value.(type) {
+		case string:
+			event = event.Str(key, v)
+		case int:
+			event = event.Int(key, v)
+		case int64:
+			event = event.Int64(key, v)
+		default:
+			// Convert other types to string
+			event = event.Str(key, fmt.Sprintf("%v", v))
+		}
+	}
+	event.Msg(message)
+
+	// Log to database
+	s.logToDatabase(jobID, "debug", message)
+}
+
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
 func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, configInterface interface{}, sourceID string, refreshSource bool, sourceConfigSnapshotInterface interface{}, authSnapshotInterface interface{}) (string, error) {
 	// Type assert config
@@ -383,7 +406,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	if testURLCount > 0 {
 		seedURLsMsg += fmt.Sprintf(" ⚠️  WARNING: %d test URLs detected (localhost/127.0.0.1)", testURLCount)
 	}
-	s.logInfoToConsoleAndDatabase(jobID, seedURLsMsg, map[string]interface{}{
+	s.logDebugToConsoleAndDatabase(jobID, seedURLsMsg, map[string]interface{}{
 		"seed_url_count": len(seedURLs),
 		"test_url_count": testURLCount,
 	})
@@ -391,7 +414,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Log crawler configuration summary
 	configMsg := fmt.Sprintf("Crawler configuration: max_depth=%d, max_pages=%d, concurrency=%d, rate_limit=%dms, follow_links=%v",
 		config.MaxDepth, config.MaxPages, config.Concurrency, config.RateLimit.Milliseconds(), config.FollowLinks)
-	s.logInfoToConsoleAndDatabase(jobID, configMsg, map[string]interface{}{
+	s.logDebugToConsoleAndDatabase(jobID, configMsg, map[string]interface{}{
 		"max_depth":    config.MaxDepth,
 		"max_pages":    config.MaxPages,
 		"concurrency":  config.Concurrency,
@@ -476,7 +499,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		if sourceConfigSnapshot.BaseURL != "" {
 			baseURLInfo = sourceConfigSnapshot.BaseURL
 		}
-		s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("Source config validated and stored: base_url=%s", baseURLInfo), map[string]interface{}{
+		s.logDebugToConsoleAndDatabase(jobID, fmt.Sprintf("Source config validated and stored: base_url=%s", baseURLInfo), map[string]interface{}{
 			"base_url": baseURLInfo,
 		})
 	} else {
@@ -503,7 +526,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 				cookieCount = len(cookies)
 			}
 		}
-		s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("Auth snapshot stored: %d cookies available", cookieCount), map[string]interface{}{
+		s.logDebugToConsoleAndDatabase(jobID, fmt.Sprintf("Auth snapshot stored: %d cookies available", cookieCount), map[string]interface{}{
 			"cookie_count": cookieCount,
 		})
 
@@ -531,7 +554,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	}
 
 	// Log HTTP client configuration
-	s.logInfoToConsoleAndDatabase(jobID, fmt.Sprintf("HTTP client configured: type=%s", httpClientType), map[string]interface{}{
+	s.logDebugToConsoleAndDatabase(jobID, fmt.Sprintf("HTTP client configured: type=%s", httpClientType), map[string]interface{}{
 		"client_type": httpClientType,
 	})
 
@@ -1115,7 +1138,7 @@ func (s *Service) workerLoop(jobID string, workerIndex int, config CrawlConfig) 
 			// Discover links if enabled and within depth limit (0 = unlimited depth)
 			if config.FollowLinks && (config.MaxDepth == 0 || item.Depth < config.MaxDepth) {
 				// Log link discovery decision at INFO level
-				s.logger.Info().
+				s.logger.Debug().
 					Str("job_id", jobID).
 					Str("url", item.URL).
 					Bool("follow_links", config.FollowLinks).
@@ -1130,7 +1153,7 @@ func (s *Service) workerLoop(jobID string, workerIndex int, config CrawlConfig) 
 				s.jobsMu.RUnlock()
 
 				if completedCount%10 == 0 {
-					s.logToDatabase(jobID, "info", fmt.Sprintf("Link discovery: follow_links=true, depth=%d/%d, url=%s", item.Depth, config.MaxDepth, item.URL))
+					s.logToDatabase(jobID, "debug", fmt.Sprintf("Link discovery: follow_links=true, depth=%d/%d, url=%s", item.Depth, config.MaxDepth, item.URL))
 				}
 
 				links := s.discoverLinks(result, item, config)
@@ -1400,7 +1423,7 @@ func (s *Service) makeRequest(item *URLQueueItem, workerIndex int, config CrawlC
 				}
 				return "default"
 			}())
-		s.logToDatabase(jobID, "info", scraperMsg)
+		s.logToDatabase(jobID, "debug", scraperMsg)
 	}
 
 	// Create HTMLScraper instance with merged config
@@ -1571,7 +1594,7 @@ func (s *Service) makeRequest(item *URLQueueItem, workerIndex int, config CrawlC
 		if completedCount%50 == 0 && completedCount > 0 {
 			successMsg := fmt.Sprintf("Scraping successful: %s (status=%d, duration=%dms, body_length=%d)",
 				item.URL, statusCode, duration.Milliseconds(), len(crawlResult.Body))
-			s.logToDatabase(jobID, "info", successMsg)
+			s.logToDatabase(jobID, "debug", successMsg)
 		}
 	}
 
@@ -1678,7 +1701,7 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 
 	// Log discovered links summary with samples
 	if jobID, ok := parent.Metadata["job_id"].(string); ok && jobID != "" && len(allLinks) > 0 {
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_id", jobID).
 			Str("parent_url", parent.URL).
 			Int("total_discovered", len(allLinks)).
@@ -1690,12 +1713,12 @@ func (s *Service) discoverLinks(result *CrawlResult, parent *URLQueueItem, confi
 			sampleSize = len(allLinks)
 		}
 
-		s.logToDatabase(jobID, "info", fmt.Sprintf("Discovered %d links from %s (showing first %d):", len(allLinks), parent.URL, sampleSize))
+		s.logToDatabase(jobID, "debug", fmt.Sprintf("Discovered %d links from %s (showing first %d):", len(allLinks), parent.URL, sampleSize))
 		for i := 0; i < sampleSize; i++ {
-			s.logToDatabase(jobID, "info", fmt.Sprintf("  - %s", allLinks[i]))
+			s.logToDatabase(jobID, "debug", fmt.Sprintf("  - %s", allLinks[i]))
 		}
 		if len(allLinks) > sampleSize {
-			s.logToDatabase(jobID, "info", fmt.Sprintf("  ... and %d more links", len(allLinks)-sampleSize))
+			s.logToDatabase(jobID, "debug", fmt.Sprintf("  ... and %d more links", len(allLinks)-sampleSize))
 		}
 	}
 
@@ -1872,7 +1895,7 @@ func (s *Service) filterLinks(jobID string, links []string, config CrawlConfig) 
 
 	// Summary log for filtered links
 	if len(excludedLinks) > 0 || len(notIncludedLinks) > 0 {
-		s.logger.Info().
+		s.logger.Debug().
 			Int("excluded_count", len(excludedLinks)).
 			Int("not_included_count", len(notIncludedLinks)).
 			Int("passed_count", len(filtered)).
@@ -1882,7 +1905,7 @@ func (s *Service) filterLinks(jobID string, links []string, config CrawlConfig) 
 		if jobID != "" {
 			filterMsg := fmt.Sprintf("Pattern filtering: excluded=%d, not_included=%d, passed=%d",
 				len(excludedLinks), len(notIncludedLinks), len(filtered))
-			s.logToDatabase(jobID, "info", filterMsg)
+			s.logToDatabase(jobID, "debug", filterMsg)
 		}
 	}
 
@@ -2225,7 +2248,7 @@ func (s *Service) enqueueLinks(jobID string, links []string, parent *URLQueueIte
 			sampleURLs = links[:sampleCount]
 		}
 
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_id", jobID).
 			Str("parent_url", parent.URL).
 			Int("enqueued_count", enqueuedCount).

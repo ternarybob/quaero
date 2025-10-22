@@ -133,6 +133,16 @@ h2 {
         }
 
     }
+
+    .card-body {
+        .columns {
+            .column {
+                p {
+                    margin-bottom: 0;
+                }
+            }
+        }
+    }
 }
 
 /* 2. SPECTRE CSS BUTTON OVERRIDES
