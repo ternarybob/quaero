@@ -102,8 +102,6 @@ func createTestSummarizerDeps() (*SummarizerActionDeps, *mockDocumentStorage, *m
 	mockLLM := &mockLLMService{}
 
 	logger := arbor.NewLogger()
-	logger.SetConsole(true)
-	logger.SetLevel(arbor.LogLevelInfo)
 
 	deps := &SummarizerActionDeps{
 		DocStorage: mockStorage,
@@ -160,7 +158,7 @@ func TestScanAction_Success(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -185,7 +183,7 @@ func TestScanAction_WithBatchSize(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -206,7 +204,7 @@ func TestScanAction_WithOffset(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -224,7 +222,7 @@ func TestScanAction_WithMaxDocuments(t *testing.T) {
 		return createTestDocuments(10, false, false, false), nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -250,7 +248,7 @@ func TestScanAction_WithFilterSourceType(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -273,7 +271,7 @@ func TestScanAction_SkipWithSummary(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -296,7 +294,7 @@ func TestScanAction_SkipEmptyContent(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -311,7 +309,7 @@ func TestScanAction_ListDocumentsError(t *testing.T) {
 		return nil, fmt.Errorf("database error")
 	}
 
-	err := scanAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := scanAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err == nil {
 		t.Error("Expected error for ListDocuments failure, got nil")
@@ -335,7 +333,7 @@ func TestSummarizeAction_Success(t *testing.T) {
 		return "Test summary", nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -395,7 +393,7 @@ func TestSummarizeAction_WithContentLimit(t *testing.T) {
 		return "Test summary", nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -426,7 +424,7 @@ func TestSummarizeAction_WithCustomSystemPrompt(t *testing.T) {
 		return "Test summary", nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -434,7 +432,7 @@ func TestSummarizeAction_WithCustomSystemPrompt(t *testing.T) {
 }
 
 func TestSummarizeAction_WithIncludeKeywordsFalse(t *testing.T) {
-	deps, mockStorage, mockLLM := createTestSummarizerDeps()
+	deps, mockStorage, _ := createTestSummarizerDeps()
 	step := createTestStep("summarize", map[string]interface{}{
 		"include_keywords": false,
 	})
@@ -446,7 +444,7 @@ func TestSummarizeAction_WithIncludeKeywordsFalse(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -461,7 +459,7 @@ func TestSummarizeAction_WithIncludeKeywordsFalse(t *testing.T) {
 }
 
 func TestSummarizeAction_WithIncludeWordCountFalse(t *testing.T) {
-	deps, mockStorage, mockLLM := createTestSummarizerDeps()
+	deps, mockStorage, _ := createTestSummarizerDeps()
 	step := createTestStep("summarize", map[string]interface{}{
 		"include_word_count": false,
 	})
@@ -473,7 +471,7 @@ func TestSummarizeAction_WithIncludeWordCountFalse(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -488,7 +486,7 @@ func TestSummarizeAction_WithIncludeWordCountFalse(t *testing.T) {
 }
 
 func TestSummarizeAction_WithTopNKeywords(t *testing.T) {
-	deps, mockStorage, mockLLM := createTestSummarizerDeps()
+	deps, mockStorage, _ := createTestSummarizerDeps()
 	step := createTestStep("summarize", map[string]interface{}{
 		"top_n_keywords": 5,
 	})
@@ -500,7 +498,7 @@ func TestSummarizeAction_WithTopNKeywords(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -532,7 +530,7 @@ func TestSummarizeAction_LLMChatError(t *testing.T) {
 		return "", fmt.Errorf("LLM service error")
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	// Should have errors but continue processing
 	if err == nil {
@@ -550,7 +548,7 @@ func TestSummarizeAction_LLMChatError(t *testing.T) {
 }
 
 func TestSummarizeAction_UpdateDocumentError(t *testing.T) {
-	deps, mockStorage, mockLLM := createTestSummarizerDeps()
+	deps, mockStorage, _ := createTestSummarizerDeps()
 	step := createTestStep("summarize", nil)
 	step.OnError = models.ErrorStrategyContinue
 
@@ -565,7 +563,7 @@ func TestSummarizeAction_UpdateDocumentError(t *testing.T) {
 		return fmt.Errorf("database error")
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err == nil {
 		t.Error("Expected aggregated errors, got nil")
@@ -585,7 +583,7 @@ func TestSummarizeAction_SkipWithSummary(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -605,7 +603,7 @@ func TestSummarizeAction_EmptyDocumentList(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error for empty list, got: %v", err)
@@ -625,7 +623,7 @@ func TestExtractKeywordsAction_Success(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -659,7 +657,7 @@ func TestExtractKeywordsAction_WithTopN(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -690,7 +688,7 @@ func TestExtractKeywordsAction_WithMinWordLength(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -721,7 +719,7 @@ func TestExtractKeywordsAction_SkipWithKeywords(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -744,7 +742,7 @@ func TestExtractKeywordsAction_EmptyContent(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -769,7 +767,7 @@ func TestExtractKeywordsAction_StopWordsFiltering(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -803,7 +801,7 @@ func TestExtractKeywordsAction_UpdateDocumentError(t *testing.T) {
 		return fmt.Errorf("database error")
 	}
 
-	err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err == nil {
 		t.Error("Expected aggregated errors, got nil")
@@ -1149,7 +1147,7 @@ func TestSummarizeAction_NegativeTopNKeywords(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := summarizeAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := summarizeAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -1229,7 +1227,7 @@ func TestExtractKeywordsAction_NegativeValues(t *testing.T) {
 				return []*models.Document{}, nil
 			}
 
-			err := extractKeywordsAction(context.Background(), step, []*models.SourceConfig{}, deps)
+			err := extractKeywordsAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error, got nil")
@@ -1275,7 +1273,7 @@ func TestScanAction_WithSourceFiltering(t *testing.T) {
 		return []*models.Document{}, nil
 	}
 
-	err := scanAction(context.Background(), step, sources, deps)
+	err := scanAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -1307,7 +1305,7 @@ func TestSummarizeAction_WithSourceFiltering(t *testing.T) {
 		return nil
 	}
 
-	err := summarizeAction(context.Background(), step, sources, deps)
+	err := summarizeAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -1346,7 +1344,7 @@ func TestExtractKeywordsAction_WithSourceFiltering(t *testing.T) {
 		return nil
 	}
 
-	err := extractKeywordsAction(context.Background(), step, sources, deps)
+	err := extractKeywordsAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

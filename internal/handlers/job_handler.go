@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 14th October 2025 3:45:00 pm
-// Modified By: Claude Code
+// Last Modified: Thursday, 23rd October 2025 8:03:36 am
+// Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
 package handlers
@@ -370,14 +370,14 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job rerun started")
+	h.logger.Info().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied and queued")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"original_job_id": jobID,
 		"new_job_id":      newJobID,
-		"message":         "Job rerun started successfully",
+		"message":         "Job copied and added to queue successfully",
 	})
 }
 

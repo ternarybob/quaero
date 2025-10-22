@@ -161,9 +161,36 @@
                         </div>
 
                         <!-- Tab Content: Job Logs -->
-                        <div x-show="activeTab === 'logs'">
-                            <div id="job-logs-container">
-                                <p class="text-muted text-center">Select a job to view its logs</p>
+                        <div id="job-logs-tab" x-show="activeTab === 'logs'" x-data="{ autoScroll: true, logs: [], hasSelection: false }">
+                            <!-- Control Buttons Header -->
+                            <header class="navbar" style="margin-bottom: 1rem;">
+                                <section class="navbar-section">
+                                    <!-- Spacer -->
+                                </section>
+                                <section class="navbar-section">
+                                    <button class="btn btn-sm" @click="autoScroll = !autoScroll" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                                        <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
+                                    </button>
+                                    <button class="btn btn-sm" @click="loadJobLogsTab()" title="Refresh Logs">
+                                        <i class="fa-solid fa-rotate-right"></i>
+                                    </button>
+                                </section>
+                            </header>
+
+                            <!-- Terminal Display -->
+                            <div class="terminal" x-ref="logContainer">
+                                <template x-if="logs.length === 0">
+                                    <div style="text-align: center; color: var(--text-secondary);">
+                                        <span x-text="hasSelection ? 'No logs available for this job' : 'Select a job to view its logs'"></span>
+                                    </div>
+                                </template>
+                                <template x-for="log in logs" :key="log.timestamp + log.message">
+                                    <div class="terminal-line">
+                                        <span class="terminal-time" x-text="'[' + log.timestamp + ']'"></span>
+                                        <span :class="log.levelClass" x-text="'[' + log.level.toUpperCase() + ']'"></span>
+                                        <span x-text="log.message"></span>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -578,7 +605,7 @@
                         <td>${createdDate}</td>
                         <td class="text-center">
                             ${job.status !== 'running' ? `
-                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Rerun Job">
+                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Copy Job and Add to Queue">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                             ` : ''}
@@ -732,14 +759,22 @@
 
         // Load job logs for the currently selected job
         async function loadJobLogsTab() {
-            const logsContainer = document.getElementById('job-logs-container');
-
-            if (!selectedJob || !selectedJob.id) {
-                logsContainer.innerHTML = '<p class="text-muted text-center">Select a job to view its logs</p>';
+            // Get Alpine.js component data by ID (Comment 5: use ID instead of brittle x-show selector)
+            const logsTabElement = document.getElementById('job-logs-tab');
+            if (!logsTabElement) {
+                console.error('Job logs tab element not found');
                 return;
             }
 
-            logsContainer.innerHTML = '<div class="loading loading-lg"></div>';
+            const alpineData = Alpine.$data(logsTabElement);
+
+            // Update hasSelection flag (Comment 2: use hasSelection instead of referencing selectedJob in template)
+            alpineData.hasSelection = !!(selectedJob && selectedJob.id);
+
+            if (!selectedJob || !selectedJob.id) {
+                alpineData.logs = [];
+                return;
+            }
 
             try {
                 const response = await fetch(`/api/jobs/${selectedJob.id}/logs`);
@@ -750,61 +785,46 @@
                 const data = await response.json();
                 const logs = data.logs || [];
 
-                if (logs.length === 0) {
-                    logsContainer.innerHTML = '<p class="text-muted text-center">No logs available for this job</p>';
-                    return;
-                }
-
-                // Build logs table
-                let html = `
-                    <table class="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th>TIME</th>
-                                <th>LEVEL</th>
-                                <th>MESSAGE</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-
-                logs.forEach(log => {
-                    const levelClass = log.level === 'error' ? 'text-error' : log.level === 'info' ? 'text-primary' : '';
-                    const levelBadge = log.level === 'error'
-                        ? '<span class="label label-error">ERROR</span>'
-                        : log.level === 'info'
-                            ? '<span class="label label-primary">INFO</span>'
-                            : `<span class="label">${log.level.toUpperCase()}</span>`;
-
-                    html += `
-                        <tr>
-                            <td><code>${log.timestamp || 'N/A'}</code></td>
-                            <td>${levelBadge}</td>
-                            <td class="${levelClass}">${log.message || 'N/A'}</td>
-                        </tr>
-                    `;
+                // Normalize log levels and add CSS class mapping (Comment 3: map log levels to CSS classes)
+                const normalizedLogs = logs.map(log => {
+                    // Normalize level: error->error, warning/warn->warning, info->info, debug->debug
+                    let normalizedLevel = log.level.toLowerCase();
+                    if (normalizedLevel === 'warn') {
+                        normalizedLevel = 'warning';
+                    }
+                    
+                    return {
+                        timestamp: log.timestamp,
+                        level: normalizedLevel,
+                        levelClass: 'terminal-' + normalizedLevel,
+                        message: log.message
+                    };
                 });
 
-                html += `
-                        </tbody>
-                    </table>
-                `;
+                // Update Alpine.js state
+                alpineData.logs = normalizedLogs;
 
-                logsContainer.innerHTML = html;
+                // Auto-scroll to bottom if enabled (Comment 1: use DOM query instead of $refs)
+                if (alpineData.autoScroll) {
+                    Alpine.nextTick(() => {
+                        const container = logsTabElement.querySelector('[x-ref="logContainer"]');
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    });
+                }
 
             } catch (error) {
                 console.error('Error loading job logs:', error);
-                logsContainer.innerHTML = `
-                    <div class="toast toast-error">
-                        <i class="fa-solid fa-exclamation-circle"></i> Failed to load logs: ${error.message}
-                    </div>
-                `;
+                alpineData.logs = [];
+                alpineData.hasSelection = false;
+                window.showNotification('Failed to load logs: ' + error.message, 'error');
             }
         }
 
         // Rerun a job
         async function rerunJob(jobId) {
-            if (!confirm(`Rerun job ${jobId.substring(0, 8)}?\n\nThis will create a NEW job (copy) with the same configuration.\nThe original job will remain unchanged.`)) {
+            if (!confirm(`Copy and queue job ${jobId.substring(0, 8)}?\n\nThis will create a NEW job (copy) with the same configuration and add it to the queue.\nThe job will NOT execute immediately - it will be queued as "pending".\nThe original job will remain unchanged.`)) {
                 return;
             }
 
@@ -835,11 +855,11 @@
                 const result = await response.json();
                 const newJobIdShort = result.new_job_id.substring(0, 8);
 
-                // Show clear notification about the NEW job created
+                // Show clear notification about the NEW job queued
                 window.showNotification(
-                    `New job created successfully!\n` +
+                    `Job copied and added to queue!\n` +
                     `Original: ${jobId.substring(0, 8)}... (unchanged)\n` +
-                    `New Copy: ${newJobIdShort}... (queued)`,
+                    `New Job: ${newJobIdShort}... (pending in queue)`,
                     'success'
                 );
 

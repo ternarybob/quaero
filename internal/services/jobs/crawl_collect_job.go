@@ -84,7 +84,7 @@ func (j *CrawlCollectJob) Execute() error {
 
 // processSource handles crawling for a single source
 func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.SourceConfig) error {
-	j.logger.Info().
+	j.logger.Debug().
 		Str("source_id", source.ID).
 		Str("source_type", string(source.Type)).
 		Str("base_url", source.BaseURL).
@@ -106,7 +106,7 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		return fmt.Errorf("failed to start crawl: %w", err)
 	}
 
-	j.logger.Info().
+	j.logger.Debug().
 		Str("job_id", jobID).
 		Str("source_id", source.ID).
 		Msg("Crawl job started, waiting for completion")

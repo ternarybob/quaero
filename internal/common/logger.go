@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ternarybob/arbor"
+	arborcommon "github.com/ternarybob/arbor/common"
 	"github.com/ternarybob/arbor/models"
 )
 
@@ -50,4 +51,10 @@ func InitLogger(logger arbor.ILogger) {
 	loggerMutex.Lock()
 	defer loggerMutex.Unlock()
 	globalLogger = logger
+}
+
+// Stop flushes any remaining context logs before application shutdown
+// Safe to call multiple times (Arbor's Stop is idempotent)
+func Stop() {
+	arborcommon.Stop()
 }

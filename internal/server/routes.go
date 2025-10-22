@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 9th October 2025 8:53:55 am
+// Last Modified: Thursday, 23rd October 2025 8:11:51 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -104,12 +104,12 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// POST /api/jobs/{id}/rerun
-		if len(pathSuffix) > 6 && pathSuffix[len(pathSuffix)-6:] == "/rerun" {
+		if strings.HasSuffix(pathSuffix, "/rerun") {
 			s.app.JobHandler.RerunJobHandler(w, r)
 			return
 		}
 		// POST /api/jobs/{id}/cancel
-		if len(pathSuffix) > 7 && pathSuffix[len(pathSuffix)-7:] == "/cancel" {
+		if strings.HasSuffix(pathSuffix, "/cancel") {
 			s.app.JobHandler.CancelJobHandler(w, r)
 			return
 		}

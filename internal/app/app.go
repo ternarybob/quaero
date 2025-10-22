@@ -9,12 +9,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/ternarybob/arbor"
+	arbormodels "github.com/ternarybob/arbor/models"
 
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
@@ -37,10 +40,11 @@ import (
 
 // App holds all application components and dependencies
 type App struct {
-	Config         *common.Config // Deprecated: Use ConfigService instead
-	ConfigService  interfaces.ConfigService
-	Logger         arbor.ILogger
-	StorageManager interfaces.StorageManager
+	Config          *common.Config // Deprecated: Use ConfigService instead
+	ConfigService   interfaces.ConfigService
+	Logger          arbor.ILogger
+	logBatchChannel chan []arbormodels.LogEvent
+	StorageManager  interfaces.StorageManager
 
 	// Document services
 	LLMService        interfaces.LLMService
@@ -184,6 +188,55 @@ func (a *App) initServices() error {
 	a.Logger.Info().
 		Str("mode", string(mode)).
 		Msg("LLM service initialized")
+
+	// 1.5. Initialize context logging (after LLM service)
+	// Create channel for log batches (buffer size 10 allows up to 10 batches to queue)
+	logBatchChannel := make(chan []arbormodels.LogEvent, 10)
+	a.logBatchChannel = logBatchChannel
+
+	// Configure Arbor with context channel (default buffering: batch size 5, flush interval 1s)
+	a.Logger.SetContextChannel(logBatchChannel)
+
+	// Start consumer goroutine to process log batches and write to database
+	go func() {
+		for batch := range logBatchChannel {
+			for _, event := range batch {
+				// Extract jobID from CorrelationID
+				jobID := event.CorrelationID
+				if jobID == "" {
+					continue // Skip logs without jobID
+				}
+
+				// Convert Level.String() to lowercase (already lowercase from phuslu/log)
+				levelStr := event.Level.String()
+
+				// Format Timestamp to "15:04:05" format
+				formattedTime := event.Timestamp.Format("15:04:05")
+
+				// Build message with fields if present
+				message := event.Message
+				if len(event.Fields) > 0 {
+					// Append fields to message for database persistence
+					for key, value := range event.Fields {
+						message += fmt.Sprintf(" %s=%v", key, value)
+					}
+				}
+
+				// Create JobLogEntry
+				logEntry := models.JobLogEntry{
+					Timestamp: formattedTime,
+					Level:     levelStr,
+					Message:   message,
+				}
+
+				// Write to database (non-blocking, use background context)
+				if err := a.StorageManager.JobStorage().AppendJobLog(context.Background(), jobID, logEntry); err != nil {
+					a.Logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist context log to database")
+				}
+			}
+		}
+	}()
+	a.Logger.Info().Msg("Context logging initialized with database persistence")
 
 	// 2. Initialize embedding service (now uses LLM abstraction)
 	// NOTE: Phase 4 - EmbeddingService removed completely
@@ -435,6 +488,18 @@ func (a *App) initHandlers() error {
 
 // Close closes all application resources
 func (a *App) Close() error {
+	// Flush context logs before stopping services
+	a.Logger.Info().Msg("Flushing context logs")
+	common.Stop()
+
+	// Close log batch channel
+	if a.logBatchChannel != nil {
+		close(a.logBatchChannel)
+		// Allow consumer goroutine to process final batch
+		time.Sleep(100 * time.Millisecond)
+		a.Logger.Info().Msg("Context log channel closed")
+	}
+
 	// Stop scheduler service
 	if a.SchedulerService != nil {
 		if err := a.SchedulerService.Stop(); err != nil {

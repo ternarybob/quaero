@@ -60,6 +60,100 @@ go run .
 
 **That's it!** The test runner handles everything.
 
+## CLI Flags
+
+The test runner now supports CLI flags for selective test execution and discovery.
+
+### Available Flags
+
+- **`--suite <api|ui|all>`** - Filters which test directories to run
+  - `api`: Run only API integration tests
+  - `ui`: Run only UI browser tests
+  - `all`: Run all tests (default)
+  
+- **`--test <pattern>`** - Go test pattern for `-run` flag
+  - Supports regex patterns for matching test function names
+  - Examples: `TestAuth`, `TestAuth.*`, `Test(Auth|Config)`
+  
+- **`--list`** - List available test suites and exit
+  - Displays descriptions of all available test suites
+  - Shows example usage for each suite
+  
+- **`--help`** - Show usage information
+
+### Common Usage Examples
+
+```powershell
+# Example 1: List available test suites
+.\bin\quaero-test-runner.exe --list
+
+# Example 2: Run only API tests
+.\bin\quaero-test-runner.exe --suite api
+
+# Example 3: Run only UI tests
+.\bin\quaero-test-runner.exe --suite ui
+
+# Example 4: Run specific test by name
+.\bin\quaero-test-runner.exe --suite api --test TestAuthList
+
+# Example 5: Run tests matching pattern
+.\bin\quaero-test-runner.exe --suite api --test "TestAuth.*"
+
+# Example 6: Run specific UI test
+.\bin\quaero-test-runner.exe --suite ui --test TestHeroSectionConsistency
+
+# Example 7: Run job rerun tests
+.\bin\quaero-test-runner.exe --suite api --test TestJobRerun
+
+# Example 8: Run all tests (default behavior)
+.\bin\quaero-test-runner.exe
+# or explicitly:
+.\bin\quaero-test-runner.exe --suite all
+```
+
+### Running from Source with Flags
+
+You can use CLI flags when running from source:
+
+```powershell
+# Run from source with flags
+cd cmd/quaero-test-runner
+go run . --suite api --test TestAuthList
+
+# Note: If you encounter issues with flag parsing, use -- separator
+go run . -- --suite api --test TestAuth
+```
+
+### Test Pattern Matching
+
+The `--test` flag uses Go's `-run` regex pattern matching. Here are common patterns:
+
+| Pattern | Matches |
+|---------|---------|
+| `TestAuth` | TestAuth, TestAuthList, TestAuthentication, etc. |
+| `^TestAuth$` | Only TestAuth (exact match) |
+| `TestAuth.*List` | TestAuthList, TestAuthStatusList, etc. |
+| `Test(Auth\|Config)` | TestAuth*, TestConfig*, etc. |
+| `TestAuth/subtest` | Specific subtest within TestAuth |
+
+**Examples:**
+
+```powershell
+# Match all authentication tests
+.\bin\quaero-test-runner.exe --suite api --test "TestAuth"
+
+# Match exact test name
+.\bin\quaero-test-runner.exe --suite api --test "^TestAuthList$"
+
+# Match tests ending with "Health"
+.\bin\quaero-test-runner.exe --suite api --test ".*Health$"
+
+# Match multiple test prefixes
+.\bin\quaero-test-runner.exe --suite api --test "Test(Auth|Config|Job)"
+```
+
+📖 For advanced patterns, see [Go testing documentation](https://golang.org/pkg/testing/#hdr-Subtests_and_Sub_benchmarks).
+
 ## Configuration
 
 Edit `bin/quaero-test-runner.toml` or `cmd/quaero-test-runner/quaero-test-runner.toml`:
@@ -260,7 +354,31 @@ func TestMyUI(t *testing.T) {
 
 ## Running Individual Tests (Development)
 
-For development/debugging, you can run tests directly WITHOUT the test runner:
+### ✅ Recommended: Use CLI Flags
+
+The **recommended approach** is to use the test runner's `--suite` and `--test` flags for selective test execution:
+
+```powershell
+# Run specific API test
+.\bin\quaero-test-runner.exe --suite api --test TestAuthList
+
+# Run specific UI test
+.\bin\quaero-test-runner.exe --suite ui --test TestHeroSectionConsistency
+
+# Run tests matching pattern
+.\bin\quaero-test-runner.exe --suite api --test "TestAuth.*"
+```
+
+**Advantages:**
+- ✅ Automatic service management (no manual startup)
+- ✅ Proper environment setup (TEST_SERVER_URL, TEST_MODE)
+- ✅ Screenshots saved to timestamped results directory
+- ✅ Test logs captured automatically
+- ✅ Works with both mock and integration modes
+
+### Alternative: Manual go test (Advanced)
+
+For advanced debugging, you can run tests directly WITHOUT the test runner:
 
 ```powershell
 # ⚠️ WARNING: You must manually start the service first!
@@ -276,18 +394,86 @@ go test -v ./api -run TestChatHealth  # Specific test
 go test -v ./ui -run TestHeroSectionConsistency  # Hero test
 ```
 
-**When to use direct testing:**
-- Debugging a specific test
-- Rapid iteration during development
-- Running a single test repeatedly
+### Comparison: Test Runner Flags vs Manual go test
 
-**When to use test runner:**
-- CI/CD pipelines
-- Full regression testing
-- Before commits/PRs
-- When you want automated service management
+| Approach | Service Management | Environment Setup | Screenshots | When to Use |
+|----------|-------------------|-------------------|-------------|-------------|
+| `--suite` + `--test` flags | ✅ Automatic | ✅ Automatic | ✅ Saved | Development, CI/CD, standard use |
+| Manual `go test` | ❌ Manual | ⚠️ Manual | ⚠️ Lost | Advanced debugging only |
+
+**When to use test runner flags:**
+- ✅ Standard development workflow
+- ✅ Running specific tests during feature development
+- ✅ CI/CD pipelines
+- ✅ Pre-commit validation
+- ✅ When you want automated service management
+
+**When to use manual go test:**
+- 🔧 Deep debugging with IDE integration
+- 🔧 Custom test flags (e.g., `-bench`, `-cpuprofile`)
+- 🔧 Test development with rapid iteration
+
+## Exit Codes
+
+The test runner uses standard exit codes to indicate different outcomes:
+
+| Exit Code | Meaning | When It Occurs |
+|-----------|---------|----------------|
+| **0** | Success | All tests passed |
+| **1** | Test failure | One or more tests failed |
+| **2** | No tests executed | Suite/mode configuration resulted in no tests running |
+
+### Exit Code 2 Scenarios
+
+Exit code **2** indicates that no tests were executed, which can occur when:
+
+1. **UI tests requested in mock mode**
+   ```powershell
+   # Config has test_mode = "mock"
+   .\bin\quaero-test-runner.exe --suite ui
+   # Exit 2: UI tests require integration mode
+   ```
+
+2. **Test pattern matches no tests**
+   ```powershell
+   .\bin\quaero-test-runner.exe --suite api --test "TestNonExistent"
+   # Exit 2: No tests match the pattern
+   ```
+
+3. **Suite/mode combination filters out all tests**
+   ```powershell
+   # Config has test_mode = "mock" and --suite all
+   # Exit 2: Only API tests run, but if API path doesn't exist
+   ```
+
+**Note:** Exit code 2 is **not** a test failure - it indicates a configuration issue where the runner had nothing to execute.
 
 ## Troubleshooting
+
+### No Tests Run When Using --test Flag
+
+**Symptoms:** Test runner reports "no tests to run" or shows 0 tests executed
+
+**Solution:**
+1. Check test function name spelling (case-sensitive)
+2. Verify regex pattern syntax: `--test "TestAuth.*"`
+3. List available tests: `go test -v ./test/api -list ".*"`
+4. Try without pattern first: `--suite api` to see all API tests
+
+### UI Tests Skipped in Mock Mode
+
+**Symptoms:** "WARNING: UI tests require integration mode" message
+
+**Solution:**
+UI tests require `test_mode = "integration"` in config file:
+
+```toml
+[test_runner]
+test_mode = "integration"  # Change from "mock"
+```
+
+Or run API tests only: `--suite api`
+
 
 ### Test Runner Fails to Build
 
@@ -363,13 +549,54 @@ build_script = "./my-custom-build.ps1"
 
 ## CI/CD Integration
 
-**GitHub Actions Example:**
+### Fast CI Feedback with Test Suites
+
+Run API tests first (fast), then UI tests (slower) for optimal CI feedback:
+
+**GitHub Actions Example with Matrix Strategy:**
 
 ```yaml
-- name: Run Tests
+name: Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        suite: [api, ui]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Run ${{ matrix.suite }} Tests
+        run: |
+          cd cmd/quaero-test-runner
+          go run . --suite ${{ matrix.suite }}
+      
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.suite }}
+          path: test/results/
+```
+
+**GitHub Actions Example with Sequential Stages:**
+
+```yaml
+- name: Run API Tests (Fast)
   run: |
     cd cmd/quaero-test-runner
-    go run .
+    go run . --suite api
+
+- name: Run UI Tests (Slower)
+  if: success()
+  run: |
+    cd cmd/quaero-test-runner
+    go run . --suite ui
 ```
 
 **Azure Pipelines Example:**
@@ -377,28 +604,98 @@ build_script = "./my-custom-build.ps1"
 ```yaml
 - script: |
     cd cmd/quaero-test-runner
-    go run .
-  displayName: 'Run Integration Tests'
+    go run . --suite api
+  displayName: 'Run API Tests'
+
+- script: |
+    cd cmd/quaero-test-runner
+    go run . --suite ui
+  displayName: 'Run UI Tests'
+  condition: succeeded()
 ```
 
 **Jenkins Example:**
 
 ```groovy
-stage('Test') {
+stage('API Tests') {
     steps {
         dir('cmd/quaero-test-runner') {
-            bat 'go run .'
+            bat 'go run . --suite api'
+        }
+    }
+}
+stage('UI Tests') {
+    when { expression { currentBuild.result == 'SUCCESS' } }
+    steps {
+        dir('cmd/quaero-test-runner') {
+            bat 'go run . --suite ui'
         }
     }
 }
 ```
 
+### Running Specific Tests in CI
+
+```yaml
+# Run smoke tests only
+- name: Smoke Tests
+  run: |
+    cd cmd/quaero-test-runner
+    go run . --suite api --test "TestAuth.*|TestHealth.*"
+```
+
+## Quick Reference
+
+### CLI Flags Summary
+
+| Flag | Values | Default | Description |
+|------|--------|---------|-------------|
+| `--suite` | api, ui, all | all | Test suite to run |
+| `--test` | Go regex pattern | (none) | Filter tests by name pattern |
+| `--list` | (boolean) | false | List available suites and exit |
+| `--help` | (boolean) | false | Show usage information |
+
+### Common Commands
+
+```powershell
+# Discovery
+--list                              # List test suites
+
+# Run all tests
+(no flags)                          # Default: all tests
+--suite all                         # Explicit: all tests
+
+# Run by suite
+--suite api                         # API tests only
+--suite ui                          # UI tests only
+
+# Run specific tests
+--suite api --test TestAuth         # Tests matching "TestAuth"
+--suite api --test "^TestAuth$"     # Exact match "TestAuth"
+--suite api --test "TestAuth.*"     # Tests starting with "TestAuth"
+--suite ui --test TestHero          # UI tests matching "TestHero"
+
+# Pattern matching
+--suite api --test "Test(Auth|Job)" # Match multiple prefixes
+--suite api --test ".*Health$"      # Match suffix
+```
+
+### Test Mode Behavior
+
+| Mode | API Tests | UI Tests | Backend |
+|------|-----------|----------|---------|
+| **mock** | ✅ Runs | ⚠️ Skipped | In-memory mock |
+| **integration** | ✅ Runs | ✅ Runs | Real service + database |
+
+**Note:** Use `--suite api` in mock mode to avoid UI test warnings.
+
 ## Summary
 
 **✅ DO:**
+- Use CLI flags for selective test execution: `--suite api --test TestAuth`
 - Run the test runner: `cd cmd/quaero-test-runner && go run .`
 - Let the test runner build and start the service
-- Use configuration file for paths and settings
+- Use `--list` to discover available test suites
 - Review screenshots in results directories
 
 **❌ DON'T:**
@@ -413,3 +710,4 @@ stage('Test') {
 - [README.md](../../README.md) - Project overview
 - [test/helpers.go](../../test/helpers.go) - Shared test utilities
 - [test/ui/screenshot_helper.go](../../test/ui/screenshot_helper.go) - Screenshot utilities
+- [Go Testing Documentation](https://golang.org/pkg/testing/) - Test pattern matching

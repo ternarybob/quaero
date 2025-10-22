@@ -1,5 +1,23 @@
 # Quaero Test Runner Configuration
 # Supports two test modes: "mock" and "integration"
+#
+# CLI FLAGS (Runtime Arguments):
+# CLI flags can override or filter test execution behavior.
+# Flags are passed at runtime, not configured in this file.
+#
+# Available flags:
+#   --suite <api|ui|all>  : Filter which test directories to run
+#   --test <pattern>      : Go regex pattern to filter test functions
+#   --list                : List available test suites and exit
+#   --help                : Show usage information
+#
+# Examples:
+#   quaero-test-runner --suite api
+#   quaero-test-runner --suite api --test TestAuth
+#   quaero-test-runner --suite ui --test TestHeroSectionConsistency
+#   quaero-test-runner --list
+#
+# See README.md for complete CLI flag documentation.
 
 [test_runner]
 # Directory where test files are located (do not include subdirs like api/ui)
@@ -17,9 +35,16 @@ build_script = "./scripts/build.ps1"  # Windows
 # Test mode: "mock" or "integration"
 # - mock: Uses in-memory mock server, no real database, fast, isolated
 #   Ideal for CI/CD pipelines, fast feedback, unit testing
+#   Note: UI tests are skipped in mock mode
 # - integration: Uses real Quaero service, tests full stack, requires service running
 #   Ideal for end-to-end testing, pre-release validation
-test_mode = "mock"  # Default to mock for safety
+#   Note: Both API and UI tests run in integration mode
+#
+# Combining test_mode with CLI flags:
+#   test_mode="mock" + --suite api    : API tests against mock server
+#   test_mode="integration" + --suite ui : UI tests against real service
+#   test_mode="mock" + --suite ui     : Warning displayed, UI tests skipped
+test_mode = "integration"  # Use real service for comprehensive testing
 
 [test_server]
 # Test server binds to this port for serving test resources

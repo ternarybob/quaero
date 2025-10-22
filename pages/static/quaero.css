@@ -419,6 +419,10 @@ h2 {
     color: #f85149;
 }
 
+.terminal-debug {
+    color: #8b949e;
+}
+
 /* Table Styling Overrides */
 .table {
     border-collapse: collapse;

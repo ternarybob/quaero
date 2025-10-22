@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
-	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 )

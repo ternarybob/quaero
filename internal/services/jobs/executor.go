@@ -166,7 +166,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 					// Set flag indicating async polling was launched
 					asyncPollingLaunched = true
 
-					e.logger.Info().
+					e.logger.Debug().
 						Str("job_id", definition.ID).
 						Int("step_index", stepIndex).
 						Str("step_name", step.Name).
@@ -209,7 +209,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 					}()
 
 					// Immediately return - polling continues in background
-					e.logger.Info().
+					e.logger.Debug().
 						Str("job_id", definition.ID).
 						Int("step_index", stepIndex).
 						Msg("Crawl step completed (polling in background)")
@@ -266,7 +266,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	if !asyncPollingLaunched {
 		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", "")
 	} else {
-		e.logger.Info().
+		e.logger.Debug().
 			Str("job_id", definition.ID).
 			Msg("Async polling in progress - completion event deferred to polling goroutine")
 	}
@@ -363,8 +363,8 @@ func (e *JobExecutor) retryStep(ctx context.Context, definition *models.JobDefin
 			backoff = maxBackoff
 		}
 
-		// Log retry attempt
-		e.logger.Info().
+		// Log retry attempt (execution detail)
+		e.logger.Debug().
 			Str("job_id", definition.ID).
 			Str("step_name", step.Name).
 			Int("attempt", attempt).
@@ -476,7 +476,7 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 	consecutiveErrors := make(map[string]int)
 	maxConsecutiveErrors := 5 // Fail after 5 consecutive GetJobStatus errors
 
-	e.logger.Info().
+	e.logger.Debug().
 		Str("job_id", definition.ID).
 		Int("step_index", stepIndex).
 		Str("step_name", step.Name).
@@ -657,16 +657,16 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 // publishCrawlProgressEvent publishes a job progress event with crawl-specific details
 func (e *JobExecutor) publishCrawlProgressEvent(ctx context.Context, definition *models.JobDefinition, stepIndex int, step models.JobStep, crawlJobID string, cj *crawler.CrawlJob, status string) {
 	payload := map[string]interface{}{
-		"job_id":        definition.ID,
-		"job_name":      definition.Name,
-		"job_type":      string(definition.Type),
-		"step_index":    stepIndex,
-		"step_name":     step.Name,
-		"step_action":   step.Action,
-		"total_steps":   len(definition.Steps),
-		"status":        status,
-		"timestamp":     time.Now(),
-		"crawl_job_id":  crawlJobID,
+		"job_id":       definition.ID,
+		"job_name":     definition.Name,
+		"job_type":     string(definition.Type),
+		"step_index":   stepIndex,
+		"step_name":    step.Name,
+		"step_action":  step.Action,
+		"total_steps":  len(definition.Steps),
+		"status":       status,
+		"timestamp":    time.Now(),
+		"crawl_job_id": crawlJobID,
 	}
 
 	// Populate source_type from CrawlJob

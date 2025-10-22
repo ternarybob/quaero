@@ -728,9 +728,9 @@ func TestSourcesFilterDisplayFormatting(t *testing.T) {
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	testSources := []struct {
-		name           string
-		filters        map[string]interface{}
-		expectedText   string
+		name         string
+		filters      map[string]interface{}
+		expectedText string
 	}{
 		{
 			name: "UI Test Both Filters",

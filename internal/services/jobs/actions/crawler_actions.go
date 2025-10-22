@@ -82,22 +82,22 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 			FollowLinks:     followLinks,
 		}
 
-		// Log the decision path for follow_links configuration
+		// Log the decision path for follow_links configuration (execution detail)
 		if followLinksProvided {
-			deps.Logger.Info().
+			deps.Logger.Debug().
 				Str("source_id", source.ID).
 				Str("source_name", source.Name).
 				Bool("follow_links", jobCrawlConfig.FollowLinks).
 				Msg("Using follow_links from job config")
 		} else {
-			deps.Logger.Info().
+			deps.Logger.Debug().
 				Str("source_id", source.ID).
 				Str("source_name", source.Name).
 				Bool("follow_links", jobCrawlConfig.FollowLinks).
 				Msg("Using follow_links from source default")
 		}
 
-		deps.Logger.Info().
+		deps.Logger.Debug().
 			Str("action", "crawl").
 			Str("source_id", source.ID).
 			Str("source_type", string(source.Type)).
@@ -144,7 +144,7 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 			sourceType: string(source.Type),
 		})
 
-		deps.Logger.Info().
+		deps.Logger.Debug().
 			Str("action", "crawl").
 			Str("job_id", jobID).
 			Str("source_id", source.ID).
@@ -213,7 +213,7 @@ func transformAction(ctx context.Context, step *models.JobStep, sources []*model
 
 	// If no sources specified, publish once for all sources
 	if len(sources) == 0 {
-		deps.Logger.Info().
+		deps.Logger.Debug().
 			Str("action", "transform").
 			Msg("No sources specified, publishing event for all sources")
 
@@ -232,7 +232,7 @@ func transformAction(ctx context.Context, step *models.JobStep, sources []*model
 			return fmt.Errorf("failed to publish collection event: %w", err)
 		}
 
-		deps.Logger.Info().
+		deps.Logger.Debug().
 			Str("action", "transform").
 			Msg("Published collection triggered event for all sources")
 
@@ -258,7 +258,7 @@ func transformAction(ctx context.Context, step *models.JobStep, sources []*model
 			return fmt.Errorf("failed to publish collection event for source %s: %w", source.ID, err)
 		}
 
-		deps.Logger.Info().
+		deps.Logger.Debug().
 			Str("action", "transform").
 			Str("source_id", source.ID).
 			Str("source_type", string(source.Type)).
@@ -324,7 +324,7 @@ func embedAction(ctx context.Context, step *models.JobStep, sources []*models.So
 		return fmt.Errorf("failed to publish embedding event: %w", err)
 	}
 
-	deps.Logger.Info().
+	deps.Logger.Debug().
 		Str("action", "embed").
 		Bool("force_embed", forceEmbed).
 		Int("batch_size", batchSize).

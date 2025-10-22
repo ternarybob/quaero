@@ -49,8 +49,12 @@ func (m *mockAuthStorage) GetCredentialsByID(ctx context.Context, id string) (*m
 	return &models.AuthCredentials{
 		ID:         id,
 		SiteDomain: "example.atlassian.net",
-		CloudID:    "test-cloud-id",
-		AtlToken:   "test-token",
+		Data: map[string]interface{}{
+			"cloud_id": "test-cloud-id",
+		},
+		Tokens: map[string]string{
+			"atl_token": "test-token",
+		},
 	}, nil
 }
 
@@ -121,8 +125,6 @@ func createTestDeps() (*CrawlerActionDeps, *mockStartCrawlJobFunc, *mockAuthStor
 	mockEvents := &mockEventService{}
 
 	logger := arbor.NewLogger()
-	logger.SetConsole(true)
-	logger.SetLevel(arbor.LogLevelInfo)
 
 	cfg := &common.Config{}
 
@@ -144,10 +146,8 @@ func createTestSources() []*models.SourceConfig {
 			Type:    models.SourceTypeJira,
 			BaseURL: "https://example.atlassian.net",
 			CrawlConfig: models.CrawlConfig{
-				MaxDepth:     2,
-				MaxPages:     100,
-				SeedURLs:     []string{"https://example.atlassian.net/browse/PROJECT"},
-				AllowedPaths: []string{"/browse/"},
+				MaxDepth: 2,
+				MaxPages: 100,
 			},
 		},
 		{
@@ -155,10 +155,8 @@ func createTestSources() []*models.SourceConfig {
 			Type:    models.SourceTypeConfluence,
 			BaseURL: "https://example.atlassian.net/wiki",
 			CrawlConfig: models.CrawlConfig{
-				MaxDepth:     3,
-				MaxPages:     200,
-				SeedURLs:     []string{"https://example.atlassian.net/wiki/spaces/SPACE"},
-				AllowedPaths: []string{"/wiki/"},
+				MaxDepth: 3,
+				MaxPages: 200,
 			},
 		},
 	}
@@ -169,9 +167,6 @@ func createTestStep(action string, config map[string]interface{}) models.JobStep
 		Action:  action,
 		Config:  config,
 		OnError: models.ErrorStrategyFail,
-		Retry: models.RetryConfig{
-			MaxAttempts: 1,
-		},
 	}
 }
 
@@ -195,7 +190,7 @@ func TestCrawlAction_Success(t *testing.T) {
 
 	step.Config["wait_for_completion"] = false // Skip waiting since we can't mock it
 
-	err := crawlAction(context.Background(), step, sources, deps)
+	err := crawlAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -222,7 +217,7 @@ func TestCrawlAction_NoSources(t *testing.T) {
 	deps, _, _, _ := createTestDeps()
 	step := createTestStep("crawl", nil)
 
-	err := crawlAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := crawlAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err == nil {
 		t.Error("Expected error for no sources, got nil")
@@ -243,7 +238,7 @@ func TestCrawlAction_StartCrawlFailure(t *testing.T) {
 	}
 	startCrawlJobFunc = mockStartCrawl.startCrawl
 
-	err := crawlAction(context.Background(), step, sources, deps)
+	err := crawlAction(context.Background(), &step, sources, deps)
 
 	if err == nil {
 		t.Error("Expected error for failed crawl, got nil")
@@ -287,7 +282,7 @@ func TestCrawlAction_NoBlocking(t *testing.T) {
 
 	// Measure execution time
 	start := time.Now()
-	err := crawlAction(context.Background(), step, sources, deps)
+	err := crawlAction(context.Background(), &step, sources, deps)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -332,7 +327,7 @@ func TestTransformAction_Success(t *testing.T) {
 	sources := createTestSources()
 	step := createTestStep("transform", nil)
 
-	err := transformAction(context.Background(), step, sources, deps)
+	err := transformAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -354,7 +349,7 @@ func TestTransformAction_NoSources(t *testing.T) {
 	deps, _, _, mockEvents := createTestDeps()
 	step := createTestStep("transform", nil)
 
-	err := transformAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := transformAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error for no sources (applies to all), got: %v", err)
@@ -373,7 +368,7 @@ func TestTransformAction_WithJobID(t *testing.T) {
 		"job_id": "test-job-123",
 	})
 
-	err := transformAction(context.Background(), step, sources, deps)
+	err := transformAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -401,7 +396,7 @@ func TestTransformAction_WithForceSync(t *testing.T) {
 		"force_sync": true,
 	})
 
-	err := transformAction(context.Background(), step, sources, deps)
+	err := transformAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -431,7 +426,7 @@ func TestTransformAction_EventPublishFailure(t *testing.T) {
 		return fmt.Errorf("event publish failed")
 	}
 
-	err := transformAction(context.Background(), step, sources, deps)
+	err := transformAction(context.Background(), &step, sources, deps)
 
 	// Should return error immediately for transform action
 	if err == nil {
@@ -445,7 +440,7 @@ func TestEmbedAction_Success(t *testing.T) {
 	deps, _, _, mockEvents := createTestDeps()
 	step := createTestStep("embed", nil)
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -467,7 +462,7 @@ func TestEmbedAction_WithForceEmbed(t *testing.T) {
 		"force_embed": true,
 	})
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -489,7 +484,7 @@ func TestEmbedAction_WithBatchSize(t *testing.T) {
 		"batch_size": 100,
 	})
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -511,7 +506,7 @@ func TestEmbedAction_WithModelName(t *testing.T) {
 		"model_name": "custom-model",
 	})
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -534,7 +529,7 @@ func TestEmbedAction_WithFilterSourceIDs(t *testing.T) {
 		"filter_source_ids": filterIDs,
 	})
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -560,7 +555,7 @@ func TestEmbedAction_WithSources(t *testing.T) {
 	sources := createTestSources()
 	step := createTestStep("embed", nil)
 
-	err := embedAction(context.Background(), step, sources, deps)
+	err := embedAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -589,7 +584,7 @@ func TestEmbedAction_EventPublishFailure(t *testing.T) {
 		return fmt.Errorf("event publish failed")
 	}
 
-	err := embedAction(context.Background(), step, []*models.SourceConfig{}, deps)
+	err := embedAction(context.Background(), &step, []*models.SourceConfig{}, deps)
 
 	// Should return error immediately
 	if err == nil {
@@ -603,6 +598,10 @@ func TestRegisterCrawlerActions_Success(t *testing.T) {
 	logger := arbor.NewLogger()
 	registry := jobs.NewJobTypeRegistry(logger)
 	deps, _, _, _ := createTestDeps()
+
+	// Provide a non-nil CrawlerService for registration
+	// RegisterCrawlerActions validates that all dependencies are non-nil
+	deps.CrawlerService = &crawler.Service{}
 
 	err := RegisterCrawlerActions(registry, deps)
 
@@ -956,7 +955,7 @@ func TestCrawlAction_MultipleSourcesWithError(t *testing.T) {
 	}
 	startCrawlJobFunc = mockStartCrawl.startCrawl
 
-	err := crawlAction(context.Background(), step, sources, deps)
+	err := crawlAction(context.Background(), &step, sources, deps)
 
 	// Should have errors aggregated but not fail completely
 	if err == nil {
@@ -976,7 +975,7 @@ func TestTransformAction_WithBatchSize(t *testing.T) {
 		"batch_size": 500,
 	})
 
-	err := transformAction(context.Background(), step, sources, deps)
+	err := transformAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
@@ -1005,7 +1004,7 @@ func TestEmbedAction_CompletePayload(t *testing.T) {
 		"model_name":  "test-model-v2",
 	})
 
-	err := embedAction(context.Background(), step, sources, deps)
+	err := embedAction(context.Background(), &step, sources, deps)
 
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)

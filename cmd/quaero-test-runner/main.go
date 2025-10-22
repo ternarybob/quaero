@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 15th October 2025 2:16:41 pm
+// Last Modified: Thursday, 23rd October 2025 8:42:40 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +20,13 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/quaero/test"
+)
+
+// CLI flags
+var (
+	suiteFlag = flag.String("suite", "all", "Test suite to run: api, ui, or all (default: all)")
+	testFlag  = flag.String("test", "", "Go test pattern for -run flag (e.g., TestAuth or TestAuth.*)")
+	listFlag  = flag.Bool("list", false, "List available test suites and exit")
 )
 
 type TestSuite struct {
@@ -122,6 +130,52 @@ func loadServiceConfig(configPath string) (*ServiceConfig, error) {
 	return &config, nil
 }
 
+// listTestSuites prints available test suites and exits
+func listTestSuites() {
+	fmt.Println("\n==============================================")
+	fmt.Println("Available Test Suites")
+	fmt.Println("==============================================\n")
+
+	fmt.Println("📦 API Tests (test/api/)")
+	fmt.Println("   HTTP endpoint integration tests")
+	fmt.Println("   Tests authentication, collection, jobs, documents, etc.")
+	fmt.Println("   Example: --suite api --test TestAuthList\n")
+
+	fmt.Println("🌐 UI Tests (test/ui/)")
+	fmt.Println("   Browser automation tests with ChromeDP")
+	fmt.Println("   Tests page navigation, hero consistency, chat interface, etc.")
+	fmt.Println("   Example: --suite ui --test TestHeroSectionConsistency\n")
+
+	fmt.Println("🎯 All Tests (default)")
+	fmt.Println("   Runs all API and UI tests")
+	fmt.Println("   Example: --suite all (or omit --suite flag)\n")
+
+	fmt.Println("Usage Examples:")
+	fmt.Println("  quaero-test-runner --list")
+	fmt.Println("  quaero-test-runner --suite api")
+	fmt.Println("  quaero-test-runner --suite ui")
+	fmt.Println("  quaero-test-runner --suite api --test TestAuth")
+	fmt.Println("  quaero-test-runner --suite api --test \"TestAuth.*\"")
+	fmt.Println()
+
+	os.Exit(0)
+}
+
+// printUsage prints usage information
+func printUsage() {
+	fmt.Println("\nQuaero Test Runner - CLI Flags\n")
+	fmt.Println("Usage: quaero-test-runner [flags]\n")
+	fmt.Println("Flags:")
+	flag.PrintDefaults()
+	fmt.Println("\nExamples:")
+	fmt.Println("  quaero-test-runner --list")
+	fmt.Println("  quaero-test-runner --suite api")
+	fmt.Println("  quaero-test-runner --suite ui --test TestHeroSectionConsistency")
+	fmt.Println("  quaero-test-runner --suite api --test \"TestAuth.*\"")
+	fmt.Println("\nSee README.md for detailed documentation")
+	fmt.Println()
+}
+
 // killProcessOnPort kills any process listening on the specified port
 func killProcessOnPort(port int) error {
 	if runtime.GOOS == "windows" {
@@ -146,6 +200,24 @@ func killProcessOnPort(port int) error {
 }
 
 func main() {
+	// Parse CLI flags
+	flag.Parse()
+
+	// Handle --list flag
+	if *listFlag {
+		listTestSuites()
+		return
+	}
+
+	// Validate --suite flag
+	validSuites := map[string]bool{"api": true, "ui": true, "all": true}
+	suiteLower := strings.ToLower(*suiteFlag)
+	if !validSuites[suiteLower] {
+		fmt.Printf("ERROR: Invalid suite '%s'. Must be 'api', 'ui', or 'all'\n", *suiteFlag)
+		printUsage()
+		os.Exit(1)
+	}
+
 	fmt.Println("==============================================")
 	fmt.Println("Quaero Test Runner")
 	fmt.Println("==============================================\n")
@@ -161,7 +233,71 @@ func main() {
 	fmt.Printf("  Tests Directory: %s\n", config.TestRunner.TestsDir)
 	fmt.Printf("  Output Directory: %s\n", config.TestRunner.OutputDir)
 	fmt.Printf("  Build Script: %s\n", config.TestRunner.BuildScript)
-	fmt.Printf("  Test Mode: %s\n\n", config.TestRunner.TestMode)
+	fmt.Printf("  Test Mode: %s\n", config.TestRunner.TestMode)
+
+	// Show active CLI flags
+	if *suiteFlag != "all" || *testFlag != "" {
+		fmt.Printf("\nCLI Flags:\n")
+		if *suiteFlag != "all" {
+			fmt.Printf("  Suite Filter: %s\n", *suiteFlag)
+		}
+		if *testFlag != "" {
+			fmt.Printf("  Test Pattern: %s\n", *testFlag)
+		}
+	}
+	fmt.Println()
+
+	// Determine which test suites will run BEFORE starting services
+	// This avoids wasted work if no suites match the filter/mode combination
+	fmt.Println("Determining test suites to run...")
+	fmt.Println(strings.Repeat("-", 80))
+
+	apiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "api"))
+	uiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "ui"))
+
+	// Build suites conditionally based on test mode and CLI flags
+	suites := []TestSuite{}
+
+	// Add API tests if requested
+	if suiteLower == "api" || suiteLower == "all" {
+		suites = append(suites, TestSuite{
+			Name:    "API Tests",
+			Path:    apiTestPath,
+			Command: []string{"go", "test", "-v", "-count=1", "./" + apiTestPath},
+		})
+	}
+
+	// Add UI tests if requested (only in integration mode)
+	if suiteLower == "ui" || suiteLower == "all" {
+		if config.TestRunner.TestMode == "integration" {
+			suites = append(suites, TestSuite{
+				Name:    "UI Tests",
+				Path:    uiTestPath,
+				Command: []string{"go", "test", "-v", "-count=1", "./" + uiTestPath},
+			})
+		} else if suiteLower == "ui" {
+			// Warn if user specifically requested UI tests in mock mode
+			fmt.Printf("WARNING: UI tests require integration mode (test_mode=integration)\n")
+			fmt.Printf("Skipping UI tests since test_mode=%s\n", config.TestRunner.TestMode)
+		}
+	}
+
+	// Early exit if no suites will run
+	if len(suites) == 0 {
+		fmt.Println("\nNo test suites match the current configuration:")
+		fmt.Printf("  Suite Filter: %s\n", *suiteFlag)
+		fmt.Printf("  Test Mode: %s\n", config.TestRunner.TestMode)
+		fmt.Println("\nUI tests require integration mode (test_mode='integration')")
+		fmt.Println("Change suite filter (--suite) or test mode in config to run tests.")
+		fmt.Println()
+		os.Exit(2)
+	}
+
+	fmt.Printf("✓ %d test suite(s) will run:\n", len(suites))
+	for _, suite := range suites {
+		fmt.Printf("  - %s\n", suite.Name)
+	}
+	fmt.Println()
 
 	// Step 0: Start test server for browser validation
 	fmt.Printf("STEP 0: Starting test server (port %d)...\n", config.TestServer.Port)
@@ -276,29 +412,6 @@ func main() {
 	fmt.Println("STEP 3: Running tests...")
 	fmt.Println(strings.Repeat("-", 80))
 
-	// Define test suites organized by category
-	// Use ./ prefix for go test to recognize as relative path
-	apiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "api"))
-	uiTestPath := filepath.ToSlash(filepath.Join(config.TestRunner.TestsDir, "ui"))
-
-	// Build suites conditionally based on test mode
-	suites := []TestSuite{
-		{
-			Name:    "API Tests",
-			Path:    apiTestPath,
-			Command: []string{"go", "test", "-v", "./" + apiTestPath},
-		},
-	}
-
-	// Only include UI tests in integration mode
-	if config.TestRunner.TestMode == "integration" {
-		suites = append(suites, TestSuite{
-			Name:    "UI Tests",
-			Path:    uiTestPath,
-			Command: []string{"go", "test", "-v", "./" + uiTestPath},
-		})
-	}
-
 	fmt.Printf("Test results will be saved to: %s/{testname}-{datetime}/\n", config.TestRunner.OutputDir)
 	if config.TestRunner.TestMode == "integration" {
 		fmt.Printf("UI tests will include screenshots for each navigation\n\n")
@@ -341,6 +454,12 @@ func main() {
 	printSummary(results, allPassed)
 
 	// Exit with appropriate code
+	// Exit code 0: all tests passed
+	// Exit code 1: one or more tests failed
+	// Exit code 2: no tests executed
+	if len(results) == 0 {
+		os.Exit(2)
+	}
 	if !allPassed {
 		os.Exit(1)
 	}
@@ -499,8 +618,19 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 		}
 	}
 
+	// Build test command with optional -run flag
+	cmdArgs := suite.Command[1:] // Skip "go" command
+	if *testFlag != "" {
+		cmdArgs = append(cmdArgs, "-run", *testFlag)
+		fmt.Printf("  Filtering tests with pattern: %s\n", *testFlag)
+	}
+
+	// Log the exact command being executed
+	fullCmd := append([]string{suite.Command[0]}, cmdArgs...)
+	fmt.Printf("  Executing: %s\n\n", strings.Join(fullCmd, " "))
+
 	// Run the test command with environment variables
-	cmd := exec.Command(suite.Command[0], suite.Command[1:]...)
+	cmd := exec.Command(suite.Command[0], cmdArgs...)
 	cmd.Dir = "."
 
 	// Use test mode from config (fallback to URL-based detection if mode is empty)
@@ -540,6 +670,17 @@ func printSummary(results []TestResult, allPassed bool) {
 	fmt.Println("\n" + strings.Repeat("=", 80))
 	fmt.Println("TEST SUMMARY")
 	fmt.Println(strings.Repeat("=", 80))
+
+	// Handle case where no tests executed
+	if len(results) == 0 {
+		fmt.Println("\n⚠ No tests executed due to suite/test mode selection.")
+		fmt.Println("\nThis can occur when:")
+		fmt.Println("  - UI tests requested in mock mode")
+		fmt.Println("  - Test pattern (-test flag) matched no tests")
+		fmt.Println("  - Suite configuration filtered out all tests")
+		fmt.Println("\nExit code 2 indicates no tests ran (not a test failure).")
+		return
+	}
 
 	totalDuration := time.Duration(0)
 	passed := 0
