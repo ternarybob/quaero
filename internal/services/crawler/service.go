@@ -718,10 +718,18 @@ func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (i
 }
 
 // RerunJob creates a copy of a previous job and adds it to the queue with "pending" status
-// IMPORTANT: Jobs are rerun with their stored snapshots (auth and source config from the original job's creation time)
-// This ensures jobs run independently with their "at time" configuration, not current live configuration.
+// This is the same as "execute on-demand" but uses an existing job as the template.
+// Jobs are self-contained with all config stored (source_config_snapshot, auth_snapshot, seed_urls).
 // The job is NOT executed immediately - it is queued and will be picked up by workers when available.
 func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig interface{}) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("service is nil")
+	}
+
+	if s.logger == nil {
+		return "", fmt.Errorf("logger is nil")
+	}
+
 	if s.jobStorage == nil {
 		return "", fmt.Errorf("job storage not configured")
 	}
@@ -733,116 +741,64 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 	}
 
 	originalJob, ok := jobInterface.(*CrawlJob)
-	if !ok {
-		return "", fmt.Errorf("invalid job type")
-	}
-
-	// Use original config or updated config
-	config := originalJob.Config
-	if updateConfig != nil {
-		// Type assert to *CrawlConfig
-		crawlConfig, ok := updateConfig.(*CrawlConfig)
-		if !ok {
-			return "", fmt.Errorf("invalid config type: expected *CrawlConfig")
-		}
-		config = *crawlConfig
-	}
-
-	// Use stored seed URLs from original job
-	seedURLs := originalJob.SeedURLs
-	if len(seedURLs) == 0 {
-		return "", fmt.Errorf("cannot rerun job: no seed URLs stored in original job")
-	}
-
-	// Get snapshots from original job - these preserve the "at time" configuration
-	sourceConfigSnapshot, err := originalJob.GetSourceConfigSnapshot()
-	if err != nil {
-		s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get source config snapshot from original job")
-	}
-
-	authSnapshot, err := originalJob.GetAuthSnapshot()
-	if err != nil {
-		s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get auth snapshot from original job")
+	if !ok || originalJob == nil {
+		return "", fmt.Errorf("invalid job type or nil job")
 	}
 
 	// Create new job ID
 	newJobID := uuid.New().String()
+	now := time.Now()
 
-	// Create context logger for the new job (with proper nil safety)
-	// Use regular logger if context logger creation fails
-	contextLogger := s.logger
-	if s.logger != nil {
-		if ctxLogger := s.logger.WithContextWriter(newJobID); ctxLogger != nil {
-			contextLogger = ctxLogger
-		}
-	}
-
-	// Create new job in PENDING status (do NOT start execution)
+	// Build fresh job copying only essential fields from original
+	// This avoids any potential issues with struct copying or nil pointers
 	newJob := &CrawlJob{
-		ID:            newJobID,
-		Name:          originalJob.Name,
-		Description:   originalJob.Description,
-		SourceType:    originalJob.SourceType,
-		EntityType:    originalJob.EntityType,
-		Config:        config,
-		RefreshSource: false, // Always false to preserve snapshot configuration
-		SeedURLs:      seedURLs,
-		Status:        JobStatusPending, // Job is queued, not running
+		ID:                   newJobID,
+		Name:                 originalJob.Name,
+		Description:          originalJob.Description,
+		SourceType:           originalJob.SourceType,
+		EntityType:           originalJob.EntityType,
+		Config:               originalJob.Config,
+		SourceConfigSnapshot: originalJob.SourceConfigSnapshot,
+		AuthSnapshot:         originalJob.AuthSnapshot,
+		RefreshSource:        originalJob.RefreshSource,
+		SeedURLs:             originalJob.SeedURLs,
+
+		// Reset to fresh state
+		Status:         JobStatusPending,
+		CreatedAt:      now,
+		StartedAt:      time.Time{},
+		CompletedAt:    time.Time{},
+		Error:          "",
+		ResultCount:    0,
+		FailedCount:    0,
+		DocumentsSaved: 0,
+
+		// Fresh progress
 		Progress: CrawlProgress{
-			TotalURLs:     len(seedURLs),
+			TotalURLs:     len(originalJob.SeedURLs),
 			CompletedURLs: 0,
 			FailedURLs:    0,
-			PendingURLs:   len(seedURLs),
-			StartTime:     time.Time{}, // Not started yet
+			PendingURLs:   len(originalJob.SeedURLs),
+			StartTime:     now,
 		},
-		CreatedAt: time.Now(),
 	}
 
-	// Store snapshots in the new job
-	if sourceConfigSnapshot != nil {
-		if err := newJob.SetSourceConfigSnapshot(sourceConfigSnapshot); err != nil {
-			if contextLogger != nil {
-				contextLogger.Error().Err(err).Msg("Failed to serialize source config snapshot")
-			}
-			return "", fmt.Errorf("failed to set source config snapshot: %w", err)
-		}
-		if contextLogger != nil {
-			contextLogger.Debug().Msg("Source config snapshot copied to new job")
+	// Apply config update if provided
+	if updateConfig != nil {
+		if crawlConfig, ok := updateConfig.(*CrawlConfig); ok && crawlConfig != nil {
+			newJob.Config = *crawlConfig
 		}
 	}
 
-	if authSnapshot != nil {
-		if err := newJob.SetAuthSnapshot(authSnapshot); err != nil {
-			if contextLogger != nil {
-				contextLogger.Error().Err(err).Msg("Failed to serialize auth snapshot")
-			}
-			return "", fmt.Errorf("failed to set auth snapshot: %w", err)
-		}
-		if contextLogger != nil {
-			contextLogger.Debug().Msg("Auth snapshot copied to new job")
-		}
-	}
-
-	// Persist job to database in PENDING status
+	// Save the new job
 	if err := s.jobStorage.SaveJob(ctx, newJob); err != nil {
-		s.logger.Error().Err(err).Str("job_id", newJobID).Msg("Failed to persist job to database")
 		return "", fmt.Errorf("failed to save job: %w", err)
-	}
-
-	if contextLogger != nil {
-		contextLogger.Info().
-			Str("original_job_id", jobID).
-			Str("source_type", originalJob.SourceType).
-			Str("entity_type", originalJob.EntityType).
-			Int("seed_count", len(seedURLs)).
-			Msg("Job copied and queued successfully (pending execution)")
 	}
 
 	s.logger.Info().
 		Str("original_job_id", jobID).
 		Str("new_job_id", newJobID).
-		Bool("used_snapshots", sourceConfigSnapshot != nil || authSnapshot != nil).
-		Msg("Job rerun created and added to queue (not executed)")
+		Msg("Job rerun created successfully")
 
 	return newJobID, nil
 }

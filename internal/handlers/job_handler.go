@@ -366,7 +366,8 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	newJobID, err := h.crawlerService.RerunJob(ctx, jobID, updateConfig)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to rerun job")
-		http.Error(w, "Failed to rerun job", http.StatusInternalServerError)
+		// Return detailed error for debugging
+		http.Error(w, "Failed to rerun job: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

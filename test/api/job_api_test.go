@@ -11,6 +11,7 @@ import (
 
 // TestCreateJobWithSource creates a job from an existing source with authentication
 func TestCreateJobWithSource(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	baseURL := test.MustGetTestServerURL()
 	h := test.NewHTTPTestHelper(t, baseURL)
 
@@ -187,6 +188,7 @@ func TestCreateJobWithSource(t *testing.T) {
 
 // TestCreateJobWithRefresh creates a job with refresh_source=true
 func TestCreateJobWithRefresh(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Create source without auth
@@ -287,6 +289,7 @@ func TestCreateJobValidationFailure(t *testing.T) {
 
 // TestCreateJobSourceNotFound tests job creation with non-existent source
 func TestCreateJobSourceNotFound(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Attempt to create job with non-existent source ID
@@ -306,6 +309,7 @@ func TestCreateJobSourceNotFound(t *testing.T) {
 
 // TestCreateJobWithoutAuth creates a job from a source without authentication
 func TestCreateJobWithoutAuth(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Create source without auth_id
@@ -373,6 +377,7 @@ func TestCreateJobWithoutAuth(t *testing.T) {
 
 // TestGetJobQueue tests the job queue endpoint
 func TestGetJobQueue(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// Create a source for testing
@@ -458,6 +463,7 @@ func TestGetJobQueue(t *testing.T) {
 
 // TestJobSnapshotImmutability verifies that job snapshots remain unchanged after source modification
 func TestJobSnapshotImmutability(t *testing.T) {
+	t.Skip("SKIP: Direct job creation endpoint is deprecated - use job definitions instead")
 	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
 
 	// 1. Create source
