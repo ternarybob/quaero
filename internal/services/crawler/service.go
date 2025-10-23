@@ -561,6 +561,9 @@ func (s *Service) GetJobStatus(jobID string) (interface{}, error) {
 
 // CancelJob cancels a running job
 func (s *Service) CancelJob(jobID string) error {
+	// Create contextLogger at function start for consistent logging to both console and database
+	contextLogger := s.logger.WithContextWriter(jobID)
+
 	// Acquire lock to check job and update status
 	s.jobsMu.Lock()
 	job, exists := s.activeJobs[jobID]
@@ -581,25 +584,26 @@ func (s *Service) CancelJob(jobID string) error {
 	// Persist cancellation status to database (outside lock to avoid contention)
 	if s.jobStorage != nil {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
-			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job cancellation")
+			contextLogger.Warn().Err(err).Msg("Failed to persist job cancellation")
 		}
 
-		// Append cancellation log with progress summary
-		cancelMsg := fmt.Sprintf("Job cancelled by user: %d completed, %d failed, %d pending",
-			job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs)
-		contextLogger := s.logger.WithContextWriter(jobID)
-		contextLogger.Warn().Msg(cancelMsg)
+		// Append cancellation log with structured fields for queryability
+		contextLogger.Warn().
+			Int("completed", job.Progress.CompletedURLs).
+			Int("failed", job.Progress.FailedURLs).
+			Int("pending", job.Progress.PendingURLs).
+			Msg("Job cancelled by user")
 	}
 
 	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
 	s.jobsMu.Lock()
 	if _, exists := s.jobClients[jobID]; exists {
 		delete(s.jobClients, jobID)
-		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after cancellation")
+		contextLogger.Debug().Msg("Cleaned up per-job HTTP client after cancellation")
 	}
 	// Remove from activeJobs since job is now in terminal state
 	delete(s.activeJobs, jobID)
-	s.logger.Debug().Str("job_id", jobID).Msg("Removed cancelled job from active jobs")
+	contextLogger.Debug().Msg("Removed cancelled job from active jobs")
 	s.jobsMu.Unlock()
 
 	// Emit progress after persistence
@@ -610,6 +614,9 @@ func (s *Service) CancelJob(jobID string) error {
 
 // FailJob marks a job as failed with a reason (called by scheduler for stale job detection)
 func (s *Service) FailJob(jobID string, reason string) error {
+	// Create contextLogger at function start for consistent logging to both console and database
+	contextLogger := s.logger.WithContextWriter(jobID)
+
 	// Acquire lock to check job and update status
 	s.jobsMu.Lock()
 	job, exists := s.activeJobs[jobID]
@@ -627,25 +634,27 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	// Persist failed status to database (outside lock to avoid contention)
 	if s.jobStorage != nil {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
-			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist job failure")
+			contextLogger.Warn().Err(err).Msg("Failed to persist job failure")
 		}
 
-		// Append failure log with progress summary
-		failMsg := fmt.Sprintf("Job failed: %s - %d completed, %d failed, %d pending",
-			reason, job.Progress.CompletedURLs, job.Progress.FailedURLs, job.Progress.PendingURLs)
-		contextLogger := s.logger.WithContextWriter(jobID)
-		contextLogger.Error().Msg(failMsg)
+		// Append failure log with structured fields for queryability
+		contextLogger.Error().
+			Str("reason", reason).
+			Int("completed", job.Progress.CompletedURLs).
+			Int("failed", job.Progress.FailedURLs).
+			Int("pending", job.Progress.PendingURLs).
+			Msg("Job failed")
 	}
 
 	// Reacquire lock to clean up per-job HTTP client map and remove from activeJobs
 	s.jobsMu.Lock()
 	if _, exists := s.jobClients[jobID]; exists {
 		delete(s.jobClients, jobID)
-		s.logger.Debug().Str("job_id", jobID).Msg("Cleaned up per-job HTTP client after failure")
+		contextLogger.Debug().Msg("Cleaned up per-job HTTP client after failure")
 	}
 	// Remove from activeJobs since job is now in terminal state
 	delete(s.activeJobs, jobID)
-	s.logger.Debug().Str("job_id", jobID).Str("reason", reason).Msg("Removed failed job from active jobs")
+	contextLogger.Debug().Str("reason", reason).Msg("Removed failed job from active jobs")
 	s.jobsMu.Unlock()
 
 	// Emit progress after persistence

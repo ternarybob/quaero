@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -403,6 +404,9 @@ func (s *Service) monitorCompletion(jobID string) {
 // logQueueDiagnostics logs current queue state and job progress for debugging
 // This method helps diagnose queue health issues, stalled jobs, and worker activity
 func (s *Service) logQueueDiagnostics(jobID string) {
+	// Create contextLogger at function start for consistent logging to both console and database
+	contextLogger := s.logger.WithContextWriter(jobID)
+
 	// Get current queue length
 	queueLen := s.queue.Len()
 
@@ -444,8 +448,16 @@ func (s *Service) logQueueDiagnostics(jobID string) {
 		healthIssues = append(healthIssues, fmt.Sprintf("count_mismatch_processed=%d_expected=%d", totalProcessed, expectedProcessed))
 	}
 
-	// Log queue diagnostics with health status
-	logEvent := s.logger.Debug().
+	// Log queue diagnostics with dynamic level based on health status
+	// Use Warn level for unhealthy queues, Debug level for healthy queues
+	var logEvent *zerolog.Event
+	if !queueHealthy {
+		logEvent = contextLogger.Warn()
+	} else {
+		logEvent = contextLogger.Debug()
+	}
+
+	logEvent = logEvent.
 		Str("job_id", jobID).
 		Int("queue_len", queueLen).
 		Int("pending_urls", pendingURLs).
@@ -459,12 +471,4 @@ func (s *Service) logQueueDiagnostics(jobID string) {
 	}
 
 	logEvent.Msg("Queue diagnostics")
-
-	// Persist diagnostics if health issues detected
-	if !queueHealthy && s.jobStorage != nil {
-		diagMsg := fmt.Sprintf("Queue health issues detected: queue_len=%d, pending=%d, completed=%d, failed=%d, issues=%v",
-			queueLen, pendingURLs, completedURLs, failedURLs, healthIssues)
-		contextLogger := s.logger.WithContextWriter(jobID)
-		contextLogger.Warn().Msg(diagMsg)
-	}
 }
