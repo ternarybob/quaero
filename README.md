@@ -1,28 +1,34 @@
 # Quaero
 
-**Quaero** (Latin: "I seek, I search") - A knowledge collection system with web-based interface.
+**Quaero** (Latin: "I seek, I search") - A local knowledge collection and search system.
 
 ## Overview
 
-Quaero collects documentation from Atlassian (Confluence, Jira) using browser extension authentication and provides a web-based interface for browsing and searching the data.
+Quaero is a single-executable Windows service designed to run locally on your machine. It crawls websites using personal cookie authentication, converts content to markdown for LLM consumption, and provides natural language query capabilities through Model Context Protocol (MCP) integration.
 
 ### Key Features
 
-- 🔐 **Automatic Authentication** - Chrome extension captures credentials
-- 📊 **Real-time Updates** - WebSocket-based live log streaming
-- 💾 **SQLite Storage** - Local database with full-text search
-- 🌐 **Web Interface** - Browser-based UI for collection and browsing
-- ⚡ **Fast Collection** - Efficient scraping and storage
-- ⏰ **Scheduled Jobs** - Automated crawling and document summarization
+- 🔐 **Cookie-Based Authentication** - Chrome extension captures session cookies
+- 🕸️ **Website Crawler** - Depth-based crawling starting from seed URLs
+- 📝 **Markdown Conversion** - Converts web pages to LLM-friendly markdown
+- 💾 **SQLite Storage** - Local database for documents and metadata
+- 🎯 **Job Manager** - Persistent queue-based job execution system
+- 📚 **Document Summarization** - LLM-powered content summaries
+- 🤖 **MCP Integration** - Model Context Protocol for LLM chat interfaces
+- 🌐 **Web Interface** - Browser-based UI for job management and monitoring
+- ⏰ **Scheduled Jobs** - Automated crawling and summarization tasks
 
 ## Technology Stack
 
 - **Language:** Go 1.25+
-- **Storage:** SQLite with FTS5 (full-text search)
-- **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
-- **Authentication:** Chrome extension → WebSocket → HTTP service
+- **Storage:** SQLite with persistent job queue (goqite)
+- **Web UI:** HTML templates, Alpine.js, Bulma CSS
+- **Crawler:** chromedp for JavaScript rendering, HTML to Markdown conversion
+- **Job Queue:** goqite (SQLite-backed persistent queue)
+- **Authentication:** Chrome extension → HTTP POST
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
+- **MCP:** Model Context Protocol for LLM integration (planned)
 
 ## Quick Start
 

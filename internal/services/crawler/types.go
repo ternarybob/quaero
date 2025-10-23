@@ -31,25 +31,26 @@ const (
 // CrawlJob represents a crawl job inspired by Firecrawl's job model
 // Configuration is snapshot at job creation time for self-contained, re-runnable jobs
 type CrawlJob struct {
-	ID                   string        `json:"id"`
-	Name                 string        `json:"name"`                   // User-friendly name for the job
-	Description          string        `json:"description"`            // User-provided description
-	SourceType           string        `json:"source_type"`            // "jira", "confluence", "github"
-	EntityType           string        `json:"entity_type"`            // "projects", "issues", "spaces", "pages"
-	Config               CrawlConfig   `json:"config"`                 // Snapshot of configuration at job creation time
-	SourceConfigSnapshot string        `json:"source_config_snapshot"` // JSON snapshot of models.SourceConfig at creation
-	AuthSnapshot         string        `json:"auth_snapshot"`          // JSON snapshot of models.AuthCredentials at creation
-	RefreshSource        bool          `json:"refresh_source"`         // Whether to refresh config/auth before execution
-	Status               JobStatus     `json:"status"`
-	Progress             CrawlProgress `json:"progress"`
-	CreatedAt            time.Time     `json:"created_at"`
-	StartedAt            time.Time     `json:"started_at,omitempty"`
-	CompletedAt          time.Time     `json:"completed_at,omitempty"`
-	Error                string        `json:"error,omitempty"`
-	ResultCount          int           `json:"result_count"`
-	FailedCount          int           `json:"failed_count"`
-	DocumentsSaved       int           `json:"documents_saved"`     // Number of documents successfully saved to storage
-	SeedURLs             []string      `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`                   // User-friendly name for the job
+	Description          string          `json:"description"`            // User-provided description
+	SourceType           string          `json:"source_type"`            // "jira", "confluence", "github"
+	EntityType           string          `json:"entity_type"`            // "projects", "issues", "spaces", "pages"
+	Config               CrawlConfig     `json:"config"`                 // Snapshot of configuration at job creation time
+	SourceConfigSnapshot string          `json:"source_config_snapshot"` // JSON snapshot of models.SourceConfig at creation
+	AuthSnapshot         string          `json:"auth_snapshot"`          // JSON snapshot of models.AuthCredentials at creation
+	RefreshSource        bool            `json:"refresh_source"`         // Whether to refresh config/auth before execution
+	Status               JobStatus       `json:"status"`
+	Progress             CrawlProgress   `json:"progress"`
+	CreatedAt            time.Time       `json:"created_at"`
+	StartedAt            time.Time       `json:"started_at,omitempty"`
+	CompletedAt          time.Time       `json:"completed_at,omitempty"`
+	Error                string          `json:"error,omitempty"`
+	ResultCount          int             `json:"result_count"`
+	FailedCount          int             `json:"failed_count"`
+	DocumentsSaved       int             `json:"documents_saved"`     // Number of documents successfully saved to storage
+	SeedURLs             []string        `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
+	SeenURLs             map[string]bool `json:"seen_urls,omitempty"` // Track URLs that have been enqueued to prevent duplicates
 }
 
 // CrawlConfig defines crawl behavior
@@ -78,16 +79,8 @@ type CrawlProgress struct {
 	EstimatedCompletion time.Time `json:"estimated_completion,omitempty"`
 }
 
-// URLQueueItem represents a URL in the crawl queue
-type URLQueueItem struct {
-	URL       string                 `json:"url"`
-	Depth     int                    `json:"depth"`
-	ParentURL string                 `json:"parent_url,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Attempts  int                    `json:"attempts"`
-	Priority  int                    `json:"priority"` // Lower number = higher priority
-	AddedAt   time.Time              `json:"added_at"`
-}
+// VERIFICATION COMMENT 2: URLQueueItem removed - legacy type from old worker-based architecture
+// The new queue system uses queue.JobMessage instead (see internal/queue/types.go)
 
 // CrawlResult represents the result of crawling a single URL
 type CrawlResult struct {

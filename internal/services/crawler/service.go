@@ -23,14 +23,15 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/sources"
-	"github.com/ternarybob/quaero/internal/services/workers"
 )
 
-// Service orchestrates URL queue, retries, and worker pool
-// Rate limiting strategy: Rate limiting is exclusively managed by HTMLScraper via common.CrawlerConfig mapping.
-// Per-job rate limits are applied via Colly's built-in Limit() mechanism in HTMLScraper to avoid double rate limiting
-// and leverage Colly's efficient per-domain parallelism control.
+// VERIFICATION COMMENT 4: Removed workers import (worker management migrated to queue.WorkerPool)
+
+// Service orchestrates crawler jobs using queue manager
+// Worker management has been migrated to queue.WorkerPool
+// Job execution is handled by queue-based job types (internal/jobs/types/crawler.go)
 type Service struct {
 	authService     interfaces.AuthService
 	sourceService   *sources.Service
@@ -38,12 +39,12 @@ type Service struct {
 	eventService    interfaces.EventService
 	jobStorage      interfaces.JobStorage
 	documentStorage interfaces.DocumentStorage // Used for immediate document persistence during crawling
+	queueManager    interfaces.QueueManager    // Replaces custom URLQueue with goqite-backed queue
 	logger          arbor.ILogger
 	config          *common.Config
 
-	queue       *URLQueue
-	retryPolicy *RetryPolicy
-	workerPool  *workers.Pool
+	// VERIFICATION COMMENT 2: retryPolicy removed - legacy field from old worker-based architecture
+	// VERIFICATION COMMENT 4: workerPool field removed (workers managed globally by queue.WorkerPool)
 
 	// Browser pool for chromedp (reusable browser instances)
 	browserPool      []context.Context
@@ -63,7 +64,7 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, logger arbor.ILogger, config *common.Config) *Service {
+func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
@@ -73,16 +74,16 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 		eventService:    eventService,
 		jobStorage:      jobStorage,
 		documentStorage: documentStorage,
+		queueManager:    queueManager,
 		logger:          logger,
 		config:          config,
-		queue:           NewURLQueue(),
-		retryPolicy:     NewRetryPolicy(),
-		workerPool:      workers.NewPool(config.Crawler.MaxConcurrency, logger),
-		activeJobs:      make(map[string]*CrawlJob),
-		jobResults:      make(map[string][]*CrawlResult),
-		jobClients:      make(map[string]*http.Client),
-		ctx:             ctx,
-		cancel:          cancel,
+		// VERIFICATION COMMENT 2: retryPolicy initialization removed (legacy from old worker architecture)
+		// VERIFICATION COMMENT 4: workerPool initialization removed (workers managed globally by queue.WorkerPool)
+		activeJobs: make(map[string]*CrawlJob),
+		jobResults: make(map[string][]*CrawlResult),
+		jobClients: make(map[string]*http.Client),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 
 	return s
@@ -440,25 +441,50 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	s.jobResults[jobID] = make([]*CrawlResult, 0)
 	s.jobsMu.Unlock()
 
-	// Seed queue with metadata for link discovery
-	// Track how many URLs are actually added (excluding duplicates)
+	// Seed queue with job messages for crawler workers
+	// Build config map for job messages
+	jobConfig := map[string]interface{}{
+		"max_depth":      config.MaxDepth,
+		"max_pages":      config.MaxPages,
+		"follow_links":   config.FollowLinks,
+		"source_type":    sourceType,
+		"entity_type":    entityType,
+		"rate_limit":     config.RateLimit.Milliseconds(),
+		"concurrency":    config.Concurrency,
+		"retry_attempts": config.RetryAttempts,
+		"retry_backoff":  config.RetryBackoff.Milliseconds(),
+	}
+
+	// Add include/exclude patterns from config to job message
+	if len(config.IncludePatterns) > 0 {
+		jobConfig["include_patterns"] = config.IncludePatterns
+	}
+	if len(config.ExcludePatterns) > 0 {
+		jobConfig["exclude_patterns"] = config.ExcludePatterns
+	}
+
+	// Enqueue seed URLs as job messages
 	actuallyEnqueued := 0
-	for i, url := range seedURLs {
-		item := &URLQueueItem{
-			URL:      url,
-			Depth:    0,
-			Priority: i,
-			AddedAt:  time.Now(),
-			Metadata: map[string]interface{}{
-				"job_id":      jobID,
-				"source_type": sourceType,
-				"entity_type": entityType,
-			},
+	for i, seedURL := range seedURLs {
+		msg := &queue.JobMessage{
+			ID:              fmt.Sprintf("%s-seed-%d", jobID, i),
+			Type:            "crawler_url",
+			URL:             seedURL,
+			Depth:           0,
+			ParentID:        jobID,
+			JobDefinitionID: jobID,
+			Config:          jobConfig,
 		}
-		// Check if URL was actually added (not a duplicate)
-		if s.queue.Push(item) {
-			actuallyEnqueued++
+
+		if err := s.queueManager.Enqueue(s.ctx, msg); err != nil {
+			contextLogger.Warn().
+				Err(err).
+				Str("seed_url", seedURL).
+				Msg("Failed to enqueue seed URL")
+			continue
 		}
+
+		actuallyEnqueued++
 	}
 
 	// Update PendingURLs and TotalURLs to match actual queue state
@@ -503,8 +529,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Msg(jobStartMsg)
 	}
 
-	// Emit started event
-	s.emitProgress(job)
+	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
 
 	// Initialize browser pool if JavaScript rendering is enabled
 	if s.config.Crawler.EnableJavaScript {
@@ -514,8 +539,8 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	}
 
-	// Start workers
-	s.startWorkers(jobID, config)
+	// Note: Workers are managed globally by queue.WorkerPool (started at app initialization)
+	// Job messages are already enqueued and will be picked up by workers automatically
 
 	return jobID, nil
 }
@@ -606,8 +631,7 @@ func (s *Service) CancelJob(jobID string) error {
 	contextLogger.Debug().Msg("Removed cancelled job from active jobs")
 	s.jobsMu.Unlock()
 
-	// Emit progress after persistence
-	s.emitProgress(job)
+	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
 
 	return nil
 }
@@ -657,8 +681,7 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	contextLogger.Debug().Str("reason", reason).Msg("Removed failed job from active jobs")
 	s.jobsMu.Unlock()
 
-	// Emit progress after persistence
-	s.emitProgress(job)
+	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
 
 	return nil
 }
@@ -894,7 +917,6 @@ func (s *Service) WaitForJob(ctx context.Context, jobID string) (interface{}, er
 // Shutdown stops the crawler service
 func (s *Service) Shutdown() error {
 	s.cancel()
-	s.queue.Close()
 	s.wg.Wait()
 
 	// Shutdown browser pool
@@ -920,6 +942,32 @@ func (s *Service) Close() error {
 }
 
 // Helper functions
+
+// BuildHTTPClientFromAuth creates an HTTP client from auth credentials (wrapper for job use)
+func (s *Service) BuildHTTPClientFromAuth(ctx context.Context) (*http.Client, error) {
+	if s.authStorage == nil {
+		return &http.Client{Timeout: 30 * time.Second}, nil
+	}
+
+	// Get all auth credentials and use the first one
+	credsList, err := s.authStorage.ListCredentials(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list auth credentials: %w", err)
+	}
+
+	// Return default client if no credentials available
+	if len(credsList) == 0 {
+		return &http.Client{Timeout: 30 * time.Second}, nil
+	}
+
+	// Use first available credential
+	return buildHTTPClientFromAuth(credsList[0])
+}
+
+// GetConfig returns the crawler configuration
+func (s *Service) GetConfig() common.CrawlerConfig {
+	return s.config.Crawler
+}
 
 // buildHTTPClientFromAuth creates an HTTP client with cookies from AuthCredentials
 func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, error) {

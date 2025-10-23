@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 
 -- Crawler job history with configuration snapshots for re-runnable jobs
 -- Inspired by Firecrawl's async job model
+-- NOTE: Logs are stored in the dedicated job_logs table (unlimited history, CASCADE DELETE)
 CREATE TABLE IF NOT EXISTS crawl_jobs (
 	id TEXT PRIMARY KEY,
 	name TEXT DEFAULT '',
@@ -119,14 +120,42 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 	last_heartbeat INTEGER,
 	error TEXT,
 	result_count INTEGER DEFAULT 0,
-	failed_count INTEGER DEFAULT 0,
-	logs TEXT DEFAULT '[]'
+	failed_count INTEGER DEFAULT 0
 );
 
 -- Crawler job indexes
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC);
+
+-- Job seen URLs table for concurrency-safe URL deduplication (VERIFICATION COMMENT 1)
+-- Tracks URLs that have been enqueued for each job to prevent duplicate processing
+-- Uses composite primary key (job_id, url) for atomic INSERT OR IGNORE operations
+CREATE TABLE IF NOT EXISTS job_seen_urls (
+	job_id TEXT NOT NULL,
+	url TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (job_id, url),
+	FOREIGN KEY (job_id) REFERENCES crawl_jobs(id) ON DELETE CASCADE
+);
+
+-- Index for efficient cleanup when jobs are deleted
+CREATE INDEX IF NOT EXISTS idx_job_seen_urls_job_id ON job_seen_urls(job_id);
+
+-- Job logs table for structured log storage (replaces crawl_jobs.logs JSON column)
+-- Provides unlimited log history with indexed queries and automatic CASCADE DELETE
+CREATE TABLE IF NOT EXISTS job_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	job_id TEXT NOT NULL,
+	timestamp TEXT NOT NULL,
+	level TEXT NOT NULL,
+	message TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	FOREIGN KEY (job_id) REFERENCES crawl_jobs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_logs_level ON job_logs(level, created_at DESC);
 
 -- Source configurations table
 CREATE TABLE IF NOT EXISTS sources (
@@ -247,7 +276,9 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
-	// MIGRATION 5: Add logs column to crawl_jobs
+	// MIGRATION 5: (deprecated) Add logs column to crawl_jobs
+	// This migration is deprecated - the logs column has been replaced by the job_logs table
+	// Migration kept for backward compatibility but does nothing on new installations
 	if err := s.migrateAddJobLogsColumn(); err != nil {
 		return err
 	}
@@ -286,6 +317,11 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 12: Add back filters column to sources table
 	if err := s.migrateAddBackSourcesFiltersColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 13: Remove logs column from crawl_jobs table
+	if err := s.migrateRemoveLogsColumn(); err != nil {
 		return err
 	}
 
@@ -1065,5 +1101,137 @@ func (s *SQLiteDB) migrateAddBackSourcesFiltersColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: filters column added back successfully")
+	return nil
+}
+
+// migrateRemoveLogsColumn removes the deprecated logs column from crawl_jobs table
+func (s *SQLiteDB) migrateRemoveLogsColumn() error {
+	// Check if logs column exists
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasLogs := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "logs" {
+			hasLogs = true
+			break
+		}
+	}
+
+	// If logs column doesn't exist, migration already completed
+	if !hasLogs {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Removing deprecated logs column from crawl_jobs table")
+
+	// Begin transaction
+	s.logger.Info().Msg("Beginning migration transaction")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Ensure rollback on error
+	defer func() {
+		if err != nil {
+			s.logger.Warn().Msg("Rolling back migration transaction due to error")
+			if rbErr := tx.Rollback(); rbErr != nil {
+				s.logger.Error().Err(rbErr).Msg("Failed to rollback transaction")
+			}
+		}
+	}()
+
+	// Step 1: Create new crawl_jobs table without logs column
+	s.logger.Info().Msg("Step 1: Creating new crawl_jobs table without logs column")
+	_, err = tx.Exec(`
+		CREATE TABLE crawl_jobs_new (
+			id TEXT PRIMARY KEY,
+			name TEXT DEFAULT '',
+			description TEXT DEFAULT '',
+			source_type TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			config_json TEXT NOT NULL,
+			source_config_snapshot TEXT,
+			auth_snapshot TEXT,
+			refresh_source INTEGER DEFAULT 0,
+			seed_urls TEXT,
+			status TEXT NOT NULL,
+			progress_json TEXT,
+			created_at INTEGER NOT NULL,
+			started_at INTEGER,
+			completed_at INTEGER,
+			last_heartbeat INTEGER,
+			error TEXT,
+			result_count INTEGER DEFAULT 0,
+			failed_count INTEGER DEFAULT 0
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new crawl_jobs table: %w", err)
+	}
+
+	// Step 2: Copy all data to new table (excluding logs column)
+	s.logger.Info().Msg("Step 2: Copying data to new table")
+	_, err = tx.Exec(`
+		INSERT INTO crawl_jobs_new
+		SELECT id, name, description, source_type, entity_type, config_json,
+			   source_config_snapshot, auth_snapshot, refresh_source, seed_urls,
+			   status, progress_json, created_at, started_at, completed_at,
+			   last_heartbeat, error, result_count, failed_count
+		FROM crawl_jobs
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy data to new table: %w", err)
+	}
+
+	// Step 3: Drop old table
+	s.logger.Info().Msg("Step 3: Dropping old crawl_jobs table")
+	_, err = tx.Exec(`DROP TABLE crawl_jobs`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old crawl_jobs table: %w", err)
+	}
+
+	// Step 4: Rename new table to crawl_jobs
+	s.logger.Info().Msg("Step 4: Renaming crawl_jobs_new to crawl_jobs")
+	_, err = tx.Exec(`ALTER TABLE crawl_jobs_new RENAME TO crawl_jobs`)
+	if err != nil {
+		return fmt.Errorf("failed to rename crawl_jobs_new to crawl_jobs: %w", err)
+	}
+
+	// Step 5: Recreate indexes
+	s.logger.Info().Msg("Step 5: Recreating indexes")
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_status: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_source: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_created: %w", err)
+	}
+
+	// Commit transaction
+	s.logger.Info().Msg("Committing migration transaction")
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: logs column removed successfully (logs now in job_logs table)")
 	return nil
 }

@@ -37,7 +37,9 @@ func TestCrawlerServiceLogging(t *testing.T) {
 	// Create minimal source service
 	sourceService := sources.NewService(authStorage, authStorage, eventService, logger)
 
-	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, logger, config)
+	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
+	queueManager := &mockQueueManager{}
+	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {
@@ -158,7 +160,9 @@ func TestCrawlerLoggingWithFollowLinksDisabled(t *testing.T) {
 	// Create minimal source service
 	sourceService := sources.NewService(authStorage, authStorage, eventService, logger)
 
-	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, logger, config)
+	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
+	queueManager := &mockQueueManager{}
+	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {
@@ -495,6 +499,11 @@ func (s *InMemoryJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]mo
 	return []models.JobLogEntry{}, nil
 }
 
+func (s *InMemoryJobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
+	// Simple mock - always return true (newly added)
+	return true, nil
+}
+
 // Helper method to verify log contains expected content
 func (s *InMemoryJobStorage) VerifyLogContains(t *testing.T, jobID, expectedSubstring string) bool {
 	entries, exists := s.logs[jobID]
@@ -528,6 +537,8 @@ func (s *InMemoryJobStorage) CountLogsByLevel(jobID, level string) int {
 	}
 	return count
 }
+
+// VERIFICATION COMMENT 2: mockQueueManager defined in service_test.go (shared between test files)
 
 // MockDocumentStorage implements interfaces.DocumentStorage for testing
 type MockDocumentStorage struct {

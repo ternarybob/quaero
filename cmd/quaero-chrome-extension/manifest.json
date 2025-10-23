@@ -8,7 +8,6 @@
     "activeTab",
     "tabs",
     "storage",
-    "sidePanel",
     "scripting"
   ],
   "host_permissions": [
@@ -20,10 +19,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open Quaero"
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_popup": "popup.html",
+    "default_title": "Quaero Auth Capture"
   },
   "icons": {
     "16": "icons/icon16.png",

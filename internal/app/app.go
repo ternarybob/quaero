@@ -17,7 +17,11 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	jobmgr "github.com/ternarybob/quaero/internal/jobs"
+	jobtypes "github.com/ternarybob/quaero/internal/jobs/types"
+	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
@@ -60,8 +64,12 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution
-	JobRegistry *jobs.JobTypeRegistry
-	JobExecutor *jobs.JobExecutor
+	JobRegistry  *jobs.JobTypeRegistry
+	JobExecutor  *jobs.JobExecutor
+	QueueManager interfaces.QueueManager
+	LogService   interfaces.LogService
+	JobManager   interfaces.JobManager
+	WorkerPool   interfaces.WorkerPool
 
 	// Specialized transformers
 	JiraTransformer       *atlassian.JiraTransformer
@@ -189,7 +197,15 @@ func (a *App) initServices() error {
 		Str("mode", string(mode)).
 		Msg("LLM service initialized")
 
-	// 1.5. Initialize context logging (after LLM service)
+	// 1.5. Initialize log service (before context logging)
+	logService := logs.NewService(a.StorageManager.JobLogStorage(), a.Logger)
+	if err := logService.Start(); err != nil {
+		return fmt.Errorf("failed to start log service: %w", err)
+	}
+	a.LogService = logService
+	a.Logger.Info().Msg("Log service initialized")
+
+	// 1.6. Initialize context logging (after log service)
 	// Create channel for log batches (buffer size 10 allows up to 10 batches to queue)
 	logBatchChannel := make(chan []arbormodels.LogEvent, 10)
 	a.logBatchChannel = logBatchChannel
@@ -230,9 +246,7 @@ func (a *App) initServices() error {
 				}
 
 				// Write to database (non-blocking, use background context)
-				if err := a.StorageManager.JobStorage().AppendJobLog(context.Background(), jobID, logEntry); err != nil {
-					a.Logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to persist context log to database")
-				}
+				a.LogService.AppendLog(context.Background(), jobID, logEntry)
 			}
 		}
 	}()
@@ -284,6 +298,46 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Source service initialized")
 
+	// 5.7. Initialize queue manager
+	// Parse configured queue settings
+	pollInterval, err := time.ParseDuration(a.Config.Queue.PollInterval)
+	if err != nil {
+		return fmt.Errorf("failed to parse queue poll interval: %w", err)
+	}
+
+	visibilityTimeout, err := time.ParseDuration(a.Config.Queue.VisibilityTimeout)
+	if err != nil {
+		return fmt.Errorf("failed to parse queue visibility timeout: %w", err)
+	}
+
+	queueConfig := queue.Config{
+		PollInterval:      pollInterval,
+		Concurrency:       a.Config.Queue.Concurrency,
+		VisibilityTimeout: visibilityTimeout,
+		MaxReceive:        a.Config.Queue.MaxReceive,
+		QueueName:         a.Config.Queue.QueueName,
+	}
+
+	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), queueConfig, a.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to initialize queue manager: %w", err)
+	}
+	if err := queueMgr.Start(); err != nil {
+		return fmt.Errorf("failed to start queue manager: %w", err)
+	}
+	a.QueueManager = queueMgr
+	a.Logger.Info().Msg("Queue manager initialized")
+
+	// 5.9. Initialize job manager
+	jobMgr := jobmgr.NewManager(a.StorageManager.JobStorage(), queueMgr, logService, a.Logger)
+	a.JobManager = jobMgr
+	a.Logger.Info().Msg("Job manager initialized")
+
+	// 5.10. Initialize worker pool
+	workerPool := queue.NewWorkerPool(queueMgr, a.Logger)
+	a.WorkerPool = workerPool
+	a.Logger.Info().Msg("Worker pool initialized")
+
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -294,7 +348,7 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service
-	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), a.Logger, a.Config)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), a.QueueManager, a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -321,6 +375,55 @@ func (a *App) initServices() error {
 		true, // enableEmptyOutputFallback
 	)
 	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
+
+	// 6.7. Register job handlers with worker pool
+	// Crawler job handler
+	crawlerJobDeps := &jobtypes.CrawlerJobDeps{
+		CrawlerService:  a.CrawlerService,
+		LogService:      a.LogService,
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+		QueueManager:    a.QueueManager,
+		JobStorage:      a.StorageManager.JobStorage(),
+	}
+	crawlerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("crawler_url", crawlerJobHandler)
+	a.Logger.Info().Msg("Crawler job handler registered")
+
+	// Summarizer job handler
+	summarizerJobDeps := &jobtypes.SummarizerJobDeps{
+		LLMService:      a.LLMService,
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+	}
+	summarizerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewSummarizerJob(baseJob, summarizerJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("summarizer", summarizerJobHandler)
+	a.Logger.Info().Msg("Summarizer job handler registered")
+
+	// Cleanup job handler
+	cleanupJobDeps := &jobtypes.CleanupJobDeps{
+		JobStorage: a.StorageManager.JobStorage(),
+		LogService: a.LogService,
+	}
+	cleanupJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewCleanupJob(baseJob, cleanupJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("cleanup", cleanupJobHandler)
+	a.Logger.Info().Msg("Cleanup job handler registered")
+
+	// Start worker pool
+	if err := a.WorkerPool.Start(); err != nil {
+		return fmt.Errorf("failed to start worker pool: %w", err)
+	}
+	a.Logger.Info().Msg("Worker pool started")
 
 	// 7. Initialize embedding coordinator
 	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
@@ -456,7 +559,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.Config, a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.Config, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
@@ -505,6 +608,32 @@ func (a *App) Close() error {
 		if err := a.SchedulerService.Stop(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to stop scheduler service")
 		}
+	}
+
+	// Stop worker pool
+	if a.WorkerPool != nil {
+		if err := a.WorkerPool.Stop(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to stop worker pool")
+		} else {
+			a.Logger.Info().Msg("Worker pool stopped")
+		}
+	}
+
+	// Stop log service
+	if a.LogService != nil {
+		if err := a.LogService.Stop(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to stop log service")
+		} else {
+			a.Logger.Info().Msg("Log service stopped")
+		}
+	}
+
+	// Stop queue manager
+	if a.QueueManager != nil {
+		if err := a.QueueManager.Stop(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to stop queue manager")
+		}
+		a.Logger.Info().Msg("Queue manager stopped")
 	}
 
 	// Shutdown job executor (cancels all background polling tasks)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"maragu.dev/goqite"
 	_ "modernc.org/sqlite"
 )
 
@@ -39,6 +40,13 @@ func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, 
 		logger: logger,
 		config: config,
 	}
+
+	// Initialize goqite queue schema
+	if err := goqite.Setup(context.Background(), db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize goqite schema: %w", err)
+	}
+	logger.Info().Msg("goqite queue schema initialized")
 
 	// Configure database
 	if err := s.configure(); err != nil {

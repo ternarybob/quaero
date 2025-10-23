@@ -12,6 +12,7 @@ type Manager struct {
 	auth          interfaces.AuthStorage
 	document      interfaces.DocumentStorage
 	job           interfaces.JobStorage
+	jobLog        interfaces.JobLogStorage
 	source        interfaces.SourceStorage
 	jobDefinition interfaces.JobDefinitionStorage
 	logger        arbor.ILogger
@@ -29,6 +30,7 @@ func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.S
 		auth:          NewAuthStorage(db, logger),
 		document:      NewDocumentStorage(db, logger),
 		job:           NewJobStorage(db, logger),
+		jobLog:        NewJobLogStorage(db, logger),
 		source:        NewSourceStorage(db, logger),
 		jobDefinition: NewJobDefinitionStorage(db, logger),
 		logger:        logger,
@@ -52,6 +54,11 @@ func (m *Manager) DocumentStorage() interfaces.DocumentStorage {
 // JobStorage returns the Job storage interface
 func (m *Manager) JobStorage() interfaces.JobStorage {
 	return m.job
+}
+
+// JobLogStorage returns the JobLog storage interface
+func (m *Manager) JobLogStorage() interfaces.JobLogStorage {
+	return m.jobLog
 }
 
 // SourceStorage returns the Source storage interface

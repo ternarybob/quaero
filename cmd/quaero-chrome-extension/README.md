@@ -15,40 +15,47 @@ This Chrome extension captures authentication data from your active Jira/Conflue
 
 1. Start the Quaero service (default: `http://localhost:8085`)
 2. Navigate to your Jira or Confluence instance and log in
-3. Click the Quaero extension icon in Chrome
-4. Click "Capture Authentication"
-5. The extension will capture your authentication and send it to the service
+3. Click the Quaero extension icon in Chrome toolbar
+4. The popup will show current status and server connectivity
+5. Click "Capture Authentication" to send credentials to Quaero
 6. Use the Quaero web UI to manage sources and start crawling
 
 ## Features
 
-- **Side Panel Interface**: Modern side panel UI for easy access
+- **Dropdown Popup Interface**: Compact popup UI with all essential features
 - **Authentication Capture**: Extracts cookies and tokens from Atlassian sites
-- **WebSocket Status**: Real-time monitoring of Quaero server connection
+- **Server Status**: Real-time check of Quaero server connection
 - **Settings**: Configurable server URL (default: http://localhost:8085)
 - **Version Display**: Shows both extension and server version
+- **Last Capture Tracking**: Displays when authentication was last captured
+- **Domain Validation**: Ensures you're on a Jira/Confluence page before capturing
 
 ## API Endpoints
 
 The extension uses the following Quaero API endpoints:
 
 - `POST /api/auth` - Capture and store authentication credentials
-- `GET /api/auth/status` - Check authentication status
 - `GET /api/version` - Get server version information
-- `GET /api/status` - Get application status
-- `WS /ws` - WebSocket connection for real-time updates
 
 ## Security
 
 - Authentication data is only sent to localhost (default: `localhost:8085`)
 - No data is sent to external servers
 - All communication is local to your machine
-- Uses secure WebSocket (WSS) for HTTPS connections
+- Domain validation prevents accidental capture on wrong sites
 
 ## Files
 
-- `manifest.json` - Extension manifest
-- `background.js` - Service worker for auth capture
-- `sidepanel.html/js` - Main UI interface
-- `popup.html/js` - Quick action popup
+- `manifest.json` - Extension manifest (Manifest V3)
+- `background.js` - Service worker for background tasks
+- `popup.html` - Main popup UI
+- `popup.js` - Popup logic and API communication
+- `content.js` - Content script (minimal)
 - `icons/` - Extension icons
+
+## Removed Features
+
+This version has been simplified from the previous side panel implementation:
+- Removed side panel UI (now uses standard popup)
+- Removed WebSocket real-time updates (status checked on demand)
+- Simplified to focus on core authentication capture functionality

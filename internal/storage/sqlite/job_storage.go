@@ -696,9 +696,18 @@ func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
 //	    logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to append log")
 //	    // Non-fatal: log the error but continue job execution
 //	}
+//
+// Deprecated: Use LogService.AppendLog() instead.
+// This method writes to the crawl_jobs.logs JSON column which has a 100-entry limit.
+// The new LogService writes to the dedicated job_logs table with unlimited history.
+// This method is kept for backward compatibility during migration.
 func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.logger.Warn().
+		Str("job_id", jobID).
+		Msg("AppendJobLog is deprecated - use LogService.AppendLog() instead")
 
 	// Query current logs
 	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
@@ -786,7 +795,16 @@ func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry mo
 }
 
 // GetJobLogs retrieves all log entries for a job
+//
+// Deprecated: Use LogService.GetLogs() instead.
+// This method reads from the crawl_jobs.logs JSON column (limited to 100 entries).
+// The new LogService reads from the dedicated job_logs table with full history.
+// This method is kept for backward compatibility during migration.
 func (s *JobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+	s.logger.Warn().
+		Str("job_id", jobID).
+		Msg("GetJobLogs is deprecated - use LogService.GetLogs() instead")
+
 	query := "SELECT logs FROM crawl_jobs WHERE id = ?"
 	var logsJSON sql.NullString
 	err := s.db.db.QueryRowContext(ctx, query, jobID).Scan(&logsJSON)
@@ -810,4 +828,66 @@ func (s *JobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.Job
 	}
 
 	return logs, nil
+}
+
+// MarkURLSeen atomically records a URL as seen for a job and returns whether it was newly added.
+// VERIFICATION COMMENT 1: Concurrency-safe URL deduplication
+//
+// Thread Safety:
+//   - Uses INSERT OR IGNORE for atomic duplicate detection at database level
+//   - No locks required - SQLite handles atomicity via UNIQUE constraint
+//   - Safe for concurrent workers processing the same job
+//
+// Returns:
+//   - (true, nil) if URL was newly added (first worker to enqueue this URL wins)
+//   - (false, nil) if URL was already seen (duplicate detected, skip enqueueing)
+//   - (false, error) if database operation fails
+//
+// Performance:
+//   - Single INSERT operation - no SELECT needed
+//   - Indexed on (job_id, url) PRIMARY KEY for fast lookups
+//   - Rows deleted CASCADE when job is deleted (no orphaned entries)
+func (s *JobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
+	query := `
+		INSERT OR IGNORE INTO job_seen_urls (job_id, url, created_at)
+		VALUES (?, ?, ?)
+	`
+
+	result, err := s.db.db.ExecContext(ctx, query, jobID, url, time.Now().Unix())
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("job_id", jobID).
+			Str("url", url).
+			Msg("Failed to mark URL as seen")
+		return false, fmt.Errorf("failed to mark URL as seen: %w", err)
+	}
+
+	// Check rows affected: 1 = newly added, 0 = already exists
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Warn().
+			Err(err).
+			Str("job_id", jobID).
+			Str("url", url).
+			Msg("Failed to get rows affected")
+		// Return true conservatively to avoid skipping URLs on error
+		return true, nil
+	}
+
+	newlyAdded := rowsAffected > 0
+
+	if newlyAdded {
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("url", url).
+			Msg("URL marked as seen (newly added)")
+	} else {
+		s.logger.Debug().
+			Str("job_id", jobID).
+			Str("url", url).
+			Msg("URL already seen (duplicate detected)")
+	}
+
+	return newlyAdded, nil
 }

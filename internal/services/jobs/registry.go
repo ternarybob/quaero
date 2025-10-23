@@ -3,6 +3,42 @@
 // Modified By: Claude Code
 // -----------------------------------------------------------------------
 
+// Package jobs provides the job type registry for multi-step job definitions.
+//
+// # ARCHITECTURE: Two Parallel Job Systems
+//
+// Quaero has two distinct job execution systems that serve different purposes:
+//
+// 1. JobTypeRegistry (THIS FILE) - Multi-step job definitions with action handlers
+//   - Purpose: Orchestrates complex, multi-step workflows with configurable actions
+//   - Examples: Summarization jobs with scan/summarize/extract_keywords actions
+//   - Storage: Job definitions stored in database (job_definitions table)
+//   - Execution: Actions registered here and executed via executor service
+//   - Used for: User-defined scheduled jobs, batch processing workflows
+//
+// 2. Queue-based job types (internal/jobs/types/) - Single-purpose message handlers
+//   - Purpose: Process individual work items from goqite message queue
+//   - Examples: CrawlerJob (process single URL), SummarizerJob (process action), CleanupJob
+//   - Storage: Messages in goqite queue table
+//   - Execution: WorkerPool pulls messages and dispatches to registered handlers
+//   - Used for: Distributed crawling, background processing, async task execution
+//
+// # Why Two Systems?
+//
+//   - JobTypeRegistry: Designed for user-facing job definitions where users configure
+//     multi-step workflows (e.g., "scan all docs, then summarize, then extract keywords")
+//
+//   - Queue-based jobs: Designed for internal task distribution where a parent job
+//     creates many child tasks that workers process concurrently (e.g., parent crawler
+//     job enqueues 100 URL messages that workers process independently)
+//
+// # Naming Confusion
+//
+// Some overlap exists (e.g., "summarizer" appears in both systems):
+// - JobTypeRegistry "summarizer": Multi-step workflow definition
+// - Queue SummarizerJob: Individual action execution message handler
+//
+// This is intentional: the registry action creates queue messages for async execution.
 package jobs
 
 import (
@@ -20,7 +56,10 @@ import (
 // and the list of sources to operate on
 type ActionHandler func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error
 
-// JobTypeRegistry manages the registration and retrieval of action handlers for different job types
+// JobTypeRegistry manages the registration and retrieval of action handlers for different job types.
+//
+// This registry is for MULTI-STEP JOB DEFINITIONS with configurable actions.
+// For queue-based single-purpose job handlers, see internal/jobs/types/ and internal/queue/worker.go.
 type JobTypeRegistry struct {
 	actions map[models.JobType]map[string]ActionHandler // Nested map: job type → action name → handler
 	logger  arbor.ILogger

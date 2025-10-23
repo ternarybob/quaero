@@ -78,8 +78,22 @@ type JobStorage interface {
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)
 	CountJobsWithFilters(ctx context.Context, opts *ListOptions) (int, error)
+
+	// Deprecated: Use LogService.AppendLog() instead. This method writes to the crawl_jobs.logs
+	// JSON column (limited to 100 entries). The new LogService writes to the dedicated job_logs
+	// table with unlimited history and better performance.
 	AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error
+
+	// Deprecated: Use LogService.GetLogs() instead. This method reads from the crawl_jobs.logs
+	// JSON column (limited to 100 entries). The new LogService reads from the dedicated job_logs
+	// table with full history and indexed queries.
 	GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error)
+
+	// VERIFICATION COMMENT 1: Concurrency-safe URL deduplication
+	// MarkURLSeen atomically records a URL as seen for a job and returns whether it was newly added.
+	// Returns (true, nil) if URL was newly added, (false, nil) if URL was already seen.
+	// This prevents race conditions when multiple workers try to enqueue the same URL.
+	MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error)
 }
 
 // SourceStorage - interface for source configuration persistence
@@ -114,11 +128,24 @@ type JobDefinitionStorage interface {
 	CountJobDefinitions(ctx context.Context) (int, error)
 }
 
+// JobLogStorage - interface for job log persistence
+// ORDERING: GetLogs() and GetLogsByLevel() return logs in newest-first order (DESC).
+// This matches typical web UI expectations where recent activity appears first.
+type JobLogStorage interface {
+	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error
+	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error
+	GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error)
+	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
+	DeleteLogs(ctx context.Context, jobID string) error
+	CountLogs(ctx context.Context, jobID string) (int, error)
+}
+
 // StorageManager - composite interface for all storage operations
 type StorageManager interface {
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
 	JobStorage() JobStorage
+	JobLogStorage() JobLogStorage
 	SourceStorage() SourceStorage
 	JobDefinitionStorage() JobDefinitionStorage
 	DB() interface{}

@@ -14,6 +14,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/ternarybob/arbor v1.4.50
 	github.com/ternarybob/banner v0.0.5
+	maragu.dev/goqite v0.3.1
 	modernc.org/sqlite v1.39.1
 )
 

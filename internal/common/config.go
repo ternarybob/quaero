@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
 	Server      ServerConfig     `toml:"server"`
+	Queue       QueueConfig      `toml:"queue"`
 	Sources     SourcesConfig    `toml:"sources"`
 	Storage     StorageConfig    `toml:"storage"`
 	LLM         LLMConfig        `toml:"llm"`
@@ -30,6 +31,14 @@ type ServerConfig struct {
 	Port     int    `toml:"port"`
 	Host     string `toml:"host"`
 	LlamaDir string `toml:"llama_dir"` // Directory containing llama-cli binary
+}
+
+type QueueConfig struct {
+	PollInterval      string `toml:"poll_interval"`      // e.g., "1s" - how often workers poll for messages
+	Concurrency       int    `toml:"concurrency"`        // Number of concurrent workers
+	VisibilityTimeout string `toml:"visibility_timeout"` // e.g., "5m" - message visibility timeout for redelivery
+	MaxReceive        int    `toml:"max_receive"`        // Max times a message can be received before dead-letter
+	QueueName         string `toml:"queue_name"`         // Queue name in goqite table
 }
 
 type SourcesConfig struct {
@@ -185,6 +194,13 @@ func NewDefaultConfig() *Config {
 			Host:     "localhost",
 			LlamaDir: "./llama",
 		},
+		Queue: QueueConfig{
+			PollInterval:      "1s",
+			Concurrency:       5,
+			VisibilityTimeout: "5m",
+			MaxReceive:        3,
+			QueueName:         "quaero_jobs",
+		},
 		Storage: StorageConfig{
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
@@ -321,6 +337,27 @@ func applyEnvOverrides(config *Config) {
 	}
 	if llamaDir := os.Getenv("QUAERO_SERVER_LLAMA_DIR"); llamaDir != "" {
 		config.Server.LlamaDir = llamaDir
+	}
+
+	// Queue configuration
+	if pollInterval := os.Getenv("QUAERO_QUEUE_POLL_INTERVAL"); pollInterval != "" {
+		config.Queue.PollInterval = pollInterval
+	}
+	if concurrency := os.Getenv("QUAERO_QUEUE_CONCURRENCY"); concurrency != "" {
+		if c, err := strconv.Atoi(concurrency); err == nil {
+			config.Queue.Concurrency = c
+		}
+	}
+	if visibilityTimeout := os.Getenv("QUAERO_QUEUE_VISIBILITY_TIMEOUT"); visibilityTimeout != "" {
+		config.Queue.VisibilityTimeout = visibilityTimeout
+	}
+	if maxReceive := os.Getenv("QUAERO_QUEUE_MAX_RECEIVE"); maxReceive != "" {
+		if mr, err := strconv.Atoi(maxReceive); err == nil {
+			config.Queue.MaxReceive = mr
+		}
+	}
+	if queueName := os.Getenv("QUAERO_QUEUE_NAME"); queueName != "" {
+		config.Queue.QueueName = queueName
 	}
 
 	// Storage configuration

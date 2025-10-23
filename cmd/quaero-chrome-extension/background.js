@@ -2,13 +2,7 @@
 
 console.log('Quaero extension loaded');
 
-// Open side panel when extension icon is clicked
-chrome.action.onClicked.addListener(async (tab) => {
-  // Open the side panel for the current window
-  await chrome.sidePanel.open({ windowId: tab.windowId });
-});
-
-// Listen for messages from popup/sidepanel
+// Listen for messages from popup (if needed for advanced features)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'captureAuth') {
     captureAuthData()

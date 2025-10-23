@@ -7,7 +7,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
-	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 // JobHandler handles job-related API requests
@@ -27,18 +25,20 @@ type JobHandler struct {
 	sourceService    *sources.Service
 	authStorage      interfaces.AuthStorage
 	schedulerService interfaces.SchedulerService
+	logService       interfaces.LogService
 	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
 		sourceService:    sourceService,
 		authStorage:      authStorage,
 		schedulerService: schedulerService,
+		logService:       logService,
 		config:           config,
 		logger:           logger,
 	}
@@ -250,7 +250,7 @@ func (h *JobHandler) GetJobResultsHandler(w http.ResponseWriter, r *http.Request
 }
 
 // GetJobLogsHandler returns the logs of a job
-// GET /api/jobs/{id}/logs
+// GET /api/jobs/{id}/logs?order=desc (desc=newest-first, asc=oldest-first)
 func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -267,16 +267,37 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logs, err := h.jobStorage.GetJobLogs(ctx, jobID)
+	// Parse order query parameter (default: desc = newest-first)
+	order := r.URL.Query().Get("order")
+	if order == "" {
+		order = "desc" // Default to newest-first
+	}
+
+	logs, err := h.logService.GetLogs(ctx, jobID, 1000) // Limit to 1000 most recent logs
 	if err != nil {
-		if errors.Is(err, sqlite.ErrJobNotFound) {
-			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not found when retrieving logs")
-			http.Error(w, "Job not found", http.StatusNotFound)
-			return
-		}
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
 		http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
 		return
+	}
+
+	// If logs are empty, check if job exists (return 404 if job doesn't exist)
+	if len(logs) == 0 {
+		_, err := h.jobStorage.GetJob(ctx, jobID)
+		if err != nil {
+			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not found")
+			http.Error(w, "Job not found", http.StatusNotFound)
+			return
+		}
+		// Job exists but has no logs yet - return empty array with 200 OK
+	}
+
+	// Apply ordering: logs come from DB in DESC order (newest-first)
+	// If asc requested, reverse the slice
+	if order == "asc" {
+		// Reverse slice for oldest-first ordering
+		for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
+			logs[i], logs[j] = logs[j], logs[i]
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -284,6 +305,7 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		"job_id": jobID,
 		"logs":   logs,
 		"count":  len(logs),
+		"order":  order, // Include order in response for client awareness
 	})
 }
 
