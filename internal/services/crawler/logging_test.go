@@ -421,19 +421,23 @@ func (s *InMemoryJobStorage) UpdateJob(ctx context.Context, job interface{}) err
 	return nil
 }
 
-func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]interface{}, error) {
-	jobs := make([]interface{}, 0, len(s.jobs))
+func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+	jobs := make([]*models.CrawlJob, 0, len(s.jobs))
 	for _, job := range s.jobs {
-		jobs = append(jobs, job)
+		// Type assert to *CrawlJob (which is an alias for *models.CrawlJob)
+		if crawlJob, ok := job.(*CrawlJob); ok {
+			jobs = append(jobs, crawlJob)
+		}
 	}
 	return jobs, nil
 }
 
-func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error) {
-	jobs := make([]interface{}, 0)
+func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error) {
+	jobs := make([]*models.CrawlJob, 0)
 	for _, job := range s.jobs {
 		if crawlJob, ok := job.(*CrawlJob); ok && string(crawlJob.Status) == status {
-			jobs = append(jobs, job)
+			// CrawlJob is an alias for models.CrawlJob - can append directly
+			jobs = append(jobs, crawlJob)
 		}
 	}
 	return jobs, nil
@@ -459,8 +463,8 @@ func (s *InMemoryJobStorage) UpdateJobHeartbeat(ctx context.Context, jobID strin
 	return nil
 }
 
-func (s *InMemoryJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
-	return []interface{}{}, nil
+func (s *InMemoryJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
+	return []*models.CrawlJob{}, nil
 }
 
 func (s *InMemoryJobStorage) DeleteJob(ctx context.Context, jobID string) error {

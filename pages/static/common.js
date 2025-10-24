@@ -843,7 +843,7 @@ document.addEventListener('alpine:init', () => {
       // Periodically check WebSocket connection status
       setInterval(() => {
         if (typeof WebSocketManager !== 'undefined') {
-          this.connectionStatus = WebSocketManager.connected || false;
+          this.connectionStatus = WebSocketManager.getConnectionStatus();
         } else {
           this.connectionStatus = false;
         }

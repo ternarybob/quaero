@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Friday, 24th October 2025 4:11:54 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package crawler
 
 import (
@@ -121,20 +126,8 @@ func (m *mockJobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOpti
 	}
 	jobs := make([]*models.CrawlJob, 0, len(m.jobs))
 	for _, job := range m.jobs {
-		// Convert internal CrawlJob to models.CrawlJob
-		modelJob := &models.CrawlJob{
-			ID:           job.ID,
-			SourceType:   job.SourceType,
-			EntityType:   job.EntityType,
-			Status:       string(job.Status),
-			StartedAt:    job.StartedAt,
-			CompletedAt:  job.CompletedAt,
-			ConfigJSON:   job.ConfigJSON,
-			ProgressJSON: job.ProgressJSON,
-			ParentJobID:  job.ParentJobID,
-			JobDefID:     job.JobDefID,
-		}
-		jobs = append(jobs, modelJob)
+		// crawler.CrawlJob is an alias for models.CrawlJob - no conversion needed
+		jobs = append(jobs, job)
 	}
 	return jobs, nil
 }
@@ -178,20 +171,8 @@ func (m *mockJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]
 	jobs := make([]*models.CrawlJob, 0)
 	for _, job := range m.jobs {
 		if job.Status == JobStatus(status) {
-			// Convert internal CrawlJob to models.CrawlJob
-			modelJob := &models.CrawlJob{
-				ID:           job.ID,
-				SourceType:   job.SourceType,
-				EntityType:   job.EntityType,
-				Status:       string(job.Status),
-				StartedAt:    job.StartedAt,
-				CompletedAt:  job.CompletedAt,
-				ConfigJSON:   job.ConfigJSON,
-				ProgressJSON: job.ProgressJSON,
-				ParentJobID:  job.ParentJobID,
-				JobDefID:     job.JobDefID,
-			}
-			jobs = append(jobs, modelJob)
+			// crawler.CrawlJob is an alias for models.CrawlJob - no conversion needed
+			jobs = append(jobs, job)
 		}
 	}
 	return jobs, nil
@@ -217,8 +198,8 @@ func (m *mockJobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) e
 	return nil
 }
 
-func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
-	return []interface{}{}, nil
+func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
+	return []*models.CrawlJob{}, nil
 }
 
 func (m *mockJobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
@@ -910,29 +891,20 @@ func TestServiceShutdown(t *testing.T) {
 	}
 }
 
-// TestExtractLinksFromHTML tests HTML link extraction with both quoted and unquoted hrefs
-// VERIFICATION COMMENT 2: extractLinksFromHTML moved to internal/jobs/types/crawler.go with queue refactor
-// This test has been disabled as the function is no longer part of the Service
-func TestExtractLinksFromHTML(t *testing.T) {
-	t.Skip("extractLinksFromHTML removed - functionality moved to queue-based job types")
-	// VERIFICATION COMMENT 2: Test body completely removed - method no longer exists
-}
+// TestExtractLinksFromHTML - REMOVED (2025-10-24)
+// Reason: extractLinksFromHTML moved to internal/jobs/types/crawler.go with queue refactor
+// The function is no longer part of the Service class.
+// For link extraction testing, add tests in internal/jobs/types/crawler_test.go
 
-// TestFilterJiraLinks tests Jira URL filtering with patterns and host filtering
-// VERIFICATION COMMENT 2: filterJiraLinks moved to shared LinkFilter helper in filters.go
-// This test has been disabled as the function is no longer part of the Service
-func TestFilterJiraLinks(t *testing.T) {
-	t.Skip("filterJiraLinks removed - functionality moved to shared LinkFilter helper")
-	// VERIFICATION COMMENT 2: Test body completely removed - method no longer exists
-}
+// TestFilterJiraLinks - REMOVED (2025-10-24)
+// Reason: filterJiraLinks moved to internal/services/crawler/filters.go
+// The function is now a shared LinkFilter helper.
+// For Jira link filtering tests, add tests in internal/services/crawler/filters_test.go
 
-// TestFilterConfluenceLinks tests Confluence URL filtering with patterns and host filtering
-// VERIFICATION COMMENT 2: filterConfluenceLinks moved to shared LinkFilter helper in filters.go
-// This test has been disabled as the function is no longer part of the Service
-func TestFilterConfluenceLinks(t *testing.T) {
-	t.Skip("filterConfluenceLinks removed - functionality moved to shared LinkFilter helper")
-	// VERIFICATION COMMENT 2: Test body completely removed - method no longer exists
-}
+// TestFilterConfluenceLinks - REMOVED (2025-10-24)
+// Reason: filterConfluenceLinks moved to internal/services/crawler/filters.go
+// The function is now a shared LinkFilter helper.
+// For Confluence link filtering tests, add tests in internal/services/crawler/filters_test.go
 
 // TestCrawlerJob_SavesDocumentImmediately verifies that documents are saved immediately after successful crawls
 // Renamed from TestWorkerLoop_SavesDocumentImmediately to reflect new architecture

@@ -257,18 +257,15 @@
                                         <i class="form-icon"></i>
                                     </label>
                                 </th>
-                                <th>JOB ID</th>
-                                <th>SOURCE</th>
-                                <th>ENTITY</th>
-                                <th class="text-center">STATUS</th>
-                                <th>PROGRESS</th>
+                                <th>JOB</th>
+                                <th>STATUS</th>
                                 <th>CREATED</th>
                                 <th class="text-center">ACTIONS</th>
                             </tr>
                         </thead>
                         <tbody id="jobs-table-body">
                             <tr>
-                                <td colspan="8" class="text-center">
+                                <td colspan="5" class="text-center">
                                     Loading jobs...
                                 </td>
                             </tr>
@@ -595,7 +592,7 @@
                 console.error('[Queue] Error stack:', error.stack);
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-error">
+                        <td colspan="5" class="text-center text-error">
                             Failed to load jobs. Please try again.
                         </td>
                     </tr>
@@ -736,7 +733,7 @@
             if (!filteredJobs || filteredJobs.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="text-center">
+                        <td colspan="5" class="text-center">
                             No jobs found matching the current filters.
                         </td>
                     </tr>
@@ -746,15 +743,42 @@
 
             tbody.innerHTML = filteredJobs.map((job, index) => {
                 const statusBadge = getStatusBadge(job.status);
-                const progressText = getProgressText(job);
                 const createdDate = job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A';
                 const isSelected = selectedJob && selectedJob.id === job.id;
                 const isChecked = selectedJobIds.has(job.id);
                 const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
+                const sourceType = job.source_type || 'N/A';
 
-                // Check if this is a parent job (has seed URLs)
-                const isParentJob = job.seed_urls && Array.isArray(job.seed_urls) && job.seed_urls.length > 0;
-                const parentBadge = isParentJob ? '<span class="parent-job-badge" title="Parent job with seed URLs">PARENT</span>' : '';
+                // Extract document count from progress data
+                let documentsCount = 'N/A';
+                let activeChildren = 'N/A';
+                if (job.progress) {
+                    try {
+                        const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
+                        if (progress && progress.completed_urls !== undefined) {
+                            documentsCount = progress.completed_urls;
+                        }
+                    } catch (error) {
+                        console.warn('[Queue] Failed to parse job progress:', error);
+                    }
+                }
+
+                // Build job column with ID and source
+                const jobColumn = `
+                    <div>
+                        <div>id:${jobIdShort}</div>
+                        <div class="text-small text-gray">source:${sourceType}</div>
+                    </div>
+                `;
+
+                // Build status column with three lines: badge, documents, active children
+                const statusColumn = `
+                    <div>
+                        <div>${statusBadge}</div>
+                        <div class="text-small text-gray" style="margin-top: 0.25rem;">Documents: ${documentsCount}</div>
+                        <div class="text-small text-gray">Active Children: ${activeChildren}</div>
+                    </div>
+                `;
 
                 return `
                     <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})">
@@ -765,11 +789,8 @@
                                 <i class="form-icon"></i>
                             </label>
                         </td>
-                        <td title="${job.id || 'N/A'}">${jobIdShort}...${parentBadge}</td>
-                        <td>${job.source_type || 'N/A'}</td>
-                        <td>${job.entity_type || 'N/A'}</td>
-                        <td class="text-center">${statusBadge}</td>
-                        <td>${progressText}</td>
+                        <td title="${job.id || 'N/A'}">${jobColumn}</td>
+                        <td>${statusColumn}</td>
                         <td>${createdDate}</td>
                         <td class="text-center">
                             ${job.status !== 'running' ? `
@@ -1012,7 +1033,7 @@
                     if (normalizedLevel === 'warn') {
                         normalizedLevel = 'warning';
                     }
-                    
+
                     return {
                         timestamp: log.timestamp,
                         level: normalizedLevel,

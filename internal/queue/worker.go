@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -65,8 +66,16 @@ func (wp *WorkerPool) Stop() error {
 
 // worker is the main worker loop that processes messages
 func (wp *WorkerPool) worker(workerID int) {
+	// Stagger worker starts to reduce database lock contention
+	// Spread workers evenly across the poll interval
+	staggerDelay := (wp.queueMgr.config.PollInterval / time.Duration(wp.queueMgr.config.Concurrency)) * time.Duration(workerID)
+	if staggerDelay > 0 {
+		time.Sleep(staggerDelay)
+	}
+
 	wp.logger.Debug().
 		Int("worker_id", workerID).
+		Dur("stagger_delay", staggerDelay).
 		Msg("Worker started")
 
 	ticker := time.NewTicker(wp.queueMgr.config.PollInterval)
@@ -83,8 +92,10 @@ func (wp *WorkerPool) worker(workerID int) {
 		case <-ticker.C:
 			// Try to receive a message
 			if err := wp.processMessage(workerID); err != nil {
-				// Log all errors except "no message" errors
-				if err.Error() != "no message" {
+				errMsg := err.Error()
+				// Log all errors except "no message" and SQLITE_BUSY errors
+				// SQLITE_BUSY errors are expected with high concurrency and will retry on next poll
+				if errMsg != "no message" && !strings.Contains(errMsg, "database is locked") && !strings.Contains(errMsg, "SQLITE_BUSY") {
 					wp.logger.Warn().
 						Err(err).
 						Int("worker_id", workerID).

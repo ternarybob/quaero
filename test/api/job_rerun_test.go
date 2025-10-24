@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 23rd October 2025 8:30:34 am
+// Last Modified: Friday, 24th October 2025 4:11:33 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -244,29 +244,17 @@ func TestJobRerunNonExistent(t *testing.T) {
 	t.Log("✓ Correctly handled rerun of non-existent job")
 }
 
-// TestJobRerunPreservesSeedURLs verifies that rerun preserves seed URLs from original job.
-// Note: This test is covered by TestJobRerun which verifies seed URL preservation.
-// The original version of this test tested modification of job definitions, but the current
-// architecture generates seed URLs from source configuration (base_url), not from job definition
-// step config. To properly test snapshot preservation, we would need to test source modification,
-// which is a more complex scenario that's not critical for the core rerun functionality.
-func TestJobRerunPreservesSeedURLs(t *testing.T) {
-	t.Skip(`SKIP: Architecture changed - seed URLs now generated from source configuration
-
-	This test was written to verify that modifying job definition step config (start_urls)
-	doesn't affect rerun. However, the current architecture works differently:
-
-	Current System:
-	- Seed URLs are generated from source configuration (base_url)
-	- Jobs store seed URLs and source config snapshots
-	- Rerun uses stored seed URLs from the original job's snapshot
-
-	The core rerun functionality (seed URL preservation) is already tested in TestJobRerun.
-	To test snapshot preservation against source modifications would require:
-	1. Create source with base_url A
-	2. Execute job (generates seed URLs from A)
-	3. Modify source to use base_url B
-	4. Rerun job and verify it uses seed URLs from A (snapshot)
-
-	This is a valid test scenario but not critical for basic rerun functionality.`)
-}
+// TestJobRerunPreservesSeedURLs - REMOVED (2025-10-24)
+// Reason: Architecture changed - seed URLs now generated from source configuration.
+//
+// The core rerun functionality (seed URL preservation) is already tested in TestJobRerun.
+// Snapshot preservation is handled by the job definition and rerun system.
+//
+// If snapshot preservation testing is needed against source modifications:
+// 1. Create source with base_url A
+// 2. Execute job (generates seed URLs from A)
+// 3. Modify source to use base_url B
+// 4. Rerun job and verify it uses seed URLs from A (snapshot)
+//
+// This scenario is not critical for basic rerun functionality and would require
+// additional test infrastructure to properly validate.

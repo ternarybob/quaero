@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -43,10 +44,17 @@ func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, 
 
 	// Initialize goqite queue schema
 	if err := goqite.Setup(context.Background(), db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to initialize goqite schema: %w", err)
+		// Check if error is about table already existing (which is safe to ignore)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "table goqite already exists") {
+			logger.Debug().Msg("goqite queue schema already exists (skipping initialization)")
+		} else {
+			db.Close()
+			return nil, fmt.Errorf("failed to initialize goqite schema: %w", err)
+		}
+	} else {
+		logger.Info().Msg("goqite queue schema initialized")
 	}
-	logger.Info().Msg("goqite queue schema initialized")
 
 	// Configure database
 	if err := s.configure(); err != nil {

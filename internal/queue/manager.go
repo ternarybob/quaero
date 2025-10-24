@@ -133,6 +133,10 @@ func (m *Manager) Receive(ctx context.Context) (*goqite.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	// goqite can return (nil, nil) when no message is available
+	if msg == nil {
+		return nil, fmt.Errorf("no message")
+	}
 	return msg, nil
 }
 
