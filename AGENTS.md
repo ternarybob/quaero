@@ -156,6 +156,107 @@ Quaero follows a clean architecture pattern with clear separation of concerns:
 - Enables testing with mocks
 - Allows swapping implementations
 
+### Queue-Based Job Processing
+
+Quaero uses a queue-based architecture for distributed job processing with goqite (SQLite-backed message queue):
+
+**Core Components:**
+
+1. **QueueManager** (`internal/queue/manager.go`)
+   - Manages goqite-backed job queue
+   - Lifecycle management (Start/Stop/Restart)
+   - Message operations: Enqueue, EnqueueWithDelay, Receive, Delete, Extend
+   - Queue statistics: GetQueueLength, GetQueueStats
+   - Visibility timeout for worker fault tolerance
+
+2. **WorkerPool** (`internal/queue/worker.go`)
+   - Pool of worker goroutines processing queue messages
+   - Configurable concurrency level
+   - Registered handlers for different job types
+   - Automatic retry with max_receive limit
+   - Graceful shutdown support
+
+3. **JobMessage** (`internal/queue/types.go`)
+   - Message types: "parent", "crawler_url", "summarizer", "cleanup"
+   - Contains job configuration, metadata, and parent/child relationships
+   - Serializable to JSON for queue storage
+   - Supports depth tracking for crawler jobs
+
+4. **Job Types** (`internal/jobs/types/`)
+   - **CrawlerJob** (`crawler.go`) - Fetches URLs, extracts content, spawns child jobs
+   - **SummarizerJob** (`summarizer.go`) - Generates summaries, extracts keywords
+   - **CleanupJob** (`cleanup.go`) - Cleans up old jobs and logs
+   - **BaseJob** (`base.go`) - Shared functionality (logging, status updates, child job enqueueing)
+
+**Job Execution Flow:**
+
+```
+1. User triggers job via UI or JobDefinition
+   ↓
+2. Parent job message created and enqueued to goqite queue
+   ↓
+3. WorkerPool receives message from queue
+   ↓
+4. Worker routes message to appropriate handler (CrawlerJob, SummarizerJob, etc.)
+   ↓
+5. Handler executes job logic:
+   - CrawlerJob: Fetch URL, extract content, discover links
+   - SummarizerJob: Generate summary using LLM
+   - CleanupJob: Delete old jobs/logs
+   ↓
+6. Job spawns child jobs if needed (URL discovery creates crawler_url messages)
+   ↓
+7. Progress tracked in crawl_jobs table
+   ↓
+8. Logs stored in job_logs table (unlimited history)
+   ↓
+9. Worker deletes message from queue on completion/failure
+```
+
+**Key Features:**
+
+- **Persistent Queue:** goqite uses SQLite for durable message storage
+- **Worker Pool:** Configurable concurrency with polling-based processing
+- **Job Spawning:** Parent jobs can spawn child jobs (URL discovery)
+- **Progress Tracking:** Real-time progress updates via crawl_jobs table
+- **Unlimited Logs:** job_logs table with CASCADE DELETE for automatic cleanup
+- **Fault Tolerance:** Visibility timeout prevents message loss on worker crash
+- **Depth Limiting:** Crawler jobs respect max_depth configuration
+
+**Configuration:**
+
+```toml
+[queue]
+queue_name = "quaero-jobs"
+concurrency = 4
+poll_interval = "1s"
+visibility_timeout = "5m"
+max_receive = 3
+```
+
+### Job Definitions vs Queue Jobs
+
+**Important Distinction:**
+
+- **JobExecutor** (`internal/services/jobs/executor.go`):
+  - Orchestrates multi-step workflows defined by users (JobDefinitions)
+  - Executes steps sequentially with retry logic and error handling
+  - Polls crawl jobs asynchronously when wait_for_completion is enabled
+  - Publishes progress events for UI updates
+  - Supports error strategies: fail, continue, retry
+
+- **Queue Jobs** (`internal/jobs/types/`):
+  - Handle individual task execution (CrawlerJob, SummarizerJob, CleanupJob)
+  - Process URLs, generate summaries, clean up old jobs
+  - Provide persistent queue with worker pool
+  - Enable job spawning and depth tracking
+
+**Both systems coexist and complement each other:**
+- JobDefinitions can trigger crawl jobs via the "crawl" action
+- JobExecutor polls those crawl jobs until completion
+- Crawl jobs are executed by the queue-based CrawlerJob type
+- JobExecutor is NOT replaced by the queue system - it serves a different purpose
+
 ### Service Initialization Flow
 
 The app initialization sequence in `internal/app/app.go` is critical:
@@ -241,6 +342,14 @@ mock_mode = false  # Set to true for testing
 
 **Auth Table:**
 - `auth_credentials` - Atlassian authentication tokens
+
+**Job Tables:**
+- `crawl_jobs` - Persistent job state and progress tracking
+  - **Note:** `logs` column was removed - logs now in separate table
+- `job_logs` - Unlimited job log history
+  - Foreign key with `ON DELETE CASCADE` for automatic cleanup
+  - Indexed by job_id and level for efficient queries
+- `job_seen_urls` - URL deduplication for crawler jobs
 
 ### Chrome Extension & Authentication Flow
 

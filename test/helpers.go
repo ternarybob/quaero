@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Friday, 24th October 2025 3:10:51 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package test
 
 import (
@@ -24,11 +29,21 @@ type HTTPTestHelper struct {
 	T       *testing.T
 }
 
+// getConfiguredTimeout returns the test timeout from environment or default
+func getConfiguredTimeout() time.Duration {
+	if timeoutStr := os.Getenv("TEST_TIMEOUT_SECONDS"); timeoutStr != "" {
+		if seconds, err := strconv.Atoi(timeoutStr); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return 60 * time.Second // Default for LLM operations
+}
+
 // NewHTTPTestHelper creates a new HTTP test helper
 func NewHTTPTestHelper(t *testing.T, baseURL string) *HTTPTestHelper {
 	return &HTTPTestHelper{
 		BaseURL: baseURL,
-		Client:  &http.Client{Timeout: 60 * time.Second}, // Increased for slow LLM responses
+		Client:  &http.Client{Timeout: getConfiguredTimeout()},
 		T:       t,
 	}
 }

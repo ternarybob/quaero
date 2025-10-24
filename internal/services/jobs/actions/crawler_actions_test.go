@@ -145,18 +145,22 @@ func createTestSources() []*models.SourceConfig {
 			ID:      "jira-source-1",
 			Type:    models.SourceTypeJira,
 			BaseURL: "https://example.atlassian.net",
-			CrawlConfig: models.CrawlConfig{
-				MaxDepth: 2,
-				MaxPages: 100,
+			CrawlConfig: models.SourceCrawlConfig{
+				MaxDepth:    2,
+				MaxPages:    100,
+				Concurrency: 5,
+				FollowLinks: true,
 			},
 		},
 		{
 			ID:      "confluence-source-1",
 			Type:    models.SourceTypeConfluence,
 			BaseURL: "https://example.atlassian.net/wiki",
-			CrawlConfig: models.CrawlConfig{
-				MaxDepth: 3,
-				MaxPages: 200,
+			CrawlConfig: models.SourceCrawlConfig{
+				MaxDepth:    3,
+				MaxPages:    200,
+				Concurrency: 5,
+				FollowLinks: true,
 			},
 		},
 	}

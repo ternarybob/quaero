@@ -379,9 +379,11 @@ func createTestSources() []*models.SourceConfig {
 			BaseURL: "https://test.atlassian.net",
 			Enabled: true,
 			Filters: make(map[string]interface{}),
-			CrawlConfig: models.CrawlConfig{
+			CrawlConfig: models.SourceCrawlConfig{
 				MaxDepth:    2,
 				Concurrency: 5,
+				FollowLinks: true,
+				MaxPages:    100,
 			},
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
@@ -393,9 +395,11 @@ func createTestSources() []*models.SourceConfig {
 			BaseURL: "https://test.atlassian.net/wiki",
 			Enabled: true,
 			Filters: make(map[string]interface{}),
-			CrawlConfig: models.CrawlConfig{
+			CrawlConfig: models.SourceCrawlConfig{
 				MaxDepth:    2,
 				Concurrency: 5,
+				FollowLinks: true,
+				MaxPages:    100,
 			},
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
@@ -489,11 +493,18 @@ func TestExecute_Success(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify success
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false for non-crawl steps")
 	}
 
 	// Verify events published
@@ -514,7 +525,8 @@ func TestExecute_InvalidJobDefinition(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	_, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	if err == nil {
 		t.Error("Expected validation error")
@@ -536,7 +548,8 @@ func TestExecute_SourceFetchFailure(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	_, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify error
 	if err == nil {
@@ -568,11 +581,18 @@ func TestExecute_StepFailure_Continue(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify job completes with error but execution continued
 	if err == nil {
 		t.Error("Expected aggregated error")
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false for non-polling steps")
 	}
 }
 
@@ -597,7 +617,8 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify job stopped immediately
 	if err == nil {
@@ -605,6 +626,12 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "job execution failed at step 0") {
 		t.Errorf("Expected step 0 failure, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false when job fails early")
 	}
 }
 
@@ -637,11 +664,18 @@ func TestExecute_StepFailure_Retry(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify job succeeds after retries
 	if err != nil {
 		t.Errorf("Expected success after retries, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false for non-polling steps")
 	}
 }
 
@@ -661,7 +695,8 @@ func TestExecute_ActionHandlerNotFound(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	_, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify error
 	if err == nil {
@@ -701,7 +736,8 @@ func TestExecute_ContextCancellation(t *testing.T) {
 	cancel()
 
 	// Execute job
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	_, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify context cancellation handled
 	if err == nil {
@@ -730,7 +766,8 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify all errors aggregated
 	if err == nil {
@@ -738,6 +775,12 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "2 error(s)") {
 		t.Errorf("Expected 2 errors, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false for failed steps")
 	}
 }
 
@@ -1046,11 +1089,18 @@ func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify success
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if !result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be true for crawl step with wait_for_completion")
 	}
 
 	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)
@@ -1146,11 +1196,18 @@ func TestAsyncPolling_JobFailure(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Async polling: Execute returns immediately, errors reported via events only
 	if err != nil {
 		t.Errorf("Expected no immediate error (async polling), got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if !result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be true for crawl step with wait_for_completion")
 	}
 
 	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)
@@ -1245,7 +1302,8 @@ func TestAsyncPolling_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	_, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Note: Polling happens in background goroutine with context.Background(),
 	// so cancelling request context won't affect polling. This test verifies
@@ -1307,11 +1365,18 @@ func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Verify success (no polling happened)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be false when wait_for_completion is false")
 	}
 
 	// Wait a bit to ensure polling doesn't happen
@@ -1403,11 +1468,18 @@ func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
 
 	// Execute job
 	ctx := context.Background()
-	err := executor.Execute(ctx, jobDef)
+	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
+	result, err := executor.Execute(ctx, jobDef, noOpCallback)
 
 	// Async polling: Execute returns immediately, errors reported via events only
 	if err != nil {
 		t.Errorf("Expected no immediate error (async polling), got: %v", err)
+	}
+	if result == nil {
+		t.Error("Expected non-nil result")
+	}
+	if !result.AsyncPollingActive {
+		t.Error("Expected AsyncPollingActive to be true for crawl step with wait_for_completion and multiple jobs")
 	}
 
 	// Give polling goroutine time to complete (ticker interval is 5s, need ~11s for 2 ticks)

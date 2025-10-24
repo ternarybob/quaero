@@ -37,8 +37,10 @@ var (
 	FromJSONCrawlProgress = models.FromJSONCrawlProgress
 )
 
-// VERIFICATION COMMENT 2: URLQueueItem removed - legacy type from old worker-based architecture
-// The new queue system uses queue.JobMessage instead (see internal/queue/types.go)
+// URLQueueItem was removed during queue refactoring (replaced by queue.JobMessage)
+// The custom URLQueue with priority heap and deduplication has been replaced by
+// goqite-backed queue manager with persistent storage and worker pool.
+// See internal/queue/types.go for the new message types.
 
 // CrawlResult represents the result of crawling a single URL
 type CrawlResult struct {

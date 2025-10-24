@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 
 -- Crawler job history with configuration snapshots for re-runnable jobs
 -- Inspired by Firecrawl's async job model
--- NOTE: Logs are stored in the dedicated job_logs table (unlimited history, CASCADE DELETE)
+-- Used by both JobExecutor (for JobDefinition workflows) and queue-based jobs
+-- The 'logs' column was removed in MIGRATION 13 (logs now in job_logs table)
 CREATE TABLE IF NOT EXISTS crawl_jobs (
 	id TEXT PRIMARY KEY,
 	name TEXT DEFAULT '',
@@ -320,7 +321,10 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
-	// MIGRATION 13: Remove logs column from crawl_jobs table
+	// MIGRATION 13: Remove deprecated logs column from crawl_jobs table
+	// Logs are now stored in the dedicated job_logs table with unlimited history
+	// and better query performance. This migration recreates the crawl_jobs table
+	// without the logs column while preserving all other data.
 	if err := s.migrateRemoveLogsColumn(); err != nil {
 		return err
 	}
@@ -1104,7 +1108,13 @@ func (s *SQLiteDB) migrateAddBackSourcesFiltersColumn() error {
 	return nil
 }
 
-// migrateRemoveLogsColumn removes the deprecated logs column from crawl_jobs table
+// migrateRemoveLogsColumn removes the deprecated logs column from crawl_jobs table.
+// The logs column stored job logs as a JSON array with a 100-entry limit.
+// Logs are now stored in the dedicated job_logs table (see lines 145-158) which provides:
+// - Unlimited log history (no truncation)
+// - Better query performance with indexes
+// - Automatic CASCADE DELETE when jobs are deleted
+// - Batched writes via LogService for efficiency
 func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 	// Check if logs column exists
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`

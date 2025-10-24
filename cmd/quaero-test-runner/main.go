@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 23rd October 2025 8:42:40 am
+// Last Modified: Friday, 24th October 2025 3:10:09 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -9,12 +9,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,13 +46,20 @@ type TestResult struct {
 
 type TestRunnerConfig struct {
 	TestRunner struct {
-		TestsDir    string `toml:"tests_dir"`
-		OutputDir   string `toml:"output_dir"`
-		BuildScript string `toml:"build_script"`
-		TestMode    string `toml:"test_mode"`
+		TestsDir           string `toml:"tests_dir"`
+		OutputDir          string `toml:"output_dir"`
+		BuildScript        string `toml:"build_script"`
+		TestMode           string `toml:"test_mode"`
+		TestTimeoutSeconds int    `toml:"test_timeout_seconds"`
+		RetryFailedTests   bool   `toml:"retry_failed_tests"`
+		MaxRetries         int    `toml:"max_retries"`
+		RetryDelaySeconds  int    `toml:"retry_delay_seconds"`
+		ParallelSuites     bool   `toml:"parallel_suites"`
+		MaxParallel        int    `toml:"max_parallel"`
 	} `toml:"test_runner"`
 	TestServer struct {
-		Port int `toml:"port"`
+		Port                 int  `toml:"port"`
+		EnabledInIntegration bool `toml:"enabled_in_integration"`
 	} `toml:"test_server"`
 	Service struct {
 		Binary                string `toml:"binary"`
@@ -58,6 +67,10 @@ type TestRunnerConfig struct {
 		Port                  int    `toml:"port"` // Optional port override
 		StartupTimeoutSeconds int    `toml:"startup_timeout_seconds"`
 	} `toml:"service"`
+	Coverage struct {
+		Enabled      bool   `toml:"enabled"`
+		OutputFormat string `toml:"output_format"`
+	} `toml:"coverage"`
 }
 
 type ServiceConfig struct {
@@ -110,6 +123,21 @@ func loadConfig() (*TestRunnerConfig, error) {
 	}
 	if config.TestRunner.TestMode == "" {
 		config.TestRunner.TestMode = "integration"
+	}
+	if config.TestRunner.TestTimeoutSeconds == 0 {
+		config.TestRunner.TestTimeoutSeconds = 60
+	}
+	if config.TestRunner.MaxRetries == 0 {
+		config.TestRunner.MaxRetries = 1
+	}
+	if config.TestRunner.RetryDelaySeconds == 0 {
+		config.TestRunner.RetryDelaySeconds = 5
+	}
+	if config.TestRunner.MaxParallel == 0 {
+		config.TestRunner.MaxParallel = 2
+	}
+	if config.Coverage.OutputFormat == "" {
+		config.Coverage.OutputFormat = "html"
 	}
 
 	return &config, nil
@@ -174,6 +202,17 @@ func printUsage() {
 	fmt.Println("  quaero-test-runner --suite api --test \"TestAuth.*\"")
 	fmt.Println("\nSee README.md for detailed documentation")
 	fmt.Println()
+}
+
+// checkPortAvailable checks if a port is available (not in use)
+func checkPortAvailable(port int) error {
+	addr := fmt.Sprintf("localhost:%d", port)
+	conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+	if err == nil {
+		conn.Close()
+		return fmt.Errorf("port %d is already in use", port)
+	}
+	return nil
 }
 
 // killProcessOnPort kills any process listening on the specified port
@@ -299,33 +338,56 @@ func main() {
 	}
 	fmt.Println()
 
-	// Step 0: Start test server for browser validation
-	fmt.Printf("STEP 0: Starting test server (port %d)...\n", config.TestServer.Port)
-	fmt.Println(strings.Repeat("-", 80))
-	testServer := StartTestServer(config.TestServer.Port)
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		testServer.Shutdown(ctx)
-		fmt.Println("✓ Test server stopped")
-	}()
+	// Step 0: Conditionally start test server for browser validation
+	var testServer *http.Server
+	var testServerURL string
 
-	// Verify test server is ready
-	testServerURL := fmt.Sprintf("http://localhost:%d", config.TestServer.Port)
-	if err := waitForService(testServerURL, 5*time.Second); err != nil {
-		fmt.Printf("ERROR: Test server did not become ready: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("✓ Test server ready on %s\n\n", testServerURL)
+	// Only start test server when needed for UI tests in integration mode
+	needTestServer := (suiteLower == "ui" || suiteLower == "all") &&
+		config.TestRunner.TestMode == "integration" &&
+		config.TestServer.EnabledInIntegration
 
-	// Step 0.5: Check connectivity
-	fmt.Println("STEP 0.5: Verifying connectivity...")
-	fmt.Println(strings.Repeat("-", 80))
-	if err := checkConnectivity(testServerURL); err != nil {
-		fmt.Printf("WARNING: Connectivity check failed: %v\n", err)
-		fmt.Println("Continuing with tests...\n")
+	if needTestServer {
+		fmt.Printf("STEP 0: Starting test server (port %d) for browser validation...\n", config.TestServer.Port)
+		fmt.Println(strings.Repeat("-", 80))
+
+		// Check if test server port is available
+		if err := checkPortAvailable(config.TestServer.Port); err != nil {
+			fmt.Printf("ERROR: %v\n", err)
+			fmt.Printf("Stop the conflicting process or change test_server.port in config\n")
+			os.Exit(1)
+		}
+
+		testServer = StartTestServer(config.TestServer.Port)
+		defer func() {
+			if testServer != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				testServer.Shutdown(ctx)
+				fmt.Println("✓ Test server stopped")
+			}
+		}()
+
+		// Verify test server is ready
+		testServerURL = fmt.Sprintf("http://localhost:%d", config.TestServer.Port)
+		if err := waitForService(testServerURL, "/status", 5*time.Second); err != nil {
+			fmt.Printf("ERROR: Test server did not become ready: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Test server ready on %s\n\n", testServerURL)
+
+		// Step 0.5: Check connectivity
+		fmt.Println("STEP 0.5: Verifying connectivity...")
+		fmt.Println(strings.Repeat("-", 80))
+		if err := checkConnectivity(testServerURL); err != nil {
+			fmt.Printf("WARNING: Connectivity check failed: %v\n", err)
+			fmt.Println("Continuing with tests...\n")
+		} else {
+			fmt.Println("✓ Connectivity verified\n")
+		}
 	} else {
-		fmt.Println("✓ Connectivity verified\n")
+		fmt.Println("STEP 0: Skipping test server (not needed for this test configuration)")
+		fmt.Printf("  Suite: %s, Mode: %s, Enabled: %v\n\n", suiteLower, config.TestRunner.TestMode, config.TestServer.EnabledInIntegration)
 	}
 
 	// Declare variables for service/mock server
@@ -351,7 +413,7 @@ func main() {
 		serviceURL = "http://localhost:9999"
 
 		// Wait for mock server to be ready
-		if err := waitForService(serviceURL, 5*time.Second); err != nil {
+		if err := waitForService(serviceURL, "/api/status", 5*time.Second); err != nil {
 			fmt.Printf("ERROR: Mock server did not become ready: %v\n", err)
 			mockServer.Stop()
 			os.Exit(1)
@@ -363,6 +425,19 @@ func main() {
 		// Step 1: Read service configuration to determine port
 		fmt.Println("STEP 1: Reading service configuration...")
 		fmt.Println(strings.Repeat("-", 80))
+
+		// Security: Validate config file path
+		absConfigPath, err := filepath.Abs(config.Service.Config)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to resolve config path: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(absConfigPath); os.IsNotExist(err) {
+			fmt.Printf("ERROR: Service config file does not exist: %s\n", absConfigPath)
+			os.Exit(1)
+		}
+		fmt.Printf("Using service config: %s\n", absConfigPath)
+
 		serviceConfig, err := loadServiceConfig(config.Service.Config)
 		if err != nil {
 			fmt.Printf("ERROR: Failed to load service config: %v\n", err)
@@ -386,6 +461,24 @@ func main() {
 		// Step 2: Build and start service (build.ps1 will kill any existing services)
 		fmt.Println("STEP 2: Building and starting service...")
 		fmt.Println(strings.Repeat("-", 80))
+
+		// Check if service port is available
+		if err := checkPortAvailable(servicePort); err != nil {
+			fmt.Printf("WARNING: %v\n", err)
+			fmt.Printf("Attempting to stop existing quaero.exe processes...\n")
+			if runtime.GOOS == "windows" {
+				exec.Command("taskkill", "/F", "/IM", "quaero.exe").Run()
+				time.Sleep(2 * time.Second)
+			}
+			// Verify port is now available
+			if err := checkPortAvailable(servicePort); err != nil {
+				fmt.Printf("ERROR: %v\n", err)
+				fmt.Printf("Stop the conflicting process manually: taskkill /F /IM quaero.exe\n")
+				os.Exit(1)
+			}
+			fmt.Println("✓ Port is now available")
+		}
+
 		fmt.Println("Building fresh service for testing...")
 		fmt.Println("Note: build.ps1 will automatically stop any existing services")
 
@@ -399,8 +492,15 @@ func main() {
 		// Wait for service to be ready
 		fmt.Println("Waiting for service to be ready...")
 		startupTimeout := time.Duration(config.Service.StartupTimeoutSeconds) * time.Second
-		if err := waitForService(serviceURL, startupTimeout); err != nil {
+		if err := waitForService(serviceURL, "/api/status", startupTimeout); err != nil {
 			fmt.Printf("ERROR: Service did not become ready: %v\n", err)
+			fmt.Println("\nTroubleshooting:")
+			fmt.Println("  1. Check if port is already in use:")
+			fmt.Printf("     netstat -an | findstr :%d\n", servicePort)
+			fmt.Println("  2. Check service logs in the service window")
+			fmt.Println("  3. Verify database path is writable")
+			fmt.Println("  4. Try increasing startup_timeout_seconds in config")
+			fmt.Println("  5. Verify build script executed successfully")
 			stopService(serviceCmd)
 			os.Exit(1)
 		}
@@ -419,21 +519,42 @@ func main() {
 		fmt.Printf("Running in mock mode - UI tests skipped\n\n")
 	}
 
-	results := make([]TestResult, 0, len(suites))
+	var results []TestResult
 	allPassed := true
 
-	for _, suite := range suites {
-		fmt.Printf("Running %s...\n", suite.Name)
-		fmt.Println(strings.Repeat("-", 80))
+	// Execute tests based on parallel configuration
+	if config.TestRunner.ParallelSuites && len(suites) > 1 {
+		// Parallel execution
+		fmt.Printf("Running %d suites in parallel (max %d concurrent)...\n\n", len(suites), config.TestRunner.MaxParallel)
+		results = runTestSuitesParallel(suites, config, serviceURL)
+	} else {
+		// Sequential execution
+		results = make([]TestResult, 0, len(suites))
+		for _, suite := range suites {
+			fmt.Printf("Running %s...\n", suite.Name)
+			fmt.Println(strings.Repeat("-", 80))
 
-		result := runTestSuite(suite, config.TestRunner.OutputDir, serviceURL, config.TestRunner.TestMode)
-		results = append(results, result)
+			var result TestResult
+			if config.TestRunner.RetryFailedTests {
+				result = runTestSuiteWithRetry(suite, config, serviceURL)
+			} else {
+				result = runTestSuite(suite, config, serviceURL)
+			}
+			results = append(results, result)
 
-		if result.Success {
-			fmt.Printf("✓ %s PASSED (%.2fs)\n\n", suite.Name, result.Duration.Seconds())
-		} else {
-			fmt.Printf("✗ %s FAILED (%.2fs)\n\n", suite.Name, result.Duration.Seconds())
+			if result.Success {
+				fmt.Printf("✓ %s PASSED (%.2fs)\n\n", suite.Name, result.Duration.Seconds())
+			} else {
+				fmt.Printf("✗ %s FAILED (%.2fs)\n\n", suite.Name, result.Duration.Seconds())
+			}
+		}
+	}
+
+	// Check if all tests passed
+	for _, result := range results {
+		if !result.Success {
 			allPassed = false
+			break
 		}
 	}
 
@@ -568,17 +689,13 @@ func checkConnectivity(testServerURL string) error {
 }
 
 // waitForService waits for the service to become ready
-func waitForService(url string, timeout time.Duration) error {
+func waitForService(url string, healthPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	for time.Now().Before(deadline) {
-		// For test server, use /status endpoint
-		checkURL := url + "/api/status"
-		if strings.Contains(url, "3333") {
-			checkURL = url + "/status"
-		}
+	checkURL := url + healthPath
 
+	for time.Now().Before(deadline) {
 		resp, err := client.Get(checkURL)
 		if err == nil {
 			resp.Body.Close()
@@ -593,12 +710,12 @@ func waitForService(url string, timeout time.Duration) error {
 	return fmt.Errorf("service did not become ready within %v", timeout)
 }
 
-func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode string) TestResult {
+func runTestSuite(suite TestSuite, config *TestRunnerConfig, serviceURL string) TestResult {
 	startTime := time.Now()
 	timestamp := time.Now().Format("2006-01-02_15-04-05")
 
 	// Create results directory structure: {output_dir}/{testname}-{datetime}/
-	suiteDir := filepath.Join(outputDir, fmt.Sprintf("%s-%s", sanitizeFilename(suite.Name), timestamp))
+	suiteDir := filepath.Join(config.TestRunner.OutputDir, fmt.Sprintf("%s-%s", sanitizeFilename(suite.Name), timestamp))
 	if err := os.MkdirAll(suiteDir, 0755); err != nil {
 		fmt.Printf("ERROR: Failed to create suite directory: %v\n", err)
 	}
@@ -618,11 +735,18 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 		}
 	}
 
-	// Build test command with optional -run flag
+	// Build test command with optional -run flag and coverage
 	cmdArgs := suite.Command[1:] // Skip "go" command
 	if *testFlag != "" {
 		cmdArgs = append(cmdArgs, "-run", *testFlag)
 		fmt.Printf("  Filtering tests with pattern: %s\n", *testFlag)
+	}
+
+	// Add coverage if enabled
+	var coverFile string
+	if config.Coverage.Enabled {
+		coverFile = filepath.Join(suiteDir, "coverage.out")
+		cmdArgs = append(cmdArgs, "-coverprofile="+coverFile)
 	}
 
 	// Log the exact command being executed
@@ -633,7 +757,8 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 	cmd := exec.Command(suite.Command[0], cmdArgs...)
 	cmd.Dir = "."
 
-	// Use test mode from config (fallback to URL-based detection if mode is empty)
+	// Use test mode from config
+	testMode := config.TestRunner.TestMode
 	if testMode == "" {
 		testMode = "integration"
 		if strings.Contains(serviceURL, ":9999") {
@@ -646,6 +771,7 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 		fmt.Sprintf("TEST_RESULTS_DIR=%s", absSuiteDir),
 		fmt.Sprintf("TEST_SERVER_URL=%s", serviceURL),
 		fmt.Sprintf("TEST_MODE=%s", testMode),
+		fmt.Sprintf("TEST_TIMEOUT_SECONDS=%d", config.TestRunner.TestTimeoutSeconds),
 	)
 
 	output, err := cmd.CombinedOutput()
@@ -654,6 +780,19 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 	// Save output to test.log in the suite directory
 	outputFile := filepath.Join(suiteDir, "test.log")
 	os.WriteFile(outputFile, output, 0644)
+
+	// Generate coverage HTML if enabled and coverage file exists
+	if config.Coverage.Enabled && coverFile != "" {
+		if _, err := os.Stat(coverFile); err == nil {
+			if config.Coverage.OutputFormat == "html" || config.Coverage.OutputFormat == "both" {
+				htmlFile := filepath.Join(suiteDir, "coverage.html")
+				coverCmd := exec.Command("go", "tool", "cover", "-html="+coverFile, "-o="+htmlFile)
+				if coverErr := coverCmd.Run(); coverErr == nil {
+					fmt.Printf("  ✓ Coverage report: %s\n", htmlFile)
+				}
+			}
+		}
+	}
 
 	// Determine success
 	success := err == nil
@@ -664,6 +803,80 @@ func runTestSuite(suite TestSuite, outputDir string, serviceURL string, testMode
 		Output:   string(output),
 		Duration: duration,
 	}
+}
+
+// runTestSuiteWithRetry runs a test suite with retry logic
+func runTestSuiteWithRetry(suite TestSuite, config *TestRunnerConfig, serviceURL string) TestResult {
+	maxRetries := config.TestRunner.MaxRetries
+	if maxRetries < 1 {
+		maxRetries = 1
+	}
+
+	var result TestResult
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			fmt.Printf("\n⚠ Retry attempt %d/%d for %s...\n", attempt, maxRetries, suite.Name)
+			time.Sleep(time.Duration(config.TestRunner.RetryDelaySeconds) * time.Second)
+		}
+
+		result = runTestSuite(suite, config, serviceURL)
+
+		if result.Success {
+			if attempt > 1 {
+				fmt.Printf("✓ %s PASSED on attempt %d\n", suite.Name, attempt)
+			}
+			return result
+		}
+	}
+
+	fmt.Printf("✗ %s FAILED after %d attempts\n", suite.Name, maxRetries)
+	return result
+}
+
+// runTestSuitesParallel runs multiple test suites in parallel
+func runTestSuitesParallel(suites []TestSuite, config *TestRunnerConfig, serviceURL string) []TestResult {
+	var wg sync.WaitGroup
+	resultsChan := make(chan TestResult, len(suites))
+	semaphore := make(chan struct{}, config.TestRunner.MaxParallel)
+
+	for _, suite := range suites {
+		wg.Add(1)
+		go func(s TestSuite) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }() // Release
+
+			fmt.Printf("[Parallel] Starting %s...\n", s.Name)
+
+			var result TestResult
+			if config.TestRunner.RetryFailedTests {
+				result = runTestSuiteWithRetry(s, config, serviceURL)
+			} else {
+				result = runTestSuite(s, config, serviceURL)
+			}
+
+			if result.Success {
+				fmt.Printf("[Parallel] ✓ %s PASSED (%.2fs)\n", s.Name, result.Duration.Seconds())
+			} else {
+				fmt.Printf("[Parallel] ✗ %s FAILED (%.2fs)\n", s.Name, result.Duration.Seconds())
+			}
+
+			resultsChan <- result
+		}(suite)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	// Collect results
+	results := make([]TestResult, 0, len(suites))
+	for result := range resultsChan {
+		results = append(results, result)
+	}
+
+	return results
 }
 
 func printSummary(results []TestResult, allPassed bool) {

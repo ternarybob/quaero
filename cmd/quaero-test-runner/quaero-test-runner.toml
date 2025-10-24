@@ -29,7 +29,7 @@ tests_dir = "./test"
 output_dir = "./test/results"
 
 # Build script location
-build_script = "./scripts/build.ps1"  # Windows
+build_script = "./scripts/build.ps1" # Windows
 # build_script = "./scripts/build.sh" # Linux/Mac
 
 # Test mode: "mock" or "integration"
@@ -44,15 +44,39 @@ build_script = "./scripts/build.ps1"  # Windows
 #   test_mode="mock" + --suite api    : API tests against mock server
 #   test_mode="integration" + --suite ui : UI tests against real service
 #   test_mode="mock" + --suite ui     : Warning displayed, UI tests skipped
-test_mode = "integration"  # Use real service for comprehensive testing
+test_mode = "integration" # Use real service for comprehensive testing
+
+# Test execution timeout (seconds)
+# This value is passed to tests via TEST_TIMEOUT_SECONDS environment variable
+test_timeout_seconds = 60
+
+# Retry failed tests
+retry_failed_tests = false
+max_retries = 2
+retry_delay_seconds = 5
+
+# Parallel test execution
+parallel_suites = false
+max_parallel = 2
 
 [test_server]
 # Test server binds to this port for serving test resources
+# Only used for browser validation tests (test/ui/browser_validation_test.go)
 port = 3333
+
+# Enable test server in integration mode
+# Set to true to start test server for browser validation tests
+# Set to false to skip test server (saves resources if not needed)
+enabled_in_integration = true
 
 [service]
 # Service under test configuration
-binary = "./bin/quaero.exe"              # Path to service executable
-config = "./bin/quaero.toml"             # Path to service configuration
+binary = "./bin/quaero.exe"  # Path to service executable
+config = "./bin/quaero.toml" # Path to service configuration
 # port = 8085                            # Optional: Override port (pass --port flag to binary)
-startup_timeout_seconds = 30             # How long to wait for service to start
+startup_timeout_seconds = 30 # How long to wait for service to start
+
+[coverage]
+# Code coverage reporting
+enabled = true
+output_format = "html" # "html", "json", or "both"

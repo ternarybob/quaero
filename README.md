@@ -188,21 +188,19 @@ quaero/
 │   │   ├── api.go                   # System API (version, health)
 │   │   ├── ui.go                    # UI page handlers
 │   │   ├── websocket.go             # WebSocket & log streaming
-│   │   ├── scraper.go               # Scraper triggers
-│   │   ├── collector.go             # Paginated data endpoints
 │   │   ├── collection.go            # Manual sync endpoints
 │   │   ├── document.go              # Document management
 │   │   ├── scheduler.go             # Event triggers
-│   │   └── embedding_handler.go     # Embedding API (testing)
+│   │   ├── job_handler.go           # Job management API
+│   │   ├── job_definition_handler.go # Job definition API
+│   │   └── chat_handler.go          # Chat API
 │   ├── services/                    # Stateful business services
-│   │   ├── atlassian/               # Jira & Confluence collectors
-│   │   │   ├── jira_*.go            # Jira scraping services
-│   │   │   └── confluence_*.go      # Confluence scraping services
-│   │   ├── collection/              # Collection coordinator
-│   │   │   └── coordinator_service.go
-│   │   ├── embeddings/              # Embedding services
-│   │   │   ├── embedding_service.go   # Core embedding logic
-│   │   │   └── coordinator_service.go # Embedding coordinator
+│   │   ├── atlassian/               # Jira & Confluence transformers
+│   │   │   ├── jira_transformer.go  # Jira data transformation
+│   │   │   └── confluence_transformer.go # Confluence data transformation
+│   │   ├── crawler/                 # Website crawler service
+│   │   │   ├── service.go           # Core crawler logic
+│   │   │   └── filters.go           # URL pattern filtering
 │   │   ├── events/                  # Pub/sub event service
 │   │   │   └── event_service.go
 │   │   ├── scheduler/               # Cron scheduler
@@ -212,23 +210,43 @@ quaero/
 │   │   │   ├── audit.go             # Audit logging
 │   │   │   └── offline/             # Offline llama.cpp implementation
 │   │   ├── documents/               # Document service
-│   │   ├── processing/              # Processing service
-│   │   └── workers/                 # Worker pool pattern
+│   │   ├── chat/                    # Chat service (RAG)
+│   │   ├── search/                  # Search service (FTS5)
+│   │   ├── summary/                 # Summary generation
+│   │   ├── sources/                 # Source configuration
+│   │   ├── status/                  # Status tracking
+│   │   └── jobs/                    # Job executor & registry
+│   │       ├── executor.go          # Job definition executor
+│   │       ├── registry.go          # Action type registry
+│   │       └── actions/             # Action handlers (crawler, summarizer)
+│   ├── queue/                       # Queue-based job system
+│   │   ├── manager.go               # Queue manager (goqite)
+│   │   ├── worker.go                # Worker pool
+│   │   └── types.go                 # Queue message types
+│   ├── jobs/                        # Job management
+│   │   ├── manager.go               # Job CRUD operations
+│   │   └── types/                   # Job type implementations
+│   │       ├── base.go              # BaseJob shared functionality
+│   │       ├── crawler.go           # CrawlerJob (URL processing)
+│   │       ├── summarizer.go        # SummarizerJob
+│   │       └── cleanup.go           # CleanupJob
 │   ├── storage/                     # Data persistence layer
 │   │   └── sqlite/                  # SQLite implementation
-
 │   │       ├── document_storage.go  # Document CRUD
-│   │       ├── jira_storage.go      # Jira data storage
-│   │       └── confluence_storage.go # Confluence data storage
+│   │       ├── job_storage.go       # Job CRUD
+│   │       ├── source_storage.go    # Source configuration
+│   │       └── schema.go            # Database schema & migrations
 │   ├── interfaces/                  # Service interfaces
 │   │   ├── llm_service.go           # LLM abstraction
 │   │   ├── event_service.go         # Event pub/sub
-│   │   ├── embedding_service.go     # Embedding generation
+│   │   ├── queue_manager.go         # Queue operations
+│   │   ├── job_storage.go           # Job persistence
 │   │   └── ...                      # Other interfaces
 │   └── models/                      # Data models
 │       ├── document.go              # Document model
-│       ├── jira.go                  # Jira models
-│       └── confluence.go            # Confluence models
+│       ├── job.go                   # Job models
+│       ├── source.go                # Source configuration
+│       └── config.go                # Configuration models
 ├── pages/                           # Web UI templates
 │   ├── index.html                   # Dashboard
 │   ├── jira.html                    # Jira UI

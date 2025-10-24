@@ -179,7 +179,23 @@ func (a *App) initDatabase() error {
 	return nil
 }
 
-// initServices initializes all business services
+// initServices initializes all business services in dependency order.
+//
+// QUEUE-BASED JOB ARCHITECTURE:
+// 1. QueueManager (goqite-backed) - Persistent queue with worker pool
+// 2. JobManager - CRUD operations for jobs
+// 3. WorkerPool - Registers handlers for job types (crawler_url, summarizer, cleanup, parent)
+// 4. Job Types - CrawlerJob, SummarizerJob, CleanupJob (handle individual tasks)
+//
+// JOB DEFINITION ARCHITECTURE:
+// 1. JobRegistry - Maps job types to action handlers
+// 2. JobExecutor - Orchestrates multi-step workflows with retry and polling
+// 3. Action Handlers - CrawlerActions, SummarizerActions (registered with JobRegistry)
+//
+// Both systems coexist:
+// - Queue system: Handles individual task execution (URLs, summaries, cleanup)
+// - JobExecutor: Orchestrates user-defined workflows (JobDefinitions)
+// - JobDefinitions can trigger crawl jobs, which are executed by the queue system
 func (a *App) initServices() error {
 	var err error
 
@@ -426,6 +442,12 @@ func (a *App) initServices() error {
 	parentJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
 		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 
+		// Determine target job ID for status updates (fallback to msg.ID if ParentID is empty)
+		targetID := msg.ParentID
+		if targetID == "" {
+			targetID = msg.ID
+		}
+
 		// Extract job definition ID from message
 		jobDefID := msg.JobDefinitionID
 		if jobDefID == "" {
@@ -437,31 +459,66 @@ func (a *App) initServices() error {
 		}
 
 		if jobDefID == "" {
-			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", "Job definition ID not found in message")
+			baseJob.UpdateJobStatus(ctx, targetID, "failed", "Job definition ID not found in message")
 			return fmt.Errorf("job definition ID not found in parent message")
 		}
 
 		// Load job definition from storage
 		jobDef, err := a.StorageManager.JobDefinitionStorage().GetJobDefinition(ctx, jobDefID)
 		if err != nil {
-			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
+			baseJob.UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
 			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Msg("Failed to load job definition")
 			return fmt.Errorf("failed to load job definition: %w", err)
 		}
 
 		// Update job status to running
-		baseJob.UpdateJobStatus(ctx, msg.ParentID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
+		baseJob.UpdateJobStatus(ctx, targetID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
 
-		// Execute job definition steps
-		if err := a.JobExecutor.Execute(ctx, jobDef); err != nil {
-			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", fmt.Sprintf("Job execution failed: %v", err))
+		// Create status update callback for async polling completion
+		statusCallback := func(callbackCtx context.Context, status string, errorMsg string) error {
+			if err := baseJob.UpdateJobStatus(callbackCtx, targetID, status, errorMsg); err != nil {
+				a.Logger.Error().
+					Err(err).
+					Str("parent_job_id", targetID).
+					Str("status", status).
+					Msg("Failed to update parent job status from async polling callback")
+				return err
+			}
+
+			a.Logger.Info().
+				Str("parent_job_id", targetID).
+				Str("job_def_id", jobDefID).
+				Str("job_name", jobDef.Name).
+				Str("status", status).
+				Msg("Parent job status updated from async polling callback")
+
+			return nil
+		}
+
+		// Execute job definition steps with status callback
+		result, err := a.JobExecutor.Execute(ctx, jobDef, statusCallback)
+		if err != nil {
+			// Only update status if async polling is NOT active
+			// (polling goroutine will handle status update via callback)
+			if result == nil || !result.AsyncPollingActive {
+				baseJob.UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Job execution failed: %v", err))
+			}
 			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition execution failed")
 			return fmt.Errorf("job definition execution failed: %w", err)
 		}
 
-		// Update job status to completed
-		baseJob.UpdateJobStatus(ctx, msg.ParentID, "completed", "Job definition executed successfully")
-		a.Logger.Info().Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition executed successfully")
+		// Update job status to completed only if async polling is NOT active
+		// If async polling is active, the polling goroutine will handle status update via callback
+		if result != nil && result.AsyncPollingActive {
+			a.Logger.Debug().
+				Str("parent_job_id", targetID).
+				Str("job_def_id", jobDefID).
+				Str("job_name", jobDef.Name).
+				Msg("Async polling active - parent job status update deferred to polling callback")
+		} else {
+			baseJob.UpdateJobStatus(ctx, targetID, "completed", "Job definition executed successfully")
+			a.Logger.Info().Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition executed successfully")
+		}
 
 		return nil
 	}

@@ -1,10 +1,15 @@
 package crawler
 
-// orchestrator.go contains link filtering functions for URL processing.
-// Worker management has been migrated to queue.WorkerPool.
-// Job execution is handled by queue-based job types (internal/jobs/types/crawler.go).
-// VERIFICATION COMMENT 9: Progress tracking functions removed (now handled by queue-based jobs).
-// VERIFICATION COMMENT 3: Regex imports removed (filtering now handled by shared LinkFilter helper).
+// orchestrator.go contains link filtering utilities for the crawler service.
+//
+// ARCHITECTURE NOTES:
+// - Worker management: Migrated to queue.WorkerPool (internal/queue/worker.go)
+// - Job execution: Handled by CrawlerJob type (internal/jobs/types/crawler.go)
+// - Progress tracking: Managed by JobStorage and queue stats (removed from this file)
+// - Link filtering: Uses shared LinkFilter helper (internal/services/crawler/filters.go)
+//
+// REMAINING FUNCTIONS:
+// - filterLinks(): Applies include/exclude patterns using LinkFilter helper
 
 // filterLinks applies include/exclude patterns using shared LinkFilter helper
 // VERIFICATION COMMENT 3: Replaced duplicate filtering logic with shared LinkFilter (DRY principle)

@@ -1,7 +1,28 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 21st October 2025 5:45:00 pm
+// Last Modified: Friday, 24th October 2025 12:00:00 pm
 // Modified By: Claude Code
 // -----------------------------------------------------------------------
+
+// Package jobs provides the JobExecutor for orchestrating user-defined job workflows.
+//
+// ARCHITECTURE NOTES:
+// JobExecutor is NOT replaced by the queue system - it serves a different purpose:
+//
+// - JobExecutor: Orchestrates multi-step workflows defined by users (JobDefinitions)
+//   - Executes steps sequentially with retry logic and error handling
+//   - Polls crawl jobs asynchronously when wait_for_completion is enabled
+//   - Publishes progress events for UI updates
+//   - Supports error strategies: fail, continue, retry
+//
+// - Queue System: Handles individual task execution (CrawlerJob, SummarizerJob, CleanupJob)
+//   - Processes URLs, generates summaries, cleans up old jobs
+//   - Provides persistent queue with worker pool
+//   - Enables job spawning and depth tracking
+//
+// Both systems coexist and complement each other:
+// - JobDefinitions can trigger crawl jobs via the crawl action
+// - JobExecutor polls those crawl jobs until completion
+// - Crawl jobs are executed by the queue-based CrawlerJob type
 
 package jobs
 
@@ -17,6 +38,14 @@ import (
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
+
+// ExecutionResult contains the result of Execute(), indicating whether async polling was launched
+type ExecutionResult struct {
+	AsyncPollingActive bool // True if async polling goroutine was launched
+}
+
+// StatusUpdateCallback is called when async polling completes to update parent job status
+type StatusUpdateCallback func(ctx context.Context, status string, errorMsg string) error
 
 // JobExecutor orchestrates the execution of job definitions by iterating through steps,
 // retrieving action handlers from the registry, and implementing error handling strategies
@@ -75,11 +104,13 @@ func (e *JobExecutor) Shutdown() {
 	e.cancel()
 }
 
-// Execute executes a job definition by iterating through its steps
-func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinition) error {
+// Execute executes a job definition by iterating through its steps.
+// Returns ExecutionResult indicating whether async polling was launched.
+// If async polling is active, the statusCallback will be invoked when polling completes.
+func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinition, statusCallback StatusUpdateCallback) (*ExecutionResult, error) {
 	// Validate job definition
 	if err := definition.Validate(); err != nil {
-		return fmt.Errorf("invalid job definition: %w", err)
+		return nil, fmt.Errorf("invalid job definition: %w", err)
 	}
 
 	// Log execution start
@@ -95,7 +126,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	// Fetch sources
 	fetchedSources, err := e.fetchSources(ctx, definition.Sources)
 	if err != nil {
-		return fmt.Errorf("failed to fetch sources: %w", err)
+		return nil, fmt.Errorf("failed to fetch sources: %w", err)
 	}
 
 	// Publish job start event
@@ -112,7 +143,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		// Check context cancellation before starting step
 		if ctx.Err() != nil {
 			e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", ctx.Err().Error())
-			return ctx.Err()
+			return &ExecutionResult{AsyncPollingActive: false}, ctx.Err()
 		}
 
 		stepStartTime := time.Now()
@@ -137,7 +168,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 				if shouldStopOnError(step) {
 					// Publish failure event
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", handledErr.Error())
-					return fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
+					return &ExecutionResult{AsyncPollingActive: false}, fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
 				}
 			}
 			continue
@@ -151,7 +182,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 				if shouldStopOnError(step) {
 					// Publish failure event
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "failed", handledErr.Error())
-					return fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
+					return &ExecutionResult{AsyncPollingActive: false}, fmt.Errorf("job execution failed at step %d: %w", stepIndex, handledErr)
 				}
 			} else {
 				// Step succeeded after retry - publish completion event
@@ -196,6 +227,16 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 								Str("job_id", definition.ID).
 								Int("step_index", stepIndex).
 								Msg("Async crawl polling failed")
+
+							// Invoke status callback with failure
+							if statusCallback != nil {
+								if callbackErr := statusCallback(pollingCtx, "failed", pollErr.Error()); callbackErr != nil {
+									e.logger.Error().
+										Err(callbackErr).
+										Str("job_id", definition.ID).
+										Msg("Failed to invoke status callback for polling failure")
+								}
+							}
 						} else {
 							// Publish step-level completion event
 							e.publishProgressEvent(pollingCtx, definition, stepIndex, step.Name, step.Action, "completed", "")
@@ -205,6 +246,16 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 								Str("job_id", definition.ID).
 								Int("step_index", stepIndex).
 								Msg("Async crawl polling completed successfully")
+
+							// Invoke status callback with success
+							if statusCallback != nil {
+								if callbackErr := statusCallback(pollingCtx, "completed", ""); callbackErr != nil {
+									e.logger.Error().
+										Err(callbackErr).
+										Str("job_id", definition.ID).
+										Msg("Failed to invoke status callback for polling success")
+								}
+							}
 						}
 					}()
 
@@ -251,7 +302,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		// Publish failure event with aggregated error message
 		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "failed", fmt.Sprintf("%d error(s) occurred", len(errors)))
 
-		return fmt.Errorf("job execution completed with %d error(s): %v", len(errors), errors)
+		return &ExecutionResult{AsyncPollingActive: asyncPollingLaunched}, fmt.Errorf("job execution completed with %d error(s): %v", len(errors), errors)
 	}
 
 	// Log successful completion
@@ -271,7 +322,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 			Msg("Async polling in progress - completion event deferred to polling goroutine")
 	}
 
-	return nil
+	return &ExecutionResult{AsyncPollingActive: asyncPollingLaunched}, nil
 }
 
 // shouldStopOnError returns true if the step's error strategy should stop execution
@@ -693,6 +744,7 @@ func (e *JobExecutor) publishCrawlProgressEvent(ctx context.Context, definition 
 }
 
 // extractCrawlJobIDs extracts job IDs from step config after crawl action completes
+// Supports both single string and slice of strings
 func extractCrawlJobIDs(stepConfig map[string]interface{}) []string {
 	if stepConfig == nil {
 		return []string{}
@@ -701,6 +753,11 @@ func extractCrawlJobIDs(stepConfig map[string]interface{}) []string {
 	jobIDsRaw, ok := stepConfig["crawl_job_ids"]
 	if !ok {
 		return []string{}
+	}
+
+	// Try single string (wrap in slice)
+	if str, ok := jobIDsRaw.(string); ok {
+		return []string{str}
 	}
 
 	// Try direct []string
