@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/services/crawler"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // Manager manages job CRUD operations
@@ -39,11 +39,11 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 	jobID := uuid.New().String()
 
 	// Create job with basic config
-	job := &crawler.CrawlJob{
+	job := &models.CrawlJob{
 		ID:         jobID,
 		SourceType: sourceType,
 		EntityType: sourceID,
-		Status:     crawler.JobStatusPending,
+		Status:     models.JobStatusPending,
 	}
 
 	// Save job to storage
@@ -75,21 +75,40 @@ func (m *Manager) GetJob(ctx context.Context, jobID string) (interface{}, error)
 }
 
 // ListJobs lists jobs with optional filters
-func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]interface{}, error) {
-	jobsInterface, err := m.jobStorage.ListJobs(ctx, opts)
+func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+	jobs, err := m.jobStorage.ListJobs(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	return jobsInterface, nil
+	return jobs, nil
+}
+
+// CountJobs counts jobs matching the provided filters
+func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+	// If filters are present, use filtered count
+	if opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "") {
+		count, err := m.jobStorage.CountJobsWithFilters(ctx, opts)
+		if err != nil {
+			return 0, fmt.Errorf("failed to count filtered jobs: %w", err)
+		}
+		return count, nil
+	}
+
+	// No filters: use global count
+	count, err := m.jobStorage.CountJobs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count jobs: %w", err)
+	}
+	return count, nil
 }
 
 // UpdateJob updates job metadata
 func (m *Manager) UpdateJob(ctx context.Context, job interface{}) error {
 	// Type assert to concrete type for storage
-	crawlJob, ok := job.(*crawler.CrawlJob)
+	crawlJob, ok := job.(*models.CrawlJob)
 	if !ok {
-		return fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
 	if err := m.jobStorage.SaveJob(ctx, crawlJob); err != nil {
@@ -112,24 +131,33 @@ func (m *Manager) DeleteJob(ctx context.Context, jobID string) error {
 	}
 
 	// Type assert to concrete type
-	job, ok := jobInterface.(*crawler.CrawlJob)
+	job, ok := jobInterface.(*models.CrawlJob)
 	if !ok {
-		return fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
 	// Cancel if running
-	if job.Status == crawler.JobStatusRunning {
-		job.Status = crawler.JobStatusCancelled
+	if job.Status == models.JobStatusRunning {
+		job.Status = models.JobStatusCancelled
 		if err := m.jobStorage.SaveJob(ctx, job); err != nil {
 			m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status to cancelled")
 		}
 	}
 
-	// Delete from storage (if storage supports deletion)
-	// Note: Current interface may not have DeleteJob method
+	// Delete job from storage
+	if err := m.jobStorage.DeleteJob(ctx, jobID); err != nil {
+		return fmt.Errorf("failed to delete job: %w", err)
+	}
+
+	// Delete job logs (optional but recommended to keep data consistent)
+	if err := m.logService.DeleteLogs(ctx, jobID); err != nil {
+		m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to delete job logs (non-critical)")
+		// Continue even if log deletion fails - it's not critical
+	}
+
 	m.logger.Info().
 		Str("job_id", jobID).
-		Msg("Job marked for deletion")
+		Msg("Job deleted successfully")
 
 	return nil
 }
@@ -143,9 +171,9 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 	}
 
 	// Type assert to concrete type
-	originalJob, ok := jobInterface.(*crawler.CrawlJob)
+	originalJob, ok := jobInterface.(*models.CrawlJob)
 	if !ok {
-		return "", fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+		return "", fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
 	// Generate new name
@@ -157,7 +185,7 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 	}
 
 	// Create new job with copied config
-	newJob := &crawler.CrawlJob{
+	newJob := &models.CrawlJob{
 		ID:                   uuid.New().String(),
 		Name:                 newName,
 		Description:          originalJob.Description,
@@ -168,7 +196,7 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 		AuthSnapshot:         originalJob.AuthSnapshot,
 		RefreshSource:        originalJob.RefreshSource,
 		SeedURLs:             originalJob.SeedURLs,
-		Status:               crawler.JobStatusPending,
+		Status:               models.JobStatusPending,
 	}
 
 	// Save new job

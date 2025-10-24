@@ -433,6 +433,102 @@
             </div>
         </section>
 
+        <!-- Queue Status Overview -->
+        <section style="margin-top: 1.5rem;" x-data="queueStatusOverview">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Queue Status</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <a href="/queue" class="btn btn-sm btn-primary">
+                                <i class="fas fa-list"></i>
+                                <span>View Queue</span>
+                            </a>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <div class="columns">
+                        <div class="column col-4">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.pending_messages">0</div>
+                                    <div class="tile-subtitle text-gray">Pending Jobs</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column col-4">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.in_flight_messages">0</div>
+                                    <div class="tile-subtitle text-gray">Running Jobs</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column col-4">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.concurrency">0</div>
+                                    <div class="tile-subtitle text-gray">Active Workers</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recent Job Spawns -->
+        <section style="margin-top: 1.5rem;" x-data="jobSpawnNotifications">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Recent Job Spawns</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" @click="clearNotifications()" title="Clear Notifications">
+                                <i class="fa-solid fa-eraser"></i>
+                            </button>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <template x-if="notifications.length === 0">
+                        <div class="text-center text-gray">
+                            No job spawn events yet.
+                        </div>
+                    </template>
+                    <template x-if="notifications.length > 0">
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            <table class="table table-sm striped">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 80px;">TIME</th>
+                                        <th>PARENT</th>
+                                        <th>CHILD</th>
+                                        <th>URL</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="notification in notifications.slice(0, 10)" :key="notification.child_job_id">
+                                        <tr>
+                                            <td x-text="formatTimestamp(notification.timestamp)" style="font-size: 0.8rem;"></td>
+                                            <td x-text="notification.parent_job_id.substring(0, 8) + '...'" style="font-size: 0.8rem;"></td>
+                                            <td x-text="notification.child_job_id.substring(0, 8) + '...'" style="font-size: 0.8rem;"></td>
+                                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem;" :title="notification.url" x-text="notification.url || 'N/A'"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </section>
+
         <!-- Service Logs -->
         <section style="margin-top: 1.5rem;">
             {{template "service-logs.html" .}}

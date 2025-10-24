@@ -800,6 +800,140 @@ document.addEventListener('alpine:init', () => {
       return `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
     }
   }));
+
+  // Queue Statistics Component (for queue.html)
+  Alpine.data('queueStats', () => ({
+    stats: {
+      pending_messages: 0,
+      in_flight_messages: 0,
+      total_messages: 0,
+      concurrency: 0,
+      queue_name: 'crawler'
+    },
+    connectionStatus: false,
+
+    init() {
+      window.debugLog('QueueStats', 'Initializing component');
+      this.subscribeToWebSocket();
+      this.checkConnectionStatus();
+    },
+
+    subscribeToWebSocket() {
+      if (typeof WebSocketManager !== 'undefined') {
+        WebSocketManager.subscribe('queue_stats', (data) => {
+          window.debugLog('QueueStats', 'Queue stats update received:', data);
+          this.stats = {
+            pending_messages: data.pending_messages || 0,
+            in_flight_messages: data.in_flight_messages || 0,
+            total_messages: data.total_messages || 0,
+            concurrency: data.concurrency || 0,
+            queue_name: data.queue_name || 'crawler'
+          };
+          this.connectionStatus = true;
+        });
+        window.debugLog('QueueStats', 'WebSocket subscription established');
+        this.connectionStatus = true;
+      } else {
+        window.debugError('QueueStats', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
+        this.connectionStatus = false;
+      }
+    },
+
+    checkConnectionStatus() {
+      // Periodically check WebSocket connection status
+      setInterval(() => {
+        if (typeof WebSocketManager !== 'undefined') {
+          this.connectionStatus = WebSocketManager.connected || false;
+        } else {
+          this.connectionStatus = false;
+        }
+      }, 5000);
+    }
+  }));
+
+  // Queue Status Overview Component (for jobs.html)
+  Alpine.data('queueStatusOverview', () => ({
+    stats: {
+      pending_messages: 0,
+      in_flight_messages: 0,
+      concurrency: 0
+    },
+
+    init() {
+      window.debugLog('QueueStatusOverview', 'Initializing component');
+      this.subscribeToWebSocket();
+    },
+
+    subscribeToWebSocket() {
+      if (typeof WebSocketManager !== 'undefined') {
+        WebSocketManager.subscribe('queue_stats', (data) => {
+          window.debugLog('QueueStatusOverview', 'Queue stats update received:', data);
+          this.stats = {
+            pending_messages: data.pending_messages || 0,
+            in_flight_messages: data.in_flight_messages || 0,
+            concurrency: data.concurrency || 0
+          };
+        });
+        window.debugLog('QueueStatusOverview', 'WebSocket subscription established');
+      } else {
+        window.debugError('QueueStatusOverview', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
+      }
+    }
+  }));
+
+  // Job Spawn Notifications Component (optional enhancement)
+  Alpine.data('jobSpawnNotifications', () => ({
+    notifications: [],
+    maxNotifications: 50,
+
+    init() {
+      window.debugLog('JobSpawnNotifications', 'Initializing component');
+      this.subscribeToWebSocket();
+    },
+
+    subscribeToWebSocket() {
+      if (typeof WebSocketManager !== 'undefined') {
+        WebSocketManager.subscribe('job_spawn', (data) => {
+          window.debugLog('JobSpawnNotifications', 'Job spawn event received:', data);
+          this.addNotification({
+            parent_job_id: data.parent_job_id || '',
+            child_job_id: data.child_job_id || '',
+            job_type: data.job_type || 'unknown',
+            url: data.url || '',
+            depth: data.depth || 0,
+            timestamp: data.timestamp || new Date().toISOString()
+          });
+        });
+        window.debugLog('JobSpawnNotifications', 'WebSocket subscription established');
+      } else {
+        window.debugError('JobSpawnNotifications', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
+      }
+    },
+
+    addNotification(notification) {
+      this.notifications.unshift(notification);
+
+      // Limit to maxNotifications
+      if (this.notifications.length > this.maxNotifications) {
+        this.notifications = this.notifications.slice(0, this.maxNotifications);
+      }
+    },
+
+    formatTimestamp(timestamp) {
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      return date.toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    },
+
+    clearNotifications() {
+      this.notifications = [];
+    }
+  }));
 });
 
 // Global notification function using custom toast system

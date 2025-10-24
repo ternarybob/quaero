@@ -738,15 +738,8 @@ func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (i
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	// Convert []interface{} to []*CrawlJob
-	crawlJobs := make([]*CrawlJob, 0, len(jobs))
-	for _, j := range jobs {
-		if job, ok := j.(*CrawlJob); ok {
-			crawlJobs = append(crawlJobs, job)
-		}
-	}
-
-	return crawlJobs, nil
+	// Jobs are already []*CrawlJob, no conversion needed
+	return jobs, nil
 }
 
 // RerunJob creates a copy of a previous job and adds it to the queue with "pending" status

@@ -81,6 +81,16 @@ const (
 	//
 	// These fields are populated during async polling of crawl jobs
 	EventJobProgress EventType = "job_progress"
+
+	// EventJobSpawn is published when a job spawns child jobs
+	// Payload structure: map[string]interface{} with keys:
+	//   - parent_job_id: string (parent job ID)
+	//   - child_job_id: string (newly spawned child job ID)
+	//   - job_type: string (type of job, e.g., "crawler_url")
+	//   - url: string (URL being crawled, if applicable)
+	//   - depth: int (crawl depth)
+	//   - timestamp: time.Time
+	EventJobSpawn EventType = "job_spawn"
 )
 
 // Event represents a system event

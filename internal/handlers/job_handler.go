@@ -14,6 +14,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
@@ -26,12 +27,13 @@ type JobHandler struct {
 	authStorage      interfaces.AuthStorage
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
+	jobManager       interfaces.JobManager
 	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
@@ -39,6 +41,7 @@ func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobSto
 		authStorage:      authStorage,
 		schedulerService: schedulerService,
 		logService:       logService,
+		jobManager:       jobManager,
 		config:           config,
 		logger:           logger,
 	}
@@ -92,49 +95,24 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		OrderDir:   orderDir,
 	}
 
-	jobsInterface, err := h.crawlerService.ListJobs(ctx, opts)
+	jobs, err := h.jobManager.ListJobs(ctx, opts)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to list jobs")
 		http.Error(w, "Failed to list jobs", http.StatusInternalServerError)
 		return
 	}
 
-	// Type assert to []*crawler.CrawlJob
-	jobs, ok := jobsInterface.([]*crawler.CrawlJob)
-	if !ok {
-		h.logger.Error().Msg("Unexpected result type from ListJobs")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	// Mask sensitive data
+	maskedJobs := make([]*models.CrawlJob, 0, len(jobs))
+	for _, job := range jobs {
+		maskedJobs = append(maskedJobs, job.MaskSensitiveData())
 	}
 
-	// Mask sensitive data in jobs
-	maskedJobs := make([]*crawler.CrawlJob, len(jobs))
-	for i, job := range jobs {
-		maskedJobs[i] = job.MaskSensitiveData()
-	}
-
-	// Get total count - use filtered count when filters are present
-	totalCount := 0
-	hasFilters := opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "")
-
-	if hasFilters {
-		// Get filtered count matching the query criteria
-		filteredCount, err := h.jobStorage.CountJobsWithFilters(ctx, opts)
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to count filtered jobs, falling back to global count")
-			totalCount, _ = h.jobStorage.CountJobs(ctx)
-		} else {
-			totalCount = filteredCount
-		}
-	} else {
-		// No filters: use global count
-		globalCount, err := h.jobStorage.CountJobs(ctx)
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to count jobs")
-			totalCount = len(jobs)
-		} else {
-			totalCount = globalCount
-		}
+	// Get total count using JobManager (ensures consistent filtering)
+	totalCount, err := h.jobManager.CountJobs(ctx, opts)
+	if err != nil {
+		h.logger.Warn().Err(err).Msg("Failed to count jobs, using result length")
+		totalCount = len(maskedJobs)
 	}
 
 	response := map[string]interface{}{
@@ -166,38 +144,15 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to get job from active jobs first
-	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
-
-	// If job is not in active jobs or there was an error, try to get it from database
-	if err != nil || jobInterface == nil {
-		if err != nil {
-			h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Job not in active jobs, checking storage")
-		}
-
-		jobInterface, storageErr := h.jobStorage.GetJob(ctx, jobID)
-		if storageErr != nil {
-			h.logger.Error().Err(storageErr).Str("job_id", jobID).Msg("Failed to get job from storage")
-			http.Error(w, "Job not found", http.StatusNotFound)
-			return
-		}
-
-		job, ok := jobInterface.(*crawler.CrawlJob)
-		if !ok {
-			http.Error(w, "Invalid job type", http.StatusInternalServerError)
-			return
-		}
-
-		// Mask sensitive data before returning
-		masked := job.MaskSensitiveData()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(masked)
+	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job")
+		http.Error(w, "Job not found", http.StatusNotFound)
 		return
 	}
 
 	// Type assert the job from active jobs
-	job, ok := jobInterface.(*crawler.CrawlJob)
+	job, ok := jobInterface.(*models.CrawlJob)
 	if !ok {
 		http.Error(w, "Invalid job type", http.StatusInternalServerError)
 		return
@@ -351,12 +306,12 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if job is currently running in memory - prevent rerun of active jobs
 	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
 	if err == nil && jobInterface != nil {
-		job, ok := jobInterface.(*crawler.CrawlJob)
+		job, ok := jobInterface.(*models.CrawlJob)
 		if !ok {
 			http.Error(w, "Invalid job type", http.StatusInternalServerError)
 			return
 		}
-		if job.Status == crawler.JobStatusRunning {
+		if job.Status == models.JobStatusRunning {
 			h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun active job")
 			http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
 			return
@@ -366,8 +321,8 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if job is marked as running in storage
 	jobFromStorage, err := h.jobStorage.GetJob(ctx, jobID)
 	if err == nil && jobFromStorage != nil {
-		if crawlJob, ok := jobFromStorage.(*crawler.CrawlJob); ok {
-			if crawlJob.Status == crawler.JobStatusRunning {
+		if crawlJob, ok := jobFromStorage.(*models.CrawlJob); ok {
+			if crawlJob.Status == models.JobStatusRunning {
 				h.logger.Warn().Str("job_id", jobID).Msg("Cannot rerun job marked as running in database")
 				http.Error(w, "Cannot rerun an active job. Wait for it to complete or cancel it first.", http.StatusBadRequest)
 				return
@@ -436,6 +391,38 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CopyJobHandler duplicates a job with a new ID
+// POST /api/jobs/{id}/copy
+func (h *JobHandler) CopyJobHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	// Copy job via JobManager
+	newJobID, err := h.jobManager.CopyJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to copy job")
+		http.Error(w, "Failed to copy job", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"original_job_id": jobID,
+		"new_job_id":      newJobID,
+		"message":         "Job copied successfully",
+	})
+}
+
 // DeleteJobHandler deletes a job from the database
 // DELETE /api/jobs/{id}
 func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
@@ -457,18 +444,18 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if job is still running
 	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
 	if err == nil && jobInterface != nil {
-		job, ok := jobInterface.(*crawler.CrawlJob)
+		job, ok := jobInterface.(*models.CrawlJob)
 		if !ok {
 			http.Error(w, "Invalid job type", http.StatusInternalServerError)
 			return
 		}
-		if job.Status == crawler.JobStatusRunning {
+		if job.Status == models.JobStatusRunning {
 			http.Error(w, "Cannot delete a running job. Cancel it first.", http.StatusBadRequest)
 			return
 		}
 	}
 
-	err = h.jobStorage.DeleteJob(ctx, jobID)
+	err = h.jobManager.DeleteJob(ctx, jobID)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to delete job")
 		http.Error(w, "Failed to delete job", http.StatusInternalServerError)
@@ -495,11 +482,11 @@ func (h *JobHandler) GetJobStatsHandler(w http.ResponseWriter, r *http.Request) 
 		totalCount = 0
 	}
 
-	pendingCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(crawler.JobStatusPending))
-	runningCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(crawler.JobStatusRunning))
-	completedCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(crawler.JobStatusCompleted))
-	failedCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(crawler.JobStatusFailed))
-	cancelledCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(crawler.JobStatusCancelled))
+	pendingCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusPending))
+	runningCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusRunning))
+	completedCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusCompleted))
+	failedCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusFailed))
+	cancelledCount, _ := h.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusCancelled))
 
 	stats := map[string]interface{}{
 		"total_jobs":     totalCount,
@@ -545,7 +532,7 @@ func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 
 	// Fetch pending jobs
-	pendingJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(crawler.JobStatusPending))
+	pendingJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(models.JobStatusPending))
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch pending jobs")
 		http.Error(w, "Failed to fetch job queue", http.StatusInternalServerError)
@@ -553,26 +540,22 @@ func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Fetch running jobs
-	runningJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(crawler.JobStatusRunning))
+	runningJobsInterface, err := h.jobStorage.GetJobsByStatus(ctx, string(models.JobStatusRunning))
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to fetch running jobs")
 		http.Error(w, "Failed to fetch job queue", http.StatusInternalServerError)
 		return
 	}
 
-	// Convert to CrawlJob slices and mask sensitive data
-	pendingJobs := make([]*crawler.CrawlJob, 0)
-	for _, jobInterface := range pendingJobsInterface {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
-			pendingJobs = append(pendingJobs, job.MaskSensitiveData())
-		}
+	// Mask sensitive data
+	pendingJobs := make([]*models.CrawlJob, 0, len(pendingJobsInterface))
+	for _, job := range pendingJobsInterface {
+		pendingJobs = append(pendingJobs, job.MaskSensitiveData())
 	}
 
-	runningJobs := make([]*crawler.CrawlJob, 0)
-	for _, jobInterface := range runningJobsInterface {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
-			runningJobs = append(runningJobs, job.MaskSensitiveData())
-		}
+	runningJobs := make([]*models.CrawlJob, 0, len(runningJobsInterface))
+	for _, job := range runningJobsInterface {
+		runningJobs = append(runningJobs, job.MaskSensitiveData())
 	}
 
 	totalCount := len(pendingJobs) + len(runningJobs)
@@ -631,7 +614,7 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, ok := jobInterface.(*crawler.CrawlJob)
+	job, ok := jobInterface.(*models.CrawlJob)
 	if !ok {
 		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type")
 		http.Error(w, "Invalid job type", http.StatusInternalServerError)

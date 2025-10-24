@@ -97,24 +97,31 @@ enable_wal = true
    .\scripts\build.ps1 -Run
    ```
 
-2. **Navigate to Atlassian:**
-   - Go to your Confluence or Jira instance
+2. **Navigate to a website:**
+   - Go to any website you want to crawl (e.g., Confluence, Jira, documentation sites)
    - Log in normally (handles 2FA, SSO, etc.)
 
 3. **Capture Authentication:**
    - Click the Quaero extension icon
-   - Click "Send to Quaero"
-   - Extension sends credentials to server
+   - Click "Capture Authentication"
+   - Extension sends cookies to Quaero server
 
-4. **Access Web UI:**
+4. **Create a Crawl Job:**
    - Open http://localhost:8085
-   - Click "Confluence" or "Jira"
-   - Click "Collect" to start gathering data
+   - Click "New Job"
+   - Enter seed URL(s) to start crawling from
+   - Configure crawl depth, filters, and options
+   - Click "Start Job"
 
-5. **Browse Data:**
-   - View collected spaces/projects
-   - Browse pages/issues
-   - Real-time log updates
+5. **Monitor Progress:**
+   - View job progress in real-time
+   - Browse collected documents
+   - Check job logs for details
+
+6. **Query Knowledge Base** (upcoming):
+   - Ask natural language questions
+   - LLM uses MCP to access crawled content
+   - Get answers with source citations
 
 ## Build and Test Instructions
 
@@ -278,157 +285,182 @@ quaero version
 
 ## Architecture
 
-### Core Services
+### Core Components
 
-#### 1. Collectors (Jira & Confluence)
-The collector services (`internal/services/atlassian/`) scrape data from Atlassian APIs:
-
-**Jira Collector** (`jira_*.go`):
-- Scrapes projects, issues, and metadata
-- Uses Atlassian REST API v3
-- Stores data as documents with `source_type=jira`
-- Auto-subscribes to collection events
-
-**Confluence Collector** (`confluence_*.go`):
-- Scrapes spaces, pages, and content
-- Uses Confluence REST API
-- Stores data as documents with `source_type=confluence`
-- Auto-subscribes to collection events
-
-Both collectors:
-- Load authentication from database
-- Support pagination for large datasets
-- Stream real-time logs via WebSocket
-- Create document records for vector search
-
-#### 2. Collection Coordinator
-The collection coordinator (`internal/services/collection/coordinator_service.go`) orchestrates data synchronization:
+#### 1. Crawler Service
+The crawler service (`internal/services/crawler/`) manages web crawling operations:
 
 **Responsibilities:**
-- Subscribes to `EventCollectionTriggered` events
-- Queries documents marked with `force_sync_pending=true`
-- Dispatches sync jobs to worker pool (max 10 concurrent)
-- Delegates to appropriate collector (Jira/Confluence) based on `source_type`
-- Updates `last_synced` timestamp on completion
-- Clears `force_sync_pending` flag
+- Creates and manages crawl jobs
+- Orchestrates depth-first crawling from seed URLs
+- Handles JavaScript rendering with chromedp
+- Converts HTML pages to markdown
+- Filters and discovers child links
+- Applies include/exclude URL patterns
+- Tracks job progress and completion
 
-**Worker Pool:**
-- Bounded concurrency (10 workers)
-- Parallel processing of sync jobs
-- Error collection and aggregation
-- Panic recovery per worker
+**Key Features:**
+- Cookie-based authentication (from Chrome extension)
+- Configurable crawl depth
+- Domain filtering (stay within domain or expand)
+- URL pattern matching (regex include/exclude)
+- Max pages limit
+- Rate limiting and concurrency control
+- JavaScript rendering support
 
-#### 3. Embedding Services
-The embedding system generates vector embeddings for semantic search:
+#### 2. Job Manager
+The job manager (`internal/jobs/`) handles job lifecycle and execution:
 
-**Embedding Service** (`internal/services/embeddings/embedding_service.go`):
-- Generates 768-dimension embeddings via LLM service
-- Supports offline mode (local models) and cloud mode (APIs)
-- Combines document title + content for embedding
-- Logs operations to audit trail
-- Currently using mock mode for testing
+**Job Queue System:**
+- Persistent queue backed by goqite (SQLite)
+- Jobs survive application restarts
+- Worker pool processes messages (5 workers default)
+- Type-based routing (crawler_url, summarizer, cleanup)
+- Automatic retry with visibility timeout
+- Dead-letter handling after 3 attempts
 
-**Embedding Coordinator** (`internal/services/embeddings/coordinator_service.go`):
-- Subscribes to `EventEmbeddingTriggered` events
-- Processes documents with `force_embed_pending=true` (forced)
-- Processes unvectorized documents (missing embeddings)
-- Uses worker pool for parallel embedding generation
-- Updates document with embedding vector and model name
+**Job Types:**
+1. **crawler_url** - Process individual URLs
+   - Fetch and parse HTML
+   - Convert to markdown
+   - Save to document storage
+   - Discover and enqueue child URLs
+   - Track progress (completed/pending/failed)
 
-**LLM Service Modes:**
-- **Offline:** Local llama.cpp models (nomic-embed-text, qwen2.5)
-- **Cloud:** OpenAI/Anthropic APIs (planned)
-- **Mock:** Fake embeddings for testing (current default)
+2. **summarizer** - Generate document summaries
+   - Batch process documents
+   - LLM-powered summarization
+   - Extract keywords
+   - Update document metadata
 
-#### 4. Event-Driven Architecture
-The event service (`internal/services/events/event_service.go`) implements pub/sub pattern:
+3. **cleanup** - Maintenance tasks
+   - Remove old completed jobs
+   - Clean up job logs
+   - Configurable age threshold
 
-**Event Types:**
-- `EventCollectionTriggered` - Triggers data collection from sources
-- `EventEmbeddingTriggered` - Triggers embedding generation
+#### 3. Document Storage
+The document storage (`internal/storage/sqlite/`) manages crawled content:
+
+**Document Model:**
+- Unique document ID
+- Source URL and type
+- Title and markdown content
+- Detail level (full, summary, brief)
+- Metadata (tags, timestamps, keywords)
+- Creation and update timestamps
+
+**Storage Features:**
+- SQLite database with FTS5 full-text search
+- Document deduplication by URL
+- Batch operations for performance
+- Metadata queries and filtering
+- Document versioning support
+
+#### 4. Scheduler Service
+The scheduler (`internal/services/scheduler/`) manages automated tasks:
+
+**Default Jobs:**
+1. **crawl_and_collect** (every 10 minutes)
+   - Refreshes configured sources
+   - Crawls new pages
+   - Updates existing documents
+
+2. **scan_and_summarize** (every 2 hours)
+   - Scans documents without summaries
+   - Generates LLM-powered summaries
+   - Extracts keywords
 
 **Features:**
-- Asynchronous publishing (`Publish`) - fire-and-forget
-- Synchronous publishing (`PublishSync`) - wait for all handlers
-- Multiple subscribers per event type
-- Panic recovery in event handlers
-- Error aggregation and reporting
+- Cron-based scheduling
+- Job enable/disable controls
+- Dynamic schedule updates
+- Manual trigger support
+- Prevents concurrent execution
 
-**Flow:**
-```
-Scheduler (cron) → Publish Event → Event Service → All Subscribers
-                                                    ├─ Jira Collector
-                                                    ├─ Confluence Collector
-                                                    ├─ Collection Coordinator
-                                                    └─ Embedding Coordinator
-```
+#### 5. MCP Integration (Planned)
+Model Context Protocol integration for LLM chat:
 
-#### 5. Scheduler Service
-The scheduler (`internal/services/scheduler/scheduler_service.go`) triggers automated workflows:
+**Planned Features:**
+- MCP server exposing document corpus
+- Natural language query interface
+- Context-aware responses
+- Source citation with links
+- Progressive thinking chain-of-thought
 
-**Capabilities:**
-- Cron-based scheduling (default: every 1 minute)
-- Publishes `EventCollectionTriggered` events
-- Publishes `EventEmbeddingTriggered` events
-- Manual trigger support via API
-- Prevents concurrent execution with mutex
+**Query Examples:**
+- "How many backlog items are there?"
+- "List all the projects"
+- "How do I get access to this server?"
+- Technical and developer-focused questions
 
-**Workflow Cascade:**
-```
-Scheduler → Collection Event → Collectors scrape data → Documents created
-         → Embedding Event → Coordinator generates embeddings → Vectors stored
-```
+**Implementation:**
+- MCP resource provider for documents
+- Vector similarity search (upcoming)
+- Context retrieval and ranking
+- Response generation with citations
 
 ### Authentication Flow
 
 ```
-1. User logs into Atlassian
+1. User logs into website (Jira, Confluence, etc.)
    ↓
-2. Extension captures cookies/tokens
+2. Extension captures session cookies
    ↓
-3. Extension connects to ws://localhost:8085/ws
+3. Extension sends POST to localhost:8085/api/auth
    ↓
-4. Extension sends auth data
+4. Server stores cookies in SQLite
    ↓
-5. Server stores credentials in SQLite
-   ↓
-6. Collectors use credentials for API calls
+5. Crawler uses cookies for authenticated requests
 ```
 
-### Collection Flow
+### Crawl Job Flow
 
 ```
-1. Scheduler triggers collection event (cron: */1 * * * *)
+1. User creates crawl job via UI
+   ├─ Seed URLs
+   ├─ Crawl depth
+   ├─ Include/exclude patterns
+   └─ Max pages
    ↓
-2. Event service publishes to all subscribers
+2. Job manager creates job in database
    ↓
-3. Jira/Confluence collectors scrape their sources
+3. Seed URLs enqueued as crawler_url messages
    ↓
-4. Collectors create document records in SQLite
+4. Worker pool pulls messages from queue
    ↓
-5. Collection coordinator processes force_sync documents
+5. For each URL:
+   ├─ Fetch HTML (with chromedp if JavaScript)
+   ├─ Convert to markdown
+   ├─ Save document to SQLite
+   ├─ Discover child links
+   ├─ Filter links (patterns, depth, domain)
+   ├─ Deduplicate URLs (database)
+   └─ Enqueue valid child URLs
    ↓
-6. Worker pool executes sync jobs in parallel (10 workers)
+6. Job completes when PendingURLs == 0
    ↓
-7. WebSocket streams real-time logs to UI
+7. UI displays progress and results
 ```
 
-### Embedding Flow
+### Summarization Flow
 
 ```
-1. Scheduler triggers embedding event
+1. Scheduler triggers scan_and_summarize job (cron: every 2 hours)
    ↓
-2. Embedding coordinator queries documents
-   ├─ Documents with force_embed_pending=true
-   └─ Unvectorized documents (no embedding)
+2. summarizer job message enqueued
    ↓
-3. Worker pool generates embeddings in parallel
+3. Worker pulls and executes summarizer
    ↓
-4. LLM service (offline/cloud/mock) creates 768-dim vectors
+4. Batch query documents without summaries
    ↓
-5. Documents updated with embedding + model name
+5. For each document:
+   ├─ Truncate content to limit
+   ├─ Send to LLM service
+   ├─ Generate summary
+   ├─ Extract keywords
+   └─ Update document metadata
    ↓
-6. Vectors ready for semantic search (future: sqlite-vec)
+6. Job completes, documents ready for search
 ```
 
 ## Web UI
@@ -757,51 +789,65 @@ type quaero.toml
 ## Current Status
 
 **✅ Working:**
-- Jira and Confluence collectors with event-driven architecture
-- Document storage with force sync support
-- Vector embeddings (mock mode) - 768-dimension
-- Embedding API endpoint for testing
-- Worker pool pattern for parallel processing
-- LLM audit logging and monitoring
-- Real-time WebSocket log streaming
-- Cron-based scheduler for automated workflows
-- Default scheduled jobs (crawl_and_collect, scan_and_summarize)
-- Web UI for managing default jobs (enable/disable, schedule editing)
+- Website crawler with depth-based traversal
+- Cookie-based authentication via Chrome extension
+- HTML to Markdown conversion
+- JavaScript rendering (chromedp)
+- Persistent job queue (goqite/SQLite)
+- Worker pool with job type routing
+- Document storage with deduplication
+- Job progress tracking (completed/pending/failed URLs)
+- URL filtering (include/exclude patterns)
+- Job management UI (create, monitor, logs)
+- Scheduled jobs (crawl_and_collect, scan_and_summarize)
+- Document summarization (LLM-powered)
+- Keyword extraction
+- Job logs with real-time updates
 
-**⚠️ In Development:**
-- Offline LLM integration (llama.cpp models)
-- Vector search (sqlite-vec integration)
+**⚠️ In Development (~75% Complete):**
+- Image extraction from crawled pages (TODO)
+- MCP (Model Context Protocol) integration
 - Natural language query interface
-- RAG pipeline
+- Vector embeddings for semantic search
+- LLM chat with document context
 
 **❌ Not Yet Implemented:**
-- GitHub collector
-- Cloud LLM mode (OpenAI/Anthropic APIs)
+- Progressive thinking chain-of-thought responses
+- Source citations in chat responses
 - Multi-user support
-- Semantic search UI
+- Cloud deployment
+- GitHub/GitLab source integration
+- Slack/Teams integration
 
 ## Roadmap
 
-See [docs/remaining-requirements.md](docs/remaining-requirements.md) for detailed roadmap.
+See [docs/remaining-requirements.md](docs/remaining-requirements.md) and [docs/QUEUE_MANAGER_IMPLEMENTATION_STATUS.md](docs/QUEUE_MANAGER_IMPLEMENTATION_STATUS.md) for detailed status.
 
-**Current Sprint:**
-- [x] Vector embeddings (mock mode working)
-- [x] Embedding API endpoint
-- [x] Unit and integration tests for embeddings
-- [ ] Offline LLM integration (llama-server)
-- [ ] sqlite-vec integration for vector search
+**Current Sprint (~75% Complete):**
+- [x] Persistent job queue (goqite)
+- [x] Worker pool with job routing
+- [x] Crawler job implementation
+- [x] Document storage and deduplication
+- [x] Job progress tracking
+- [x] Summarizer job implementation
+- [ ] Image extraction from crawled pages
+- [ ] Complete queue manager refactor (remaining 25%)
 
 **Next Sprint:**
+- [ ] MCP (Model Context Protocol) server
 - [ ] Natural language query interface
+- [ ] Vector embeddings for semantic search
 - [ ] RAG pipeline with context retrieval
-- [ ] Semantic search UI
+- [ ] Progressive thinking chain-of-thought
+- [ ] Source citation system
 
 **Future:**
-- [ ] GitHub collector
-- [ ] Cloud LLM mode (OpenAI, Anthropic)
-- [ ] Additional data sources (Slack, Linear)
-- [ ] Multi-user support
-- [ ] Cloud deployment option
+- [ ] GitHub/GitLab source integration
+- [ ] Slack/Teams messaging integration
+- [ ] Multi-user support with authentication
+- [ ] Cloud deployment option (Docker/K8s)
+- [ ] Distributed queue (Redis/RabbitMQ)
+- [ ] Advanced analytics and reporting
 
 ## Contributing
 

@@ -68,12 +68,12 @@ type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
-	ListJobs(ctx context.Context, opts *ListOptions) ([]interface{}, error)
-	GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error)
+	ListJobs(ctx context.Context, opts *ListOptions) ([]*models.CrawlJob, error)
+	GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
 	UpdateJobHeartbeat(ctx context.Context, jobID string) error
-	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error)
+	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error)
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)

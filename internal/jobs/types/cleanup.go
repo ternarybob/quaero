@@ -124,26 +124,23 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			}
 
 			// Filter jobs by age
-			for _, jobInterface := range jobs {
-				// Type assert to access job fields
-				// Jobs are stored as interface{}, need to access via reflection or type assertion
-				// Since we don't know the exact type, we'll use type assertion to a map
-				if jobMap, ok := jobInterface.(map[string]interface{}); ok {
-					// Extract updated_at timestamp
-					var updatedAt time.Time
-					if updatedAtStr, ok := jobMap["updated_at"].(string); ok {
-						if parsed, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
-							updatedAt = parsed
-						}
-					} else if updatedAtTime, ok := jobMap["updated_at"].(time.Time); ok {
-						updatedAt = updatedAtTime
-					}
+			for _, job := range jobs {
+				// Access job fields directly (jobs are already typed as []*models.CrawlJob)
+				// Use CompletedAt/StartedAt/CreatedAt as the timestamp to check
+				// Determine which timestamp to check
+				var checkTime time.Time
+				if !job.CompletedAt.IsZero() {
+					checkTime = job.CompletedAt
+				} else if !job.StartedAt.IsZero() {
+					checkTime = job.StartedAt
+				} else {
+					checkTime = job.CreatedAt
+				}
 
-					// Check if job is old enough
-					if !updatedAt.IsZero() && updatedAt.Before(cleanupTime) {
-						if jobID, ok := jobMap["id"].(string); ok && jobID != "" {
-							jobsToClean = append(jobsToClean, jobID)
-						}
+				// Check if job is old enough
+				if !checkTime.IsZero() && checkTime.Before(cleanupTime) {
+					if job.ID != "" {
+						jobsToClean = append(jobsToClean, job.ID)
 					}
 				}
 			}

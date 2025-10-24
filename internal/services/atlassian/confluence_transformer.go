@@ -56,11 +56,9 @@ func (t *ConfluenceTransformer) handleCollectionEvent(ctx context.Context, event
 
 	// Filter for Confluence jobs
 	var confluenceJobs []*crawler.CrawlJob
-	for _, jobInterface := range jobsInterface {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
-			if job.SourceType == "confluence" {
-				confluenceJobs = append(confluenceJobs, job)
-			}
+	for _, job := range jobsInterface {
+		if job.SourceType == "confluence" {
+			confluenceJobs = append(confluenceJobs, job)
 		}
 	}
 

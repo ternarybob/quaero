@@ -121,6 +121,24 @@ type AppStatusUpdate struct {
 	Timestamp time.Time              `json:"timestamp"`
 }
 
+type QueueStatsUpdate struct {
+	TotalMessages    int       `json:"total_messages"`
+	PendingMessages  int       `json:"pending_messages"`
+	InFlightMessages int       `json:"in_flight_messages"`
+	QueueName        string    `json:"queue_name"`
+	Concurrency      int       `json:"concurrency"`
+	Timestamp        time.Time `json:"timestamp"`
+}
+
+type JobSpawnUpdate struct {
+	ParentJobID string    `json:"parent_job_id"`
+	ChildJobID  string    `json:"child_job_id"`
+	JobType     string    `json:"job_type"`
+	URL         string    `json:"url,omitempty"`
+	Depth       int       `json:"depth"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
 // HandleWebSocket handles WebSocket connections
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -646,6 +664,74 @@ func (h *WebSocketHandler) BroadcastAppStatus(status AppStatusUpdate) {
 	}
 }
 
+// BroadcastQueueStats sends queue statistics to all connected clients
+func (h *WebSocketHandler) BroadcastQueueStats(stats QueueStatsUpdate) {
+	msg := WSMessage{
+		Type:    "queue_stats",
+		Payload: stats,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal queue stats message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send queue stats to client")
+		}
+	}
+}
+
+// BroadcastJobSpawn sends job spawning events to all connected clients
+func (h *WebSocketHandler) BroadcastJobSpawn(spawn JobSpawnUpdate) {
+	msg := WSMessage{
+		Type:    "job_spawn",
+		Payload: spawn,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal job spawn message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send job spawn to client")
+		}
+	}
+}
+
 // SubscribeToCrawlerEvents subscribes to crawler progress events
 func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	if h.eventService == nil {
@@ -728,6 +814,26 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 
 		// Broadcast to all clients
 		h.BroadcastAppStatus(update)
+		return nil
+	})
+
+	h.eventService.Subscribe(interfaces.EventJobSpawn, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid job spawn event payload type")
+			return nil
+		}
+
+		spawn := JobSpawnUpdate{
+			ParentJobID: getString(payload, "parent_job_id"),
+			ChildJobID:  getString(payload, "child_job_id"),
+			JobType:     getString(payload, "job_type"),
+			URL:         getString(payload, "url"),
+			Depth:       getInt(payload, "depth"),
+			Timestamp:   time.Now(),
+		}
+
+		h.BroadcastJobSpawn(spawn)
 		return nil
 	})
 }

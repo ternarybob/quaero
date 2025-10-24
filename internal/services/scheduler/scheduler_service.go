@@ -907,13 +907,7 @@ func (s *Service) CleanupOrphanedJobs() error {
 
 	// Mark each as failed
 	cleanedCount := 0
-	for _, jobInterface := range runningJobs {
-		job, ok := jobInterface.(*crawler.CrawlJob)
-		if !ok {
-			s.logger.Warn().Msg("Skipping non-crawler job in orphaned job cleanup")
-			continue
-		}
-
+	for _, job := range runningJobs {
 		if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", "Service restarted while job was running"); err != nil {
 			s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update orphaned job status")
 		} else {
@@ -946,13 +940,7 @@ func (s *Service) DetectStaleJobs() error {
 	s.logger.Warn().Int("count", len(staleJobs)).Msg("Detected stale jobs (no heartbeat for 10+ minutes)")
 
 	// Mark each as failed
-	for _, jobInterface := range staleJobs {
-		job, ok := jobInterface.(*crawler.CrawlJob)
-		if !ok {
-			s.logger.Warn().Msg("Skipping non-crawler job in stale job detection")
-			continue
-		}
-
+	for _, job := range staleJobs {
 		reason := "Job stale (no heartbeat for 10+ minutes)"
 
 		// Try to fail job via crawler service first to update in-memory state

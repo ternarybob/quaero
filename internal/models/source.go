@@ -12,8 +12,9 @@ const (
 	SourceTypeGithub     = "github"
 )
 
-// CrawlConfig contains configuration for crawler behavior
-type CrawlConfig struct {
+// SourceCrawlConfig contains basic crawler configuration for source defaults
+// This is distinct from models.CrawlConfig which provides comprehensive job-level configuration
+type SourceCrawlConfig struct {
 	MaxDepth    int  `json:"max_depth"`
 	FollowLinks bool `json:"follow_links"`
 	Concurrency int  `json:"concurrency"`
@@ -25,13 +26,13 @@ type CrawlConfig struct {
 // Sources define connection details only: base URL, authentication, and source type.
 // Crawling behavior (start URLs, filtering, depth) is specified at the job level.
 type SourceConfig struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Type        string      `json:"type"`
-	BaseURL     string      `json:"base_url"`
-	Enabled     bool        `json:"enabled"`
-	AuthID      string      `json:"auth_id"` // Reference to auth_credentials.id
-	CrawlConfig CrawlConfig `json:"crawl_config"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	BaseURL     string            `json:"base_url"`
+	Enabled     bool              `json:"enabled"`
+	AuthID      string            `json:"auth_id"` // Reference to auth_credentials.id
+	CrawlConfig SourceCrawlConfig `json:"crawl_config"`
 	// Filters contains include_patterns and exclude_patterns as comma-delimited strings
 	// Example: {"include_patterns": "browse,projects", "exclude_patterns": "admin,logout"}
 	Filters   map[string]interface{} `json:"filters"`

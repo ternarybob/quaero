@@ -54,11 +54,9 @@ func (t *JiraTransformer) handleCollectionEvent(ctx context.Context, event inter
 
 	// Filter for Jira jobs
 	var jiraJobs []*crawler.CrawlJob
-	for _, jobInterface := range jobsInterface {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
-			if job.SourceType == "jira" {
-				jiraJobs = append(jiraJobs, job)
-			}
+	for _, job := range jobsInterface {
+		if job.SourceType == "jira" {
+			jiraJobs = append(jiraJobs, job)
 		}
 	}
 

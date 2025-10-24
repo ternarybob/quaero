@@ -12,6 +12,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
@@ -24,6 +25,7 @@ type JobDefinitionHandler struct {
 	jobExecutor   *jobs.JobExecutor
 	sourceService *sources.Service
 	jobRegistry   *jobs.JobTypeRegistry
+	queueManager  interfaces.QueueManager
 	logger        arbor.ILogger
 }
 
@@ -33,6 +35,7 @@ func NewJobDefinitionHandler(
 	jobExecutor *jobs.JobExecutor,
 	sourceService *sources.Service,
 	jobRegistry *jobs.JobTypeRegistry,
+	queueManager interfaces.QueueManager,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -47,6 +50,9 @@ func NewJobDefinitionHandler(
 	if jobRegistry == nil {
 		panic("jobRegistry cannot be nil")
 	}
+	if queueManager == nil {
+		panic("queueManager cannot be nil")
+	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
@@ -58,6 +64,7 @@ func NewJobDefinitionHandler(
 		jobExecutor:   jobExecutor,
 		sourceService: sourceService,
 		jobRegistry:   jobRegistry,
+		queueManager:  queueManager,
 		logger:        logger,
 	}
 }
@@ -367,24 +374,33 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
-	// Execute job asynchronously
-	execCtx := context.Background()
-	go func() {
-		h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Starting job execution")
-		if err := h.jobExecutor.Execute(execCtx, jobDef); err != nil {
-			h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Job execution failed")
-		} else {
-			h.logger.Info().Str("job_def_id", jobDef.ID).Msg("Job execution completed successfully")
-		}
-	}()
+	// Create parent job message for job definition execution using dedicated constructor
+	parentMsg := queue.NewJobDefinitionMessage(
+		jobDef.ID,
+		map[string]interface{}{
+			"job_definition_id": jobDef.ID,
+			"job_name":          jobDef.Name,
+			"job_type":          string(jobDef.Type),
+			"sources":           jobDef.Sources,
+			"steps":             jobDef.Steps,
+			"timeout":           jobDef.Timeout,
+		},
+	)
 
-	h.logger.Info().Str("job_def_id", id).Str("name", jobDef.Name).Msg("Job execution started")
+	// Enqueue parent message
+	if err := h.queueManager.Enqueue(ctx, parentMsg); err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to enqueue job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to start job execution")
+		return
+	}
+
+	h.logger.Info().Str("job_def_id", id).Str("message_id", parentMsg.ID).Msg("Job definition enqueued")
 
 	response := map[string]interface{}{
-		"job_id":   jobDef.ID,
+		"job_id":   parentMsg.ID,
 		"job_name": jobDef.Name,
-		"status":   "started",
-		"message":  "Job execution started successfully",
+		"status":   "queued",
+		"message":  "Job execution queued successfully",
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)

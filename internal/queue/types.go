@@ -98,6 +98,24 @@ func NewCleanupMessage(config map[string]interface{}) *JobMessage {
 	return msg
 }
 
+// NewJobDefinitionMessage creates a parent job message specifically for job definition execution
+// This constructor provides semantic clarity for job definition workflows
+func NewJobDefinitionMessage(jobDefID string, config map[string]interface{}) *JobMessage {
+	msg := NewJobMessage("parent", "")
+	msg.JobDefinitionID = jobDefID
+	msg.Config = config
+	// Store job_type in metadata for clarity (not in SourceType which is for data sources)
+	if config != nil {
+		if jobType, ok := config["job_type"]; ok {
+			if msg.Metadata == nil {
+				msg.Metadata = make(map[string]interface{})
+			}
+			msg.Metadata["job_type"] = jobType
+		}
+	}
+	return msg
+}
+
 // ToJSON serializes the message to JSON
 func (m *JobMessage) ToJSON() ([]byte, error) {
 	return json.Marshal(m)

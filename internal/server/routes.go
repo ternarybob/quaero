@@ -113,6 +113,11 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			s.app.JobHandler.CancelJobHandler(w, r)
 			return
 		}
+		// POST /api/jobs/{id}/copy
+		if strings.HasSuffix(pathSuffix, "/copy") {
+			s.app.JobHandler.CopyJobHandler(w, r)
+			return
+		}
 	}
 
 	// GET /api/jobs/{id}

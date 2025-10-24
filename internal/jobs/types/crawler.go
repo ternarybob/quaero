@@ -20,6 +20,7 @@ type CrawlerJobDeps struct {
 	DocumentStorage interfaces.DocumentStorage
 	QueueManager    interfaces.QueueManager
 	JobStorage      interfaces.JobStorage
+	EventService    interfaces.EventService
 }
 
 // CrawlerJob handles URL crawling jobs
@@ -450,6 +451,22 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			}
 
 			enqueuedCount++
+
+			// Publish job spawn event for real-time UI updates
+			if c.deps.EventService != nil {
+				spawnEvent := interfaces.Event{
+					Type: interfaces.EventJobSpawn,
+					Payload: map[string]interface{}{
+						"parent_job_id": msg.ParentID,
+						"child_job_id":  childMsg.ID,
+						"job_type":      "crawler_url",
+						"url":           childURL,
+						"depth":         msg.Depth + 1,
+						"timestamp":     time.Now(),
+					},
+				}
+				c.deps.EventService.Publish(ctx, spawnEvent)
+			}
 
 			c.logger.Debug().
 				Str("child_url", childURL).

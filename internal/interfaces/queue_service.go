@@ -41,7 +41,8 @@ type JobManager interface {
 	// Job lifecycle
 	CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error)
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
-	ListJobs(ctx context.Context, opts *ListOptions) ([]interface{}, error)
+	ListJobs(ctx context.Context, opts *ListOptions) ([]*models.CrawlJob, error)
+	CountJobs(ctx context.Context, opts *ListOptions) (int, error)
 	UpdateJob(ctx context.Context, job interface{}) error
 	DeleteJob(ctx context.Context, jobID string) error
 	CopyJob(ctx context.Context, jobID string) (string, error)

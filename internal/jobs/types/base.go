@@ -9,6 +9,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 // Job interface defines the contract for job type implementations
@@ -48,28 +49,26 @@ func (b *BaseJob) UpdateJobStatus(ctx context.Context, jobID string, status stri
 		return fmt.Errorf("failed to get job: %w", err)
 	}
 
-	// Use map access for stable field modification (works with most job storage implementations)
-	jobMap, ok := jobInterface.(map[string]interface{})
+	// Type-assert to *crawler.CrawlJob for strong typing
+	crawlJob, ok := jobInterface.(*crawler.CrawlJob)
 	if !ok {
-		return fmt.Errorf("job is not a map structure, cannot update status")
+		return fmt.Errorf("job is not a *crawler.CrawlJob, cannot update status")
 	}
 
 	// Update status field
-	jobMap["status"] = status
+	crawlJob.Status = crawler.JobStatus(status)
 	if errorMsg != "" {
-		jobMap["error"] = errorMsg
+		crawlJob.Error = errorMsg
 	}
 
 	// Set completion time for terminal states
 	if status == "completed" || status == "failed" || status == "cancelled" {
-		jobMap["completed_at"] = time.Now().Format(time.RFC3339)
+		now := time.Now()
+		crawlJob.CompletedAt = now
 	}
 
-	// Update the last modified timestamp
-	jobMap["updated_at"] = time.Now().Format(time.RFC3339)
-
 	// Save updated job via JobManager
-	if err := b.jobManager.UpdateJob(ctx, jobMap); err != nil {
+	if err := b.jobManager.UpdateJob(ctx, crawlJob); err != nil {
 		return fmt.Errorf("failed to save job: %w", err)
 	}
 

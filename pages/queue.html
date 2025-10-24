@@ -4,6 +4,52 @@
 <head>
     {{template "head.html" .}}
     <title>Queue Management - Quaero</title>
+    <style>
+        /* Progress Bar Styles */
+        .progress-container {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            height: 20px;
+            margin: 0.5rem 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: #5755d9;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .progress-bar.progress-success {
+            background-color: #32b643;
+        }
+
+        .progress-bar.progress-warning {
+            background-color: #ffb700;
+        }
+
+        .progress-bar.progress-error {
+            background-color: #e85600;
+        }
+
+        /* Parent Job Indicator */
+        .parent-job-badge {
+            display: inline-block;
+            padding: 0.1rem 0.3rem;
+            font-size: 0.7rem;
+            border-radius: 2px;
+            background-color: #5755d9;
+            color: white;
+            margin-left: 0.25rem;
+        }
+    </style>
 </head>
 
 <body>
@@ -21,6 +67,111 @@
                 To create or edit job definitions, visit the <a href="/jobs">Jobs</a> page
             </div>
         </div>
+
+        <!-- Queue Statistics -->
+        <section style="margin-top: 1.5rem;" x-data="queueStats">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Queue Status</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <span class="label" :class="connectionStatus ? 'label-success' : 'label-error'" x-text="connectionStatus ? 'Connected' : 'Disconnected'"></span>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <div class="columns">
+                        <div class="column col-3">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.pending_messages">0</div>
+                                    <div class="tile-subtitle text-gray">Pending Messages</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column col-3">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.in_flight_messages">0</div>
+                                    <div class="tile-subtitle text-gray">In-Flight Messages</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column col-3">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.total_messages">0</div>
+                                    <div class="tile-subtitle text-gray">Total Messages</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="column col-3">
+                            <div class="tile tile-centered">
+                                <div class="tile-content">
+                                    <div class="tile-title text-bold" x-text="stats.concurrency">0</div>
+                                    <div class="tile-subtitle text-gray">Workers</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Job Spawn Notifications -->
+        <section x-data="jobSpawnNotifications">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Recent Job Spawns</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <button class="btn btn-sm" @click="clearNotifications()" title="Clear Notifications">
+                                <i class="fa-solid fa-eraser"></i> Clear
+                            </button>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <template x-if="notifications.length === 0">
+                        <div class="text-center text-gray">
+                            No job spawn events yet. Child jobs will appear here when spawned from parent jobs.
+                        </div>
+                    </template>
+                    <template x-if="notifications.length > 0">
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm striped">
+                                <thead>
+                                    <tr>
+                                        <th>TIME</th>
+                                        <th>PARENT JOB</th>
+                                        <th>CHILD JOB</th>
+                                        <th>TYPE</th>
+                                        <th>URL</th>
+                                        <th>DEPTH</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="notification in notifications" :key="notification.child_job_id">
+                                        <tr>
+                                            <td x-text="formatTimestamp(notification.timestamp)"></td>
+                                            <td x-text="notification.parent_job_id.substring(0, 8) + '...'"></td>
+                                            <td x-text="notification.child_job_id.substring(0, 8) + '...'"></td>
+                                            <td x-text="notification.job_type"></td>
+                                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="notification.url" x-text="notification.url || 'N/A'"></td>
+                                            <td x-text="notification.depth"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </section>
 
         <!-- Job Statistics -->
         <section>
@@ -157,6 +308,19 @@
 
                         <!-- Tab Content: Job JSON -->
                         <div x-show="activeTab === 'json'">
+                            <!-- Job Progress Visualization -->
+                            <div id="job-progress-section" style="margin-bottom: 1rem; display: none;">
+                                <h4 style="margin-bottom: 0.5rem;">Job Progress</h4>
+                                <div class="progress-container">
+                                    <div id="job-progress-bar" class="progress-bar" style="width: 0%;">
+                                        <span id="job-progress-text">0%</span>
+                                    </div>
+                                </div>
+                                <div style="font-size: 0.875rem; color: #666; margin-top: 0.25rem;">
+                                    <span id="job-progress-details">No progress data available</span>
+                                </div>
+                            </div>
+
                             <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
                         </div>
 
@@ -588,6 +752,10 @@
                 const isChecked = selectedJobIds.has(job.id);
                 const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
 
+                // Check if this is a parent job (has seed URLs)
+                const isParentJob = job.seed_urls && Array.isArray(job.seed_urls) && job.seed_urls.length > 0;
+                const parentBadge = isParentJob ? '<span class="parent-job-badge" title="Parent job with seed URLs">PARENT</span>' : '';
+
                 return `
                     <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})">
                         <td onclick="event.stopPropagation()">
@@ -597,7 +765,7 @@
                                 <i class="form-icon"></i>
                             </label>
                         </td>
-                        <td title="${job.id || 'N/A'}">${jobIdShort}...</td>
+                        <td title="${job.id || 'N/A'}">${jobIdShort}...${parentBadge}</td>
                         <td>${job.source_type || 'N/A'}</td>
                         <td>${job.entity_type || 'N/A'}</td>
                         <td class="text-center">${statusBadge}</td>
@@ -741,10 +909,15 @@
             const selectedId = document.getElementById('selected-job-id');
             const detailPre = document.getElementById('job-detail-json');
             const codeBlock = detailPre.querySelector('code');
+            const progressSection = document.getElementById('job-progress-section');
+            const progressBar = document.getElementById('job-progress-bar');
+            const progressText = document.getElementById('job-progress-text');
+            const progressDetails = document.getElementById('job-progress-details');
 
             if (!job) {
                 selectedId.textContent = '';
                 codeBlock.textContent = '';
+                if (progressSection) progressSection.style.display = 'none';
                 return;
             }
 
@@ -754,6 +927,53 @@
 
             if (typeof hljs !== 'undefined') {
                 hljs.highlightElement(codeBlock);
+            }
+
+            // Update progress visualization
+            if (job.progress && progressSection && progressBar && progressText && progressDetails) {
+                try {
+                    const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
+
+                    if (progress && progress.percentage !== undefined) {
+                        const percentage = Math.round(progress.percentage);
+
+                        // Show progress section
+                        progressSection.style.display = 'block';
+
+                        // Update progress bar width and text
+                        progressBar.style.width = percentage + '%';
+                        progressText.textContent = percentage + '%';
+
+                        // Apply color based on status
+                        progressBar.classList.remove('progress-success', 'progress-warning', 'progress-error');
+                        if (job.status === 'completed') {
+                            progressBar.classList.add('progress-success');
+                        } else if (job.status === 'failed') {
+                            progressBar.classList.add('progress-error');
+                        } else if (job.status === 'running') {
+                            progressBar.classList.add('progress-warning');
+                        }
+
+                        // Update details text
+                        let detailsText = '';
+                        if (progress.completed_urls !== undefined && progress.total_urls !== undefined) {
+                            detailsText = `${progress.completed_urls} of ${progress.total_urls} URLs completed`;
+                            if (progress.failed_urls !== undefined && progress.failed_urls > 0) {
+                                detailsText += ` (${progress.failed_urls} failed)`;
+                            }
+                        } else {
+                            detailsText = `Progress: ${percentage}%`;
+                        }
+                        progressDetails.textContent = detailsText;
+                    } else {
+                        progressSection.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.warn('[Queue] Failed to parse job progress for display:', error);
+                    progressSection.style.display = 'none';
+                }
+            } else {
+                if (progressSection) progressSection.style.display = 'none';
             }
         }
 

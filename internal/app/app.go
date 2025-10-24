@@ -48,6 +48,8 @@ type App struct {
 	ConfigService   interfaces.ConfigService
 	Logger          arbor.ILogger
 	logBatchChannel chan []arbormodels.LogEvent
+	ctx             context.Context
+	cancelCtx       context.CancelFunc
 	StorageManager  interfaces.StorageManager
 
 	// Document services
@@ -384,6 +386,7 @@ func (a *App) initServices() error {
 		DocumentStorage: a.StorageManager.DocumentStorage(),
 		QueueManager:    a.QueueManager,
 		JobStorage:      a.StorageManager.JobStorage(),
+		EventService:    a.EventService,
 	}
 	crawlerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
 		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
@@ -418,6 +421,52 @@ func (a *App) initServices() error {
 	}
 	a.WorkerPool.RegisterHandler("cleanup", cleanupJobHandler)
 	a.Logger.Info().Msg("Cleanup job handler registered")
+
+	// Parent job handler (for job definition execution)
+	parentJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+
+		// Extract job definition ID from message
+		jobDefID := msg.JobDefinitionID
+		if jobDefID == "" {
+			if val, ok := msg.Config["job_definition_id"]; ok {
+				if id, ok := val.(string); ok {
+					jobDefID = id
+				}
+			}
+		}
+
+		if jobDefID == "" {
+			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", "Job definition ID not found in message")
+			return fmt.Errorf("job definition ID not found in parent message")
+		}
+
+		// Load job definition from storage
+		jobDef, err := a.StorageManager.JobDefinitionStorage().GetJobDefinition(ctx, jobDefID)
+		if err != nil {
+			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
+			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Msg("Failed to load job definition")
+			return fmt.Errorf("failed to load job definition: %w", err)
+		}
+
+		// Update job status to running
+		baseJob.UpdateJobStatus(ctx, msg.ParentID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
+
+		// Execute job definition steps
+		if err := a.JobExecutor.Execute(ctx, jobDef); err != nil {
+			baseJob.UpdateJobStatus(ctx, msg.ParentID, "failed", fmt.Sprintf("Job execution failed: %v", err))
+			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition execution failed")
+			return fmt.Errorf("job definition execution failed: %w", err)
+		}
+
+		// Update job status to completed
+		baseJob.UpdateJobStatus(ctx, msg.ParentID, "completed", "Job definition executed successfully")
+		a.Logger.Info().Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition executed successfully")
+
+		return nil
+	}
+	a.WorkerPool.RegisterHandler("parent", parentJobHandler)
+	a.Logger.Info().Msg("Parent job handler registered")
 
 	// Start worker pool
 	if err := a.WorkerPool.Start(); err != nil {
@@ -559,7 +608,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.Config, a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
@@ -579,6 +628,7 @@ func (a *App) initHandlers() error {
 		a.JobExecutor,
 		a.SourceService,
 		a.JobRegistry,
+		a.QueueManager,
 		a.Logger,
 	)
 	a.Logger.Info().Msg("Job definition handler initialized")
@@ -586,11 +636,77 @@ func (a *App) initHandlers() error {
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
 
+	// Start queue stats broadcaster with cancellable context
+	a.ctx, a.cancelCtx = context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Get queue stats
+				stats, err := a.QueueManager.GetQueueStats(context.Background())
+				if err != nil {
+					a.Logger.Warn().Err(err).Msg("Failed to get queue stats")
+					continue
+				}
+
+				// Broadcast to WebSocket clients
+				update := handlers.QueueStatsUpdate{
+					TotalMessages:    getInt(stats, "total_messages"),
+					PendingMessages:  getInt(stats, "pending_messages"),
+					InFlightMessages: getInt(stats, "in_flight_messages"),
+					QueueName:        getString(stats, "queue_name"),
+					Concurrency:      getInt(stats, "concurrency"),
+					Timestamp:        time.Now(),
+				}
+				a.WSHandler.BroadcastQueueStats(update)
+			case <-a.ctx.Done():
+				a.Logger.Info().Msg("Queue stats broadcaster shutting down")
+				return
+			}
+		}
+	}()
+	a.Logger.Info().Msg("Queue stats broadcaster started")
+
 	return nil
+}
+
+// Helper functions for safe type conversion from map[string]interface{}
+func getInt(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok {
+		switch v := val.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }
 
 // Close closes all application resources
 func (a *App) Close() error {
+	// Cancel queue stats broadcaster goroutine
+	if a.cancelCtx != nil {
+		a.Logger.Info().Msg("Cancelling background goroutines")
+		a.cancelCtx()
+		// Allow goroutine to finish gracefully
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	// Flush context logs before stopping services
 	a.Logger.Info().Msg("Flushing context logs")
 	common.Stop()

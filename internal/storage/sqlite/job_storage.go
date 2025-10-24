@@ -13,7 +13,6 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 // ErrJobNotFound is returned when a job is not found in the database
@@ -57,9 +56,9 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	crawlJob, ok := job.(*crawler.CrawlJob)
+	crawlJob, ok := job.(*models.CrawlJob)
 	if !ok {
-		return fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
 	// Serialize config and progress to JSON
@@ -162,7 +161,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	}
 
 	// Validate result count matches progress for completed jobs
-	if crawlJob.Status == crawler.JobStatusCompleted || crawlJob.Status == crawler.JobStatusFailed || crawlJob.Status == crawler.JobStatusCancelled {
+	if crawlJob.Status == models.JobStatusCompleted || crawlJob.Status == models.JobStatusFailed || crawlJob.Status == models.JobStatusCancelled {
 		expectedResultCount := crawlJob.Progress.CompletedURLs
 		expectedFailedCount := crawlJob.Progress.FailedURLs
 
@@ -205,7 +204,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 }
 
 // ListJobs lists jobs with pagination and filters
-func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]interface{}, error) {
+func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
@@ -287,7 +286,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 }
 
 // GetJobsByStatus filters jobs by status
-func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]interface{}, error) {
+func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
@@ -364,7 +363,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 }
 
 // GetStaleJobs returns jobs with stale heartbeats (older than threshold)
-func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]interface{}, error) {
+func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
@@ -483,18 +482,18 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	}
 
 	// Deserialize config and progress
-	config, err := crawler.FromJSONCrawlConfig(configJSON)
+	config, err := models.FromJSONCrawlConfig(configJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize config: %w", err)
 	}
 
-	progress, err := crawler.FromJSONCrawlProgress(progressJSON)
+	progress, err := models.FromJSONCrawlProgress(progressJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to deserialize progress: %w", err)
 	}
 
 	// Build CrawlJob
-	job := &crawler.CrawlJob{
+	job := &models.CrawlJob{
 		ID:                   id,
 		Name:                 name,
 		Description:          description,
@@ -504,7 +503,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 		SourceConfigSnapshot: "",
 		AuthSnapshot:         "",
 		RefreshSource:        refreshSource != 0,
-		Status:               crawler.JobStatus(status),
+		Status:               models.JobStatus(status),
 		Progress:             *progress,
 		ResultCount:          resultCount,
 		FailedCount:          failedCount,
@@ -544,8 +543,8 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 }
 
 // scanJobs scans multiple rows into slice of CrawlJob
-func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
-	var jobs []interface{}
+func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
+	var jobs []*models.CrawlJob
 
 	for rows.Next() {
 		var (
@@ -569,20 +568,20 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 		}
 
 		// Deserialize config and progress
-		config, err := crawler.FromJSONCrawlConfig(configJSON)
+		config, err := models.FromJSONCrawlConfig(configJSON)
 		if err != nil {
 			s.logger.Warn().Err(err).Str("job_id", id).Msg("Failed to deserialize config, skipping job")
 			continue
 		}
 
-		progress, err := crawler.FromJSONCrawlProgress(progressJSON)
+		progress, err := models.FromJSONCrawlProgress(progressJSON)
 		if err != nil {
 			s.logger.Warn().Err(err).Str("job_id", id).Msg("Failed to deserialize progress, skipping job")
 			continue
 		}
 
 		// Build CrawlJob
-		job := &crawler.CrawlJob{
+		job := &models.CrawlJob{
 			ID:                   id,
 			Name:                 name,
 			Description:          description,
@@ -592,7 +591,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]interface{}, error) {
 			SourceConfigSnapshot: "",
 			AuthSnapshot:         "",
 			RefreshSource:        refreshSource != 0,
-			Status:               crawler.JobStatus(status),
+			Status:               models.JobStatus(status),
 			Progress:             *progress,
 			ResultCount:          resultCount,
 			FailedCount:          failedCount,
@@ -639,9 +638,9 @@ func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	crawlJob, ok := job.(*crawler.CrawlJob)
+	crawlJob, ok := job.(*models.CrawlJob)
 	if !ok {
-		return fmt.Errorf("invalid job type: expected *crawler.CrawlJob")
+		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
 	query := `
