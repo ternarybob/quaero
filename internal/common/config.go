@@ -25,6 +25,7 @@ type Config struct {
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
 	Crawler     CrawlerConfig    `toml:"crawler"`
+	Search      SearchConfig     `toml:"search"`
 }
 
 type ServerConfig struct {
@@ -183,6 +184,12 @@ type CrawlerConfig struct {
 	JavaScriptWaitTime        time.Duration `toml:"javascript_wait_time"`         // Time to wait for JavaScript to render (default: 3s)
 }
 
+// SearchConfig contains configuration for search behavior
+type SearchConfig struct {
+	CaseSensitiveMultiplier int `toml:"case_sensitive_multiplier"` // Multiplier for case-sensitive searches (default: 3)
+	CaseSensitiveMaxCap     int `toml:"case_sensitive_max_cap"`    // Maximum results cap for case-sensitive searches (default: 1000)
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -288,6 +295,10 @@ func NewDefaultConfig() *Config {
 			EnableEmptyOutputFallback: true,                                      // Apply HTML stripping fallback when conversion produces empty output
 			EnableJavaScript:          true,                                      // Enable JavaScript rendering for SPAs like Jira
 			JavaScriptWaitTime:        3 * time.Second,                           // Wait 3 seconds for JavaScript to render
+		},
+		Search: SearchConfig{
+			CaseSensitiveMultiplier: 3,    // Fetch 3x the requested limit for case-sensitive searches
+			CaseSensitiveMaxCap:     1000, // Cap at 1000 results to prevent excessive memory usage
 		},
 	}
 }
@@ -520,6 +531,18 @@ func applyEnvOverrides(config *Config) {
 	if enableEmptyOutputFallback := os.Getenv("QUAERO_CRAWLER_ENABLE_EMPTY_OUTPUT_FALLBACK"); enableEmptyOutputFallback != "" {
 		if eof, err := strconv.ParseBool(enableEmptyOutputFallback); err == nil {
 			config.Crawler.EnableEmptyOutputFallback = eof
+		}
+	}
+
+	// Search configuration
+	if caseSensitiveMultiplier := os.Getenv("QUAERO_SEARCH_CASE_SENSITIVE_MULTIPLIER"); caseSensitiveMultiplier != "" {
+		if csm, err := strconv.Atoi(caseSensitiveMultiplier); err == nil {
+			config.Search.CaseSensitiveMultiplier = csm
+		}
+	}
+	if caseSensitiveMaxCap := os.Getenv("QUAERO_SEARCH_CASE_SENSITIVE_MAX_CAP"); caseSensitiveMaxCap != "" {
+		if csmc, err := strconv.Atoi(caseSensitiveMaxCap); err == nil {
+			config.Search.CaseSensitiveMaxCap = csmc
 		}
 	}
 }

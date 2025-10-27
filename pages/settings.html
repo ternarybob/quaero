@@ -15,42 +15,43 @@
         <!-- Page Title -->
         <div class="page-title">
             <h1>Settings</h1>
-            <p>System configuration and operational controls</p>
+            <p>System configuration, status, and operational controls</p>
         </div>
 
-        <!-- Full Configuration Table -->
-        <section>
+        <!-- Service Status and Configuration (Alpine Component) -->
+        <section x-data="settingsPage()">
+            <!-- Service Status -->
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2>System Configuration (Read-Only)</h2>
+                            <h2>Service Status</h2>
                         </section>
                         <section class="navbar-section">
-                            <button class="btn btn-sm" onclick="loadConfig()">
+                            <button class="btn btn-sm" @click="loadConfig()">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
+                            <span :class="'label ' + (isOnline ? 'label-success' : 'label-error')">
+                                <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                            </span>
                         </section>
                     </header>
                 </div>
                 <div class="card-body">
-                        <table class="table striped border">
-                            <thead>
-                                <tr>
-                                    <th>Section</th>
-                                    <th>Setting</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody id="config-table-body">
-                                <tr>
-                                    <td colspan="3" class="text-center text-muted">
-                                        Loading configuration...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <p><strong>Version:</strong> <span x-text="version"></span></p>
+                    <p><strong>Build:</strong> <span x-text="build"></span></p>
+                    <p><strong>Port:</strong> <span x-text="port"></span></p>
+                    <p><strong>Host:</strong> <span x-text="host"></span></p>
+                </div>
+            </div>
+
+            <!-- Configuration Details -->
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-header">
+                    <h2>Configuration Details</h2>
+                </div>
+                <div class="card-body">
+                    <pre class="code-block" style="max-height: 400px; overflow: auto;"><code x-text="formatConfig(config)"></code></pre>
                 </div>
             </div>
         </section>
@@ -71,7 +72,7 @@
                             </p>
                         </div>
                         <div>
-                            <button class="btn btn-sm btn-error" onclick="confirmRemoveEmbeddings()">
+                            <button class="btn btn-sm btn-error" onclick="confirmDeleteAllDocuments()">
                                 <i class="fas fa-trash"></i>
                                 <span>CLEAR ALL</span>
                             </button>
@@ -93,71 +94,50 @@
     {{template "snackbar.html" .}}
 
     <script>
-        // Load system configuration
-        async function loadConfig() {
-            // Mock configuration data matching TOML structure
-            const config = {
-                server: {
-                    host: 'localhost',
-                    port: 8085,
-                    llama_dir: './llama'
-                },
-                'sources.confluence': {
-                    enabled: true,
-                    spaces: ['TEAM', 'DOCS']
-                },
-                'sources.jira': {
-                    enabled: true,
-                    projects: ['DATA', 'ENG']
-                },
-                llm: {
-                    mode: 'offline'
-                },
-                'llm.offline': {
-                    model_dir: './models',
-                    embed_model: 'nomic-embed-text-v1.5.Q8_0.gguf',
-                    chat_model: 'qwen2.5-7b-instruct-q4_k_m.gguf',
-                    context_size: 2048,
-                    thread_count: 4,
-                    gpu_layers: 0
-                },
-                'llm.audit': {
-                    enabled: true,
-                    log_queries: false
-                }
-            };
+        // Alpine.js component for settings page
+        function settingsPage() {
+            return {
+                isOnline: false,
+                version: 'unknown',
+                build: 'unknown',
+                port: 0,
+                host: '',
+                config: null,
 
-            // Populate configuration table
-            const tbody = document.getElementById('config-table-body');
-            tbody.innerHTML = '';
+                init() {
+                    this.loadConfig();
+                },
 
-            for (const [section, values] of Object.entries(config)) {
-                if (typeof values === 'object' && !Array.isArray(values)) {
-                    let firstRow = true;
-                    for (const [key, value] of Object.entries(values)) {
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                            <td class="section-cell">${firstRow ? '[' + section + ']' : ''}</td>
-                            <td>${key}</td>
-                            <td class="value-cell">${Array.isArray(value) ? JSON.stringify(value) : value}</td>
-                        `;
-                        tbody.appendChild(row);
-                        firstRow = false;
+                async loadConfig() {
+                    try {
+                        const response = await fetch('/api/config');
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        const data = await response.json();
+
+                        this.isOnline = true;
+                        this.version = data.version || 'unknown';
+                        this.build = data.build || 'unknown';
+                        this.port = data.port || 0;
+                        this.host = data.host || '';
+                        this.config = data.config || {};
+
+                    } catch (error) {
+                        console.error('Failed to load configuration:', error);
+                        this.isOnline = false;
                     }
-                } else {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td class="section-cell">[${section}]</td>
-                        <td>-</td>
-                        <td class="value-cell">${values}</td>
-                    `;
-                    tbody.appendChild(row);
+                },
+
+                formatConfig(cfg) {
+                    if (!cfg) return 'No configuration loaded';
+                    return JSON.stringify(cfg, null, 2);
                 }
             }
         }
 
-        // Confirm and remove all embeddings
-        async function confirmRemoveEmbeddings() {
+        // Confirm and delete all documents
+        async function confirmDeleteAllDocuments() {
             const confirmed = confirm(
                 '⚠ WARNING: This will delete ALL documents from the collection database.\n\n' +
                 'This will remove all indexed content from Jira and Confluence.\n' +
@@ -168,12 +148,13 @@
             if (!confirmed) return;
 
             try {
-                const response = await fetch('/api/embeddings', {
+                const response = await fetch('/api/documents/clear-all', {
                     method: 'DELETE'
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to clear documents');
+                    const errorData = await response.json().catch(() => ({ error: 'Failed to clear documents' }));
+                    throw new Error(errorData.error || 'Failed to clear documents');
                 }
 
                 const result = await response.json();
@@ -183,11 +164,6 @@
                 showNotification('Failed to clear documents: ' + error.message, 'error');
             }
         }
-
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function () {
-            loadConfig();
-        });
     </script>
 </body>
 

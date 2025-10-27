@@ -16,8 +16,9 @@
                 <a href="/jobs" @click="mobileMenuOpen = false" {{if or (eq .Page "jobs") (eq .Page "auth") (eq .Page "sources")}}class="active"{{end}}>JOBS</a>
                 <a href="/queue" @click="mobileMenuOpen = false" {{if eq .Page "queue"}}class="active"{{end}}>QUEUE</a>
                 <a href="/documents" @click="mobileMenuOpen = false" {{if eq .Page "documents"}}class="active"{{end}}>DOCUMENTS</a>
+                <a href="/search" @click="mobileMenuOpen = false" {{if eq .Page "search"}}class="active"{{end}}>SEARCH</a>
                 <a href="/chat" @click="mobileMenuOpen = false" {{if eq .Page "chat"}}class="active"{{end}}>CHAT</a>
-                <a href="/config" @click="mobileMenuOpen = false" {{if or (eq .Page "settings") (eq .Page "config")}}class="active"{{end}}>SETTINGS</a>
+                <a href="/settings" @click="mobileMenuOpen = false" {{if eq .Page "settings"}}class="active"{{end}}>SETTINGS</a>
             </div>
         </nav>
         <span class="label label-success status-text">ONLINE</span>

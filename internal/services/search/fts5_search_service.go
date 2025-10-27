@@ -45,7 +45,7 @@ func (s *FTS5SearchService) Search(
 
 		listOpts := &interfaces.ListOptions{
 			Limit:    limit,
-			Offset:   0,
+			Offset:   opts.Offset,
 			OrderBy:  "updated_at",
 			OrderDir: "desc",
 		}
@@ -241,43 +241,4 @@ func matchesMetadata(metadata map[string]interface{}, filters map[string]string)
 	nextFilter:
 	}
 	return true
-}
-
-// containsReference checks if a document contains a specific reference
-func containsReference(doc *models.Document, reference string) bool {
-	// Check in title
-	if strings.Contains(doc.Title, reference) {
-		return true
-	}
-
-	// Check in content markdown
-	if strings.Contains(doc.ContentMarkdown, reference) {
-		return true
-	}
-
-	// Check in metadata
-	for _, value := range doc.Metadata {
-		switch v := value.(type) {
-		case string:
-			if strings.Contains(v, reference) {
-				return true
-			}
-		case []string:
-			for _, item := range v {
-				if strings.Contains(item, reference) {
-					return true
-				}
-			}
-		case []interface{}:
-			for _, item := range v {
-				if str, ok := item.(string); ok {
-					if strings.Contains(str, reference) {
-						return true
-					}
-				}
-			}
-		}
-	}
-
-	return false
 }

@@ -21,9 +21,9 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Combined Jobs page
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
+	mux.HandleFunc("/search", s.app.PageHandler.ServePage("search.html", "search"))
 	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))
 	mux.HandleFunc("/settings", s.app.PageHandler.ServePage("settings.html", "settings"))
-	mux.HandleFunc("/config", s.app.PageHandler.ServePage("config.html", "config"))
 
 	// Static files (CSS, JS, images)
 	mux.HandleFunc("/static/", s.app.PageHandler.StaticFileHandler)
@@ -53,7 +53,11 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
-	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes) // Handles /api/documents/{id} and subpaths
+	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents
+	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes)                                   // Handles /api/documents/{id} and subpaths
+
+	// API routes - Search
+	mux.HandleFunc("/api/search", s.handleSearchRoute)
 
 	// API routes - Chat (RAG-enabled chat)
 	mux.HandleFunc("/api/chat", s.app.ChatHandler.ChatHandler)
@@ -277,4 +281,9 @@ func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// handleSearchRoute delegates to SearchHandler (method enforcement happens at handler level)
+func (s *Server) handleSearchRoute(w http.ResponseWriter, r *http.Request) {
+	s.app.SearchHandler.SearchHandler(w, r)
 }

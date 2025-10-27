@@ -183,3 +183,42 @@ func (h *DocumentHandler) DeleteDocumentHandler(w http.ResponseWriter, r *http.R
 		"message": "Document deleted successfully",
 	})
 }
+
+// DeleteAllDocumentsHandler handles DELETE /api/documents/clear-all
+// Deletes ALL documents from the database (danger zone operation)
+func (h *DocumentHandler) DeleteAllDocumentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	h.logger.Warn().Msg("Delete all documents requested (danger zone operation)")
+
+	// Get count before deletion for response
+	ctx := r.Context()
+	stats, err := h.documentService.GetStats(ctx)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get document stats before deletion")
+		WriteError(w, http.StatusInternalServerError, "Failed to get document count")
+		return
+	}
+	documentsAffected := stats.TotalDocuments
+
+	// Clear all documents
+	err = h.documentStorage.ClearAll()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to clear all documents")
+		WriteError(w, http.StatusInternalServerError, "Failed to clear all documents")
+		return
+	}
+
+	h.logger.Warn().
+		Int("documents_deleted", documentsAffected).
+		Msg("All documents deleted successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":            "All documents deleted successfully",
+		"documents_affected": documentsAffected,
+	})
+}

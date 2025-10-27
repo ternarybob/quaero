@@ -88,14 +88,13 @@
                                     <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
                                 </th>
                                 <th>SOURCE</th>
-                                <th>SOURCE ID</th>
-                                <th>TITLE</th>
+                                <th>DETAILS</th>
                                 <th>UPDATED</th>
                             </tr>
                         </thead>
                         <tbody id="documents-table-body">
                             <tr>
-                                <td colspan="5" class="text-center">
+                                <td colspan="4" class="text-center">
                                     Loading documents...
                                 </td>
                             </tr>
@@ -277,7 +276,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" class="text-center">
+                        <td colspan="4" class="text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -290,6 +289,16 @@
                 const isSelected = selectedDocument && selectedDocument.id === doc.id;
                 const isChecked = selectedDocumentIds.has(doc.id);
 
+                // Truncate source_id if too long to maintain table size
+                const sourceId = doc.source_id || 'N/A';
+                const displaySourceId = sourceId.length > 180 ? sourceId.substring(0, 180) + '...' : sourceId;
+
+                // Check if source_id is a URL (starts with http)
+                const isUrl = sourceId.startsWith('http://') || sourceId.startsWith('https://');
+                const sourceIdHtml = isUrl
+                    ? `<a href="${sourceId}" target="_blank" style="color: var(--primary-color); text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" onclick="event.stopPropagation()">${displaySourceId}</a>`
+                    : displaySourceId;
+
                 return `
                     <tr class="${isSelected ? 'bg-gray' : ''}">
                         <td style="text-align: center;">
@@ -299,8 +308,10 @@
                                    onclick="event.stopPropagation()">
                         </td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_id || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.title || 'Untitled'}</td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer; text-align: left;">
+                            <div class="text-small" title="${sourceId}" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${sourceIdHtml}</div>
+                            <div class="text-small" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${doc.title || 'Untitled'}</div>
+                        </td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                     </tr>
                 `;

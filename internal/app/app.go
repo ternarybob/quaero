@@ -93,6 +93,7 @@ type App struct {
 	WSHandler            *handlers.WebSocketHandler
 	CollectionHandler    *handlers.CollectionHandler
 	DocumentHandler      *handlers.DocumentHandler
+	SearchHandler        *handlers.SearchHandler
 	SchedulerHandler     *handlers.SchedulerHandler
 	ChatHandler          *handlers.ChatHandler
 	MCPHandler           *handlers.MCPHandler
@@ -285,11 +286,26 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 3.5 Initialize search service (FTS5-based search)
-	a.SearchService = search.NewFTS5SearchService(
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-	)
+	// 3.5 Initialize search service (Advanced search with Google-style query parsing)
+	// AdvancedSearchService requires FTS5 for full-text search capabilities
+	if !a.Config.Storage.SQLite.EnableFTS5 {
+		// FTS5 is disabled: use no-op service to allow app to start
+		// The handler will return 503 Service Unavailable for search requests
+		a.Logger.Warn().
+			Bool("fts5_enabled", a.Config.Storage.SQLite.EnableFTS5).
+			Msg("FTS5 is disabled: search service will be unavailable (using DisabledSearchService)")
+		a.SearchService = search.NewDisabledSearchService(a.Logger)
+	} else {
+		// FTS5 is enabled: use full-featured search service
+		a.SearchService = search.NewAdvancedSearchService(
+			a.StorageManager.DocumentStorage(),
+			a.Logger,
+			a.Config,
+		)
+		a.Logger.Info().
+			Bool("fts5_enabled", a.Config.Storage.SQLite.EnableFTS5).
+			Msg("Advanced search service initialized with FTS5 support")
+	}
 
 	// 4. Initialize chat service (agent-based chat with LLM)
 	a.ChatService = chat.NewChatService(
@@ -639,6 +655,10 @@ func (a *App) initHandlers() error {
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
 		a.StorageManager.DocumentStorage(),
+		a.Logger,
+	)
+	a.SearchHandler = handlers.NewSearchHandler(
+		a.SearchService,
 		a.Logger,
 	)
 	a.SchedulerHandler = handlers.NewSchedulerHandler(

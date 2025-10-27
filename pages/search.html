@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    {{template "head.html" .}}
+    <title>Search - Quaero</title>
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <!-- DOMPurify for HTML sanitization -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+</head>
+
+<body>
+
+    {{template "navbar.html" .}}
+
+    <main class="page-container">
+
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Document Search</h1>
+            <p>Search across all indexed documents using FTS5 full-text search</p>
+        </div>
+
+        <!-- Alpine.js Search Component -->
+        <div x-data="searchComponent()">
+
+            <!-- Search Input Section -->
+            <section>
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Search Query</h2>
+                    </div>
+                    <div class="card-body">
+                        <!-- Search Input and Buttons -->
+                        <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; margin-bottom: 1rem;">
+                            <input type="search"
+                                   x-model="query"
+                                   @keydown.enter="executeSearch(1)"
+                                   class="form-input input-lg"
+                                   placeholder="Enter search query (e.g., +authentication &quot;security audit&quot; document_type:jira case:match)"
+                                   autocomplete="off"
+                                   :disabled="loading">
+                            <button class="btn btn-primary btn-lg"
+                                    @click="executeSearch(1)"
+                                    :disabled="loading"
+                                    x-ref="searchBtn">
+                                <i :class="loading ? 'fa-solid fa-spinner fa-pulse' : 'fa-solid fa-search'"></i>
+                                <span x-text="loading ? 'Searching...' : 'Search'"></span>
+                            </button>
+                            <button class="btn btn-lg"
+                                    @click="clearSearch()"
+                                    :disabled="loading"
+                                    x-ref="clearBtn">
+                                <i class="fa-solid fa-times"></i> Clear
+                            </button>
+                        </div>
+
+                        <!-- Query Syntax Help Card -->
+                        <div class="card" style="background-color: var(--bg-secondary);">
+                            <div class="card-header" style="cursor: pointer;" @click="syntaxOpen = !syntaxOpen">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <h3 style="margin: 0;">Query Syntax Help</h3>
+                                    <i :class="syntaxOpen ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'"></i>
+                                </div>
+                            </div>
+                            <div x-show="syntaxOpen" class="card-body" x-transition>
+                                <div class="columns">
+                                    <div class="column col-6">
+                                        <h4>Basic Search</h4>
+                                        <ul>
+                                            <li><code>word1 word2</code> - Match documents with ANY word (OR by default)</li>
+                                            <li><code>"exact phrase"</code> - Match exact phrase</li>
+                                            <li><code>+required</code> - Word MUST be present (AND)</li>
+                                            <li><code>-excluded</code> - Word must NOT be present (NOT)</li>
+                                            <li><code>word*</code> - Prefix matching</li>
+                                        </ul>
+                                        <h4>Qualifiers</h4>
+                                        <ul>
+                                            <li><code>document_type:jira</code> - Filter by Jira documents</li>
+                                            <li><code>document_type:confluence</code> - Filter by Confluence documents</li>
+                                            <li><code>case:match</code> - Case-sensitive search</li>
+                                        </ul>
+                                    </div>
+                                    <div class="column col-6">
+                                        <h4>Examples</h4>
+                                        <ul>
+                                            <li><code>authentication security</code> - Either word</li>
+                                            <li><code>+api -deprecated</code> - API but not deprecated</li>
+                                            <li><code>"user authentication" +security</code> - Phrase + required word</li>
+                                            <li><code>+login document_type:jira</code> - Login in Jira only</li>
+                                            <li><code>+Password case:match</code> - Case-sensitive Password</li>
+                                        </ul>
+                                        <h4>Advanced</h4>
+                                        <ul>
+                                            <li><code>+auth* -deprecated document_type:confluence</code> - Complex query</li>
+                                            <li><code>"API endpoint" +security case:match</code> - Combined features</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Search Results Section -->
+            <section style="margin-top: 1.5rem;">
+                <div class="card">
+                    <div class="card-header">
+                        <header class="navbar">
+                            <section class="navbar-section">
+                                <h2>
+                                    <span x-text="getResultCountDisplay()" style="color: var(--text-secondary); margin-right: 0.5rem;"></span>
+                                    Search Results
+                                </h2>
+                            </section>
+                            <section class="navbar-section">
+                                <span x-show="currentQuery" x-text="'Query: &quot;' + currentQuery + '&quot;'" class="label label-primary"></span>
+                            </section>
+                        </header>
+                    </div>
+                    <div class="card-body">
+                        <!-- Results Container -->
+                        <div id="results-container">
+                            <!-- Empty State -->
+                            <template x-if="!hasSearched && !loading">
+                                <div class="empty">
+                                    <div class="empty-icon">
+                                        <i class="fa-solid fa-search fa-3x"></i>
+                                    </div>
+                                    <p class="empty-title h5">No search performed</p>
+                                    <p class="empty-subtitle">Enter a search query above to find documents</p>
+                                </div>
+                            </template>
+
+                            <!-- Loading State -->
+                            <template x-if="loading">
+                                <div>
+                                    <div class="loading loading-lg" style="margin: 2rem auto;"></div>
+                                    <p class="text-center" style="margin-top: 1rem;">Searching documents...</p>
+                                </div>
+                            </template>
+
+                            <!-- No Results -->
+                            <template x-if="hasSearched && !loading && searchResults.length === 0">
+                                <div class="empty">
+                                    <div class="empty-icon">
+                                        <i class="fa-solid fa-search fa-3x" style="color: var(--text-secondary);"></i>
+                                    </div>
+                                    <p class="empty-title h5">No Results Found</p>
+                                    <p class="empty-subtitle">Try different search terms or check your query syntax</p>
+                                </div>
+                            </template>
+
+                            <!-- Results -->
+                            <template x-if="!loading && searchResults.length > 0">
+                                <div>
+                                    <template x-for="(result, index) in searchResults" :key="result.id">
+                                        <div class="card" style="margin-bottom: 0.75rem;">
+                                            <div class="card-body" style="padding: 1rem;">
+                                                <div style="display: grid; grid-template-columns: auto 1fr; gap: 0.75rem; align-items: start;">
+                                                    <!-- Result Number and Source Type -->
+                                                    <div style="text-align: center; min-width: 60px;">
+                                                        <div style="font-size: 1.25rem; font-weight: bold; color: var(--text-secondary);" x-text="(offset + index + 1)"></div>
+                                                        <span class="label label-sm" x-text="result.source_type || 'unknown'" style="margin-top: 0.25rem; font-size: 0.7rem;"></span>
+                                                    </div>
+
+                                                    <!-- Title, URL, and Metadata -->
+                                                    <div>
+                                                        <h4 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;" x-text="result.title || 'Untitled Document'"></h4>
+
+                                                        <!-- URL -->
+                                                        <div style="margin-bottom: 0.5rem;">
+                                                            <a :href="result.url || '#'"
+                                                               target="_blank"
+                                                               style="color: var(--primary-color); text-decoration: none; font-size: 0.9rem; word-break: break-all;"
+                                                               x-text="result.url || 'No URL'"
+                                                               @mouseenter="$el.style.textDecoration='underline'"
+                                                               @mouseleave="$el.style.textDecoration='none'">
+                                                            </a>
+                                                            <i class="fa-solid fa-external-link-alt" style="margin-left: 0.25rem; font-size: 0.75rem; color: var(--text-secondary);"></i>
+                                                        </div>
+
+                                                        <!-- Brief Content -->
+                                                        <div style="margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);" x-html="renderMarkdown(result.brief || '')"></div>
+
+                                                        <!-- Metadata: Scraped At -->
+                                                        <div style="font-size: 0.8rem; color: var(--text-muted);">
+                                                            <template x-if="result.metadata && result.metadata.scraped_at">
+                                                                <span>
+                                                                    <i class="fa-solid fa-clock"></i>
+                                                                    <span x-text="'Scraped: ' + new Date(result.metadata.scraped_at).toLocaleString()"></span>
+                                                                </span>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Pagination Controls -->
+                        <div x-show="hasSearched && !loading && searchResults.length > 0" class="pagination-container" style="margin-top: 1rem;">
+                            <ul class="pagination">
+                                <!-- Previous Button -->
+                                <li :class="currentPage > 1 ? 'page-item' : 'page-item disabled'">
+                                    <a href="#" @click.prevent="currentPage > 1 && changePage(currentPage - 1)">Previous</a>
+                                </li>
+
+                                <!-- Current Page Indicator -->
+                                <li class="page-item active">
+                                    <a href="#" x-text="'Page ' + currentPage"></a>
+                                </li>
+
+                                <!-- Next Button -->
+                                <li :class="searchResults.length === pageSize ? 'page-item' : 'page-item disabled'">
+                                    <a href="#" @click.prevent="searchResults.length === pageSize && changePage(currentPage + 1)">Next</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Service Logs -->
+            <section style="margin-top: 1.5rem;">
+                {{template "service-logs.html" .}}
+            </section>
+
+        </div>
+
+    </main>
+
+    {{template "footer.html" .}}
+
+    {{template "snackbar.html" .}}
+
+    <script>
+        function searchComponent() {
+            return {
+                // State
+                searchResults: [],
+                query: '',
+                currentQuery: '',
+                currentPage: 1,
+                offset: 0,
+                pageSize: 50,
+                loading: false,
+                hasSearched: false,
+                syntaxOpen: false,
+                abortController: null,
+
+                // Initialize marked.js
+                init() {
+                    if (typeof marked !== 'undefined') {
+                        marked.setOptions({
+                            breaks: true,
+                            gfm: true
+                        });
+                    }
+                    console.log('[Search] Alpine.js component initialized');
+                },
+
+                // Get result count display
+                getResultCountDisplay() {
+                    if (!this.hasSearched || this.loading) {
+                        return '0';
+                    }
+                    if (this.searchResults.length === 0) {
+                        return '0';
+                    }
+                    const start = this.offset + 1;
+                    const end = this.offset + this.searchResults.length;
+                    return `Showing ${start}–${end}`;
+                },
+
+                // Execute search
+                async executeSearch(pageNumber = 1) {
+                    const trimmedQuery = this.query.trim();
+
+                    if (!trimmedQuery) {
+                        window.showNotification('Please enter a search query', 'warning');
+                        return;
+                    }
+
+                    this.currentQuery = trimmedQuery;
+                    this.currentPage = pageNumber;
+                    this.hasSearched = true;
+                    this.loading = true;
+
+                    // Calculate offset
+                    this.offset = (this.currentPage - 1) * this.pageSize;
+
+                    // Create AbortController with 30s timeout
+                    this.abortController = new AbortController();
+                    const timeoutId = setTimeout(() => {
+                        this.abortController.abort();
+                    }, 30000); // 30 seconds
+
+                    // Build query parameters
+                    const params = new URLSearchParams();
+                    params.append('q', this.currentQuery);
+                    params.append('limit', this.pageSize);
+                    params.append('offset', this.offset);
+
+                    try {
+                        const response = await fetch(`/api/search?${params.toString()}`, {
+                            signal: this.abortController.signal
+                        });
+
+                        clearTimeout(timeoutId);
+
+                        if (!response.ok) {
+                            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                            throw new Error(errorData.error || 'Search request failed');
+                        }
+
+                        const data = await response.json();
+                        this.searchResults = data.results || [];
+
+                        // Capture offset and limit from response
+                        if (data.offset !== undefined) {
+                            this.offset = data.offset;
+                        }
+                        if (data.limit !== undefined) {
+                            this.pageSize = data.limit;
+                        }
+
+                    } catch (error) {
+                        clearTimeout(timeoutId);
+                        console.error('Error executing search:', error);
+
+                        // Handle AbortError
+                        if (error.name === 'AbortError') {
+                            window.showNotification('Search request timed out after 30 seconds. Please try again.', 'error');
+                        } else {
+                            window.showNotification('Search failed: ' + error.message, 'error');
+                        }
+
+                        this.searchResults = [];
+                    } finally {
+                        this.loading = false;
+                        this.abortController = null;
+                    }
+                },
+
+                // Handle page change
+                changePage(pageNumber) {
+                    if (!this.currentQuery) {
+                        window.showNotification('Please enter a search query first', 'warning');
+                        return;
+                    }
+                    this.executeSearch(pageNumber);
+                },
+
+                // Clear search
+                clearSearch() {
+                    this.query = '';
+                    this.searchResults = [];
+                    this.currentQuery = '';
+                    this.currentPage = 1;
+                    this.offset = 0;
+                    this.hasSearched = false;
+                    this.loading = false;
+
+                    // Cancel any ongoing request
+                    if (this.abortController) {
+                        this.abortController.abort();
+                        this.abortController = null;
+                    }
+                },
+
+                // Render markdown as sanitized HTML
+                renderMarkdown(text) {
+                    if (!text) return '';
+
+                    try {
+                        // Convert markdown to HTML
+                        const html = typeof marked !== 'undefined' ? marked.parse(text) : text;
+
+                        // Sanitize HTML
+                        return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+                    } catch (error) {
+                        console.error('Error rendering markdown:', error);
+                        // Fallback to escaped text
+                        const div = document.createElement('div');
+                        div.textContent = text;
+                        return div.innerHTML;
+                    }
+                }
+            };
+        }
+
+        // Ensure Alpine.js is fully initialized
+        document.addEventListener('alpine:init', function () {
+            console.log('[Search] Alpine.js init event fired');
+        });
+    </script>
+</body>
+
+</html>

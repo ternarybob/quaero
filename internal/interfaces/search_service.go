@@ -11,6 +11,9 @@ type SearchOptions struct {
 	// Limit maximum number of results
 	Limit int
 
+	// Offset for pagination (number of results to skip)
+	Offset int
+
 	// SourceTypes filters by document source (e.g., "jira", "confluence")
 	SourceTypes []string
 
