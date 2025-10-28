@@ -276,51 +276,8 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		Str("document_id", document.ID).
 		Msg("Document saved successfully")
 
-	// Update parent job progress after successful URL processing
-	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-	if err != nil {
-		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for progress update")
-	} else {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
-			// Increment completed, decrement pending
-			job.Progress.CompletedURLs++
-			if job.Progress.PendingURLs > 0 {
-				job.Progress.PendingURLs--
-			}
-			// Recompute percentage
-			if job.Progress.TotalURLs > 0 {
-				job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
-			}
-
-			// VERIFICATION COMMENT 1: Completion check moved to after child URL increments
-			// Don't check completion here - children may be spawned which would increment PendingURLs
-			// Completion check happens after link discovery/enqueueing (see below)
-
-			// Save updated progress
-			if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-				c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to persist progress update")
-			} else {
-				c.logger.Debug().
-					Str("parent_id", msg.ParentID).
-					Int("completed", job.Progress.CompletedURLs).
-					Int("pending", job.Progress.PendingURLs).
-					Float64("percentage", job.Progress.Percentage).
-					Str("status", string(job.Status)).
-					Msg("Progress updated successfully")
-			}
-
-			// Emit progress event (only if not completed, completion event already logged)
-			if job.Status != crawler.JobStatusCompleted {
-				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-					fmt.Sprintf("Progress: %d/%d URLs completed (%.1f%%)",
-						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.Percentage)); err != nil {
-					c.logger.Warn().Err(err).Msg("Failed to log progress event")
-				}
-			}
-		} else {
-			c.logger.Warn().Str("parent_id", msg.ParentID).Msg("Failed to type assert job to *crawler.CrawlJob")
-		}
-	}
+	// Track how many children will be spawned (needed for accurate progress tracking)
+	var childrenToSpawn int
 
 	// Discover and enqueue child links if follow_links is enabled
 	if followLinks && msg.Depth < maxDepth {
@@ -481,70 +438,84 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Int("enqueued", enqueuedCount).
 			Msg("Child jobs enqueued for discovered links")
 
-		// VERIFICATION COMMENT 1: Increment TotalURLs and PendingURLs for spawned children
-		// Child URLs were successfully enqueued, so update parent job counters
-		if enqueuedCount > 0 {
-			// Load parent job to update counters
-			parentJobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-			if err != nil {
-				c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for counter update")
-			} else if parentJob, ok := parentJobInterface.(*crawler.CrawlJob); ok {
-				// Increment counters by the number of successfully enqueued children
-				parentJob.Progress.TotalURLs += enqueuedCount
-				parentJob.Progress.PendingURLs += enqueuedCount
-
-				// Recompute percentage with new totals
-				if parentJob.Progress.TotalURLs > 0 {
-					parentJob.Progress.Percentage = float64(parentJob.Progress.CompletedURLs) / float64(parentJob.Progress.TotalURLs) * 100
-				}
-
-				// Persist updated counters
-				if err := c.deps.JobStorage.SaveJob(ctx, parentJob); err != nil {
-					c.logger.Warn().
-						Err(err).
-						Str("parent_id", msg.ParentID).
-						Int("enqueued_count", enqueuedCount).
-						Msg("Failed to persist progress counters after child enqueueing")
-				} else {
-					c.logger.Debug().
-						Str("parent_id", msg.ParentID).
-						Int("total_urls", parentJob.Progress.TotalURLs).
-						Int("pending_urls", parentJob.Progress.PendingURLs).
-						Int("enqueued_children", enqueuedCount).
-						Float64("percentage", parentJob.Progress.Percentage).
-						Msg("Updated progress counters for spawned children")
-				}
-			}
-		}
+		// Track enqueued children for progress update
+		childrenToSpawn = enqueuedCount
 	}
 
-	// VERIFICATION COMMENT 1: Check job completion after child URL increments
-	// This ensures we account for any spawned children before marking job complete
-	jobInterfaceForCompletion, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-	if err == nil {
-		if jobForCompletion, ok := jobInterfaceForCompletion.(*crawler.CrawlJob); ok {
-			// Check if job is complete (all URLs processed, including any spawned children)
-			if jobForCompletion.Progress.PendingURLs == 0 && jobForCompletion.Progress.TotalURLs > 0 {
-				jobForCompletion.Status = crawler.JobStatusCompleted
+	// Update parent job progress AFTER determining how many children will be spawned
+	// This ensures PendingURLs is accurate and prevents premature job completion
+	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
+	if err != nil {
+		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for progress update")
+	} else {
+		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+			// Update counters atomically:
+			// 1. Increment completed URLs (this URL is done)
+			// 2. Decrement pending URLs (this URL is no longer pending)
+			// 3. Add spawned children to both total and pending
+			job.Progress.CompletedURLs++
+			if job.Progress.PendingURLs > 0 {
+				job.Progress.PendingURLs--
+			}
+
+			// Add spawned children to counters
+			if childrenToSpawn > 0 {
+				job.Progress.TotalURLs += childrenToSpawn
+				job.Progress.PendingURLs += childrenToSpawn
+			}
+
+			// Recompute percentage
+			if job.Progress.TotalURLs > 0 {
+				job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
+			}
+
+			// Check for job completion BEFORE saving
+			// Job is complete when all URLs have been processed (including spawned children)
+			isComplete := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
+
+			if isComplete && job.Status != crawler.JobStatusCompleted {
+				job.Status = crawler.JobStatusCompleted
 				c.logger.Info().
 					Str("parent_id", msg.ParentID).
-					Int("total_urls", jobForCompletion.Progress.TotalURLs).
-					Int("completed_urls", jobForCompletion.Progress.CompletedURLs).
-					Int("failed_urls", jobForCompletion.Progress.FailedURLs).
+					Int("total_urls", job.Progress.TotalURLs).
+					Int("completed_urls", job.Progress.CompletedURLs).
+					Int("failed_urls", job.Progress.FailedURLs).
 					Msg("Job completed - all URLs processed (including spawned children)")
 
 				// Log job completion event
 				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
 					fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
-						jobForCompletion.Progress.CompletedURLs, jobForCompletion.Progress.TotalURLs, jobForCompletion.Progress.FailedURLs)); err != nil {
+						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
 					c.logger.Warn().Err(err).Msg("Failed to log job completion event")
 				}
+			}
 
-				// Persist completion status
-				if err := c.deps.JobStorage.SaveJob(ctx, jobForCompletion); err != nil {
-					c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to persist job completion status")
+			// Save updated progress (includes completion status if applicable)
+			if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+				c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to persist progress update")
+			} else {
+				c.logger.Debug().
+					Str("parent_id", msg.ParentID).
+					Int("completed", job.Progress.CompletedURLs).
+					Int("pending", job.Progress.PendingURLs).
+					Int("total", job.Progress.TotalURLs).
+					Int("spawned_children", childrenToSpawn).
+					Float64("percentage", job.Progress.Percentage).
+					Str("status", string(job.Status)).
+					Bool("is_complete", isComplete).
+					Msg("Progress updated atomically with spawned children")
+			}
+
+			// Emit progress event (only if not completed)
+			if job.Status != crawler.JobStatusCompleted {
+				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
+					fmt.Sprintf("Progress: %d/%d URLs completed (%.1f%%)",
+						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.Percentage)); err != nil {
+					c.logger.Warn().Err(err).Msg("Failed to log progress event")
 				}
 			}
+		} else {
+			c.logger.Warn().Str("parent_id", msg.ParentID).Msg("Failed to type assert job to *crawler.CrawlJob")
 		}
 	}
 

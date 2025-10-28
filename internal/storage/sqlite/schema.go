@@ -203,6 +203,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	enabled INTEGER DEFAULT 1,
 	auto_start INTEGER DEFAULT 0,
 	config TEXT,
+	post_jobs TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
@@ -342,6 +343,11 @@ func (s *SQLiteDB) runMigrations() error {
 	// and better query performance. This migration recreates the crawl_jobs table
 	// without the logs column while preserving all other data.
 	if err := s.migrateRemoveLogsColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 14: Add post_jobs column to job_definitions table
+	if err := s.migrateAddPostJobsColumn(); err != nil {
 		return err
 	}
 
@@ -1259,5 +1265,50 @@ func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: logs column removed successfully (logs now in job_logs table)")
+	return nil
+}
+
+// migrateAddPostJobsColumn adds post_jobs column to job_definitions table
+func (s *SQLiteDB) migrateAddPostJobsColumn() error {
+	columnsQuery := `PRAGMA table_info(job_definitions)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasPostJobs := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "post_jobs" {
+			hasPostJobs = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasPostJobs {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding post_jobs column to job_definitions")
+
+	// Add the post_jobs column
+	if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN post_jobs TEXT`); err != nil {
+		return err
+	}
+
+	// Backfill existing rows with empty JSON array
+	s.logger.Info().Msg("Backfilling existing rows with empty post_jobs array")
+	if _, err := s.db.Exec(`UPDATE job_definitions SET post_jobs = '[]' WHERE post_jobs IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: post_jobs column added successfully")
 	return nil
 }

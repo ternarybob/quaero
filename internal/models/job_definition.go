@@ -91,6 +91,7 @@ type JobDefinition struct {
 	Enabled     bool                   `json:"enabled"`     // Whether the job is enabled
 	AutoStart   bool                   `json:"auto_start"`  // Whether to auto-start on scheduler initialization
 	Config      map[string]interface{} `json:"config"`      // Job-specific configuration
+	PostJobs    []string               `json:"post_jobs"`   // Array of job IDs to execute after this job completes
 	CreatedAt   time.Time              `json:"created_at"`  // Creation timestamp
 	UpdatedAt   time.Time              `json:"updated_at"`  // Last update timestamp
 }
@@ -220,6 +221,23 @@ func (j *JobDefinition) UnmarshalConfig(data string) error {
 	}
 	if err := json.Unmarshal([]byte(data), &j.Config); err != nil {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	return nil
+}
+
+// MarshalPostJobs serializes the post_jobs array to JSON string for database storage
+func (j *JobDefinition) MarshalPostJobs() (string, error) {
+	data, err := json.Marshal(j.PostJobs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal post_jobs: %w", err)
+	}
+	return string(data), nil
+}
+
+// UnmarshalPostJobs deserializes the post_jobs JSON string from database
+func (j *JobDefinition) UnmarshalPostJobs(data string) error {
+	if err := json.Unmarshal([]byte(data), &j.PostJobs); err != nil {
+		return fmt.Errorf("failed to unmarshal post_jobs: %w", err)
 	}
 	return nil
 }

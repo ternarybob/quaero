@@ -68,111 +68,6 @@
             </div>
         </div>
 
-        <!-- Queue Statistics -->
-        <section style="margin-top: 1.5rem;" x-data="queueStats">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3>Queue Status</h3>
-                        </section>
-                        <section class="navbar-section">
-                            <span class="label" :class="connectionStatus ? 'label-success' : 'label-error'" x-text="connectionStatus ? 'Connected' : 'Disconnected'"></span>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <div class="columns">
-                        <div class="column col-3">
-                            <div class="tile tile-centered">
-                                <div class="tile-content">
-                                    <div class="tile-title text-bold" x-text="stats.pending_messages">0</div>
-                                    <div class="tile-subtitle text-gray">Pending Messages</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column col-3">
-                            <div class="tile tile-centered">
-                                <div class="tile-content">
-                                    <div class="tile-title text-bold" x-text="stats.in_flight_messages">0</div>
-                                    <div class="tile-subtitle text-gray">In-Flight Messages</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column col-3">
-                            <div class="tile tile-centered">
-                                <div class="tile-content">
-                                    <div class="tile-title text-bold" x-text="stats.total_messages">0</div>
-                                    <div class="tile-subtitle text-gray">Total Messages</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="column col-3">
-                            <div class="tile tile-centered">
-                                <div class="tile-content">
-                                    <div class="tile-title text-bold" x-text="stats.concurrency">0</div>
-                                    <div class="tile-subtitle text-gray">Workers</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Job Spawn Notifications -->
-        <section x-data="jobSpawnNotifications">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3>Recent Job Spawns</h3>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm" @click="clearNotifications()" title="Clear Notifications">
-                                <i class="fa-solid fa-eraser"></i> Clear
-                            </button>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <template x-if="notifications.length === 0">
-                        <div class="text-center text-gray">
-                            No job spawn events yet. Child jobs will appear here when spawned from parent jobs.
-                        </div>
-                    </template>
-                    <template x-if="notifications.length > 0">
-                        <div style="max-height: 300px; overflow-y: auto;">
-                            <table class="table table-sm striped">
-                                <thead>
-                                    <tr>
-                                        <th>TIME</th>
-                                        <th>PARENT JOB</th>
-                                        <th>CHILD JOB</th>
-                                        <th>TYPE</th>
-                                        <th>URL</th>
-                                        <th>DEPTH</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <template x-for="notification in notifications" :key="notification.child_job_id">
-                                        <tr>
-                                            <td x-text="formatTimestamp(notification.timestamp)"></td>
-                                            <td x-text="notification.parent_job_id.substring(0, 8) + '...'"></td>
-                                            <td x-text="notification.child_job_id.substring(0, 8) + '...'"></td>
-                                            <td x-text="notification.job_type"></td>
-                                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="notification.url" x-text="notification.url || 'N/A'"></td>
-                                            <td x-text="notification.depth"></td>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table>
-                        </div>
-                    </template>
-                </div>
-            </div>
-        </section>
-
         <!-- Job Statistics -->
         <section>
             <div class="card">
@@ -220,14 +115,26 @@
         </section>
 
         <!-- Job Queue -->
-        <section>
+        <section x-data="queueStatsHeader">
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h3> Job Queue </h3>
+                            <h3>Job Queue</h3>
                         </section>
                         <section class="navbar-section">
+                            <div style="display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; margin-right: 1rem;">
+                                <span class="text-gray">
+                                    <span x-text="pending">0</span> Pending
+                                </span>
+                                <span class="text-gray">
+                                    <span x-text="inFlight">0</span> In-Flight
+                                </span>
+                                <span class="text-gray">
+                                    <span x-text="workers">0</span> Workers
+                                </span>
+                                <span class="label" :class="connected ? 'label-success' : 'label-error'" x-text="connected ? 'Connected' : 'Disconnected'"></span>
+                            </div>
                             <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none;">
                                 <i class="fa-solid fa-trash"></i>
                                 <span>Delete Selected</span>
@@ -247,30 +154,20 @@
                         <div id="filter-chips-container"></div>
                     </div>
 
-                    <!-- Jobs Table -->
-                    <table class="table striped border">
-                        <thead>
-                            <tr>
-                                <th>
-                                    <label class="form-checkbox">
-                                        <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
-                                        <i class="form-icon"></i>
-                                    </label>
-                                </th>
-                                <th>JOB</th>
-                                <th>STATUS</th>
-                                <th>CREATED</th>
-                                <th class="text-center">ACTIONS</th>
-                            </tr>
-                        </thead>
-                        <tbody id="jobs-table-body">
-                            <tr>
-                                <td colspan="5" class="text-center">
-                                    Loading jobs...
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <!-- Select All Checkbox -->
+                    <div style="margin-bottom: 0.8rem;">
+                        <label class="form-checkbox">
+                            <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
+                            <i class="form-icon"></i> Select All
+                        </label>
+                    </div>
+
+                    <!-- Jobs Cards Container -->
+                    <div id="jobs-cards-container">
+                        <div class="text-center text-gray" style="padding: 2rem;">
+                            Loading jobs...
+                        </div>
+                    </div>
 
                     <!-- Pagination Controls -->
                     <div id="job-pagination-container" class="pagination-container">
@@ -280,87 +177,6 @@
             </div>
         </section>
 
-        <!-- Job Detail -->
-        <section>
-            <div class="card">
-                <div class="card-header">
-                    <span id="selected-job-id" class="label label-primary"></span>
-                </div>
-                <div class="card-body">
-
-                    <!-- Tabs -->
-                    <div x-data="{ activeTab: 'json' }">
-                        <ul class="tab tab-block">
-                            <li class="tab-item" :class="{ 'active': activeTab === 'json' }">
-                                <a href="#" @click.prevent="activeTab = 'json'">
-                                    <i class="fa-solid fa-code"></i> Job JSON
-                                </a>
-                            </li>
-                            <li class="tab-item" :class="{ 'active': activeTab === 'logs' }">
-                                <a href="#" @click.prevent="activeTab = 'logs'; loadJobLogsTab()">
-                                    <i class="fa-solid fa-list"></i> Job Logs
-                                </a>
-                            </li>
-                        </ul>
-
-                        <!-- Tab Content: Job JSON -->
-                        <div x-show="activeTab === 'json'">
-                            <!-- Job Progress Visualization -->
-                            <div id="job-progress-section" style="margin-bottom: 1rem; display: none;">
-                                <h4 style="margin-bottom: 0.5rem;">Job Progress</h4>
-                                <div class="progress-container">
-                                    <div id="job-progress-bar" class="progress-bar" style="width: 0%;">
-                                        <span id="job-progress-text">0%</span>
-                                    </div>
-                                </div>
-                                <div style="font-size: 0.875rem; color: #666; margin-top: 0.25rem;">
-                                    <span id="job-progress-details">No progress data available</span>
-                                </div>
-                            </div>
-
-                            <pre id="job-detail-json" class="code-block"><code class="language-json"></code></pre>
-                        </div>
-
-                        <!-- Tab Content: Job Logs -->
-                        <div id="job-logs-tab" x-show="activeTab === 'logs'" x-data="{ autoScroll: true, logs: [], hasSelection: false }">
-                            <!-- Control Buttons Header -->
-                            <header class="navbar" style="margin-bottom: 1rem;">
-                                <section class="navbar-section">
-                                    <!-- Spacer -->
-                                </section>
-                                <section class="navbar-section">
-                                    <button class="btn btn-sm" @click="autoScroll = !autoScroll" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                                        <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
-                                    </button>
-                                    <button class="btn btn-sm" @click="loadJobLogsTab()" title="Refresh Logs">
-                                        <i class="fa-solid fa-rotate-right"></i>
-                                    </button>
-                                </section>
-                            </header>
-
-                            <!-- Terminal Display -->
-                            <div class="terminal" x-ref="logContainer">
-                                <template x-if="logs.length === 0">
-                                    <div style="text-align: center; color: var(--text-secondary);">
-                                        <span x-text="hasSelection ? 'No logs available for this job' : 'Select a job to view its logs'"></span>
-                                    </div>
-                                </template>
-                                <template x-for="log in logs" :key="log.timestamp + log.message">
-                                    <div class="terminal-line">
-                                        <span class="terminal-time" x-text="'[' + log.timestamp + ']'"></span>
-                                        <span :class="log.levelClass" x-text="'[' + log.level.toUpperCase() + ']'"></span>
-                                        <span x-text="log.message"></span>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
 
         <!-- Service Logs -->
         <section>
@@ -722,36 +538,35 @@
             loadJobs();
         }
 
-        // Render jobs table
+        // Render jobs as cards
         function renderJobs() {
-            const tbody = document.getElementById('jobs-table-body');
+            const container = document.getElementById('jobs-cards-container');
             const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
 
             // Update custom pagination
             renderPagination(totalPages);
 
             if (!filteredJobs || filteredJobs.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center">
-                            No jobs found matching the current filters.
-                        </td>
-                    </tr>
+                container.innerHTML = `
+                    <div class="text-center text-gray" style="padding: 2rem;">
+                        No jobs found matching the current filters.
+                    </div>
                 `;
                 return;
             }
 
-            tbody.innerHTML = filteredJobs.map((job, index) => {
+            container.innerHTML = filteredJobs.map((job, index) => {
                 const statusBadge = getStatusBadge(job.status);
                 const createdDate = job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A';
                 const isSelected = selectedJob && selectedJob.id === job.id;
                 const isChecked = selectedJobIds.has(job.id);
                 const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
                 const sourceType = job.source_type || 'N/A';
+                const jobJson = JSON.stringify(job, null, 2);
+                const jsonId = 'job-json-' + index;
 
                 // Extract document count from progress data
                 let documentsCount = 'N/A';
-                let activeChildren = 'N/A';
                 if (job.progress) {
                     try {
                         const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
@@ -763,58 +578,109 @@
                     }
                 }
 
-                // Build job column with ID and source
-                const jobColumn = `
-                    <div>
-                        <div>id:${jobIdShort}</div>
-                        <div class="text-small text-gray">source:${sourceType}</div>
-                    </div>
-                `;
-
-                // Build status column with three lines: badge, documents, active children
-                const statusColumn = `
-                    <div>
-                        <div>${statusBadge}</div>
-                        <div class="text-small text-gray" style="margin-top: 0.25rem;">Documents: ${documentsCount}</div>
-                        <div class="text-small text-gray">Active Children: ${activeChildren}</div>
-                    </div>
-                `;
-
                 return `
-                    <tr class="${isSelected ? 'bg-gray' : ''}" onclick="selectJob(${index})">
-                        <td onclick="event.stopPropagation()">
-                            <label class="form-checkbox">
-                                <input type="checkbox" class="job-checkbox" data-job-id="${job.id}"
-                                       onchange="toggleJobSelection('${job.id}')" ${isChecked ? 'checked' : ''}>
-                                <i class="form-icon"></i>
-                            </label>
-                        </td>
-                        <td title="${job.id || 'N/A'}">${jobColumn}</td>
-                        <td>${statusColumn}</td>
-                        <td>${createdDate}</td>
-                        <td class="text-center">
-                            ${job.status !== 'running' ? `
-                            <button class="btn btn-sm" onclick="event.stopPropagation(); rerunJob('${job.id}')" title="Copy Job and Add to Queue">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                            ` : ''}
-                            ${job.status === 'running' ? `
-                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); cancelJob('${job.id}')" title="Cancel Job">
-                                <i class="fas fa-stop"></i>
-                            </button>
-                            ` : ''}
-                            ${job.status !== 'running' ? `
-                            <button class="btn btn-sm btn-error" onclick="event.stopPropagation(); deleteJob('${job.id}')" title="Delete Job">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                            ` : ''}
-                        </td>
-                    </tr>
+                    <div class="card ${isSelected ? 'bg-gray' : ''}" style="margin-bottom: 0.8rem;">
+                        <div class="card-body">
+                            <div class="columns">
+                                <!-- Left side: Checkbox and Content -->
+                                <div class="column col-1" onclick="event.stopPropagation()">
+                                    <label class="form-checkbox">
+                                        <input type="checkbox" class="job-checkbox" data-job-id="${job.id}"
+                                               onchange="toggleJobSelection('${job.id}')" ${isChecked ? 'checked' : ''}>
+                                        <i class="form-icon"></i>
+                                    </label>
+                                </div>
+                                <div class="column col-9">
+                                    <div class="card-title h5" title="${job.id || 'N/A'}">Job ID: ${jobIdShort}</div>
+                                    <div class="card-subtitle text-gray">Source: ${sourceType}</div>
+
+                                    <!-- Metadata -->
+                                    <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                        <!-- Status Badge -->
+                                        <div>
+                                            ${statusBadge}
+                                        </div>
+                                        <!-- Documents -->
+                                        <div>
+                                            <i class="fas fa-file-alt"></i>
+                                            <span>${documentsCount} Documents</span>
+                                        </div>
+                                        <!-- Created Date -->
+                                        <div>
+                                            <i class="fas fa-calendar"></i>
+                                            <span>${createdDate}</span>
+                                        </div>
+                                        <!-- Toggle JSON -->
+                                        <div>
+                                            <a href="#" class="text-primary" onclick="event.preventDefault(); event.stopPropagation(); toggleJobJson('${jsonId}')">
+                                                <i class="fas fa-code"></i> Show Configuration
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Right side: Actions -->
+                                <div class="column col-2 text-right" style="flex-shrink: 0;" onclick="event.stopPropagation()">
+                                    ${job.status !== 'running' ? `
+                                    <button class="btn btn-sm" onclick="rerunJob('${job.id}')" title="Copy Job and Add to Queue">
+                                        <i class="fa-solid fa-rotate-right"></i>
+                                    </button>
+                                    ` : ''}
+                                    ${job.status === 'running' ? `
+                                    <button class="btn btn-sm btn-warning" onclick="cancelJob('${job.id}')" title="Cancel Job">
+                                        <i class="fas fa-stop"></i>
+                                    </button>
+                                    ` : ''}
+                                    ${job.status !== 'running' ? `
+                                    <button class="btn btn-sm btn-error" onclick="deleteJob('${job.id}')" title="Delete Job">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    ` : ''}
+                                </div>
+                            </div>
+
+                            <!-- Job Configuration (Collapsible JSON) -->
+                            <div id="${jsonId}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                                <pre style="background-color: #ffffff; padding: 1rem; border: 1px solid #e0e0e0; border-radius: 4px; overflow-x: auto; max-height: 400px;"><code class="language-json">${escapeHtml(jobJson)}</code></pre>
+                            </div>
+                        </div>
+                    </div>
                 `;
             }).join('');
 
             // Update delete selected button visibility
             updateDeleteSelectedButtonVisibility();
+
+            // Re-apply syntax highlighting
+            if (typeof hljs !== 'undefined') {
+                document.querySelectorAll('#jobs-cards-container code.language-json').forEach(block => {
+                    hljs.highlightElement(block);
+                });
+            }
+        }
+
+        // Toggle job JSON visibility
+        function toggleJobJson(jsonId) {
+            const jsonElement = document.getElementById(jsonId);
+            if (jsonElement) {
+                if (jsonElement.style.display === 'none') {
+                    jsonElement.style.display = 'block';
+                } else {
+                    jsonElement.style.display = 'none';
+                }
+            }
+        }
+
+        // Escape HTML entities
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
         }
 
         // Get status badge HTML
@@ -916,151 +782,6 @@
         function changePage(pageNumber) {
             currentPage = pageNumber;
             loadJobs();
-        }
-
-        // Select and display job details
-        function selectJob(index) {
-            selectedJob = filteredJobs[index];
-            displayJobDetail(selectedJob);
-            loadJobLogsTab();
-            renderJobs();
-        }
-
-        function displayJobDetail(job) {
-            const selectedId = document.getElementById('selected-job-id');
-            const detailPre = document.getElementById('job-detail-json');
-            const codeBlock = detailPre.querySelector('code');
-            const progressSection = document.getElementById('job-progress-section');
-            const progressBar = document.getElementById('job-progress-bar');
-            const progressText = document.getElementById('job-progress-text');
-            const progressDetails = document.getElementById('job-progress-details');
-
-            if (!job) {
-                selectedId.textContent = '';
-                codeBlock.textContent = '';
-                if (progressSection) progressSection.style.display = 'none';
-                return;
-            }
-
-            selectedId.textContent = job.id || 'Unknown';
-            const jsonString = JSON.stringify(job, null, 2);
-            codeBlock.textContent = jsonString;
-
-            if (typeof hljs !== 'undefined') {
-                hljs.highlightElement(codeBlock);
-            }
-
-            // Update progress visualization
-            if (job.progress && progressSection && progressBar && progressText && progressDetails) {
-                try {
-                    const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
-
-                    if (progress && progress.percentage !== undefined) {
-                        const percentage = Math.round(progress.percentage);
-
-                        // Show progress section
-                        progressSection.style.display = 'block';
-
-                        // Update progress bar width and text
-                        progressBar.style.width = percentage + '%';
-                        progressText.textContent = percentage + '%';
-
-                        // Apply color based on status
-                        progressBar.classList.remove('progress-success', 'progress-warning', 'progress-error');
-                        if (job.status === 'completed') {
-                            progressBar.classList.add('progress-success');
-                        } else if (job.status === 'failed') {
-                            progressBar.classList.add('progress-error');
-                        } else if (job.status === 'running') {
-                            progressBar.classList.add('progress-warning');
-                        }
-
-                        // Update details text
-                        let detailsText = '';
-                        if (progress.completed_urls !== undefined && progress.total_urls !== undefined) {
-                            detailsText = `${progress.completed_urls} of ${progress.total_urls} URLs completed`;
-                            if (progress.failed_urls !== undefined && progress.failed_urls > 0) {
-                                detailsText += ` (${progress.failed_urls} failed)`;
-                            }
-                        } else {
-                            detailsText = `Progress: ${percentage}%`;
-                        }
-                        progressDetails.textContent = detailsText;
-                    } else {
-                        progressSection.style.display = 'none';
-                    }
-                } catch (error) {
-                    console.warn('[Queue] Failed to parse job progress for display:', error);
-                    progressSection.style.display = 'none';
-                }
-            } else {
-                if (progressSection) progressSection.style.display = 'none';
-            }
-        }
-
-        // Load job logs for the currently selected job
-        async function loadJobLogsTab() {
-            // Get Alpine.js component data by ID (Comment 5: use ID instead of brittle x-show selector)
-            const logsTabElement = document.getElementById('job-logs-tab');
-            if (!logsTabElement) {
-                console.error('Job logs tab element not found');
-                return;
-            }
-
-            const alpineData = Alpine.$data(logsTabElement);
-
-            // Update hasSelection flag (Comment 2: use hasSelection instead of referencing selectedJob in template)
-            alpineData.hasSelection = !!(selectedJob && selectedJob.id);
-
-            if (!selectedJob || !selectedJob.id) {
-                alpineData.logs = [];
-                return;
-            }
-
-            try {
-                const response = await fetch(`/api/jobs/${selectedJob.id}/logs`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch job logs');
-                }
-
-                const data = await response.json();
-                const logs = data.logs || [];
-
-                // Normalize log levels and add CSS class mapping (Comment 3: map log levels to CSS classes)
-                const normalizedLogs = logs.map(log => {
-                    // Normalize level: error->error, warning/warn->warning, info->info, debug->debug
-                    let normalizedLevel = log.level.toLowerCase();
-                    if (normalizedLevel === 'warn') {
-                        normalizedLevel = 'warning';
-                    }
-
-                    return {
-                        timestamp: log.timestamp,
-                        level: normalizedLevel,
-                        levelClass: 'terminal-' + normalizedLevel,
-                        message: log.message
-                    };
-                });
-
-                // Update Alpine.js state
-                alpineData.logs = normalizedLogs;
-
-                // Auto-scroll to bottom if enabled (Comment 1: use DOM query instead of $refs)
-                if (alpineData.autoScroll) {
-                    Alpine.nextTick(() => {
-                        const container = logsTabElement.querySelector('[x-ref="logContainer"]');
-                        if (container) {
-                            container.scrollTop = container.scrollHeight;
-                        }
-                    });
-                }
-
-            } catch (error) {
-                console.error('Error loading job logs:', error);
-                alpineData.logs = [];
-                alpineData.hasSelection = false;
-                window.showNotification('Failed to load logs: ' + error.message, 'error');
-            }
         }
 
         // Rerun a job
@@ -1287,6 +1008,97 @@
         // Ensure Alpine.js is fully initialized
         document.addEventListener('alpine:init', function () {
             console.log('[Queue] Alpine.js initialized');
+
+            // Register queueStatsHeader component
+            Alpine.data('queueStatsHeader', () => ({
+                pending: 0,
+                inFlight: 0,
+                workers: 0,
+                connected: false,
+                ws: null,
+
+                init() {
+                    // Load initial stats from API
+                    this.loadStats();
+
+                    // Connect to WebSocket for real-time updates
+                    this.connectWebSocket();
+                },
+
+                async loadStats() {
+                    try {
+                        const response = await fetch('/api/jobs/queue');
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.pending = data.pending_messages || 0;
+                            this.inFlight = data.in_flight_messages || 0;
+                            this.workers = data.concurrency || 0;
+                            this.connected = true;
+                        } else {
+                            this.connected = false;
+                        }
+                    } catch (error) {
+                        console.error('[Queue] Error loading queue stats:', error);
+                        this.connected = false;
+                    }
+                },
+
+                connectWebSocket() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+                    console.log('[Queue] Connecting to WebSocket:', wsUrl);
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => {
+                        console.log('[Queue] WebSocket connected');
+                        this.connected = true;
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const message = JSON.parse(event.data);
+
+                            // Handle queue stats updates
+                            if (message.type === 'queue_stats' && message.payload) {
+                                this.pending = message.payload.pending_messages || 0;
+                                this.inFlight = message.payload.in_flight_messages || 0;
+                                this.workers = message.payload.concurrency || 0;
+                                this.connected = true;
+
+                                console.log('[Queue] WebSocket stats update:', {
+                                    pending: this.pending,
+                                    inFlight: this.inFlight,
+                                    workers: this.workers
+                                });
+                            }
+                        } catch (error) {
+                            console.error('[Queue] Error parsing WebSocket message:', error);
+                        }
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('[Queue] WebSocket error:', error);
+                        this.connected = false;
+                    };
+
+                    this.ws.onclose = () => {
+                        console.log('[Queue] WebSocket disconnected, reconnecting in 5s...');
+                        this.connected = false;
+
+                        // Reconnect after 5 seconds
+                        setTimeout(() => {
+                            this.connectWebSocket();
+                        }, 5000);
+                    };
+                },
+
+                destroy() {
+                    if (this.ws) {
+                        this.ws.close();
+                    }
+                }
+            }));
         });
 
         // Toggle job selection for batch operations
