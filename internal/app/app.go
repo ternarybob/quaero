@@ -516,6 +516,124 @@ func (a *App) initServices() error {
 		// Update job status to running
 		baseJob.UpdateJobStatus(ctx, targetID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
 
+		// Extract execution chain from parent message metadata for cycle prevention
+		executionChain := make(map[string]bool)
+		if msg.Metadata != nil {
+			if chain, ok := msg.Metadata["job_execution_chain"]; ok {
+				if chainSlice, ok := chain.([]interface{}); ok {
+					for _, id := range chainSlice {
+						if idStr, ok := id.(string); ok {
+							executionChain[idStr] = true
+						}
+					}
+				}
+			}
+		}
+
+		// Add current job to execution chain
+		executionChain[jobDefID] = true
+		a.Logger.Debug().
+			Str("job_def_id", jobDefID).
+			Int("chain_length", len(executionChain)).
+			Msg("Job execution chain initialized")
+
+		// Create post-job trigger callback for post-job execution
+		postJobCallback := func(callbackCtx context.Context, postJobDef *models.JobDefinition) error {
+			a.Logger.Info().
+				Str("parent_job_id", targetID).
+				Str("post_job_id", postJobDef.ID).
+				Str("post_job_name", postJobDef.Name).
+				Msg("Post-job trigger requested")
+
+			// Cycle detection: Check if postJobID is already in the execution chain
+			if executionChain[postJobDef.ID] {
+				a.Logger.Warn().
+					Str("post_job_id", postJobDef.ID).
+					Str("post_job_name", postJobDef.Name).
+					Str("parent_job_id", targetID).
+					Int("chain_length", len(executionChain)).
+					Msg("Cycle detected: post-job already in execution chain - skipping to prevent infinite loop")
+				return nil // Skip this post-job, but don't fail the parent
+			}
+
+			// Create a new parent job message for the post-job
+			config := map[string]interface{}{
+				"job_definition_id": postJobDef.ID,
+				"job_name":          postJobDef.Name,
+				"job_type":          string(postJobDef.Type),
+			}
+
+			// Add sources if present
+			if len(postJobDef.Sources) > 0 {
+				config["sources"] = postJobDef.Sources
+			}
+
+			// Add steps if present
+			if len(postJobDef.Steps) > 0 {
+				config["steps"] = postJobDef.Steps
+			}
+
+			// Add timeout if present
+			if postJobDef.Timeout != "" {
+				config["timeout"] = postJobDef.Timeout
+			}
+
+			parentMsg := queue.NewJobDefinitionMessage(postJobDef.ID, config)
+
+			// Propagate execution chain to post-job message for cycle prevention
+			// Convert map to slice for JSON serialization
+			chainSlice := make([]string, 0, len(executionChain))
+			for jobID := range executionChain {
+				chainSlice = append(chainSlice, jobID)
+			}
+			if parentMsg.Metadata == nil {
+				parentMsg.Metadata = make(map[string]interface{})
+			}
+			parentMsg.Metadata["job_execution_chain"] = chainSlice
+
+			a.Logger.Debug().
+				Str("post_job_id", postJobDef.ID).
+				Str("parent_job_id", targetID).
+				Int("chain_length", len(chainSlice)).
+				Msg("Propagated execution chain to post-job message")
+
+			// Create a job record in database
+			job := &models.CrawlJob{
+				ID:     parentMsg.ID,
+				Name:   postJobDef.Name,
+				Status: models.JobStatusPending,
+			}
+			if err := a.StorageManager.JobStorage().SaveJob(callbackCtx, job); err != nil {
+				a.Logger.Error().
+					Err(err).
+					Str("post_job_id", postJobDef.ID).
+					Str("message_id", parentMsg.ID).
+					Str("parent_job_id", targetID).
+					Msg("Failed to save post-job record")
+				return fmt.Errorf("failed to save post-job record: %w", err)
+			}
+
+			// Enqueue the message
+			if err := a.QueueManager.Enqueue(callbackCtx, parentMsg); err != nil {
+				a.Logger.Error().
+					Err(err).
+					Str("post_job_id", postJobDef.ID).
+					Str("message_id", parentMsg.ID).
+					Str("parent_job_id", targetID).
+					Msg("Failed to enqueue post-job")
+				return fmt.Errorf("failed to enqueue post-job: %w", err)
+			}
+
+			a.Logger.Info().
+				Str("post_job_id", postJobDef.ID).
+				Str("post_job_name", postJobDef.Name).
+				Str("message_id", parentMsg.ID).
+				Str("parent_job_id", targetID).
+				Msg("Post-job enqueued successfully")
+
+			return nil
+		}
+
 		// Create status update callback for async polling completion
 		statusCallback := func(callbackCtx context.Context, status string, errorMsg string) error {
 			if err := baseJob.UpdateJobStatus(callbackCtx, targetID, status, errorMsg); err != nil {
@@ -537,8 +655,8 @@ func (a *App) initServices() error {
 			return nil
 		}
 
-		// Execute job definition steps with status callback
-		result, err := a.JobExecutor.Execute(ctx, jobDef, statusCallback)
+		// Execute job definition steps with status callback and post-job callback
+		result, err := a.JobExecutor.Execute(ctx, jobDef, statusCallback, postJobCallback)
 		if err != nil {
 			// Only update status if async polling is NOT active
 			// (polling goroutine will handle status update via callback)
@@ -596,7 +714,7 @@ func (a *App) initServices() error {
 
 	// Initialize job executor for job definition execution
 	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
-	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.CrawlerService, a.Logger)
+	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.CrawlerService, a.StorageManager.JobDefinitionStorage(), a.Logger)
 	if err != nil {
 		return fmt.Errorf("failed to initialize job executor: %w", err)
 	}

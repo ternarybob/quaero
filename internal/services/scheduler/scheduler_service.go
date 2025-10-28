@@ -862,9 +862,9 @@ func (s *Service) LoadJobDefinitions() error {
 		// Create handler closure that captures the job definition
 		handler := func() error {
 			execCtx := context.Background()
-			// For scheduled jobs, we don't need a status callback since they're not parent jobs
-			// Pass nil callback - job-level events are still published via EventJobProgress
-			_, err := s.jobExecutor.Execute(execCtx, jd, nil)
+			// For scheduled jobs, we don't need status or post-job callbacks since they're not parent jobs
+			// Pass nil callbacks - job-level events are still published via EventJobProgress
+			_, err := s.jobExecutor.Execute(execCtx, jd, nil, nil)
 			return err
 		}
 

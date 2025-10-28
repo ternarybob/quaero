@@ -442,6 +442,11 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		childrenToSpawn = enqueuedCount
 	}
 
+	// Update heartbeat to track "last URL processed" timestamp
+	if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
+		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat")
+	}
+
 	// Update parent job progress AFTER determining how many children will be spawned
 	// This ensures PendingURLs is accurate and prevents premature job completion
 	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
@@ -469,25 +474,88 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
 			}
 
-			// Check for job completion BEFORE saving
-			// Job is complete when all URLs have been processed (including spawned children)
-			isComplete := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
+			// Two-phase completion detection with grace period
+			// Phase 1: Detect when PendingURLs reaches 0 (completion candidate)
+			// Phase 2: Verify after 5-second grace period that job is truly idle
+			isCompletionCandidate := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
 
-			if isComplete && job.Status != crawler.JobStatusCompleted {
-				job.Status = crawler.JobStatusCompleted
-				c.logger.Info().
-					Str("parent_id", msg.ParentID).
-					Int("total_urls", job.Progress.TotalURLs).
-					Int("completed_urls", job.Progress.CompletedURLs).
-					Int("failed_urls", job.Progress.FailedURLs).
-					Msg("Job completed - all URLs processed (including spawned children)")
+			if isCompletionCandidate && job.Status != crawler.JobStatusCompleted {
+				const gracePeriod = 5 * time.Second
 
-				// Log job completion event
-				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-					fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
-						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
-					c.logger.Warn().Err(err).Msg("Failed to log job completion event")
+				// Check if we already have a completion candidate timestamp
+				if job.CompletionCandidateAt.IsZero() {
+					// Phase 1: First time reaching PendingURLs == 0
+					job.CompletionCandidateAt = time.Now()
+					c.logger.Info().
+						Str("parent_id", msg.ParentID).
+						Int("completed", job.Progress.CompletedURLs).
+						Int("total", job.Progress.TotalURLs).
+						Msg("Job became completion candidate - starting grace period")
+				} else {
+					// Phase 2: We're already a completion candidate, check if grace period elapsed
+					elapsed := time.Since(job.CompletionCandidateAt)
+
+					if elapsed >= gracePeriod {
+						// Grace period elapsed - verify completion conditions still met
+						// Reload job to check if heartbeat changed (indicates activity during grace period)
+						freshJobInterface, reloadErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
+						if reloadErr != nil {
+							c.logger.Warn().Err(reloadErr).Msg("Failed to reload job for completion verification")
+						} else if freshJob, ok := freshJobInterface.(*crawler.CrawlJob); ok {
+							// Verify conditions:
+							// 1. PendingURLs still 0 (no new URLs enqueued)
+							// 2. Heartbeat unchanged (no activity during grace period)
+							heartbeatUnchanged := freshJob.CompletionCandidateAt.Equal(job.CompletionCandidateAt)
+							pendingStillZero := freshJob.Progress.PendingURLs == 0
+
+							if heartbeatUnchanged && pendingStillZero {
+								// All conditions met - mark job as completed
+								job.ResultCount = job.Progress.CompletedURLs
+								job.FailedCount = job.Progress.FailedURLs
+								job.Status = crawler.JobStatusCompleted
+								job.CompletedAt = time.Now()
+
+								c.logger.Info().
+									Str("parent_id", msg.ParentID).
+									Int("total_urls", job.Progress.TotalURLs).
+									Int("completed_urls", job.Progress.CompletedURLs).
+									Int("failed_urls", job.Progress.FailedURLs).
+									Dur("grace_period", elapsed).
+									Msg("Job completed after grace period verification")
+
+								// Log job completion event
+								if err := c.LogJobEvent(ctx, msg.ParentID, "info",
+									fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
+										job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
+									c.logger.Warn().Err(err).Msg("Failed to log job completion event")
+								}
+							} else {
+								// Conditions not met - reset candidate timestamp (more work happening)
+								job.CompletionCandidateAt = time.Now()
+								c.logger.Debug().
+									Str("parent_id", msg.ParentID).
+									Bool("heartbeat_unchanged", heartbeatUnchanged).
+									Bool("pending_still_zero", pendingStillZero).
+									Msg("Grace period verification failed - resetting completion candidate")
+							}
+						}
+					} else {
+						// Still waiting for grace period to elapse
+						remaining := gracePeriod - elapsed
+						c.logger.Debug().
+							Str("parent_id", msg.ParentID).
+							Dur("elapsed", elapsed).
+							Dur("remaining", remaining).
+							Msg("Completion candidate - waiting for grace period")
+					}
 				}
+			} else if !isCompletionCandidate && !job.CompletionCandidateAt.IsZero() {
+				// PendingURLs no longer 0 - reset completion candidate (new URLs enqueued)
+				c.logger.Debug().
+					Str("parent_id", msg.ParentID).
+					Int("pending", job.Progress.PendingURLs).
+					Msg("No longer completion candidate - new URLs enqueued")
+				job.CompletionCandidateAt = time.Time{} // Reset to zero
 			}
 
 			// Save updated progress (includes completion status if applicable)
@@ -502,7 +570,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 					Int("spawned_children", childrenToSpawn).
 					Float64("percentage", job.Progress.Percentage).
 					Str("status", string(job.Status)).
-					Bool("is_complete", isComplete).
+					Bool("is_completion_candidate", isCompletionCandidate).
 					Msg("Progress updated atomically with spawned children")
 			}
 

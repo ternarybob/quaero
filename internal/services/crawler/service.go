@@ -604,6 +604,11 @@ func (s *Service) CancelJob(jobID string) error {
 
 	job.Status = JobStatusCancelled
 	job.CompletedAt = time.Now()
+
+	// Sync result counts with progress counters before terminating
+	job.ResultCount = job.Progress.CompletedURLs
+	job.FailedCount = job.Progress.FailedURLs
+
 	s.jobsMu.Unlock()
 
 	// Persist cancellation status to database (outside lock to avoid contention)
@@ -653,6 +658,11 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	job.Status = JobStatusFailed
 	job.CompletedAt = time.Now()
 	job.Error = reason
+
+	// Sync result counts with progress counters before terminating
+	job.ResultCount = job.Progress.CompletedURLs
+	job.FailedCount = job.Progress.FailedURLs
+
 	s.jobsMu.Unlock()
 
 	// Persist failed status to database (outside lock to avoid contention)

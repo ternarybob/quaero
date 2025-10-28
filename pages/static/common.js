@@ -558,6 +558,9 @@ document.addEventListener('alpine:init', () => {
           this.jobDefinitions = [];
         }
 
+        // Backward compatibility: ensure all job definitions have post_jobs field
+        this.jobDefinitions = this.jobDefinitions.map(jd => ({ ...jd, post_jobs: jd.post_jobs || [] }));
+
         this.loading = false;
       } catch (err) {
         window.debugError('JobDefinitionsManagement', 'Error loading job definitions:', err);
@@ -591,8 +594,14 @@ document.addEventListener('alpine:init', () => {
         timeout: '',   // Optional: duration string like "10m", "1h", "30s"
         enabled: true,
         auto_start: false,
-        config: {}
+        config: {},
+        post_jobs: []
       };
+    },
+
+    get availablePostJobs() {
+      // Filter out the current job being edited to prevent self-reference
+      return this.jobDefinitions.filter(jobDef => jobDef.id !== this.currentJobDefinition.id);
     },
 
     generateID() {
@@ -663,11 +672,12 @@ document.addEventListener('alpine:init', () => {
       this.currentJobDefinition.steps = this.getDefaultSteps(jobType);
     },
 
-    openCreateModal(event) {
+    async openCreateModal(event) {
       this.modalTriggerElement = event?.target || document.activeElement;
       this.resetCurrentJobDefinition();
       this.showCreateModal = true;
       document.body.classList.add('modal-open');
+      await this.loadJobDefinitions();
       this.loadSources();
 
       this.$nextTick(() => {
@@ -679,11 +689,16 @@ document.addEventListener('alpine:init', () => {
       });
     },
 
-    editJobDefinition(jobDef, event) {
+    async editJobDefinition(jobDef, event) {
       this.modalTriggerElement = event?.target || document.activeElement;
       this.currentJobDefinition = JSON.parse(JSON.stringify(jobDef));
+      // Defensive initialization for backward compatibility with old job definitions
+      if (!this.currentJobDefinition.post_jobs) {
+        this.currentJobDefinition.post_jobs = [];
+      }
       this.showEditModal = true;
       document.body.classList.add('modal-open');
+      await this.loadJobDefinitions();
       this.loadSources();
 
       this.$nextTick(() => {
@@ -693,10 +708,87 @@ document.addEventListener('alpine:init', () => {
           if (firstFocusable) firstFocusable.focus();
         }
       });
+    },
+
+    detectPostJobCycle() {
+      // Build directed graph from all job definitions with the pending post_jobs applied
+      const graph = new Map();
+
+      // Add all existing job definitions to the graph
+      for (const jobDef of this.jobDefinitions) {
+        const postJobs = jobDef.post_jobs || [];
+        // If this is the current job being edited, use the pending post_jobs
+        if (jobDef.id === this.currentJobDefinition.id) {
+          graph.set(jobDef.id, this.currentJobDefinition.post_jobs || []);
+        } else {
+          graph.set(jobDef.id, postJobs);
+        }
+      }
+
+      // If this is a new job (not in jobDefinitions yet), add it to the graph
+      const isNewJob = !this.jobDefinitions.some(jd => jd.id === this.currentJobDefinition.id);
+      if (isNewJob) {
+        graph.set(this.currentJobDefinition.id, this.currentJobDefinition.post_jobs || []);
+      }
+
+      // DFS to detect if current job is reachable from any of its post_jobs
+      const currentJobId = this.currentJobDefinition.id;
+      const postJobs = this.currentJobDefinition.post_jobs || [];
+
+      if (postJobs.length === 0) {
+        return false; // No post-jobs, no cycle possible
+      }
+
+      // Check if current job is reachable from any of its post_jobs
+      const visited = new Set();
+      const recursionStack = new Set();
+
+      const dfs = (nodeId) => {
+        if (recursionStack.has(nodeId)) {
+          return true; // Cycle detected
+        }
+        if (visited.has(nodeId)) {
+          return false; // Already visited this path
+        }
+
+        visited.add(nodeId);
+        recursionStack.add(nodeId);
+
+        const neighbors = graph.get(nodeId) || [];
+        for (const neighborId of neighbors) {
+          if (neighborId === currentJobId) {
+            return true; // Found path back to current job - cycle detected
+          }
+          if (dfs(neighborId)) {
+            return true;
+          }
+        }
+
+        recursionStack.delete(nodeId);
+        return false;
+      };
+
+      // Start DFS from each post-job of the current job
+      for (const postJobId of postJobs) {
+        visited.clear();
+        recursionStack.clear();
+        if (dfs(postJobId)) {
+          return true; // Cycle detected
+        }
+      }
+
+      return false; // No cycle detected
     },
 
     async saveJobDefinition() {
       window.debugLog('JobDefinitionsManagement', 'Saving job definition:', this.currentJobDefinition);
+
+      // Check for cycles in post-job graph before saving
+      if (this.detectPostJobCycle()) {
+        window.showNotification('Cannot save: Post-job configuration creates a cycle. A job cannot trigger itself indirectly through post-jobs.', 'error');
+        return;
+      }
+
       try {
         const isEdit = this.showEditModal;
         const url = isEdit ? `/api/job-definitions/${this.currentJobDefinition.id}` : '/api/job-definitions';
@@ -798,6 +890,20 @@ document.addEventListener('alpine:init', () => {
     formatSourcesList(sources) {
       if (!sources || sources.length === 0) return 'None';
       return `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
+    },
+
+    formatPostJobsList(postJobs) {
+      if (!postJobs || postJobs.length === 0) return 'None';
+      return `${postJobs.length} post-job${postJobs.length !== 1 ? 's' : ''}`;
+    },
+
+    getPostJobsTooltip(postJobIds) {
+      if (!postJobIds || postJobIds.length === 0) return 'No post-jobs configured';
+      const names = postJobIds.map(postJobId => {
+        const jobDef = this.jobDefinitions.find(jd => jd.id === postJobId);
+        return jobDef ? jobDef.name : postJobId + ' (deleted)';
+      });
+      return 'Post-jobs:\n' + names.join('\n');
     }
   }));
 

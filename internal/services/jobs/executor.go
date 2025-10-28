@@ -47,6 +47,15 @@ type ExecutionResult struct {
 // StatusUpdateCallback is called when async polling completes to update parent job status
 type StatusUpdateCallback func(ctx context.Context, status string, errorMsg string) error
 
+// PostJobTriggerCallback is invoked for each post-job after successful job completion.
+// The callback is responsible for enqueueing the post-job to the queue.
+// Parameters:
+//   - ctx: Context for the callback operation
+//   - postJobDef: The fetched post-job definition to enqueue
+//
+// Returns error if the post-job cannot be enqueued
+type PostJobTriggerCallback func(ctx context.Context, postJobDef *models.JobDefinition) error
+
 // JobExecutor orchestrates the execution of job definitions by iterating through steps,
 // retrieving action handlers from the registry, and implementing error handling strategies
 type JobExecutor struct {
@@ -54,6 +63,7 @@ type JobExecutor struct {
 	sourceService  *sources.Service
 	eventService   interfaces.EventService
 	crawlerService interfaces.CrawlerService
+	jobDefStorage  interfaces.JobDefinitionStorage
 	logger         arbor.ILogger
 
 	// Context for lifecycle management
@@ -62,7 +72,7 @@ type JobExecutor struct {
 }
 
 // NewJobExecutor creates a new job executor instance
-func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, eventService interfaces.EventService, crawlerService interfaces.CrawlerService, logger arbor.ILogger) (*JobExecutor, error) {
+func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, eventService interfaces.EventService, crawlerService interfaces.CrawlerService, jobDefStorage interfaces.JobDefinitionStorage, logger arbor.ILogger) (*JobExecutor, error) {
 	// Validate inputs
 	if registry == nil {
 		return nil, fmt.Errorf("registry cannot be nil")
@@ -76,6 +86,9 @@ func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, e
 	if crawlerService == nil {
 		return nil, fmt.Errorf("crawlerService cannot be nil")
 	}
+	if jobDefStorage == nil {
+		return nil, fmt.Errorf("jobDefStorage cannot be nil")
+	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
 	}
@@ -88,12 +101,13 @@ func NewJobExecutor(registry *JobTypeRegistry, sourceService *sources.Service, e
 		sourceService:  sourceService,
 		eventService:   eventService,
 		crawlerService: crawlerService,
+		jobDefStorage:  jobDefStorage,
 		logger:         logger,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
 
-	logger.Info().Msg("Job executor initialized")
+	logger.Info().Msg("Job executor initialized with job definition storage")
 
 	return executor, nil
 }
@@ -107,7 +121,9 @@ func (e *JobExecutor) Shutdown() {
 // Execute executes a job definition by iterating through its steps.
 // Returns ExecutionResult indicating whether async polling was launched.
 // If async polling is active, the statusCallback will be invoked when polling completes.
-func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinition, statusCallback StatusUpdateCallback) (*ExecutionResult, error) {
+// If postJobCallback is provided, it will be invoked for each post-job after successful completion.
+// If nil, post-jobs are skipped.
+func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinition, statusCallback StatusUpdateCallback, postJobCallback PostJobTriggerCallback) (*ExecutionResult, error) {
 	// Validate job definition
 	if err := definition.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid job definition: %w", err)
@@ -247,6 +263,11 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 								Int("step_index", stepIndex).
 								Msg("Async crawl polling completed successfully")
 
+							// Trigger post-jobs after successful async polling completion
+							// Use executor context (e.ctx) instead of pollingCtx to avoid timeout issues
+							// This ensures post-jobs have sufficient time to complete even if polling consumed most of the timeout
+							e.executePostJobs(e.ctx, definition, postJobCallback)
+
 							// Invoke status callback with success
 							if statusCallback != nil {
 								if callbackErr := statusCallback(pollingCtx, "completed", ""); callbackErr != nil {
@@ -316,6 +337,9 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	// If async polling was launched, the polling goroutine will publish the final completion event
 	if !asyncPollingLaunched {
 		e.publishProgressEvent(ctx, definition, len(definition.Steps)-1, "", "", "completed", "")
+
+		// Trigger post-jobs after successful synchronous completion
+		e.executePostJobs(ctx, definition, postJobCallback)
 	} else {
 		e.logger.Debug().
 			Str("job_id", definition.ID).
@@ -323,6 +347,113 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	}
 
 	return &ExecutionResult{AsyncPollingActive: asyncPollingLaunched}, nil
+}
+
+// executePostJobs executes post-jobs after successful job completion
+// Fetches job definitions from storage and invokes the callback for each enabled post-job
+// Errors are logged but do not fail the parent job (graceful degradation)
+func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.JobDefinition, postJobCallback PostJobTriggerCallback) error {
+	// Check if callback is nil - skip post-jobs if not provided
+	if postJobCallback == nil {
+		return nil
+	}
+
+	// Check if PostJobs array is empty
+	if len(definition.PostJobs) == 0 {
+		return nil
+	}
+
+	// Log start of post-job execution
+	e.logger.Info().
+		Str("parent_job_id", definition.ID).
+		Int("post_job_count", len(definition.PostJobs)).
+		Msg("Starting post-job execution")
+
+	triggeredCount := 0
+	skippedCount := 0
+
+	// Iterate through post-jobs
+	for _, postJobID := range definition.PostJobs {
+		// Log fetching post-job definition
+		e.logger.Debug().
+			Str("post_job_id", postJobID).
+			Str("parent_job_id", definition.ID).
+			Msg("Fetching post-job definition")
+
+		// Fetch post-job definition from storage
+		postJobDef, err := e.jobDefStorage.GetJobDefinition(ctx, postJobID)
+		if err != nil {
+			// Log warning and continue to next post-job
+			e.logger.Warn().
+				Err(err).
+				Str("post_job_id", postJobID).
+				Str("parent_job_id", definition.ID).
+				Msg("Failed to fetch post-job definition, skipping")
+			skippedCount++
+			continue
+		}
+
+		// Validate: check if post-job is enabled
+		if !postJobDef.Enabled {
+			e.logger.Warn().
+				Str("post_job_id", postJobID).
+				Str("post_job_name", postJobDef.Name).
+				Str("parent_job_id", definition.ID).
+				Msg("Post-job is disabled, skipping")
+			skippedCount++
+			continue
+		}
+
+		// Validate: check if post-job definition is valid
+		if err := postJobDef.Validate(); err != nil {
+			e.logger.Warn().
+				Err(err).
+				Str("post_job_id", postJobID).
+				Str("post_job_name", postJobDef.Name).
+				Str("parent_job_id", definition.ID).
+				Msg("Post-job definition is invalid, skipping")
+			skippedCount++
+			continue
+		}
+
+		// Log triggering post-job
+		e.logger.Info().
+			Str("post_job_id", postJobID).
+			Str("post_job_name", postJobDef.Name).
+			Str("parent_job_id", definition.ID).
+			Msg("Triggering post-job execution")
+
+		// Invoke callback to trigger post-job (pass definition to avoid double-fetching)
+		if err := postJobCallback(ctx, postJobDef); err != nil {
+			// Log error and continue to next post-job (graceful degradation)
+			e.logger.Error().
+				Err(err).
+				Str("post_job_id", postJobID).
+				Str("parent_job_id", definition.ID).
+				Msg("Failed to trigger post-job, continuing with remaining post-jobs")
+			skippedCount++
+			continue
+		}
+
+		// Log successful trigger
+		e.logger.Info().
+			Str("post_job_id", postJobID).
+			Str("post_job_name", postJobDef.Name).
+			Str("parent_job_id", definition.ID).
+			Msg("Post-job triggered successfully")
+		triggeredCount++
+	}
+
+	// Log completion with summary
+	e.logger.Info().
+		Str("parent_job_id", definition.ID).
+		Int("triggered_count", triggeredCount).
+		Int("skipped_count", skippedCount).
+		Int("total_count", len(definition.PostJobs)).
+		Msg("Post-job execution completed")
+
+	// Always return nil - errors are logged but don't fail parent job
+	return nil
 }
 
 // shouldStopOnError returns true if the step's error strategy should stop execution

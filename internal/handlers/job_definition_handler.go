@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -402,6 +403,9 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		SourceType:  string(jobDef.Type),
 		EntityType:  "job_definition",
 		Status:      models.JobStatusPending,
+		CreatedAt:   time.Now(),
+		Config:      models.CrawlConfig{},
+		Progress:    models.CrawlProgress{},
 	}
 
 	if err := h.jobStorage.SaveJob(ctx, job); err != nil {

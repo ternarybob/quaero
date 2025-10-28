@@ -133,6 +133,90 @@ func (m *mockAuthStorage) ListServices(ctx context.Context) ([]string, error) {
 	return []string{}, nil
 }
 
+// mockJobDefinitionStorage implements interfaces.JobDefinitionStorage
+type mockJobDefinitionStorage struct {
+	jobDefs map[string]*models.JobDefinition
+	err     error
+}
+
+func (m *mockJobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *models.JobDefinition) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.jobDefs[jobDef.ID] = jobDef
+	return nil
+}
+
+func (m *mockJobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if jobDef, ok := m.jobDefs[id]; ok {
+		return jobDef, nil
+	}
+	return nil, errors.New("job definition not found")
+}
+
+func (m *mockJobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	list := make([]*models.JobDefinition, 0, len(m.jobDefs))
+	for _, jd := range m.jobDefs {
+		list = append(list, jd)
+	}
+	return list, nil
+}
+
+func (m *mockJobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	list := make([]*models.JobDefinition, 0)
+	for _, jd := range m.jobDefs {
+		if string(jd.Type) == jobType {
+			list = append(list, jd)
+		}
+	}
+	return list, nil
+}
+
+func (m *mockJobDefinitionStorage) DeleteJobDefinition(ctx context.Context, id string) error {
+	if m.err != nil {
+		return m.err
+	}
+	delete(m.jobDefs, id)
+	return nil
+}
+
+func (m *mockJobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	list := make([]*models.JobDefinition, 0)
+	for _, jd := range m.jobDefs {
+		if jd.Enabled {
+			list = append(list, jd)
+		}
+	}
+	return list, nil
+}
+
+func (m *mockJobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *models.JobDefinition) error {
+	if m.err != nil {
+		return m.err
+	}
+	m.jobDefs[jobDef.ID] = jobDef
+	return nil
+}
+
+func (m *mockJobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	return len(m.jobDefs), nil
+}
+
 // mockEventService implements a mock event service
 type mockEventService struct {
 	events  []interfaces.EventType
@@ -325,7 +409,7 @@ func createMockActionHandler(shouldFail bool, failCount int) ActionHandler {
 // Test helpers
 
 // createTestExecutor creates an executor with mock dependencies
-func createTestExecutor() (*JobExecutor, *mockSourceStorage, *mockEventService, *JobTypeRegistry) {
+func createTestExecutor() (*JobExecutor, *mockSourceStorage, *mockEventService, *JobTypeRegistry, *mockJobDefinitionStorage) {
 	logger := arbor.NewLogger()
 	registry := NewJobTypeRegistry(logger)
 
@@ -341,14 +425,17 @@ func createTestExecutor() (*JobExecutor, *mockSourceStorage, *mockEventService, 
 	crawlerSvc := &mockCrawlerService{
 		jobs: make(map[string]map[string]interface{}),
 	}
+	jobDefStorage := &mockJobDefinitionStorage{
+		jobDefs: make(map[string]*models.JobDefinition),
+	}
 
 	// Create real sources.Service with mock storage
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
 
 	// Create executor with real dependencies
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
-	return executor, sourceStorage, eventSvc, registry
+	return executor, sourceStorage, eventSvc, registry, jobDefStorage
 }
 
 // createTestJobDefinition creates a test job definition
@@ -417,10 +504,11 @@ func TestNewJobExecutor(t *testing.T) {
 	authStorage := &mockAuthStorage{}
 	eventSvc := &mockEventService{}
 	crawlerSvc := &mockCrawlerService{jobs: make(map[string]map[string]interface{})}
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
 
 	t.Run("successful initialization", func(t *testing.T) {
-		executor, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+		executor, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 		if err != nil {
 			t.Errorf("Expected no error, got: %v", err)
 		}
@@ -436,35 +524,35 @@ func TestNewJobExecutor(t *testing.T) {
 	})
 
 	t.Run("nil registry", func(t *testing.T) {
-		_, err := NewJobExecutor(nil, sourceService, eventSvc, crawlerSvc, logger)
+		_, err := NewJobExecutor(nil, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 		if err == nil {
 			t.Error("Expected error for nil registry")
 		}
 	})
 
 	t.Run("nil source service", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, nil, eventSvc, crawlerSvc, logger)
+		_, err := NewJobExecutor(registry, nil, eventSvc, crawlerSvc, jobDefStorage, logger)
 		if err == nil {
 			t.Error("Expected error for nil source service")
 		}
 	})
 
 	t.Run("nil event service", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, sourceService, nil, crawlerSvc, logger)
+		_, err := NewJobExecutor(registry, sourceService, nil, crawlerSvc, jobDefStorage, logger)
 		if err == nil {
 			t.Error("Expected error for nil event service")
 		}
 	})
 
 	t.Run("nil crawler service", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, sourceService, eventSvc, nil, logger)
+		_, err := NewJobExecutor(registry, sourceService, eventSvc, nil, jobDefStorage, logger)
 		if err == nil {
 			t.Error("Expected error for nil crawler service")
 		}
 	})
 
 	t.Run("nil logger", func(t *testing.T) {
-		_, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, nil)
+		_, err := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, nil)
 		if err == nil {
 			t.Error("Expected error for nil logger")
 		}
@@ -473,7 +561,7 @@ func TestNewJobExecutor(t *testing.T) {
 
 // TestExecute_Success tests successful job execution
 func TestExecute_Success(t *testing.T) {
-	executor, sourceStorage, eventSvc, registry := createTestExecutor()
+	executor, sourceStorage, eventSvc, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sourcesData := createTestSources()
@@ -494,7 +582,7 @@ func TestExecute_Success(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify success
 	if err != nil {
@@ -515,7 +603,7 @@ func TestExecute_Success(t *testing.T) {
 
 // TestExecute_InvalidJobDefinition tests execution with invalid job definition
 func TestExecute_InvalidJobDefinition(t *testing.T) {
-	executor, _, _, _ := createTestExecutor()
+	executor, _, _, _, _ := createTestExecutor()
 
 	// Create invalid job definition (missing required fields)
 	jobDef := &models.JobDefinition{
@@ -526,7 +614,7 @@ func TestExecute_InvalidJobDefinition(t *testing.T) {
 
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	_, err := executor.Execute(ctx, jobDef, noOpCallback)
+	_, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	if err == nil {
 		t.Error("Expected validation error")
@@ -535,7 +623,7 @@ func TestExecute_InvalidJobDefinition(t *testing.T) {
 
 // TestExecute_SourceFetchFailure tests source fetch failure
 func TestExecute_SourceFetchFailure(t *testing.T) {
-	executor, sourceStorage, _, _ := createTestExecutor()
+	executor, sourceStorage, _, _, _ := createTestExecutor()
 
 	// Configure source storage to return error
 	sourceStorage.err = errors.New("source fetch failed")
@@ -549,7 +637,7 @@ func TestExecute_SourceFetchFailure(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	_, err := executor.Execute(ctx, jobDef, noOpCallback)
+	_, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify error
 	if err == nil {
@@ -562,7 +650,7 @@ func TestExecute_SourceFetchFailure(t *testing.T) {
 
 // TestExecute_StepFailure_Continue tests continue error strategy
 func TestExecute_StepFailure_Continue(t *testing.T) {
-	executor, sourceStorage, _, registry := createTestExecutor()
+	executor, sourceStorage, _, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sourcesData := createTestSources()
@@ -582,7 +670,7 @@ func TestExecute_StepFailure_Continue(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify job completes with error but execution continued
 	if err == nil {
@@ -598,7 +686,7 @@ func TestExecute_StepFailure_Continue(t *testing.T) {
 
 // TestExecute_StepFailure_Fail tests fail error strategy
 func TestExecute_StepFailure_Fail(t *testing.T) {
-	executor, sourceStorage, _, registry := createTestExecutor()
+	executor, sourceStorage, _, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -618,7 +706,7 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify job stopped immediately
 	if err == nil {
@@ -637,7 +725,7 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 
 // TestExecute_StepFailure_Retry tests retry error strategy
 func TestExecute_StepFailure_Retry(t *testing.T) {
-	executor, sourceStorage, _, registry := createTestExecutor()
+	executor, sourceStorage, _, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -665,7 +753,7 @@ func TestExecute_StepFailure_Retry(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify job succeeds after retries
 	if err != nil {
@@ -681,7 +769,7 @@ func TestExecute_StepFailure_Retry(t *testing.T) {
 
 // TestExecute_ActionHandlerNotFound tests missing action handler
 func TestExecute_ActionHandlerNotFound(t *testing.T) {
-	executor, sourceStorage, _, _ := createTestExecutor()
+	executor, sourceStorage, _, _, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -696,7 +784,7 @@ func TestExecute_ActionHandlerNotFound(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	_, err := executor.Execute(ctx, jobDef, noOpCallback)
+	_, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify error
 	if err == nil {
@@ -709,7 +797,7 @@ func TestExecute_ActionHandlerNotFound(t *testing.T) {
 
 // TestExecute_ContextCancellation tests context cancellation
 func TestExecute_ContextCancellation(t *testing.T) {
-	executor, sourceStorage, _, registry := createTestExecutor()
+	executor, sourceStorage, _, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -737,7 +825,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 
 	// Execute job
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	_, err := executor.Execute(ctx, jobDef, noOpCallback)
+	_, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify context cancellation handled
 	if err == nil {
@@ -747,7 +835,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 
 // TestExecute_MultipleStepFailures tests multiple failing steps with continue strategy
 func TestExecute_MultipleStepFailures(t *testing.T) {
-	executor, sourceStorage, _, registry := createTestExecutor()
+	executor, sourceStorage, _, registry, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -767,7 +855,7 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify all errors aggregated
 	if err == nil {
@@ -786,7 +874,7 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 
 // TestHandleStepError_Continue tests continue strategy
 func TestHandleStepError_Continue(t *testing.T) {
-	executor, _, _, _ := createTestExecutor()
+	executor, _, _, _, _ := createTestExecutor()
 
 	step := models.JobStep{
 		Name:    "test",
@@ -809,7 +897,7 @@ func TestHandleStepError_Continue(t *testing.T) {
 
 // TestHandleStepError_Fail tests fail strategy
 func TestHandleStepError_Fail(t *testing.T) {
-	executor, _, _, _ := createTestExecutor()
+	executor, _, _, _, _ := createTestExecutor()
 
 	step := models.JobStep{
 		Name:    "test",
@@ -832,7 +920,7 @@ func TestHandleStepError_Fail(t *testing.T) {
 
 // TestRetryStep_SuccessOnFirstRetry tests immediate success on retry
 func TestRetryStep_SuccessOnFirstRetry(t *testing.T) {
-	executor, _, _, registry := createTestExecutor()
+	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that succeeds immediately
 	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(false, 0))
@@ -856,7 +944,7 @@ func TestRetryStep_SuccessOnFirstRetry(t *testing.T) {
 
 // TestRetryStep_SuccessAfterMultipleRetries tests success after multiple attempts
 func TestRetryStep_SuccessAfterMultipleRetries(t *testing.T) {
-	executor, _, _, registry := createTestExecutor()
+	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that fails twice, succeeds on third
 	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 2))
@@ -881,7 +969,7 @@ func TestRetryStep_SuccessAfterMultipleRetries(t *testing.T) {
 
 // TestRetryStep_ExhaustedRetries tests all retries exhausted
 func TestRetryStep_ExhaustedRetries(t *testing.T) {
-	executor, _, _, registry := createTestExecutor()
+	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that always fails
 	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 100))
@@ -909,7 +997,7 @@ func TestRetryStep_ExhaustedRetries(t *testing.T) {
 
 // TestFetchSources_Success tests successful source fetching
 func TestFetchSources_Success(t *testing.T) {
-	executor, sourceStorage, _, _ := createTestExecutor()
+	executor, sourceStorage, _, _, _ := createTestExecutor()
 
 	// Setup sources
 	sources := createTestSources()
@@ -929,7 +1017,7 @@ func TestFetchSources_Success(t *testing.T) {
 
 // TestFetchSources_EmptySourceList tests empty source list
 func TestFetchSources_EmptySourceList(t *testing.T) {
-	executor, _, _, _ := createTestExecutor()
+	executor, _, _, _, _ := createTestExecutor()
 
 	ctx := context.Background()
 	fetched, err := executor.fetchSources(ctx, []string{})
@@ -944,7 +1032,7 @@ func TestFetchSources_EmptySourceList(t *testing.T) {
 
 // TestFetchSources_SourceNotFound tests source not found error
 func TestFetchSources_SourceNotFound(t *testing.T) {
-	executor, _, _, _ := createTestExecutor()
+	executor, _, _, _, _ := createTestExecutor()
 
 	ctx := context.Background()
 	_, err := executor.fetchSources(ctx, []string{"nonexistent"})
@@ -1056,8 +1144,10 @@ func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
 		createCrawlJob("crawl-job-1", "completed", 100, 0, "jira"),
 	})
 
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
+
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
 	// Setup source
 	sourcesData := createTestSources()
@@ -1090,7 +1180,7 @@ func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify success
 	if err != nil {
@@ -1164,8 +1254,10 @@ func TestAsyncPolling_JobFailure(t *testing.T) {
 		createCrawlJob("crawl-job-2", "failed", 60, 10, "confluence"),
 	})
 
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
+
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
 	// Setup source
 	sourcesData := createTestSources()
@@ -1197,7 +1289,7 @@ func TestAsyncPolling_JobFailure(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Async polling: Execute returns immediately, errors reported via events only
 	if err != nil {
@@ -1268,8 +1360,10 @@ func TestAsyncPolling_ContextCancellation(t *testing.T) {
 		createCrawlJob("crawl-job-3", "running", 60, 0, "jira"),
 	})
 
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
+
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
 	// Setup source
 	sourcesData := createTestSources()
@@ -1303,7 +1397,7 @@ func TestAsyncPolling_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	_, err := executor.Execute(ctx, jobDef, noOpCallback)
+	_, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Note: Polling happens in background goroutine with context.Background(),
 	// so cancelling request context won't affect polling. This test verifies
@@ -1333,8 +1427,10 @@ func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
 	// Create stateful crawler service
 	crawlerSvc := newStatefulMockCrawlerService()
 
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
+
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
 	// Setup source
 	sourcesData := createTestSources()
@@ -1366,7 +1462,7 @@ func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Verify success (no polling happened)
 	if err != nil {
@@ -1435,8 +1531,10 @@ func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
 		createCrawlJob("crawl-job-6", "failed", 50, 20, "confluence"),
 	})
 
+	jobDefStorage := &mockJobDefinitionStorage{jobDefs: make(map[string]*models.JobDefinition)}
+
 	sourceService := sources.NewService(sourceStorage, authStorage, eventSvc, logger)
-	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, logger)
+	executor, _ := NewJobExecutor(registry, sourceService, eventSvc, crawlerSvc, jobDefStorage, logger)
 
 	// Setup sources
 	sourcesData := createTestSources()
@@ -1469,7 +1567,7 @@ func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
 	// Execute job
 	ctx := context.Background()
 	noOpCallback := func(ctx context.Context, status string, errorMsg string) error { return nil }
-	result, err := executor.Execute(ctx, jobDef, noOpCallback)
+	result, err := executor.Execute(ctx, jobDef, noOpCallback, nil)
 
 	// Async polling: Execute returns immediately, errors reported via events only
 	if err != nil {

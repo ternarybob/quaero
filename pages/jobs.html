@@ -335,6 +335,12 @@
                                                 <span x-text="jobDef.schedule || 'Manual'"></span>
                                             </div>
 
+                                            <!-- Post-Jobs -->
+                                            <div :title="getPostJobsTooltip(jobDef.post_jobs)">
+                                                <i class="fas fa-link"></i>
+                                                <span x-text="formatPostJobsList(jobDef.post_jobs)"></span>
+                                            </div>
+
                                             <!-- Status -->
                                             <div>
                                                 <i class="fas" :class="jobDef.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
@@ -403,6 +409,21 @@
                                 <template x-if="sources.length === 0">
                                     <p class="form-input-hint text-warning">
                                         No sources available. Add sources first.
+                                    </p>
+                                </template>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Post-Jobs (Optional)</label>
+                                <select class="form-select" x-model="currentJobDefinition.post_jobs" multiple size="5">
+                                    <template x-for="jobDef in availablePostJobs" :key="jobDef.id">
+                                        <option :value="jobDef.id" x-text="jobDef.name + (jobDef.enabled ? '' : ' (disabled)')"></option>
+                                    </template>
+                                </select>
+                                <p class="form-input-hint">Select job definitions to execute after this job completes successfully. Jobs run independently (no parent/child relationship). Hold Ctrl/Cmd to select multiple.</p>
+                                <template x-if="availablePostJobs.length === 0">
+                                    <p class="form-input-hint text-warning">
+                                        No other job definitions available. Create additional jobs first.
                                     </p>
                                 </template>
                             </div>
