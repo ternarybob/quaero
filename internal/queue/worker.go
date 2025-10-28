@@ -12,26 +12,36 @@ import (
 // JobHandler is a function that handles a specific job type
 type JobHandler func(ctx context.Context, msg *JobMessage) error
 
+// JobStorage is a minimal interface for job status management in worker pool
+// This matches the required methods from interfaces.JobStorage
+type JobStorage interface {
+	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
+	// MarkRunningJobsAsPending marks all running jobs as pending (for graceful shutdown)
+	MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error)
+}
+
 // WorkerPool manages a pool of workers that process queue messages
 type WorkerPool struct {
-	queueMgr *Manager
-	handlers map[string]JobHandler
-	logger   arbor.ILogger
-	ctx      context.Context
-	cancel   context.CancelFunc
+	queueMgr   *Manager
+	handlers   map[string]JobHandler
+	jobStorage JobStorage
+	logger     arbor.ILogger
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(queueMgr *Manager, logger arbor.ILogger) *WorkerPool {
+func NewWorkerPool(queueMgr *Manager, jobStorage JobStorage, logger arbor.ILogger) *WorkerPool {
 	// Create child context from manager's context to isolate worker pool lifecycle
 	ctx, cancel := context.WithCancel(queueMgr.ctx)
 
 	return &WorkerPool{
-		queueMgr: queueMgr,
-		handlers: make(map[string]JobHandler),
-		logger:   logger,
-		ctx:      ctx,
-		cancel:   cancel,
+		queueMgr:   queueMgr,
+		handlers:   make(map[string]JobHandler),
+		jobStorage: jobStorage,
+		logger:     logger,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 }
 
@@ -57,10 +67,28 @@ func (wp *WorkerPool) Start() error {
 	return nil
 }
 
-// Stop gracefully stops the worker pool
+// Stop gracefully stops the worker pool and marks running jobs as pending for resume
 func (wp *WorkerPool) Stop() error {
-	wp.logger.Info().Msg("Stopping worker pool")
+	wp.logger.Info().Msg("Stopping worker pool - marking running jobs as pending")
+
+	// Mark all running jobs as pending so they can be resumed after restart
+	// This allows graceful shutdown without losing job progress
+	ctx := context.Background() // Use background context since worker context is being cancelled
+
+	count, err := wp.jobStorage.MarkRunningJobsAsPending(ctx, "Service shutdown - job will resume on restart")
+	if err != nil {
+		wp.logger.Warn().Err(err).Msg("Failed to mark running jobs as pending during shutdown")
+	} else if count > 0 {
+		wp.logger.Info().Int("count", count).Msg("Marked running jobs as pending for graceful shutdown")
+	}
+
+	// Cancel worker pool context to stop all workers
 	wp.cancel()
+
+	// Give workers a brief moment to finish current processing
+	time.Sleep(500 * time.Millisecond)
+
+	wp.logger.Info().Msg("Worker pool stopped")
 	return nil
 }
 

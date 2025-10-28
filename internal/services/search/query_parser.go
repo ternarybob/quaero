@@ -309,6 +309,7 @@ func (p *QueryParser) BuildFTS5Query(tokens []Token) string {
 // ExtractQualifiers extracts and removes qualifier tokens from the token list
 // Returns a map of qualifier key-value pairs
 // Recognized qualifiers:
+// - id: document ID for direct lookup
 // - document_type: jira, confluence, github
 // - case: match (for case-sensitive search)
 func (p *QueryParser) ExtractQualifiers(tokens []Token) map[string]string {
@@ -320,6 +321,8 @@ func (p *QueryParser) ExtractQualifiers(tokens []Token) map[string]string {
 			if key != "" {
 				// Normalize known qualifiers
 				switch key {
+				case "id":
+					qualifiers["id"] = value
 				case "document_type", "type", "source":
 					qualifiers["document_type"] = strings.ToLower(value)
 				case "case":

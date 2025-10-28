@@ -36,7 +36,7 @@ func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.S
 		logger:        logger,
 	}
 
-	logger.Info().Msg("Job definition storage initialized")
+	logger.Info().Msg("Storage manager initialized")
 
 	return manager, nil
 }

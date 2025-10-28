@@ -19,46 +19,24 @@ import (
 // These summary documents are embedded and searchable via RAG,
 // allowing queries like "how many documents are in the system"
 type Service struct {
-	docStorage   interfaces.DocumentStorage
-	docService   interfaces.DocumentService
-	eventService interfaces.EventService
-	logger       arbor.ILogger
+	docStorage interfaces.DocumentStorage
+	docService interfaces.DocumentService
+	logger     arbor.ILogger
 }
 
 // NewService creates a new summary document service
-// It automatically subscribes to embedding events to update summaries
 func NewService(
 	docStorage interfaces.DocumentStorage,
 	docService interfaces.DocumentService,
-	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *Service {
 	s := &Service{
-		docStorage:   docStorage,
-		docService:   docService,
-		eventService: eventService,
-		logger:       logger,
+		docStorage: docStorage,
+		docService: docService,
+		logger:     logger,
 	}
-
-	// Subscribe to embedding events to update summary after embeddings complete
-	s.eventService.Subscribe(interfaces.EventEmbeddingTriggered, s.handleEmbeddingEvent)
 
 	return s
-}
-
-// handleEmbeddingEvent handles embedding completion events and generates summary
-func (s *Service) handleEmbeddingEvent(ctx context.Context, event interfaces.Event) error {
-	s.logger.Info().Msg(">>> SUMMARY SERVICE: Embedding event received, generating corpus summary")
-
-	if err := s.GenerateSummaryDocument(ctx); err != nil {
-		s.logger.Error().
-			Err(err).
-			Msg(">>> SUMMARY SERVICE: Failed to generate summary document")
-		return fmt.Errorf("failed to generate summary: %w", err)
-	}
-
-	s.logger.Info().Msg(">>> SUMMARY SERVICE: Summary generation completed successfully")
-	return nil
 }
 
 // GenerateSummaryDocument creates/updates a special summary document

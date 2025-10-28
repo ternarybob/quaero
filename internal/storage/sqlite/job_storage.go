@@ -327,6 +327,37 @@ func (s *JobStorage) UpdateJobStatus(ctx context.Context, jobID string, status s
 	return err
 }
 
+// MarkRunningJobsAsPending marks all running jobs as pending (for graceful shutdown)
+// Returns the count of jobs marked as pending
+func (s *JobStorage) MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `
+		UPDATE crawl_jobs
+		SET status = 'pending',
+		    error = ?,
+		    completed_at = NULL
+		WHERE status = 'running'
+	`
+
+	result, err := s.db.db.ExecContext(ctx, query, reason)
+	if err != nil {
+		return 0, fmt.Errorf("failed to mark running jobs as pending: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if count > 0 {
+		s.logger.Info().Int64("count", count).Str("reason", reason).Msg("Marked running jobs as pending")
+	}
+
+	return int(count), nil
+}
+
 // UpdateJobProgress updates job progress information
 func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error {
 	s.mu.Lock()

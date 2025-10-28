@@ -39,6 +39,9 @@ type ParsedQuery struct {
 	// FTS5Query is the converted query for SQLite FTS5
 	FTS5Query string
 
+	// ID is the document ID for direct lookup (extracted from id: qualifier)
+	ID string
+
 	// DocumentType filters results by source type (extracted from document_type: qualifier)
 	DocumentType string
 
@@ -95,6 +98,7 @@ func (s *AdvancedSearchService) logParsedQuery(query string, parsedQuery ParsedQ
 		s.logger.Debug().
 			Str("original_query", query).
 			Str("fts5_query", parsedQuery.FTS5Query).
+			Str("id", parsedQuery.ID).
 			Str("document_type", parsedQuery.DocumentType).
 			Bool("case_sensitive", parsedQuery.CaseSensitive).
 			Msg("Parsed query")
@@ -102,12 +106,28 @@ func (s *AdvancedSearchService) logParsedQuery(query string, parsedQuery ParsedQ
 }
 
 // executeSearch performs the appropriate search operation based on query type
-// Uses ListDocuments for empty queries (filter-only) or FullTextSearch for FTS5 queries
+// Uses GetByID for ID-based queries, ListDocuments for empty queries, or FullTextSearch for FTS5 queries
 func (s *AdvancedSearchService) executeSearch(
 	query string,
 	parsedQuery ParsedQuery,
 	opts interfaces.SearchOptions,
 ) ([]*models.Document, error) {
+	// If ID is specified, do direct lookup
+	if parsedQuery.ID != "" {
+		doc, err := s.storage.GetDocument(parsedQuery.ID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Error().
+					Err(err).
+					Str("id", parsedQuery.ID).
+					Msg("Failed to get document by ID")
+			}
+			// Return empty results instead of error for ID not found
+			return []*models.Document{}, nil
+		}
+		return []*models.Document{doc}, nil
+	}
+
 	// If FTS5 query is empty, list all documents (for filter-only queries)
 	if parsedQuery.FTS5Query == "" {
 		return s.executeListDocuments(parsedQuery, opts)
@@ -332,11 +352,13 @@ func (s *AdvancedSearchService) parseQuery(query string) ParsedQuery {
 	fts5Query := s.parser.BuildFTS5Query(tokens)
 
 	// Parse qualifiers
+	id := qualifiers["id"]
 	documentType := qualifiers["document_type"]
 	caseSensitive := qualifiers["case"] == "match"
 
 	return ParsedQuery{
 		FTS5Query:     fts5Query,
+		ID:            id,
 		DocumentType:  documentType,
 		CaseSensitive: caseSensitive,
 		Tokens:        tokens,

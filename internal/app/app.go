@@ -185,8 +185,8 @@ func (a *App) initDatabase() error {
 // QUEUE-BASED JOB ARCHITECTURE:
 // 1. QueueManager (goqite-backed) - Persistent queue with worker pool
 // 2. JobManager - CRUD operations for jobs
-// 3. WorkerPool - Registers handlers for job types (crawler_url, summarizer, cleanup, parent)
-// 4. Job Types - CrawlerJob, SummarizerJob, CleanupJob (handle individual tasks)
+// 3. WorkerPool - Registers handlers for job types (crawler_url, summarizer, cleanup, reindex, parent)
+// 4. Job Types - CrawlerJob, SummarizerJob, CleanupJob, ReindexJob (handle individual tasks)
 //
 // JOB DEFINITION ARCHITECTURE:
 // 1. JobRegistry - Maps job types to action handlers
@@ -367,10 +367,24 @@ func (a *App) initServices() error {
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 
-	// 5.10. Initialize worker pool
-	workerPool := queue.NewWorkerPool(queueMgr, a.Logger)
+	// 5.10. Initialize worker pool with job storage for lifecycle management
+	workerPool := queue.NewWorkerPool(queueMgr, a.StorageManager.JobStorage(), a.Logger)
 	a.WorkerPool = workerPool
 	a.Logger.Info().Msg("Worker pool initialized")
+
+	// 5.11. Startup recovery: Mark orphaned running jobs from previous session
+	// These jobs were interrupted by ungraceful shutdown or crash
+	orphanedCount, err := a.StorageManager.JobStorage().MarkRunningJobsAsPending(
+		context.Background(),
+		"Service restart detected - resuming interrupted jobs",
+	)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to mark orphaned running jobs on startup")
+	} else if orphanedCount > 0 {
+		a.Logger.Warn().
+			Int("count", orphanedCount).
+			Msg("Marked orphaned running jobs as pending for recovery")
+	}
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -453,6 +467,18 @@ func (a *App) initServices() error {
 	}
 	a.WorkerPool.RegisterHandler("cleanup", cleanupJobHandler)
 	a.Logger.Info().Msg("Cleanup job handler registered")
+
+	// Reindex job handler
+	reindexJobDeps := &jobtypes.ReindexJobDeps{
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+	}
+	reindexJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewReindexJob(baseJob, reindexJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("reindex", reindexJobHandler)
+	a.Logger.Info().Msg("Reindex job handler registered")
 
 	// Parent job handler (for job definition execution)
 	parentJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
@@ -561,18 +587,12 @@ func (a *App) initServices() error {
 	// 	return fmt.Errorf("failed to start embedding coordinator: %w", err)
 	// }
 
-	// 11.5 Initialize summary service (subscribes to embedding events)
+	// 11.5 Initialize summary service
 	a.SummaryService = summary.NewService(
 		a.StorageManager.DocumentStorage(),
 		a.DocumentService,
-		a.EventService,
 		a.Logger,
 	)
-	// Generate initial summary document at startup
-	a.Logger.Info().Msg("Generating initial corpus summary document at startup")
-	if err := a.SummaryService.GenerateSummaryDocument(context.Background()); err != nil {
-		a.Logger.Warn().Err(err).Msg("Failed to generate initial summary document (non-critical)")
-	}
 
 	// Initialize job executor for job definition execution
 	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
@@ -605,6 +625,17 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to register summarizer actions: %w", err)
 	}
 	a.Logger.Info().Msg("Summarizer actions registered with job type registry")
+
+	// Register maintenance actions with the job type registry
+	maintenanceDeps := &actions.MaintenanceActionDeps{
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+		SummaryService:  a.SummaryService,
+		Logger:          a.Logger,
+	}
+	if err = actions.RegisterMaintenanceActions(a.JobRegistry, maintenanceDeps); err != nil {
+		return fmt.Errorf("failed to register maintenance actions: %w", err)
+	}
+	a.Logger.Info().Msg("Maintenance actions registered with job type registry")
 
 	// 12. Initialize scheduler service with database persistence and job definition support
 	a.SchedulerService = scheduler.NewServiceWithDB(
@@ -702,6 +733,7 @@ func (a *App) initHandlers() error {
 	// Initialize job definition handler
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
+		a.StorageManager.JobStorage(),
 		a.JobExecutor,
 		a.SourceService,
 		a.JobRegistry,
@@ -713,8 +745,57 @@ func (a *App) initHandlers() error {
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
 
-	// Start queue stats broadcaster with cancellable context
+	// Start queue stats broadcaster and stale job detector with cancellable context
 	a.ctx, a.cancelCtx = context.WithCancel(context.Background())
+
+	// Start stale job detector (runs every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Check for jobs that have been running for more than 15 minutes without heartbeat
+				staleJobs, err := a.StorageManager.JobStorage().GetStaleJobs(context.Background(), 15)
+				if err != nil {
+					a.Logger.Warn().Err(err).Msg("Failed to check for stale jobs")
+					continue
+				}
+
+				if len(staleJobs) > 0 {
+					a.Logger.Warn().
+						Int("count", len(staleJobs)).
+						Msg("Detected stale jobs - marking as failed")
+
+					for _, job := range staleJobs {
+						if err := a.StorageManager.JobStorage().UpdateJobStatus(
+							context.Background(),
+							job.ID,
+							"failed",
+							"Job stalled - no heartbeat for 15+ minutes",
+						); err != nil {
+							a.Logger.Warn().
+								Err(err).
+								Str("job_id", job.ID).
+								Msg("Failed to mark stale job as failed")
+						} else {
+							a.Logger.Info().
+								Str("job_id", job.ID).
+								Str("job_name", job.Name).
+								Msg("Marked stale job as failed")
+						}
+					}
+				}
+			case <-a.ctx.Done():
+				a.Logger.Info().Msg("Stale job detector shutting down")
+				return
+			}
+		}
+	}()
+	a.Logger.Info().Msg("Stale job detector started (checks every 5 minutes)")
+
+	// Start queue stats broadcaster
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()

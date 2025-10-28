@@ -154,6 +154,15 @@ h2 {
     color: var(--btn-primary);
     border-color: var(--border-color);
     transition: all 0.2s;
+    min-width: 2rem;
+
+    &.btn-sm {
+        min-width: 1.5rem;
+    }
+
+    &.btn-lg {
+        min-width: 3rem;
+    }
 
     &.btn-primary {
         background-color: var(--color-primary);
@@ -750,4 +759,32 @@ body.modal-open {
     display: flex;
     align-items: center;
     gap: 0;
+}
+
+/* 12. LOADING INDICATORS
+   ========================================================================== */
+.loading {
+    display: inline-block;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.loading.loading-lg {
+    width: 2rem;
+    height: 2rem;
+    border-width: 3px;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }

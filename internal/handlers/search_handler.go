@@ -16,13 +16,19 @@ import (
 	"github.com/ternarybob/quaero/internal/services/search"
 )
 
-// SearchResult represents a single search result with truncated content
+// SearchResult represents a single search result with complete document data
 type SearchResult struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Brief      string `json:"brief"`
-	URL        string `json:"url"`
-	SourceType string `json:"source_type"`
+	ID              string                 `json:"id"`
+	SourceType      string                 `json:"source_type"`
+	SourceID        string                 `json:"source_id"`
+	Title           string                 `json:"title"`
+	ContentMarkdown string                 `json:"content_markdown"`
+	URL             string                 `json:"url"`
+	DetailLevel     string                 `json:"detail_level"`
+	Metadata        map[string]interface{} `json:"metadata"`
+	CreatedAt       string                 `json:"created_at"`
+	UpdatedAt       string                 `json:"updated_at"`
+	Brief           string                 `json:"brief"` // Kept for backward compatibility
 }
 
 // SearchHandler handles search-related HTTP requests
@@ -127,18 +133,24 @@ func (h *SearchHandler) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Transform results
 	results := make([]SearchResult, 0, len(documents))
 	for _, doc := range documents {
-		// Truncate ContentMarkdown to 200 characters
+		// Truncate ContentMarkdown to 200 characters for brief
 		brief := doc.ContentMarkdown
 		if len(brief) > 200 {
 			brief = brief[:200] + "..."
 		}
 
 		results = append(results, SearchResult{
-			ID:         doc.ID,
-			Title:      doc.Title,
-			Brief:      brief,
-			URL:        doc.URL,
-			SourceType: doc.SourceType,
+			ID:              doc.ID,
+			SourceType:      doc.SourceType,
+			SourceID:        doc.SourceID,
+			Title:           doc.Title,
+			ContentMarkdown: doc.ContentMarkdown,
+			URL:             doc.URL,
+			DetailLevel:     doc.DetailLevel,
+			Metadata:        doc.Metadata,
+			CreatedAt:       doc.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:       doc.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Brief:           brief,
 		})
 	}
 

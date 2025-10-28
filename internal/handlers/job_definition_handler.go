@@ -22,6 +22,7 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
 	jobDefStorage interfaces.JobDefinitionStorage
+	jobStorage    interfaces.JobStorage
 	jobExecutor   *jobs.JobExecutor
 	sourceService *sources.Service
 	jobRegistry   *jobs.JobTypeRegistry
@@ -32,6 +33,7 @@ type JobDefinitionHandler struct {
 // NewJobDefinitionHandler creates a new job definition handler
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
+	jobStorage interfaces.JobStorage,
 	jobExecutor *jobs.JobExecutor,
 	sourceService *sources.Service,
 	jobRegistry *jobs.JobTypeRegistry,
@@ -40,6 +42,9 @@ func NewJobDefinitionHandler(
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
 		panic("jobDefStorage cannot be nil")
+	}
+	if jobStorage == nil {
+		panic("jobStorage cannot be nil")
 	}
 	if jobExecutor == nil {
 		panic("jobExecutor cannot be nil")
@@ -61,6 +66,7 @@ func NewJobDefinitionHandler(
 
 	return &JobDefinitionHandler{
 		jobDefStorage: jobDefStorage,
+		jobStorage:    jobStorage,
 		jobExecutor:   jobExecutor,
 		sourceService: sourceService,
 		jobRegistry:   jobRegistry,
@@ -387,6 +393,23 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		},
 	)
 
+	// Create job record in database for Queue UI tracking
+	// Use message ID as job ID so parent handler can update status
+	job := &models.CrawlJob{
+		ID:          parentMsg.ID,
+		Name:        jobDef.Name,
+		Description: jobDef.Description,
+		SourceType:  string(jobDef.Type),
+		EntityType:  "job_definition",
+		Status:      models.JobStatusPending,
+	}
+
+	if err := h.jobStorage.SaveJob(ctx, job); err != nil {
+		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("Failed to create job record")
+		WriteError(w, http.StatusInternalServerError, "Failed to create job record")
+		return
+	}
+
 	// Enqueue parent message
 	if err := h.queueManager.Enqueue(ctx, parentMsg); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to enqueue job definition")
@@ -394,7 +417,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", id).Str("message_id", parentMsg.ID).Msg("Job definition enqueued")
+	h.logger.Info().Str("job_def_id", id).Str("message_id", parentMsg.ID).Str("job_id", job.ID).Msg("Job definition enqueued with job record")
 
 	response := map[string]interface{}{
 		"job_id":   parentMsg.ID,

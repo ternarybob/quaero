@@ -1,6 +1,9 @@
 package sqlite
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 const schemaSQL = `
 -- Authentication table
@@ -250,6 +253,19 @@ func (s *SQLiteDB) InitSchema() error {
 	// Run migrations for schema evolution
 	if err := s.runMigrations(); err != nil {
 		return err
+	}
+
+	// Create default job definitions after schema and migrations are complete
+	// This ensures the job_definitions table exists and has the correct schema
+	ctx := context.Background()
+	jobDefStorage := NewJobDefinitionStorage(s, s.logger)
+	if jds, ok := jobDefStorage.(*JobDefinitionStorage); ok {
+		if err := jds.CreateDefaultJobDefinitions(ctx); err != nil {
+			// Log warning but don't fail startup - default job definitions are a convenience feature
+			s.logger.Warn().Err(err).Msg("Failed to create default job definitions")
+		} else {
+			s.logger.Debug().Msg("Default job definitions initialized")
+		}
 	}
 
 	return nil

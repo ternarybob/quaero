@@ -466,7 +466,8 @@ func (h *WebSocketHandler) parseAndBroadcastLog(logLine string) {
 		strings.Contains(logLine, "WebSocket client disconnected") ||
 		strings.Contains(logLine, "DEBUG: Memory writer entry") ||
 		strings.Contains(logLine, "HTTP request") ||
-		strings.Contains(logLine, "HTTP response") {
+		strings.Contains(logLine, "HTTP response") ||
+		strings.Contains(logLine, "Publishing Event") {
 		return
 	}
 
@@ -538,7 +539,8 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 				strings.Contains(logLine, "WebSocket client disconnected") ||
 				strings.Contains(logLine, "DEBUG: Memory writer entry") ||
 				strings.Contains(logLine, "HTTP request") ||
-				strings.Contains(logLine, "HTTP response") {
+				strings.Contains(logLine, "HTTP response") ||
+				strings.Contains(logLine, "Publishing Event") {
 				continue
 			}
 

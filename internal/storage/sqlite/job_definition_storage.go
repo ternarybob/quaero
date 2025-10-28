@@ -373,6 +373,197 @@ func (s *JobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, er
 	return count, nil
 }
 
+// CreateDefaultJobDefinitions creates default job definitions that ship with Quaero.
+// This method is idempotent and safe to call multiple times - it will only create
+// missing job definitions using ON CONFLICT DO NOTHING to preserve user customizations.
+func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) error {
+	// Database Maintenance Job - Rebuilds FTS5 index weekly
+	dbMaintenanceJob := &models.JobDefinition{
+		ID:          "default-database-maintenance",
+		Name:        "Database Maintenance",
+		Type:        models.JobTypeCustom,
+		Description: "Rebuilds the FTS5 full-text search index to ensure optimal search performance. Runs weekly to keep the search index synchronized with document changes.",
+		Sources:     []string{}, // This job doesn't operate on specific sources
+		Steps: []models.JobStep{
+			{
+				Name:   "reindex",
+				Action: "reindex",
+				Config: map[string]interface{}{
+					"dry_run": false,
+				},
+				OnError: models.ErrorStrategyFail,
+			},
+		},
+		Schedule:  "0 2 * * 0", // Sunday at 2:00 AM (weekly)
+		Timeout:   "30m",       // 30 minutes should be sufficient
+		Enabled:   true,        // Enable by default
+		AutoStart: false,       // Don't auto-start on scheduler initialization, only run on schedule
+		Config:    make(map[string]interface{}),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Serialize job definition fields to JSON
+	sourcesJSON, err := dbMaintenanceJob.MarshalSources()
+	if err != nil {
+		return fmt.Errorf("failed to marshal sources: %w", err)
+	}
+
+	stepsJSON, err := dbMaintenanceJob.MarshalSteps()
+	if err != nil {
+		return fmt.Errorf("failed to marshal steps: %w", err)
+	}
+
+	configJSON, err := dbMaintenanceJob.MarshalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Convert bools to integers
+	enabled := 0
+	if dbMaintenanceJob.Enabled {
+		enabled = 1
+	}
+	autoStart := 0
+	if dbMaintenanceJob.AutoStart {
+		autoStart = 1
+	}
+
+	// Convert timestamps to Unix integers
+	createdAt := dbMaintenanceJob.CreatedAt.Unix()
+	updatedAt := dbMaintenanceJob.UpdatedAt.Unix()
+
+	// Insert job definition using ON CONFLICT DO NOTHING to preserve user customizations
+	query := `
+		INSERT INTO job_definitions (
+			id, name, type, description, sources, steps, schedule, timeout,
+			enabled, auto_start, config, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING
+	`
+
+	result, err := s.db.DB().ExecContext(ctx, query,
+		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), dbMaintenanceJob.Description,
+		sourcesJSON, stepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
+		enabled, autoStart, configJSON, createdAt, updatedAt,
+	)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Msg("Failed to create default database maintenance job")
+		return fmt.Errorf("failed to create default database maintenance job: %w", err)
+	}
+
+	// Check if a row was actually inserted
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to get rows affected for default job creation")
+	} else if rowsAffected > 0 {
+		s.logger.Info().
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Str("job_def_name", dbMaintenanceJob.Name).
+			Msg("Default job definition created")
+	} else {
+		s.logger.Debug().
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Msg("Default job definition already exists, preserving user customizations")
+	}
+
+	// Corpus Summary Job - Generates corpus statistics hourly
+	corpusSummaryJob := &models.JobDefinition{
+		ID:          "default-corpus-summary",
+		Name:        "Corpus Summary Generation",
+		Type:        models.JobTypeCustom,
+		Description: "Generates a summary document containing statistics about the document corpus (total documents, documents by source type). This summary is searchable and enables queries like 'how many documents are in the system'. Runs hourly to keep statistics current.",
+		Sources:     []string{}, // This job operates on all documents, not specific sources
+		Steps: []models.JobStep{
+			{
+				Name:    "corpus_summary",
+				Action:  "corpus_summary",
+				Config:  map[string]interface{}{},
+				OnError: models.ErrorStrategyFail,
+			},
+		},
+		Schedule:  "0 * * * *", // Hourly at minute 0
+		Timeout:   "5m",        // 5 minutes should be sufficient for counting
+		Enabled:   true,        // Enable by default
+		AutoStart: false,       // Only run on schedule, not on startup
+		Config:    make(map[string]interface{}),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Serialize corpus summary job definition fields to JSON
+	corpusSourcesJSON, err := corpusSummaryJob.MarshalSources()
+	if err != nil {
+		return fmt.Errorf("failed to marshal corpus summary sources: %w", err)
+	}
+
+	corpusStepsJSON, err := corpusSummaryJob.MarshalSteps()
+	if err != nil {
+		return fmt.Errorf("failed to marshal corpus summary steps: %w", err)
+	}
+
+	corpusConfigJSON, err := corpusSummaryJob.MarshalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to marshal corpus summary config: %w", err)
+	}
+
+	// Convert bools to integers for corpus summary job
+	corpusEnabled := 0
+	if corpusSummaryJob.Enabled {
+		corpusEnabled = 1
+	}
+	corpusAutoStart := 0
+	if corpusSummaryJob.AutoStart {
+		corpusAutoStart = 1
+	}
+
+	// Convert timestamps to Unix integers for corpus summary job
+	corpusCreatedAt := corpusSummaryJob.CreatedAt.Unix()
+	corpusUpdatedAt := corpusSummaryJob.UpdatedAt.Unix()
+
+	// Insert corpus summary job definition using ON CONFLICT DO NOTHING to preserve user customizations
+	corpusQuery := `
+		INSERT INTO job_definitions (
+			id, name, type, description, sources, steps, schedule, timeout,
+			enabled, auto_start, config, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING
+	`
+
+	corpusResult, err := s.db.DB().ExecContext(ctx, corpusQuery,
+		corpusSummaryJob.ID, corpusSummaryJob.Name, string(corpusSummaryJob.Type), corpusSummaryJob.Description,
+		corpusSourcesJSON, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
+		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusCreatedAt, corpusUpdatedAt,
+	)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("job_def_id", corpusSummaryJob.ID).
+			Msg("Failed to create default corpus summary job")
+		return fmt.Errorf("failed to create default corpus summary job: %w", err)
+	}
+
+	// Check if a row was actually inserted for corpus summary job
+	corpusRowsAffected, err := corpusResult.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to get rows affected for corpus summary job creation")
+	} else if corpusRowsAffected > 0 {
+		s.logger.Info().
+			Str("job_def_id", corpusSummaryJob.ID).
+			Str("job_def_name", corpusSummaryJob.Name).
+			Msg("Default job definition created")
+	} else {
+		s.logger.Debug().
+			Str("job_def_id", corpusSummaryJob.ID).
+			Msg("Default job definition already exists, preserving user customizations")
+	}
+
+	return nil
+}
+
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (

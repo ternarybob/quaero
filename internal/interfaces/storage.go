@@ -61,6 +61,9 @@ type DocumentStorage interface {
 
 	// Bulk operations
 	ClearAll() error
+
+	// Index maintenance
+	RebuildFTS5Index() error
 }
 
 // JobStorage - interface for crawler job persistence
@@ -94,6 +97,10 @@ type JobStorage interface {
 	// Returns (true, nil) if URL was newly added, (false, nil) if URL was already seen.
 	// This prevents race conditions when multiple workers try to enqueue the same URL.
 	MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error)
+
+	// MarkRunningJobsAsPending marks all running jobs as pending (for graceful shutdown)
+	// Returns the count of jobs marked as pending
+	MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error)
 }
 
 // SourceStorage - interface for source configuration persistence

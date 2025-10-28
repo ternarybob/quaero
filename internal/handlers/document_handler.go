@@ -222,3 +222,29 @@ func (h *DocumentHandler) DeleteAllDocumentsHandler(w http.ResponseWriter, r *ht
 		"documents_affected": documentsAffected,
 	})
 }
+
+// RebuildIndexHandler handles POST /api/documents/rebuild-index
+// Rebuilds the FTS5 full-text search index
+func (h *DocumentHandler) RebuildIndexHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	h.logger.Info().Msg("FTS5 index rebuild requested")
+
+	// Rebuild the FTS5 index
+	err := h.documentStorage.RebuildFTS5Index()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to rebuild FTS5 index")
+		WriteError(w, http.StatusInternalServerError, "Failed to rebuild search index")
+		return
+	}
+
+	h.logger.Info().Msg("FTS5 index rebuilt successfully")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message": "Search index rebuilt successfully",
+	})
+}
