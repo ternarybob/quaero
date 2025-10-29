@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 -- The 'logs' column was removed in MIGRATION 13 (logs now in job_logs table)
 CREATE TABLE IF NOT EXISTS crawl_jobs (
 	id TEXT PRIMARY KEY,
+	parent_id TEXT,
 	name TEXT DEFAULT '',
 	description TEXT DEFAULT '',
 	source_type TEXT NOT NULL,
@@ -131,6 +132,7 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC);
 
 -- Job seen URLs table for concurrency-safe URL deduplication (VERIFICATION COMMENT 1)
 -- Tracks URLs that have been enqueued for each job to prevent duplicate processing
@@ -348,6 +350,12 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 14: Add post_jobs column to job_definitions table
 	if err := s.migrateAddPostJobsColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 15: Add parent_id column to crawl_jobs table
+	// Enables parent-child job hierarchy tracking for the Queue UI
+	if err := s.migrateAddParentIdColumn(); err != nil {
 		return err
 	}
 
@@ -1147,6 +1155,7 @@ func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 	defer rows.Close()
 
 	hasLogs := false
+	hasParentID := false
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -1156,7 +1165,9 @@ func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 		}
 		if name == "logs" {
 			hasLogs = true
-			break
+		}
+		if name == "parent_id" {
+			hasParentID = true
 		}
 	}
 
@@ -1185,44 +1196,83 @@ func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 	}()
 
 	// Step 1: Create new crawl_jobs table without logs column
-	s.logger.Info().Msg("Step 1: Creating new crawl_jobs table without logs column")
-	_, err = tx.Exec(`
-		CREATE TABLE crawl_jobs_new (
-			id TEXT PRIMARY KEY,
-			name TEXT DEFAULT '',
-			description TEXT DEFAULT '',
-			source_type TEXT NOT NULL,
-			entity_type TEXT NOT NULL,
-			config_json TEXT NOT NULL,
-			source_config_snapshot TEXT,
-			auth_snapshot TEXT,
-			refresh_source INTEGER DEFAULT 0,
-			seed_urls TEXT,
-			status TEXT NOT NULL,
-			progress_json TEXT,
-			created_at INTEGER NOT NULL,
-			started_at INTEGER,
-			completed_at INTEGER,
-			last_heartbeat INTEGER,
-			error TEXT,
-			result_count INTEGER DEFAULT 0,
-			failed_count INTEGER DEFAULT 0
-		)
-	`)
+	if hasParentID {
+		s.logger.Info().Msg("Step 1: Creating new crawl_jobs table without logs column (with parent_id)")
+		_, err = tx.Exec(`
+			CREATE TABLE crawl_jobs_new (
+				id TEXT PRIMARY KEY,
+				parent_id TEXT,
+				name TEXT DEFAULT '',
+				description TEXT DEFAULT '',
+				source_type TEXT NOT NULL,
+				entity_type TEXT NOT NULL,
+				config_json TEXT NOT NULL,
+				source_config_snapshot TEXT,
+				auth_snapshot TEXT,
+				refresh_source INTEGER DEFAULT 0,
+				seed_urls TEXT,
+				status TEXT NOT NULL,
+				progress_json TEXT,
+				created_at INTEGER NOT NULL,
+				started_at INTEGER,
+				completed_at INTEGER,
+				last_heartbeat INTEGER,
+				error TEXT,
+				result_count INTEGER DEFAULT 0,
+				failed_count INTEGER DEFAULT 0
+			)
+		`)
+	} else {
+		s.logger.Info().Msg("Step 1: Creating new crawl_jobs table without logs column (without parent_id)")
+		_, err = tx.Exec(`
+			CREATE TABLE crawl_jobs_new (
+				id TEXT PRIMARY KEY,
+				name TEXT DEFAULT '',
+				description TEXT DEFAULT '',
+				source_type TEXT NOT NULL,
+				entity_type TEXT NOT NULL,
+				config_json TEXT NOT NULL,
+				source_config_snapshot TEXT,
+				auth_snapshot TEXT,
+				refresh_source INTEGER DEFAULT 0,
+				seed_urls TEXT,
+				status TEXT NOT NULL,
+				progress_json TEXT,
+				created_at INTEGER NOT NULL,
+				started_at INTEGER,
+				completed_at INTEGER,
+				last_heartbeat INTEGER,
+				error TEXT,
+				result_count INTEGER DEFAULT 0,
+				failed_count INTEGER DEFAULT 0
+			)
+		`)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to create new crawl_jobs table: %w", err)
 	}
 
 	// Step 2: Copy all data to new table (excluding logs column)
 	s.logger.Info().Msg("Step 2: Copying data to new table")
-	_, err = tx.Exec(`
-		INSERT INTO crawl_jobs_new
-		SELECT id, name, description, source_type, entity_type, config_json,
-			   source_config_snapshot, auth_snapshot, refresh_source, seed_urls,
-			   status, progress_json, created_at, started_at, completed_at,
-			   last_heartbeat, error, result_count, failed_count
-		FROM crawl_jobs
-	`)
+	if hasParentID {
+		_, err = tx.Exec(`
+			INSERT INTO crawl_jobs_new
+			SELECT id, parent_id, name, description, source_type, entity_type, config_json,
+				   source_config_snapshot, auth_snapshot, refresh_source, seed_urls,
+				   status, progress_json, created_at, started_at, completed_at,
+				   last_heartbeat, error, result_count, failed_count
+			FROM crawl_jobs
+		`)
+	} else {
+		_, err = tx.Exec(`
+			INSERT INTO crawl_jobs_new
+			SELECT id, name, description, source_type, entity_type, config_json,
+				   source_config_snapshot, auth_snapshot, refresh_source, seed_urls,
+				   status, progress_json, created_at, started_at, completed_at,
+				   last_heartbeat, error, result_count, failed_count
+			FROM crawl_jobs
+		`)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to copy data to new table: %w", err)
 	}
@@ -1256,6 +1306,13 @@ func (s *SQLiteDB) migrateRemoveLogsColumn() error {
 	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC)`)
 	if err != nil {
 		return fmt.Errorf("failed to create idx_jobs_created: %w", err)
+	}
+
+	if hasParentID {
+		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC)`)
+		if err != nil {
+			return fmt.Errorf("failed to create idx_jobs_parent_id: %w", err)
+		}
 	}
 
 	// Commit transaction
@@ -1310,5 +1367,49 @@ func (s *SQLiteDB) migrateAddPostJobsColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: post_jobs column added successfully")
+	return nil
+}
+
+// migrateAddParentIdColumn adds parent_id column to crawl_jobs table
+func (s *SQLiteDB) migrateAddParentIdColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasParentID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "parent_id" {
+			hasParentID = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasParentID {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding parent_id column to crawl_jobs")
+
+	// Add the parent_id column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN parent_id TEXT`); err != nil {
+		return err
+	}
+
+	// Create the index
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC)`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: parent_id column and index added successfully")
 	return nil
 }

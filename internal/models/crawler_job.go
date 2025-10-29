@@ -29,7 +29,11 @@ const (
 // CrawlJob represents a crawl job inspired by Firecrawl's job model
 // Configuration is snapshot at job creation time for self-contained, re-runnable jobs
 type CrawlJob struct {
-	ID                   string        `json:"id"`
+	ID string `json:"id"`
+	// ParentID is the parent job ID for child jobs (empty for parent jobs)
+	// Child crawler_url jobs reference their root parent job ID
+	// Used for hierarchical display in Queue Management UI
+	ParentID             string        `json:"parent_id,omitempty"`
 	Name                 string        `json:"name"`                   // User-friendly name for the job
 	Description          string        `json:"description"`            // User-provided description
 	SourceType           string        `json:"source_type"`            // "jira", "confluence", "github"

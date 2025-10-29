@@ -33,6 +33,23 @@ func NewManager(jobStorage interfaces.JobStorage, queueMgr interfaces.QueueManag
 	}
 }
 
+// JobChildStats holds aggregate statistics for a parent job's children
+type JobChildStats struct {
+	ChildCount        int `json:"child_count"`
+	CompletedChildren int `json:"completed_children"`
+	FailedChildren    int `json:"failed_children"`
+}
+
+func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error) {
+	stats, err := m.jobStorage.GetJobChildStats(ctx, parentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child stats: %w", err)
+	}
+
+	m.logger.Debug().Int("parent_count", len(parentIDs)).Int("stats_count", len(stats)).Msg("Retrieved child statistics")
+	return stats, nil
+}
+
 // CreateJob creates a new job and enqueues parent message
 func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error) {
 	// Generate job ID

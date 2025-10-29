@@ -19,6 +19,12 @@ import (
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
+// JobGroup represents a parent job with its children
+type JobGroup struct {
+	Parent   *models.CrawlJob
+	Children []*models.CrawlJob
+}
+
 // JobHandler handles job-related API requests
 type JobHandler struct {
 	crawlerService   *crawler.Service
@@ -59,6 +65,12 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status") // Supports comma-separated values (e.g., "pending,running"); parsing handled by storage layer
 	sourceType := r.URL.Query().Get("source")
 	entityType := r.URL.Query().Get("entity")
+	parentID := r.URL.Query().Get("parent_id")
+	groupedStr := r.URL.Query().Get("grouped")
+	grouped := false
+	if groupedStr == "true" {
+		grouped = true
+	}
 	orderBy := r.URL.Query().Get("order_by")
 	orderDir := r.URL.Query().Get("order_dir")
 
@@ -91,6 +103,8 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		Status:     status,
 		SourceType: sourceType,
 		EntityType: entityType,
+		ParentID:   parentID, // NEW
+		Grouped:    grouped,  // NEW
 		OrderBy:    orderBy,
 		OrderDir:   orderDir,
 	}
@@ -102,21 +116,126 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mask sensitive data
-	maskedJobs := make([]*models.CrawlJob, 0, len(jobs))
+	// Extract parent job IDs for statistics calculation
+	parentJobIDs := make([]string, 0)
 	for _, job := range jobs {
-		maskedJobs = append(maskedJobs, job.MaskSensitiveData())
+		// Only calculate stats for parent jobs (jobs with no parent_id)
+		if job.ParentID == "" {
+			parentJobIDs = append(parentJobIDs, job.ID)
+		}
+	}
+
+	// Fetch child statistics in batch
+	var childStatsMap map[string]*jobs.JobChildStats
+	if len(parentJobIDs) > 0 {
+		var err error
+		childStatsMap, err = h.jobManager.GetJobChildStats(ctx, parentJobIDs)
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to get child statistics, continuing without stats")
+			childStatsMap = make(map[string]*jobs.JobChildStats)
+		}
+	} else {
+		childStatsMap = make(map[string]*jobs.JobChildStats)
 	}
 
 	// Get total count using JobManager (ensures consistent filtering)
 	totalCount, err := h.jobManager.CountJobs(ctx, opts)
 	if err != nil {
 		h.logger.Warn().Err(err).Msg("Failed to count jobs, using result length")
-		totalCount = len(maskedJobs)
+		totalCount = len(jobs)
+	}
+
+	if !grouped {
+		// Mask sensitive data and enrich with statistics
+		enrichedJobs := make([]map[string]interface{}, 0, len(jobs))
+		for _, job := range jobs {
+			masked := job.MaskSensitiveData()
+
+			// Convert to map and add statistics
+			jobMap := convertJobToMap(masked)
+
+			// Add child statistics
+			if stats, exists := childStatsMap[masked.ID]; exists {
+				jobMap["child_count"] = stats.ChildCount
+				jobMap["completed_children"] = stats.CompletedChildren
+				jobMap["failed_children"] = stats.FailedChildren
+			} else {
+				jobMap["child_count"] = 0
+				jobMap["completed_children"] = 0
+				jobMap["failed_children"] = 0
+			}
+
+			enrichedJobs = append(enrichedJobs, jobMap)
+		}
+
+		response := map[string]interface{}{
+			"jobs":        enrichedJobs,
+			"total_count": totalCount,
+			"limit":       limit,
+			"offset":      offset,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Group jobs by parent
+	groupsMap := make(map[string]*JobGroup)
+	orphanJobs := make([]*models.CrawlJob, 0)
+
+	for _, job := range jobs {
+		if job.ParentID == "" {
+			// This is a parent job
+			if _, exists := groupsMap[job.ID]; !exists {
+				groupsMap[job.ID] = &JobGroup{
+					Parent:   job,
+					Children: make([]*models.CrawlJob, 0),
+				}
+			}
+		} else {
+			// This is a child job
+			if group, exists := groupsMap[job.ParentID]; exists {
+				group.Children = append(group.Children, job)
+			} else {
+				// Parent not in current page, treat as orphan
+				orphanJobs = append(orphanJobs, job)
+			}
+		}
+	}
+
+	// Convert to array and enrich with statistics
+	groups := make([]map[string]interface{}, 0, len(groupsMap))
+	for parentID, group := range groupsMap {
+		maskedParent := group.Parent.MaskSensitiveData()
+		parentMap := convertJobToMap(maskedParent)
+
+		// Add statistics
+		if stats, exists := childStatsMap[parentID]; exists {
+			parentMap["child_count"] = stats.ChildCount
+			parentMap["completed_children"] = stats.CompletedChildren
+			parentMap["failed_children"] = stats.FailedChildren
+		} else {
+			parentMap["child_count"] = 0
+			parentMap["completed_children"] = 0
+			parentMap["failed_children"] = 0
+		}
+
+		// Mask children
+		maskedChildren := make([]*models.CrawlJob, 0, len(group.Children))
+		for _, child := range group.Children {
+			maskedChildren = append(maskedChildren, child.MaskSensitiveData())
+		}
+
+		groups = append(groups, map[string]interface{}{
+			"parent":   parentMap,
+			"children": maskedChildren,
+		})
 	}
 
 	response := map[string]interface{}{
-		"jobs":        maskedJobs,
+		"groups":      groups,
+		"orphans":     orphanJobs, // Jobs whose parent is not in current page
 		"total_count": totalCount,
 		"limit":       limit,
 		"offset":      offset,
@@ -649,4 +768,20 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 		"job":     masked,
 		"message": "Job updated successfully",
 	})
+}
+
+// convertJobToMap converts a CrawlJob struct to a map for JSON response enrichment
+func convertJobToMap(job *models.CrawlJob) map[string]interface{} {
+	// Marshal to JSON then unmarshal to map to preserve all fields and JSON tags
+	data, err := json.Marshal(job)
+	if err != nil {
+		return map[string]interface{}{"id": job.ID, "error": "failed to serialize job"}
+	}
+
+	var jobMap map[string]interface{}
+	if err := json.Unmarshal(data, &jobMap); err != nil {
+		return map[string]interface{}{"id": job.ID, "error": "failed to deserialize job"}
+	}
+
+	return jobMap
 }

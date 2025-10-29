@@ -113,12 +113,19 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 		authSnapshot.String = crawlJob.AuthSnapshot
 	}
 
+	var parentID sql.NullString
+	if crawlJob.ParentID != "" {
+		parentID.Valid = true
+		parentID.String = crawlJob.ParentID
+	}
+
 	query := `
 		INSERT INTO crawl_jobs (
-			id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+			id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 			status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			parent_id = excluded.parent_id,
 			name = excluded.name,
 			description = excluded.description,
 			status = excluded.status,
@@ -136,6 +143,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 
 	_, err = s.db.db.ExecContext(ctx, query,
 		crawlJob.ID,
+		parentID,
 		crawlJob.Name,
 		crawlJob.Description,
 		crawlJob.SourceType,
@@ -193,7 +201,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 // GetJob retrieves a job by ID
 func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	query := `
-		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE id = ?
@@ -206,7 +214,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 // ListJobs lists jobs with pagination and filters
 func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE 1=1
@@ -246,13 +254,21 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
 			}
 		}
-		if opts.EntityType != "" {
-			query += " AND entity_type = ?"
-			args = append(args, opts.EntityType)
-		}
-
-		// Order by
-		orderBy := "created_at"
+		        if opts.EntityType != "" {
+		            query += " AND entity_type = ?"
+		            args = append(args, opts.EntityType)
+		        }
+		
+		        if opts.ParentID != "" {
+		            if opts.ParentID == "root" {
+		                query += " AND (parent_id IS NULL OR parent_id = '')"
+		            } else {
+		                query += " AND parent_id = ?"
+		                args = append(args, opts.ParentID)
+		            }
+		        }
+		
+		        // Order by		orderBy := "created_at"
 		if opts.OrderBy != "" {
 			orderBy = opts.OrderBy
 		}
@@ -288,7 +304,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 // GetJobsByStatus filters jobs by status
 func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = ?
@@ -302,6 +318,82 @@ func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*mod
 	defer rows.Close()
 
 	return s.scanJobs(rows)
+}
+
+// GetChildJobs retrieves all child jobs for a given parent job ID
+// Returns jobs ordered by created_at DESC (newest first)
+// Returns empty slice if parent has no children or parent doesn't exist
+func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error) {
+	query := `
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json,
+		       source_config_snapshot, auth_snapshot, refresh_source, status, progress_json,
+		       created_at, started_at, completed_at, last_heartbeat, error, result_count,
+		       failed_count, seed_urls
+		FROM crawl_jobs
+		WHERE parent_id = ?
+		ORDER BY created_at DESC
+	`
+
+	rows, err := s.db.db.QueryContext(ctx, query, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs, err := s.scanJobs(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	s.logger.Debug().Str("parent_id", parentID).Int("child_count", len(jobs)).Msg("Retrieved child jobs")
+	return jobs, nil
+}
+
+// JobChildStats holds aggregate statistics for a parent job's children
+type JobChildStats struct {
+	ChildCount        int
+	CompletedChildren int
+	FailedChildren    int
+}
+
+func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error) {
+	if len(parentIDs) == 0 {
+		return make(map[string]*JobChildStats), nil
+	}
+
+	query := `
+		SELECT
+			parent_id,
+			COUNT(*) as child_count,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children
+		FROM crawl_jobs
+		WHERE parent_id IN (?` + strings.Repeat(",?", len(parentIDs)-1) + `)
+		GROUP BY parent_id
+	`
+
+	args := make([]interface{}, len(parentIDs))
+	for i, id := range parentIDs {
+		args[i] = id
+	}
+
+	rows, err := s.db.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job child stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]*JobChildStats)
+	for rows.Next() {
+		var parentID string
+		var childStats JobChildStats
+		if err := rows.Scan(&parentID, &childStats.ChildCount, &childStats.CompletedChildren, &childStats.FailedChildren); err != nil {
+			return nil, fmt.Errorf("failed to scan job child stats: %w", err)
+		}
+		stats[parentID] = &childStats
+	}
+
+	return stats, nil
 }
 
 // UpdateJobStatus updates job status and error message
@@ -396,7 +488,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 // GetStaleJobs returns jobs with stale heartbeats (older than threshold)
 func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = 'running'
@@ -480,6 +572,15 @@ func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.
 			query += " AND entity_type = ?"
 			args = append(args, opts.EntityType)
 		}
+
+		if opts.ParentID != "" {
+			if opts.ParentID == "root" {
+				query += " AND (parent_id IS NULL OR parent_id = '')"
+			} else {
+				query += " AND parent_id = ?"
+				args = append(args, opts.ParentID)
+			}
+		}
 	}
 
 	var count int
@@ -491,6 +592,7 @@ func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.
 func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	var (
 		id, name, description, sourceType, entityType, configJSON, status, progressJSON string
+		parentID                                                                        sql.NullString
 		sourceConfigSnapshot, authSnapshot                                              sql.NullString
 		refreshSource                                                                   int
 		errorMsg                                                                        sql.NullString
@@ -501,7 +603,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	)
 
 	err := row.Scan(
-		&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+		&id, &parentID, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 		&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 	)
 
@@ -547,6 +649,9 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	if authSnapshot.Valid {
 		job.AuthSnapshot = authSnapshot.String
 	}
+	if parentID.Valid {
+		job.ParentID = parentID.String
+	}
 
 	// Convert timestamps
 	job.CreatedAt = unixToTime(createdAt)
@@ -583,6 +688,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 	for rows.Next() {
 		var (
 			id, name, description, sourceType, entityType, configJSON, status, progressJSON string
+			parentID                                                                        sql.NullString
 			sourceConfigSnapshot, authSnapshot                                              sql.NullString
 			refreshSource                                                                   int
 			errorMsg                                                                        sql.NullString
@@ -593,7 +699,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		)
 
 		err := rows.Scan(
-			&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+			&id, &parentID, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 			&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 		)
 
@@ -637,6 +743,9 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		}
 		if authSnapshot.Valid {
 			job.AuthSnapshot = authSnapshot.String
+		}
+		if parentID.Valid {
+			job.ParentID = parentID.String
 		}
 
 		// Convert timestamps

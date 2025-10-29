@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 12:10:32 pm
+// Last Modified: Thursday, 30th October 2025 9:33:10 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -72,6 +72,10 @@ type JobStorage interface {
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
 	ListJobs(ctx context.Context, opts *ListOptions) ([]*models.CrawlJob, error)
+	// GetChildJobs retrieves all child jobs for a given parent job ID
+	// Returns jobs ordered by created_at DESC (newest first)
+	// Returns empty slice if parent has no children or parent doesn't exist
+	GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error)
 	GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
