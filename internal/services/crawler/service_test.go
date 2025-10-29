@@ -220,6 +220,20 @@ func (m *mockJobStorage) MarkURLSeen(ctx context.Context, jobID string, url stri
 	return true, nil // Newly added
 }
 
+func (m *mockJobStorage) MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error) {
+	if m.jobs == nil {
+		return 0, nil
+	}
+	count := 0
+	for _, job := range m.jobs {
+		if job.Status == JobStatusRunning {
+			job.Status = JobStatusPending
+			count++
+		}
+	}
+	return count, nil
+}
+
 // Mock QueueManager
 type mockQueueManager struct {
 	messages []*queue.JobMessage
@@ -425,6 +439,11 @@ func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error
 
 func (m *mockDocumentStorage) ClearAll() error {
 	m.documents = make(map[string]*models.Document)
+	return nil
+}
+
+func (m *mockDocumentStorage) RebuildFTS5Index() error {
+	// Mock implementation - no-op for testing
 	return nil
 }
 

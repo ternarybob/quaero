@@ -4,7 +4,9 @@
 
 ## Overview
 
-Quaero is a single-executable Windows service designed to run locally on your machine. It crawls websites using personal cookie authentication, converts content to markdown for LLM consumption, and provides natural language query capabilities through Model Context Protocol (MCP) integration.
+Enterprise knowledge is locked behind authenticated web applications (Confluence, Jira, documentation sites) where traditional RAG tools cannot access or safely store sensitive data. Quaero solves this by running entirely locally on your machine, capturing your authenticated browser sessions via a Chrome extension, and crawling pages to normalize them into markdown with metadata. All data is stored in a local SQLite database with scheduled recrawls and LLM-powered summarization keeping your private knowledge base current - without any data ever leaving your machine.
+
+Quaero is a local service (Windows, Linux, macOS) that provides fast full-text and semantic search, along with chat capabilities through integrated language models.
 
 ### Key Features
 
@@ -14,7 +16,7 @@ Quaero is a single-executable Windows service designed to run locally on your ma
 - 💾 **SQLite Storage** - Local database for documents and metadata
 - 🎯 **Job Manager** - Persistent queue-based job execution system
 - 📚 **Document Summarization** - LLM-powered content summaries
-- 🤖 **MCP Integration** - Model Context Protocol for LLM chat interfaces
+- 🔍 **Advanced Search** - Google-style query parser with FTS5 and vector search
 - 🌐 **Web Interface** - Browser-based UI for job management and monitoring
 - ⏰ **Scheduled Jobs** - Automated crawling and summarization tasks
 
@@ -28,7 +30,7 @@ Quaero is a single-executable Windows service designed to run locally on your ma
 - **Authentication:** Chrome extension → HTTP POST
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
-- **MCP:** Model Context Protocol for LLM integration (planned)
+- **MCP:** Model Context Protocol for internal agent tools
 
 ## Quick Start
 
@@ -40,47 +42,109 @@ Quaero is a single-executable Windows service designed to run locally on your ma
 
 ### Installation
 
+#### Windows (PowerShell)
+
 ```powershell
 # Clone the repository
 git clone https://github.com/ternarybob/quaero.git
 cd quaero
 
-# Build (Windows only)
+# Build
 .\scripts\build.ps1
 ```
 
-**Important:** Building MUST use `.\scripts\build.ps1`. Direct `go build` is not supported for production builds.
+#### Linux/macOS (Bash)
+
+```bash
+# Clone the repository
+git clone https://github.com/ternarybob/quaero.git
+cd quaero
+
+# Build
+./scripts/build.sh
+```
+
+**Important:** Always use the build scripts (`build.ps1` on Windows, `build.sh` on Linux/macOS). Direct `go build` is not supported for production builds as it doesn't handle versioning and assets correctly.
 
 ### Configuration
 
-Create `quaero.toml` in your project directory:
+Create `quaero.toml` in your project directory (or use the default from `deployments/local/quaero.toml`):
 
 ```toml
+# Server configuration
 [server]
 host = "localhost"
-port = 8085
+port = 8080  # Default port (can be overridden with --port flag or QUAERO_SERVER_PORT env var)
 
-[logging]
-level = "info"
-format = "json"
-
+# Storage configuration
 [storage]
 type = "sqlite"
 
 [storage.sqlite]
-path = "./quaero.db"
-enable_fts5 = true
-enable_wal = true
+path = "./data/quaero.db"
+enable_fts5 = true           # Full-text search
+enable_vector = true         # Vector embeddings for semantic search
+embedding_dimension = 768    # Matches nomic-embed-text model output
+cache_size_mb = 64          # SQLite cache size
+wal_mode = true             # Write-ahead logging for better concurrency
+busy_timeout_ms = 5000      # Busy timeout in milliseconds
+
+# LLM configuration
+[llm]
+mode = "offline"  # "offline" (local, secure) or "cloud" (external API)
+
+[llm.offline]
+model_dir = "./models"
+embed_model = "nomic-embed-text-v1.5-q8.gguf"
+chat_model = "qwen2.5-7b-instruct-q4.gguf"
+
+[llm.audit]
+enabled = true      # Enable audit logging
+log_queries = false # Don't log query text (PII protection)
+
+# Search configuration
+[search]
+mode = "advanced"  # "advanced" (Google-style), "fts5", or "disabled"
+case_sensitive_multiplier = 3
+case_sensitive_max_cap = 1000
+
+# Job configuration
+[jobs.crawl_and_collect]
+enabled = true
+auto_start = false      # Don't run on startup
+schedule = "*/5 * * * *"  # Every 5 minutes (minimum interval)
 ```
 
 ### Running the Server
 
+#### Windows
 ```powershell
 # Start the server (after building)
 .\bin\quaero.exe
 
 # Or build and run in one step
 .\scripts\build.ps1 -Run
+
+# With custom port
+.\bin\quaero.exe --port 9090
+```
+
+#### Linux/macOS
+```bash
+# Start the server (after building)
+./bin/quaero
+
+# With custom config file
+./bin/quaero --config deployments/local/quaero.toml
+
+# With environment variables
+QUAERO_SERVER_PORT=9090 ./bin/quaero
+```
+
+#### Docker
+```bash
+# Build and run with Docker
+docker-compose -f deployments/docker/docker-compose.yml up
 ```
 
 ### Installing Chrome Extension
@@ -89,12 +153,17 @@ enable_wal = true
 2. Enable "Developer mode" (top right)
 3. Click "Load unpacked"
 4. Select the `cmd/quaero-chrome-extension/` directory
+5. **Configure server URL** in extension settings if not using default `http://localhost:8080`
 
 ### Using Quaero
 
 1. **Start the server:**
    ```powershell
+   # Windows
    .\scripts\build.ps1 -Run
+
+   # Linux/macOS
+   ./scripts/build.sh && ./bin/quaero
    ```
 
 2. **Navigate to a website:**
@@ -103,36 +172,82 @@ enable_wal = true
 
 3. **Capture Authentication:**
    - Click the Quaero extension icon
-   - Click "Capture Authentication"
-   - Extension sends cookies to Quaero server
+   - Extension sends cookies to server via `POST /api/auth`
+   - Verify connection status in extension popup
 
-4. **Create a Crawl Job:**
-   - Open http://localhost:8085
-   - Click "New Job"
-   - Enter seed URL(s) to start crawling from
-   - Configure crawl depth, filters, and options
-   - Click "Start Job"
+4. **Access Web Interface:**
+   - Open http://localhost:8080 (default port)
+   - Navigate to Jobs page to create crawl jobs
+   - Visit Queue page to monitor running jobs
 
-5. **Monitor Progress:**
-   - View job progress in real-time
-   - Browse collected documents
-   - Check job logs for details
+5. **Create a Crawl Job:**
+   - Go to Jobs page
+   - Click "New Job Definition"
+   - Configure sources, schedule, and crawl parameters
+   - Execute job manually or wait for schedule
 
-6. **Query Knowledge Base** (upcoming):
-   - Ask natural language questions
-   - LLM uses MCP to access crawled content
-   - Get answers with source citations
+6. **Search and Query:**
+   - Use Search page for advanced queries
+   - Chat page for natural language questions with RAG
 
 ## Build and Test Instructions
 
 **IMPORTANT:** The following instructions are critical for maintaining a stable development environment.
 
-### Build and Run Instructions (Windows ONLY)
+### Platform-Specific Build Instructions
 
--   **Building, compiling, and running the application MUST be done using the following scripts:**
-    -   `./scripts/build.ps1`
-    -   `./scripts/build.ps1 -Run`
--   **The ONLY exception** is using `go build` for a compile test, with no output binary.
+#### Windows (PowerShell)
+```powershell
+# Development build
+.\scripts\build.ps1
+
+# Clean build
+.\scripts\build.ps1 -Clean
+
+# Release build (optimized)
+.\scripts\build.ps1 -Release
+
+# Build and run
+.\scripts\build.ps1 -Run
+```
+
+#### Linux/macOS (Bash)
+```bash
+# Development build
+./scripts/build.sh
+
+# Clean build
+./scripts/build.sh --clean
+
+# Release build (optimized)
+./scripts/build.sh --release
+
+# Build with tests
+./scripts/build.sh --test
+```
+
+#### Docker
+```bash
+# Build Docker image
+docker build -f deployments/docker/Dockerfile -t quaero:latest .
+
+# Run with Docker Compose
+docker-compose -f deployments/docker/docker-compose.yml up
+
+# Production build with version
+docker build \
+  --build-arg VERSION=1.0.0 \
+  --build-arg BUILD=production \
+  --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+  -f deployments/docker/Dockerfile \
+  -t quaero:1.0.0 .
+```
+
+**Platform-Specific Notes:**
+- **Windows:** UI tests require Chrome installed. Use PowerShell for scripts.
+- **Linux:** Ensure execute permissions on build.sh (`chmod +x scripts/build.sh`)
+- **macOS:** Requires Chrome or Chromium for UI tests
+- **All Platforms:** Always use build scripts to ensure proper versioning and asset handling
 
 ### Testing Instructions
 
@@ -284,14 +399,17 @@ quaero/
 ### Server
 
 ```bash
-# Start server
-quaero serve
+# Start server (no subcommand needed)
+quaero
 
 # With custom port
-quaero serve --port 8085
+quaero --port 8080
+
+# With custom host
+quaero --host 0.0.0.0
 
 # With custom config
-quaero serve --config /path/to/quaero.toml
+quaero --config /path/to/quaero.toml
 ```
 
 ### Version
@@ -300,6 +418,58 @@ quaero serve --config /path/to/quaero.toml
 # Show version
 quaero version
 ```
+
+## Security & Privacy
+
+### Local-Only Operation (Offline Mode)
+
+**Default Configuration:** Quaero runs in `offline` mode by default, ensuring:
+- ✅ **All data stays local** - No network egress for crawled content
+- ✅ **Local LLM inference** - Uses llama.cpp with local model files
+- ✅ **SQLite storage** - Database files remain on your machine
+- ✅ **No telemetry** - No usage data collection or phone-home
+
+### Cloud Mode Risks
+
+⚠️ **WARNING:** Cloud mode sends data to external APIs. Only enable if you understand the implications:
+
+```toml
+[llm]
+mode = "cloud"  # ⚠️ SENDS DATA TO EXTERNAL APIS
+
+[llm.cloud]
+provider = "gemini"  # Data sent to Google/OpenAI/Anthropic
+api_key = "${QUAERO_LLM_CLOUD_API_KEY}"
+```
+
+**Cloud Mode Implications:**
+- Document content sent to third-party APIs
+- Query text transmitted externally
+- Subject to provider's data policies
+- Not suitable for sensitive/classified data
+
+### Audit Logging
+
+Quaero includes audit logging for compliance:
+
+```toml
+[llm.audit]
+enabled = true      # Log all LLM interactions
+log_queries = false # Disable to protect PII in queries
+```
+
+Audit logs are stored in SQLite and include:
+- Timestamp and request ID
+- Model used and token counts
+- Response metadata (not content if `log_queries=false`)
+- User context (if multi-user support enabled)
+
+### Authentication Security
+
+- Chrome extension captures cookies locally
+- Cookies transmitted only to localhost
+- No cloud storage of credentials
+- Session data encrypted at rest in SQLite
 
 ## Architecture
 
@@ -329,13 +499,15 @@ The crawler service (`internal/services/crawler/`) manages web crawling operatio
 #### 2. Job Manager
 The job manager (`internal/jobs/`) handles job lifecycle and execution:
 
-**Job Queue System:**
-- Persistent queue backed by goqite (SQLite)
+**Job Queue System (goqite):**
+- Persistent queue backed by SQLite
 - Jobs survive application restarts
 - Worker pool processes messages (5 workers default)
-- Type-based routing (crawler_url, summarizer, cleanup)
-- Automatic retry with visibility timeout
-- Dead-letter handling after 3 attempts
+- Visibility timeout (5 minutes default) - messages become visible for retry if not completed
+- Max receive count (3 attempts) - messages move to dead-letter after exhausting retries
+- Delayed completion probe - 5-second grace period after job completion to ensure all child URLs are processed
+- Atomic progress updates - Pending/Total counts maintained consistently when spawning child URLs
+- Heartbeat mechanism for long-running jobs to prevent visibility timeout
 
 **Job Types:**
 1. **crawler_url** - Process individual URLs
@@ -374,48 +546,61 @@ The document storage (`internal/storage/sqlite/`) manages crawled content:
 - Metadata queries and filtering
 - Document versioning support
 
-#### 4. Scheduler Service
+#### 4. Search Service
+The search service (`internal/services/search/`) provides multiple search modes:
+
+**Search Modes:**
+- **advanced** (default) - Google-style query parser with operators:
+  - Quoted phrases: `"exact match"`
+  - Boolean operators: `AND`, `OR`, `NOT`
+  - Field searches: `title:keyword`
+  - Wildcards: `test*`
+- **fts5** - Direct SQLite FTS5 full-text search
+- **disabled** - Search disabled
+
+**Features:**
+- Case-sensitive search with multiplier (fetches 3x results, caps at 1000)
+- SQLite FTS5 indexing on title + content
+- Vector search support when enabled (`storage.sqlite.enable_vector=true`)
+- Configurable embedding dimensions (768 for nomic-embed-text)
+- Hybrid search combining keyword and semantic results
+
+#### 5. Scheduler Service
 The scheduler (`internal/services/scheduler/`) manages automated tasks:
 
 **Default Jobs:**
-1. **crawl_and_collect** (every 10 minutes)
+1. **crawl_and_collect** (every 5 minutes minimum)
    - Refreshes configured sources
    - Crawls new pages
    - Updates existing documents
 
-2. **scan_and_summarize** (every 2 hours)
-   - Scans documents without summaries
-   - Generates LLM-powered summaries
-   - Extracts keywords
-
 **Features:**
 - Cron-based scheduling
 - Job enable/disable controls
-- Dynamic schedule updates
-- Manual trigger support
+- `auto_start` flag for immediate execution on startup
+- Dynamic schedule updates with 5-minute minimum interval
+- Manual trigger support via API
 - Prevents concurrent execution
 
-#### 5. MCP Integration (Planned)
-Model Context Protocol integration for LLM chat:
+#### 6. MCP Integration
+Model Context Protocol integration (internal for Claude Code only):
 
-**Planned Features:**
-- MCP server exposing document corpus
-- Natural language query interface
-- Context-aware responses
-- Source citation with links
-- Progressive thinking chain-of-thought
+**Current Status:**
+- ⚠️ **Internal use only** - MCP endpoint is specifically for Claude Code integration
+- Not a general-purpose MCP server implementation
+- Provides document corpus access to Claude agents
 
-**Query Examples:**
+**Supported Queries (via Claude Code):**
 - "How many backlog items are there?"
 - "List all the projects"
 - "How do I get access to this server?"
 - Technical and developer-focused questions
 
-**Implementation:**
-- MCP resource provider for documents
-- Vector similarity search (upcoming)
-- Context retrieval and ranking
-- Response generation with citations
+**Implementation Notes:**
+- `/mcp` endpoint handles Claude-specific requests
+- Documents exposed as MCP resources
+- Query interface for agent tools only
+- Not intended for external MCP clients
 
 ### Authentication Flow
 
@@ -483,108 +668,115 @@ Model Context Protocol integration for LLM chat:
 
 ## Web UI
 
-### Dashboard (/)
-- System status
+### Pages
+
+#### Dashboard (`/`)
+- System overview and status
+- Quick access to main features
 - Authentication status
-- Quick links
 
-### Confluence (/confluence)
-- Space browser
-- Collection trigger
-- Real-time logs
+#### Jobs (`/jobs`)
+- Job definition management
+- Create, edit, delete job definitions
+- Configure sources and schedules
+- Execute jobs manually
 
-### Jira (/jira)
-- Project browser
-- Collection trigger
-- Real-time logs
+#### Queue (`/queue`)
+- Active job monitoring
+- Real-time job status updates
+- Job logs and progress tracking
+- Cancel or rerun jobs
+
+#### Search (`/search`)
+- Advanced search with query operators
+- Full-text and semantic search
+- Filter by source, date, type
+
+#### Chat (`/chat`)
+- Natural language queries
+- RAG-enabled responses
+- Document context integration
+
+#### Documents (`/documents`)
+- Browse collected documents
+- View document metadata
+- Force reprocessing
+
+#### Settings (`/settings`)
+- Application configuration
+- LLM settings
+- Storage management
 
 ## API Endpoints
 
 ### HTTP Endpoints
 
-#### UI Routes
-```
-GET  /                           - Dashboard
-GET  /jira                       - Jira UI
-GET  /confluence                 - Confluence UI
-GET  /documents                  - Documents browser
-GET  /embeddings                 - Embeddings test page
-GET  /settings                   - Settings page
-GET  /static/common.css          - Shared styles
-GET  /ui/status                  - UI status endpoint
-GET  /ui/parser-status           - Parser status
-```
-
 #### Authentication
 ```
-POST /api/auth                   - Update authentication credentials
+POST /api/auth                          - Update authentication from Chrome extension
+GET  /api/auth/status                   - Check authentication status
+GET  /api/auth/list                     - List authenticated sources
 ```
 
-#### Collection (UI-triggered)
+#### Sources
 ```
-POST /api/scrape                 - Trigger collection
-POST /api/scrape/projects        - Scrape Jira projects
-POST /api/scrape/spaces          - Scrape Confluence spaces
-```
-
-#### Cache Management
-```
-POST /api/projects/refresh-cache     - Refresh Jira projects cache
-POST /api/projects/get-issues        - Get project issues
-POST /api/spaces/refresh-cache       - Refresh Confluence spaces cache
-POST /api/spaces/get-pages           - Get space pages
+GET  /api/sources                       - List all sources
+GET  /api/sources/{id}                  - Get source by ID
+POST /api/sources                       - Create new source
+PUT  /api/sources/{id}                  - Update source
+DELETE /api/sources/{id}                - Delete source
 ```
 
-#### Data Access
+#### Job Definitions
 ```
-POST /api/data/clear-all             - Clear all data
-POST /api/data/jira/clear            - Clear Jira data
-POST /api/data/confluence/clear      - Clear Confluence data
-GET  /api/data/jira                  - Get Jira data summary
-GET  /api/data/jira/issues           - Get Jira issues
-GET  /api/data/confluence            - Get Confluence data summary
-GET  /api/data/confluence/pages      - Get Confluence pages
-```
-
-#### Collector (Paginated Data)
-```
-GET  /api/collector/projects         - Get projects (paginated)
-GET  /api/collector/spaces           - Get spaces (paginated)
-GET  /api/collector/issues           - Get issues (paginated)
-GET  /api/collector/pages            - Get pages (paginated)
+GET  /api/job-definitions                - List all job definitions
+GET  /api/job-definitions/{id}           - Get job definition by ID
+POST /api/job-definitions                - Create new job definition
+PUT  /api/job-definitions/{id}           - Update job definition
+DELETE /api/job-definitions/{id}         - Delete job definition
+POST /api/job-definitions/{id}/execute   - Execute job definition manually
 ```
 
-#### Collection Sync (Manual)
+#### Jobs
 ```
-POST /api/collection/jira/sync       - Manual Jira sync
-POST /api/collection/confluence/sync - Manual Confluence sync
-POST /api/collection/sync-all        - Sync all sources
+GET  /api/jobs                          - List all jobs (with pagination)
+GET  /api/jobs/{id}                     - Get job by ID
+POST /api/jobs/{id}/cancel              - Cancel running job
+POST /api/jobs/{id}/retry               - Retry failed job
+DELETE /api/jobs/{id}                   - Delete job
+GET  /api/jobs/{id}/logs                - Get job logs
 ```
 
 #### Documents
 ```
-GET  /api/documents/stats            - Document statistics
-GET  /api/documents                  - List documents
-POST /api/documents/process          - Process documents
-POST /api/documents/force-sync       - Force sync document
-POST /api/documents/force-embed      - Force embed document
+GET  /api/documents                     - List documents (with pagination)
+GET  /api/documents/{id}                - Get document by ID
+PUT  /api/documents/{id}                - Update document
+DELETE /api/documents/{id}              - Delete document
+POST /api/documents/search              - Search documents
 ```
 
-#### Embeddings
+#### Search
 ```
-POST /api/embeddings/generate        - Generate embedding (testing)
-```
-
-#### Processing
-```
-GET  /api/processing/status          - Processing status
+POST /api/search                        - Advanced search with query operators
 ```
 
-#### Scheduler
+#### Chat
 ```
-POST /api/scheduler/trigger-collection - Trigger collection event
-POST /api/scheduler/trigger-embedding  - Trigger embedding event
+POST /api/chat                          - Send chat message (RAG-enabled)
+GET  /api/chat/history                  - Get chat history
 ```
+
+#### System
+```
+GET  /api/version                       - Server version info
+GET  /api/health                        - Health check endpoint
+GET  /api/config                        - Get server configuration
+```
+
+#### MCP (Model Context Protocol)
+```
+POST /mcp                                - Handle MCP requests
 
 #### Default Jobs
 ```
@@ -807,35 +999,33 @@ type quaero.toml
 ## Current Status
 
 **✅ Working:**
-- Website crawler with depth-based traversal
+- Generic website crawler with depth-based traversal
 - Cookie-based authentication via Chrome extension
-- HTML to Markdown conversion
-- JavaScript rendering (chromedp)
+- HTML to Markdown conversion with chromedp
 - Persistent job queue (goqite/SQLite)
-- Worker pool with job type routing
-- Document storage with deduplication
-- Job progress tracking (completed/pending/failed URLs)
-- URL filtering (include/exclude patterns)
-- Job management UI (create, monitor, logs)
-- Scheduled jobs (crawl_and_collect, scan_and_summarize)
-- Document summarization (LLM-powered)
-- Keyword extraction
-- Job logs with real-time updates
+- Worker pool with configurable concurrency
+- Document storage with SQLite FTS5
+- Job progress tracking with real-time WebSocket updates
+- URL filtering (include/exclude regex patterns)
+- Job management UI (create, monitor, execute)
+- Scheduled jobs with cron expressions
+- LLM-powered document summarization (offline/cloud modes)
+- Advanced search with Google-style query parser
+- Chat interface with RAG support
+- Real-time job logs and status updates
 
-**⚠️ In Development (~75% Complete):**
-- Image extraction from crawled pages (TODO)
-- MCP (Model Context Protocol) integration
-- Natural language query interface
-- Vector embeddings for semantic search
-- LLM chat with document context
+**⚠️ In Progress:**
+- Image extraction from crawled pages
+- MCP endpoint (internal Claude Code use only)
+- Vector embeddings optimization
+- Source citation formatting
 
 **❌ Not Yet Implemented:**
-- Progressive thinking chain-of-thought responses
-- Source citations in chat responses
-- Multi-user support
-- Cloud deployment
-- GitHub/GitLab source integration
-- Slack/Teams integration
+- Multi-user support with authentication
+- GitHub/GitLab native integrations
+- Slack/Teams connectors
+- Distributed queue support (Redis/RabbitMQ)
+- Cloud-native deployment (Kubernetes)
 
 ## Roadmap
 

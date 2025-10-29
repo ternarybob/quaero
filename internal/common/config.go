@@ -194,8 +194,14 @@ type SearchConfig struct {
 
 // WebSocketConfig contains configuration for WebSocket log streaming
 type WebSocketConfig struct {
-	MinLevel        string   `toml:"min_level"`        // Minimum log level to broadcast ("debug", "info", "warn", "error")
-	ExcludePatterns []string `toml:"exclude_patterns"` // Log message patterns to exclude from broadcasting
+	MinLevel        string            `toml:"min_level"`        // Minimum log level to broadcast ("debug", "info", "warn", "error")
+	ExcludePatterns []string          `toml:"exclude_patterns"` // Log message patterns to exclude from broadcasting
+	// Whitelist of event types to broadcast via WebSocket. Empty list allows all events.
+	// Example: ["job_created", "job_completed", "crawl_progress"]
+	AllowedEvents []string `toml:"allowed_events"`
+	// Throttle intervals for high-frequency events. Map of event type to duration string.
+	// Example: {"crawl_progress": "1s", "job_spawn": "500ms"}
+	ThrottleIntervals map[string]string `toml:"throttle_intervals"`
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -317,6 +323,14 @@ func NewDefaultConfig() *Config {
 				"HTTP request",
 				"HTTP response",
 				"Publishing Event",
+				"DEBUG: Memory writer entry",
+			},
+			// Empty AllowedEvents allows all events (backward compatible)
+			AllowedEvents: []string{},
+			// Throttle high-frequency events to prevent WebSocket flooding during large crawls
+			ThrottleIntervals: map[string]string{
+				"crawl_progress": "1s",   // Max 1 crawl progress update per second per job
+				"job_spawn":      "500ms", // Max 2 job spawn events per second
 			},
 		},
 	}
@@ -583,6 +597,37 @@ func applyEnvOverrides(config *Config) {
 		}
 		if len(patterns) > 0 {
 			config.WebSocket.ExcludePatterns = patterns
+		}
+	}
+	if allowedEvents := os.Getenv("QUAERO_WEBSOCKET_ALLOWED_EVENTS"); allowedEvents != "" {
+		// Split comma-separated event types
+		events := []string{}
+		for _, e := range splitString(allowedEvents, ",") {
+			trimmed := trimSpace(e)
+			if trimmed != "" {
+				events = append(events, trimmed)
+			}
+		}
+		if len(events) > 0 {
+			config.WebSocket.AllowedEvents = events
+		}
+	}
+	if crawlProgressThrottle := os.Getenv("QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS"); crawlProgressThrottle != "" {
+		// Parse duration string (e.g., "2s", "1500ms")
+		if _, err := time.ParseDuration(crawlProgressThrottle); err == nil {
+			if config.WebSocket.ThrottleIntervals == nil {
+				config.WebSocket.ThrottleIntervals = make(map[string]string)
+			}
+			config.WebSocket.ThrottleIntervals["crawl_progress"] = crawlProgressThrottle
+		}
+	}
+	if jobSpawnThrottle := os.Getenv("QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN"); jobSpawnThrottle != "" {
+		// Parse duration string (e.g., "2s", "1500ms")
+		if _, err := time.ParseDuration(jobSpawnThrottle); err == nil {
+			if config.WebSocket.ThrottleIntervals == nil {
+				config.WebSocket.ThrottleIntervals = make(map[string]string)
+			}
+			config.WebSocket.ThrottleIntervals["job_spawn"] = jobSpawnThrottle
 		}
 	}
 }

@@ -30,6 +30,12 @@ document.addEventListener('alpine:init', () => {
     autoScroll: true,
     logIdCounter: 0,
 
+    // Architecture Note: Log Filtering
+    // - Server filters logs before broadcasting (WebSocketWriter with min_level and exclude_patterns)
+    // - Client displays all received logs without filtering
+    // - This maintains clean separation: server controls filtering, client is display layer
+    // - See: internal/handlers/websocket_writer.go for server-side filtering logic
+
     init() {
       window.debugLog('ServiceLogs', 'Initializing component');
       this.loadRecentLogs();

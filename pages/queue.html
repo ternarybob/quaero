@@ -271,7 +271,13 @@
         let currentPage = 1;
         let totalJobs = 0;
         const pageSize = 50;
-        let autoRefreshInterval = null;
+
+        // WebSocket connection state
+        let jobsWS = null;
+        let wsConnected = false;
+        let wsReconnectAttempts = 0;
+        const WS_MAX_RECONNECT_DELAY = 30000; // 30 seconds
+        const WS_INITIAL_RECONNECT_DELAY = 1000; // 1 second
 
         // Filter state - will be loaded from localStorage or defaults
         let activeFilters = {
@@ -421,6 +427,128 @@
             loadJobs();
         }
 
+        // Update job in list from WebSocket update
+        async function updateJobInList(update) {
+            console.log('[Queue] Job updated via WebSocket:', update.job_id.substring(0, 8), update.status);
+
+            // Find job in allJobs array
+            let jobIndex = allJobs.findIndex(job => job.id === update.job_id);
+            let job = jobIndex >= 0 ? allJobs[jobIndex] : null;
+
+            // If job not found, fetch full job data regardless of status
+            if (!job) {
+                try {
+                    const response = await fetch(`/api/jobs/${update.job_id}`);
+                    if (response.ok) {
+                        job = await response.json();
+                        allJobs.unshift(job); // Insert at beginning (newest first)
+                        jobIndex = 0;
+                    }
+                } catch (error) {
+                    console.warn('[Queue] Failed to fetch new job:', error);
+                    return;
+                }
+            }
+
+            // If job still not found, ignore update
+            if (!job) {
+                return;
+            }
+
+            // Update job fields - preserve existing values when fields are omitted
+            job.status = update.status;
+
+            if (update.result_count !== undefined && update.result_count !== null) {
+                job.result_count = update.result_count;
+            }
+            if (update.failed_count !== undefined && update.failed_count !== null) {
+                job.failed_count = update.failed_count;
+            }
+
+            // Update progress object
+            if (!job.progress) {
+                job.progress = {};
+            }
+            if (typeof job.progress === 'string') {
+                try {
+                    job.progress = JSON.parse(job.progress);
+                } catch (e) {
+                    job.progress = {};
+                }
+            }
+
+            if (update.completed_urls !== undefined && update.completed_urls !== null) {
+                job.progress.completed_urls = update.completed_urls;
+            }
+            if (update.pending_urls !== undefined && update.pending_urls !== null) {
+                job.progress.pending_urls = update.pending_urls;
+            }
+            if (update.total_urls !== undefined && update.total_urls !== null) {
+                job.progress.total_urls = update.total_urls;
+            }
+
+            // Set error if present
+            if (update.error !== undefined && update.error !== null) {
+                job.error = update.error;
+            }
+
+            // Check if job matches active filters
+            const matchesFilters = matchesActiveFilters(job);
+
+            // Find job in filteredJobs
+            const filteredIndex = filteredJobs.findIndex(j => j.id === update.job_id);
+
+            if (matchesFilters) {
+                if (filteredIndex >= 0) {
+                    // Update in place
+                    filteredJobs[filteredIndex] = job;
+                } else {
+                    // Insert at correct position (sorted by created_at DESC)
+                    const insertIndex = filteredJobs.findIndex(j => {
+                        return new Date(j.created_at) < new Date(job.created_at);
+                    });
+                    if (insertIndex >= 0) {
+                        filteredJobs.splice(insertIndex, 0, job);
+                    } else {
+                        filteredJobs.push(job);
+                    }
+                }
+            } else {
+                // Remove from filteredJobs if doesn't match filters
+                if (filteredIndex >= 0) {
+                    filteredJobs.splice(filteredIndex, 1);
+                }
+            }
+
+            // Trim to pageSize if on first page to maintain pagination consistency
+            if (currentPage === 1 && filteredJobs.length > pageSize) {
+                filteredJobs.length = pageSize;
+            }
+
+            // Re-render jobs
+            renderJobs();
+        }
+
+        // Check if job matches active filters
+        function matchesActiveFilters(job) {
+            // Check status filter
+            if (activeFilters.status.size > 0 && !activeFilters.status.has(job.status)) {
+                return false;
+            }
+
+            // Check source filter
+            if (activeFilters.source.size > 0 && !activeFilters.source.has(job.source_type)) {
+                return false;
+            }
+
+            // Check entity filter
+            if (activeFilters.entity.size > 0 && !activeFilters.entity.has(job.entity_type)) {
+                return false;
+            }
+
+            return true;
+        }
+
         // Show filter modal
         function showFilterModal() {
             const modal = document.getElementById('filter-modal');
@@ -536,6 +664,81 @@
             renderFilterChips();
             currentPage = 1;
             loadJobs();
+        }
+
+        // Connect to WebSocket for real-time job updates
+        function connectJobsWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            console.log('[Queue] Connecting to Jobs WebSocket:', wsUrl);
+            jobsWS = new WebSocket(wsUrl);
+
+            jobsWS.onopen = () => {
+                console.log('[Queue] Jobs WebSocket connected');
+                wsConnected = true;
+                wsReconnectAttempts = 0;
+            };
+
+            jobsWS.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log('[Queue] WebSocket message:', message.type);
+
+                    // Handle job status change events
+                    if (message.type === 'job_status_change' && message.payload) {
+                        const update = message.payload;
+                        updateJobInList(update);
+
+                        // Update stats for terminal states
+                        if (update.status === 'completed' || update.status === 'failed' || update.status === 'cancelled') {
+                            loadStats();
+                        }
+                    }
+
+                    // Handle job created events (future-proof)
+                    if (message.type === 'job_created' && message.payload) {
+                        updateJobInList(message.payload);
+                        loadStats();
+                    }
+
+                    // Handle job progress events
+                    if (message.type === 'job_progress' && message.payload) {
+                        updateJobInList(message.payload);
+                    }
+
+                    // Handle job completed events
+                    if (message.type === 'job_completed' && message.payload) {
+                        updateJobInList(message.payload);
+                        loadStats();
+                    }
+                } catch (error) {
+                    console.error('[Queue] Error parsing WebSocket message:', error);
+                }
+            };
+
+            jobsWS.onerror = (error) => {
+                console.error('[Queue] Jobs WebSocket error:', error);
+                wsConnected = false;
+            };
+
+            jobsWS.onclose = () => {
+                wsConnected = false;
+
+                // Calculate exponential backoff delay
+                const delay = Math.min(
+                    WS_INITIAL_RECONNECT_DELAY * Math.pow(2, wsReconnectAttempts),
+                    WS_MAX_RECONNECT_DELAY
+                );
+                wsReconnectAttempts++;
+
+                console.log('[Queue] Jobs WebSocket disconnected, reconnecting in', delay, 'ms');
+
+                // Schedule reconnection
+                setTimeout(() => {
+                    connectJobsWebSocket();
+                }, delay);
+            };
         }
 
         // Render jobs as cards
@@ -890,7 +1093,7 @@
 
                 window.showNotification('Job cancelled successfully', 'success');
                 loadStats();
-                loadJobs();
+                // Note: loadJobs() removed - WebSocket will update job status automatically
             } catch (error) {
                 console.error('Error cancelling job:', error);
                 window.showNotification('Failed to cancel job: ' + error.message, 'error');
@@ -936,8 +1139,25 @@
                 }
 
                 window.showNotification('Job deleted successfully', 'success');
+
+                // Remove job from allJobs array
+                const allJobsIndex = allJobs.findIndex(job => job.id === jobId);
+                if (allJobsIndex >= 0) {
+                    allJobs.splice(allJobsIndex, 1);
+                }
+
+                // Remove job from filteredJobs array
+                const filteredJobsIndex = filteredJobs.findIndex(job => job.id === jobId);
+                if (filteredJobsIndex >= 0) {
+                    filteredJobs.splice(filteredJobsIndex, 1);
+                }
+
+                // Remove from selected jobs
+                selectedJobIds.delete(jobId);
+
+                // Re-render without API call
+                renderJobs();
                 loadStats();
-                loadJobs();
             } catch (error) {
                 console.error('Error deleting job:', error);
                 window.showNotification('Failed to delete job: ' + error.message, 'error');
@@ -952,22 +1172,6 @@
             }
         }
 
-        // Auto-refresh for running jobs
-        function startAutoRefresh() {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
-            }
-
-            autoRefreshInterval = setInterval(() => {
-                // Check if there are any running jobs
-                const hasRunningJobs = allJobs.some(job => job.status === 'running');
-                if (hasRunningJobs) {
-                    loadJobs(); // Silently refresh
-                    loadStats(); // Update stats
-                }
-            }, 5000); // Refresh every 5 seconds
-        }
-
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function () {
             console.log('[Queue] ==================== PAGE LOAD ====================');
@@ -979,10 +1183,18 @@
             loadFiltersFromStorage();
             console.log('[Queue] Loaded filters from storage:', activeFilters);
 
+            // Initialize WebSocket connection for real-time job updates
+            console.log('[Queue] Initializing WebSocket connection for job updates');
+            connectJobsWebSocket();
+
+            // Real-time updates via WebSocket (no polling fallback)
+            // - Server pushes job status changes via job_status_change events
+            // - Exponential backoff reconnection handles temporary disconnections
+            // - Manual page refresh available as ultimate fallback
+
             renderFilterChips(); // Render initial filter chips
             loadStats();
             loadJobs();
-            startAutoRefresh();
 
             // Add ESC key handler for filter modal
             document.addEventListener('keydown', function (e) {
@@ -1000,8 +1212,11 @@
 
         // Cleanup on page unload
         window.addEventListener('beforeunload', function () {
-            if (autoRefreshInterval) {
-                clearInterval(autoRefreshInterval);
+            // Close WebSocket connection
+            if (jobsWS) {
+                console.log('[Queue] Closing WebSocket connection');
+                jobsWS.close();
+                jobsWS = null;
             }
         });
 

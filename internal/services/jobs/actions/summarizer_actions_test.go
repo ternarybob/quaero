@@ -62,6 +62,7 @@ func (m *mockDocumentStorage) GetStats() (*models.DocumentStats, error)         
 func (m *mockDocumentStorage) ClearAll() error                                       { return nil }
 func (m *mockDocumentStorage) SetForceSyncPending(id string, pending bool) error     { return nil }
 func (m *mockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error)    { return nil, nil }
+func (m *mockDocumentStorage) RebuildFTS5Index() error                                { return nil }
 
 type mockLLMService struct {
 	chatFunc      func(context.Context, []interfaces.Message) (string, error)

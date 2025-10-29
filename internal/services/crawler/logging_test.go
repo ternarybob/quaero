@@ -508,6 +508,18 @@ func (s *InMemoryJobStorage) MarkURLSeen(ctx context.Context, jobID string, url 
 	return true, nil
 }
 
+func (s *InMemoryJobStorage) MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error) {
+	// Simple mock - count running jobs and mark as pending
+	count := 0
+	for _, job := range s.jobs {
+		if crawlJob, ok := job.(*CrawlJob); ok && crawlJob.Status == JobStatusRunning {
+			crawlJob.Status = JobStatusPending
+			count++
+		}
+	}
+	return count, nil
+}
+
 // Helper method to verify log contains expected content
 func (s *InMemoryJobStorage) VerifyLogContains(t *testing.T, jobID, expectedSubstring string) bool {
 	entries, exists := s.logs[jobID]
@@ -672,5 +684,10 @@ func (m *MockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error
 
 func (m *MockDocumentStorage) ClearAll() error {
 	m.documents = make(map[string]*models.Document)
+	return nil
+}
+
+func (m *MockDocumentStorage) RebuildFTS5Index() error {
+	// Mock implementation - no-op for testing
 	return nil
 }

@@ -80,13 +80,14 @@ var rootCmd = &cobra.Command{
 		// Get executable path for log directory
 		execPath, err := os.Executable()
 		if err != nil {
-			fmt.Printf("Warning: Failed to get executable path: %v\n", err)
+			// Add console writer first, then log the warning
 			logger = logger.WithConsoleWriter(models.WriterConfiguration{
 				Type:             models.LogWriterTypeConsole,
 				TimeFormat:       "15:04:05",
 				TextOutput:       true,
 				DisableTimestamp: false,
 			})
+			logger.Warn().Err(err).Msg("Failed to get executable path - using fallback console logging")
 		} else {
 			execDir := filepath.Dir(execPath)
 			logsDir := filepath.Join(execDir, "logs")
@@ -106,7 +107,14 @@ var rootCmd = &cobra.Command{
 			// Configure file logging if enabled
 			if hasFileOutput {
 				if err := os.MkdirAll(logsDir, 0755); err != nil {
-					fmt.Printf("Warning: Failed to create logs directory: %v\n", err)
+					// Use console writer temporarily for this warning
+					tempLogger := logger.WithConsoleWriter(models.WriterConfiguration{
+						Type:             models.LogWriterTypeConsole,
+						TimeFormat:       "15:04:05",
+						TextOutput:       true,
+						DisableTimestamp: false,
+					})
+					tempLogger.Warn().Err(err).Str("logs_dir", logsDir).Msg("Failed to create logs directory")
 				} else {
 					logFile := filepath.Join(logsDir, "quaero.log")
 					logger = logger.WithFileWriter(models.WriterConfiguration{
@@ -139,7 +147,9 @@ var rootCmd = &cobra.Command{
 					TextOutput:       true,
 					DisableTimestamp: false,
 				})
-				fmt.Printf("Warning: No visible log outputs configured, falling back to console\n")
+				logger.Warn().
+					Strs("configured_outputs", config.Logging.Output).
+					Msg("No visible log outputs configured - falling back to console")
 			}
 		}
 

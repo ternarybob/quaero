@@ -5,24 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/arbor/models"
 )
 
 // TestDataSetup creates test authentication and sources for development/testing
 type TestDataSetup struct {
 	baseURL string
 	client  *http.Client
+	logger  arbor.ILogger
 }
 
-func NewTestDataSetup(baseURL string) *TestDataSetup {
+func NewTestDataSetup(baseURL string, logger arbor.ILogger) *TestDataSetup {
 	return &TestDataSetup{
 		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		logger: logger,
 	}
 }
 
@@ -64,7 +68,7 @@ func (t *TestDataSetup) SetupAuthentication() (string, error) {
 		return "", fmt.Errorf("auth creation failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Println("✓ Created authentication for bobmcallan.atlassian.net")
+	t.logger.Info().Msg("✓ Created authentication for bobmcallan.atlassian.net")
 
 	// Get the auth ID
 	listResp, err := http.Get(t.baseURL + "/api/auth/list")
@@ -81,7 +85,7 @@ func (t *TestDataSetup) SetupAuthentication() (string, error) {
 	for _, auth := range auths {
 		if siteDomain, ok := auth["site_domain"].(string); ok && siteDomain == "bobmcallan.atlassian.net" {
 			if authID, ok := auth["id"].(string); ok {
-				log.Printf("  Auth ID: %s", authID)
+				t.logger.Info().Str("auth_id", authID).Msg("  Auth ID")
 				return authID, nil
 			}
 		}
@@ -116,7 +120,11 @@ func (t *TestDataSetup) CreateSource(source map[string]interface{}) (string, err
 	if sourceID, ok := result["id"].(string); ok {
 		sourceName := result["name"].(string)
 		sourceType := result["type"].(string)
-		log.Printf("✓ Created %s source: %s (ID: %s)", sourceType, sourceName, sourceID)
+		t.logger.Info().
+			Str("source_type", sourceType).
+			Str("source_name", sourceName).
+			Str("source_id", sourceID).
+			Msg("✓ Created source")
 		return sourceID, nil
 	}
 
@@ -125,8 +133,8 @@ func (t *TestDataSetup) CreateSource(source map[string]interface{}) (string, err
 
 // SetupTestData creates all test data
 func (t *TestDataSetup) SetupTestData() error {
-	log.Println("Setting up test data...")
-	log.Println("====================================================")
+	t.logger.Info().Msg("Setting up test data...")
+	t.logger.Info().Msg("====================================================")
 
 	// Step 1: Create authentication
 	authID, err := t.SetupAuthentication()
@@ -134,8 +142,8 @@ func (t *TestDataSetup) SetupTestData() error {
 		return fmt.Errorf("failed to setup authentication: %w", err)
 	}
 
-	log.Println()
-	log.Println("Creating sources with authentication...")
+	t.logger.Info().Msg("")
+	t.logger.Info().Msg("Creating sources with authentication...")
 
 	// Step 2: Create Jira source
 	jiraSource := map[string]interface{}{
@@ -177,28 +185,28 @@ func (t *TestDataSetup) SetupTestData() error {
 		return fmt.Errorf("failed to create Confluence source: %w", err)
 	}
 
-	log.Println()
-	log.Println("====================================================")
-	log.Println("✅ Test data setup complete!")
-	log.Println()
-	log.Println("Summary:")
-	log.Printf("  • Authentication ID: %s", authID)
-	log.Printf("  • Jira Source ID: %s", jiraID)
-	log.Printf("  • Confluence Source ID: %s", confluenceID)
-	log.Println()
-	log.Println("You can now:")
-	log.Println("  1. Visit http://localhost:8085/sources to see the sources")
-	log.Println("  2. Visit http://localhost:8085/auth to see the authentication")
-	log.Println("  3. Use the Chrome extension to capture real authentication")
-	log.Println()
+	t.logger.Info().Msg("")
+	t.logger.Info().Msg("====================================================")
+	t.logger.Info().Msg("✅ Test data setup complete!")
+	t.logger.Info().Msg("")
+	t.logger.Info().Msg("Summary:")
+	t.logger.Info().Str("auth_id", authID).Msg("  • Authentication ID")
+	t.logger.Info().Str("jira_id", jiraID).Msg("  • Jira Source ID")
+	t.logger.Info().Str("confluence_id", confluenceID).Msg("  • Confluence Source ID")
+	t.logger.Info().Msg("")
+	t.logger.Info().Msg("You can now:")
+	t.logger.Info().Msg("  1. Visit http://localhost:8085/sources to see the sources")
+	t.logger.Info().Msg("  2. Visit http://localhost:8085/auth to see the authentication")
+	t.logger.Info().Msg("  3. Use the Chrome extension to capture real authentication")
+	t.logger.Info().Msg("")
 
 	return nil
 }
 
 // CleanupTestData removes all test data
 func (t *TestDataSetup) CleanupTestData() error {
-	log.Println("Cleaning up test data...")
-	log.Println("====================================================")
+	t.logger.Info().Msg("Cleaning up test data...")
+	t.logger.Info().Msg("====================================================")
 
 	// Get all sources
 	resp, err := http.Get(t.baseURL + "/api/sources")
@@ -220,10 +228,10 @@ func (t *TestDataSetup) CleanupTestData() error {
 		req, _ := http.NewRequest("DELETE", t.baseURL+"/api/sources/"+sourceID, nil)
 		delResp, err := t.client.Do(req)
 		if err != nil {
-			log.Printf("  ⚠ Failed to delete source %s: %v", sourceName, err)
+			t.logger.Warn().Err(err).Str("source_name", sourceName).Msg("  ⚠ Failed to delete source")
 		} else {
 			delResp.Body.Close()
-			log.Printf("  ✓ Deleted source: %s", sourceName)
+			t.logger.Info().Str("source_name", sourceName).Msg("  ✓ Deleted source")
 		}
 	}
 
@@ -247,19 +255,27 @@ func (t *TestDataSetup) CleanupTestData() error {
 		req, _ := http.NewRequest("DELETE", t.baseURL+"/api/auth/"+authID, nil)
 		delResp, err := t.client.Do(req)
 		if err != nil {
-			log.Printf("  ⚠ Failed to delete auth for %s: %v", siteDomain, err)
+			t.logger.Warn().Err(err).Str("site_domain", siteDomain).Msg("  ⚠ Failed to delete auth")
 		} else {
 			delResp.Body.Close()
-			log.Printf("  ✓ Deleted authentication: %s", siteDomain)
+			t.logger.Info().Str("site_domain", siteDomain).Msg("  ✓ Deleted authentication")
 		}
 	}
 
-	log.Println()
-	log.Println("✅ Cleanup complete!")
+	t.logger.Info().Msg("")
+	t.logger.Info().Msg("✅ Cleanup complete!")
 	return nil
 }
 
 func main() {
+	// Initialize Arbor logger for console output
+	logger := arbor.NewLogger().WithConsoleWriter(models.WriterConfiguration{
+		Type:             models.LogWriterTypeConsole,
+		TimeFormat:       "15:04:05",
+		TextOutput:       true,
+		DisableTimestamp: false,
+	})
+
 	// Get server URL from environment or use default
 	serverURL := os.Getenv("TEST_SERVER_URL")
 	if serverURL == "" {
@@ -275,22 +291,24 @@ func main() {
 		}
 	}
 
-	setup := NewTestDataSetup(serverURL)
+	setup := NewTestDataSetup(serverURL, logger)
 
 	if cleanup {
 		if err := setup.CleanupTestData(); err != nil {
-			log.Fatalf("Cleanup failed: %v", err)
+			logger.Fatal().Err(err).Msg("Cleanup failed")
 		}
 	} else {
 		// Check if server is running
 		resp, err := http.Get(serverURL + "/api/status")
 		if err != nil {
-			log.Fatalf("❌ Server is not running at %s\n   Please start the server first: cd bin && ./quaero.exe -c quaero.toml", serverURL)
+			logger.Fatal().
+				Str("server_url", serverURL).
+				Msg("❌ Server is not running - Please start the server first: cd bin && ./quaero.exe -c quaero.toml")
 		}
 		resp.Body.Close()
 
 		if err := setup.SetupTestData(); err != nil {
-			log.Fatalf("Setup failed: %v", err)
+			logger.Fatal().Err(err).Msg("Setup failed")
 		}
 	}
 }

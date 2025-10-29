@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -23,6 +24,9 @@ type DocumentStorage struct {
 
 // NewDocumentStorage creates a new document storage instance
 func NewDocumentStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.DocumentStorage {
+	if logger == nil {
+		logger = common.GetLogger()
+	}
 	return &DocumentStorage{
 		db:     db,
 		logger: logger,
@@ -263,32 +267,26 @@ func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Doc
 	`
 
 	// Debug logging to help diagnose search issues
-	if d.logger != nil {
-		d.logger.Debug().
-			Str("fts5_query", query).
-			Int("limit", limit).
-			Msg("Executing FTS5 search")
-	}
+	d.logger.Debug().
+		Str("fts5_query", query).
+		Int("limit", limit).
+		Msg("Executing FTS5 search")
 
 	rows, err := d.db.db.Query(sqlQuery, query, limit)
 	if err != nil {
-		if d.logger != nil {
-			d.logger.Error().
-				Err(err).
-				Str("fts5_query", query).
-				Msg("FTS5 search query failed")
-		}
+		d.logger.Error().
+			Err(err).
+			Str("fts5_query", query).
+			Msg("FTS5 search query failed")
 		return nil, err
 	}
 	defer rows.Close()
 
 	results, err := d.scanDocuments(rows)
-	if d.logger != nil {
-		d.logger.Debug().
-			Str("fts5_query", query).
-			Int("results", len(results)).
-			Msg("FTS5 search completed")
-	}
+	d.logger.Debug().
+		Str("fts5_query", query).
+		Int("results", len(results)).
+		Msg("FTS5 search completed")
 
 	return results, err
 }
@@ -524,22 +522,16 @@ func (d *DocumentStorage) ClearAll() error {
 // RebuildFTS5Index rebuilds the FTS5 full-text search index
 // This should be called if the FTS5 index is out of sync with the documents table
 func (d *DocumentStorage) RebuildFTS5Index() error {
-	if d.logger != nil {
-		d.logger.Info().Msg("Rebuilding FTS5 index")
-	}
+	d.logger.Info().Msg("Rebuilding FTS5 index")
 
 	// Use the FTS5 'rebuild' command to recreate the index from the documents table
 	_, err := d.db.db.Exec(`INSERT INTO documents_fts(documents_fts) VALUES('rebuild')`)
 	if err != nil {
-		if d.logger != nil {
-			d.logger.Error().Err(err).Msg("Failed to rebuild FTS5 index")
-		}
+		d.logger.Error().Err(err).Msg("Failed to rebuild FTS5 index")
 		return fmt.Errorf("failed to rebuild FTS5 index: %w", err)
 	}
 
-	if d.logger != nil {
-		d.logger.Info().Msg("FTS5 index rebuilt successfully")
-	}
+	d.logger.Info().Msg("FTS5 index rebuilt successfully")
 	return nil
 }
 

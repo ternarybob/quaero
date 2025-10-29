@@ -84,6 +84,45 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		sourceType = st
 	}
 
+	entityType := "url"
+	if et, ok := msg.Config["entity_type"].(string); ok {
+		entityType = et
+	}
+
+	// Publish EventJobStarted if this is the first URL (job transitioning from pending to running)
+	if c.deps.EventService != nil {
+		// Load job to check status
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				// Only publish if job is still pending (first URL)
+				if job.Status == models.JobStatusPending {
+					// Update job status to running
+					job.Status = models.JobStatusRunning
+					if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
+						c.logger.Warn().Err(saveErr).Msg("Failed to update job status to running")
+					} else {
+						// Publish EventJobStarted event
+						startedEvent := interfaces.Event{
+							Type: interfaces.EventJobStarted,
+							Payload: map[string]interface{}{
+								"job_id":      msg.ParentID,
+								"status":      "running",
+								"source_type": sourceType,
+								"entity_type": entityType,
+								"url":         msg.URL,
+								"depth":       msg.Depth,
+								"timestamp":   time.Now(),
+							},
+						}
+						if err := c.deps.EventService.Publish(ctx, startedEvent); err != nil {
+							c.logger.Warn().Err(err).Msg("Failed to publish job started event")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Fetch URL content using crawler service with auth-aware HTTP and HTML parsing
 	c.logger.Debug().
 		Str("url", msg.URL).
@@ -660,6 +699,32 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 	if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
 		c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to save completed job")
 		return fmt.Errorf("failed to save completed job: %w", err)
+	}
+
+	// Publish EventJobCompleted after successful job completion
+	if c.deps.EventService != nil {
+		// Calculate duration: use StartedAt if available (for accurate processing time), otherwise CreatedAt
+		duration := job.CompletedAt.Sub(job.CreatedAt) // Default to full lifetime
+		if !job.StartedAt.IsZero() {
+			duration = job.CompletedAt.Sub(job.StartedAt) // Prefer actual processing time
+		}
+		completedEvent := interfaces.Event{
+			Type: interfaces.EventJobCompleted,
+			Payload: map[string]interface{}{
+				"job_id":           msg.ParentID,
+				"status":           "completed",
+				"source_type":      job.SourceType,
+				"entity_type":      job.EntityType,
+				"result_count":     job.ResultCount,
+				"failed_count":     job.FailedCount,
+				"total_urls":       job.Progress.TotalURLs,
+				"duration_seconds": duration.Seconds(),
+				"timestamp":        time.Now(),
+			},
+		}
+		if err := c.deps.EventService.Publish(ctx, completedEvent); err != nil {
+			c.logger.Warn().Err(err).Msg("Failed to publish job completed event")
+		}
 	}
 
 	c.logger.Info().

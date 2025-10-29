@@ -7,31 +7,64 @@ import (
 	"github.com/ternarybob/arbor/levels"
 	"github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/arbor/writers"
+
+	"github.com/ternarybob/quaero/internal/common"
+)
+
+const (
+	// Default buffer size for WebSocket log queue
+	defaultWebSocketBufferSize = 1000
 )
 
 // WebSocketWriter is an arbor writer that broadcasts logs to WebSocket clients
 type WebSocketWriter struct {
 	handler         *WebSocketHandler
-	writer          writers.IGoroutineWriter
+	writer          writers.IChannelWriter
 	config          models.WriterConfiguration
 	minLevel        levels.LogLevel
 	excludePatterns []string
 }
 
-// NewWebSocketWriter creates a new WebSocket arbor writer using GoroutineWriter pattern
-func NewWebSocketWriter(handler *WebSocketHandler, config models.WriterConfiguration) (*WebSocketWriter, error) {
-	w := &WebSocketWriter{
-		handler:  handler,
-		config:   config,
-		minLevel: levels.InfoLevel,
-		excludePatterns: []string{
+// NewWebSocketWriter creates a new WebSocket arbor writer using ChannelWriter pattern
+func NewWebSocketWriter(handler *WebSocketHandler, config models.WriterConfiguration, wsConfig *common.WebSocketConfig) (*WebSocketWriter, error) {
+	// Nil-safety check: use safe defaults if wsConfig is nil
+	var minLevel levels.LogLevel
+	var excludePatterns []string
+
+	if wsConfig == nil {
+		// Use safe defaults when no config provided
+		minLevel = levels.InfoLevel
+		excludePatterns = []string{
 			"WebSocket client connected",
 			"WebSocket client disconnected",
 			"HTTP request",
 			"HTTP response",
 			"Publishing Event",
 			"DEBUG: Memory writer entry",
-		},
+		}
+	} else {
+		// Parse min level from config, default to InfoLevel
+		minLevel = parseLogLevel(wsConfig.MinLevel)
+
+		// Use config exclude patterns with fallback to defaults
+		excludePatterns = wsConfig.ExcludePatterns
+		if len(excludePatterns) == 0 {
+			excludePatterns = []string{
+				"WebSocket client connected",
+				"WebSocket client disconnected",
+				"HTTP request",
+				"HTTP response",
+				"Publishing Event",
+				"DEBUG: Memory writer entry",
+			}
+		}
+	}
+
+	w := &WebSocketWriter{
+		handler:         handler,
+		config:          config,
+		minLevel:        minLevel,
+		excludePatterns: excludePatterns,
 	}
 
 	// Define processor function for filtering and broadcasting
@@ -62,14 +95,14 @@ func NewWebSocketWriter(handler *WebSocketHandler, config models.WriterConfigura
 		return nil
 	}
 
-	// Create GoroutineWriter with 1000-entry buffer
-	gw, err := writers.NewGoroutineWriter(config, 1000, processor)
+	// Create ChannelWriter with buffer
+	cw, err := writers.NewChannelWriter(config, defaultWebSocketBufferSize, processor)
 	if err != nil {
 		return nil, err
 	}
-	gw.Start()
+	cw.Start()
 
-	w.writer = gw
+	w.writer = cw
 	return w, nil
 }
 
@@ -83,6 +116,22 @@ func plogToArborLevel(level plog.Level) levels.LogLevel {
 	case plog.InfoLevel:
 		return levels.InfoLevel
 	case plog.DebugLevel:
+		return levels.DebugLevel
+	default:
+		return levels.InfoLevel
+	}
+}
+
+// parseLogLevel converts string log level to arbor levels.LogLevel
+func parseLogLevel(level string) levels.LogLevel {
+	switch strings.ToLower(level) {
+	case "error":
+		return levels.ErrorLevel
+	case "warn", "warning":
+		return levels.WarnLevel
+	case "info":
+		return levels.InfoLevel
+	case "debug":
 		return levels.DebugLevel
 	default:
 		return levels.InfoLevel
@@ -112,19 +161,7 @@ func (w *WebSocketWriter) Write(data []byte) (int, error) {
 
 // WithLevel updates the minimum log level and returns self
 func (w *WebSocketWriter) WithLevel(level plog.Level) writers.IWriter {
-	// Map phuslu/log.Level to Arbor's levels.LogLevel
-	switch level {
-	case plog.ErrorLevel:
-		w.minLevel = levels.ErrorLevel
-	case plog.WarnLevel:
-		w.minLevel = levels.WarnLevel
-	case plog.InfoLevel:
-		w.minLevel = levels.InfoLevel
-	case plog.DebugLevel:
-		w.minLevel = levels.DebugLevel
-	default:
-		w.minLevel = levels.InfoLevel
-	}
+	w.minLevel = plogToArborLevel(level)
 	return w
 }
 

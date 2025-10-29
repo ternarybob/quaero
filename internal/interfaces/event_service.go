@@ -91,6 +91,75 @@ const (
 	//   - depth: int (crawl depth)
 	//   - timestamp: time.Time
 	EventJobSpawn EventType = "job_spawn"
+
+	// EventJobCreated is published when a new crawl job is created and persisted.
+	// Published after successful database persistence in StartCrawl.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - status: string ("pending")
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - seed_url_count: int
+	//   - max_depth: int
+	//   - max_pages: int
+	//   - follow_links: bool
+	//   - timestamp: time.Time
+	EventJobCreated EventType = "job_created"
+
+	// EventJobStarted is published when a job begins processing its first URL.
+	// Published when job transitions from pending to running (first URL processed).
+	// Published at the start of CrawlerJob.Execute for the first URL.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - status: string ("running")
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - url: string (first URL being processed)
+	//   - depth: int
+	//   - timestamp: time.Time
+	EventJobStarted EventType = "job_started"
+
+	// EventJobCompleted is published when a job successfully completes all URLs.
+	// Published after grace period verification in ExecuteCompletionProbe.
+	// Published after marking job complete and persisting to database.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - status: string ("completed")
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - result_count: int
+	//   - failed_count: int
+	//   - total_urls: int
+	//   - duration_seconds: float64
+	//   - timestamp: time.Time
+	EventJobCompleted EventType = "job_completed"
+
+	// EventJobFailed is published when a job fails due to system errors or timeout.
+	// Published when job is marked as failed (stale job detection, system errors).
+	// Published after marking job failed in Service.FailJob.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - status: string ("failed")
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - result_count: int
+	//   - failed_count: int
+	//   - error: string
+	//   - timestamp: time.Time
+	EventJobFailed EventType = "job_failed"
+
+	// EventJobCancelled is published when a user cancels a running job.
+	// Published when user cancels a running job via API.
+	// Published after marking job cancelled in Service.CancelJob.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string
+	//   - status: string ("cancelled")
+	//   - source_type: string ("jira", "confluence", "github")
+	//   - entity_type: string ("project", "issue", "space", "page")
+	//   - result_count: int
+	//   - failed_count: int
+	//   - timestamp: time.Time
+	EventJobCancelled EventType = "job_cancelled"
 )
 
 // Event represents a system event

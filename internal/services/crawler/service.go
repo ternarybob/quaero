@@ -501,6 +501,27 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	}
 
+	// Publish EventJobCreated after successful job persistence
+	if s.eventService != nil {
+		createdEvent := interfaces.Event{
+			Type: interfaces.EventJobCreated,
+			Payload: map[string]interface{}{
+				"job_id":         jobID,
+				"status":         "pending",
+				"source_type":    sourceType,
+				"entity_type":    entityType,
+				"seed_url_count": len(seedURLs),
+				"max_depth":      config.MaxDepth,
+				"max_pages":      config.MaxPages,
+				"follow_links":   config.FollowLinks,
+				"timestamp":      time.Now(),
+			},
+		}
+		if err := s.eventService.Publish(s.ctx, createdEvent); err != nil {
+			contextLogger.Warn().Err(err).Msg("Failed to publish job created event")
+		}
+	}
+
 	s.jobsMu.Lock()
 	s.activeJobs[jobID] = job
 	s.jobResults[jobID] = make([]*CrawlResult, 0)
@@ -558,41 +579,8 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	job.Progress.TotalURLs = actuallyEnqueued
 	s.jobsMu.Unlock()
 
-	// Update job status
-	s.jobsMu.Lock()
-	job.Status = JobStatusRunning
-	job.StartedAt = time.Now()
-	s.jobsMu.Unlock()
-
-	// Persist status update
-	if s.jobStorage != nil {
-		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
-			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status in database")
-		}
-
-		// Initialize heartbeat for the running job
-		if err := s.jobStorage.UpdateJobHeartbeat(s.ctx, jobID); err != nil {
-			s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to initialize job heartbeat")
-		}
-
-		// Append detailed job initialization summary log
-		authStatus := "no auth"
-		if authSnapshot != nil {
-			authStatus = "authenticated"
-		}
-		jobStartMsg := fmt.Sprintf("Job started: source=%s/%s, seeds=%d, max_depth=%d, max_pages=%d, concurrency=%d, auth=%s",
-			sourceType, entityType, len(seedURLs), config.MaxDepth, config.MaxPages, config.Concurrency, authStatus)
-
-		contextLogger.Info().
-			Str("source_type", sourceType).
-			Str("entity_type", entityType).
-			Int("seed_count", len(seedURLs)).
-			Int("max_depth", config.MaxDepth).
-			Int("max_pages", config.MaxPages).
-			Int("concurrency", config.Concurrency).
-			Str("auth", authStatus).
-			Msg(jobStartMsg)
-	}
+	// Note: Job remains in JobStatusPending state until first worker picks up a URL
+	// At that point, Execute() will transition to JobStatusRunning and publish EventJobStarted
 
 	// Initialize browser pool if JavaScript rendering is enabled
 	if s.config.Crawler.EnableJavaScript {
@@ -680,6 +668,27 @@ func (s *Service) CancelJob(jobID string) error {
 			contextLogger.Warn().Err(err).Msg("Failed to persist job cancellation")
 		}
 
+		// Publish EventJobCancelled after successful job cancellation
+		if s.eventService != nil {
+			cancelledEvent := interfaces.Event{
+				Type: interfaces.EventJobCancelled,
+				Payload: map[string]interface{}{
+					"job_id":         jobID,
+					"status":         "cancelled",
+					"source_type":    job.SourceType,
+					"entity_type":    job.EntityType,
+					"result_count":   job.ResultCount,
+					"failed_count":   job.FailedCount,
+					"completed_urls": job.Progress.CompletedURLs,
+					"pending_urls":   job.Progress.PendingURLs,
+					"timestamp":      time.Now(),
+				},
+			}
+			if err := s.eventService.Publish(s.ctx, cancelledEvent); err != nil {
+				contextLogger.Warn().Err(err).Msg("Failed to publish job cancelled event")
+			}
+		}
+
 		// Append cancellation log with structured fields for queryability
 		contextLogger.Warn().
 			Int("completed", job.Progress.CompletedURLs).
@@ -730,6 +739,28 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	if s.jobStorage != nil {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			contextLogger.Warn().Err(err).Msg("Failed to persist job failure")
+		}
+
+		// Publish EventJobFailed after successful job failure persistence
+		if s.eventService != nil {
+			failedEvent := interfaces.Event{
+				Type: interfaces.EventJobFailed,
+				Payload: map[string]interface{}{
+					"job_id":         jobID,
+					"status":         "failed",
+					"source_type":    job.SourceType,
+					"entity_type":    job.EntityType,
+					"result_count":   job.ResultCount,
+					"failed_count":   job.FailedCount,
+					"error":          reason,
+					"completed_urls": job.Progress.CompletedURLs,
+					"pending_urls":   job.Progress.PendingURLs,
+					"timestamp":      time.Now(),
+				},
+			}
+			if err := s.eventService.Publish(s.ctx, failedEvent); err != nil {
+				contextLogger.Warn().Err(err).Msg("Failed to publish job failed event")
+			}
 		}
 
 		// Append failure log with structured fields for queryability

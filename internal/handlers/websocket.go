@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"golang.org/x/time/rate"
 )
 
 var upgrader = websocket.Upgrader{
@@ -32,20 +35,71 @@ type AuthLoader interface {
 }
 
 type WebSocketHandler struct {
-	logger       arbor.ILogger
-	clients      map[*websocket.Conn]bool
-	clientMutex  map[*websocket.Conn]*sync.Mutex
-	mu           sync.RWMutex
-	authLoader   AuthLoader
-	eventService interfaces.EventService
+	logger                 arbor.ILogger
+	clients                map[*websocket.Conn]bool
+	clientMutex            map[*websocket.Conn]*sync.Mutex
+	mu                     sync.RWMutex
+	authLoader             AuthLoader
+	eventService           interfaces.EventService
+	crawlProgressThrottler *rate.Limiter        // Rate limiter for crawl_progress events
+	jobSpawnThrottler      *rate.Limiter        // Rate limiter for job_spawn events
+	allowedEvents          map[string]bool      // Whitelist of events to broadcast (empty = allow all)
 }
 
-func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger) *WebSocketHandler {
+func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger, config *common.WebSocketConfig) *WebSocketHandler {
 	h := &WebSocketHandler{
 		logger:       logger,
 		clients:      make(map[*websocket.Conn]bool),
 		clientMutex:  make(map[*websocket.Conn]*sync.Mutex),
 		eventService: eventService,
+	}
+
+	// Initialize allowedEvents map (whitelist pattern)
+	// Empty list means allow all events (backward compatible)
+	h.allowedEvents = make(map[string]bool)
+	if config != nil && len(config.AllowedEvents) > 0 {
+		for _, eventType := range config.AllowedEvents {
+			h.allowedEvents[eventType] = true
+		}
+		logger.Debug().
+			Int("allowed_events", len(h.allowedEvents)).
+			Msg("Initialized event whitelist for WebSocketHandler")
+	}
+
+	// Initialize throttlers from config (only if explicitly configured)
+	// Nil throttlers = no throttling (disabled)
+	if config != nil && len(config.ThrottleIntervals) > 0 {
+		// Initialize crawl_progress throttler only if configured
+		if intervalStr, ok := config.ThrottleIntervals["crawl_progress"]; ok {
+			if duration, err := time.ParseDuration(intervalStr); err == nil {
+				h.crawlProgressThrottler = rate.NewLimiter(rate.Every(duration), 1)
+				logger.Debug().
+					Str("event_type", "crawl_progress").
+					Str("interval", intervalStr).
+					Msg("Throttler initialized for crawl_progress events")
+			} else {
+				logger.Warn().
+					Err(err).
+					Str("interval", intervalStr).
+					Msg("Failed to parse crawl_progress throttle interval - throttler disabled")
+			}
+		}
+
+		// Initialize job_spawn throttler only if configured
+		if intervalStr, ok := config.ThrottleIntervals["job_spawn"]; ok {
+			if duration, err := time.ParseDuration(intervalStr); err == nil {
+				h.jobSpawnThrottler = rate.NewLimiter(rate.Every(duration), 1)
+				logger.Debug().
+					Str("event_type", "job_spawn").
+					Str("interval", intervalStr).
+					Msg("Throttler initialized for job_spawn events")
+			} else {
+				logger.Warn().
+					Err(err).
+					Str("interval", intervalStr).
+					Msg("Failed to parse job_spawn throttle interval - throttler disabled")
+			}
+		}
 	}
 
 	// Subscribe to crawler events if eventService is provided
@@ -122,6 +176,21 @@ type JobSpawnUpdate struct {
 	URL         string    `json:"url,omitempty"`
 	Depth       int       `json:"depth"`
 	Timestamp   time.Time `json:"timestamp"`
+}
+
+type JobStatusUpdate struct {
+	JobID         string    `json:"job_id"`
+	Status        string    `json:"status"`             // "pending", "running", "completed", "failed", "cancelled"
+	SourceType    string    `json:"source_type"`        // "jira", "confluence", "github"
+	EntityType    string    `json:"entity_type"`        // "project", "issue", "space", "page"
+	ResultCount   int       `json:"result_count"`       // Documents successfully processed
+	FailedCount   int       `json:"failed_count"`       // Documents that failed
+	TotalURLs     int       `json:"total_urls"`         // Total URLs discovered
+	CompletedURLs int       `json:"completed_urls"`     // URLs completed
+	PendingURLs   int       `json:"pending_urls"`       // URLs still in queue
+	Error         string    `json:"error,omitempty"`    // Error message for failed jobs
+	Duration      float64   `json:"duration,omitempty"` // Duration in seconds for completed jobs
+	Timestamp     time.Time `json:"timestamp"`          // Event timestamp
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -590,6 +659,40 @@ func (h *WebSocketHandler) BroadcastJobSpawn(spawn JobSpawnUpdate) {
 	}
 }
 
+// BroadcastJobStatusChange sends job status change events to all connected clients
+func (h *WebSocketHandler) BroadcastJobStatusChange(update JobStatusUpdate) {
+	msg := WSMessage{
+		Type:    "job_status_change",
+		Payload: update,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal job status change message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send job status change to client")
+		}
+	}
+}
+
 // SubscribeToCrawlerEvents subscribes to crawler progress events
 func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	if h.eventService == nil {
@@ -601,6 +704,17 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
 			h.logger.Warn().Msg("Invalid crawl progress event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["crawl_progress"] {
+			return nil
+		}
+
+		// Throttle crawl progress events to prevent WebSocket flooding
+		if h.crawlProgressThrottler != nil && !h.crawlProgressThrottler.Allow() {
+			// Event throttled, skip broadcasting
 			return nil
 		}
 
@@ -682,6 +796,17 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			return nil
 		}
 
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_spawn"] {
+			return nil
+		}
+
+		// Throttle job spawn events to prevent WebSocket flooding
+		if h.jobSpawnThrottler != nil && !h.jobSpawnThrottler.Allow() {
+			// Event throttled, skip broadcasting
+			return nil
+		}
+
 		spawn := JobSpawnUpdate{
 			ParentJobID: getString(payload, "parent_job_id"),
 			ChildJobID:  getString(payload, "child_job_id"),
@@ -722,8 +847,24 @@ func getInt(m map[string]interface{}, key string) int {
 
 func getFloat64(m map[string]interface{}, key string) float64 {
 	if val, ok := m[key]; ok {
-		if f, ok := val.(float64); ok {
-			return f
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		case string:
+			// Attempt to parse numeric strings
+			if f, err := time.ParseDuration(v); err == nil {
+				// Handle duration strings like "5s", "1m", etc.
+				return f.Seconds()
+			}
+			// Try parsing as plain float
+			var f float64
+			if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+				return f
+			}
 		}
 	}
 	return 0.0

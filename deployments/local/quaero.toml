@@ -157,13 +157,13 @@ description = "Scan markdown documents and generate summaries with metadata"
 # =============================================================================
 # WebSocket Log Streaming Configuration
 # =============================================================================
-# Configure server-side filtering for real-time log streaming to browser UI.
+# Configure server-side filtering for real-time log streaming and event broadcasting to browser UI.
 # Logs are filtered before broadcasting to reduce client load and network traffic.
 # Technical parameters have sensible defaults hardcoded in the application.
 # Only uncomment settings you want to override from defaults.
 #
-# Defaults: min_level="info", exclude_patterns=["WebSocket client", "HTTP request", ...]
-# Env vars: QUAERO_WEBSOCKET_MIN_LEVEL, QUAERO_WEBSOCKET_EXCLUDE_PATTERNS
+# Defaults: min_level="info", exclude_patterns=[...], allowed_events=[] (all), throttle_intervals={crawl_progress:1s, job_spawn:500ms}
+# Env vars: QUAERO_WEBSOCKET_MIN_LEVEL, QUAERO_WEBSOCKET_EXCLUDE_PATTERNS, QUAERO_WEBSOCKET_ALLOWED_EVENTS, QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS, QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN
 
 # [websocket]
 # min_level = "info"  # Minimum log level to broadcast ("debug", "info", "warn", "error")
@@ -173,4 +173,23 @@ description = "Scan markdown documents and generate summaries with metadata"
 #     "HTTP request",
 #     "HTTP response",
 #     "Publishing Event",
+#     "DEBUG: Memory writer entry",
 # ]
+
+# Event Filtering - Control which events are broadcast to WebSocket clients
+# allowed_events = []  # Empty list allows all events (default)
+# allowed_events = [   # Whitelist specific events (example)
+#     "job_created",
+#     "job_started",
+#     "job_completed",
+#     "job_failed",
+#     "job_cancelled",
+#     "crawl_progress",
+#     "job_spawn",
+# ]
+
+# Event Throttling - Rate limit high-frequency events to prevent WebSocket flooding
+# Throttling reduces network traffic and client load during large crawls (1000s of URLs)
+# [websocket.throttle_intervals]
+# crawl_progress = "1s"   # Max 1 crawl progress update per second per job (default)
+# job_spawn = "500ms"     # Max 2 job spawn events per second (default)

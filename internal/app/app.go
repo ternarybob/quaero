@@ -145,13 +145,18 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 		Type:       arbormodels.LogWriterTypeConsole,
 		TimeFormat: "15:04:05",
 	}
-	wsWriter, err := handlers.NewWebSocketWriter(app.WSHandler, writerConfig)
+	wsWriter, err := handlers.NewWebSocketWriter(app.WSHandler, writerConfig, &cfg.WebSocket)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create WebSocket writer: %w", err)
 	}
 	arbor.RegisterWriter("websocket", wsWriter)
 	app.WSWriter = wsWriter
-	logger.Info().Msg("WebSocket arbor writer registered for real-time log streaming")
+	logger.Info().
+		Str("min_level", cfg.WebSocket.MinLevel).
+		Int("exclude_patterns", len(cfg.WebSocket.ExcludePatterns)).
+		Int("allowed_events", len(cfg.WebSocket.AllowedEvents)).
+		Int("throttle_intervals", len(cfg.WebSocket.ThrottleIntervals)).
+		Msg("WebSocket arbor writer registered with config-driven filtering")
 
 	logger.Info().Msg("WebSocket handlers started (status broadcaster + arbor writer)")
 
@@ -805,7 +810,17 @@ func (a *App) initServices() error {
 func (a *App) initHandlers() error {
 	// Initialize handlers
 	a.APIHandler = handlers.NewAPIHandler(a.Logger)
-	a.WSHandler = handlers.NewWebSocketHandler(a.EventService, a.Logger)
+	a.WSHandler = handlers.NewWebSocketHandler(a.EventService, a.Logger, &a.Config.WebSocket)
+
+	// Initialize EventSubscriber for job lifecycle events with config-driven filtering
+	// Subscribes to EventJobCreated, EventJobStarted, EventJobCompleted, EventJobFailed, EventJobCancelled
+	// Transforms events and broadcasts to WebSocket clients via BroadcastJobStatusChange
+	_ = handlers.NewEventSubscriber(a.WSHandler, a.EventService, a.Logger, &a.Config.WebSocket)
+	a.Logger.Info().
+		Int("allowed_events", len(a.Config.WebSocket.AllowedEvents)).
+		Int("throttle_intervals", len(a.Config.WebSocket.ThrottleIntervals)).
+		Msg("EventSubscriber initialized with config-driven filtering and throttling")
+
 	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.StorageManager.AuthStorage(), a.WSHandler, a.Logger)
 	a.CollectionHandler = handlers.NewCollectionHandler(
 		a.EventService,
@@ -994,6 +1009,8 @@ func (a *App) Close() error {
 	}
 
 	// Flush context logs before stopping services
+	// Note: Arbor's Stop() is idempotent and safe to call multiple times
+	// but should only be called once at end of shutdown sequence
 	a.Logger.Info().Msg("Flushing context logs")
 	common.Stop()
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -21,6 +22,9 @@ func NewFTS5SearchService(
 	storage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 ) *FTS5SearchService {
+	if logger == nil {
+		logger = common.GetLogger()
+	}
 	return &FTS5SearchService{
 		storage: storage,
 		logger:  logger,
@@ -52,11 +56,9 @@ func (s *FTS5SearchService) Search(
 
 		results, err = s.storage.ListDocuments(listOpts)
 		if err != nil {
-			if s.logger != nil {
-				s.logger.Error().
-					Err(err).
-					Msg("Failed to list documents")
-			}
+			s.logger.Error().
+				Err(err).
+				Msg("Failed to list documents")
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
 	} else {
@@ -68,12 +70,10 @@ func (s *FTS5SearchService) Search(
 
 		results, err = s.storage.FullTextSearch(query, limit)
 		if err != nil {
-			if s.logger != nil {
-				s.logger.Error().
-					Err(err).
-					Str("query", query).
-					Msg("Failed to search documents")
-			}
+			s.logger.Error().
+				Err(err).
+				Str("query", query).
+				Msg("Failed to search documents")
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
 	}
@@ -93,12 +93,10 @@ func (s *FTS5SearchService) Search(
 		results = results[:opts.Limit]
 	}
 
-	if s.logger != nil {
-		s.logger.Debug().
-			Str("query", query).
-			Int("results", len(results)).
-			Msg("Search completed")
-	}
+	s.logger.Debug().
+		Str("query", query).
+		Int("results", len(results)).
+		Msg("Search completed")
 
 	return results, nil
 }
@@ -107,12 +105,10 @@ func (s *FTS5SearchService) Search(
 func (s *FTS5SearchService) GetByID(ctx context.Context, id string) (*models.Document, error) {
 	doc, err := s.storage.GetDocument(id)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("id", id).
-				Msg("Failed to get document by ID")
-		}
+		s.logger.Error().
+			Err(err).
+			Str("id", id).
+			Msg("Failed to get document by ID")
 		return nil, fmt.Errorf("get document failed: %w", err)
 	}
 
@@ -138,12 +134,10 @@ func (s *FTS5SearchService) SearchByReference(
 
 	results, err := s.storage.FullTextSearch(quotedReference, limit)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("reference", reference).
-				Msg("Failed to search by reference")
-		}
+		s.logger.Error().
+			Err(err).
+			Str("reference", reference).
+			Msg("Failed to search by reference")
 		return nil, fmt.Errorf("search by reference failed: %w", err)
 	}
 
@@ -166,12 +160,10 @@ func (s *FTS5SearchService) SearchByReference(
 		filtered = filtered[:opts.Limit]
 	}
 
-	if s.logger != nil {
-		s.logger.Debug().
-			Str("reference", reference).
-			Int("results", len(filtered)).
-			Msg("Search by reference completed")
-	}
+	s.logger.Debug().
+		Str("reference", reference).
+		Int("results", len(filtered)).
+		Msg("Search by reference completed")
 
 	return filtered, nil
 }

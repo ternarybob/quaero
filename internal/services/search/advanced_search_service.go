@@ -58,6 +58,9 @@ func NewAdvancedSearchService(
 	logger arbor.ILogger,
 	config *common.Config,
 ) *AdvancedSearchService {
+	if logger == nil {
+		logger = common.GetLogger()
+	}
 	return &AdvancedSearchService{
 		storage: storage,
 		logger:  logger,
@@ -94,15 +97,13 @@ func (s *AdvancedSearchService) Search(
 
 // logParsedQuery logs the parsed query details for debugging
 func (s *AdvancedSearchService) logParsedQuery(query string, parsedQuery ParsedQuery) {
-	if s.logger != nil {
-		s.logger.Debug().
-			Str("original_query", query).
-			Str("fts5_query", parsedQuery.FTS5Query).
-			Str("id", parsedQuery.ID).
-			Str("document_type", parsedQuery.DocumentType).
-			Bool("case_sensitive", parsedQuery.CaseSensitive).
-			Msg("Parsed query")
-	}
+	s.logger.Debug().
+		Str("original_query", query).
+		Str("fts5_query", parsedQuery.FTS5Query).
+		Str("id", parsedQuery.ID).
+		Str("document_type", parsedQuery.DocumentType).
+		Bool("case_sensitive", parsedQuery.CaseSensitive).
+		Msg("Parsed query")
 }
 
 // executeSearch performs the appropriate search operation based on query type
@@ -116,12 +117,10 @@ func (s *AdvancedSearchService) executeSearch(
 	if parsedQuery.ID != "" {
 		doc, err := s.storage.GetDocument(parsedQuery.ID)
 		if err != nil {
-			if s.logger != nil {
-				s.logger.Error().
-					Err(err).
-					Str("id", parsedQuery.ID).
-					Msg("Failed to get document by ID")
-			}
+			s.logger.Error().
+				Err(err).
+				Str("id", parsedQuery.ID).
+				Msg("Failed to get document by ID")
 			// Return empty results instead of error for ID not found
 			return []*models.Document{}, nil
 		}
@@ -161,11 +160,9 @@ func (s *AdvancedSearchService) executeListDocuments(
 
 	results, err := s.storage.ListDocuments(listOpts)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Msg("Failed to list documents")
-		}
+		s.logger.Error().
+			Err(err).
+			Msg("Failed to list documents")
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
@@ -182,13 +179,11 @@ func (s *AdvancedSearchService) executeFullTextSearch(
 
 	results, err := s.storage.FullTextSearch(parsedQuery.FTS5Query, limit)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("query", query).
-				Str("fts5_query", parsedQuery.FTS5Query).
-				Msg("Failed to search documents")
-		}
+		s.logger.Error().
+			Err(err).
+			Str("query", query).
+			Str("fts5_query", parsedQuery.FTS5Query).
+			Msg("Failed to search documents")
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
@@ -257,24 +252,20 @@ func (s *AdvancedSearchService) applyFilters(
 
 // logSearchCompletion logs the final search results count
 func (s *AdvancedSearchService) logSearchCompletion(query string, resultCount int) {
-	if s.logger != nil {
-		s.logger.Debug().
-			Str("query", query).
-			Int("results", resultCount).
-			Msg("Advanced search completed")
-	}
+	s.logger.Debug().
+		Str("query", query).
+		Int("results", resultCount).
+		Msg("Advanced search completed")
 }
 
 // GetByID retrieves a single document by its ID
 func (s *AdvancedSearchService) GetByID(ctx context.Context, id string) (*models.Document, error) {
 	doc, err := s.storage.GetDocument(id)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("id", id).
-				Msg("Failed to get document by ID")
-		}
+		s.logger.Error().
+			Err(err).
+			Str("id", id).
+			Msg("Failed to get document by ID")
 		return nil, fmt.Errorf("get document failed: %w", err)
 	}
 
@@ -301,12 +292,10 @@ func (s *AdvancedSearchService) SearchByReference(
 
 	results, err := s.storage.FullTextSearch(quotedReference, limit)
 	if err != nil {
-		if s.logger != nil {
-			s.logger.Error().
-				Err(err).
-				Str("reference", reference).
-				Msg("Failed to search by reference")
-		}
+		s.logger.Error().
+			Err(err).
+			Str("reference", reference).
+			Msg("Failed to search by reference")
 		return nil, fmt.Errorf("search by reference failed: %w", err)
 	}
 
@@ -329,12 +318,10 @@ func (s *AdvancedSearchService) SearchByReference(
 		filtered = filtered[:opts.Limit]
 	}
 
-	if s.logger != nil {
-		s.logger.Debug().
-			Str("reference", reference).
-			Int("results", len(filtered)).
-			Msg("Search by reference completed")
-	}
+	s.logger.Debug().
+		Str("reference", reference).
+		Int("results", len(filtered)).
+		Msg("Search by reference completed")
 
 	return filtered, nil
 }

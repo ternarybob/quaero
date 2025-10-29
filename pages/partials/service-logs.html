@@ -20,6 +20,7 @@
     </div>
 
     <div class="card-body">
+        <!-- Logs are filtered server-side before broadcasting (see WebSocketWriter) -->
         <div class="terminal" x-ref="logContainer">
             <template x-if="logs.length === 0">
                 <div style="text-align: center; color: var(--text-secondary);">No logs available</div>
