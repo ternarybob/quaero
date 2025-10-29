@@ -29,77 +29,11 @@ document.addEventListener('alpine:init', () => {
     maxLogs: 200,
     autoScroll: true,
     logIdCounter: 0,
-    selectedLogLevel: 'all',
 
     init() {
       window.debugLog('ServiceLogs', 'Initializing component');
-      // Load saved filter preference from localStorage
-      const savedFilter = localStorage.getItem('quaero_log_level_filter');
-      const allowedLevels = ['all', 'error', 'warning', 'info', 'debug'];
-
-      // Normalize legacy/alias values
-      const aliasMap = {
-        'warn': 'warning',
-        'errors': 'error',
-        'err': 'error',
-        'dbg': 'debug'
-      };
-
-      let normalizedFilter = savedFilter ? savedFilter.toLowerCase() : null;
-      if (normalizedFilter && aliasMap[normalizedFilter]) {
-        normalizedFilter = aliasMap[normalizedFilter];
-        window.debugLog('ServiceLogs', 'Normalized legacy filter value:', savedFilter, '→', normalizedFilter);
-      }
-
-      if (normalizedFilter && allowedLevels.includes(normalizedFilter)) {
-        this.selectedLogLevel = normalizedFilter;
-        // Update localStorage with normalized value
-        localStorage.setItem('quaero_log_level_filter', normalizedFilter);
-        window.debugLog('ServiceLogs', 'Loaded filter preference:', normalizedFilter);
-      } else {
-        // Reset to 'all' if invalid or missing
-        this.selectedLogLevel = 'all';
-        localStorage.setItem('quaero_log_level_filter', 'all');
-        if (savedFilter) {
-          window.debugLog('ServiceLogs', 'Invalid filter value detected, reset to "all":', savedFilter);
-        }
-      }
       this.loadRecentLogs();
       this.subscribeToWebSocket();
-    },
-
-    get filteredLogs() {
-      if (this.selectedLogLevel === 'all') {
-        return this.logs;
-      }
-
-      // Filter logs by selected level with case-insensitive comparison
-      // Handle level name variations (WARN vs WARNING, ERR vs ERROR)
-      return this.logs.filter(log => {
-        const logLevel = log.level.toUpperCase();
-        const filterLevel = this.selectedLogLevel.toUpperCase();
-
-        // Exact match
-        if (logLevel === filterLevel) {
-          return true;
-        }
-
-        // Handle variations
-        if (filterLevel === 'ERROR' && (logLevel === 'ERR' || logLevel === 'ERROR')) {
-          return true;
-        }
-        if (filterLevel === 'WARNING' && (logLevel === 'WARN' || logLevel === 'WARNING')) {
-          return true;
-        }
-
-        return false;
-      });
-    },
-
-    setLogLevel(level) {
-      this.selectedLogLevel = level;
-      localStorage.setItem('quaero_log_level_filter', level);
-      window.debugLog('ServiceLogs', 'Log level filter changed to:', level);
     },
 
     async loadRecentLogs() {

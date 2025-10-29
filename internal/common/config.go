@@ -26,6 +26,7 @@ type Config struct {
 	Jobs        JobsConfig       `toml:"jobs"`
 	Crawler     CrawlerConfig    `toml:"crawler"`
 	Search      SearchConfig     `toml:"search"`
+	WebSocket   WebSocketConfig  `toml:"websocket"`
 }
 
 type ServerConfig struct {
@@ -186,8 +187,15 @@ type CrawlerConfig struct {
 
 // SearchConfig contains configuration for search behavior
 type SearchConfig struct {
-	CaseSensitiveMultiplier int `toml:"case_sensitive_multiplier"` // Multiplier for case-sensitive searches (default: 3)
-	CaseSensitiveMaxCap     int `toml:"case_sensitive_max_cap"`    // Maximum results cap for case-sensitive searches (default: 1000)
+	Mode                    string `toml:"mode"`                      // Search service mode: "fts5", "advanced" (default), or "disabled"
+	CaseSensitiveMultiplier int    `toml:"case_sensitive_multiplier"` // Multiplier for case-sensitive searches (default: 3)
+	CaseSensitiveMaxCap     int    `toml:"case_sensitive_max_cap"`    // Maximum results cap for case-sensitive searches (default: 1000)
+}
+
+// WebSocketConfig contains configuration for WebSocket log streaming
+type WebSocketConfig struct {
+	MinLevel        string   `toml:"min_level"`        // Minimum log level to broadcast ("debug", "info", "warn", "error")
+	ExcludePatterns []string `toml:"exclude_patterns"` // Log message patterns to exclude from broadcasting
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -297,8 +305,19 @@ func NewDefaultConfig() *Config {
 			JavaScriptWaitTime:        3 * time.Second,                           // Wait 3 seconds for JavaScript to render
 		},
 		Search: SearchConfig{
-			CaseSensitiveMultiplier: 3,    // Fetch 3x the requested limit for case-sensitive searches
-			CaseSensitiveMaxCap:     1000, // Cap at 1000 results to prevent excessive memory usage
+			Mode:                    "advanced", // Advanced search with Google-style query parsing (fts5|advanced|disabled)
+			CaseSensitiveMultiplier: 3,          // Fetch 3x the requested limit for case-sensitive searches
+			CaseSensitiveMaxCap:     1000,       // Cap at 1000 results to prevent excessive memory usage
+		},
+		WebSocket: WebSocketConfig{
+			MinLevel: "info", // Default: info level and above
+			ExcludePatterns: []string{
+				"WebSocket client connected",
+				"WebSocket client disconnected",
+				"HTTP request",
+				"HTTP response",
+				"Publishing Event",
+			},
 		},
 	}
 }
@@ -535,6 +554,9 @@ func applyEnvOverrides(config *Config) {
 	}
 
 	// Search configuration
+	if searchMode := os.Getenv("QUAERO_SEARCH_MODE"); searchMode != "" {
+		config.Search.Mode = searchMode
+	}
 	if caseSensitiveMultiplier := os.Getenv("QUAERO_SEARCH_CASE_SENSITIVE_MULTIPLIER"); caseSensitiveMultiplier != "" {
 		if csm, err := strconv.Atoi(caseSensitiveMultiplier); err == nil {
 			config.Search.CaseSensitiveMultiplier = csm
@@ -543,6 +565,24 @@ func applyEnvOverrides(config *Config) {
 	if caseSensitiveMaxCap := os.Getenv("QUAERO_SEARCH_CASE_SENSITIVE_MAX_CAP"); caseSensitiveMaxCap != "" {
 		if csmc, err := strconv.Atoi(caseSensitiveMaxCap); err == nil {
 			config.Search.CaseSensitiveMaxCap = csmc
+		}
+	}
+
+	// WebSocket configuration
+	if minLevel := os.Getenv("QUAERO_WEBSOCKET_MIN_LEVEL"); minLevel != "" {
+		config.WebSocket.MinLevel = minLevel
+	}
+	if excludePatterns := os.Getenv("QUAERO_WEBSOCKET_EXCLUDE_PATTERNS"); excludePatterns != "" {
+		// Split comma-separated patterns
+		patterns := []string{}
+		for _, p := range splitString(excludePatterns, ",") {
+			trimmed := trimSpace(p)
+			if trimmed != "" {
+				patterns = append(patterns, trimmed)
+			}
+		}
+		if len(patterns) > 0 {
+			config.WebSocket.ExcludePatterns = patterns
 		}
 	}
 }

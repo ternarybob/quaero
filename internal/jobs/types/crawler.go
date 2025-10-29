@@ -164,8 +164,13 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Msg("Failed to scrape URL")
 
 		// Update parent job progress even on failure
+		// Update heartbeat to track last activity
+		if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
+			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
+		}
+
 		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
 				job.Progress.CompletedURLs++ // Count as processed (failed)
 				if job.Progress.PendingURLs > 0 {
 					job.Progress.PendingURLs--
@@ -174,6 +179,10 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				if job.Progress.TotalURLs > 0 {
 					job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
 				}
+
+				// Check completion and enqueue probe if needed
+				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
+
 				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
 					c.logger.Warn().Err(saveErr).Msg("Failed to persist progress after scraping failure")
 				}
@@ -198,8 +207,13 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		}
 
 		// Update parent job progress for non-success status
+		// Update heartbeat to track last activity
+		if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
+			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
+		}
+
 		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
 				job.Progress.CompletedURLs++ // Count as processed (failed)
 				if job.Progress.PendingURLs > 0 {
 					job.Progress.PendingURLs--
@@ -208,6 +222,10 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				if job.Progress.TotalURLs > 0 {
 					job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
 				}
+
+				// Check completion and enqueue probe if needed
+				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
+
 				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
 					c.logger.Warn().Err(saveErr).Msg("Failed to persist progress after non-success status")
 				}
@@ -287,9 +305,6 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Int("max_depth", maxDepth).
 			Msg("Link discovery enabled, extracting and enqueueing child URLs")
 
-		// VERIFICATION COMMENT 1: URL deduplication now handled by database (job_seen_urls table)
-		// No need to load parent job or manage in-memory SeenURLs map
-
 		// Extract include/exclude patterns from config
 		includePatterns := []string{}
 		if patterns, ok := msg.Config["include_patterns"].([]interface{}); ok {
@@ -325,8 +340,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Int("max_pages", maxPages).
 			Msg("Processing discovered links")
 
-		// VERIFICATION COMMENT 3: Use shared LinkFilter helper (DRY principle)
-		// Replaces inline regex compilation with consolidated filtering logic
+		// Use shared LinkFilter helper for URL filtering
 		linkFilter := crawler.NewLinkFilter(includePatterns, excludePatterns, sourceType, c.logger)
 
 		// Filter and enqueue child jobs for discovered links
@@ -335,9 +349,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		duplicateCount := 0
 
 		for _, childURL := range discoveredLinks {
-			// VERIFICATION COMMENT 1: Concurrency-safe URL deduplication using database
-			// MarkURLSeen atomically checks and records URL as seen using INSERT OR IGNORE
-			// Returns true if URL was newly added (safe to enqueue), false if already exists (duplicate)
+			// Check for duplicate URLs using database-backed deduplication
 			isNew, err := c.deps.JobStorage.MarkURLSeen(ctx, msg.ParentID, childURL)
 			if err != nil {
 				c.logger.Warn().
@@ -364,7 +376,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				break
 			}
 
-			// VERIFICATION COMMENT 3: Apply consolidated filtering using shared LinkFilter
+			// Apply URL filtering
 			filterResult := linkFilter.FilterURL(childURL)
 			if !filterResult.ShouldEnqueue {
 				filteredCount++
@@ -376,16 +388,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				continue
 			}
 
-			// Create child job message
-			// VERIFICATION COMMENT 7: ParentID hierarchy uses FLAT structure.
-			// All child messages inherit the root job's ParentID rather than pointing
-			// to their immediate parent. This design choice supports:
-			// - Centralized progress tracking at root job level
-			// - Job-level URL deduplication via database table
-			// - Simplified job completion detection (single PendingURLs counter)
-			// - Consistent logging and event tracking
-			// Alternative tree structure would require recursive traversal and
-			// complex aggregation, adding unnecessary complexity for crawler use case.
+			// Create child job message (flat hierarchy - all children point to root job)
 			childMsg := &queue.JobMessage{
 				ID:              fmt.Sprintf("%s-child-%d", msg.ID, enqueuedCount),
 				Type:            "crawler_url",
@@ -453,7 +456,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	if err != nil {
 		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for progress update")
 	} else {
-		if job, ok := jobInterface.(*crawler.CrawlJob); ok {
+		if job, ok := jobInterface.(*models.CrawlJob); ok {
 			// Update counters atomically:
 			// 1. Increment completed URLs (this URL is done)
 			// 2. Decrement pending URLs (this URL is no longer pending)
@@ -474,89 +477,8 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
 			}
 
-			// Two-phase completion detection with grace period
-			// Phase 1: Detect when PendingURLs reaches 0 (completion candidate)
-			// Phase 2: Verify after 5-second grace period that job is truly idle
-			isCompletionCandidate := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
-
-			if isCompletionCandidate && job.Status != crawler.JobStatusCompleted {
-				const gracePeriod = 5 * time.Second
-
-				// Check if we already have a completion candidate timestamp
-				if job.CompletionCandidateAt.IsZero() {
-					// Phase 1: First time reaching PendingURLs == 0
-					job.CompletionCandidateAt = time.Now()
-					c.logger.Info().
-						Str("parent_id", msg.ParentID).
-						Int("completed", job.Progress.CompletedURLs).
-						Int("total", job.Progress.TotalURLs).
-						Msg("Job became completion candidate - starting grace period")
-				} else {
-					// Phase 2: We're already a completion candidate, check if grace period elapsed
-					elapsed := time.Since(job.CompletionCandidateAt)
-
-					if elapsed >= gracePeriod {
-						// Grace period elapsed - verify completion conditions still met
-						// Reload job to check if heartbeat changed (indicates activity during grace period)
-						freshJobInterface, reloadErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-						if reloadErr != nil {
-							c.logger.Warn().Err(reloadErr).Msg("Failed to reload job for completion verification")
-						} else if freshJob, ok := freshJobInterface.(*crawler.CrawlJob); ok {
-							// Verify conditions:
-							// 1. PendingURLs still 0 (no new URLs enqueued)
-							// 2. Heartbeat unchanged (no activity during grace period)
-							heartbeatUnchanged := freshJob.CompletionCandidateAt.Equal(job.CompletionCandidateAt)
-							pendingStillZero := freshJob.Progress.PendingURLs == 0
-
-							if heartbeatUnchanged && pendingStillZero {
-								// All conditions met - mark job as completed
-								job.ResultCount = job.Progress.CompletedURLs
-								job.FailedCount = job.Progress.FailedURLs
-								job.Status = crawler.JobStatusCompleted
-								job.CompletedAt = time.Now()
-
-								c.logger.Info().
-									Str("parent_id", msg.ParentID).
-									Int("total_urls", job.Progress.TotalURLs).
-									Int("completed_urls", job.Progress.CompletedURLs).
-									Int("failed_urls", job.Progress.FailedURLs).
-									Dur("grace_period", elapsed).
-									Msg("Job completed after grace period verification")
-
-								// Log job completion event
-								if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-									fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
-										job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
-									c.logger.Warn().Err(err).Msg("Failed to log job completion event")
-								}
-							} else {
-								// Conditions not met - reset candidate timestamp (more work happening)
-								job.CompletionCandidateAt = time.Now()
-								c.logger.Debug().
-									Str("parent_id", msg.ParentID).
-									Bool("heartbeat_unchanged", heartbeatUnchanged).
-									Bool("pending_still_zero", pendingStillZero).
-									Msg("Grace period verification failed - resetting completion candidate")
-							}
-						}
-					} else {
-						// Still waiting for grace period to elapse
-						remaining := gracePeriod - elapsed
-						c.logger.Debug().
-							Str("parent_id", msg.ParentID).
-							Dur("elapsed", elapsed).
-							Dur("remaining", remaining).
-							Msg("Completion candidate - waiting for grace period")
-					}
-				}
-			} else if !isCompletionCandidate && !job.CompletionCandidateAt.IsZero() {
-				// PendingURLs no longer 0 - reset completion candidate (new URLs enqueued)
-				c.logger.Debug().
-					Str("parent_id", msg.ParentID).
-					Int("pending", job.Progress.PendingURLs).
-					Msg("No longer completion candidate - new URLs enqueued")
-				job.CompletionCandidateAt = time.Time{} // Reset to zero
-			}
+			// Check completion and enqueue probe if needed (Comment 3 & 8)
+			c.checkAndEnqueueCompletionProbe(ctx, job, msg)
 
 			// Save updated progress (includes completion status if applicable)
 			if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
@@ -570,12 +492,11 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 					Int("spawned_children", childrenToSpawn).
 					Float64("percentage", job.Progress.Percentage).
 					Str("status", string(job.Status)).
-					Bool("is_completion_candidate", isCompletionCandidate).
 					Msg("Progress updated atomically with spawned children")
 			}
 
 			// Emit progress event (only if not completed)
-			if job.Status != crawler.JobStatusCompleted {
+			if job.Status != models.JobStatusCompleted {
 				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
 					fmt.Sprintf("Progress: %d/%d URLs completed (%.1f%%)",
 						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.Percentage)); err != nil {
@@ -632,8 +553,129 @@ func (c *CrawlerJob) GetType() string {
 	return "crawler"
 }
 
-// VERIFICATION COMMENT 3: Removed duplicate filtering logic (DRY principle)
-// - isValidJiraURL() moved to crawler.IsValidJiraURL() in filters.go
-// - isValidConfluenceURL() moved to crawler.IsValidConfluenceURL() in filters.go
-// - shouldEnqueueURL() replaced with crawler.LinkFilter.FilterURL() in filters.go
-// All filtering logic now consolidated in shared LinkFilter helper
+// checkAndEnqueueCompletionProbe checks if the job is eligible for completion and enqueues a delayed probe
+// This is called after each URL is processed (success or failure) to detect job completion
+func (c *CrawlerJob) checkAndEnqueueCompletionProbe(ctx context.Context, job *models.CrawlJob, msg *queue.JobMessage) {
+	// Completion detection with delayed probe mechanism (Comment 3 & 8)
+	// When PendingURLs reaches 0, enqueue a delayed probe to verify completion after grace period
+	isCompletionCandidate := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
+
+	if isCompletionCandidate && job.Status != models.JobStatusCompleted {
+		// Enqueue a delayed completion probe message (5 second grace period)
+		// This allows time for any in-flight URL processing to update the heartbeat
+		probeMsg := &queue.JobMessage{
+			ID:              fmt.Sprintf("%s-completion-probe-%d", msg.ParentID, time.Now().Unix()),
+			Type:            "crawler_completion_probe",
+			ParentID:        msg.ParentID,
+			JobDefinitionID: msg.JobDefinitionID,
+			Config:          msg.Config,
+		}
+
+		if err := c.deps.QueueManager.EnqueueWithDelay(ctx, probeMsg, 5*time.Second); err != nil {
+			c.logger.Warn().
+				Err(err).
+				Str("parent_id", msg.ParentID).
+				Msg("Failed to enqueue completion probe - completion may be delayed")
+		} else {
+			c.logger.Info().
+				Str("parent_id", msg.ParentID).
+				Int("completed", job.Progress.CompletedURLs).
+				Int("total", job.Progress.TotalURLs).
+				Msg("Enqueued completion probe with 5s grace period")
+		}
+	}
+}
+
+// ExecuteCompletionProbe handles delayed completion verification (Comment 3 & 8)
+// This is called after a 5-second grace period to verify job completion
+func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobMessage) error {
+	c.logger.Info().
+		Str("message_id", msg.ID).
+		Str("parent_id", msg.ParentID).
+		Msg("Processing completion probe")
+
+	// Load the current job state
+	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
+	if err != nil {
+		c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load job for completion probe")
+		return fmt.Errorf("failed to load job: %w", err)
+	}
+
+	job, ok := jobInterface.(*models.CrawlJob)
+	if !ok {
+		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
+	}
+
+	// Check completion conditions:
+	// 1. PendingURLs must still be 0
+	// 2. LastHeartbeat must be older than 5 seconds (indicates no recent activity)
+	// 3. Status must not already be completed
+	const gracePeriod = 5 * time.Second
+
+	if job.Status == models.JobStatusCompleted {
+		c.logger.Debug().Str("parent_id", msg.ParentID).Msg("Job already completed, skipping probe")
+		return nil
+	}
+
+	if job.Progress.PendingURLs > 0 {
+		c.logger.Info().
+			Str("parent_id", msg.ParentID).
+			Int("pending_urls", job.Progress.PendingURLs).
+			Msg("Job no longer eligible for completion - new URLs appeared during grace period")
+		return nil
+	}
+
+	// Check if heartbeat is old enough (no activity during grace period)
+	timeSinceHeartbeat := time.Since(job.LastHeartbeat)
+	if timeSinceHeartbeat < gracePeriod {
+		c.logger.Info().
+			Str("parent_id", msg.ParentID).
+			Dur("time_since_heartbeat", timeSinceHeartbeat).
+			Dur("grace_period", gracePeriod).
+			Msg("Job has recent activity - enqueuing another completion probe")
+
+		// Heartbeat is too recent - enqueue another probe for later
+		retryProbeMsg := &queue.JobMessage{
+			ID:              fmt.Sprintf("%s-completion-probe-retry-%d", msg.ParentID, time.Now().Unix()),
+			Type:            "crawler_completion_probe",
+			ParentID:        msg.ParentID,
+			JobDefinitionID: msg.JobDefinitionID,
+			Config:          msg.Config,
+		}
+
+		remainingWait := gracePeriod - timeSinceHeartbeat + (1 * time.Second) // Add 1s buffer
+		if err := c.deps.QueueManager.EnqueueWithDelay(ctx, retryProbeMsg, remainingWait); err != nil {
+			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to enqueue retry probe")
+		}
+
+		return nil
+	}
+
+	// All conditions met - mark job as completed
+	job.ResultCount = job.Progress.CompletedURLs
+	job.FailedCount = job.Progress.FailedURLs
+	job.Status = models.JobStatusCompleted
+	job.CompletedAt = time.Now()
+
+	if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+		c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to save completed job")
+		return fmt.Errorf("failed to save completed job: %w", err)
+	}
+
+	c.logger.Info().
+		Str("parent_id", msg.ParentID).
+		Int("total_urls", job.Progress.TotalURLs).
+		Int("completed_urls", job.Progress.CompletedURLs).
+		Int("failed_urls", job.Progress.FailedURLs).
+		Dur("time_since_last_heartbeat", timeSinceHeartbeat).
+		Msg("Job marked as completed after grace period verification")
+
+	// Log job completion event
+	if err := c.LogJobEvent(ctx, msg.ParentID, "info",
+		fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
+			job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to log job completion event")
+	}
+
+	return nil
+}

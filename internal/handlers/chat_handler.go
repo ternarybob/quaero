@@ -30,8 +30,7 @@ func NewChatHandler(
 
 // ChatHandler handles POST /api/chat requests
 func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -132,8 +131,7 @@ func (h *ChatHandler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 // HealthHandler handles GET /api/chat/health requests
 // Returns detailed service status including LLM mode and server states
 func (h *ChatHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 

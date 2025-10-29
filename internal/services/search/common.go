@@ -1,6 +1,7 @@
 package search
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/ternarybob/quaero/internal/models"
@@ -50,4 +51,74 @@ func containsReference(doc *models.Document, reference string) bool {
 	}
 
 	return false
+}
+
+// filterBySourceType filters documents by source type
+// Used by both FTS5SearchService and AdvancedSearchService
+func filterBySourceType(docs []*models.Document, sourceTypes []string) []*models.Document {
+	filtered := make([]*models.Document, 0, len(docs))
+	for _, doc := range docs {
+		for _, sourceType := range sourceTypes {
+			if doc.SourceType == sourceType {
+				filtered = append(filtered, doc)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+// filterByMetadata filters documents by metadata key-value pairs
+// Used by both FTS5SearchService and AdvancedSearchService
+func filterByMetadata(docs []*models.Document, filters map[string]string) []*models.Document {
+	filtered := make([]*models.Document, 0, len(docs))
+	for _, doc := range docs {
+		if matchesMetadata(doc.Metadata, filters) {
+			filtered = append(filtered, doc)
+		}
+	}
+	return filtered
+}
+
+// matchesMetadata checks if document metadata matches all filter criteria
+// Used by filterByMetadata helper
+func matchesMetadata(metadata map[string]interface{}, filters map[string]string) bool {
+	for key, value := range filters {
+		metaValue, exists := metadata[key]
+		if !exists {
+			return false
+		}
+
+		// Convert metadata value to string for comparison
+		var metaStr string
+		switch v := metaValue.(type) {
+		case string:
+			metaStr = v
+		case []string:
+			// Check if value is in array
+			for _, item := range v {
+				if item == value {
+					goto nextFilter
+				}
+			}
+			return false
+		case []interface{}:
+			// Check if value is in array
+			for _, item := range v {
+				if fmt.Sprintf("%v", item) == value {
+					goto nextFilter
+				}
+			}
+			return false
+		default:
+			metaStr = fmt.Sprintf("%v", v)
+		}
+
+		if metaStr != value {
+			return false
+		}
+
+	nextFilter:
+	}
+	return true
 }

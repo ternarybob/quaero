@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -21,13 +19,85 @@ import (
 	"github.com/ternarybob/arbor"
 
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/httpclient"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
-// VERIFICATION COMMENT 4: Removed workers import (worker management migrated to queue.WorkerPool)
+// ============================================================================
+// JOB SYSTEM ARCHITECTURE
+// ============================================================================
+//
+// This crawler service interacts with TWO distinct job systems that serve
+// different purposes and operate independently:
+//
+// 1. QUEUE-BASED JOB SYSTEM (Task Execution)
+//    - Purpose: Execute individual crawler tasks (URLs, pages)
+//    - Components: QueueManager (goqite), WorkerPool, CrawlerJob
+//    - Location: internal/queue/, internal/jobs/types/crawler.go
+//    - Characteristics:
+//      * Task-level granularity (one job message per URL)
+//      * Worker pool processes messages from persistent queue
+//      * Automatic retries, visibility timeouts, dead-letter handling
+//      * Horizontal scalability (multiple workers, multiple instances)
+//    - Use When:
+//      * Executing individual crawler tasks
+//      * Need retry semantics and fault tolerance
+//      * Want distributed processing across workers
+//      * Processing user-triggered crawl operations
+//
+// 2. JOB DEFINITION SYSTEM (Workflow Orchestration)
+//    - Purpose: Orchestrate multi-step workflows and scheduled jobs
+//    - Components: JobExecutor, JobRegistry, Action Handlers
+//    - Location: internal/services/jobs/, internal/services/jobs/actions/
+//    - Characteristics:
+//      * Workflow-level granularity (entire multi-step process)
+//      * Declarative job definitions with steps and dependencies
+//      * Scheduler integration for cron-based execution
+//      * Supports post-job triggers and chaining
+//      * Polling-based completion detection for async operations
+//    - Use When:
+//      * Defining scheduled workflows (cron jobs)
+//      * Orchestrating multi-step processes (crawl → summarize → cleanup)
+//      * Need job chaining with post-job triggers
+//      * Require workflow-level configuration and metadata
+//
+// INTERACTION BETWEEN SYSTEMS:
+//
+// JobExecutor (workflow) → QueueManager (task execution)
+//   - JobExecutor triggers crawl workflows via CrawlerActions
+//   - CrawlerActions enqueue URL tasks into QueueManager
+//   - WorkerPool processes URL tasks using CrawlerJob handlers
+//   - Completion detection uses polling via GetJobStatus()
+//
+// EXAMPLE WORKFLOW:
+//
+// 1. User creates JobDefinition: "Crawl Jira + Summarize"
+// 2. JobExecutor processes definition, executes CrawlerAction
+// 3. CrawlerAction calls StartCrawl() → enqueues seed URLs
+// 4. WorkerPool workers process URL messages via CrawlerJob
+// 5. JobExecutor polls GetJobStatus() until crawl completes
+// 6. Post-job trigger fires SummarizerAction (if configured)
+// 7. Workflow completes, status persisted to database
+//
+// KEY DESIGN PRINCIPLES:
+//
+// - Single Responsibility: Each system handles its domain well
+// - Loose Coupling: Systems communicate via interfaces (JobStorage, QueueManager)
+// - Persistence: Both systems store state in database for recovery
+// - Scalability: Queue system scales horizontally, executor scales vertically
+// - Separation of Concerns: Task execution vs. workflow orchestration
+//
+// MIGRATION NOTES:
+//
+// - Worker management migrated from Service to queue.WorkerPool
+// - Progress tracking moved from Service to CrawlJob (via JobStorage)
+// - URL queue replaced with goqite-backed persistent queue
+// - Retry logic handled by queue system (visibility timeout)
+//
+// ============================================================================
 
 // Service orchestrates crawler jobs using queue manager
 // Worker management has been migrated to queue.WorkerPool
@@ -42,9 +112,6 @@ type Service struct {
 	queueManager    interfaces.QueueManager    // Replaces custom URLQueue with goqite-backed queue
 	logger          arbor.ILogger
 	config          *common.Config
-
-	// VERIFICATION COMMENT 2: retryPolicy removed - legacy field from old worker-based architecture
-	// VERIFICATION COMMENT 4: workerPool field removed (workers managed globally by queue.WorkerPool)
 
 	// Browser pool for chromedp (reusable browser instances)
 	browserPool      []context.Context
@@ -77,13 +144,11 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 		queueManager:    queueManager,
 		logger:          logger,
 		config:          config,
-		// VERIFICATION COMMENT 2: retryPolicy initialization removed (legacy from old worker architecture)
-		// VERIFICATION COMMENT 4: workerPool initialization removed (workers managed globally by queue.WorkerPool)
-		activeJobs: make(map[string]*CrawlJob),
-		jobResults: make(map[string][]*CrawlResult),
-		jobClients: make(map[string]*http.Client),
-		ctx:        ctx,
-		cancel:     cancel,
+		activeJobs:      make(map[string]*CrawlJob),
+		jobResults:      make(map[string][]*CrawlResult),
+		jobClients:      make(map[string]*http.Client),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	return s
@@ -529,8 +594,6 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Msg(jobStartMsg)
 	}
 
-	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
-
 	// Initialize browser pool if JavaScript rendering is enabled
 	if s.config.Crawler.EnableJavaScript {
 		if err := s.initBrowserPool(config.Concurrency); err != nil {
@@ -636,8 +699,6 @@ func (s *Service) CancelJob(jobID string) error {
 	contextLogger.Debug().Msg("Removed cancelled job from active jobs")
 	s.jobsMu.Unlock()
 
-	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
-
 	return nil
 }
 
@@ -690,8 +751,6 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	delete(s.activeJobs, jobID)
 	contextLogger.Debug().Str("reason", reason).Msg("Removed failed job from active jobs")
 	s.jobsMu.Unlock()
-
-	// VERIFICATION COMMENT 9: Removed s.emitProgress() call (function removed, progress now tracked via queue-based jobs)
 
 	return nil
 }
@@ -974,80 +1033,5 @@ func (s *Service) GetConfig() common.CrawlerConfig {
 
 // buildHTTPClientFromAuth creates an HTTP client with cookies from AuthCredentials
 func buildHTTPClientFromAuth(authCreds *models.AuthCredentials) (*http.Client, error) {
-	if authCreds == nil {
-		return &http.Client{Timeout: 30 * time.Second}, nil
-	}
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
-	}
-
-	client := &http.Client{
-		Jar:     jar,
-		Timeout: 30 * time.Second,
-	}
-
-	// Parse base URL for fallback
-	baseURL, err := url.Parse(authCreds.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base URL: %w", err)
-	}
-
-	// Unmarshal cookies from JSON
-	var cookies []*interfaces.AtlassianExtensionCookie
-	if err := json.Unmarshal(authCreds.Cookies, &cookies); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cookies: %w", err)
-	}
-
-	// Group cookies by domain to set them with appropriate URLs
-	// This ensures cookie jar accepts cookies based on their declared domain
-	cookiesByDomain := make(map[string][]*http.Cookie)
-	for _, c := range cookies {
-		// Calculate expiration time
-		// If expiration is 0 or in the past, treat as session cookie (no expiration)
-		// This prevents cookie jar from rejecting cookies with zero/invalid timestamps
-		var expires time.Time
-		if c.Expires > 0 {
-			expires = time.Unix(c.Expires, 0)
-			// If cookie expired more than a day ago, treat as session cookie
-			if expires.Before(time.Now().Add(-24 * time.Hour)) {
-				expires = time.Time{} // Zero value = session cookie
-			}
-		}
-		// Zero time.Time = session cookie (no expiration)
-
-		httpCookie := &http.Cookie{
-			Name:     c.Name,
-			Value:    c.Value,
-			Domain:   c.Domain,
-			Path:     c.Path,
-			Expires:  expires,
-			Secure:   c.Secure,
-			HttpOnly: c.HTTPOnly,
-		}
-
-		// Use cookie's domain, removing leading dot if present
-		domain := strings.TrimPrefix(c.Domain, ".")
-		if domain == "" {
-			domain = baseURL.Host // Fallback to base URL host
-		}
-
-		cookiesByDomain[domain] = append(cookiesByDomain[domain], httpCookie)
-	}
-
-	// Set cookies for each domain using a URL that matches that domain
-	for domain, domainCookies := range cookiesByDomain {
-		// Build URL for this domain (always use https for Atlassian)
-		domainURL, err := url.Parse(fmt.Sprintf("https://%s/", domain))
-		if err != nil {
-			// Log warning and skip this domain
-			continue
-		}
-
-		// Set cookies for this domain
-		client.Jar.SetCookies(domainURL, domainCookies)
-	}
-
-	return client, nil
+	return httpclient.NewHTTPClientWithAuth(authCreds)
 }

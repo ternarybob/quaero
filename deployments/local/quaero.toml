@@ -153,3 +153,24 @@ description = "Scan markdown documents and generate summaries with metadata"
 # only_main_content = true                  # Default: true
 # include_links = true                      # Default: true
 # include_metadata = true                   # Default: true
+
+# =============================================================================
+# WebSocket Log Streaming Configuration
+# =============================================================================
+# Configure server-side filtering for real-time log streaming to browser UI.
+# Logs are filtered before broadcasting to reduce client load and network traffic.
+# Technical parameters have sensible defaults hardcoded in the application.
+# Only uncomment settings you want to override from defaults.
+#
+# Defaults: min_level="info", exclude_patterns=["WebSocket client", "HTTP request", ...]
+# Env vars: QUAERO_WEBSOCKET_MIN_LEVEL, QUAERO_WEBSOCKET_EXCLUDE_PATTERNS
+
+# [websocket]
+# min_level = "info"  # Minimum log level to broadcast ("debug", "info", "warn", "error")
+# exclude_patterns = [  # Log message patterns to exclude from broadcasting
+#     "WebSocket client connected",
+#     "WebSocket client disconnected",
+#     "HTTP request",
+#     "HTTP response",
+#     "Publishing Event",
+# ]

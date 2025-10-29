@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
-	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/httpclient"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -91,22 +90,12 @@ func (s *Service) UpdateAuth(authData *interfaces.AtlassianAuthData) error {
 }
 
 func (s *Service) configureHTTPClient(authData *interfaces.AtlassianAuthData) error {
-	jar, err := cookiejar.New(nil)
+	client, err := httpclient.NewHTTPClientFromAtlassianAuth(authData)
 	if err != nil {
-		return fmt.Errorf("failed to create cookie jar: %w", err)
+		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
-	s.client = &http.Client{
-		Jar:     jar,
-		Timeout: 30 * time.Second,
-	}
-
-	baseURL, err := url.Parse(authData.BaseURL)
-	if err != nil {
-		return fmt.Errorf("invalid base URL: %w", err)
-	}
-
-	s.client.Jar.SetCookies(baseURL, authData.GetHTTPCookies())
+	s.client = client
 	s.baseURL = authData.BaseURL
 	s.userAgent = authData.UserAgent
 

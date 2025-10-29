@@ -9,7 +9,6 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 // Job interface defines the contract for job type implementations
@@ -39,45 +38,6 @@ func NewBaseJob(messageID, jobDefinitionID string, logger arbor.ILogger, jobMana
 		queueManager:    queueManager,
 		jobLogStorage:   jobLogStorage,
 	}
-}
-
-// UpdateJobStatus updates the status of a job in storage
-func (b *BaseJob) UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error {
-	// Get current job via JobManager
-	jobInterface, err := b.jobManager.GetJob(ctx, jobID)
-	if err != nil {
-		return fmt.Errorf("failed to get job: %w", err)
-	}
-
-	// Type-assert to *crawler.CrawlJob for strong typing
-	crawlJob, ok := jobInterface.(*crawler.CrawlJob)
-	if !ok {
-		return fmt.Errorf("job is not a *crawler.CrawlJob, cannot update status")
-	}
-
-	// Update status field
-	crawlJob.Status = crawler.JobStatus(status)
-	if errorMsg != "" {
-		crawlJob.Error = errorMsg
-	}
-
-	// Set completion time for terminal states
-	if status == "completed" || status == "failed" || status == "cancelled" {
-		now := time.Now()
-		crawlJob.CompletedAt = now
-	}
-
-	// Save updated job via JobManager
-	if err := b.jobManager.UpdateJob(ctx, crawlJob); err != nil {
-		return fmt.Errorf("failed to save job: %w", err)
-	}
-
-	b.logger.Debug().
-		Str("job_id", jobID).
-		Str("status", status).
-		Msg("Job status updated")
-
-	return nil
 }
 
 // EnqueueChildJob enqueues a child job to the queue

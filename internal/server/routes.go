@@ -175,28 +175,19 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 
 // handleSourcesRoute routes /api/sources requests (list and create)
 func (s *Server) handleSourcesRoute(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		s.app.SourcesHandler.ListSourcesHandler(w, r)
-	case "POST":
-		s.app.SourcesHandler.CreateSourceHandler(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	RouteResourceCollection(w, r,
+		s.app.SourcesHandler.ListSourcesHandler,
+		s.app.SourcesHandler.CreateSourceHandler,
+	)
 }
 
 // handleSourceRoutes routes /api/sources/{id} requests
 func (s *Server) handleSourceRoutes(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		s.app.SourcesHandler.GetSourceHandler(w, r)
-	case "PUT":
-		s.app.SourcesHandler.UpdateSourceHandler(w, r)
-	case "DELETE":
-		s.app.SourcesHandler.DeleteSourceHandler(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	RouteResourceItem(w, r,
+		s.app.SourcesHandler.GetSourceHandler,
+		s.app.SourcesHandler.UpdateSourceHandler,
+		s.app.SourcesHandler.DeleteSourceHandler,
+	)
 }
 
 // handleAuthRoutes routes /api/auth/{id} requests
@@ -210,14 +201,11 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 
 	// Handle /api/auth/{id}
 	if len(path) > len("/api/auth/") {
-		switch r.Method {
-		case "GET":
-			s.app.AuthHandler.GetAuthHandler(w, r)
-		case "DELETE":
-			s.app.AuthHandler.DeleteAuthHandler(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
+		RouteResourceItem(w, r,
+			s.app.AuthHandler.GetAuthHandler,
+			nil, // No PUT for auth
+			s.app.AuthHandler.DeleteAuthHandler,
+		)
 		return
 	}
 
@@ -226,37 +214,26 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 
 // handleJobDefinitionsRoute routes /api/job-definitions requests (list and create)
 func (s *Server) handleJobDefinitionsRoute(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		s.app.JobDefinitionHandler.ListJobDefinitionsHandler(w, r)
-	case "POST":
-		s.app.JobDefinitionHandler.CreateJobDefinitionHandler(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	RouteResourceCollection(w, r,
+		s.app.JobDefinitionHandler.ListJobDefinitionsHandler,
+		s.app.JobDefinitionHandler.CreateJobDefinitionHandler,
+	)
 }
 
 // handleJobDefinitionRoutes routes /api/job-definitions/{id} requests
 func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	// Check for /execute suffix
-	if strings.HasSuffix(path, "/execute") && r.Method == "POST" {
+	// Check for /execute suffix first
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)
 		return
 	}
 
 	// Standard CRUD operations
-	switch r.Method {
-	case "GET":
-		s.app.JobDefinitionHandler.GetJobDefinitionHandler(w, r)
-	case "PUT":
-		s.app.JobDefinitionHandler.UpdateJobDefinitionHandler(w, r)
-	case "DELETE":
-		s.app.JobDefinitionHandler.DeleteJobDefinitionHandler(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	RouteResourceItem(w, r,
+		s.app.JobDefinitionHandler.GetJobDefinitionHandler,
+		s.app.JobDefinitionHandler.UpdateJobDefinitionHandler,
+		s.app.JobDefinitionHandler.DeleteJobDefinitionHandler,
+	)
 }
 
 // NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup

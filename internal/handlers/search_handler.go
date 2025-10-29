@@ -48,8 +48,7 @@ func NewSearchHandler(searchService interfaces.SearchService, logger arbor.ILogg
 // SearchHandler handles GET /api/search?q=query requests
 func (h *SearchHandler) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Method validation
-	if r.Method != "GET" {
-		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	if !RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 

@@ -50,6 +50,14 @@ func NewMockServer(port int) *MockServer {
 	// Status endpoint
 	mux.HandleFunc("/api/status", ms.handleStatus)
 
+	// HTML test page endpoints for crawler testing
+	mux.HandleFunc("/test/parent", ms.handleTestParent)
+	mux.HandleFunc("/test/child1", ms.handleTestChild)
+	mux.HandleFunc("/test/child2", ms.handleTestChild)
+	mux.HandleFunc("/test/child3", ms.handleTestChild)
+	mux.HandleFunc("/test/child4", ms.handleTestChild)
+	mux.HandleFunc("/test/child5", ms.handleTestChild)
+
 	ms.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
@@ -397,4 +405,46 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]interface{}{
 		"error": message,
 	})
+}
+
+// handleTestParent returns an HTML page with links to child pages
+func (ms *MockServer) handleTestParent(w http.ResponseWriter, r *http.Request) {
+	html := `<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Parent Page</title>
+</head>
+<body>
+    <h1>Parent Page</h1>
+    <p>This is the parent page for testing crawler child URL processing.</p>
+    <ul>
+        <li><a href="/test/child1">Child Page 1</a></li>
+        <li><a href="/test/child2">Child Page 2</a></li>
+        <li><a href="/test/child3">Child Page 3</a></li>
+        <li><a href="/test/child4">Child Page 4</a></li>
+        <li><a href="/test/child5">Child Page 5</a></li>
+    </ul>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
+}
+
+// handleTestChild returns a simple HTML page with no links
+func (ms *MockServer) handleTestChild(w http.ResponseWriter, r *http.Request) {
+	childNum := strings.TrimPrefix(r.URL.Path, "/test/child")
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Child Page %s</title>
+</head>
+<body>
+    <h1>Child Page %s</h1>
+    <p>This is a child page with no further links.</p>
+</body>
+</html>`, childNum, childNum)
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
 }

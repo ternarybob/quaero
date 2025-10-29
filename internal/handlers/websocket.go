@@ -36,8 +36,6 @@ type WebSocketHandler struct {
 	clients      map[*websocket.Conn]bool
 	clientMutex  map[*websocket.Conn]*sync.Mutex
 	mu           sync.RWMutex
-	lastLogKeys  map[string]bool
-	logKeysMu    sync.RWMutex
 	authLoader   AuthLoader
 	eventService interfaces.EventService
 }
@@ -47,7 +45,6 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 		logger:       logger,
 		clients:      make(map[*websocket.Conn]bool),
 		clientMutex:  make(map[*websocket.Conn]*sync.Mutex),
-		lastLogKeys:  make(map[string]bool),
 		eventService: eventService,
 	}
 
@@ -62,18 +59,6 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 // SetAuthLoader sets the auth loader for loading stored authentication
 func (h *WebSocketHandler) SetAuthLoader(loader AuthLoader) {
 	h.authLoader = loader
-}
-
-// BroadcastUILog sends a formatted log message directly to UI clients
-// This bypasses the arbor logger and sends complete, formatted messages
-func (h *WebSocketHandler) BroadcastUILog(level, message string) {
-	timestamp := time.Now().Format("15:04:05")
-	entry := LogEntry{
-		Timestamp: timestamp,
-		Level:     level,
-		Message:   message,
-	}
-	h.BroadcastLog(entry)
 }
 
 // Message types
@@ -385,138 +370,9 @@ func (h *WebSocketHandler) SendLog(level, message string) {
 	h.BroadcastLog(entry)
 }
 
-// StartLogStreamer starts streaming logs from arbor's memory writer to WebSocket clients
-func (h *WebSocketHandler) StartLogStreamer() {
-	ticker := time.NewTicker(2 * time.Second)
-	go func() {
-		for range ticker.C {
-			h.mu.RLock()
-			clientCount := len(h.clients)
-			h.mu.RUnlock()
-
-			if clientCount > 0 {
-				h.sendLogs()
-			}
-		}
-	}()
-}
-
-// sendLogs retrieves logs from arbor memory writer and broadcasts them
-func (h *WebSocketHandler) sendLogs() {
-	logger := h.logger
-	if logger == nil {
-		return
-	}
-
-	// Try to get the memory writer for more efficient log retrieval
-	memWriter := arbor.GetRegisteredMemoryWriter(arbor.WRITER_MEMORY)
-	if memWriter != nil {
-		entries, err := memWriter.GetEntriesWithLimit(50)
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to get log entries from memory writer")
-			return
-		}
-
-		if len(entries) == 0 {
-			return
-		}
-
-		// Only send new log entries (ones we haven't seen before)
-		h.logKeysMu.Lock()
-		newKeys := make(map[string]bool)
-		for key, logLine := range entries {
-			newKeys[key] = true
-			if !h.lastLogKeys[key] {
-				h.parseAndBroadcastLog(logLine)
-			}
-		}
-		h.lastLogKeys = newKeys
-		h.logKeysMu.Unlock()
-
-		return
-	}
-
-	// Fallback to logger method if memory writer not available
-	entries, err := logger.GetMemoryLogsWithLimit(50)
-	if err != nil {
-		h.logger.Warn().Err(err).Msg("Failed to get log entries")
-		return
-	}
-
-	if len(entries) == 0 {
-		return
-	}
-
-	// Convert map to array and parse log entries
-	for _, logLine := range entries {
-		h.parseAndBroadcastLog(logLine)
-	}
-}
-
-// parseAndBroadcastLog parses a log line and broadcasts it as a LogEntry
-// Arbor memory writer format: "INF|Oct  2 16:27:13|Message key=value key2=value2"
-// Output format: "[16:27:13] [INFO] Message key=value key2=value2"
-func (h *WebSocketHandler) parseAndBroadcastLog(logLine string) {
-	if logLine == "" {
-		return
-	}
-
-	// Filter out internal handler logs (WebSocket, UI handler, etc.)
-	if strings.Contains(logLine, "WebSocket client connected") ||
-		strings.Contains(logLine, "WebSocket client disconnected") ||
-		strings.Contains(logLine, "DEBUG: Memory writer entry") ||
-		strings.Contains(logLine, "HTTP request") ||
-		strings.Contains(logLine, "HTTP response") ||
-		strings.Contains(logLine, "Publishing Event") {
-		return
-	}
-
-	// Parse arbor memory writer format: "LEVEL|Date Time|Message with fields"
-	// Example: "INF|Oct  2 16:27:13|Stored pages count=25"
-	parts := strings.SplitN(logLine, "|", 3)
-	if len(parts) != 3 {
-		return
-	}
-
-	levelStr := strings.TrimSpace(parts[0])
-	dateTime := strings.TrimSpace(parts[1])
-	messageWithFields := strings.TrimSpace(parts[2])
-
-	// Map level
-	level := "info"
-	switch levelStr {
-	case "ERR", "ERROR", "FATAL", "PANIC":
-		level = "error"
-	case "WRN", "WARN":
-		level = "warn"
-	case "INF", "INFO":
-		level = "info"
-	case "DBG", "DEBUG":
-		level = "debug"
-	}
-
-	// Extract just the time from "Oct  2 16:27:13"
-	// Time is the last part after splitting by spaces
-	timeParts := strings.Fields(dateTime)
-	var timestamp string
-	if len(timeParts) >= 3 {
-		timestamp = timeParts[len(timeParts)-1] // Get last part (HH:MM:SS)
-	} else {
-		timestamp = time.Now().Format("15:04:05")
-	}
-
-	entry := LogEntry{
-		Timestamp: timestamp,
-		Level:     level,
-		Message:   messageWithFields, // Include the full message with structured fields
-	}
-	h.BroadcastLog(entry)
-}
-
 // GetRecentLogsHandler returns recent logs from the last 5 minutes as JSON
 func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 

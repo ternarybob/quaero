@@ -26,8 +26,7 @@ func NewSchedulerHandler(
 
 // TriggerCollectionHandler manually triggers collection
 func (h *SchedulerHandler) TriggerCollectionHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -45,8 +44,7 @@ func (h *SchedulerHandler) TriggerCollectionHandler(w http.ResponseWriter, r *ht
 
 // ForceSyncDocumentHandler sets force_sync_pending for a document
 func (h *SchedulerHandler) ForceSyncDocumentHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 

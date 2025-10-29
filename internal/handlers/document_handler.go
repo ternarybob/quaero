@@ -31,8 +31,7 @@ func NewDocumentHandler(documentService interfaces.DocumentService, documentStor
 
 // StatsHandler returns document statistics
 func (h *DocumentHandler) StatsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -50,8 +49,7 @@ func (h *DocumentHandler) StatsHandler(w http.ResponseWriter, r *http.Request) {
 
 // ListHandler returns paginated list of documents with filtering
 func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodGet) {
 		return
 	}
 
@@ -114,8 +112,7 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 // ReprocessDocumentHandler handles POST /api/documents/{id}/reprocess
 // This marks a document for re-vectorization (force embed)
 func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 
@@ -150,8 +147,7 @@ func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *htt
 // DeleteDocumentHandler handles DELETE /api/documents/{id}
 // Deletes a document from the database
 func (h *DocumentHandler) DeleteDocumentHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !RequireMethod(w, r, http.MethodDelete) {
 		return
 	}
 
@@ -187,8 +183,7 @@ func (h *DocumentHandler) DeleteDocumentHandler(w http.ResponseWriter, r *http.R
 // DeleteAllDocumentsHandler handles DELETE /api/documents/clear-all
 // Deletes ALL documents from the database (danger zone operation)
 func (h *DocumentHandler) DeleteAllDocumentsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	if !RequireMethod(w, r, http.MethodDelete) {
 		return
 	}
 
@@ -226,8 +221,7 @@ func (h *DocumentHandler) DeleteAllDocumentsHandler(w http.ResponseWriter, r *ht
 // RebuildIndexHandler handles POST /api/documents/rebuild-index
 // Rebuilds the FTS5 full-text search index
 func (h *DocumentHandler) RebuildIndexHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		WriteError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	if !RequireMethod(w, r, http.MethodPost) {
 		return
 	}
 

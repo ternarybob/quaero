@@ -43,10 +43,8 @@ type CrawlJob struct {
 	CreatedAt            time.Time     `json:"created_at"`
 	StartedAt            time.Time     `json:"started_at,omitempty"`
 	CompletedAt          time.Time     `json:"completed_at,omitempty"`
-	// CompletionCandidateAt is the timestamp when job first became a completion candidate (PendingURLs == 0)
-	// Used for grace period verification before marking complete. Reset to zero if new URLs enqueued during grace period.
-	CompletionCandidateAt time.Time `json:"completion_candidate_at,omitempty"`
-	Error                 string    `json:"error,omitempty"`
+	LastHeartbeat        time.Time     `json:"last_heartbeat,omitempty"` // Timestamp of last URL processed (for idle detection)
+	Error                string        `json:"error,omitempty"`
 	// ResultCount is a snapshot of Progress.CompletedURLs at job completion
 	// Synced when job reaches terminal status (completed/failed/cancelled)
 	// Used for historical tracking and validation

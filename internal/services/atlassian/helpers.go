@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -30,11 +29,6 @@ var (
 func shouldLogDebug() bool {
 	count := atomic.AddUint64(&debugLogCounter, 1)
 	return count%debugLogSampleRate == 0
-}
-
-// generateDocumentID generates a UUID with "doc_" prefix
-func generateDocumentID() string {
-	return "doc_" + uuid.New().String()
 }
 
 // resolveDocumentURL resolves a document URL to an absolute URL using sourceConfig.BaseURL and pageURL as fallbacks

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
@@ -412,7 +413,7 @@ func (t *ConfluenceTransformer) parseConfluencePage(body []byte, pageURL string,
 	// Create document
 	now := time.Now()
 	document := &models.Document{
-		ID:              generateDocumentID(),
+		ID:              common.NewDocumentID(),
 		SourceType:      "confluence",
 		SourceID:        pageID,
 		Title:           pageTitle,

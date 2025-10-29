@@ -91,6 +91,7 @@ type App struct {
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
 	WSHandler            *handlers.WebSocketHandler
+	WSWriter             *handlers.WebSocketWriter
 	CollectionHandler    *handlers.CollectionHandler
 	DocumentHandler      *handlers.DocumentHandler
 	SearchHandler        *handlers.SearchHandler
@@ -138,8 +139,21 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Start WebSocket background tasks for real-time UI updates
 	app.WSHandler.StartStatusBroadcaster()
-	app.WSHandler.StartLogStreamer()
-	logger.Info().Msg("WebSocket handlers started for real-time updates")
+
+	// Register WebSocket arbor writer for real-time log streaming
+	writerConfig := arbormodels.WriterConfiguration{
+		Type:       arbormodels.LogWriterTypeConsole,
+		TimeFormat: "15:04:05",
+	}
+	wsWriter, err := handlers.NewWebSocketWriter(app.WSHandler, writerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WebSocket writer: %w", err)
+	}
+	arbor.RegisterWriter("websocket", wsWriter)
+	app.WSWriter = wsWriter
+	logger.Info().Msg("WebSocket arbor writer registered for real-time log streaming")
+
+	logger.Info().Msg("WebSocket handlers started (status broadcaster + arbor writer)")
 
 	// Log initialization summary
 	enabledSources := []string{}
@@ -286,25 +300,14 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// 3.5 Initialize search service (Advanced search with Google-style query parsing)
-	// AdvancedSearchService requires FTS5 for full-text search capabilities
-	if !a.Config.Storage.SQLite.EnableFTS5 {
-		// FTS5 is disabled: use no-op service to allow app to start
-		// The handler will return 503 Service Unavailable for search requests
-		a.Logger.Warn().
-			Bool("fts5_enabled", a.Config.Storage.SQLite.EnableFTS5).
-			Msg("FTS5 is disabled: search service will be unavailable (using DisabledSearchService)")
-		a.SearchService = search.NewDisabledSearchService(a.Logger)
-	} else {
-		// FTS5 is enabled: use full-featured search service
-		a.SearchService = search.NewAdvancedSearchService(
-			a.StorageManager.DocumentStorage(),
-			a.Logger,
-			a.Config,
-		)
-		a.Logger.Info().
-			Bool("fts5_enabled", a.Config.Storage.SQLite.EnableFTS5).
-			Msg("Advanced search service initialized with FTS5 support")
+	// 3.5 Initialize search service using factory (supports fts5, advanced, disabled modes)
+	a.SearchService, err = search.NewSearchService(
+		a.StorageManager.DocumentStorage(),
+		a.Logger,
+		a.Config,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize search service: %w", err)
 	}
 
 	// 4. Initialize chat service (agent-based chat with LLM)
@@ -442,6 +445,15 @@ func (a *App) initServices() error {
 	a.WorkerPool.RegisterHandler("crawler_url", crawlerJobHandler)
 	a.Logger.Info().Msg("Crawler job handler registered")
 
+	// Crawler completion probe handler (for delayed completion verification)
+	completionProbeHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
+		return job.ExecuteCompletionProbe(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("crawler_completion_probe", completionProbeHandler)
+	a.Logger.Info().Msg("Crawler completion probe handler registered")
+
 	// Summarizer job handler
 	summarizerJobDeps := &jobtypes.SummarizerJobDeps{
 		LLMService:      a.LLMService,
@@ -482,8 +494,6 @@ func (a *App) initServices() error {
 
 	// Parent job handler (for job definition execution)
 	parentJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-
 		// Determine target job ID for status updates (fallback to msg.ID if ParentID is empty)
 		targetID := msg.ParentID
 		if targetID == "" {
@@ -501,20 +511,20 @@ func (a *App) initServices() error {
 		}
 
 		if jobDefID == "" {
-			baseJob.UpdateJobStatus(ctx, targetID, "failed", "Job definition ID not found in message")
+			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", "Job definition ID not found in message")
 			return fmt.Errorf("job definition ID not found in parent message")
 		}
 
 		// Load job definition from storage
 		jobDef, err := a.StorageManager.JobDefinitionStorage().GetJobDefinition(ctx, jobDefID)
 		if err != nil {
-			baseJob.UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
+			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
 			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Msg("Failed to load job definition")
 			return fmt.Errorf("failed to load job definition: %w", err)
 		}
 
 		// Update job status to running
-		baseJob.UpdateJobStatus(ctx, targetID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
+		a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
 
 		// Extract execution chain from parent message metadata for cycle prevention
 		executionChain := make(map[string]bool)
@@ -636,7 +646,7 @@ func (a *App) initServices() error {
 
 		// Create status update callback for async polling completion
 		statusCallback := func(callbackCtx context.Context, status string, errorMsg string) error {
-			if err := baseJob.UpdateJobStatus(callbackCtx, targetID, status, errorMsg); err != nil {
+			if err := a.StorageManager.JobStorage().UpdateJobStatus(callbackCtx, targetID, status, errorMsg); err != nil {
 				a.Logger.Error().
 					Err(err).
 					Str("parent_job_id", targetID).
@@ -661,7 +671,7 @@ func (a *App) initServices() error {
 			// Only update status if async polling is NOT active
 			// (polling goroutine will handle status update via callback)
 			if result == nil || !result.AsyncPollingActive {
-				baseJob.UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Job execution failed: %v", err))
+				a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Job execution failed: %v", err))
 			}
 			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition execution failed")
 			return fmt.Errorf("job definition execution failed: %w", err)
@@ -676,7 +686,7 @@ func (a *App) initServices() error {
 				Str("job_name", jobDef.Name).
 				Msg("Async polling active - parent job status update deferred to polling callback")
 		} else {
-			baseJob.UpdateJobStatus(ctx, targetID, "completed", "Job definition executed successfully")
+			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "completed", "Job definition executed successfully")
 			a.Logger.Info().Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition executed successfully")
 		}
 
@@ -986,6 +996,15 @@ func (a *App) Close() error {
 	// Flush context logs before stopping services
 	a.Logger.Info().Msg("Flushing context logs")
 	common.Stop()
+
+	// Close WebSocket writer with graceful buffer draining
+	if a.WSWriter != nil {
+		if err := a.WSWriter.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close WebSocket writer")
+		} else {
+			a.Logger.Info().Msg("WebSocket writer closed (buffer drained)")
+		}
+	}
 
 	// Close log batch channel
 	if a.logBatchChannel != nil {

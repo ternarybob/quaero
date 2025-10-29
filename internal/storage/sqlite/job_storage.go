@@ -194,7 +194,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
-		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE id = ?
 	`
@@ -207,7 +207,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
-		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE 1=1
 	`
@@ -289,7 +289,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
-		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = ?
 		ORDER BY created_at DESC
@@ -397,7 +397,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
-		       status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
+		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = 'running'
 		  AND COALESCE(last_heartbeat, started_at, created_at) < strftime('%s', 'now', '-' || ? || ' minutes')
@@ -495,14 +495,14 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 		refreshSource                                                                   int
 		errorMsg                                                                        sql.NullString
 		createdAt                                                                       int64
-		startedAt, completedAt                                                          sql.NullInt64
+		startedAt, completedAt, lastHeartbeat                                           sql.NullInt64
 		resultCount, failedCount                                                        int
 		seedURLsJSON                                                                    sql.NullString
 	)
 
 	err := row.Scan(
 		&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
-		&status, &progressJSON, &createdAt, &startedAt, &completedAt, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
+		&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 	)
 
 	if err != nil {
@@ -556,6 +556,9 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	if completedAt.Valid {
 		job.CompletedAt = unixToTime(completedAt.Int64)
 	}
+	if lastHeartbeat.Valid {
+		job.LastHeartbeat = unixToTime(lastHeartbeat.Int64)
+	}
 	if errorMsg.Valid {
 		job.Error = errorMsg.String
 	}
@@ -584,14 +587,14 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 			refreshSource                                                                   int
 			errorMsg                                                                        sql.NullString
 			createdAt                                                                       int64
-			startedAt, completedAt                                                          sql.NullInt64
+			startedAt, completedAt, lastHeartbeat                                           sql.NullInt64
 			resultCount, failedCount                                                        int
 			seedURLsJSON                                                                    sql.NullString
 		)
 
 		err := rows.Scan(
 			&id, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
-			&status, &progressJSON, &createdAt, &startedAt, &completedAt, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
+			&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 		)
 
 		if err != nil {
@@ -643,6 +646,9 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		}
 		if completedAt.Valid {
 			job.CompletedAt = unixToTime(completedAt.Int64)
+		}
+		if lastHeartbeat.Valid {
+			job.LastHeartbeat = unixToTime(lastHeartbeat.Int64)
 		}
 		if errorMsg.Valid {
 			job.Error = errorMsg.String
