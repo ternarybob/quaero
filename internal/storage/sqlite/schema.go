@@ -359,6 +359,12 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 16: Enable foreign keys and add parent_id CASCADE constraint
+	// Ensures referential integrity and automatic cascade deletion of child jobs
+	if err := s.migrateEnableForeignKeysAndAddParentConstraint(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1411,5 +1417,190 @@ func (s *SQLiteDB) migrateAddParentIdColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: parent_id column and index added successfully")
+	return nil
+}
+
+// migrateEnableForeignKeysAndAddParentConstraint enables foreign key enforcement
+// and adds CASCADE constraint to parent_id column in crawl_jobs table
+func (s *SQLiteDB) migrateEnableForeignKeysAndAddParentConstraint() error {
+	// Check if foreign key constraint already exists on parent_id
+	fkQuery := `PRAGMA foreign_key_list(crawl_jobs)`
+	rows, err := s.db.Query(fkQuery)
+	if err != nil {
+		return fmt.Errorf("failed to query foreign keys: %w", err)
+	}
+	defer rows.Close()
+
+	hasParentIDConstraint := false
+	for rows.Next() {
+		var id, seq int
+		var table, from, to, onUpdate, onDelete, match string
+		if err := rows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match); err != nil {
+			return fmt.Errorf("failed to scan foreign key: %w", err)
+		}
+		if from == "parent_id" && onDelete == "CASCADE" {
+			hasParentIDConstraint = true
+			s.logger.Info().
+				Str("from", from).
+				Str("on_delete", onDelete).
+				Msg("Foreign key constraint on parent_id already exists, migration skipped")
+			break
+		}
+	}
+
+	// If constraint already exists, migration already completed
+	if hasParentIDConstraint {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Enable foreign keys and add parent_id CASCADE constraint")
+
+	// Begin transaction
+	s.logger.Info().Msg("Beginning migration transaction")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Ensure rollback on error
+	defer func() {
+		if err != nil {
+			s.logger.Warn().Msg("Rolling back migration transaction due to error")
+			if rbErr := tx.Rollback(); rbErr != nil {
+				s.logger.Error().Err(rbErr).Msg("Failed to rollback transaction")
+			}
+		}
+	}()
+
+	// Step 1: Clean up orphaned child jobs (children without parents)
+	s.logger.Info().Msg("Step 1: Cleaning up orphaned child jobs")
+	result, err := tx.Exec(`
+		DELETE FROM crawl_jobs
+		WHERE parent_id IS NOT NULL
+		  AND parent_id != ''
+		  AND parent_id NOT IN (SELECT id FROM crawl_jobs)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to clean up orphaned jobs: %w", err)
+	}
+
+	orphanedCount, _ := result.RowsAffected()
+	s.logger.Info().Int64("orphaned_jobs_deleted", orphanedCount).Msg("Orphaned child jobs cleaned up")
+
+	// Step 2: Create new crawl_jobs table with foreign key constraint
+	s.logger.Info().Msg("Step 2: Creating new crawl_jobs table with foreign key constraint")
+	_, err = tx.Exec(`
+		CREATE TABLE crawl_jobs_new (
+			id TEXT PRIMARY KEY,
+			parent_id TEXT,
+			name TEXT DEFAULT '',
+			description TEXT DEFAULT '',
+			source_type TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			config_json TEXT NOT NULL,
+			source_config_snapshot TEXT,
+			auth_snapshot TEXT,
+			refresh_source INTEGER DEFAULT 0,
+			seed_urls TEXT,
+			status TEXT NOT NULL,
+			progress_json TEXT,
+			created_at INTEGER NOT NULL,
+			started_at INTEGER,
+			completed_at INTEGER,
+			last_heartbeat INTEGER,
+			error TEXT,
+			result_count INTEGER DEFAULT 0,
+			failed_count INTEGER DEFAULT 0,
+			FOREIGN KEY (parent_id) REFERENCES crawl_jobs_new(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create new crawl_jobs table: %w", err)
+	}
+
+	// Step 3: Copy all data from old table to new table
+	s.logger.Info().Msg("Step 3: Copying data to new table")
+	_, err = tx.Exec(`
+		INSERT INTO crawl_jobs_new
+		SELECT id, parent_id, name, description, source_type, entity_type, config_json,
+			   source_config_snapshot, auth_snapshot, refresh_source, seed_urls,
+			   status, progress_json, created_at, started_at, completed_at,
+			   last_heartbeat, error, result_count, failed_count
+		FROM crawl_jobs
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to copy data to new table: %w", err)
+	}
+
+	// Step 4: Drop old table
+	s.logger.Info().Msg("Step 4: Dropping old crawl_jobs table")
+	_, err = tx.Exec(`DROP TABLE crawl_jobs`)
+	if err != nil {
+		return fmt.Errorf("failed to drop old crawl_jobs table: %w", err)
+	}
+
+	// Step 5: Rename new table to crawl_jobs
+	s.logger.Info().Msg("Step 5: Renaming crawl_jobs_new to crawl_jobs")
+	_, err = tx.Exec(`ALTER TABLE crawl_jobs_new RENAME TO crawl_jobs`)
+	if err != nil {
+		return fmt.Errorf("failed to rename crawl_jobs_new to crawl_jobs: %w", err)
+	}
+
+	// Step 6: Recreate all indexes
+	s.logger.Info().Msg("Step 6: Recreating indexes")
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_status: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_source: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_created: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_parent_id: %w", err)
+	}
+
+	// Commit transaction
+	s.logger.Info().Msg("Committing migration transaction")
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Step 7: Verify foreign key constraint was added
+	s.logger.Info().Msg("Step 7: Verifying foreign key constraint")
+	verifyRows, err := s.db.Query(`PRAGMA foreign_key_list(crawl_jobs)`)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to verify foreign key constraint")
+	} else {
+		defer verifyRows.Close()
+		constraintFound := false
+		for verifyRows.Next() {
+			var id, seq int
+			var table, from, to, onUpdate, onDelete, match string
+			if err := verifyRows.Scan(&id, &seq, &table, &from, &to, &onUpdate, &onDelete, &match); err == nil {
+				if from == "parent_id" {
+					constraintFound = true
+					s.logger.Info().
+						Str("from", from).
+						Str("to", to).
+						Str("on_delete", onDelete).
+						Msg("Foreign key constraint verified")
+				}
+			}
+		}
+		if !constraintFound {
+			s.logger.Warn().Msg("Foreign key constraint not found after migration")
+		}
+	}
+
+	s.logger.Info().Msg("Migration: Foreign key constraint on parent_id added successfully")
 	return nil
 }

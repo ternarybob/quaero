@@ -100,7 +100,7 @@ const WebSocketManager = (() => {
             this.ws.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    console.log('[WSManager] Message received, type:', message.type);
+                    // console.log('[WSManager] Message received, type:', message.type);
                     this.handleMessage(message);
                 } catch (error) {
                     console.error('[WSManager] Failed to parse message:', error, 'Data:', event.data);

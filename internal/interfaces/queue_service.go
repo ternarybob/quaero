@@ -41,11 +41,20 @@ type JobManager interface {
 	// Job lifecycle
 	CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error)
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
-	ListJobs(ctx context.Context, opts *ListOptions) ([]*models.CrawlJob, error)
-	CountJobs(ctx context.Context, opts *ListOptions) (int, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.CrawlJob, error)
+	CountJobs(ctx context.Context, opts *JobListOptions) (int, error)
 	UpdateJob(ctx context.Context, job interface{}) error
+
+	// DeleteJob deletes a job and all its child jobs recursively.
+	// If the job has children, they are deleted first in a cascade operation.
+	// Each deletion is logged individually for audit purposes.
+	// If any child deletion fails, the error is logged but deletion continues.
+	// The parent job is deleted even if some children fail to delete.
+	// Returns an aggregated error if any deletions failed.
 	DeleteJob(ctx context.Context, jobID string) error
+
 	CopyJob(ctx context.Context, jobID string) (string, error)
+	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
 	// VERIFICATION COMMENT 2: GetJobWithChildren removed - flat hierarchy does not require tree traversal
 	// All child messages point to root job ID for centralized progress tracking
 }

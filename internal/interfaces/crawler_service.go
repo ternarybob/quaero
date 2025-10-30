@@ -35,7 +35,7 @@ type CrawlerService interface {
 	GetJobResults(jobID string) (interface{}, error)
 
 	// ListJobs returns a list of crawl jobs with optional filtering
-	ListJobs(ctx context.Context, opts *ListOptions) (interface{}, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) (interface{}, error)
 
 	// RerunJob re-executes a previous job with the same or updated configuration
 	// updateConfig: If nil, uses original job configuration

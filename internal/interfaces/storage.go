@@ -66,12 +66,20 @@ type DocumentStorage interface {
 	RebuildFTS5Index() error
 }
 
+// JobChildStats holds aggregate statistics for a parent job's children
+type JobChildStats struct {
+	ChildCount        int
+	CompletedChildren int
+	FailedChildren    int
+}
+
 // JobStorage - interface for crawler job persistence
 type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
-	ListJobs(ctx context.Context, opts *ListOptions) ([]*models.CrawlJob, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.CrawlJob, error)
+	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
 	// GetChildJobs retrieves all child jobs for a given parent job ID
 	// Returns jobs ordered by created_at DESC (newest first)
 	// Returns empty slice if parent has no children or parent doesn't exist
@@ -84,7 +92,7 @@ type JobStorage interface {
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)
-	CountJobsWithFilters(ctx context.Context, opts *ListOptions) (int, error)
+	CountJobsWithFilters(ctx context.Context, opts *JobListOptions) (int, error)
 
 	// Deprecated: Use LogService.AppendLog() instead. This method writes to the crawl_jobs.logs
 	// JSON column (limited to 100 entries). The new LogService writes to the dedicated job_logs

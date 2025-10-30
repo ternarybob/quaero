@@ -115,7 +115,7 @@
         </section>
 
         <!-- Job Queue -->
-        <section x-data="queueStatsHeader">
+        <section>
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
@@ -123,7 +123,7 @@
                             <h3>Job Queue</h3>
                         </section>
                         <section class="navbar-section">
-                            <div style="display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; margin-right: 1rem;">
+                            <div x-data="queueStatsHeader" x-init="init()" style="display: flex; align-items: center; gap: 1rem; font-size: 0.8rem; margin-right: 1rem;">
                                 <span class="text-gray">
                                     <span x-text="pending">0</span> Pending
                                 </span>
@@ -137,19 +137,22 @@
                             </div>
                             <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none;">
                                 <i class="fa-solid fa-trash"></i>
-                                <span>Delete Selected</span>
+                                <span id="delete-selected-text">Delete Selected</span>
                             </button>
-                            <button class="btn btn-sm" onclick="loadJobs()" title="Refresh Jobs">
+                            <button class="btn btn-sm" onclick="event.preventDefault(); window.dispatchEvent(new CustomEvent('jobList:load'))" title="Refresh Jobs">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                         </section>
                     </header>
                 </div>
-                <div class="card-body">
+                <div class="card-body" x-data="jobList" x-init="init()">
                     <!-- Filter Button and Chips -->
                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
                         <button type="button" class="btn btn-sm" onclick="showFilterModal()">
                             <i class="fas fa-filter"></i> Filter
+                        </button>
+                        <button type="button" class="btn btn-sm" @click="toggleShowChildJobs()" :class="showChildJobs ? 'btn-primary' : ''" id="toggle-children-btn">
+                            <i class="fas fa-sitemap"></i> <span x-text="showChildJobs ? 'Show Parent Jobs Only' : 'Show All Jobs'" id="toggle-children-text"></span>
                         </button>
                         <div id="filter-chips-container"></div>
                     </div>
@@ -157,21 +160,141 @@
                     <!-- Select All Checkbox -->
                     <div style="margin-bottom: 0.8rem;">
                         <label class="form-checkbox">
-                            <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll()">
+                            <input type="checkbox" id="select-all-checkbox" @change="toggleSelectAll()">
                             <i class="form-icon"></i> Select All
                         </label>
                     </div>
 
                     <!-- Jobs Cards Container -->
                     <div id="jobs-cards-container">
-                        <div class="text-center text-gray" style="padding: 2rem;">
-                            Loading jobs...
-                        </div>
+                        <template x-for="item in itemsToRender" :key="item.job.id + (item.type || 'flat')">
+                            <div>
+                                <!-- Loading indicator for expanding parents -->
+                                <template x-if="item.type === 'loading'">
+                                    <div class="loading-children" style="margin-left: 2rem; margin-bottom: 0.8rem; padding: 0.5rem; color: #888;">
+                                        <i class="fas fa-spinner fa-pulse"></i>
+                                        <span>Loading children...</span>
+                                    </div>
+                                </template>
+
+                                <!-- Job card -->
+                                <template x-if="item.type !== 'loading'">
+                                    <div class="card" :class="{
+                                            'bg-gray': selectedJob && selectedJob.id === item.job.id,
+                                            'job-card-parent': item.type === 'parent',
+                                            'job-card-child': item.type === 'child',
+                                            'job-card-flat': item.type === 'flat'
+                                        }" style="margin-bottom: 0.8rem;">
+                                <div class="card-body">
+                                    <div class="columns">
+                                        <!-- Left side: Checkbox and Content -->
+                                        <div class="column col-1" @click.stop>
+                                            <label class="form-checkbox">
+                                                <input type="checkbox" class="job-checkbox" :data-job-id="item.job.id"
+                                                       @change="toggleJobSelection(item.job.id)" :checked="selectedJobIds.has(item.job.id)">
+                                                <i class="form-icon"></i>
+                                            </label>
+                                        </div>
+                                        <div class="column col-9">
+                                            <div class="card-title h5" :title="item.job.id || 'N/A'">
+                                                <template x-if="item.type === 'parent'">
+                                                    <button class="expand-collapse-btn" @click.stop="toggleParentExpansion(item.job.id)"
+                                                            :class="expandedParents.has(item.job.id) ? 'expanded' : ''">
+                                                        <i class="fas fa-chevron-right"></i>
+                                                    </button>
+                                                </template>
+                                                <i class="fas" :class="item.type === 'child' ? 'fa-file job-type-icon child-icon' : 'fa-folder job-type-icon parent-icon'"></i>
+                                                Job ID: <span x-text="item.job.id ? item.job.id.substring(0, 8) : 'N/A'"></span>
+                                                <template x-if="item.type === 'parent'">
+                                                    <span class="parent-job-badge">PARENT</span>
+                                                </template>
+                                                <template x-if="item.type === 'parent' && item.job.entity_type === 'job_definition'">
+                                                    <span class="label label-info" style="margin-left: 0.5rem; font-size: 0.7rem;">JOB DEFINITION</span>
+                                                </template>
+                                            </div>
+                                            <div class="card-subtitle text-gray" x-text="'Source: ' + (item.job.source_type || 'N/A')"></div>
+
+                                            <!-- Metadata -->
+                                            <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                                <!-- Status Badge -->
+                                                <div>
+                                                    <span class="label"
+                                                          :class="getStatusBadgeClass(item.type, item.job.status, item.job)"
+                                                          x-text="getStatusBadgeText(item.type, item.job.status, item.job)"></span>
+                                                </div>
+                                                <!-- Documents -->
+                                                <div>
+                                                    <i class="fas fa-file-alt"></i>
+                                                    <span x-text="(() => { const count = getDocumentsCount(item.job); return (typeof count === 'number' ? count : 'N/A') + ' Documents'; })()"></span>
+                                                </div>
+                                                <!-- Created Date -->
+                                                <div>
+                                                    <i class="fas fa-calendar"></i>
+                                                    <span x-text="getCreatedDate(item.job)"></span>
+                                                </div>
+                                                <!-- Toggle JSON -->
+                                                <div>
+                                                    <a href="#" class="text-primary" @click.prevent.stop="toggleJobJson('job-json-' + $id(item.job.id))">
+                                                        <i class="fas fa-code"></i> Show Configuration
+                                                    </a>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Parent progress display -->
+                                            <template x-if="item.type === 'parent'">
+                                                <div class="parent-progress">
+                                                    <div class="parent-progress-text" 
+                                                         x-text="getParentProgressText(item.job)"
+                                                         :style="getParentProgressStyle(item.job)"></div>
+                                                    <div class="parent-progress-bar">
+                                                        <div class="parent-progress-bar-fill" 
+                                                             :style="getParentProgressBarStyle(item.job)"></div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <!-- Right side: Actions -->
+                                        <div class="column col-2 text-right" style="flex-shrink: 0;" @click.stop>
+                                            <template x-if="item.job.status !== 'running'">
+                                                <button class="btn btn-sm" @click="window.rerunJob(item.job.id)" title="Copy Job and Add to Queue">
+                                                    <i class="fa-solid fa-rotate-right"></i>
+                                                </button>
+                                            </template>
+                                            <template x-if="item.job.status === 'running'">
+                                                <button class="btn btn-sm btn-warning" @click="window.cancelJob(item.job.id)" title="Cancel Job">
+                                                    <i class="fas fa-stop"></i>
+                                                </button>
+                                            </template>
+                                            <template x-if="item.job.status !== 'running'">
+                                                <button class="btn btn-sm btn-error" @click="window.deleteJob(item.job.id)" title="Delete Job">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- Job Configuration (Collapsible JSON) -->
+                                    <div :id="'job-json-' + $id(item.job.id)" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                                        <pre style="background-color: #ffffff; padding: 1rem; border: 1px solid #e0e0e0; border-radius: 4px; overflow-x: auto; max-height: 400px;"><code class="language-json" x-text="JSON.stringify(item.job, null, 2)"></code></pre>
+                                    </div>
+                                </div>
+                            </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- No jobs message -->
+                        <template x-if="itemsToRender.length === 0">
+                            <div class="text-center text-gray" style="padding: 2rem;">
+                                <span x-text="filteredJobs.length === 0 ? 'No jobs found matching the current filters.' : 'Loading jobs...'"></span>
+                            </div>
+                        </template>
                     </div>
 
                     <!-- Pagination Controls -->
                     <div id="job-pagination-container" class="pagination-container">
-                        <!-- Pagination will be rendered here by renderPagination() -->
+                        <!-- Pagination handled by separate function -->
                     </div>
                 </div>
             </div>
@@ -263,14 +386,16 @@
     </div>
 
     <script>
-        // State management
+        // State management (moved to Alpine component jobList)
         let allJobs = [];
         let filteredJobs = [];
         let selectedJob = null;
-        let selectedJobIds = new Set(); // Track selected jobs for batch operations
-        let currentPage = 1;
-        let totalJobs = 0;
-        const pageSize = 50;
+
+        // Hierarchy state management
+        let showChildJobs = false; // Toggle between parent-only and all-jobs view
+        let expandedParents = new Set(); // Track expanded parent jobs
+        let childJobsCache = new Map(); // Cache: parentID -> array of child jobs
+        let loadingParents = new Set(); // Track parents currently loading children
 
         // WebSocket connection state
         let jobsWS = null;
@@ -279,19 +404,22 @@
         const WS_MAX_RECONNECT_DELAY = 30000; // 30 seconds
         const WS_INITIAL_RECONNECT_DELAY = 1000; // 1 second
 
-        // Filter state - will be loaded from localStorage or defaults
-        let activeFilters = {
-            status: new Set(),
-            source: new Set(),
-            entity: new Set()
-        };
-
         // Default filters - include all statuses
         const defaultFilters = {
             status: new Set(['pending', 'running', 'completed', 'failed', 'cancelled']),
             source: new Set(),
             entity: new Set()
         };
+
+        // Filter state - initialize immediately with defaults to prevent undefined errors
+        let activeFilters = {
+            status: new Set(defaultFilters.status),
+            source: new Set(defaultFilters.source),
+            entity: new Set(defaultFilters.entity)
+        };
+
+        // Initialize filters immediately on script load
+        window.activeFilters = activeFilters;
 
         // Load filters from localStorage
         function loadFiltersFromStorage() {
@@ -374,159 +502,20 @@
             }
         }
 
-        // Load all jobs
-        async function loadJobs() {
-            const tbody = document.getElementById('jobs-table-body');
-
-            try {
-                // Build query parameters from filters
-                const params = new URLSearchParams();
-                params.append('limit', pageSize);
-                params.append('offset', (currentPage - 1) * pageSize);
-                params.append('order_by', 'created_at');
-                params.append('order_dir', 'DESC');
-
-                // Build filter parameters from activeFilters state
-                if (activeFilters.status.size > 0) {
-                    params.append('status', Array.from(activeFilters.status).join(','));
-                }
-                if (activeFilters.source.size > 0) {
-                    params.append('source', Array.from(activeFilters.source).join(','));
-                }
-                if (activeFilters.entity.size > 0) {
-                    params.append('entity', Array.from(activeFilters.entity).join(','));
-                }
-
-                const response = await fetch(`/api/jobs?${params.toString()}`);
-                if (!response.ok) {
-                    throw new Error('Failed to fetch jobs');
-                }
-
-                const data = await response.json();
-                allJobs = data.jobs || [];
-                totalJobs = data.total_count || 0;
-                filteredJobs = [...allJobs];
-
-                renderJobs();
-
-            } catch (error) {
-                console.error('[Queue] Error loading jobs:', error);
-                console.error('[Queue] Error stack:', error.stack);
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center text-error">
-                            Failed to load jobs. Please try again.
-                        </td>
-                    </tr>
-                `;
-            }
+        // Load all jobs - dispatches event to Alpine component
+        function loadJobs() {
+            window.dispatchEvent(new CustomEvent('jobList:load'));
         }
 
-        // Wrapper function for loadJobs() - maintains compatibility with plan documentation
+        // Wrapper function for loadJobs() - maintains compatibility
         function loadJobQueue() {
             loadJobs();
         }
 
-        // Update job in list from WebSocket update
+
+        // Update job in list from WebSocket update - dispatches event to Alpine component
         async function updateJobInList(update) {
-            console.log('[Queue] Job updated via WebSocket:', update.job_id.substring(0, 8), update.status);
-
-            // Find job in allJobs array
-            let jobIndex = allJobs.findIndex(job => job.id === update.job_id);
-            let job = jobIndex >= 0 ? allJobs[jobIndex] : null;
-
-            // If job not found, fetch full job data regardless of status
-            if (!job) {
-                try {
-                    const response = await fetch(`/api/jobs/${update.job_id}`);
-                    if (response.ok) {
-                        job = await response.json();
-                        allJobs.unshift(job); // Insert at beginning (newest first)
-                        jobIndex = 0;
-                    }
-                } catch (error) {
-                    console.warn('[Queue] Failed to fetch new job:', error);
-                    return;
-                }
-            }
-
-            // If job still not found, ignore update
-            if (!job) {
-                return;
-            }
-
-            // Update job fields - preserve existing values when fields are omitted
-            job.status = update.status;
-
-            if (update.result_count !== undefined && update.result_count !== null) {
-                job.result_count = update.result_count;
-            }
-            if (update.failed_count !== undefined && update.failed_count !== null) {
-                job.failed_count = update.failed_count;
-            }
-
-            // Update progress object
-            if (!job.progress) {
-                job.progress = {};
-            }
-            if (typeof job.progress === 'string') {
-                try {
-                    job.progress = JSON.parse(job.progress);
-                } catch (e) {
-                    job.progress = {};
-                }
-            }
-
-            if (update.completed_urls !== undefined && update.completed_urls !== null) {
-                job.progress.completed_urls = update.completed_urls;
-            }
-            if (update.pending_urls !== undefined && update.pending_urls !== null) {
-                job.progress.pending_urls = update.pending_urls;
-            }
-            if (update.total_urls !== undefined && update.total_urls !== null) {
-                job.progress.total_urls = update.total_urls;
-            }
-
-            // Set error if present
-            if (update.error !== undefined && update.error !== null) {
-                job.error = update.error;
-            }
-
-            // Check if job matches active filters
-            const matchesFilters = matchesActiveFilters(job);
-
-            // Find job in filteredJobs
-            const filteredIndex = filteredJobs.findIndex(j => j.id === update.job_id);
-
-            if (matchesFilters) {
-                if (filteredIndex >= 0) {
-                    // Update in place
-                    filteredJobs[filteredIndex] = job;
-                } else {
-                    // Insert at correct position (sorted by created_at DESC)
-                    const insertIndex = filteredJobs.findIndex(j => {
-                        return new Date(j.created_at) < new Date(job.created_at);
-                    });
-                    if (insertIndex >= 0) {
-                        filteredJobs.splice(insertIndex, 0, job);
-                    } else {
-                        filteredJobs.push(job);
-                    }
-                }
-            } else {
-                // Remove from filteredJobs if doesn't match filters
-                if (filteredIndex >= 0) {
-                    filteredJobs.splice(filteredIndex, 1);
-                }
-            }
-
-            // Trim to pageSize if on first page to maintain pagination consistency
-            if (currentPage === 1 && filteredJobs.length > pageSize) {
-                filteredJobs.length = pageSize;
-            }
-
-            // Re-render jobs
-            renderJobs();
+            window.dispatchEvent(new CustomEvent('jobList:updateJob', { detail: update }));
         }
 
         // Check if job matches active filters
@@ -599,8 +588,10 @@
             // Close modal and refresh
             closeFilterModal();
             renderFilterChips();
-            currentPage = 1;
-            loadJobs();
+            // Reset to first page and reload jobs
+            window.dispatchEvent(new CustomEvent('jobList:changePage', {
+                detail: { page: 1 }
+            }));
         }
 
         // Clear all filters
@@ -662,8 +653,10 @@
             activeFilters[category].delete(value);
             saveFiltersToStorage(); // Save after removing filter
             renderFilterChips();
-            currentPage = 1;
-            loadJobs();
+            // Reset to first page and reload jobs
+            window.dispatchEvent(new CustomEvent('jobList:changePage', {
+                detail: { page: 1 }
+            }));
         }
 
         // Connect to WebSocket for real-time job updates
@@ -678,12 +671,28 @@
                 console.log('[Queue] Jobs WebSocket connected');
                 wsConnected = true;
                 wsReconnectAttempts = 0;
+                // Update queue stats header to show connected
+                window.dispatchEvent(new CustomEvent('queueStats:update', {
+                    detail: { connected: true }
+                }));
             };
 
             jobsWS.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    console.log('[Queue] WebSocket message:', message.type);
+                    // console.log(`[Queue] WebSocket message received, type: ${message.type}`);
+
+                    // Handle queue stats updates and forward to queueStatsHeader component
+                    if (message.type === 'queue_stats' && message.payload) {
+                        window.dispatchEvent(new CustomEvent('queueStats:update', {
+                            detail: {
+                                pending: message.payload.pending_messages || 0,
+                                inFlight: message.payload.in_flight_messages || 0,
+                                workers: message.payload.concurrency || 0,
+                                connected: true
+                            }
+                        }));
+                    }
 
                     // Handle job status change events
                     if (message.type === 'job_status_change' && message.payload) {
@@ -720,10 +729,18 @@
             jobsWS.onerror = (error) => {
                 console.error('[Queue] Jobs WebSocket error:', error);
                 wsConnected = false;
+                // Update queue stats header to show disconnected
+                window.dispatchEvent(new CustomEvent('queueStats:update', {
+                    detail: { connected: false }
+                }));
             };
 
             jobsWS.onclose = () => {
                 wsConnected = false;
+                // Update queue stats header to show disconnected
+                window.dispatchEvent(new CustomEvent('queueStats:update', {
+                    detail: { connected: false }
+                }));
 
                 // Calculate exponential backoff delay
                 const delay = Math.min(
@@ -741,187 +758,13 @@
             };
         }
 
-        // Render jobs as cards
+        // Render jobs - dispatches event to Alpine component
         function renderJobs() {
-            const container = document.getElementById('jobs-cards-container');
-            const totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
-
-            // Update custom pagination
-            renderPagination(totalPages);
-
-            if (!filteredJobs || filteredJobs.length === 0) {
-                container.innerHTML = `
-                    <div class="text-center text-gray" style="padding: 2rem;">
-                        No jobs found matching the current filters.
-                    </div>
-                `;
-                return;
-            }
-
-            container.innerHTML = filteredJobs.map((job, index) => {
-                const statusBadge = getStatusBadge(job.status);
-                const createdDate = job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A';
-                const isSelected = selectedJob && selectedJob.id === job.id;
-                const isChecked = selectedJobIds.has(job.id);
-                const jobIdShort = job.id ? job.id.substring(0, 8) : 'N/A';
-                const sourceType = job.source_type || 'N/A';
-                const jobJson = JSON.stringify(job, null, 2);
-                const jsonId = 'job-json-' + index;
-
-                // Extract document count from progress data
-                let documentsCount = 'N/A';
-                if (job.progress) {
-                    try {
-                        const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
-                        if (progress && progress.completed_urls !== undefined) {
-                            documentsCount = progress.completed_urls;
-                        }
-                    } catch (error) {
-                        console.warn('[Queue] Failed to parse job progress:', error);
-                    }
-                }
-
-                return `
-                    <div class="card ${isSelected ? 'bg-gray' : ''}" style="margin-bottom: 0.8rem;">
-                        <div class="card-body">
-                            <div class="columns">
-                                <!-- Left side: Checkbox and Content -->
-                                <div class="column col-1" onclick="event.stopPropagation()">
-                                    <label class="form-checkbox">
-                                        <input type="checkbox" class="job-checkbox" data-job-id="${job.id}"
-                                               onchange="toggleJobSelection('${job.id}')" ${isChecked ? 'checked' : ''}>
-                                        <i class="form-icon"></i>
-                                    </label>
-                                </div>
-                                <div class="column col-9">
-                                    <div class="card-title h5" title="${job.id || 'N/A'}">Job ID: ${jobIdShort}</div>
-                                    <div class="card-subtitle text-gray">Source: ${sourceType}</div>
-
-                                    <!-- Metadata -->
-                                    <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
-                                        <!-- Status Badge -->
-                                        <div>
-                                            ${statusBadge}
-                                        </div>
-                                        <!-- Documents -->
-                                        <div>
-                                            <i class="fas fa-file-alt"></i>
-                                            <span>${documentsCount} Documents</span>
-                                        </div>
-                                        <!-- Created Date -->
-                                        <div>
-                                            <i class="fas fa-calendar"></i>
-                                            <span>${createdDate}</span>
-                                        </div>
-                                        <!-- Toggle JSON -->
-                                        <div>
-                                            <a href="#" class="text-primary" onclick="event.preventDefault(); event.stopPropagation(); toggleJobJson('${jsonId}')">
-                                                <i class="fas fa-code"></i> Show Configuration
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Right side: Actions -->
-                                <div class="column col-2 text-right" style="flex-shrink: 0;" onclick="event.stopPropagation()">
-                                    ${job.status !== 'running' ? `
-                                    <button class="btn btn-sm" onclick="rerunJob('${job.id}')" title="Copy Job and Add to Queue">
-                                        <i class="fa-solid fa-rotate-right"></i>
-                                    </button>
-                                    ` : ''}
-                                    ${job.status === 'running' ? `
-                                    <button class="btn btn-sm btn-warning" onclick="cancelJob('${job.id}')" title="Cancel Job">
-                                        <i class="fas fa-stop"></i>
-                                    </button>
-                                    ` : ''}
-                                    ${job.status !== 'running' ? `
-                                    <button class="btn btn-sm btn-error" onclick="deleteJob('${job.id}')" title="Delete Job">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                    ` : ''}
-                                </div>
-                            </div>
-
-                            <!-- Job Configuration (Collapsible JSON) -->
-                            <div id="${jsonId}" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
-                                <pre style="background-color: #ffffff; padding: 1rem; border: 1px solid #e0e0e0; border-radius: 4px; overflow-x: auto; max-height: 400px;"><code class="language-json">${escapeHtml(jobJson)}</code></pre>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            // Update delete selected button visibility
-            updateDeleteSelectedButtonVisibility();
-
-            // Re-apply syntax highlighting
-            if (typeof hljs !== 'undefined') {
-                document.querySelectorAll('#jobs-cards-container code.language-json').forEach(block => {
-                    hljs.highlightElement(block);
-                });
-            }
+            window.dispatchEvent(new CustomEvent('jobList:render'));
         }
 
-        // Toggle job JSON visibility
-        function toggleJobJson(jsonId) {
-            const jsonElement = document.getElementById(jsonId);
-            if (jsonElement) {
-                if (jsonElement.style.display === 'none') {
-                    jsonElement.style.display = 'block';
-                } else {
-                    jsonElement.style.display = 'none';
-                }
-            }
-        }
-
-        // Escape HTML entities
-        function escapeHtml(text) {
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return text.replace(/[&<>"']/g, m => map[m]);
-        }
-
-        // Get status badge HTML
-        function getStatusBadge(status) {
-            const badges = {
-                'pending': '<span class="label label-warning">Pending</span>',
-                'running': '<span class="label label-primary">Running</span>',
-                'completed': '<span class="label label-success">Completed</span>',
-                'failed': '<span class="label label-error">Failed</span>',
-                'cancelled': '<span class="label">Cancelled</span>'
-            };
-            return badges[status] || '<span class="label">Unknown</span>';
-        }
-
-        // Get progress text
-        function getProgressText(job) {
-            if (!job.progress) return 'N/A';
-
-            try {
-                const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
-
-                if (progress && progress.percentage !== undefined) {
-                    return `${Math.round(progress.percentage)}%`;
-                }
-
-                if (progress && progress.completed_urls !== undefined && progress.total_urls !== undefined) {
-                    return `${progress.completed_urls}/${progress.total_urls} URLs`;
-                }
-
-                return 'N/A';
-            } catch (error) {
-                console.warn('[Queue] Failed to parse job progress:', error, job.progress);
-                return 'N/A';
-            }
-        }
-
-        // Custom pagination rendering
-        function renderPagination(totalPages) {
+        // Custom pagination rendering - reads state from Alpine component
+        function renderPagination(totalPages, currentPage) {
             const container = document.getElementById('job-pagination-container');
             if (!container) return;
 
@@ -981,10 +824,11 @@
             container.innerHTML = html;
         }
 
-        // Pagination page change handler
+        // Pagination page change handler - dispatches event to Alpine component
         function changePage(pageNumber) {
-            currentPage = pageNumber;
-            loadJobs();
+            window.dispatchEvent(new CustomEvent('jobList:changePage', {
+                detail: { page: pageNumber }
+            }));
         }
 
         // Rerun a job
@@ -1152,9 +996,6 @@
                     filteredJobs.splice(filteredJobsIndex, 1);
                 }
 
-                // Remove from selected jobs
-                selectedJobIds.delete(jobId);
-
                 // Re-render without API call
                 renderJobs();
                 loadStats();
@@ -1196,12 +1037,19 @@
             loadStats();
             loadJobs();
 
-            // Add ESC key handler for filter modal
+            // Add ESC key handler for filter modal and other shortcuts
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') {
                     const modal = document.getElementById('filter-modal');
                     if (modal && modal.classList.contains('active')) {
                         closeFilterModal();
+                    }
+                }
+                // Toggle hierarchy view with 'h' key
+                if (e.key === 'h' && !e.ctrlKey && !e.metaKey) {
+                    const activeElement = document.activeElement;
+                    if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA') {
+                        window.dispatchEvent(new CustomEvent('jobList:toggleHierarchy'));
                     }
                 }
             });
@@ -1225,19 +1073,27 @@
             console.log('[Queue] Alpine.js initialized');
 
             // Register queueStatsHeader component
+            // Note: WebSocket connection is now handled by the main job WebSocket (connectJobsWebSocket)
+            // to avoid duplicate connections. Queue stats are forwarded from the main WebSocket.
             Alpine.data('queueStatsHeader', () => ({
                 pending: 0,
                 inFlight: 0,
                 workers: 0,
                 connected: false,
-                ws: null,
 
                 init() {
+                    // Add event listeners for external updates
+                    window.addEventListener('queueStats:update', (e) => {
+                        if (e.detail) {
+                            this.pending = e.detail.pending || 0;
+                            this.inFlight = e.detail.inFlight || 0;
+                            this.workers = e.detail.workers || 0;
+                            this.connected = e.detail.connected !== undefined ? e.detail.connected : true;
+                        }
+                    });
+
                     // Load initial stats from API
                     this.loadStats();
-
-                    // Connect to WebSocket for real-time updates
-                    this.connectWebSocket();
                 },
 
                 async loadStats() {
@@ -1256,203 +1112,688 @@
                         console.error('[Queue] Error loading queue stats:', error);
                         this.connected = false;
                     }
+                }
+            }));
+            
+            // Register jobList component
+            Alpine.data('jobList', () => ({
+                // State management
+                showChildJobs: false, // Toggle between parent-only and all-jobs view
+                expandedParents: new Set(), // Track expanded parent jobs
+                childJobsCache: new Map(), // Cache: parentID -> array of child jobs
+                loadingParents: new Set(), // Track parents currently loading children
+                allJobs: [],
+                filteredJobs: [],
+                selectedJob: null,
+                selectedJobIds: new Set(), // Track selected jobs for batch operations
+                currentPage: 1,
+                totalJobs: 0,
+                pageSize: 50,
+                itemsToRender: [],
+                parentRefreshTimeouts: new Map(), // Debounce parent refreshes per parent_id
+
+                init() {
+                    // Add event listeners for external commands
+                    window.addEventListener('jobList:load', () => this.loadJobs());
+                    window.addEventListener('jobList:render', () => this.renderJobs());
+                    window.addEventListener('jobList:updateJob', (e) => this.updateJobInList(e.detail));
+                    window.addEventListener('jobList:changePage', (e) => {
+                        this.currentPage = e.detail.page;
+                        this.loadJobs();
+                    });
+                    window.addEventListener('jobList:toggleHierarchy', () => this.toggleShowChildJobs());
+                    window.addEventListener('jobList:deleteSelected', () => this.deleteSelectedJobs());
+
+                    // Wait for DOM to be ready then initialize
+                    this.loadJobs();
                 },
+                
+                async loadJobs() {
+                    try {
+                        // Build query parameters from filters
+                        const params = new URLSearchParams();
+                        params.append('limit', this.pageSize);
+                        params.append('offset', (this.currentPage - 1) * this.pageSize);
+                        params.append('order_by', 'created_at');
+                        params.append('order_dir', 'DESC');
 
-                connectWebSocket() {
-                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${protocol}//${window.location.host}/ws`;
+                        // Add parent filter for hierarchy view
+                        // When showing only parent jobs, send parent_id=root to server
+                        if (!this.showChildJobs) {
+                            params.append('parent_id', 'root');
+                        }
 
-                    console.log('[Queue] Connecting to WebSocket:', wsUrl);
-                    this.ws = new WebSocket(wsUrl);
+                        // Build filter parameters from activeFilters state (with safe checks)
+                        if (window.activeFilters && window.activeFilters.status && window.activeFilters.status.size > 0) {
+                            params.append('status', Array.from(window.activeFilters.status).join(','));
+                        }
+                        if (window.activeFilters && window.activeFilters.source && window.activeFilters.source.size > 0) {
+                            params.append('source', Array.from(window.activeFilters.source).join(','));
+                        }
+                        if (window.activeFilters && window.activeFilters.entity && window.activeFilters.entity.size > 0) {
+                            params.append('entity', Array.from(window.activeFilters.entity).join(','));
+                        }
 
-                    this.ws.onopen = () => {
-                        console.log('[Queue] WebSocket connected');
-                        this.connected = true;
+                        const response = await fetch(`/api/jobs?${params.toString()}`);
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch jobs');
+                        }
+
+                        const data = await response.json();
+                        this.allJobs = data.jobs || [];
+                        this.totalJobs = data.total_count || 0;
+                        this.filteredJobs = [...this.allJobs];
+
+                        if (!this.showChildJobs) {
+                            this.expandedParents.clear(); // Reset expanded state when switching to parent-only view
+                        }
+                        
+                        this.renderJobs();
+
+                    } catch (error) {
+                        console.error('[Queue] Error loading jobs:', error);
+                        console.error('[Queue] Error stack:', error.stack);
+                        const container = document.getElementById('jobs-cards-container');
+                        container.innerHTML = `
+                            <div class="text-center text-error" style="padding: 2rem;">
+                                Failed to load jobs. Please try again.
+                            </div>
+                        `;
+                    }
+                },
+                
+                async loadChildJobs(parentId) {
+                    // Check cache first
+                    if (this.childJobsCache.has(parentId)) {
+                        return this.childJobsCache.get(parentId);
+                    }
+                    
+                    try {
+                        const params = new URLSearchParams();
+                        params.append('parent_id', parentId);
+                        params.append('limit', 1000); // Load all children (reasonable limit)
+                        params.append('order_by', 'created_at');
+                        params.append('order_dir', 'DESC');
+                        
+                        const response = await fetch(`/api/jobs?${params.toString()}`);
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch child jobs');
+                        }
+                        
+                        const data = await response.json();
+                        const children = data.jobs || [];
+                        
+                        // Cache the results
+                        this.childJobsCache.set(parentId, children);
+                        
+                        return children;
+                    } catch (error) {
+                        console.error('[Queue] Error loading child jobs:', error);
+                        return [];
+                    }
+                },
+                
+                async toggleParentExpansion(parentId) {
+                    if (this.expandedParents.has(parentId)) {
+                        // Collapse
+                        this.expandedParents.delete(parentId);
+                    } else {
+                        // Expand - add to loading state and load children
+                        this.loadingParents.add(parentId);
+                        
+                        await this.loadChildJobs(parentId);
+                        
+                        // Remove from loading and add to expanded
+                        this.loadingParents.delete(parentId);
+                        this.expandedParents.add(parentId);
+                    }
+                    
+                    // Re-render to show/hide children
+                    this.renderJobs();
+                },
+                
+                toggleShowChildJobs() {
+                    this.showChildJobs = !this.showChildJobs;
+                    const btn = document.getElementById('toggle-children-btn');
+                    
+                    this.currentPage = 1; // Reset to first page
+                    this.loadJobs();
+                },
+                
+                renderJobs() {
+                    // Build hierarchical structure if showChildJobs is false
+                    let itemsToRender = [];
+                    if (!this.showChildJobs) {
+                        // Only show parent jobs with their children if expanded
+                        itemsToRender = this.filteredJobs.filter(job => !job.parent_id).map(parentJob => {
+                            return { type: 'parent', job: parentJob, isExpanded: this.expandedParents.has(parentJob.id) };
+                        });
+
+                        // Add loading indicators for parents currently loading and child jobs for expanded parents
+                        for (let i = 0; i < itemsToRender.length; i++) {
+                            const item = itemsToRender[i];
+                            if (item.type === 'parent') {
+                                // Add loading indicator if parent is currently loading
+                                if (this.loadingParents.has(item.job.id)) {
+                                    const loadingItem = { type: 'loading', job: item.job, parentId: item.job.id };
+                                    itemsToRender.splice(i + 1, 0, loadingItem);
+                                }
+                                // Add child jobs if parent is expanded and not loading
+                                else if (item.isExpanded) {
+                                    const children = this.childJobsCache.get(item.job.id) || [];
+                                    const childItems = children.map(child => ({ type: 'child', job: child }));
+                                    // Insert children right after the parent
+                                    itemsToRender.splice(i + 1, 0, ...childItems);
+                                    i += children.length; // Skip the inserted children when continuing the loop
+                                }
+                            }
+                        }
+                    } else {
+                        // Show all jobs in flat structure when showing all
+                        itemsToRender = this.filteredJobs.map(job => ({ type: 'flat', job: job }));
+                    }
+
+                    this.itemsToRender = itemsToRender;
+
+                    // Also update pagination
+                    const totalPages = Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
+                    window.renderPagination(totalPages, this.currentPage);
+                },
+                
+                getParentProgressText(job) {
+                    // Check if currently loading children
+                    if (this.loadingParents.has(job.id)) {
+                        return 'Loading children...';
+                    }
+
+                    // Use child statistics from job if available
+                    const completed = job.completed_children || 0;
+                    const total = job.child_count || 0;
+                    const failed = job.failed_children || 0;
+                    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+                    if (total > 0) {
+                        let text = `${completed}/${total} URLs completed (${percentage}%)`;
+                        if (failed > 0) {
+                            text += ` - ${failed} failed`;
+                        }
+                        return text;
+                    } else {
+                        return 'No child jobs';
+                    }
+                },
+                
+                getParentProgressBarStyle(job) {
+                    const completed = job.completed_children || 0;
+                    const total = job.child_count || 0;
+                    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+                    
+                    return {
+                        width: `${percentage}%`
                     };
+                },
+                
+                getParentProgressStyle(job) {
+                    return {};
+                },
+                
+                getDocumentsCount(job) {
+                    // For completed/failed/cancelled jobs, use result_count (authoritative snapshot)
+                    // For running/pending jobs, use progress.completed_urls (real-time counter)
+                    const terminalStatuses = ['completed', 'failed', 'cancelled'];
 
-                    this.ws.onmessage = (event) => {
+                    // Check if job is in terminal status and has result_count
+                    if (terminalStatuses.includes(job.status) && job.result_count !== undefined && job.result_count !== null) {
+                        return job.result_count;
+                    }
+
+                    // For active jobs or fallback, use progress.completed_urls
+                    if (job.progress) {
                         try {
-                            const message = JSON.parse(event.data);
-
-                            // Handle queue stats updates
-                            if (message.type === 'queue_stats' && message.payload) {
-                                this.pending = message.payload.pending_messages || 0;
-                                this.inFlight = message.payload.in_flight_messages || 0;
-                                this.workers = message.payload.concurrency || 0;
-                                this.connected = true;
-
-                                console.log('[Queue] WebSocket stats update:', {
-                                    pending: this.pending,
-                                    inFlight: this.inFlight,
-                                    workers: this.workers
-                                });
+                            const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
+                            if (progress && progress.completed_urls !== undefined) {
+                                return progress.completed_urls;
                             }
                         } catch (error) {
-                            console.error('[Queue] Error parsing WebSocket message:', error);
+                            console.warn('[Queue] Failed to parse job progress:', error);
                         }
-                    };
+                    }
 
-                    this.ws.onerror = (error) => {
-                        console.error('[Queue] WebSocket error:', error);
-                        this.connected = false;
-                    };
+                    // Final fallback to result_count if available
+                    if (job.result_count !== undefined && job.result_count !== null) {
+                        return job.result_count;
+                    }
 
-                    this.ws.onclose = () => {
-                        console.log('[Queue] WebSocket disconnected, reconnecting in 5s...');
-                        this.connected = false;
-
-                        // Reconnect after 5 seconds
-                        setTimeout(() => {
-                            this.connectWebSocket();
-                        }, 5000);
-                    };
+                    return 'N/A';
+                },
+                
+                getCreatedDate(job) {
+                    return job.created_at ? new Date(job.created_at).toLocaleString() : 'N/A';
                 },
 
-                destroy() {
-                    if (this.ws) {
-                        this.ws.close();
+                deriveParentStatus(job) {
+                    // If not a parent job or no child stats, return original status
+                    if (!job.child_count || job.child_count === 0) {
+                        return { status: job.status, suffix: '' };
                     }
+
+                    const total = job.child_count;
+                    const completed = job.completed_children || 0;
+                    const failed = job.failed_children || 0;
+
+                    // All children completed
+                    if (completed === total) {
+                        return { status: 'completed', suffix: '' };
+                    }
+
+                    // Some children failed but job is still running
+                    if (failed > 0 && job.status === 'running') {
+                        return { status: 'running', suffix: ` (${failed} failed)` };
+                    }
+
+                    // Job is running with children in progress
+                    if (job.status === 'running') {
+                        return { status: 'running', suffix: '' };
+                    }
+
+                    // Default to job's own status
+                    return { status: job.status, suffix: '' };
+                },
+
+                getStatusBadgeClass(type, status, job) {
+                    // For parent jobs, derive status from children
+                    if ((type === 'parent' || (type === 'flat' && !job.parent_id)) && job.child_count > 0) {
+                        const derived = this.deriveParentStatus(job);
+                        status = derived.status;
+                    }
+
+                    if (type === 'child') {
+                        const childBadges = {
+                            'pending': 'label-secondary',
+                            'running': 'label-primary label-processing',
+                            'completed': 'label-success label-done',
+                            'failed': 'label-error',
+                            'cancelled': 'label'
+                        };
+                        return childBadges[status] || 'label';
+                    } else if (type === 'parent') {
+                        const parentBadges = {
+                            'pending': 'label-warning label-queued',
+                            'running': 'label-primary label-orchestrating',
+                            'completed': 'label-success',
+                            'failed': 'label-error',
+                            'cancelled': 'label'
+                        };
+                        return parentBadges[status] || 'label';
+                    } else {
+                        // In flat mode, determine if job is parent or child based on parent_id field
+                        const isChild = !!job.parent_id;
+                        if (isChild) {
+                            const childBadges = {
+                                'pending': 'label-secondary',
+                                'running': 'label-primary label-processing',
+                                'completed': 'label-success label-done',
+                                'failed': 'label-error',
+                                'cancelled': 'label'
+                            };
+                            return childBadges[status] || 'label';
+                        } else {
+                            const parentBadges = {
+                                'pending': 'label-warning label-queued',
+                                'running': 'label-primary label-orchestrating',
+                                'completed': 'label-success',
+                                'failed': 'label-error',
+                                'cancelled': 'label'
+                            };
+                            return parentBadges[status] || 'label';
+                        }
+                    }
+                },
+                
+                getStatusBadgeText(type, status, job) {
+                    // For parent jobs, derive status from children
+                    let suffix = '';
+                    if ((type === 'parent' || (type === 'flat' && !job.parent_id)) && job.child_count > 0) {
+                        const derived = this.deriveParentStatus(job);
+                        status = derived.status;
+                        suffix = derived.suffix;
+                    }
+
+                    // Return appropriate text based on the badge type
+                    const statusTexts = {
+                        'pending': type === 'child' ? 'Pending' : type === 'parent' ? 'Queued' : (!job || !job.parent_id ? 'Queued' : 'Pending'),
+                        'running': type === 'child' ? 'Processing' : type === 'parent' ? 'Orchestrating' : (!job || !job.parent_id ? 'Orchestrating' : 'Processing'),
+                        'completed': type === 'child' ? 'Done' : 'Completed',
+                        'failed': 'Failed',
+                        'cancelled': 'Cancelled'
+                    };
+                    return (statusTexts[status] || 'Unknown') + suffix;
+                },
+                
+                toggleJobSelection(jobId) {
+                    if (this.selectedJobIds.has(jobId)) {
+                        this.selectedJobIds.delete(jobId);
+                    } else {
+                        this.selectedJobIds.add(jobId);
+                    }
+                    this.updateDeleteSelectedButtonVisibility();
+                    this.updateSelectAllCheckbox();
+                },
+
+                toggleSelectAll() {
+                    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+                    const jobCheckboxes = document.querySelectorAll('.job-checkbox');
+
+                    if (selectAllCheckbox.checked) {
+                        // Select all visible jobs
+                        jobCheckboxes.forEach(checkbox => {
+                            const jobId = checkbox.dataset.jobId;
+                            this.selectedJobIds.add(jobId);
+                            checkbox.checked = true;
+                        });
+                    } else {
+                        // Deselect all visible jobs
+                        jobCheckboxes.forEach(checkbox => {
+                            const jobId = checkbox.dataset.jobId;
+                            this.selectedJobIds.delete(jobId);
+                            checkbox.checked = false;
+                        });
+                    }
+
+                    this.updateDeleteSelectedButtonVisibility();
+                },
+
+                updateSelectAllCheckbox() {
+                    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+                    const jobCheckboxes = document.querySelectorAll('.job-checkbox');
+                    const checkedCount = Array.from(jobCheckboxes).filter(cb => cb.checked).length;
+
+                    if (checkedCount === 0) {
+                        selectAllCheckbox.checked = false;
+                        selectAllCheckbox.indeterminate = false;
+                    } else if (checkedCount === jobCheckboxes.length) {
+                        selectAllCheckbox.checked = true;
+                        selectAllCheckbox.indeterminate = false;
+                    } else {
+                        selectAllCheckbox.checked = false;
+                        selectAllCheckbox.indeterminate = true;
+                    }
+                },
+
+                updateDeleteSelectedButtonVisibility() {
+                    const deleteButton = document.getElementById('delete-selected-btn');
+                    const buttonSpan = deleteButton.querySelector('span');
+                    if (this.selectedJobIds.size > 0) {
+                        deleteButton.style.display = 'inline-block';
+                        if (buttonSpan) {
+                            buttonSpan.textContent = `Delete Selected (${this.selectedJobIds.size})`;
+                        }
+                    } else {
+                        deleteButton.style.display = 'none';
+                        if (buttonSpan) {
+                            buttonSpan.textContent = 'Delete Selected';
+                        }
+                    }
+                },
+
+                async deleteSelectedJobs() {
+                    if (this.selectedJobIds.size === 0) {
+                        window.showNotification('No jobs selected', 'warning');
+                        return;
+                    }
+
+                    const jobCount = this.selectedJobIds.size;
+                    const jobList = Array.from(this.selectedJobIds).map(id => id.substring(0, 8) + '...').join(', ');
+
+                    if (!confirm(`Delete ${jobCount} selected job${jobCount > 1 ? 's' : ''}?\n\nJobs: ${jobList}\n\nThis will permanently remove the job${jobCount > 1 ? 's' : ''} from the database.`)) {
+                        return;
+                    }
+
+                    const deleteButton = document.getElementById('delete-selected-btn');
+                    const buttonSpan = deleteButton.querySelector('span');
+                    const originalText = buttonSpan ? buttonSpan.textContent : 'Delete Selected';
+                    deleteButton.disabled = true;
+                    deleteButton.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> <span>Deleting...</span>';
+
+                    const results = {
+                        successful: [],
+                        failed: []
+                    };
+
+                    // Delete each job
+                    for (const jobId of this.selectedJobIds) {
+                        try {
+                            const response = await fetch(`/api/jobs/${jobId}`, {
+                                method: 'DELETE'
+                            });
+
+                            if (response.ok) {
+                                results.successful.push(jobId);
+                                // Remove from allJobs and filteredJobs arrays
+                                const allJobsIndex = this.allJobs.findIndex(job => job.id === jobId);
+                                if (allJobsIndex >= 0) {
+                                    this.allJobs.splice(allJobsIndex, 1);
+                                }
+                                const filteredJobsIndex = this.filteredJobs.findIndex(job => job.id === jobId);
+                                if (filteredJobsIndex >= 0) {
+                                    this.filteredJobs.splice(filteredJobsIndex, 1);
+                                }
+                            } else {
+                                const errorText = await response.text();
+                                results.failed.push({ jobId, error: errorText });
+                            }
+                        } catch (error) {
+                            results.failed.push({ jobId, error: error.message });
+                        }
+                    }
+
+                    // Clear selections
+                    this.selectedJobIds.clear();
+                    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = false;
+
+                    // Reset button
+                    deleteButton.disabled = false;
+                    deleteButton.innerHTML = `<i class="fa-solid fa-trash"></i> <span>${originalText}</span>`;
+                    this.updateDeleteSelectedButtonVisibility();
+
+                    // Show results
+                    if (results.successful.length > 0) {
+                        window.showNotification(`Successfully deleted ${results.successful.length} job${results.successful.length > 1 ? 's' : ''}`, 'success');
+                    }
+
+                    if (results.failed.length > 0) {
+                        window.showNotification(`Failed to delete ${results.failed.length} job${results.failed.length > 1 ? 's' : ''}: ${results.failed[0].error}`, 'error');
+                        console.error('Failed deletions:', results.failed);
+                    }
+
+                    // Refresh data
+                    window.loadStats();
+                    this.loadJobs();
+                    this.renderJobs();
+                },
+                
+                async updateJobInList(update) {
+                    console.log('[Queue] Job updated via WebSocket:', update.job_id.substring(0, 8), update.status);
+
+                    // Find job in allJobs array
+                    let jobIndex = this.allJobs.findIndex(job => job.id === update.job_id);
+                    let job = jobIndex >= 0 ? this.allJobs[jobIndex] : null;
+
+                    // If job not found, fetch full job data regardless of status
+                    if (!job) {
+                        try {
+                            const response = await fetch(`/api/jobs/${update.job_id}`);
+                            if (response.ok) {
+                                job = await response.json();
+                                this.allJobs.unshift(job); // Insert at beginning (newest first)
+                                jobIndex = 0;
+                            }
+                        } catch (error) {
+                            console.warn('[Queue] Failed to fetch new job:', error);
+                            return;
+                        }
+                    }
+
+                    // If job still not found, ignore update
+                    if (!job) {
+                        return;
+                    }
+
+                    // Update job fields - preserve existing values when fields are omitted
+                    job.status = update.status;
+
+                    if (update.result_count !== undefined && update.result_count !== null) {
+                        job.result_count = update.result_count;
+                    }
+                    if (update.failed_count !== undefined && update.failed_count !== null) {
+                        job.failed_count = update.failed_count;
+                    }
+
+                    // Update progress object
+                    if (!job.progress) {
+                        job.progress = {};
+                    }
+                    if (typeof job.progress === 'string') {
+                        try {
+                            job.progress = JSON.parse(job.progress);
+                        } catch (e) {
+                            job.progress = {};
+                        }
+                    }
+
+                    if (update.completed_urls !== undefined && update.completed_urls !== null) {
+                        job.progress.completed_urls = update.completed_urls;
+                    }
+                    if (update.pending_urls !== undefined && update.pending_urls !== null) {
+                        job.progress.pending_urls = update.pending_urls;
+                    }
+                    if (update.total_urls !== undefined && update.total_urls !== null) {
+                        job.progress.total_urls = update.total_urls;
+                    }
+
+                    // Set error if present
+                    if (update.error !== undefined && update.error !== null) {
+                        job.error = update.error;
+                    }
+
+                    // Check if job matches active filters
+                    const matchesFilters = window.matchesActiveFilters(job);
+
+                    // Find job in filteredJobs
+                    const filteredIndex = this.filteredJobs.findIndex(j => j.id === update.job_id);
+
+                    if (matchesFilters) {
+                        if (filteredIndex >= 0) {
+                            // Update in place
+                            this.filteredJobs[filteredIndex] = job;
+                        } else {
+                            // Insert at correct position (sorted by created_at DESC)
+                            const insertIndex = this.filteredJobs.findIndex(j => {
+                                return new Date(j.created_at) < new Date(job.created_at);
+                            });
+                            if (insertIndex >= 0) {
+                                this.filteredJobs.splice(insertIndex, 0, job);
+                            } else {
+                                this.filteredJobs.push(job);
+                            }
+                        }
+                    } else {
+                        // Remove from filteredJobs if doesn't match filters
+                        if (filteredIndex >= 0) {
+                            this.filteredJobs.splice(filteredIndex, 1);
+                        }
+                    }
+
+                    // If this is a child job and parent is expanded, update cache
+                    if (job.parent_id && this.childJobsCache.has(job.parent_id)) {
+                        const cachedChildren = this.childJobsCache.get(job.parent_id);
+                        const childIndex = cachedChildren.findIndex(c => c.id === job.id);
+                        if (childIndex >= 0) {
+                            cachedChildren[childIndex] = job;
+                        } else {
+                            cachedChildren.unshift(job); // Add new child
+                        }
+                    }
+
+                    // If child job updated, refresh parent stats (debounced per parent_id)
+                    if (job.parent_id) {
+                        this.debouncedRefreshParent(job.parent_id);
+                    }
+
+                    // Trim to pageSize if on first page to maintain pagination consistency
+                    if (this.currentPage === 1 && this.filteredJobs.length > this.pageSize) {
+                        this.filteredJobs.length = this.pageSize;
+                    }
+
+                    // Re-render jobs
+                    this.renderJobs();
+                },
+
+                // Debounced parent refresh to reduce load under high child job churn
+                debouncedRefreshParent(parentId) {
+                    // Clear any existing timeout for this parent
+                    if (this.parentRefreshTimeouts.has(parentId)) {
+                        clearTimeout(this.parentRefreshTimeouts.get(parentId));
+                    }
+
+                    // Set new timeout to fetch parent after 400ms
+                    const timeoutId = setTimeout(async () => {
+                        try {
+                            const parentResponse = await fetch(`/api/jobs/${parentId}`);
+                            if (parentResponse.ok) {
+                                const updatedParent = await parentResponse.json();
+
+                                // Update parent in allJobs array
+                                const parentIndex = this.allJobs.findIndex(j => j.id === parentId);
+                                if (parentIndex >= 0) {
+                                    this.allJobs[parentIndex] = updatedParent;
+                                }
+
+                                // Update parent in filteredJobs array if it exists there
+                                const filteredParentIndex = this.filteredJobs.findIndex(j => j.id === parentId);
+                                if (filteredParentIndex >= 0) {
+                                    this.filteredJobs[filteredParentIndex] = updatedParent;
+                                }
+
+                                // Re-render to show updated parent stats
+                                this.renderJobs();
+                            }
+                        } catch (error) {
+                            console.warn('[Queue] Failed to update parent stats after child update:', error);
+                        } finally {
+                            // Remove timeout from map after execution
+                            this.parentRefreshTimeouts.delete(parentId);
+                        }
+                    }, 400); // 400ms debounce window (within 300-500ms recommended range)
+
+                    // Store timeout ID
+                    this.parentRefreshTimeouts.set(parentId, timeoutId);
+                },
+
+                toggleJobJson(jsonId) {
+                    const jsonElement = document.getElementById(jsonId);
+                    if (jsonElement) {
+                        if (jsonElement.style.display === 'none') {
+                            jsonElement.style.display = 'block';
+                        } else {
+                            jsonElement.style.display = 'none';
+                        }
+                    }
+                },
+                
+                // Helper function to get the correct status badge HTML based on type
+                getStatusBadgeHtml(type, status) {
+                    // This method is now handled via separate functions for Alpine binding
+                    return this.getStatusBadgeClass(type, status);
                 }
             }));
         });
 
-        // Toggle job selection for batch operations
-        function toggleJobSelection(jobId) {
-            if (selectedJobIds.has(jobId)) {
-                selectedJobIds.delete(jobId);
-            } else {
-                selectedJobIds.add(jobId);
-            }
-            updateDeleteSelectedButtonVisibility();
-            updateSelectAllCheckbox();
-        }
-
-        // Toggle select all checkbox
-        function toggleSelectAll() {
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            const jobCheckboxes = document.querySelectorAll('.job-checkbox');
-
-            if (selectAllCheckbox.checked) {
-                // Select all visible jobs
-                jobCheckboxes.forEach(checkbox => {
-                    const jobId = checkbox.dataset.jobId;
-                    selectedJobIds.add(jobId);
-                    checkbox.checked = true;
-                });
-            } else {
-                // Deselect all visible jobs
-                jobCheckboxes.forEach(checkbox => {
-                    const jobId = checkbox.dataset.jobId;
-                    selectedJobIds.delete(jobId);
-                    checkbox.checked = false;
-                });
-            }
-
-            updateDeleteSelectedButtonVisibility();
-        }
-
-        // Update select all checkbox state based on individual selections
-        function updateSelectAllCheckbox() {
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            const jobCheckboxes = document.querySelectorAll('.job-checkbox');
-            const checkedCount = Array.from(jobCheckboxes).filter(cb => cb.checked).length;
-
-            if (checkedCount === 0) {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = false;
-            } else if (checkedCount === jobCheckboxes.length) {
-                selectAllCheckbox.checked = true;
-                selectAllCheckbox.indeterminate = false;
-            } else {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = true;
-            }
-        }
-
-        // Update visibility of delete selected button
-        function updateDeleteSelectedButtonVisibility() {
-            const deleteButton = document.getElementById('delete-selected-btn');
-            const buttonSpan = deleteButton.querySelector('span');
-            if (selectedJobIds.size > 0) {
-                deleteButton.style.display = 'inline-block';
-                if (buttonSpan) {
-                    buttonSpan.textContent = `Delete Selected (${selectedJobIds.size})`;
-                }
-            } else {
-                deleteButton.style.display = 'none';
-                if (buttonSpan) {
-                    buttonSpan.textContent = 'Delete Selected';
-                }
-            }
-        }
-
-        // Delete multiple selected jobs
-        async function deleteSelectedJobs() {
-            if (selectedJobIds.size === 0) {
-                window.showNotification('No jobs selected', 'warning');
-                return;
-            }
-
-            const jobCount = selectedJobIds.size;
-            const jobList = Array.from(selectedJobIds).map(id => id.substring(0, 8) + '...').join(', ');
-
-            if (!confirm(`Delete ${jobCount} selected job${jobCount > 1 ? 's' : ''}?\n\nJobs: ${jobList}\n\nThis will permanently remove the job${jobCount > 1 ? 's' : ''} from the database.`)) {
-                return;
-            }
-
-            const deleteButton = document.getElementById('delete-selected-btn');
-            const buttonSpan = deleteButton.querySelector('span');
-            const originalText = buttonSpan ? buttonSpan.textContent : 'Delete Selected';
-            deleteButton.disabled = true;
-            deleteButton.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> <span>Deleting...</span>';
-
-            const results = {
-                successful: [],
-                failed: []
-            };
-
-            // Delete each job
-            for (const jobId of selectedJobIds) {
-                try {
-                    const response = await fetch(`/api/jobs/${jobId}`, {
-                        method: 'DELETE'
-                    });
-
-                    if (response.ok) {
-                        results.successful.push(jobId);
-                    } else {
-                        const errorText = await response.text();
-                        results.failed.push({ jobId, error: errorText });
-                    }
-                } catch (error) {
-                    results.failed.push({ jobId, error: error.message });
-                }
-            }
-
-            // Clear selections
-            selectedJobIds.clear();
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            selectAllCheckbox.checked = false;
-            selectAllCheckbox.indeterminate = false;
-
-            // Reset button
-            deleteButton.disabled = false;
-            deleteButton.innerHTML = `<i class="fa-solid fa-trash"></i> <span>${originalText}</span>`;
-            updateDeleteSelectedButtonVisibility();
-
-            // Show results
-            if (results.successful.length > 0) {
-                window.showNotification(`Successfully deleted ${results.successful.length} job${results.successful.length > 1 ? 's' : ''}`, 'success');
-            }
-
-            if (results.failed.length > 0) {
-                window.showNotification(`Failed to delete ${results.failed.length} job${results.failed.length > 1 ? 's' : ''}: ${results.failed[0].error}`, 'error');
-                console.error('Failed deletions:', results.failed);
-            }
-
-            // Refresh data
-            loadStats();
-            loadJobs();
+        // Window helper function - dispatches event to Alpine component
+        function deleteSelectedJobs() {
+            window.dispatchEvent(new CustomEvent('jobList:deleteSelected'));
         }
 
         // Initialize highlight.js - only for job detail

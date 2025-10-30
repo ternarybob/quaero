@@ -121,6 +121,7 @@ h2 {
 .card {
     border-radius: var(--border-radius);
     margin-bottom: 1.5rem;
+    transition: box-shadow 0.2s ease, max-height 0.2s ease; /* Add smooth transition */
 
     .card-header {
         border-bottom: 1px solid var(--border-color);
@@ -787,4 +788,184 @@ body.modal-open {
     100% {
         transform: rotate(360deg);
     }
+}
+
+/* 13. JOB QUEUE TREE VIEW HIERARCHY
+   ========================================================================== */
+
+/* Parent job card styling */
+.job-card-parent {
+    border-left: 3px solid var(--color-primary);
+}
+
+/* Child job card styling */
+.job-card-child {
+    margin-left: 2rem;
+    background-color: #fafbfc;
+    border-left: 3px solid var(--border-color);
+}
+
+/* Expand/collapse button */
+.expand-collapse-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    color: var(--text-secondary);
+    transition: color 0.2s, transform 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.expand-collapse-btn:hover {
+    color: var(--color-primary);
+}
+
+.expand-collapse-btn i {
+    font-size: 0.875rem;
+    transition: transform 0.2s ease;
+}
+
+/* Rotate chevron when expanded */
+.expand-collapse-btn.expanded i {
+    transform: rotate(90deg);
+}
+
+/* Job type icons */
+.job-type-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-right: 0.5rem;
+    color: var(--text-secondary);
+}
+
+.job-type-icon.parent-icon {
+    color: var(--color-primary);
+}
+
+.job-type-icon.child-icon {
+    color: var(--text-secondary);
+}
+
+/* Aggregate progress display for parent jobs */
+.parent-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background-color: var(--page-bg);
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+}
+
+.parent-progress-text {
+    color: var(--text-secondary);
+}
+
+.parent-progress-bar {
+    flex: 1;
+    height: 8px;
+    background-color: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.parent-progress-bar-fill {
+    height: 100%;
+    background-color: var(--color-success);
+    transition: width 0.3s ease;
+}
+
+/* Status badge variants for parent jobs */
+.label-orchestrating {
+    background-color: #0757ba;
+    color: white;
+}
+
+.label-queued {
+    background-color: #ffb700;
+    color: #333;
+}
+
+/* Status badge variants for child jobs */
+.label-processing {
+    background-color: #5755d9;
+    color: white;
+}
+
+.label-done {
+    background-color: #1f883d;
+    color: white;
+}
+
+/* Child job metadata styling */
+.child-job-url {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 400px;
+}
+
+/* Hover effects for tree items */
+.job-card-parent:hover,
+.job-card-child:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Loading indicator for expanding parents */
+.loading-children {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.loading-children i {
+    margin-right: 0.5rem;
+}
+
+/* Empty state for no children */
+.no-children-message {
+    margin-left: 2rem;
+    padding: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-style: italic;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .job-card-child {
+        margin-left: 1rem;
+    }
+    
+    .child-job-url {
+        max-width: 200px;
+    }
+}
+
+/* Slide-in animation for children */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.job-card-child {
+    animation: slideIn 0.2s ease-out;
 }

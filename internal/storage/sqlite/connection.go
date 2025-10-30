@@ -77,7 +77,7 @@ func (s *SQLiteDB) configure() error {
 	pragmas := []string{
 		fmt.Sprintf("PRAGMA cache_size = -%d", s.config.CacheSizeMB*1024), // Negative for KB
 		fmt.Sprintf("PRAGMA busy_timeout = %d", s.config.BusyTimeoutMS),
-		"PRAGMA foreign_keys = OFF", // Disabled - this is a temporary document cache, not a relational database
+		"PRAGMA foreign_keys = ON", // Enabled for referential integrity (CASCADE constraints for jobs, logs, URLs)
 		"PRAGMA synchronous = NORMAL",
 	}
 

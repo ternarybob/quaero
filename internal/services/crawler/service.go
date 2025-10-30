@@ -828,7 +828,7 @@ func (s *Service) GetRunningJobIDs() []string {
 }
 
 // ListJobs returns a list of jobs with optional filtering
-func (s *Service) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
+func (s *Service) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) (interface{}, error) {
 	if s.jobStorage == nil {
 		return nil, fmt.Errorf("job storage not configured")
 	}

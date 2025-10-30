@@ -33,14 +33,7 @@ func NewManager(jobStorage interfaces.JobStorage, queueMgr interfaces.QueueManag
 	}
 }
 
-// JobChildStats holds aggregate statistics for a parent job's children
-type JobChildStats struct {
-	ChildCount        int `json:"child_count"`
-	CompletedChildren int `json:"completed_children"`
-	FailedChildren    int `json:"failed_children"`
-}
-
-func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error) {
+func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
 	stats, err := m.jobStorage.GetJobChildStats(ctx, parentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get child stats: %w", err)
@@ -92,7 +85,7 @@ func (m *Manager) GetJob(ctx context.Context, jobID string) (interface{}, error)
 }
 
 // ListJobs lists jobs with optional filters
-func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
 	jobs, err := m.jobStorage.ListJobs(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
@@ -102,9 +95,9 @@ func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([
 }
 
 // CountJobs counts jobs matching the provided filters
-func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
 	// If filters are present, use filtered count
-	if opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "") {
+	if opts != nil && (opts.Status != "" || opts.SourceType != "" || opts.EntityType != "" || opts.ParentID != "") {
 		count, err := m.jobStorage.CountJobsWithFilters(ctx, opts)
 		if err != nil {
 			return 0, fmt.Errorf("failed to count filtered jobs: %w", err)
@@ -139,8 +132,24 @@ func (m *Manager) UpdateJob(ctx context.Context, job interface{}) error {
 	return nil
 }
 
-// DeleteJob deletes a job and cancels if running
+// DeleteJob deletes a job and all its child jobs recursively.
+// If the job has children, they are deleted first in a cascade operation.
+// Each deletion is logged individually for audit purposes.
+// If any child deletion fails, the error is logged but deletion continues.
+// The parent job is deleted even if some children fail to delete.
+// Returns an aggregated error if any deletions failed.
 func (m *Manager) DeleteJob(ctx context.Context, jobID string) error {
+	return m.deleteJobRecursive(ctx, jobID, 0)
+}
+
+// deleteJobRecursive handles recursive deletion with depth tracking
+func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth int) error {
+	// Prevent infinite recursion
+	const maxDepth = 10
+	if depth > maxDepth {
+		return fmt.Errorf("maximum recursion depth (%d) exceeded for job %s", maxDepth, jobID)
+	}
+
 	// Get job to check status
 	jobInterface, err := m.GetJob(ctx, jobID)
 	if err != nil {
@@ -153,6 +162,58 @@ func (m *Manager) DeleteJob(ctx context.Context, jobID string) error {
 		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
+	// Check for child jobs and cascade delete
+	children, err := m.jobStorage.GetChildJobs(ctx, jobID)
+	if err != nil {
+		m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get child jobs, continuing with deletion")
+	}
+
+	if len(children) > 0 {
+		m.logger.Info().
+			Str("parent_id", jobID).
+			Int("child_count", len(children)).
+			Int("depth", depth).
+			Msg("Cascading delete to child jobs")
+
+		var errs []error
+		successCount := 0
+		errorCount := 0
+
+		for _, child := range children {
+			m.logger.Debug().
+				Str("parent_id", jobID).
+				Str("child_id", child.ID).
+				Msg("Deleting child job")
+
+			// Recursively delete child (which will delete its children if any)
+			if err := m.deleteJobRecursive(ctx, child.ID, depth+1); err != nil {
+				m.logger.Warn().
+					Err(err).
+					Str("parent_id", jobID).
+					Str("child_id", child.ID).
+					Msg("Failed to delete child job, continuing")
+				errs = append(errs, fmt.Errorf("child %s: %w", child.ID, err))
+				errorCount++
+			} else {
+				successCount++
+			}
+		}
+
+		m.logger.Info().
+			Str("job_id", jobID).
+			Int("children_deleted", successCount).
+			Int("children_failed", errorCount).
+			Msg("Cascade deletion completed")
+
+		// If any child deletions failed, log aggregated errors but continue with parent deletion
+		if len(errs) > 0 {
+			m.logger.Warn().
+				Str("job_id", jobID).
+				Int("error_count", len(errs)).
+				Msg("Some child deletions failed, but continuing with parent deletion")
+		}
+	}
+
 	// Cancel if running
 	if job.Status == models.JobStatusRunning {
 		job.Status = models.JobStatusCancelled
@@ -162,19 +223,14 @@ func (m *Manager) DeleteJob(ctx context.Context, jobID string) error {
 	}
 
 	// Delete job from storage
+	// Note: FK CASCADE automatically deletes associated job_logs and job_seen_urls
 	if err := m.jobStorage.DeleteJob(ctx, jobID); err != nil {
 		return fmt.Errorf("failed to delete job: %w", err)
 	}
 
-	// Delete job logs (optional but recommended to keep data consistent)
-	if err := m.logService.DeleteLogs(ctx, jobID); err != nil {
-		m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to delete job logs (non-critical)")
-		// Continue even if log deletion fails - it's not critical
-	}
-
 	m.logger.Info().
 		Str("job_id", jobID).
-		Msg("Job deleted successfully")
+		Msg("Job deleted successfully (logs cascade deleted by FK)")
 
 	return nil
 }

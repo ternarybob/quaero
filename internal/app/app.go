@@ -474,7 +474,7 @@ func (a *App) initServices() error {
 
 	// Cleanup job handler
 	cleanupJobDeps := &jobtypes.CleanupJobDeps{
-		JobStorage: a.StorageManager.JobStorage(),
+		JobManager: a.JobManager,
 		LogService: a.LogService,
 	}
 	cleanupJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {

@@ -212,7 +212,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 }
 
 // ListJobs lists jobs with pagination and filters
-func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
 	query := `
 		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
@@ -267,8 +267,9 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions)
 		                args = append(args, opts.ParentID)
 		            }
 		        }
-		
-		        // Order by		orderBy := "created_at"
+
+		// Order by
+		orderBy := "created_at"
 		if opts.OrderBy != "" {
 			orderBy = opts.OrderBy
 		}
@@ -349,16 +350,9 @@ func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*mode
 	return jobs, nil
 }
 
-// JobChildStats holds aggregate statistics for a parent job's children
-type JobChildStats struct {
-	ChildCount        int
-	CompletedChildren int
-	FailedChildren    int
-}
-
-func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error) {
+func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
 	if len(parentIDs) == 0 {
-		return make(map[string]*JobChildStats), nil
+		return make(map[string]*interfaces.JobChildStats), nil
 	}
 
 	query := `
@@ -383,10 +377,10 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 	}
 	defer rows.Close()
 
-	stats := make(map[string]*JobChildStats)
+	stats := make(map[string]*interfaces.JobChildStats)
 	for rows.Next() {
 		var parentID string
-		var childStats JobChildStats
+		var childStats interfaces.JobChildStats
 		if err := rows.Scan(&parentID, &childStats.ChildCount, &childStats.CompletedChildren, &childStats.FailedChildren); err != nil {
 			return nil, fmt.Errorf("failed to scan job child stats: %w", err)
 		}
@@ -532,7 +526,7 @@ func (s *JobStorage) CountJobsByStatus(ctx context.Context, status string) (int,
 }
 
 // CountJobsWithFilters returns count of jobs matching filter criteria
-func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
 	query := "SELECT COUNT(*) FROM crawl_jobs WHERE 1=1"
 	args := []interface{}{}
 

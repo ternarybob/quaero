@@ -97,7 +97,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		orderDir = "DESC"
 	}
 
-	opts := &interfaces.ListOptions{
+	opts := &interfaces.JobListOptions{
 		Limit:      limit,
 		Offset:     offset,
 		Status:     status,
@@ -125,17 +125,31 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if grouped && parentID != "" && parentID != "root" {
+		// Add the parent ID to the list of IDs to get stats for
+		found := false
+		for _, id := range parentJobIDs {
+			if id == parentID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			parentJobIDs = append(parentJobIDs, parentID)
+		}
+	}
+
 	// Fetch child statistics in batch
-	var childStatsMap map[string]*jobs.JobChildStats
+	var childStatsMap map[string]*interfaces.JobChildStats
 	if len(parentJobIDs) > 0 {
 		var err error
 		childStatsMap, err = h.jobManager.GetJobChildStats(ctx, parentJobIDs)
 		if err != nil {
 			h.logger.Warn().Err(err).Msg("Failed to get child statistics, continuing without stats")
-			childStatsMap = make(map[string]*jobs.JobChildStats)
+			childStatsMap = make(map[string]*interfaces.JobChildStats)
 		}
 	} else {
-		childStatsMap = make(map[string]*jobs.JobChildStats)
+		childStatsMap = make(map[string]*interfaces.JobChildStats)
 	}
 
 	// Get total count using JobManager (ensures consistent filtering)
@@ -153,6 +167,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Convert to map and add statistics
 			jobMap := convertJobToMap(masked)
+			jobMap["parent_id"] = masked.ParentID
 
 			// Add child statistics
 			if stats, exists := childStatsMap[masked.ID]; exists {
@@ -182,7 +197,20 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Group jobs by parent
 	groupsMap := make(map[string]*JobGroup)
-	orphanJobs := make([]*models.CrawlJob, 0)
+	var orphanJobs []*models.CrawlJob
+
+	if grouped && parentID != "" && parentID != "root" {
+		// Fetch the parent job to ensure it's in the response
+		parentJob, err := h.jobManager.GetJob(ctx, parentID)
+		if err == nil {
+			if p, ok := parentJob.(*models.CrawlJob); ok {
+				groupsMap[p.ID] = &JobGroup{
+					Parent:   p,
+					Children: make([]*models.CrawlJob, 0),
+				}
+			}
+		}
+	}
 
 	for _, job := range jobs {
 		if job.ParentID == "" {
@@ -199,7 +227,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 				group.Children = append(group.Children, job)
 			} else {
 				// Parent not in current page, treat as orphan
-				orphanJobs = append(orphanJobs, job)
+				orphanJobs = append(orphanJobs, job.MaskSensitiveData())
 			}
 		}
 	}
@@ -209,6 +237,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	for parentID, group := range groupsMap {
 		maskedParent := group.Parent.MaskSensitiveData()
 		parentMap := convertJobToMap(maskedParent)
+		parentMap["parent_id"] = maskedParent.ParentID
 
 		// Add statistics
 		if stats, exists := childStatsMap[parentID]; exists {
@@ -279,6 +308,33 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Mask sensitive data before returning
 	masked := job.MaskSensitiveData()
+
+	// For parent jobs (empty parent_id), enrich with child statistics
+	if masked.ParentID == "" {
+		childStatsMap, err := h.jobManager.GetJobChildStats(ctx, []string{masked.ID})
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get child statistics, continuing without stats")
+		}
+
+		// Convert to map for enrichment
+		jobMap := convertJobToMap(masked)
+		jobMap["parent_id"] = masked.ParentID
+
+		// Add child statistics
+		if stats, exists := childStatsMap[masked.ID]; exists {
+			jobMap["child_count"] = stats.ChildCount
+			jobMap["completed_children"] = stats.CompletedChildren
+			jobMap["failed_children"] = stats.FailedChildren
+		} else {
+			jobMap["child_count"] = 0
+			jobMap["completed_children"] = 0
+			jobMap["failed_children"] = 0
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jobMap)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(masked)

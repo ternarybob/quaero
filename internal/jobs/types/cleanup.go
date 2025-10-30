@@ -11,7 +11,7 @@ import (
 
 // CleanupJobDeps holds dependencies for cleanup jobs
 type CleanupJobDeps struct {
-	JobStorage interfaces.JobStorage
+	JobManager interfaces.JobManager // Changed from JobStorage to use cascade deletion logic
 	LogService interfaces.LogService
 }
 
@@ -102,7 +102,7 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	// Query and collect eligible job IDs across all statuses
 	jobsToClean := []string{}
 	for _, status := range statuses {
-		opts := &interfaces.ListOptions{
+		opts := &interfaces.JobListOptions{
 			Status:  status,
 			Limit:   100, // Process in batches
 			Offset:  0,
@@ -110,7 +110,7 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		}
 
 		for {
-			jobs, err := c.deps.JobStorage.ListJobs(ctx, opts)
+			jobs, err := c.deps.JobManager.ListJobs(ctx, opts)
 			if err != nil {
 				c.logger.Error().
 					Err(err).
@@ -164,8 +164,8 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Msg("Starting job deletion")
 
 		for i, jobID := range jobsToClean {
-			// Delete job (logs are cascade deleted with the job)
-			if err := c.deps.JobStorage.DeleteJob(ctx, jobID); err != nil {
+			// Delete job (children and logs are cascade deleted with the job)
+			if err := c.deps.JobManager.DeleteJob(ctx, jobID); err != nil {
 				c.logger.Error().
 					Err(err).
 					Str("job_id", jobID).
