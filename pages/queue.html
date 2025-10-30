@@ -242,14 +242,40 @@
                                             
                                             <!-- Parent progress display -->
                                             <template x-if="item.type === 'parent'">
-                                                <div class="parent-progress">
-                                                    <div class="parent-progress-text" 
-                                                         x-text="getParentProgressText(item.job)"
-                                                         :style="getParentProgressStyle(item.job)"></div>
-                                                    <div class="parent-progress-bar">
-                                                        <div class="parent-progress-bar-fill" 
-                                                             :style="getParentProgressBarStyle(item.job)"></div>
+                                                <div class="parent-progress-container">
+                                                    <div class="parent-progress">
+                                                        <div class="parent-progress-text"
+                                                             x-text="getParentProgressText(item.job)"></div>
+                                                        <div class="parent-progress-bar">
+                                                            <div class="parent-progress-bar-fill"
+                                                                 :style="Object.assign(getParentProgressBarStyle(item.job), { transition: 'background 0.3s ease' })"></div>
+                                                        </div>
                                                     </div>
+
+                                                    <!-- Spawned child jobs list (if any) -->
+                                                    <template x-if="childJobsList.has(item.job.id) && childJobsList.get(item.job.id).length > 0">
+                                                        <div class="child-jobs-list-container">
+                                                            <div class="child-jobs-list-header">
+                                                                <span x-text="'Spawned URLs (' + childJobsList.get(item.job.id).length + ')' "></span>
+                                                            </div>
+                                                            <div class="child-jobs-list">
+                                                                <template x-for="child in childJobsList.get(item.job.id)" :key="child.id">
+                                                                    <div class="child-job-item">
+                                                                        <span class="label label-sm"
+                                                                              :class="{
+                                                                                  'label-secondary': child.status === 'pending',
+                                                                                  'label-primary': child.status === 'running',
+                                                                                  'label-success': child.status === 'completed',
+                                                                                  'label-error': child.status === 'failed'
+                                                                              }"
+                                                                              x-text="child.status"></span>
+                                                                        <span class="child-job-url" :title="child.url" x-text="child.url"></span>
+                                                                        <span class="child-job-depth" x-text="'Depth: ' + child.depth"></span>
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                    </template>
                                                 </div>
                                             </template>
                                         </div>
@@ -721,6 +747,22 @@
                         updateJobInList(message.payload);
                         loadStats();
                     }
+
+                    // Handle job spawn events
+                    if (message.type === 'job_spawn' && message.payload) {
+                        const spawnData = message.payload;
+                        // Dispatch event to Alpine component
+                        window.dispatchEvent(new CustomEvent('jobList:childSpawned', {
+                            detail: {
+                                parent_job_id: spawnData.parent_job_id,
+                                child_job_id:  spawnData.child_job_id,
+                                job_type:      spawnData.job_type,
+                                url:           spawnData.url,
+                                depth:         spawnData.depth,
+                                timestamp:     spawnData.timestamp
+                            }
+                        }));
+                    }
                 } catch (error) {
                     console.error('[Queue] Error parsing WebSocket message:', error);
                 }
@@ -1122,6 +1164,8 @@
                 expandedParents: new Set(), // Track expanded parent jobs
                 childJobsCache: new Map(), // Cache: parentID -> array of child jobs
                 loadingParents: new Set(), // Track parents currently loading children
+                childJobsList: new Map(), // Map: parentID -> array of child job metadata
+                childListCap: 200,
                 allJobs: [],
                 filteredJobs: [],
                 selectedJob: null,
@@ -1137,6 +1181,7 @@
                     window.addEventListener('jobList:load', () => this.loadJobs());
                     window.addEventListener('jobList:render', () => this.renderJobs());
                     window.addEventListener('jobList:updateJob', (e) => this.updateJobInList(e.detail));
+                    window.addEventListener('jobList:childSpawned', (e) => this.handleChildSpawned(e.detail));
                     window.addEventListener('jobList:changePage', (e) => {
                         this.currentPage = e.detail.page;
                         this.loadJobs();
@@ -1146,6 +1191,51 @@
 
                     // Wait for DOM to be ready then initialize
                     this.loadJobs();
+                },
+
+                handleChildSpawned(spawnData) {
+                    const parentId = spawnData.parent_job_id;
+                    if (!this.childJobsList.has(parentId)) {
+                        this.childJobsList.set(parentId, []);
+                    }
+                    const childMeta = {
+                        id: spawnData.child_job_id,
+                        url: spawnData.url,
+                        depth: spawnData.depth,
+                        status: 'pending',
+                        timestamp: spawnData.timestamp
+                    };
+                    const list = this.childJobsList.get(parentId);
+                    list.unshift(childMeta);
+                    if (list.length > this.childListCap) {
+                        list.length = this.childListCap;
+                    }
+
+                    const parentJob = this.allJobs.find(j => j.id === parentId);
+                    if (parentJob) {
+                        parentJob.child_count = (parentJob.child_count || 0) + 1;
+                    }
+
+                    this.renderJobs();
+                },
+
+                handleChildJobStatus(jobId, status) {
+                    for (const [parentId, children] of this.childJobsList.entries()) {
+                        const child = children.find(c => c.id === jobId);
+                        if (child) {
+                            child.status = status;
+                            const parentJob = this.allJobs.find(j => j.id === parentId);
+                            if (parentJob) {
+                                if (status === 'completed') {
+                                    parentJob.completed_children = (parentJob.completed_children || 0) + 1;
+                                } else if (status === 'failed') {
+                                    parentJob.failed_children = (parentJob.failed_children || 0) + 1;
+                                }
+                            }
+                            this.renderJobs();
+                            break;
+                        }
+                    }
                 },
                 
                 async loadJobs() {
@@ -1203,10 +1293,6 @@
                 },
                 
                 async loadChildJobs(parentId) {
-                    // Check cache first
-                    if (this.childJobsCache.has(parentId)) {
-                        return this.childJobsCache.get(parentId);
-                    }
                     
                     try {
                         const params = new URLSearchParams();
@@ -1222,10 +1308,20 @@
                         
                         const data = await response.json();
                         const children = data.jobs || [];
-                        
-                        // Cache the results
+
+                        // Hydrate unified child list state (metadata only)
+                        const meta = children.map(c => ({
+                            id: c.id,
+                            url: c.url || (c.config && c.config.url) || '',
+                            depth: c.depth || (c.config && c.config.depth) || 0,
+                            status: c.status || 'pending',
+                            timestamp: c.created_at || new Date().toISOString()
+                        }));
+                        this.childJobsList.set(parentId, meta);
+
+                        // Optionally retain full children in cache if other views rely on it (back-compat)
                         this.childJobsCache.set(parentId, children);
-                        
+
                         return children;
                     } catch (error) {
                         console.error('[Queue] Error loading child jobs:', error);
@@ -1278,14 +1374,7 @@
                                     const loadingItem = { type: 'loading', job: item.job, parentId: item.job.id };
                                     itemsToRender.splice(i + 1, 0, loadingItem);
                                 }
-                                // Add child jobs if parent is expanded and not loading
-                                else if (item.isExpanded) {
-                                    const children = this.childJobsCache.get(item.job.id) || [];
-                                    const childItems = children.map(child => ({ type: 'child', job: child }));
-                                    // Insert children right after the parent
-                                    itemsToRender.splice(i + 1, 0, ...childItems);
-                                    i += children.length; // Skip the inserted children when continuing the loop
-                                }
+                        // No longer inject full child cards here; a unified child list renders inside the parent card
                             }
                         }
                     } else {
@@ -1301,35 +1390,47 @@
                 },
                 
                 getParentProgressText(job) {
-                    // Check if currently loading children
                     if (this.loadingParents.has(job.id)) {
                         return 'Loading children...';
                     }
 
-                    // Use child statistics from job if available
-                    const completed = job.completed_children || 0;
                     const total = job.child_count || 0;
+                    const completed = job.completed_children || 0;
                     const failed = job.failed_children || 0;
-                    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+                    const running = Math.max(0, total - completed - failed);
 
-                    if (total > 0) {
-                        let text = `${completed}/${total} URLs completed (${percentage}%)`;
-                        if (failed > 0) {
-                            text += ` - ${failed} failed`;
-                        }
-                        return text;
-                    } else {
-                        return 'No child jobs';
+                    if (total === 0) {
+                        return 'No child jobs spawned yet';
                     }
+
+                    const parts = [];
+                    if (completed > 0) parts.push(`${completed} completed`);
+                    if (failed > 0) parts.push(`${failed} failed`);
+                    if (running > 0) parts.push(`${running} running`);
+
+                    return `${total} child jobs spawned (${parts.join(', ')})`;
                 },
                 
                 getParentProgressBarStyle(job) {
-                    const completed = job.completed_children || 0;
                     const total = job.child_count || 0;
-                    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-                    
+                    if (total === 0) {
+                        return { width: '0%' };
+                    }
+
+                    const completed = job.completed_children || 0;
+                    const failed = job.failed_children || 0;
+                    const running = Math.max(0, total - completed - failed);
+
+                    const completedPercent = (completed / total) * 100;
+                    const failedPercent = (failed / total) * 100;
+                    const runningPercent = (running / total) * 100;
+
                     return {
-                        width: `${percentage}%`
+                        width: '100%',
+                        background: `linear-gradient(to right,
+                            var(--color-success) 0% ${completedPercent}%,
+                            var(--color-danger) ${completedPercent}% ${completedPercent + failedPercent}%,
+                            var(--color-primary) ${completedPercent + failedPercent}% 100%)`
                     };
                 },
                 
@@ -1643,6 +1744,11 @@
 
                     // Update job fields - preserve existing values when fields are omitted
                     job.status = update.status;
+                    // If this is a child job reaching a terminal state, update in-memory child list immediately
+                    if (job.parent_id && (update.status === 'completed' || update.status === 'failed')) {
+                        this.handleChildJobStatus(job.id, update.status);
+                    }
+
 
                     if (update.result_count !== undefined && update.result_count !== null) {
                         job.result_count = update.result_count;

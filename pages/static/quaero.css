@@ -257,6 +257,12 @@ h2 {
     margin-top: -3px;
 }
 
+/* Small label variant for compact chips */
+.label-sm {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.3rem;
+}
+
 /* Mobile Menu Toggle */
 .mobile-menu-toggle {
     display: none;
@@ -877,8 +883,8 @@ body.modal-open {
 
 .parent-progress-bar-fill {
     height: 100%;
-    background-color: var(--color-success);
-    transition: width 0.3s ease;
+    /* Background set dynamically via Alpine.js for multi-segment display */
+    transition: background 0.3s ease;
 }
 
 /* Status badge variants for parent jobs */
@@ -918,6 +924,82 @@ body.modal-open {
 .job-card-parent:hover,
 .job-card-child:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Child jobs list container */
+.parent-progress-container {
+    margin-top: 0.5rem;
+}
+
+.child-jobs-list-container {
+    margin-top: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    background-color: var(--content-bg);
+}
+
+.child-jobs-list-header {
+    padding: 0.5rem 0.75rem;
+    background-color: var(--page-bg);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.child-jobs-list {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.child-job-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    margin-bottom: 0.3rem;
+    background-color: var(--page-bg);
+    border-radius: var(--border-radius);
+    font-size: 0.75rem;
+}
+
+.child-job-item:last-child {
+    margin-bottom: 0;
+}
+
+.child-job-url {
+    flex: 1;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.child-job-depth {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Scrollbar styling for child jobs list */
+.child-jobs-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.child-jobs-list::-webkit-scrollbar-track {
+    background: var(--page-bg);
+}
+
+.child-jobs-list::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.child-jobs-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
 }
 
 /* Loading indicator for expanding parents */

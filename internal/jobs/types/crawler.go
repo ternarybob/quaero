@@ -102,7 +102,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 						c.logger.Warn().Err(saveErr).Msg("Failed to update job status to running")
 					} else {
 						// Publish EventJobStarted event
-						startedEvent := interfaces.Event{
+                        startedEvent := interfaces.Event{
 							Type: interfaces.EventJobStarted,
 							Payload: map[string]interface{}{
 								"job_id":      msg.ParentID,
@@ -111,7 +111,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 								"entity_type": entityType,
 								"url":         msg.URL,
 								"depth":       msg.Depth,
-								"timestamp":   time.Now(),
+                                "timestamp":   time.Now().Format(time.RFC3339),
 							},
 						}
 						if err := c.deps.EventService.Publish(ctx, startedEvent); err != nil {
@@ -193,7 +193,40 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	scraper := crawler.NewHTMLScraper(mergedConfig, c.logger, httpClient, cookies)
 	defer scraper.Close()
 
-	// Scrape the URL (handles JavaScript rendering, HTML parsing, markdown conversion)
+    // Publish child-level started event for this URL processing
+    if c.deps.EventService != nil {
+        // Try to enrich with current progress stats if available
+        var childCount, completedChildren, failedChildren int
+        if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+            if job, ok := jobInterface.(*models.CrawlJob); ok {
+                childCount = job.Progress.TotalURLs
+                completedChildren = job.Progress.CompletedURLs
+                failedChildren = job.Progress.FailedURLs
+            }
+        }
+        startedChild := interfaces.Event{
+            Type: interfaces.EventJobStarted,
+            Payload: map[string]interface{}{
+                "job_id":            msg.ID,
+                "child_job_id":      msg.ID,
+                "parent_job_id":     msg.ParentID,
+                "status":            "running",
+                "source_type":       sourceType,
+                "entity_type":       entityType,
+                "url":               msg.URL,
+                "depth":             msg.Depth,
+                "child_count":       childCount,
+                "completed_children": completedChildren,
+                "failed_children":    failedChildren,
+                "timestamp":         time.Now().Format(time.RFC3339),
+            },
+        }
+        if err := c.deps.EventService.Publish(ctx, startedChild); err != nil {
+            c.logger.Warn().Err(err).Msg("Failed to publish child job started event")
+        }
+    }
+
+    // Scrape the URL (handles JavaScript rendering, HTML parsing, markdown conversion)
 	scrapeResult, err := scraper.ScrapeURL(ctx, msg.URL)
 	if err != nil {
 		c.logger.Error().
@@ -201,6 +234,26 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Str("url", msg.URL).
 			Int("depth", msg.Depth).
 			Msg("Failed to scrape URL")
+
+        // Publish EventJobFailed for critical scraping failure (child-level)
+		if c.deps.EventService != nil {
+			failedEvent := interfaces.Event{
+				Type: interfaces.EventJobFailed,
+				Payload: map[string]interface{}{
+                    "job_id":      msg.ID,
+                    "child_job_id": msg.ID,
+                    "parent_job_id": msg.ParentID,
+					"status":      "failed",
+					"source_type": sourceType,
+					"entity_type": entityType,
+					"error":       err.Error(),
+                    "timestamp":   time.Now().Format(time.RFC3339),
+				},
+			}
+			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
+				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
+			}
+		}
 
 		// Update parent job progress even on failure
 		// Update heartbeat to track last activity
@@ -268,6 +321,26 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
 					c.logger.Warn().Err(saveErr).Msg("Failed to persist progress after non-success status")
 				}
+			}
+		}
+
+        // Publish EventJobFailed for non-success HTTP status (child-level)
+		if c.deps.EventService != nil {
+			failedEvent := interfaces.Event{
+				Type: interfaces.EventJobFailed,
+				Payload: map[string]interface{}{
+                    "job_id":       msg.ID,
+                    "child_job_id": msg.ID,
+                    "parent_job_id": msg.ParentID,
+					"status":      "failed",
+					"source_type": sourceType,
+					"entity_type": entityType,
+                    "error":       fmt.Sprintf("HTTP %d: %s", scrapeResult.StatusCode, scrapeResult.Error),
+                    "timestamp":   time.Now().Format(time.RFC3339),
+				},
+			}
+			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
+				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
 			}
 		}
 
@@ -452,16 +525,16 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			enqueuedCount++
 
 			// Publish job spawn event for real-time UI updates
-			if c.deps.EventService != nil {
+    if c.deps.EventService != nil {
 				spawnEvent := interfaces.Event{
 					Type: interfaces.EventJobSpawn,
 					Payload: map[string]interface{}{
-						"parent_job_id": msg.ParentID,
-						"child_job_id":  childMsg.ID,
-						"job_type":      "crawler_url",
-						"url":           childURL,
-						"depth":         msg.Depth + 1,
-						"timestamp":     time.Now(),
+                "parent_job_id": msg.ParentID,
+                "child_job_id":  childMsg.ID,
+                "job_type":      "crawler_url",
+                "url":           childURL,
+                "depth":         msg.Depth + 1,
+                "timestamp":     time.Now().Format(time.RFC3339),
 					},
 				}
 				c.deps.EventService.Publish(ctx, spawnEvent)
@@ -540,6 +613,30 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 					fmt.Sprintf("Progress: %d/%d URLs completed (%.1f%%)",
 						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.Percentage)); err != nil {
 					c.logger.Warn().Err(err).Msg("Failed to log progress event")
+				}
+			}
+
+			// Publish child-level completion event for this processed URL
+			if c.deps.EventService != nil {
+				completedChild := interfaces.Event{
+					Type: interfaces.EventJobCompleted,
+					Payload: map[string]interface{}{
+						"job_id":             msg.ID,
+						"child_job_id":       msg.ID,
+						"parent_job_id":      msg.ParentID,
+						"status":             "completed",
+						"source_type":        sourceType,
+						"entity_type":        entityType,
+						"url":                msg.URL,
+						"depth":              msg.Depth,
+						"child_count":        job.Progress.TotalURLs,
+						"completed_children": job.Progress.CompletedURLs,
+						"failed_children":    job.Progress.FailedURLs,
+						"timestamp":          time.Now().Format(time.RFC3339),
+					},
+				}
+				if err := c.deps.EventService.Publish(ctx, completedChild); err != nil {
+					c.logger.Warn().Err(err).Msg("Failed to publish child job completed event")
 				}
 			}
 		} else {
