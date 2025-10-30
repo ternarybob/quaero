@@ -129,15 +129,70 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		return nil, fmt.Errorf("invalid job definition: %w", err)
 	}
 
-	// Log execution start
+	// Log execution start with distinction between workflow and task jobs
 	e.logger.Info().
 		Str("job_id", definition.ID).
 		Str("job_name", definition.Name).
 		Str("job_type", string(definition.Type)).
 		Int("step_count", len(definition.Steps)).
-		Msg("Starting job execution")
+		Msg("Executing job definition workflow")
 
 	startTime := time.Now()
+
+	// Execute pre-jobs before main steps
+	if len(definition.PreJobs) > 0 {
+		e.logger.Info().
+			Str("job_id", definition.ID).
+			Int("pre_job_count", len(definition.PreJobs)).
+			Msg("Starting pre-job execution")
+
+		for _, preJobID := range definition.PreJobs {
+			// Log pre-job execution
+			e.logger.Info().
+				Str("job_id", definition.ID).
+				Str("pre_job_id", preJobID).
+				Msg("Executing pre-job")
+
+			// Fetch pre-job definition from storage
+			preJobDef, err := e.jobDefStorage.GetJobDefinition(ctx, preJobID)
+			if err != nil {
+				errMsg := fmt.Errorf("failed to fetch pre-job %s: %w", preJobID, err)
+				e.logger.Error().
+					Err(err).
+					Str("job_id", definition.ID).
+					Str("pre_job_id", preJobID).
+					Msg("Failed to fetch pre-job definition")
+
+				// Check error strategy
+				if definition.Steps[0].OnError == models.ErrorStrategyFail {
+					return nil, errMsg
+				}
+				continue
+			}
+
+			// Execute the pre-job definition
+			_, err = e.Execute(ctx, preJobDef, statusCallback, postJobCallback)
+			if err != nil {
+				errMsg := fmt.Errorf("failed to execute pre-job %s: %w", preJobID, err)
+				e.logger.Error().
+					Err(err).
+					Str("job_id", definition.ID).
+					Str("pre_job_id", preJobID).
+					Msg("Pre-job execution failed")
+
+				// Check error strategy from the first step of current job
+				if len(definition.Steps) > 0 && (definition.Steps[0].OnError == models.ErrorStrategyFail || definition.Steps[0].OnError == "") {
+					return nil, errMsg
+				}
+				continue
+			}
+
+			e.logger.Info().
+				Str("job_id", definition.ID).
+				Str("pre_job_id", preJobID).
+				Msg("Pre-job executed successfully")
+		}
+	}
 
 	// Fetch sources
 	fetchedSources, err := e.fetchSources(ctx, definition.Sources)

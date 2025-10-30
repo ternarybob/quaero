@@ -195,6 +195,16 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	}
 
 	s.logger.Debug().Str("job_id", crawlJob.ID).Str("status", string(crawlJob.Status)).Msg("Job saved")
+
+	// Log when saving a job with an error field for debugging
+	if crawlJob.Error != "" {
+		s.logger.Info().
+			Str("job_id", crawlJob.ID).
+			Str("status", string(crawlJob.Status)).
+			Str("error", crawlJob.Error).
+			Msg("Job saved with error")
+	}
+
 	return nil
 }
 
@@ -254,19 +264,19 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
 			}
 		}
-		        if opts.EntityType != "" {
-		            query += " AND entity_type = ?"
-		            args = append(args, opts.EntityType)
-		        }
-		
-		        if opts.ParentID != "" {
-		            if opts.ParentID == "root" {
-		                query += " AND (parent_id IS NULL OR parent_id = '')"
-		            } else {
-		                query += " AND parent_id = ?"
-		                args = append(args, opts.ParentID)
-		            }
-		        }
+		if opts.EntityType != "" {
+			query += " AND entity_type = ?"
+			args = append(args, opts.EntityType)
+		}
+
+		if opts.ParentID != "" {
+			if opts.ParentID == "root" {
+				query += " AND (parent_id IS NULL OR parent_id = '')"
+			} else {
+				query += " AND parent_id = ?"
+				args = append(args, opts.ParentID)
+			}
+		}
 
 		// Order by
 		orderBy := "created_at"

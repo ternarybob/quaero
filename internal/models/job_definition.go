@@ -91,6 +91,7 @@ type JobDefinition struct {
 	Enabled     bool                   `json:"enabled"`     // Whether the job is enabled
 	AutoStart   bool                   `json:"auto_start"`  // Whether to auto-start on scheduler initialization
 	Config      map[string]interface{} `json:"config"`      // Job-specific configuration
+	PreJobs     []string               `json:"pre_jobs"`    // Array of job definition IDs to execute before main steps (validation, pre-checks)
 	PostJobs    []string               `json:"post_jobs"`   // Array of job IDs to execute after this job completes
 	CreatedAt   time.Time              `json:"created_at"`  // Creation timestamp
 	UpdatedAt   time.Time              `json:"updated_at"`  // Last update timestamp
@@ -139,6 +140,16 @@ func (j *JobDefinition) Validate() error {
 	if j.Timeout != "" {
 		if _, err := time.ParseDuration(j.Timeout); err != nil {
 			return fmt.Errorf("invalid timeout duration '%s': %w", j.Timeout, err)
+		}
+	}
+
+	// Validate PreJobs array
+	for _, preJobID := range j.PreJobs {
+		if preJobID == "" {
+			return errors.New("pre_job ID cannot be empty string")
+		}
+		if preJobID == j.ID {
+			return errors.New("pre_jobs cannot contain the job's own ID (circular dependency)")
 		}
 	}
 
@@ -238,6 +249,23 @@ func (j *JobDefinition) MarshalPostJobs() (string, error) {
 func (j *JobDefinition) UnmarshalPostJobs(data string) error {
 	if err := json.Unmarshal([]byte(data), &j.PostJobs); err != nil {
 		return fmt.Errorf("failed to unmarshal post_jobs: %w", err)
+	}
+	return nil
+}
+
+// MarshalPreJobs serializes the pre_jobs array to JSON string for database storage
+func (j *JobDefinition) MarshalPreJobs() (string, error) {
+	data, err := json.Marshal(j.PreJobs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal pre_jobs: %w", err)
+	}
+	return string(data), nil
+}
+
+// UnmarshalPreJobs deserializes the pre_jobs JSON string from database
+func (j *JobDefinition) UnmarshalPreJobs(data string) error {
+	if err := json.Unmarshal([]byte(data), &j.PreJobs); err != nil {
+		return fmt.Errorf("failed to unmarshal pre_jobs: %w", err)
 	}
 	return nil
 }

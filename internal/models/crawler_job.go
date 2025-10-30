@@ -48,7 +48,11 @@ type CrawlJob struct {
 	StartedAt            time.Time     `json:"started_at,omitempty"`
 	CompletedAt          time.Time     `json:"completed_at,omitempty"`
 	LastHeartbeat        time.Time     `json:"last_heartbeat,omitempty"` // Timestamp of last URL processed (for idle detection)
-	Error                string        `json:"error,omitempty"`
+	// Error contains a concise, user-friendly description of why the job failed.
+	// Format: "Category: Brief description" (e.g., "HTTP 404: Not Found", "Timeout: No activity for 10m").
+	// Only populated when job status is 'failed' or when individual operations fail.
+	// This field is displayed in the UI and should be actionable for users.
+	Error string `json:"error,omitempty"`
 	// ResultCount is a snapshot of Progress.CompletedURLs at job completion
 	// Synced when job reaches terminal status (completed/failed/cancelled)
 	// Used for historical tracking and validation

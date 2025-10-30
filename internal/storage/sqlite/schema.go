@@ -365,6 +365,11 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 17: Add pre_jobs column to job_definitions table
+	if err := s.migrateAddPreJobsColumn(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1602,5 +1607,50 @@ func (s *SQLiteDB) migrateEnableForeignKeysAndAddParentConstraint() error {
 	}
 
 	s.logger.Info().Msg("Migration: Foreign key constraint on parent_id added successfully")
+	return nil
+}
+
+// migrateAddPreJobsColumn adds pre_jobs column to job_definitions table
+func (s *SQLiteDB) migrateAddPreJobsColumn() error {
+	columnsQuery := `PRAGMA table_info(job_definitions)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasPreJobs := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "pre_jobs" {
+			hasPreJobs = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasPreJobs {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding pre_jobs column to job_definitions")
+
+	// Add the pre_jobs column
+	if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN pre_jobs TEXT`); err != nil {
+		return err
+	}
+
+	// Backfill existing rows with empty JSON array
+	s.logger.Info().Msg("Backfilling existing rows with empty pre_jobs array")
+	if _, err := s.db.Exec(`UPDATE job_definitions SET pre_jobs = '[]' WHERE pre_jobs IS NULL`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: pre_jobs column added successfully")
 	return nil
 }

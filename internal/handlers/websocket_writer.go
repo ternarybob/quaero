@@ -39,7 +39,7 @@ func NewWebSocketWriter(handler *WebSocketHandler, config models.WriterConfigura
 			"WebSocket client disconnected",
 			"HTTP request",
 			"HTTP response",
-			"Publishing event",  // Fixed case to match actual log message
+			"Publishing event", // Fixed case to match actual log message
 			"DEBUG: Memory writer entry",
 		}
 	} else {
@@ -54,7 +54,7 @@ func NewWebSocketWriter(handler *WebSocketHandler, config models.WriterConfigura
 				"WebSocket client disconnected",
 				"HTTP request",
 				"HTTP response",
-				"Publishing event",  // Fixed case to match actual log message
+				"Publishing event", // Fixed case to match actual log message
 				"DEBUG: Memory writer entry",
 			}
 		}

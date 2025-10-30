@@ -194,8 +194,8 @@ type SearchConfig struct {
 
 // WebSocketConfig contains configuration for WebSocket log streaming
 type WebSocketConfig struct {
-	MinLevel        string            `toml:"min_level"`        // Minimum log level to broadcast ("debug", "info", "warn", "error")
-	ExcludePatterns []string          `toml:"exclude_patterns"` // Log message patterns to exclude from broadcasting
+	MinLevel        string   `toml:"min_level"`        // Minimum log level to broadcast ("debug", "info", "warn", "error")
+	ExcludePatterns []string `toml:"exclude_patterns"` // Log message patterns to exclude from broadcasting
 	// Whitelist of event types to broadcast via WebSocket. Empty list allows all events.
 	// Example: ["job_created", "job_completed", "crawl_progress"]
 	AllowedEvents []string `toml:"allowed_events"`
@@ -329,7 +329,7 @@ func NewDefaultConfig() *Config {
 			AllowedEvents: []string{},
 			// Throttle high-frequency events to prevent WebSocket flooding during large crawls
 			ThrottleIntervals: map[string]string{
-				"crawl_progress": "1s",   // Max 1 crawl progress update per second per job
+				"crawl_progress": "1s",    // Max 1 crawl progress update per second per job
 				"job_spawn":      "500ms", // Max 2 job spawn events per second
 			},
 		},

@@ -183,7 +183,8 @@
                                             'bg-gray': selectedJob && selectedJob.id === item.job.id,
                                             'job-card-parent': item.type === 'parent',
                                             'job-card-child': item.type === 'child',
-                                            'job-card-flat': item.type === 'flat'
+                                            'job-card-flat': item.type === 'flat',
+                                            'job-card-workflow': !isValidSourceType(item.job.source_type)
                                         }" style="margin-bottom: 0.8rem;">
                                 <div class="card-body">
                                     <div class="columns">
@@ -203,16 +204,31 @@
                                                         <i class="fas fa-chevron-right"></i>
                                                     </button>
                                                 </template>
-                                                <i class="fas" :class="item.type === 'child' ? 'fa-file job-type-icon child-icon' : 'fa-folder job-type-icon parent-icon'"></i>
+                                                <i class="fas" :class="{
+                                                    'fa-file job-type-icon child-icon': item.type === 'child',
+                                                    'fa-project-diagram job-type-icon workflow-icon': !isValidSourceType(item.job.source_type),
+                                                    'fa-folder job-type-icon parent-icon': item.type === 'parent' && isValidSourceType(item.job.source_type)
+                                                }"></i>
                                                 Job ID: <span x-text="item.job.id ? item.job.id.substring(0, 8) : 'N/A'"></span>
                                                 <template x-if="item.type === 'parent'">
                                                     <span class="parent-job-badge">PARENT</span>
+                                                </template>
+                                                <!-- Warning indicator for parent jobs with invalid source types -->
+                                                <template x-if="item.type === 'parent' && !isValidSourceType(item.job.source_type)">
+                                                    <span class="label label-warning" style="margin-left: 0.5rem; font-size: 0.7rem;">ORCHESTRATION</span>
                                                 </template>
                                                 <template x-if="item.type === 'parent' && item.job.entity_type === 'job_definition'">
                                                     <span class="label label-info" style="margin-left: 0.5rem; font-size: 0.7rem;">JOB DEFINITION</span>
                                                 </template>
                                             </div>
-                                            <div class="card-subtitle text-gray" x-text="'Source: ' + (item.job.source_type || 'N/A')"></div>
+                                            <div class="card-subtitle text-gray">
+                                                <span x-text="getSourceTypeDisplay(item.job.source_type)"></span>
+                                                <!-- Warning badge for workflow jobs -->
+                                                <template x-if="!isValidSourceType(item.job.source_type)">
+                                                    <span class="label label-warning" style="margin-left: 0.5rem; font-size: 0.7rem;" 
+                                                          title="Workflow orchestration job vs source crawling job">WORKFLOW</span>
+                                                </template>
+                                            </div>
 
                                             <!-- Metadata -->
                                             <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
@@ -239,7 +255,15 @@
                                                     </a>
                                                 </div>
                                             </div>
-                                            
+
+                                            <!-- Failure Reason Display -->
+                                            <template x-if="item.job.status === 'failed' && item.job.error">
+                                                <div class="job-error-alert" style="margin-top: 0.8rem; padding: 0.75rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
+                                                    <i class="fas fa-exclamation-circle" style="color: var(--color-danger); margin-right: 0.5rem;"></i>
+                                                    <strong>Failure Reason:</strong> <span x-text="item.job.error"></span>
+                                                </div>
+                                            </template>
+
                                             <!-- Parent progress display -->
                                             <template x-if="item.type === 'parent'">
                                                 <div class="parent-progress-container">
@@ -282,6 +306,9 @@
 
                                         <!-- Right side: Actions -->
                                         <div class="column col-2 text-right" style="flex-shrink: 0;" @click.stop>
+                                            <button class="btn btn-sm" @click="openJobLogsModal(item.job.id)" title="View Logs">
+                                                <i class="fa-solid fa-file-lines"></i>
+                                            </button>
                                             <template x-if="item.job.status !== 'running'">
                                                 <button class="btn btn-sm" @click="window.rerunJob(item.job.id)" title="Copy Job and Add to Queue">
                                                     <i class="fa-solid fa-rotate-right"></i>
@@ -402,11 +429,83 @@
                             <i class="form-icon"></i> Repos
                         </label>
                     </div>
+
+                    <!-- Job Type Filters -->
+                    <div class="form-group">
+                        <label class="form-label"><strong>Job Types</strong></label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-job-type" value="workflow" checked>
+                            <i class="form-icon"></i> Show Workflow Jobs
+                        </label>
+                        <label class="form-checkbox">
+                            <input type="checkbox" class="filter-job-type" value="task" checked>
+                            <i class="form-icon"></i> Show Task Jobs
+                        </label>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn" onclick="clearAllFilters()">Clear All</button>
                 <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Logs Modal -->
+    <div id="job-logs-modal" class="modal" x-data="jobLogsModal" x-init="init()">
+        <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
+        <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 900px;">
+            <div class="modal-header">
+                <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
+                <div class="modal-title h5">Job Logs - <span x-text="currentJobId ? currentJobId.substring(0, 8) : 'N/A'"></span></div>
+            </div>
+            <div class="modal-body">
+                <div class="content">
+                    <!-- Log Controls -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                        <select class="form-select select-sm log-level-filter" x-model="selectedLogLevel" @change="loadLogs()" title="Filter by log level">
+                            <option value="all">All Levels</option>
+                            <option value="error">Error</option>
+                            <option value="warning">Warning</option>
+                            <option value="info">Info</option>
+                            <option value="debug">Debug</option>
+                        </select>
+                        <button class="btn btn-sm" :class="selectedLogLevel === 'error' ? 'btn-error' : ''" @click="toggleErrorsOnly()" title="Toggle error logs only">
+                            <i class="fas fa-exclamation-triangle"></i> Errors Only
+                        </button>
+                        <button class="btn btn-sm" @click="loadLogs()" title="Refresh Logs">
+                            <i class="fa-solid fa-rotate-right"></i>
+                        </button>
+                    </div>
+
+                    <!-- Logs Terminal -->
+                    <template x-if="loading">
+                        <div class="text-center" style="padding: 2rem;">
+                            <div class="loading loading-lg"></div>
+                            <p class="text-secondary" style="margin-top: 1rem;">Loading logs...</p>
+                        </div>
+                    </template>
+
+                    <template x-if="!loading">
+                        <div class="terminal" style="max-height: 500px; overflow-y: auto;">
+                            <template x-if="logs.length === 0">
+                                <div style="text-align: center; color: var(--text-secondary); padding: 2rem;">
+                                    No logs available for this job
+                                </div>
+                            </template>
+                            <template x-for="log in logs" :key="log.timestamp + log.message">
+                                <div class="terminal-line">
+                                    <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
+                                    <span :class="log.levelClass" x-text="`[${log.level.toUpperCase()}]`"></span>
+                                    <span x-text="log.message"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" @click="closeModal()">Close</button>
             </div>
         </div>
     </div>
@@ -434,14 +533,16 @@
         const defaultFilters = {
             status: new Set(['pending', 'running', 'completed', 'failed', 'cancelled']),
             source: new Set(),
-            entity: new Set()
+            entity: new Set(),
+            jobType: new Set(['workflow', 'task'])
         };
 
         // Filter state - initialize immediately with defaults to prevent undefined errors
         let activeFilters = {
             status: new Set(defaultFilters.status),
             source: new Set(defaultFilters.source),
-            entity: new Set(defaultFilters.entity)
+            entity: new Set(defaultFilters.entity),
+            jobType: new Set(defaultFilters.jobType)
         };
 
         // Initialize filters immediately on script load
@@ -456,13 +557,15 @@
                     activeFilters.status = new Set(parsed.status || []);
                     activeFilters.source = new Set(parsed.source || []);
                     activeFilters.entity = new Set(parsed.entity || []);
+                    activeFilters.jobType = new Set(parsed.jobType || []);
 
                     // If no filters were saved, use defaults
-                    if (activeFilters.status.size === 0 && activeFilters.source.size === 0 && activeFilters.entity.size === 0) {
+                    if (activeFilters.status.size === 0 && activeFilters.source.size === 0 && activeFilters.entity.size === 0 && activeFilters.jobType.size === 0) {
                         activeFilters = {
                             status: new Set(defaultFilters.status),
                             source: new Set(defaultFilters.source),
-                            entity: new Set(defaultFilters.entity)
+                            entity: new Set(defaultFilters.entity),
+                            jobType: new Set(defaultFilters.jobType)
                         };
                     }
                 } else {
@@ -470,7 +573,8 @@
                     activeFilters = {
                         status: new Set(defaultFilters.status),
                         source: new Set(defaultFilters.source),
-                        entity: new Set(defaultFilters.entity)
+                        entity: new Set(defaultFilters.entity),
+                        jobType: new Set(defaultFilters.jobType)
                     };
                 }
             } catch (error) {
@@ -479,7 +583,8 @@
                 activeFilters = {
                     status: new Set(defaultFilters.status),
                     source: new Set(defaultFilters.source),
-                    entity: new Set(defaultFilters.entity)
+                    entity: new Set(defaultFilters.entity),
+                    jobType: new Set(defaultFilters.jobType)
                 };
             }
         }
@@ -490,7 +595,8 @@
                 const toSave = {
                     status: Array.from(activeFilters.status),
                     source: Array.from(activeFilters.source),
-                    entity: Array.from(activeFilters.entity)
+                    entity: Array.from(activeFilters.entity),
+                    jobType: Array.from(activeFilters.jobType)
                 };
                 localStorage.setItem('quaero-job-filters', JSON.stringify(toSave));
             } catch (error) {
@@ -544,8 +650,43 @@
             window.dispatchEvent(new CustomEvent('jobList:updateJob', { detail: update }));
         }
 
+        // Get user-friendly display name for source type
+        function getSourceTypeDisplay(sourceType) {
+            const displayName = {
+                'jira': 'Jira',
+                'confluence': 'Confluence',
+                'github': 'GitHub'
+            };
+            
+            // If it's a valid source type, return the display name
+            if (sourceType && displayName[sourceType]) {
+                return 'Source: ' + displayName[sourceType];
+            }
+            
+            // For invalid/empty source types, return "Unknown Source" with a warning indicator
+            return 'Source: Unknown (' + (sourceType || 'N/A') + ')';
+        }
+
+        // Check if source type is valid
+        function isValidSourceType(sourceType) {
+            const validSourceTypes = ['jira', 'confluence', 'github'];
+            return sourceType && validSourceTypes.includes(sourceType);
+        }
+
         // Check if job matches active filters
         function matchesActiveFilters(job) {
+            // Check if the job is a workflow job (has invalid source type) or a task job (has valid source type)
+            const isWorkflowJob = !isValidSourceType(job.source_type);
+            const isTaskJob = isValidSourceType(job.source_type);
+
+            // Check job type filter
+            if (isWorkflowJob && !activeFilters.jobType.has('workflow')) {
+                return false;
+            }
+            if (isTaskJob && !activeFilters.jobType.has('task')) {
+                return false;
+            }
+
             // Check status filter
             if (activeFilters.status.size > 0 && !activeFilters.status.has(job.status)) {
                 return false;
@@ -578,6 +719,9 @@
             document.querySelectorAll('.filter-entity').forEach(checkbox => {
                 checkbox.checked = activeFilters.entity.has(checkbox.value);
             });
+            document.querySelectorAll('.filter-job-type').forEach(checkbox => {
+                checkbox.checked = activeFilters.jobType.has(checkbox.value);
+            });
 
             modal.classList.add('active');
             document.body.classList.add('modal-open');
@@ -608,6 +752,11 @@
                 activeFilters.entity.add(cb.value);
             });
 
+            activeFilters.jobType.clear();
+            document.querySelectorAll('.filter-job-type:checked').forEach(cb => {
+                activeFilters.jobType.add(cb.value);
+            });
+
             // Save filters to localStorage
             saveFiltersToStorage();
 
@@ -623,7 +772,7 @@
         // Clear all filters
         function clearAllFilters() {
             // Uncheck all checkboxes in modal
-            document.querySelectorAll('.filter-status, .filter-source, .filter-entity').forEach(cb => {
+            document.querySelectorAll('.filter-status, .filter-source, .filter-entity, .filter-job-type').forEach(cb => {
                 cb.checked = false;
             });
         }
@@ -667,6 +816,16 @@
                     <span class="label label-primary">
                         ${entity.charAt(0).toUpperCase() + entity.slice(1)}
                         <a href="#" onclick="event.preventDefault(); removeFilter('entity', '${entity}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
+                    </span>
+                `;
+            });
+
+            // Job type chips
+            activeFilters.jobType.forEach(jobType => {
+                html += `
+                    <span class="label label-info">
+                        ${jobType === 'workflow' ? 'Workflow Jobs' : 'Task Jobs'}
+                        <a href="#" onclick="event.preventDefault(); removeFilter('jobType', '${jobType}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
                     </span>
                 `;
             });
@@ -1895,11 +2054,125 @@
                     return this.getStatusBadgeClass(type, status);
                 }
             }));
+
+            // Register jobLogsModal component
+            Alpine.data('jobLogsModal', () => ({
+                currentJobId: null,
+                logs: [],
+                loading: false,
+                selectedLogLevel: 'all',
+
+                init() {
+                    // Listen for external modal open requests
+                    window.addEventListener('jobLogsModal:open', (e) => {
+                        this.openModal(e.detail.jobId);
+                    });
+                },
+
+                async openModal(jobId) {
+                    this.currentJobId = jobId;
+                    this.selectedLogLevel = 'all';
+                    const modal = document.getElementById('job-logs-modal');
+                    modal.classList.add('active');
+                    document.body.classList.add('modal-open');
+                    await this.loadLogs();
+                },
+
+                closeModal() {
+                    const modal = document.getElementById('job-logs-modal');
+                    modal.classList.remove('active');
+                    document.body.classList.remove('modal-open');
+                    this.currentJobId = null;
+                    this.logs = [];
+                },
+
+                async loadLogs() {
+                    if (!this.currentJobId) return;
+
+                    this.loading = true;
+                    try {
+                        // Build query string with level parameter for server-side filtering
+                        const qs = this.selectedLogLevel === 'all' ? '' : ('?level=' + encodeURIComponent(this.selectedLogLevel));
+                        const response = await fetch(`/api/jobs/${this.currentJobId}/logs${qs}`);
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch job logs');
+                        }
+
+                        const data = await response.json();
+                        const rawLogs = data.logs || [];
+
+                        // Parse logs into flat array
+                        this.logs = rawLogs.map(log => this._parseLogEntry(log));
+                    } catch (error) {
+                        console.error('Error loading job logs:', error);
+                        window.showNotification('Failed to load logs: ' + error.message, 'error');
+                        this.logs = [];
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                _parseLogEntry(logData) {
+                    const timestamp = logData.timestamp || logData.time || new Date().toISOString();
+                    const level = (logData.level || 'INFO').toUpperCase();
+                    const message = logData.message || logData.msg || '';
+
+                    return {
+                        timestamp: this._formatLogTime(timestamp),
+                        level: level,
+                        levelClass: this._getLevelClass(level),
+                        message: message
+                    };
+                },
+
+                _formatLogTime(timestamp) {
+                    // If timestamp is already formatted as HH:MM:SS, return as-is
+                    if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
+                        return timestamp;
+                    }
+
+                    // Otherwise try to parse as date
+                    const date = new Date(timestamp);
+                    if (isNaN(date.getTime())) {
+                        return timestamp; // Return original if can't parse
+                    }
+
+                    return date.toLocaleTimeString('en-US', {
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                },
+
+                _getLevelClass(level) {
+                    const levelMap = {
+                        'ERROR': 'terminal-error',
+                        'WARN': 'terminal-warning',
+                        'WARNING': 'terminal-warning',
+                        'INFO': 'terminal-info',
+                        'DEBUG': 'terminal-time'
+                    };
+                    return levelMap[level] || 'terminal-info';
+                },
+
+                toggleErrorsOnly() {
+                    this.selectedLogLevel = this.selectedLogLevel === 'error' ? 'all' : 'error';
+                    this.loadLogs();
+                }
+            }));
         });
 
         // Window helper function - dispatches event to Alpine component
         function deleteSelectedJobs() {
             window.dispatchEvent(new CustomEvent('jobList:deleteSelected'));
+        }
+
+        // Global function to open job logs modal
+        function openJobLogsModal(jobId) {
+            window.dispatchEvent(new CustomEvent('jobLogsModal:open', {
+                detail: { jobId: jobId }
+            }));
         }
 
         // Initialize highlight.js - only for job detail

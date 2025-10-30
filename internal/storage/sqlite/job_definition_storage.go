@@ -76,6 +76,12 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 		return err
 	}
 
+	// Serialize PreJobs array to JSON using model helper
+	preJobsJSON, err := jobDef.MarshalPreJobs()
+	if err != nil {
+		return err
+	}
+
 	// Convert bools to integers
 	enabled := 0
 	if jobDef.Enabled {
@@ -94,8 +100,8 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	query := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -107,6 +113,7 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 			enabled = excluded.enabled,
 			auto_start = excluded.auto_start,
 			config = excluded.config,
+			pre_jobs = excluded.pre_jobs,
 			post_jobs = excluded.post_jobs,
 			updated_at = excluded.updated_at
 	`
@@ -114,7 +121,7 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.ID, jobDef.Name, string(jobDef.Type), jobDef.Description,
 		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, postJobsJSON, createdAt, updatedAt,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, createdAt, updatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save job definition: %w", err)
@@ -176,6 +183,12 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 		return err
 	}
 
+	// Serialize PreJobs array to JSON using model helper
+	preJobsJSON, err := jobDef.MarshalPreJobs()
+	if err != nil {
+		return err
+	}
+
 	// Convert bools to integers
 	enabled := 0
 	if jobDef.Enabled {
@@ -202,6 +215,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 			enabled = ?,
 			auto_start = ?,
 			config = ?,
+			pre_jobs = ?,
 			post_jobs = ?,
 			updated_at = ?
 		WHERE id = ?
@@ -210,7 +224,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.Name, string(jobDef.Type), jobDef.Description,
 		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, postJobsJSON, updatedAt, jobDef.ID,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, updatedAt, jobDef.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update job definition: %w", err)
@@ -228,7 +242,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
 		FROM job_definitions
 		WHERE id = ?
 	`
@@ -249,7 +263,7 @@ func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) 
 func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
 		FROM job_definitions
 		WHERE 1=1
 	`
@@ -314,7 +328,7 @@ func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *int
 func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
 		FROM job_definitions
 		WHERE type = ?
 		ORDER BY created_at DESC
@@ -333,7 +347,7 @@ func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobT
 func (s *JobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
 		FROM job_definitions
 		WHERE enabled = 1
 		ORDER BY created_at DESC
@@ -434,6 +448,11 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
+	preJobsJSON, err := dbMaintenanceJob.MarshalPreJobs()
+	if err != nil {
+		return fmt.Errorf("failed to marshal pre_jobs: %w", err)
+	}
+
 	postJobsJSON, err := dbMaintenanceJob.MarshalPostJobs()
 	if err != nil {
 		return fmt.Errorf("failed to marshal post_jobs: %w", err)
@@ -457,15 +476,15 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	query := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	result, err := s.db.DB().ExecContext(ctx, query,
 		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), dbMaintenanceJob.Description,
 		sourcesJSON, stepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
-		enabled, autoStart, configJSON, postJobsJSON, createdAt, updatedAt,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, createdAt, updatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -531,6 +550,11 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 		return fmt.Errorf("failed to marshal corpus summary config: %w", err)
 	}
 
+	corpusPreJobsJSON, err := corpusSummaryJob.MarshalPreJobs()
+	if err != nil {
+		return fmt.Errorf("failed to marshal corpus summary pre_jobs: %w", err)
+	}
+
 	corpusPostJobsJSON, err := corpusSummaryJob.MarshalPostJobs()
 	if err != nil {
 		return fmt.Errorf("failed to marshal corpus summary post_jobs: %w", err)
@@ -554,15 +578,15 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	corpusQuery := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	corpusResult, err := s.db.DB().ExecContext(ctx, corpusQuery,
 		corpusSummaryJob.ID, corpusSummaryJob.Name, string(corpusSummaryJob.Type), corpusSummaryJob.Description,
 		corpusSourcesJSON, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
-		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPostJobsJSON, corpusCreatedAt, corpusUpdatedAt,
+		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusCreatedAt, corpusUpdatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -593,14 +617,14 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
-		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, postJobsJSON string
-		enabled, autoStart                                                                                  int
-		createdAt, updatedAt                                                                                int64
+		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON string
+		enabled, autoStart                                                                                               int
+		createdAt, updatedAt                                                                                             int64
 	)
 
 	err := row.Scan(
 		&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
-		&enabled, &autoStart, &configJSON, &postJobsJSON, &createdAt, &updatedAt,
+		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -647,6 +671,15 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 		jobDef.Config = make(map[string]interface{})
 	}
 
+	// Deserialize PreJobs JSON using model helper
+	if err := jobDef.UnmarshalPreJobs(preJobsJSON); err != nil {
+		s.logger.Warn().
+			Str("job_def_id", id).
+			Err(err).
+			Msg("Failed to unmarshal pre_jobs JSON")
+		jobDef.PreJobs = []string{}
+	}
+
 	// Deserialize PostJobs JSON using model helper
 	if err := jobDef.UnmarshalPostJobs(postJobsJSON); err != nil {
 		s.logger.Warn().
@@ -665,14 +698,14 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 
 	for rows.Next() {
 		var (
-			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, postJobsJSON string
-			enabled, autoStart                                                                                  int
-			createdAt, updatedAt                                                                                int64
+			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON string
+			enabled, autoStart                                                                                               int
+			createdAt, updatedAt                                                                                             int64
 		)
 
 		err := rows.Scan(
 			&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
-			&enabled, &autoStart, &configJSON, &postJobsJSON, &createdAt, &updatedAt,
+			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			s.logger.Warn().
@@ -720,6 +753,15 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 				Err(err).
 				Msg("Failed to unmarshal config JSON")
 			jobDef.Config = make(map[string]interface{})
+		}
+
+		// Deserialize PreJobs JSON using model helper
+		if err := jobDef.UnmarshalPreJobs(preJobsJSON); err != nil {
+			s.logger.Warn().
+				Str("job_def_id", id).
+				Err(err).
+				Msg("Failed to unmarshal pre_jobs JSON")
+			jobDef.PreJobs = []string{}
 		}
 
 		// Deserialize PostJobs JSON using model helper

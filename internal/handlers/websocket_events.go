@@ -15,7 +15,7 @@ type EventSubscriber struct {
 	handler       *WebSocketHandler
 	eventService  interfaces.EventService
 	logger        arbor.ILogger
-	allowedEvents map[string]bool        // Whitelist of events to broadcast (empty = allow all)
+	allowedEvents map[string]bool          // Whitelist of events to broadcast (empty = allow all)
 	throttlers    map[string]*rate.Limiter // Rate limiters for high-frequency events
 	config        *common.WebSocketConfig
 }
@@ -90,42 +90,42 @@ func (s *EventSubscriber) SubscribeAll() {
 	// Subscribe to job completion events
 	s.eventService.Subscribe(interfaces.EventJobCompleted, s.handleJobCompleted)
 
-    // Subscribe to job failure events
+	// Subscribe to job failure events
 	s.eventService.Subscribe(interfaces.EventJobFailed, s.handleJobFailed)
 
 	// Subscribe to job cancellation events
 	s.eventService.Subscribe(interfaces.EventJobCancelled, s.handleJobCancelled)
 
-    // Subscribe to job spawn events
-    s.eventService.Subscribe(interfaces.EventJobSpawn, s.handleJobSpawn)
+	// Subscribe to job spawn events
+	s.eventService.Subscribe(interfaces.EventJobSpawn, s.handleJobSpawn)
 
-    s.logger.Info().Msg("EventSubscriber registered for all job lifecycle events (created, started, completed, failed, cancelled, spawn)")
+	s.logger.Info().Msg("EventSubscriber registered for all job lifecycle events (created, started, completed, failed, cancelled, spawn)")
 }
 
 // handleJobSpawn bridges EventJobSpawn to WebSocket job_spawn broadcast
 func (s *EventSubscriber) handleJobSpawn(ctx context.Context, event interfaces.Event) error {
-    // Check if event should be broadcast (filtering + throttling)
-    if !s.shouldBroadcastEvent("job_spawn") {
-        return nil
-    }
+	// Check if event should be broadcast (filtering + throttling)
+	if !s.shouldBroadcastEvent("job_spawn") {
+		return nil
+	}
 
-    payload, ok := event.Payload.(map[string]interface{})
-    if !ok {
-        s.logger.Warn().Msg("Invalid job spawn event payload type")
-        return nil
-    }
+	payload, ok := event.Payload.(map[string]interface{})
+	if !ok {
+		s.logger.Warn().Msg("Invalid job spawn event payload type")
+		return nil
+	}
 
-    spawn := JobSpawnUpdate{
-        ParentJobID: getStringWithFallback(payload, "parent_job_id", "parentJobId"),
-        ChildJobID:  getStringWithFallback(payload, "child_job_id", "childJobId"),
-        JobType:     getStringWithFallback(payload, "job_type", "jobType"),
-        URL:         getString(payload, "url"),
-        Depth:       getIntWithFallback(payload, "depth", "depth"),
-        Timestamp:   getTimestamp(payload),
-    }
+	spawn := JobSpawnUpdate{
+		ParentJobID: getStringWithFallback(payload, "parent_job_id", "parentJobId"),
+		ChildJobID:  getStringWithFallback(payload, "child_job_id", "childJobId"),
+		JobType:     getStringWithFallback(payload, "job_type", "jobType"),
+		URL:         getString(payload, "url"),
+		Depth:       getIntWithFallback(payload, "depth", "depth"),
+		Timestamp:   getTimestamp(payload),
+	}
 
-    s.handler.BroadcastJobSpawn(spawn)
-    return nil
+	s.handler.BroadcastJobSpawn(spawn)
+	return nil
 }
 
 // shouldBroadcastEvent checks if an event should be broadcast based on whitelist and throttling

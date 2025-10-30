@@ -108,6 +108,22 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 			Bool("follow_links_from_job", followLinksProvided).
 			Msg("Starting crawl for source")
 
+		// Validate source type before starting crawl job
+		// Check that source.Type is not empty and is one of: jira, confluence, github
+		validSourceTypes := map[string]bool{
+			models.SourceTypeJira:       true,
+			models.SourceTypeConfluence: true,
+			models.SourceTypeGithub:     true,
+		}
+		if !validSourceTypes[source.Type] {
+			deps.Logger.Error().Str("source_id", source.ID).Str("source_type", source.Type).Msg("Invalid source type - skipping source")
+			errMsg := fmt.Errorf("invalid source type '%s' for source %s: must be one of: jira, confluence, github", source.Type, source.ID)
+			if step.OnError == models.ErrorStrategyFail {
+				return errMsg
+			}
+			continue // Skip this source and continue with others
+		}
+
 		// Start crawl job using helper (function variable for testability)
 		// Note: Seed URLs removed - crawling based on source base_url and type
 		jobID, err := startCrawlJobFunc(
@@ -143,6 +159,14 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 			sourceName: source.Name,
 			sourceType: string(source.Type),
 		})
+
+		// Log the source type that was passed to ensure proper inheritance
+		deps.Logger.Info().
+			Str("job_id", jobID).
+			Str("source_type", string(source.Type)).
+			Str("source_id", source.ID).
+			Dur("duration", time.Since(startTime)).
+			Msg("Crawl job started with source type")
 
 		deps.Logger.Debug().
 			Str("action", "crawl").

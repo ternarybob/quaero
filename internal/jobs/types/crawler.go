@@ -2,9 +2,12 @@ package types
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -37,6 +40,60 @@ func NewCrawlerJob(base *BaseJob, deps *CrawlerJobDeps) *CrawlerJob {
 	}
 }
 
+// formatJobError formats a concise, user-friendly error message from a Go error.
+// Returns messages in the format "Category: Brief description" suitable for UI display.
+// Handles common error types:
+//   - HTTP errors: "HTTP 404: Not Found"
+//   - Timeout errors: "Timeout: Request exceeded 30s"
+//   - Network errors: "Network: Connection refused"
+//   - Storage errors: "Storage: Database locked"
+//   - Generic errors: "Category: error.Error()" (truncated to 200 chars)
+func formatJobError(category string, err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// Check for timeout errors
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Timeout: Request exceeded deadline"
+	}
+
+	errMsg := err.Error()
+	errMsgLower := strings.ToLower(errMsg)
+
+	// Check for timeout in error message
+	if strings.Contains(errMsgLower, "timeout") || strings.Contains(errMsgLower, "deadline exceeded") {
+		if category == "Scraping" {
+			return "Timeout: Scraping timeout"
+		}
+		return "Timeout: Request timeout"
+	}
+
+	// Check for network errors
+	var urlErr *url.Error
+	var netOpErr *net.OpError
+	if errors.As(err, &urlErr) || errors.As(err, &netOpErr) {
+		// Extract brief cause from network error
+		briefCause := errMsg
+		if len(briefCause) > 100 {
+			// Try to extract the most relevant part
+			if idx := strings.LastIndex(briefCause, ":"); idx != -1 && idx < len(briefCause)-1 {
+				briefCause = strings.TrimSpace(briefCause[idx+1:])
+			}
+		}
+		return fmt.Sprintf("Network: %s", briefCause)
+	}
+
+	// Truncate long error messages
+	const maxLength = 200
+	if len(errMsg) > maxLength {
+		errMsg = errMsg[:maxLength] + "..."
+	}
+
+	// Format as "Category: Brief description"
+	return fmt.Sprintf("%s: %s", category, errMsg)
+}
+
 // Execute processes a crawler URL job
 func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	c.logger.Info().
@@ -48,6 +105,24 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 
 	// Validate message
 	if err := c.Validate(msg); err != nil {
+		// Load parent job and populate error field
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				job.Error = formatJobError("Validation", err)
+				job.Status = models.JobStatusFailed
+				job.CompletedAt = time.Now()
+				job.ResultCount = job.Progress.CompletedURLs
+				job.FailedCount = job.Progress.FailedURLs
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
+					c.logger.Warn().Err(saveErr).Msg("Failed to save job with validation error")
+				} else {
+					c.logger.Info().
+						Str("parent_id", msg.ParentID).
+						Str("error", job.Error).
+						Msg("Job marked as failed due to validation error")
+				}
+			}
+		}
 		return fmt.Errorf("invalid message: %w", err)
 	}
 
@@ -102,7 +177,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 						c.logger.Warn().Err(saveErr).Msg("Failed to update job status to running")
 					} else {
 						// Publish EventJobStarted event
-                        startedEvent := interfaces.Event{
+						startedEvent := interfaces.Event{
 							Type: interfaces.EventJobStarted,
 							Payload: map[string]interface{}{
 								"job_id":      msg.ParentID,
@@ -111,7 +186,7 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 								"entity_type": entityType,
 								"url":         msg.URL,
 								"depth":       msg.Depth,
-                                "timestamp":   time.Now().Format(time.RFC3339),
+								"timestamp":   time.Now().Format(time.RFC3339),
 							},
 						}
 						if err := c.deps.EventService.Publish(ctx, startedEvent); err != nil {
@@ -193,40 +268,40 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	scraper := crawler.NewHTMLScraper(mergedConfig, c.logger, httpClient, cookies)
 	defer scraper.Close()
 
-    // Publish child-level started event for this URL processing
-    if c.deps.EventService != nil {
-        // Try to enrich with current progress stats if available
-        var childCount, completedChildren, failedChildren int
-        if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-            if job, ok := jobInterface.(*models.CrawlJob); ok {
-                childCount = job.Progress.TotalURLs
-                completedChildren = job.Progress.CompletedURLs
-                failedChildren = job.Progress.FailedURLs
-            }
-        }
-        startedChild := interfaces.Event{
-            Type: interfaces.EventJobStarted,
-            Payload: map[string]interface{}{
-                "job_id":            msg.ID,
-                "child_job_id":      msg.ID,
-                "parent_job_id":     msg.ParentID,
-                "status":            "running",
-                "source_type":       sourceType,
-                "entity_type":       entityType,
-                "url":               msg.URL,
-                "depth":             msg.Depth,
-                "child_count":       childCount,
-                "completed_children": completedChildren,
-                "failed_children":    failedChildren,
-                "timestamp":         time.Now().Format(time.RFC3339),
-            },
-        }
-        if err := c.deps.EventService.Publish(ctx, startedChild); err != nil {
-            c.logger.Warn().Err(err).Msg("Failed to publish child job started event")
-        }
-    }
+	// Publish child-level started event for this URL processing
+	if c.deps.EventService != nil {
+		// Try to enrich with current progress stats if available
+		var childCount, completedChildren, failedChildren int
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				childCount = job.Progress.TotalURLs
+				completedChildren = job.Progress.CompletedURLs
+				failedChildren = job.Progress.FailedURLs
+			}
+		}
+		startedChild := interfaces.Event{
+			Type: interfaces.EventJobStarted,
+			Payload: map[string]interface{}{
+				"job_id":             msg.ID,
+				"child_job_id":       msg.ID,
+				"parent_job_id":      msg.ParentID,
+				"status":             "running",
+				"source_type":        sourceType,
+				"entity_type":        entityType,
+				"url":                msg.URL,
+				"depth":              msg.Depth,
+				"child_count":        childCount,
+				"completed_children": completedChildren,
+				"failed_children":    failedChildren,
+				"timestamp":          time.Now().Format(time.RFC3339),
+			},
+		}
+		if err := c.deps.EventService.Publish(ctx, startedChild); err != nil {
+			c.logger.Warn().Err(err).Msg("Failed to publish child job started event")
+		}
+	}
 
-    // Scrape the URL (handles JavaScript rendering, HTML parsing, markdown conversion)
+	// Scrape the URL (handles JavaScript rendering, HTML parsing, markdown conversion)
 	scrapeResult, err := scraper.ScrapeURL(ctx, msg.URL)
 	if err != nil {
 		c.logger.Error().
@@ -235,23 +310,35 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			Int("depth", msg.Depth).
 			Msg("Failed to scrape URL")
 
-        // Publish EventJobFailed for critical scraping failure (child-level)
+			// Publish EventJobFailed for critical scraping failure (child-level)
 		if c.deps.EventService != nil {
 			failedEvent := interfaces.Event{
 				Type: interfaces.EventJobFailed,
 				Payload: map[string]interface{}{
-                    "job_id":      msg.ID,
-                    "child_job_id": msg.ID,
-                    "parent_job_id": msg.ParentID,
-					"status":      "failed",
-					"source_type": sourceType,
-					"entity_type": entityType,
-					"error":       err.Error(),
-                    "timestamp":   time.Now().Format(time.RFC3339),
+					"job_id":        msg.ID,
+					"child_job_id":  msg.ID,
+					"parent_job_id": msg.ParentID,
+					"status":        "failed",
+					"source_type":   sourceType,
+					"entity_type":   entityType,
+					"error":         err.Error(),
+					"timestamp":     time.Now().Format(time.RFC3339),
 				},
 			}
 			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
 				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
+			}
+		}
+
+		// Update parent job error field
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				job.Error = formatJobError("Scraping", err)
+				// Note: Don't change status here - individual URL failures don't fail the entire job
+				// Only update the Error field to show the most recent failure
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
+					c.logger.Warn().Err(saveErr).Msg("Failed to save job with scraping error")
+				}
 			}
 		}
 
@@ -324,23 +411,42 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			}
 		}
 
-        // Publish EventJobFailed for non-success HTTP status (child-level)
+		// Compute HTTP error message with fallback to status text
+		msgText := scrapeResult.Error
+		if msgText == "" {
+			msgText = http.StatusText(scrapeResult.StatusCode)
+		}
+		httpErrorMsg := fmt.Sprintf("HTTP %d: %s", scrapeResult.StatusCode, msgText)
+
+		// Publish EventJobFailed for non-success HTTP status (child-level)
 		if c.deps.EventService != nil {
 			failedEvent := interfaces.Event{
 				Type: interfaces.EventJobFailed,
 				Payload: map[string]interface{}{
-                    "job_id":       msg.ID,
-                    "child_job_id": msg.ID,
-                    "parent_job_id": msg.ParentID,
-					"status":      "failed",
-					"source_type": sourceType,
-					"entity_type": entityType,
-                    "error":       fmt.Sprintf("HTTP %d: %s", scrapeResult.StatusCode, scrapeResult.Error),
-                    "timestamp":   time.Now().Format(time.RFC3339),
+					"job_id":        msg.ID,
+					"child_job_id":  msg.ID,
+					"parent_job_id": msg.ParentID,
+					"status":        "failed",
+					"source_type":   sourceType,
+					"entity_type":   entityType,
+					"error":         httpErrorMsg,
+					"timestamp":     time.Now().Format(time.RFC3339),
 				},
 			}
 			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
 				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
+			}
+		}
+
+		// Update parent job error field with HTTP error
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				job.Error = httpErrorMsg
+				// Note: Don't change status here - individual URL failures don't fail the entire job
+				// Only update the Error field to show the most recent failure
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
+					c.logger.Warn().Err(saveErr).Msg("Failed to save job with HTTP error")
+				}
 			}
 		}
 
@@ -398,6 +504,24 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	// Save document to storage
 	if err := c.deps.DocumentStorage.SaveDocument(document); err != nil {
 		c.logger.Error().Err(err).Str("url", msg.URL).Msg("Failed to save document")
+
+		// Update parent job error field with storage error
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				job.Error = formatJobError("Storage", err)
+				// Note: Don't change status here - storage errors might be transient
+				// Only update the Error field to show the most recent failure
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
+					c.logger.Warn().Err(saveErr).Msg("Failed to save job with storage error")
+				} else {
+					c.logger.Info().
+						Str("parent_id", msg.ParentID).
+						Str("error", job.Error).
+						Msg("Job error field updated with storage failure")
+				}
+			}
+		}
+
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
@@ -525,16 +649,16 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			enqueuedCount++
 
 			// Publish job spawn event for real-time UI updates
-    if c.deps.EventService != nil {
+			if c.deps.EventService != nil {
 				spawnEvent := interfaces.Event{
 					Type: interfaces.EventJobSpawn,
 					Payload: map[string]interface{}{
-                "parent_job_id": msg.ParentID,
-                "child_job_id":  childMsg.ID,
-                "job_type":      "crawler_url",
-                "url":           childURL,
-                "depth":         msg.Depth + 1,
-                "timestamp":     time.Now().Format(time.RFC3339),
+						"parent_job_id": msg.ParentID,
+						"child_job_id":  childMsg.ID,
+						"job_type":      "crawler_url",
+						"url":           childURL,
+						"depth":         msg.Depth + 1,
+						"timestamp":     time.Now().Format(time.RFC3339),
 					},
 				}
 				c.deps.EventService.Publish(ctx, spawnEvent)
@@ -753,6 +877,54 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		return nil
 	}
 
+	// Check if heartbeat is old enough (no activity during grace period)
+	timeSinceHeartbeat := time.Since(job.LastHeartbeat)
+
+	// Stale job detection: If job has been idle for too long AND still has pending URLs,
+	// mark it as failed (indicates stuck/crashed workers or queue issues)
+	const staleThreshold = 10 * time.Minute
+	if timeSinceHeartbeat > staleThreshold && job.Progress.PendingURLs > 0 {
+		idleDuration := timeSinceHeartbeat
+		job.Error = fmt.Sprintf("Timeout: No activity for %s (pending: %d URLs)", idleDuration.Round(time.Second), job.Progress.PendingURLs)
+		job.Status = models.JobStatusFailed
+		job.CompletedAt = time.Now()
+		job.ResultCount = job.Progress.CompletedURLs
+		job.FailedCount = job.Progress.FailedURLs
+
+		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+			c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to save stale job as failed")
+			return fmt.Errorf("failed to save stale job: %w", err)
+		}
+
+		// Publish EventJobFailed for stale job timeout
+		if c.deps.EventService != nil {
+			failedEvent := interfaces.Event{
+				Type: interfaces.EventJobFailed,
+				Payload: map[string]interface{}{
+					"job_id":       msg.ParentID,
+					"status":       "failed",
+					"source_type":  job.SourceType,
+					"entity_type":  job.EntityType,
+					"error":        job.Error,
+					"result_count": job.ResultCount,
+					"failed_count": job.FailedCount,
+					"timestamp":    time.Now().Format(time.RFC3339),
+				},
+			}
+			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
+				c.logger.Warn().Err(pubErr).Msg("Failed to publish stale job failed event")
+			}
+		}
+
+		c.logger.Warn().
+			Str("parent_id", msg.ParentID).
+			Dur("idle_duration", idleDuration).
+			Int("pending_urls", job.Progress.PendingURLs).
+			Msg("Job marked as failed due to inactivity")
+
+		return nil
+	}
+
 	if job.Progress.PendingURLs > 0 {
 		c.logger.Info().
 			Str("parent_id", msg.ParentID).
@@ -761,8 +933,7 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		return nil
 	}
 
-	// Check if heartbeat is old enough (no activity during grace period)
-	timeSinceHeartbeat := time.Since(job.LastHeartbeat)
+	// Check if heartbeat is recent (indicates ongoing activity)
 	if timeSinceHeartbeat < gracePeriod {
 		c.logger.Info().
 			Str("parent_id", msg.ParentID).
@@ -787,7 +958,7 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		return nil
 	}
 
-	// All conditions met - mark job as completed
+	// All conditions met - mark job as completed (only if not already failed)
 	job.ResultCount = job.Progress.CompletedURLs
 	job.FailedCount = job.Progress.FailedURLs
 	job.Status = models.JobStatusCompleted

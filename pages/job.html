@@ -81,6 +81,9 @@
                                 <option value="info">Info</option>
                                 <option value="debug">Debug</option>
                             </select>
+                            <button class="btn btn-sm" :class="selectedLogLevel === 'error' ? 'btn-error' : ''" @click="toggleErrorsOnly()" title="Toggle error logs only">
+                                <i class="fas fa-exclamation-triangle"></i> Errors Only
+                            </button>
                             <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
                                 <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                             </button>
@@ -155,6 +158,11 @@
 
                     // Start auto-refresh for running jobs
                     this.startAutoRefresh();
+
+                    // Watch selectedLogLevel and reload logs when it changes
+                    this.$watch('selectedLogLevel', () => {
+                        this.loadJobLogs();
+                    });
                 },
 
                 get filteredLogs() {
@@ -199,7 +207,9 @@
                 async loadJobLogs() {
                     this.loading = true;
                     try {
-                        const response = await fetch(`/api/jobs/${this.jobId}/logs`);
+                        // Build query string with level parameter for server-side filtering
+                        const qs = this.selectedLogLevel === 'all' ? '' : ('?level=' + encodeURIComponent(this.selectedLogLevel));
+                        const response = await fetch(`/api/jobs/${this.jobId}/logs${qs}`);
                         if (!response.ok) {
                             throw new Error('Failed to fetch job logs');
                         }
@@ -400,6 +410,10 @@
                         return `${mins}m ${secs}s`;
                     }
                     return `${secs}s`;
+                },
+
+                toggleErrorsOnly() {
+                    this.selectedLogLevel = this.selectedLogLevel === 'error' ? 'all' : 'error';
                 }
             }));
         });

@@ -160,7 +160,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !grouped {
-		// Mask sensitive data and enrich with statistics
+		// Mask sensitive data and enrich with statistics and job types
 		enrichedJobs := make([]map[string]interface{}, 0, len(jobs))
 		for _, job := range jobs {
 			masked := job.MaskSensitiveData()
@@ -168,6 +168,10 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			// Convert to map and add statistics
 			jobMap := convertJobToMap(masked)
 			jobMap["parent_id"] = masked.ParentID
+
+			// Add job type enrichment
+			jobMap["is_workflow"] = (masked.SourceType == "" || masked.SourceType == "crawler")                                                                                  // Indicates if this is a Job Definition workflow
+			jobMap["is_task"] = (masked.SourceType == models.SourceTypeJira || masked.SourceType == models.SourceTypeConfluence || masked.SourceType == models.SourceTypeGithub) // Indicates if this is a task job
 
 			// Add child statistics
 			if stats, exists := childStatsMap[masked.ID]; exists {
@@ -403,11 +407,62 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		order = "desc" // Default to newest-first
 	}
 
-	logs, err := h.logService.GetLogs(ctx, jobID, 1000) // Limit to 1000 most recent logs
-	if err != nil {
-		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
-		http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
-		return
+	// Parse level query parameter for server-side filtering
+	level := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level")))
+
+	// Normalize level aliases to match storage layer conventions
+	levelAliases := map[string]string{
+		"warning": "warn",  // "warning" → "warn"
+		"err":     "error", // "err" → "error"
+	}
+	if normalized, exists := levelAliases[level]; exists {
+		level = normalized
+	}
+
+	// Fetch logs with optional level filtering
+	var logs []models.JobLogEntry
+	var err error
+
+	// If level is specified and valid, use level filtering
+	if level != "" && level != "all" {
+		// Validate level is one of: error, warn, info, debug (and accept aliases)
+		validLevels := map[string]bool{
+			"error": true,
+			"warn":  true,
+			"info":  true,
+			"debug": true,
+		}
+
+		if !validLevels[level] {
+			h.logger.Warn().Str("job_id", jobID).Str("level", level).Msg("Invalid log level requested")
+			http.Error(w, "Invalid log level. Valid levels are: error, warn/warning, info, debug, all", http.StatusBadRequest)
+			return
+		}
+
+		h.logger.Debug().Str("job_id", jobID).Str("level", level).Msg("Fetching logs with level filter")
+		logs, err = h.logService.GetLogsByLevel(ctx, jobID, level, 1000)
+		if err != nil {
+			// Fall back to all logs if level filtering fails
+			h.logger.Warn().Err(err).Str("job_id", jobID).Str("level", level).Msg("Failed to get logs by level, falling back to all logs")
+			logs, err = h.logService.GetLogs(ctx, jobID, 1000)
+			if err != nil {
+				h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
+				http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
+				return
+			}
+			level = "all" // Update level to reflect actual response
+		}
+	} else {
+		// Fetch all logs (no filtering)
+		logs, err = h.logService.GetLogs(ctx, jobID, 1000) // Limit to 1000 most recent logs
+		if err != nil {
+			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
+			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
+			return
+		}
+		if level == "" {
+			level = "all" // Set default value for response
+		}
 	}
 
 	// If logs are empty, check if job exists (return 404 if job doesn't exist)
@@ -436,6 +491,7 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		"logs":   logs,
 		"count":  len(logs),
 		"order":  order, // Include order in response for client awareness
+		"level":  level, // Include level filter applied (or "all" if no filter)
 	})
 }
 

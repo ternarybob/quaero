@@ -432,11 +432,29 @@ h2 {
 }
 
 .terminal-error {
-    color: #f85149;
+    color: #ff6b6b;
+    font-weight: 600;
+    background-color: rgba(248, 81, 73, 0.1);
+    padding: 0.1rem 0.2rem;
+    border-radius: 2px;
 }
 
 .terminal-debug {
     color: #8b949e;
+}
+
+/* Job error alert box styling (for queue.html job cards) */
+.job-error-alert {
+    background-color: #f8d7da;
+    border-left: 4px solid var(--color-danger);
+    color: #721c24;
+    padding: 0.75rem;
+    border-radius: var(--border-radius);
+    margin-top: 0.8rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
 }
 
 /* Table Styling Overrides */

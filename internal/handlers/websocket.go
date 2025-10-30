@@ -41,9 +41,9 @@ type WebSocketHandler struct {
 	mu                     sync.RWMutex
 	authLoader             AuthLoader
 	eventService           interfaces.EventService
-	crawlProgressThrottler *rate.Limiter        // Rate limiter for crawl_progress events
-	jobSpawnThrottler      *rate.Limiter        // Rate limiter for job_spawn events
-	allowedEvents          map[string]bool      // Whitelist of events to broadcast (empty = allow all)
+	crawlProgressThrottler *rate.Limiter   // Rate limiter for crawl_progress events
+	jobSpawnThrottler      *rate.Limiter   // Rate limiter for job_spawn events
+	allowedEvents          map[string]bool // Whitelist of events to broadcast (empty = allow all)
 }
 
 func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger, config *common.WebSocketConfig) *WebSocketHandler {

@@ -292,6 +292,25 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Create context logger for this job (logs automatically sent to database)
 	contextLogger := s.logger.WithContextWriter(jobID)
 
+	// Validate source type to prevent invalid values like "crawler"
+	// Explicitly reject "crawler" - this is a job definition type, not a source type
+	if sourceType == "crawler" {
+		err := fmt.Errorf("invalid source type 'crawler': this is a job definition type, not a source type. Expected: jira, confluence, or github")
+		contextLogger.Error().Str("source_type", sourceType).Msg("Invalid source type 'crawler' detected - this is a job definition type not a source type")
+		return "", err
+	}
+
+	validSourceTypes := map[string]bool{
+		models.SourceTypeJira:       true,
+		models.SourceTypeConfluence: true,
+		models.SourceTypeGithub:     true,
+	}
+	if !validSourceTypes[sourceType] {
+		err := fmt.Errorf("invalid source type: %s (must be one of: jira, confluence, github)", sourceType)
+		contextLogger.Error().Str("source_type", sourceType).Msg("Invalid source type detected")
+		return "", err
+	}
+
 	job := &CrawlJob{
 		ID:            jobID,
 		SourceType:    sourceType,
@@ -309,6 +328,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		},
 		CreatedAt: time.Now(),
 	}
+
+	// Log the source type being used for audit trail and debugging
+	contextLogger.Info().Str("source_type", sourceType).Str("entity_type", entityType).Msg("Creating crawl job with source type")
 
 	// Validate seed URLs and detect test URLs
 	testURLCount := 0

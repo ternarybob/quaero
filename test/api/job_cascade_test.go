@@ -655,5 +655,3 @@ func TestJobCascadeDeletion_RunningChildCancellation(t *testing.T) {
 
 	t.Log("✓ Parent job deleted, with cascade handling for any running children")
 }
-
-

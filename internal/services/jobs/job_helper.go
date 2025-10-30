@@ -303,7 +303,20 @@ func StartCrawlJob(
 	}
 	logEvent.Msg("Generated seed URLs for crawl job")
 
-	// 8c. Start crawl with generated seed URLs based on source type and base URL
+	// 8c. Validate source type before starting crawl
+	// This prevents jobs from being created with invalid source types like "crawler" at the source
+	validSourceTypes := map[string]bool{
+		models.SourceTypeJira:       true,
+		models.SourceTypeConfluence: true,
+		models.SourceTypeGithub:     true,
+	}
+	if !validSourceTypes[source.Type] {
+		err := fmt.Errorf("invalid source type '%s' for source %s: must be one of: jira, confluence, github", source.Type, source.ID)
+		logger.Error().Str("source_id", source.ID).Str("source_type", source.Type).Msg("Invalid source type detected")
+		return "", err
+	}
+
+	// Start crawl with generated seed URLs based on source type and base URL
 	jobID, err = crawlerService.StartCrawl(
 		source.Type,
 		entityType,
