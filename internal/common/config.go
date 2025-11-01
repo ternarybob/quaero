@@ -217,7 +217,7 @@ func NewDefaultConfig() *Config {
 		},
 		Queue: QueueConfig{
 			PollInterval:      "1s",
-			Concurrency:       5,
+			Concurrency:       3,
 			VisibilityTimeout: "5m",
 			MaxReceive:        3,
 			QueueName:         "quaero_jobs",

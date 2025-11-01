@@ -219,11 +219,16 @@ func (s *EventSubscriber) handleJobStarted(ctx context.Context, event interfaces
 	}
 
 	update := JobStatusUpdate{
-		JobID:      getStringWithFallback(payload, "job_id", "jobId"),
-		Status:     getString(payload, "status"),
-		SourceType: getStringWithFallback(payload, "source_type", "sourceType"),
-		EntityType: getStringWithFallback(payload, "entity_type", "entityType"),
-		Timestamp:  getTimestamp(payload),
+		JobID:           getStringWithFallback(payload, "job_id", "jobId"),
+		Status:          getString(payload, "status"),
+		SourceType:      getStringWithFallback(payload, "source_type", "sourceType"),
+		EntityType:      getStringWithFallback(payload, "entity_type", "entityType"),
+		Timestamp:       getTimestamp(payload),
+		// Extract status_report fields from payload
+		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),
+		Errors:          getStringSlice(payload, "errors"),
+		Warnings:        getStringSlice(payload, "warnings"),
+		RunningChildren: getIntWithFallback(payload, "running_children", "runningChildren"),
 	}
 
 	s.handler.BroadcastJobStatusChange(update)
@@ -256,6 +261,11 @@ func (s *EventSubscriber) handleJobCompleted(ctx context.Context, event interfac
 		PendingURLs:   0,         // No pending URLs
 		Duration:      getFloat64WithFallback(payload, "duration_seconds", "durationSeconds"),
 		Timestamp:     getTimestamp(payload),
+		// Extract status_report fields from payload
+		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),
+		Errors:          getStringSlice(payload, "errors"),
+		Warnings:        getStringSlice(payload, "warnings"),
+		RunningChildren: getIntWithFallback(payload, "running_children", "runningChildren"),
 	}
 
 	s.handler.BroadcastJobStatusChange(update)
@@ -274,17 +284,57 @@ func (s *EventSubscriber) handleJobFailed(ctx context.Context, event interfaces.
 		return nil
 	}
 
+	// Extract child failure count with multiple key fallbacks
+	// Try: failed_children -> child_failure_count (with camelCase variants)
+	childFailureCount := getIntWithFallback(payload, "failed_children", "failedChildren")
+	if childFailureCount == 0 {
+		childFailureCount = getIntWithFallback(payload, "child_failure_count", "childFailureCount")
+		if childFailureCount > 0 {
+			s.logger.Debug().Msg("Using alias key 'child_failure_count' for threshold field")
+		}
+	}
+
+	// Extract error tolerance threshold with multiple key fallbacks
+	// Try: error_tolerance -> threshold (with camelCase variants)
+	errorTolerance := getIntWithFallback(payload, "error_tolerance", "errorTolerance")
+	if errorTolerance == 0 {
+		errorTolerance = getIntWithFallback(payload, "threshold", "Threshold")
+		if errorTolerance > 0 {
+			s.logger.Debug().Msg("Using alias key 'threshold' for error tolerance field")
+		}
+	}
+
+	// Extract total child count if present
+	childCount := getIntWithFallback(payload, "child_count", "childCount")
+
+	// Extract status_report errors array (prioritize over single error field)
+	errors := getStringSlice(payload, "errors")
+	// If no errors array but error field present, add it to errors array
+	if len(errors) == 0 {
+		if errorMsg := getString(payload, "error"); errorMsg != "" {
+			errors = []string{errorMsg}
+		}
+	}
+
 	update := JobStatusUpdate{
-		JobID:         getStringWithFallback(payload, "job_id", "jobId"),
-		Status:        getString(payload, "status"),
-		SourceType:    getStringWithFallback(payload, "source_type", "sourceType"),
-		EntityType:    getStringWithFallback(payload, "entity_type", "entityType"),
-		ResultCount:   getIntWithFallback(payload, "result_count", "resultCount"),
-		FailedCount:   getIntWithFallback(payload, "failed_count", "failedCount"),
-		CompletedURLs: getIntWithFallback(payload, "completed_urls", "completedUrls"),
-		PendingURLs:   getIntWithFallback(payload, "pending_urls", "pendingUrls"),
-		Error:         getString(payload, "error"),
-		Timestamp:     getTimestamp(payload),
+		JobID:             getStringWithFallback(payload, "job_id", "jobId"),
+		Status:            getString(payload, "status"),
+		SourceType:        getStringWithFallback(payload, "source_type", "sourceType"),
+		EntityType:        getStringWithFallback(payload, "entity_type", "entityType"),
+		ResultCount:       getIntWithFallback(payload, "result_count", "resultCount"),
+		FailedCount:       getIntWithFallback(payload, "failed_count", "failedCount"),
+		CompletedURLs:     getIntWithFallback(payload, "completed_urls", "completedUrls"),
+		PendingURLs:       getIntWithFallback(payload, "pending_urls", "pendingUrls"),
+		Error:             getString(payload, "error"),
+		ChildCount:        childCount,
+		ChildFailureCount: childFailureCount,
+		ErrorTolerance:    errorTolerance,
+		Timestamp:         getTimestamp(payload),
+		// Extract status_report fields from payload
+		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),
+		Errors:          errors, // Populated from status_report.errors or error field
+		Warnings:        getStringSlice(payload, "warnings"),
+		RunningChildren: getIntWithFallback(payload, "running_children", "runningChildren"),
 	}
 
 	s.handler.BroadcastJobStatusChange(update)
@@ -313,6 +363,11 @@ func (s *EventSubscriber) handleJobCancelled(ctx context.Context, event interfac
 		CompletedURLs: getIntWithFallback(payload, "completed_urls", "completedUrls"),
 		PendingURLs:   getIntWithFallback(payload, "pending_urls", "pendingUrls"),
 		Timestamp:     getTimestamp(payload),
+		// Extract status_report fields from payload
+		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),
+		Errors:          getStringSlice(payload, "errors"),
+		Warnings:        getStringSlice(payload, "warnings"),
+		RunningChildren: getIntWithFallback(payload, "running_children", "runningChildren"),
 	}
 
 	s.handler.BroadcastJobStatusChange(update)

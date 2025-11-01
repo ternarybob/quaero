@@ -16,6 +16,7 @@ import (
 
 // StartCrawlJob creates and starts a crawl job with common logic extracted from handlers and cron jobs
 // Note: Seed URLs have been removed. Crawling is based on source configuration (base_url and type).
+// jobDefinitionID: Optional job definition ID for traceability (empty string if not from a job definition)
 func StartCrawlJob(
 	ctx context.Context,
 	source *models.SourceConfig,
@@ -25,6 +26,7 @@ func StartCrawlJob(
 	logger arbor.ILogger,
 	jobCrawlConfig crawler.CrawlConfig, // Job-level crawl configuration (filtering patterns and overrides)
 	refreshSource bool, // Whether to refresh source config and auth before starting
+	jobDefinitionID string, // Optional job definition ID for traceability
 ) (jobID string, err error) {
 	// 1. Validate source configuration
 	if source.BaseURL == "" {
@@ -326,15 +328,23 @@ func StartCrawlJob(
 		refreshSource, // Pass through refreshSource parameter
 		source,
 		authCreds,
+		jobDefinitionID, // Optional job definition ID for traceability
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to start crawl: %w", err)
 	}
 
-	logger.Info().
+	logEvent = logger.Info().
 		Str("job_id", jobID).
-		Str("source_id", source.ID).
-		Msg("Crawl job started successfully")
+		Str("source_id", source.ID)
+	if jobDefinitionID != "" {
+		logEvent = logEvent.Str("job_definition_id", jobDefinitionID)
+		logger.Info().
+			Str("job_definition_id", jobDefinitionID).
+			Str("job_id", jobID).
+			Msg("Crawl job linked to job definition")
+	}
+	logEvent.Msg("Crawl job started successfully")
 
 	// 9. Return job ID
 	return jobID, nil

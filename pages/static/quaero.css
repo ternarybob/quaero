@@ -1054,6 +1054,232 @@ body.modal-open {
     }
 }
 
+/* 14. TREE VIEW STYLES (GitHub Actions-inspired)
+   ========================================================================== */
+
+/* Tree container */
+.child-jobs-tree {
+    padding: 0.5rem;
+    position: relative;
+}
+
+/* Tree item with depth-based indentation */
+.tree-item {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.5rem;
+    padding-left: calc(var(--depth, 0) * 1.5rem + 0.5rem);
+    margin-bottom: 0.25rem;
+    border-radius: var(--border-radius);
+    transition: background-color 0.15s ease;
+    position: relative;
+    outline: none;
+}
+
+.tree-item:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+.tree-item:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+.tree-item:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+}
+
+/* Tree node toggle button */
+.tree-node-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem;
+    margin-right: 0.25rem;
+    color: var(--text-secondary);
+    transition: color 0.2s, transform 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+}
+
+.tree-node-toggle:hover {
+    color: var(--color-primary);
+}
+
+.tree-node-toggle i {
+    font-size: 0.875rem;
+    transition: transform 0.2s ease;
+}
+
+/* Rotate chevron when expanded */
+.tree-node-toggle.rotated,
+.tree-node-toggle i.rotated {
+    transform: rotate(90deg);
+}
+
+/* Status icons */
+.tree-status-icon {
+    font-size: 0.875rem;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+.tree-status-icon.status-pending { 
+    color: var(--text-secondary); 
+}
+
+.tree-status-icon.status-running { 
+    color: var(--color-primary);
+}
+
+.tree-status-icon.status-completed { 
+    color: var(--color-success); 
+}
+
+.tree-status-icon.status-failed { 
+    color: var(--color-danger); 
+}
+
+.tree-status-icon.status-cancelled { 
+    color: var(--text-secondary);
+}
+
+/* Job type icon for tree items */
+.tree-job-type-icon {
+    font-size: 0.75rem !important;
+    color: var(--text-secondary);
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+/* Tree item content layout */
+.tree-item-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+/* Tree item URL */
+.tree-item-url {
+    flex: 1;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* Tree item metadata */
+.tree-item-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.tree-item-depth {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+/* Collapsed state */
+.tree-item-collapsed {
+    display: none;
+}
+
+/* Load more container in tree context */
+.load-more-container {
+    padding: 0.5rem;
+    text-align: center;
+}
+
+/* Tree connector lines (optional - for visual hierarchy) */
+.tree-item::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--depth, 0) * 1.5rem);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border-color);
+}
+
+.tree-item::after {
+    content: '';
+    position: absolute;
+    left: calc(var(--depth, 0) * 1.5rem - 8px);
+    top: 50%;
+    width: 8px;
+    height: 1px;
+    background: var(--border-color);
+}
+
+/* Hide tree connector lines at depth 0 to avoid overlap */
+.tree-item.depth-0::before,
+.tree-item.depth-0::after {
+    display: none;
+}
+
+/* Tree item with toggle has different connector */
+.tree-item.has-toggle::before {
+    top: 20px;
+}
+
+.tree-item.has-toggle::after {
+    top: calc(50% + 2px);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .tree-item:focus,
+    .tree-item:focus-visible {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+    }
+    
+    .tree-status-icon.status-pending { 
+        color: #000; 
+    }
+    
+    .tree-status-icon.status-completed { 
+        color: #006400; 
+    }
+    
+    .tree-status-icon.status-failed { 
+        color: #8B0000; 
+    }
+}
+
+/* Responsive adjustments for tree view */
+@media (max-width: 768px) {
+    .tree-item {
+        padding-left: calc(var(--depth, 0) * 1rem + 0.5rem);
+    }
+    
+    .tree-item::before {
+        left: calc(var(--depth, 0) * 1rem);
+    }
+    
+    .tree-item::after {
+        left: calc(var(--depth, 0) * 1rem - 8px);
+    }
+    
+    /* Hide connector lines on smaller screens */
+    .tree-item::before,
+    .tree-item::after {
+        display: none;
+    }
+}
+
 /* Slide-in animation for children */
 @keyframes slideIn {
     from {
@@ -1068,4 +1294,20 @@ body.modal-open {
 
 .job-card-child {
     animation: slideIn 0.2s ease-out;
+}
+
+/* Tree item fade in animation */
+@keyframes treeItemFadeIn {
+    from {
+        opacity: 0;
+        max-height: 0;
+    }
+    to {
+        opacity: 1;
+        max-height: 100px;
+    }
+}
+
+.tree-item.fade-in {
+    animation: treeItemFadeIn 0.2s ease-out;
 }

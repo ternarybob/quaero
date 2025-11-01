@@ -48,8 +48,8 @@ import (
 //      * Want distributed processing across workers
 //      * Processing user-triggered crawl operations
 //
-// 2. JOB DEFINITION SYSTEM (Workflow Orchestration)
-//    - Purpose: Orchestrate multi-step workflows and scheduled jobs
+// 2. JOB DEFINITION SYSTEM (Multi-Step Job Coordination)
+//    - Purpose: Coordinate multi-step jobs and scheduled jobs
 //    - Components: JobExecutor, JobRegistry, Action Handlers
 //    - Location: internal/services/jobs/, internal/services/jobs/actions/
 //    - Characteristics:
@@ -59,20 +59,20 @@ import (
 //      * Supports post-job triggers and chaining
 //      * Polling-based completion detection for async operations
 //    - Use When:
-//      * Defining scheduled workflows (cron jobs)
-//      * Orchestrating multi-step processes (crawl → summarize → cleanup)
+//      * Defining scheduled jobs (cron jobs)
+//      * Coordinating multi-step processes (crawl → summarize → cleanup)
 //      * Need job chaining with post-job triggers
-//      * Require workflow-level configuration and metadata
+//      * Require job-level configuration and metadata
 //
 // INTERACTION BETWEEN SYSTEMS:
 //
-// JobExecutor (workflow) → QueueManager (task execution)
+// JobExecutor (multi-step jobs) → QueueManager (task execution)
 //   - JobExecutor triggers crawl workflows via CrawlerActions
 //   - CrawlerActions enqueue URL tasks into QueueManager
 //   - WorkerPool processes URL tasks using CrawlerJob handlers
 //   - Completion detection uses polling via GetJobStatus()
 //
-// EXAMPLE WORKFLOW:
+// EXAMPLE JOB FLOW:
 //
 // 1. User creates JobDefinition: "Crawl Jira + Summarize"
 // 2. JobExecutor processes definition, executes CrawlerAction
@@ -80,7 +80,7 @@ import (
 // 4. WorkerPool workers process URL messages via CrawlerJob
 // 5. JobExecutor polls GetJobStatus() until crawl completes
 // 6. Post-job trigger fires SummarizerAction (if configured)
-// 7. Workflow completes, status persisted to database
+// 7. Job completes, status persisted to database
 //
 // KEY DESIGN PRINCIPLES:
 //
@@ -88,7 +88,7 @@ import (
 // - Loose Coupling: Systems communicate via interfaces (JobStorage, QueueManager)
 // - Persistence: Both systems store state in database for recovery
 // - Scalability: Queue system scales horizontally, executor scales vertically
-// - Separation of Concerns: Task execution vs. workflow orchestration
+// - Separation of Concerns: Task execution vs. job coordination
 //
 // MIGRATION NOTES:
 //
@@ -260,7 +260,8 @@ func (s *Service) shutdownBrowserPool() {
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
-func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, configInterface interface{}, sourceID string, refreshSource bool, sourceConfigSnapshotInterface interface{}, authSnapshotInterface interface{}) (string, error) {
+// jobDefinitionID: Optional job definition ID for traceability (empty string if not from a job definition)
+func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, configInterface interface{}, sourceID string, refreshSource bool, sourceConfigSnapshotInterface interface{}, authSnapshotInterface interface{}, jobDefinitionID string) (string, error) {
 	// Type assert config
 	config, ok := configInterface.(CrawlConfig)
 	if !ok {
@@ -313,6 +314,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 	job := &CrawlJob{
 		ID:            jobID,
+		JobType:       models.JobTypeParent, // Explicitly mark as parent job for hierarchy
 		SourceType:    sourceType,
 		EntityType:    entityType,
 		Config:        config,
@@ -327,6 +329,17 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			StartTime:     time.Now(),
 		},
 		CreatedAt: time.Now(),
+	}
+
+	// Store JobDefinitionID in metadata if provided
+	if jobDefinitionID != "" {
+		if job.Metadata == nil {
+			job.Metadata = make(map[string]interface{})
+		}
+		job.Metadata["job_definition_id"] = jobDefinitionID
+		contextLogger.Debug().
+			Str("job_definition_id", jobDefinitionID).
+			Msg("Job definition ID stored in job metadata")
 	}
 
 	// Log the source type being used for audit trail and debugging
@@ -544,6 +557,69 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	}
 
+	// Enqueue pre-validation job BEFORE seed URLs
+	preValidationMsgID := fmt.Sprintf("%s-pre-validation", jobID)
+	preValidationConfig := map[string]interface{}{
+		"source_type": sourceType,
+		"entity_type": entityType,
+		"seed_urls":   seedURLs,
+	}
+	if sourceID != "" {
+		preValidationConfig["source_id"] = sourceID
+	}
+	if authSnapshot != nil {
+		preValidationConfig["auth_id"] = authSnapshot.ID
+	}
+
+	preValidationMsg := &queue.JobMessage{
+		ID:              preValidationMsgID,
+		Type:            "pre_validation",
+		ParentID:        jobID,
+		JobDefinitionID: jobDefinitionID,
+		Config:          preValidationConfig,
+	}
+
+	contextLogger.Debug().
+		Str("message_id", preValidationMsgID).
+		Str("job_id", jobID).
+		Msg("Enqueueing pre-validation job")
+
+	if err := s.queueManager.Enqueue(s.ctx, preValidationMsg); err != nil {
+		contextLogger.Warn().
+			Err(err).
+			Str("message_id", preValidationMsgID).
+			Msg("Failed to enqueue pre-validation job, continuing with crawl")
+	} else {
+		contextLogger.Info().
+			Str("message_id", preValidationMsgID).
+			Msg("Pre-validation job enqueued")
+
+		// Create pre-validation CrawlJob record
+		preValidationJob := &CrawlJob{
+			ID:         preValidationMsgID,
+			ParentID:   jobID,
+			JobType:    models.JobTypePreValidation,
+			Name:       "Pre-validation",
+			SourceType: sourceType,
+			EntityType: entityType,
+			Status:     JobStatusPending,
+			CreatedAt:  time.Now(),
+		}
+
+		if s.jobStorage != nil {
+			if err := s.jobStorage.SaveJob(s.ctx, preValidationJob); err != nil {
+				contextLogger.Warn().
+					Err(err).
+					Str("pre_validation_job_id", preValidationMsgID).
+					Msg("Failed to persist pre-validation job to database, continuing")
+			} else {
+				contextLogger.Debug().
+					Str("pre_validation_job_id", preValidationMsgID).
+					Msg("Pre-validation job persisted to database")
+			}
+		}
+	}
+
 	s.jobsMu.Lock()
 	s.activeJobs[jobID] = job
 	s.jobResults[jobID] = make([]*CrawlResult, 0)
@@ -580,8 +656,47 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			URL:             seedURL,
 			Depth:           0,
 			ParentID:        jobID,
-			JobDefinitionID: jobID,
+			JobDefinitionID: jobDefinitionID,
 			Config:          jobConfig,
+		}
+
+		// Persist seed URL as child CrawlJob record before enqueueing
+		// This ensures child job exists in database when worker picks up the message
+		childJob := &CrawlJob{
+			ID:         msg.ID, // Match message ID for GetJob() lookups during execution
+			ParentID:   jobID,  // Link to parent job for hierarchy
+			JobType:    models.JobTypeCrawlerURL,
+			Name:       fmt.Sprintf("URL: %s", seedURL),
+			SourceType: sourceType,
+			EntityType: entityType,
+			Config:     config, // Inherit crawler config from parent
+			Status:     JobStatusPending,
+			Progress: CrawlProgress{
+				TotalURLs:     1,
+				PendingURLs:   1,
+				CompletedURLs: 0,
+				FailedURLs:    0,
+				StartTime:     time.Now(),
+			},
+			CreatedAt: time.Now(),
+		}
+
+		// Save child job to database
+		if s.jobStorage != nil {
+			if err := s.jobStorage.SaveJob(s.ctx, childJob); err != nil {
+				contextLogger.Warn().
+					Err(err).
+					Str("child_id", msg.ID).
+					Str("seed_url", seedURL).
+					Msg("Failed to persist seed child job to database, continuing with enqueue")
+				// Continue on save error - don't block enqueueing
+			} else {
+				contextLogger.Debug().
+					Str("child_id", msg.ID).
+					Str("seed_url", seedURL).
+					Str("parent_id", jobID).
+					Msg("Seed child job persisted to database")
+			}
 		}
 
 		if err := s.queueManager.Enqueue(s.ctx, msg); err != nil {
@@ -928,6 +1043,16 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 			PendingURLs:   len(originalJob.SeedURLs),
 			StartTime:     now,
 		},
+	}
+
+	// Preserve job_definition_id from original job's metadata (if present)
+	if originalJob.Metadata != nil {
+		if jobDefID, ok := originalJob.Metadata["job_definition_id"]; ok && jobDefID != nil {
+			if newJob.Metadata == nil {
+				newJob.Metadata = make(map[string]interface{})
+			}
+			newJob.Metadata["job_definition_id"] = jobDefID
+		}
 	}
 
 	// Apply config update if provided

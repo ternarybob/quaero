@@ -18,12 +18,14 @@ import (
 
 // CrawlerJobDeps holds dependencies for crawler jobs
 type CrawlerJobDeps struct {
-	CrawlerService  *crawler.Service
-	LogService      interfaces.LogService
-	DocumentStorage interfaces.DocumentStorage
-	QueueManager    interfaces.QueueManager
-	JobStorage      interfaces.JobStorage
-	EventService    interfaces.EventService
+	CrawlerService         *crawler.Service
+	LogService             interfaces.LogService
+	DocumentStorage        interfaces.DocumentStorage
+	QueueManager           interfaces.QueueManager
+	JobStorage             interfaces.JobStorage
+	EventService           interfaces.EventService
+	JobDefinitionStorage   interfaces.JobDefinitionStorage
+	JobManager             interfaces.JobManager
 }
 
 // CrawlerJob handles URL crawling jobs
@@ -198,6 +200,41 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		}
 	}
 
+	// Update child job status to running if this is a child job being processed
+	// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
+	if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
+		childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
+		if childErr != nil {
+			// Child job row missing - this can happen during upgrade or if persistence failed
+			c.logger.Warn().
+				Err(childErr).
+				Str("child_id", msg.ID).
+				Str("parent_id", msg.ParentID).
+				Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
+		} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
+			if childJob.Status == models.JobStatusPending {
+				childJob.Status = models.JobStatusRunning
+				childJob.StartedAt = time.Now()
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
+					c.logger.Warn().
+						Err(saveErr).
+						Str("child_id", msg.ID).
+						Msg("Failed to update child job status to running")
+				} else {
+					c.logger.Debug().
+						Str("child_id", msg.ID).
+						Str("parent_id", msg.ParentID).
+						Msg("Child job status updated to running")
+				}
+			}
+		} else {
+			c.logger.Warn().
+				Str("child_id", msg.ID).
+				Str("parent_id", msg.ParentID).
+				Msg("Child job type assertion failed - expected *models.CrawlJob")
+		}
+	}
+
 	// Fetch URL content using crawler service with auth-aware HTTP and HTML parsing
 	c.logger.Debug().
 		Str("url", msg.URL).
@@ -348,23 +385,63 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
 		}
 
+		// Perform atomic progress update for failed URL
+		// completedDelta: +1 (URL processed but failed)
+		// pendingDelta: -1 (URL no longer pending)
+		// totalDelta: 0 (no new children)
+		// failedDelta: +1 (one failure)
+		if atomicErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, 1, -1, 0, 1); atomicErr != nil {
+			c.logger.Warn().Err(atomicErr).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress after scraping failure")
+		}
+
+		// Load job for error tolerance threshold check and completion probe (after atomic update)
 		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
 			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Progress.CompletedURLs++ // Count as processed (failed)
-				if job.Progress.PendingURLs > 0 {
-					job.Progress.PendingURLs--
-				}
-				job.Progress.FailedURLs++ // Track failures
-				if job.Progress.TotalURLs > 0 {
-					job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
+				// Check error tolerance threshold immediately after child failure
+				// This provides prompt enforcement instead of waiting for completion probe
+				if c.checkErrorToleranceThreshold(ctx, msg, job) {
+					// Job was failed due to threshold, return early
+					return fmt.Errorf("job failed due to error tolerance threshold")
 				}
 
 				// Check completion and enqueue probe if needed
 				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
+			}
+		}
 
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to persist progress after scraping failure")
+		// Update child job status to failed if this is a child job (scraping error)
+		// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
+		if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
+			childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
+			if childErr != nil {
+				// Child job row missing - this can happen during upgrade or if persistence failed
+				c.logger.Warn().
+					Err(childErr).
+					Str("child_id", msg.ID).
+					Str("parent_id", msg.ParentID).
+					Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
+			} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
+				childJob.Status = models.JobStatusFailed
+				childJob.Error = formatJobError("Scraping", err)
+				childJob.CompletedAt = time.Now()
+				childJob.FailedCount = 1
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
+					c.logger.Warn().
+						Err(saveErr).
+						Str("child_id", msg.ID).
+						Msg("Failed to update child job status to failed (scraping error)")
+				} else {
+					c.logger.Debug().
+						Str("child_id", msg.ID).
+						Str("parent_id", msg.ParentID).
+						Str("error", childJob.Error).
+						Msg("Child job status updated to failed (scraping error)")
 				}
+			} else {
+				c.logger.Warn().
+					Str("child_id", msg.ID).
+					Str("parent_id", msg.ParentID).
+					Msg("Child job type assertion failed - expected *models.CrawlJob")
 			}
 		}
 
@@ -391,23 +468,27 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
 		}
 
+		// Perform atomic progress update for failed URL
+		// completedDelta: +1 (URL processed but failed)
+		// pendingDelta: -1 (URL no longer pending)
+		// totalDelta: 0 (no new children)
+		// failedDelta: +1 (one failure)
+		if atomicErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, 1, -1, 0, 1); atomicErr != nil {
+			c.logger.Warn().Err(atomicErr).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress after non-success status")
+		}
+
+		// Load job for error tolerance threshold check and completion probe (after atomic update)
 		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
 			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Progress.CompletedURLs++ // Count as processed (failed)
-				if job.Progress.PendingURLs > 0 {
-					job.Progress.PendingURLs--
-				}
-				job.Progress.FailedURLs++ // Track failures
-				if job.Progress.TotalURLs > 0 {
-					job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
+				// Check error tolerance threshold immediately after child failure
+				// This provides prompt enforcement instead of waiting for completion probe
+				if c.checkErrorToleranceThreshold(ctx, msg, job) {
+					// Job was failed due to threshold, return early
+					return fmt.Errorf("job failed due to error tolerance threshold")
 				}
 
 				// Check completion and enqueue probe if needed
 				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
-
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to persist progress after non-success status")
-				}
 			}
 		}
 
@@ -447,6 +528,42 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
 					c.logger.Warn().Err(saveErr).Msg("Failed to save job with HTTP error")
 				}
+			}
+		}
+
+		// Update child job status to failed if this is a child job (HTTP error)
+		// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
+		if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
+			childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
+			if childErr != nil {
+				// Child job row missing - this can happen during upgrade or if persistence failed
+				c.logger.Warn().
+					Err(childErr).
+					Str("child_id", msg.ID).
+					Str("parent_id", msg.ParentID).
+					Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
+			} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
+				childJob.Status = models.JobStatusFailed
+				childJob.Error = httpErrorMsg
+				childJob.CompletedAt = time.Now()
+				childJob.FailedCount = 1
+				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
+					c.logger.Warn().
+						Err(saveErr).
+						Str("child_id", msg.ID).
+						Msg("Failed to update child job status to failed (HTTP error)")
+				} else {
+					c.logger.Debug().
+						Str("child_id", msg.ID).
+						Str("parent_id", msg.ParentID).
+						Str("error", childJob.Error).
+						Msg("Child job status updated to failed (HTTP error)")
+				}
+			} else {
+				c.logger.Warn().
+					Str("child_id", msg.ID).
+					Str("parent_id", msg.ParentID).
+					Msg("Child job type assertion failed - expected *models.CrawlJob")
 			}
 		}
 
@@ -530,6 +647,40 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		Str("document_id", document.ID).
 		Msg("Document saved successfully")
 
+	// Update child job status to completed if this is a child job
+	// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
+	if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
+		childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
+		if childErr != nil {
+			// Child job row missing - this can happen during upgrade or if persistence failed
+			c.logger.Warn().
+				Err(childErr).
+				Str("child_id", msg.ID).
+				Str("parent_id", msg.ParentID).
+				Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
+		} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
+			childJob.Status = models.JobStatusCompleted
+			childJob.CompletedAt = time.Now()
+			childJob.ResultCount = 1 // Successfully processed this URL
+			if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
+				c.logger.Warn().
+					Err(saveErr).
+					Str("child_id", msg.ID).
+					Msg("Failed to update child job status to completed")
+			} else {
+				c.logger.Debug().
+					Str("child_id", msg.ID).
+					Str("parent_id", msg.ParentID).
+					Msg("Child job status updated to completed")
+			}
+		} else {
+			c.logger.Warn().
+				Str("child_id", msg.ID).
+				Str("parent_id", msg.ParentID).
+				Msg("Child job type assertion failed - expected *models.CrawlJob")
+		}
+	}
+
 	// Track how many children will be spawned (needed for accurate progress tracking)
 	var childrenToSpawn int
 
@@ -601,6 +752,27 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 					Str("url", childURL).
 					Msg("URL already enqueued (duplicate detected by database), skipping")
 				continue
+			}
+
+			// Persist child job to database after URL marked as seen using helper method
+			childJobID := fmt.Sprintf("%s-child-%d", msg.ID, enqueuedCount)
+
+			// Build CrawlConfig for child job (inherit from parent)
+			childConfig := models.CrawlConfig{
+				MaxDepth:        maxDepth,
+				FollowLinks:     followLinks,
+				IncludePatterns: includePatterns,
+				ExcludePatterns: excludePatterns,
+			}
+
+			// Use CreateChildJobRecord helper to persist child job consistently
+			if err := c.CreateChildJobRecord(ctx, msg.ParentID, childJobID, childURL, sourceType, entityType, childConfig); err != nil {
+				c.logger.Warn().
+					Err(err).
+					Str("child_id", childJobID).
+					Str("child_url", childURL).
+					Msg("Failed to persist child job to database via helper, continuing with enqueue")
+				// Continue on save error - don't block enqueueing
 			}
 
 			// Respect max_pages limit if configured
@@ -693,43 +865,62 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for progress update")
 	} else {
 		if job, ok := jobInterface.(*models.CrawlJob); ok {
-			// Update counters atomically:
-			// 1. Increment completed URLs (this URL is done)
-			// 2. Decrement pending URLs (this URL is no longer pending)
-			// 3. Add spawned children to both total and pending
-			job.Progress.CompletedURLs++
-			if job.Progress.PendingURLs > 0 {
-				job.Progress.PendingURLs--
-			}
+			// Calculate deltas for atomic progress update:
+			// - completedDelta: +1 (this URL completed successfully)
+			// - pendingDelta: -1 (this URL no longer pending) + childrenToSpawn (new children added)
+			// - totalDelta: +childrenToSpawn (new children added to total)
+			// - failedDelta: 0 (no failures on success path)
+			completedDelta := 1
+			pendingDelta := -1 + childrenToSpawn
+			totalDelta := childrenToSpawn
+			failedDelta := 0
 
-			// Add spawned children to counters
-			if childrenToSpawn > 0 {
-				job.Progress.TotalURLs += childrenToSpawn
-				job.Progress.PendingURLs += childrenToSpawn
-			}
+			// Determine if we should persist this update (batched saves every 10 URLs)
+			// Check using pre-update value: will the NEW completed count be a multiple of 10?
+			newCompletedURLs := job.Progress.CompletedURLs + completedDelta
+			shouldSave := newCompletedURLs%10 == 0 || // Every 10th URL
+				job.Status == models.JobStatusCompleted || // Always save on completion
+				job.Status == models.JobStatusFailed // Always save on failure
 
-			// Recompute percentage
-			if job.Progress.TotalURLs > 0 {
-				job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
-			}
+			if shouldSave {
+				// Perform atomic progress update (eliminates read-modify-write race)
+				if err := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, completedDelta, pendingDelta, totalDelta, failedDelta); err != nil {
+					c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress counters")
+				} else {
+					// Update in-memory job object to reflect changes (for completion probe check and logging)
+					job.Progress.CompletedURLs += completedDelta
+					job.Progress.PendingURLs += pendingDelta
+					job.Progress.TotalURLs += totalDelta
+					if job.Progress.TotalURLs > 0 {
+						job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
+					}
 
-			// Check completion and enqueue probe if needed (Comment 3 & 8)
-			c.checkAndEnqueueCompletionProbe(ctx, job, msg)
-
-			// Save updated progress (includes completion status if applicable)
-			if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-				c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to persist progress update")
+					c.logger.Debug().
+						Str("parent_id", msg.ParentID).
+						Int("completed", job.Progress.CompletedURLs).
+						Int("pending", job.Progress.PendingURLs).
+						Int("total", job.Progress.TotalURLs).
+						Int("spawned_children", childrenToSpawn).
+						Float64("percentage", job.Progress.Percentage).
+						Str("status", string(job.Status)).
+						Msg("Progress updated atomically with spawned children (batched)")
+				}
 			} else {
+				// Skip update for non-10th URLs to reduce database writes
+				// Update in-memory for accurate logging (note: not persisted until next batch)
+				job.Progress.CompletedURLs += completedDelta
+				job.Progress.PendingURLs += pendingDelta
+				job.Progress.TotalURLs += totalDelta
+
 				c.logger.Debug().
 					Str("parent_id", msg.ParentID).
 					Int("completed", job.Progress.CompletedURLs).
 					Int("pending", job.Progress.PendingURLs).
-					Int("total", job.Progress.TotalURLs).
-					Int("spawned_children", childrenToSpawn).
-					Float64("percentage", job.Progress.Percentage).
-					Str("status", string(job.Status)).
-					Msg("Progress updated atomically with spawned children")
+					Msg("Progress update batched (will save at next 10-URL boundary)")
 			}
+
+			// Check completion and enqueue probe if needed (uses updated in-memory values)
+			c.checkAndEnqueueCompletionProbe(ctx, job, msg)
 
 			// Emit progress event (only if not completed)
 			if job.Status != models.JobStatusCompleted {
@@ -792,6 +983,166 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		Msg("Crawler URL job completed successfully")
 
 	return nil
+}
+
+// checkErrorToleranceThreshold checks if the parent job's error tolerance threshold is exceeded
+// and takes action if configured (stop_all/continue/mark_warning).
+// Returns true if the job was failed due to threshold (caller should not continue), false otherwise.
+func (c *CrawlerJob) checkErrorToleranceThreshold(ctx context.Context, msg *queue.JobMessage, job *models.CrawlJob) bool {
+	// Only check threshold for root jobs with error tolerance configured
+	if job.ParentID != "" || msg.JobDefinitionID == "" || c.deps.JobDefinitionStorage == nil || c.deps.JobManager == nil {
+		return false
+	}
+
+	// Load job definition to check error tolerance configuration
+	jobDef, err := c.deps.JobDefinitionStorage.GetJobDefinition(ctx, msg.JobDefinitionID)
+	if err != nil {
+		c.logger.Warn().
+			Err(err).
+			Str("job_def_id", msg.JobDefinitionID).
+			Msg("Failed to load job definition for error tolerance check")
+		return false
+	}
+
+	if jobDef == nil || jobDef.ErrorTolerance == nil {
+		return false
+	}
+
+	// Get current child failure statistics
+	childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
+	if err != nil {
+		c.logger.Warn().
+			Err(err).
+			Str("parent_id", msg.ParentID).
+			Msg("Failed to get child stats for error tolerance check")
+		return false
+	}
+
+	stats, ok := childStats[msg.ParentID]
+	if !ok {
+		return false
+	}
+
+	// Check if failure threshold is exceeded
+	maxFailures := jobDef.ErrorTolerance.MaxChildFailures
+	currentFailures := stats.FailedChildren
+
+	if maxFailures == 0 || currentFailures < maxFailures {
+		return false // Threshold not exceeded
+	}
+
+	c.logger.Warn().
+		Str("parent_id", msg.ParentID).
+		Int("failed_children", currentFailures).
+		Int("max_failures", maxFailures).
+		Str("failure_action", jobDef.ErrorTolerance.FailureAction).
+		Msg("Error tolerance threshold exceeded during job execution")
+
+	// Handle based on failure action
+	switch jobDef.ErrorTolerance.FailureAction {
+	case "stop_all":
+		// Cancel all running child jobs immediately
+		cancelledCount, err := c.deps.JobManager.StopAllChildJobs(ctx, msg.ParentID)
+		if err != nil {
+			c.logger.Error().
+				Err(err).
+				Str("parent_id", msg.ParentID).
+				Msg("Failed to stop child jobs during threshold enforcement")
+		} else {
+			c.logger.Info().
+				Str("parent_id", msg.ParentID).
+				Int("cancelled_count", cancelledCount).
+				Msg("Stopped all running child jobs due to error tolerance threshold (immediate enforcement)")
+		}
+
+		// Mark parent job as failed
+		job.Status = models.JobStatusFailed
+		job.Error = fmt.Sprintf("Error tolerance exceeded: %d/%d child jobs failed (max: %d)",
+			currentFailures, stats.ChildCount, maxFailures)
+		job.CompletedAt = time.Now()
+		job.ResultCount = job.Progress.CompletedURLs
+		job.FailedCount = job.Progress.FailedURLs
+
+		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+			c.logger.Error().
+				Err(err).
+				Str("parent_id", msg.ParentID).
+				Msg("Failed to save job as failed due to error tolerance")
+			return true // Still return true to stop processing
+		}
+
+		// Publish EventJobFailed for error tolerance threshold exceeded
+		if c.deps.EventService != nil {
+			// Get status_report from job (stats already available from line 1021)
+			statusReport := job.GetStatusReport(stats)
+
+			failedEvent := interfaces.Event{
+				Type: interfaces.EventJobFailed,
+				Payload: map[string]interface{}{
+					"job_id":          msg.ParentID,
+					"status":          "failed",
+					"source_type":     job.SourceType,
+					"entity_type":     job.EntityType,
+					"error":           job.Error,
+					"result_count":    job.ResultCount,
+					"failed_count":    job.FailedCount,
+					"child_count":     stats.ChildCount,
+					"failed_children": currentFailures,
+					"error_tolerance": maxFailures,
+					"timestamp":       time.Now().Format(time.RFC3339),
+					// Add status_report fields
+					"progress_text":    statusReport.ProgressText,
+					"errors":           statusReport.Errors,
+					"warnings":         statusReport.Warnings,
+					"running_children": statusReport.RunningChildren,
+				},
+			}
+			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
+				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event for threshold")
+			}
+		}
+
+		c.logger.Info().
+			Str("parent_id", msg.ParentID).
+			Str("error", job.Error).
+			Msg("Job marked as failed due to error tolerance threshold (stop_all, immediate enforcement)")
+
+		return true // Job failed, stop processing
+
+	case "continue":
+		// Log warning but continue processing
+		c.logger.Warn().
+			Str("parent_id", msg.ParentID).
+			Int("failed_children", currentFailures).
+			Int("max_failures", maxFailures).
+			Msg("Error tolerance threshold exceeded but continuing (action: continue)")
+		return false
+
+	case "mark_warning":
+		// Set warning in job.Error field but continue
+		warningMsg := fmt.Sprintf("Warning: %d/%d child jobs failed (threshold: %d)",
+			currentFailures, stats.ChildCount, maxFailures)
+		if job.Error == "" {
+			job.Error = warningMsg
+		} else {
+			job.Error = fmt.Sprintf("%s; %s", job.Error, warningMsg)
+		}
+
+		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+			c.logger.Warn().
+				Err(err).
+				Str("parent_id", msg.ParentID).
+				Msg("Failed to save job with warning")
+		}
+
+		c.logger.Warn().
+			Str("parent_id", msg.ParentID).
+			Str("warning", warningMsg).
+			Msg("Error tolerance threshold exceeded, marked as warning (action: mark_warning)")
+		return false
+	}
+
+	return false
 }
 
 // Validate validates the crawler message
@@ -866,6 +1217,136 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
 
+	// ERROR TOLERANCE THRESHOLD CHECKING
+	// Check if this is a root job with error tolerance configured
+	if job.ParentID == "" && msg.JobDefinitionID != "" && c.deps.JobDefinitionStorage != nil && c.deps.JobManager != nil {
+		// Load job definition to check error tolerance configuration
+		jobDef, err := c.deps.JobDefinitionStorage.GetJobDefinition(ctx, msg.JobDefinitionID)
+		if err != nil {
+			c.logger.Warn().
+				Err(err).
+				Str("job_def_id", msg.JobDefinitionID).
+				Msg("Failed to load job definition for error tolerance check")
+		} else if jobDef != nil && jobDef.ErrorTolerance != nil {
+			// Get child job failure statistics
+			childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
+			if err != nil {
+				c.logger.Warn().
+					Err(err).
+					Str("parent_id", msg.ParentID).
+					Msg("Failed to get child stats for error tolerance check")
+			} else if stats, ok := childStats[msg.ParentID]; ok {
+				// Check if failure threshold is exceeded
+				maxFailures := jobDef.ErrorTolerance.MaxChildFailures
+				currentFailures := stats.FailedChildren
+
+				if maxFailures > 0 && currentFailures >= maxFailures {
+					c.logger.Warn().
+						Str("parent_id", msg.ParentID).
+						Int("failed_children", currentFailures).
+						Int("max_failures", maxFailures).
+						Str("failure_action", jobDef.ErrorTolerance.FailureAction).
+						Msg("Error tolerance threshold exceeded")
+
+					// Handle based on failure action
+					switch jobDef.ErrorTolerance.FailureAction {
+					case "stop_all":
+						// Cancel all running child jobs
+						cancelledCount, err := c.deps.JobManager.StopAllChildJobs(ctx, msg.ParentID)
+						if err != nil {
+							c.logger.Error().
+								Err(err).
+								Str("parent_id", msg.ParentID).
+								Msg("Failed to stop child jobs")
+						} else {
+							c.logger.Info().
+								Str("parent_id", msg.ParentID).
+								Int("cancelled_count", cancelledCount).
+								Msg("Stopped all running child jobs due to error tolerance threshold")
+						}
+
+						// Mark parent job as failed
+						job.Status = models.JobStatusFailed
+						job.Error = fmt.Sprintf("Error tolerance exceeded: %d/%d child jobs failed (max: %d)",
+							currentFailures, stats.ChildCount, maxFailures)
+						job.CompletedAt = time.Now()
+						job.ResultCount = job.Progress.CompletedURLs
+						job.FailedCount = job.Progress.FailedURLs
+
+						if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
+							c.logger.Error().
+								Err(err).
+								Str("parent_id", msg.ParentID).
+								Msg("Failed to save job as failed due to error tolerance")
+							return fmt.Errorf("failed to save job: %w", err)
+						}
+
+						// Publish EventJobFailed for error tolerance threshold exceeded
+						if c.deps.EventService != nil {
+							// Get status_report from job (stats already available from line 1238)
+							statusReport := job.GetStatusReport(stats)
+
+							failedEvent := interfaces.Event{
+								Type: interfaces.EventJobFailed,
+								Payload: map[string]interface{}{
+									"job_id":          msg.ParentID,
+									"status":          "failed",
+									"source_type":     job.SourceType,
+									"entity_type":     job.EntityType,
+									"error":           job.Error,
+									"result_count":    job.ResultCount,
+									"failed_count":    job.FailedCount,
+									"child_count":     stats.ChildCount,
+									"failed_children": currentFailures,
+									"error_tolerance": maxFailures,
+									"timestamp":       time.Now().Format(time.RFC3339),
+									// Add status_report fields
+									"progress_text":    statusReport.ProgressText,
+									"errors":           statusReport.Errors,
+									"warnings":         statusReport.Warnings,
+									"running_children": statusReport.RunningChildren,
+								},
+							}
+							if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
+								c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
+							}
+						}
+
+						c.logger.Info().
+							Str("parent_id", msg.ParentID).
+							Str("error", job.Error).
+							Msg("Job marked as failed due to error tolerance threshold (stop_all)")
+
+						return nil // Job failed due to threshold, don't continue completion check
+
+					case "continue":
+						// Log warning but continue processing
+						c.logger.Warn().
+							Str("parent_id", msg.ParentID).
+							Int("failed_children", currentFailures).
+							Int("max_failures", maxFailures).
+							Msg("Error tolerance threshold exceeded but continuing (action: continue)")
+
+					case "mark_warning":
+						// Set warning in job.Error field but continue
+						warningMsg := fmt.Sprintf("Warning: %d/%d child jobs failed (threshold: %d)",
+							currentFailures, stats.ChildCount, maxFailures)
+						if job.Error == "" {
+							job.Error = warningMsg
+						} else {
+							job.Error = fmt.Sprintf("%s; %s", job.Error, warningMsg)
+						}
+
+						c.logger.Warn().
+							Str("parent_id", msg.ParentID).
+							Str("warning", warningMsg).
+							Msg("Error tolerance threshold exceeded, marked as warning (action: mark_warning)")
+					}
+				}
+			}
+		}
+	}
+
 	// Check completion conditions:
 	// 1. PendingURLs must still be 0
 	// 2. LastHeartbeat must be older than 5 seconds (indicates no recent activity)
@@ -898,6 +1379,19 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 
 		// Publish EventJobFailed for stale job timeout
 		if c.deps.EventService != nil {
+			// Fetch child statistics and generate status_report for parent job
+			childStats, statErr := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
+			if statErr != nil {
+				c.logger.Warn().Err(statErr).Str("parent_id", msg.ParentID).Msg("Failed to get child stats for stale job event")
+			}
+			var stats *interfaces.JobChildStats
+			if statsData, ok := childStats[msg.ParentID]; ok {
+				stats = statsData
+			}
+
+			// Get status_report from job
+			statusReport := job.GetStatusReport(stats)
+
 			failedEvent := interfaces.Event{
 				Type: interfaces.EventJobFailed,
 				Payload: map[string]interface{}{
@@ -909,6 +1403,11 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 					"result_count": job.ResultCount,
 					"failed_count": job.FailedCount,
 					"timestamp":    time.Now().Format(time.RFC3339),
+					// Add status_report fields
+					"progress_text":    statusReport.ProgressText,
+					"errors":           statusReport.Errors,
+					"warnings":         statusReport.Warnings,
+					"running_children": statusReport.RunningChildren,
 				},
 			}
 			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
@@ -976,6 +1475,20 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		if !job.StartedAt.IsZero() {
 			duration = job.CompletedAt.Sub(job.StartedAt) // Prefer actual processing time
 		}
+
+		// Fetch child statistics and generate status_report for parent job
+		childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
+		if err != nil {
+			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to get child stats for status_report")
+		}
+		var stats *interfaces.JobChildStats
+		if statsData, ok := childStats[msg.ParentID]; ok {
+			stats = statsData
+		}
+
+		// Get status_report from job
+		statusReport := job.GetStatusReport(stats)
+
 		completedEvent := interfaces.Event{
 			Type: interfaces.EventJobCompleted,
 			Payload: map[string]interface{}{
@@ -988,6 +1501,11 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 				"total_urls":       job.Progress.TotalURLs,
 				"duration_seconds": duration.Seconds(),
 				"timestamp":        time.Now(),
+				// Add status_report fields
+				"progress_text":    statusReport.ProgressText,
+				"errors":           statusReport.Errors,
+				"warnings":         statusReport.Warnings,
+				"running_children": statusReport.RunningChildren,
 			},
 		}
 		if err := c.deps.EventService.Publish(ctx, completedEvent); err != nil {
@@ -1002,6 +1520,61 @@ func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobM
 		Int("failed_urls", job.Progress.FailedURLs).
 		Dur("time_since_last_heartbeat", timeSinceHeartbeat).
 		Msg("Job marked as completed after grace period verification")
+
+	// Enqueue post-summarization job after completion
+	postSummaryMsgID := fmt.Sprintf("%s-post-summary", msg.ParentID)
+	postSummaryConfig := map[string]interface{}{
+		"source_type":   job.SourceType,
+		"entity_type":   job.EntityType,
+		"parent_job_id": msg.ParentID,
+	}
+
+	postSummaryMsg := &queue.JobMessage{
+		ID:              postSummaryMsgID,
+		Type:            "post_summarization",
+		ParentID:        msg.ParentID,
+		JobDefinitionID: msg.JobDefinitionID,
+		Config:          postSummaryConfig,
+	}
+
+	c.logger.Info().
+		Str("message_id", postSummaryMsgID).
+		Str("parent_id", msg.ParentID).
+		Msg("Enqueueing post-summarization job")
+
+	if err := c.deps.QueueManager.Enqueue(ctx, postSummaryMsg); err != nil {
+		c.logger.Warn().
+			Err(err).
+			Str("message_id", postSummaryMsgID).
+			Msg("Failed to enqueue post-summarization job - completion not affected")
+	} else {
+		c.logger.Info().
+			Str("message_id", postSummaryMsgID).
+			Msg("Post-summarization job enqueued")
+
+		// Create post-summarization CrawlJob record
+		postSummaryJob := &models.CrawlJob{
+			ID:         postSummaryMsgID,
+			ParentID:   msg.ParentID,
+			JobType:    models.JobTypePostSummary,
+			Name:       "Post-summarization",
+			SourceType: job.SourceType,
+			EntityType: job.EntityType,
+			Status:     models.JobStatusPending,
+			CreatedAt:  time.Now(),
+		}
+
+		if err := c.deps.JobStorage.SaveJob(ctx, postSummaryJob); err != nil {
+			c.logger.Warn().
+				Err(err).
+				Str("post_summary_job_id", postSummaryMsgID).
+				Msg("Failed to persist post-summarization job to database, continuing")
+		} else {
+			c.logger.Debug().
+				Str("post_summary_job_id", postSummaryMsgID).
+				Msg("Post-summarization job persisted to database")
+		}
+	}
 
 	// Log job completion event
 	if err := c.LogJobEvent(ctx, msg.ParentID, "info",

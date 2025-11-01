@@ -614,23 +614,23 @@ func TestRegisterCrawlerActions_Success(t *testing.T) {
 	}
 
 	// Verify all three actions are registered
-	actions := registry.ListActions(models.JobTypeCrawler)
+	actions := registry.ListActions(models.JobDefinitionTypeCrawler)
 	if len(actions) != 3 {
 		t.Errorf("Expected 3 registered actions, got %d", len(actions))
 	}
 
 	// Verify each action can be retrieved
-	crawlAction, err := registry.GetAction(models.JobTypeCrawler, "crawl")
+	crawlAction, err := registry.GetAction(models.JobDefinitionTypeCrawler, "crawl")
 	if err != nil || crawlAction == nil {
 		t.Errorf("Failed to get crawl action: %v", err)
 	}
 
-	transformAction, err := registry.GetAction(models.JobTypeCrawler, "transform")
+	transformAction, err := registry.GetAction(models.JobDefinitionTypeCrawler, "transform")
 	if err != nil || transformAction == nil {
 		t.Errorf("Failed to get transform action: %v", err)
 	}
 
-	embedAction, err := registry.GetAction(models.JobTypeCrawler, "embed")
+	embedAction, err := registry.GetAction(models.JobDefinitionTypeCrawler, "embed")
 	if err != nil || embedAction == nil {
 		t.Errorf("Failed to get embed action: %v", err)
 	}

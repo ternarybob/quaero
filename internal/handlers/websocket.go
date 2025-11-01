@@ -132,12 +132,6 @@ type StatusUpdate struct {
 	LastScrape    string `json:"lastScrape"`
 }
 
-type LogEntry struct {
-	Timestamp string `json:"timestamp"`
-	Level     string `json:"level"`
-	Message   string `json:"message"`
-}
-
 type CrawlProgressUpdate struct {
 	JobID               string    `json:"jobId"`
 	SourceType          string    `json:"sourceType"`
@@ -179,18 +173,26 @@ type JobSpawnUpdate struct {
 }
 
 type JobStatusUpdate struct {
-	JobID         string    `json:"job_id"`
-	Status        string    `json:"status"`             // "pending", "running", "completed", "failed", "cancelled"
-	SourceType    string    `json:"source_type"`        // "jira", "confluence", "github"
-	EntityType    string    `json:"entity_type"`        // "project", "issue", "space", "page"
-	ResultCount   int       `json:"result_count"`       // Documents successfully processed
-	FailedCount   int       `json:"failed_count"`       // Documents that failed
-	TotalURLs     int       `json:"total_urls"`         // Total URLs discovered
-	CompletedURLs int       `json:"completed_urls"`     // URLs completed
-	PendingURLs   int       `json:"pending_urls"`       // URLs still in queue
-	Error         string    `json:"error,omitempty"`    // Error message for failed jobs
-	Duration      float64   `json:"duration,omitempty"` // Duration in seconds for completed jobs
-	Timestamp     time.Time `json:"timestamp"`          // Event timestamp
+	JobID              string    `json:"job_id"`
+	Status             string    `json:"status"`                        // "pending", "running", "completed", "failed", "cancelled"
+	SourceType         string    `json:"source_type"`                   // "jira", "confluence", "github"
+	EntityType         string    `json:"entity_type"`                   // "project", "issue", "space", "page"
+	ResultCount        int       `json:"result_count"`                  // Documents successfully processed
+	FailedCount        int       `json:"failed_count"`                  // Documents that failed
+	TotalURLs          int       `json:"total_urls"`                    // Total URLs discovered
+	CompletedURLs      int       `json:"completed_urls"`                // URLs completed
+	PendingURLs        int       `json:"pending_urls"`                  // URLs still in queue
+	Error              string    `json:"error,omitempty"`               // Error message for failed jobs
+	Duration           float64   `json:"duration,omitempty"`            // Duration in seconds for completed jobs
+	ChildCount         int       `json:"child_count,omitempty"`         // Total child jobs (for error tolerance context)
+	ChildFailureCount  int       `json:"child_failure_count,omitempty"` // Number of failed child jobs (for error tolerance)
+	ErrorTolerance     int       `json:"error_tolerance,omitempty"`     // Error tolerance threshold (0 = unlimited)
+	Timestamp          time.Time `json:"timestamp"`                     // Event timestamp
+	// Status report fields from backend (GetStatusReport)
+	ProgressText    string   `json:"progress_text,omitempty"`   // Human-readable progress from backend
+	Errors          []string `json:"errors,omitempty"`          // List of error messages from status_report
+	Warnings        []string `json:"warnings,omitempty"`        // List of warning messages from status_report
+	RunningChildren int      `json:"running_children,omitempty"` // Number of running child jobs
 }
 
 // HandleWebSocket handles WebSocket connections
@@ -331,7 +333,7 @@ func (h *WebSocketHandler) BroadcastAuth(authData *interfaces.AuthData) {
 }
 
 // BroadcastLog sends log entries to all connected clients
-func (h *WebSocketHandler) BroadcastLog(entry LogEntry) {
+func (h *WebSocketHandler) BroadcastLog(entry interfaces.LogEntry) {
 	msg := WSMessage{
 		Type:    "log",
 		Payload: entry,
@@ -431,7 +433,7 @@ func (h *WebSocketHandler) StartStatusBroadcaster() {
 
 // SendLog is a helper to broadcast log entries
 func (h *WebSocketHandler) SendLog(level, message string) {
-	entry := LogEntry{
+	entry := interfaces.LogEntry{
 		Timestamp: time.Now().Format("15:04:05"),
 		Level:     level,
 		Message:   message,
@@ -447,7 +449,7 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 
 	// Get recent logs from memory writer
 	memWriter := arbor.GetRegisteredMemoryWriter(arbor.WRITER_MEMORY)
-	var logs []LogEntry
+	var logs []interfaces.LogEntry
 
 	if memWriter != nil {
 		entries, err := memWriter.GetEntriesWithLimit(100)
@@ -501,7 +503,7 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 				level = "debug"
 			}
 
-			entry := LogEntry{
+			entry := interfaces.LogEntry{
 				Timestamp: timestamp,
 				Level:     level,
 				Message:   messageWithFields,
@@ -513,7 +515,7 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 
 	// Return empty array if no logs
 	if logs == nil {
-		logs = []LogEntry{}
+		logs = []interfaces.LogEntry{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -868,4 +870,24 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 		}
 	}
 	return 0.0
+}
+
+func getStringSlice(m map[string]interface{}, key string) []string {
+	if val, ok := m[key]; ok {
+		// Try to convert from []interface{} (JSON arrays)
+		if arr, ok := val.([]interface{}); ok {
+			result := make([]string, 0, len(arr))
+			for _, item := range arr {
+				if str, ok := item.(string); ok {
+					result = append(result, str)
+				}
+			}
+			return result
+		}
+		// Try direct []string type assertion
+		if arr, ok := val.([]string); ok {
+			return arr
+		}
+	}
+	return []string{}
 }

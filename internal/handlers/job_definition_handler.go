@@ -13,7 +13,6 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
@@ -27,7 +26,6 @@ type JobDefinitionHandler struct {
 	jobExecutor   *jobs.JobExecutor
 	sourceService *sources.Service
 	jobRegistry   *jobs.JobTypeRegistry
-	queueManager  interfaces.QueueManager
 	logger        arbor.ILogger
 }
 
@@ -38,7 +36,6 @@ func NewJobDefinitionHandler(
 	jobExecutor *jobs.JobExecutor,
 	sourceService *sources.Service,
 	jobRegistry *jobs.JobTypeRegistry,
-	queueManager interfaces.QueueManager,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -56,9 +53,6 @@ func NewJobDefinitionHandler(
 	if jobRegistry == nil {
 		panic("jobRegistry cannot be nil")
 	}
-	if queueManager == nil {
-		panic("queueManager cannot be nil")
-	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
@@ -71,7 +65,6 @@ func NewJobDefinitionHandler(
 		jobExecutor:   jobExecutor,
 		sourceService: sourceService,
 		jobRegistry:   jobRegistry,
-		queueManager:  queueManager,
 		logger:        logger,
 	}
 }
@@ -381,53 +374,47 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
-	// Create parent job message for job definition execution using dedicated constructor
-	parentMsg := queue.NewJobDefinitionMessage(
-		jobDef.ID,
-		map[string]interface{}{
-			"job_definition_id": jobDef.ID,
-			"job_name":          jobDef.Name,
-			"job_type":          string(jobDef.Type),
-			"sources":           jobDef.Sources,
-			"steps":             jobDef.Steps,
-			"timeout":           jobDef.Timeout,
-		},
-	)
+	// Generate unique execution ID for tracking
+	executionID := fmt.Sprintf("exec-%s-%d", jobDef.ID, time.Now().Unix())
 
-	// Create job record in database for Queue UI tracking
-	// Use message ID as job ID so parent handler can update status
-	job := &models.CrawlJob{
-		ID:          parentMsg.ID,
-		Name:        jobDef.Name,
-		Description: jobDef.Description,
-		SourceType:  string(jobDef.Type),
-		EntityType:  "job_definition",
-		Status:      models.JobStatusPending,
-		CreatedAt:   time.Now(),
-		Config:      models.CrawlConfig{},
-		Progress:    models.CrawlProgress{},
-	}
+	h.logger.Info().
+		Str("job_def_id", id).
+		Str("execution_id", executionID).
+		Msg("Starting job definition execution asynchronously")
 
-	if err := h.jobStorage.SaveJob(ctx, job); err != nil {
-		h.logger.Error().Err(err).Str("job_id", job.ID).Msg("Failed to create job record")
-		WriteError(w, http.StatusInternalServerError, "Failed to create job record")
-		return
-	}
+	// Launch goroutine to execute job definition directly via JobExecutor
+	// No orchestration job is created - JobExecutor will call StartCrawl() which creates the crawler parent job
+	go func() {
+		// Create background context for async execution
+		bgCtx := context.Background()
 
-	// Enqueue parent message
-	if err := h.queueManager.Enqueue(ctx, parentMsg); err != nil {
-		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to enqueue job definition")
-		WriteError(w, http.StatusInternalServerError, "Failed to start job execution")
-		return
-	}
+		h.logger.Info().
+			Str("job_def_id", jobDef.ID).
+			Str("execution_id", executionID).
+			Msg("Job definition execution started")
 
-	h.logger.Info().Str("job_def_id", id).Str("message_id", parentMsg.ID).Str("job_id", job.ID).Msg("Job definition enqueued with job record")
+		// Execute job definition directly
+		// Pass nil callbacks since there's no orchestration job to update
+		if _, err := h.jobExecutor.Execute(bgCtx, jobDef, nil, nil); err != nil {
+			h.logger.Error().
+				Err(err).
+				Str("job_def_id", jobDef.ID).
+				Str("execution_id", executionID).
+				Msg("Job definition execution failed")
+			return
+		}
+
+		h.logger.Info().
+			Str("job_def_id", jobDef.ID).
+			Str("execution_id", executionID).
+			Msg("Job definition execution completed")
+	}()
 
 	response := map[string]interface{}{
-		"job_id":   parentMsg.ID,
-		"job_name": jobDef.Name,
-		"status":   "queued",
-		"message":  "Job execution queued successfully",
+		"execution_id": executionID,
+		"job_name":     jobDef.Name,
+		"status":       "running",
+		"message":      "Job execution started",
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
@@ -444,7 +431,7 @@ func (h *JobDefinitionHandler) validateSourceIDs(ctx context.Context, sourceIDs 
 }
 
 // validateStepActions validates that all step actions are registered
-func (h *JobDefinitionHandler) validateStepActions(jobType models.JobType, steps []models.JobStep) error {
+func (h *JobDefinitionHandler) validateStepActions(jobType models.JobDefinitionType, steps []models.JobStep) error {
 	for _, step := range steps {
 		if _, err := h.jobRegistry.GetAction(jobType, step.Action); err != nil {
 			return fmt.Errorf("unknown action '%s' for step '%s'", step.Action, step.Name)

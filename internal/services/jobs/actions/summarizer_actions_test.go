@@ -970,23 +970,23 @@ func TestRegisterSummarizerActions_Success(t *testing.T) {
 	}
 
 	// Verify all three actions are registered
-	actions := registry.ListActions(models.JobTypeSummarizer)
+	actions := registry.ListActions(models.JobDefinitionTypeSummarizer)
 	if len(actions) != 3 {
 		t.Errorf("Expected 3 registered actions, got %d", len(actions))
 	}
 
 	// Verify each action can be retrieved
-	scanAction, err := registry.GetAction(models.JobTypeSummarizer, "scan")
+	scanAction, err := registry.GetAction(models.JobDefinitionTypeSummarizer, "scan")
 	if err != nil || scanAction == nil {
 		t.Errorf("Failed to get scan action: %v", err)
 	}
 
-	summarizeAction, err := registry.GetAction(models.JobTypeSummarizer, "summarize")
+	summarizeAction, err := registry.GetAction(models.JobDefinitionTypeSummarizer, "summarize")
 	if err != nil || summarizeAction == nil {
 		t.Errorf("Failed to get summarize action: %v", err)
 	}
 
-	extractKeywordsAction, err := registry.GetAction(models.JobTypeSummarizer, "extract_keywords")
+	extractKeywordsAction, err := registry.GetAction(models.JobDefinitionTypeSummarizer, "extract_keywords")
 	if err != nil || extractKeywordsAction == nil {
 		t.Errorf("Failed to get extract_keywords action: %v", err)
 	}

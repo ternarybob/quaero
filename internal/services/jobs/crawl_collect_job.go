@@ -101,6 +101,7 @@ func (j *CrawlCollectJob) processSource(ctx context.Context, source *models.Sour
 		j.logger,
 		crawler.CrawlConfig{}, // Empty config means use source defaults
 		true,                  // Refresh source config and auth for scheduled runs to ensure latest data
+		"",                    // No job definition ID for scheduled jobs
 	)
 	if err != nil {
 		return fmt.Errorf("failed to start crawl: %w", err)

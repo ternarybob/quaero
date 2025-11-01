@@ -32,6 +32,14 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 	refreshSource := extractBool(step.Config, "refresh_source", true)
 	waitForCompletion := extractBool(step.Config, "wait_for_completion", true)
 
+	// Extract JobDefinitionID from step config (populated by JobExecutor)
+	jobDefinitionID := extractString(step.Config, "job_definition_id", "")
+	if jobDefinitionID != "" {
+		deps.Logger.Debug().
+			Str("job_definition_id", jobDefinitionID).
+			Msg("Job definition ID found in step config")
+	}
+
 	// Extract filtering patterns from job step config (shared across all sources)
 	includePatterns := extractStringSlice(step.Config, "include_patterns")
 	excludePatterns := extractStringSlice(step.Config, "exclude_patterns")
@@ -135,6 +143,7 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 			deps.Logger,
 			jobCrawlConfig,
 			refreshSource,
+			jobDefinitionID,
 		)
 
 		if err != nil {
@@ -161,12 +170,15 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 		})
 
 		// Log the source type that was passed to ensure proper inheritance
-		deps.Logger.Info().
+		logEvent := deps.Logger.Info().
 			Str("job_id", jobID).
 			Str("source_type", string(source.Type)).
 			Str("source_id", source.ID).
-			Dur("duration", time.Since(startTime)).
-			Msg("Crawl job started with source type")
+			Dur("duration", time.Since(startTime))
+		if jobDefinitionID != "" {
+			logEvent = logEvent.Str("job_definition_id", jobDefinitionID)
+		}
+		logEvent.Msg("Crawl job started with source type")
 
 		deps.Logger.Debug().
 			Str("action", "crawl").
@@ -221,7 +233,7 @@ func crawlAction(ctx context.Context, step *models.JobStep, sources []*models.So
 
 // transformAction triggers document transformation via collection events.
 // This action is fire-and-forget: it publishes events but does not wait for processing completion.
-// For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
+// For wait-for-completion functionality, use a separate polling mechanism or job coordination.
 func transformAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	jobID := extractString(step.Config, "job_id", "")
@@ -301,7 +313,7 @@ func transformAction(ctx context.Context, step *models.JobStep, sources []*model
 
 // embedAction triggers embedding generation via embedding events.
 // This action is fire-and-forget: it publishes events but does not wait for processing completion.
-// For wait-for-completion functionality, use a separate polling mechanism or workflow orchestration.
+// For wait-for-completion functionality, use a separate polling mechanism or job coordination.
 func embedAction(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig, deps *CrawlerActionDeps) error {
 	// Extract configuration parameters
 	forceEmbed := extractBool(step.Config, "force_embed", false)
@@ -400,20 +412,20 @@ func RegisterCrawlerActions(registry *jobs.JobTypeRegistry, deps *CrawlerActionD
 	}
 
 	// Register actions
-	if err := registry.RegisterAction(models.JobTypeCrawler, "crawl", crawlActionHandler); err != nil {
+	if err := registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", crawlActionHandler); err != nil {
 		return fmt.Errorf("failed to register crawl action: %w", err)
 	}
 
-	if err := registry.RegisterAction(models.JobTypeCrawler, "transform", transformActionHandler); err != nil {
+	if err := registry.RegisterAction(models.JobDefinitionTypeCrawler, "transform", transformActionHandler); err != nil {
 		return fmt.Errorf("failed to register transform action: %w", err)
 	}
 
-	if err := registry.RegisterAction(models.JobTypeCrawler, "embed", embedActionHandler); err != nil {
+	if err := registry.RegisterAction(models.JobDefinitionTypeCrawler, "embed", embedActionHandler); err != nil {
 		return fmt.Errorf("failed to register embed action: %w", err)
 	}
 
 	deps.Logger.Info().
-		Str("job_type", string(models.JobTypeCrawler)).
+		Str("job_type", string(models.JobDefinitionTypeCrawler)).
 		Int("action_count", 3).
 		Msg("Crawler actions registered successfully")
 

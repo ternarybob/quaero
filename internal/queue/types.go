@@ -65,7 +65,9 @@ func NewJobMessage(jobType string, parentID string) *JobMessage {
 	}
 }
 
-// NewParentJobMessage creates a parent job message
+// NewParentJobMessage creates a parent job message for coordinating child job execution.
+// Deprecated: This function is no longer used. Job definitions now execute directly via JobExecutor
+// without creating parent messages. This function is kept for backward compatibility only.
 func NewParentJobMessage(sourceType, entityType string, config map[string]interface{}) *JobMessage {
 	msg := NewJobMessage("parent", "")
 	msg.SourceType = sourceType
@@ -98,8 +100,23 @@ func NewCleanupMessage(config map[string]interface{}) *JobMessage {
 	return msg
 }
 
-// NewJobDefinitionMessage creates a parent job message specifically for job definition execution
-// This constructor provides semantic clarity for job definition workflows
+// NewPreValidationMessage creates a pre-validation job message
+func NewPreValidationMessage(parentID string, config map[string]interface{}) *JobMessage {
+	msg := NewJobMessage("pre_validation", parentID)
+	msg.Config = config
+	return msg
+}
+
+// NewPostSummarizationMessage creates a post-summarization job message
+func NewPostSummarizationMessage(parentID string, config map[string]interface{}) *JobMessage {
+	msg := NewJobMessage("post_summarization", parentID)
+	msg.Config = config
+	return msg
+}
+
+// NewJobDefinitionMessage creates a parent message for job definition execution.
+// Deprecated: This function is no longer used. ExecuteJobDefinitionHandler now invokes JobExecutor directly
+// without creating parent messages. This function is kept for backward compatibility only.
 func NewJobDefinitionMessage(jobDefID string, config map[string]interface{}) *JobMessage {
 	msg := NewJobMessage("parent", "")
 	msg.JobDefinitionID = jobDefID

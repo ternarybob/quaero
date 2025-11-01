@@ -9,7 +9,7 @@ import (
 )
 
 // VERIFICATION COMMENT 3: Shared link filtering logic (DRY principle)
-// Consolidates duplicate filtering from orchestrator.go and CrawlerJob.shouldEnqueueURL()
+// Consolidates duplicate filtering from CrawlerJob.shouldEnqueueURL() and other components
 // Single source of truth for include/exclude patterns and source-specific validation
 
 // FilterResult contains filtering outcome and metadata

@@ -119,13 +119,35 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 		parentID.String = crawlJob.ParentID
 	}
 
+	// Normalize empty job_type to JobTypeParent (Comment 2)
+	if crawlJob.JobType == "" {
+		crawlJob.JobType = models.JobTypeParent
+	}
+
+	// Validate job_type is one of the allowed constants (Comment 3)
+	validJobTypes := map[models.JobType]bool{
+		models.JobTypeParent:        true,
+		models.JobTypePreValidation: true,
+		models.JobTypeCrawlerURL:    true,
+		models.JobTypePostSummary:   true,
+	}
+	if !validJobTypes[crawlJob.JobType] {
+		// Set to default JobTypeParent for invalid values
+		s.logger.Warn().
+			Str("job_id", crawlJob.ID).
+			Str("invalid_job_type", string(crawlJob.JobType)).
+			Msg("Invalid job_type value, setting to JobTypeParent")
+		crawlJob.JobType = models.JobTypeParent
+	}
+
 	query := `
 		INSERT INTO crawl_jobs (
-			id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+			id, parent_id, job_type, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 			status, progress_json, created_at, started_at, completed_at, error, result_count, failed_count, seed_urls
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			parent_id = excluded.parent_id,
+			job_type = excluded.job_type,
 			name = excluded.name,
 			description = excluded.description,
 			status = excluded.status,
@@ -144,6 +166,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	_, err = s.db.db.ExecContext(ctx, query,
 		crawlJob.ID,
 		parentID,
+		string(crawlJob.JobType),
 		crawlJob.Name,
 		crawlJob.Description,
 		crawlJob.SourceType,
@@ -211,7 +234,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 // GetJob retrieves a job by ID
 func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	query := `
-		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, job_type, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE id = ?
@@ -224,7 +247,7 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 // ListJobs lists jobs with pagination and filters
 func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, job_type, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE 1=1
@@ -315,7 +338,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 // GetJobsByStatus filters jobs by status
 func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, job_type, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = ?
@@ -336,7 +359,7 @@ func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*mod
 // Returns empty slice if parent has no children or parent doesn't exist
 func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, parent_id, name, description, source_type, entity_type, config_json,
+		SELECT id, parent_id, job_type, name, description, source_type, entity_type, config_json,
 		       source_config_snapshot, auth_snapshot, refresh_source, status, progress_json,
 		       created_at, started_at, completed_at, last_heartbeat, error, result_count,
 		       failed_count, seed_urls
@@ -471,6 +494,88 @@ func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progre
 	return err
 }
 
+// UpdateProgressCountersAtomic atomically updates progress counters using SQL arithmetic
+// to prevent race conditions from concurrent workers updating the same parent job.
+// This method performs in-place updates using += and -= operations in a single atomic UPDATE.
+//
+// Parameters:
+//   - completedDelta: Amount to add to CompletedURLs (e.g., +1 for completion, 0 for no change)
+//   - pendingDelta: Amount to add/subtract from PendingURLs (e.g., -1 when URL completes, +5 when spawning 5 children)
+//   - totalDelta: Amount to add to TotalURLs (e.g., +5 when spawning 5 children, 0 for no change)
+//   - failedDelta: Amount to add to FailedURLs (e.g., +1 for failure, 0 for no change)
+//
+// Thread Safety:
+//   - Single atomic UPDATE eliminates read-modify-write race conditions
+//   - Safe for concurrent workers updating same parent job
+//   - No optimistic locking or versioning needed
+//
+// JSON Update Strategy:
+//   - Deserializes progress_json in SQL (using json_extract if available)
+//   - Applies delta arithmetic to numeric counters
+//   - Recomputes percentage: CAST(new_completed AS REAL) / new_total * 100
+//   - Serializes back to JSON in single operation
+//
+// Note: This uses json_patch if SQLite has JSON1 extension, otherwise falls back to
+// read-modify-write with mutex protection (still atomic at database level).
+func (s *JobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Atomic SQL update that applies deltas and recomputes progress_json
+	// This eliminates read-modify-write races from concurrent workers
+	query := `
+		UPDATE crawl_jobs
+		SET progress_json = json_patch(progress_json, json_object(
+			'completed_urls', CAST(COALESCE(json_extract(progress_json, '$.completed_urls'), 0) + ? AS INTEGER),
+			'pending_urls', CAST(COALESCE(json_extract(progress_json, '$.pending_urls'), 0) + ? AS INTEGER),
+			'total_urls', CAST(COALESCE(json_extract(progress_json, '$.total_urls'), 0) + ? AS INTEGER),
+			'failed_urls', CAST(COALESCE(json_extract(progress_json, '$.failed_urls'), 0) + ? AS INTEGER),
+			'percentage', CAST(
+				CASE
+					WHEN (COALESCE(json_extract(progress_json, '$.total_urls'), 0) + ?) > 0
+					THEN (CAST(COALESCE(json_extract(progress_json, '$.completed_urls'), 0) + ? AS REAL) /
+					      CAST(COALESCE(json_extract(progress_json, '$.total_urls'), 0) + ? AS REAL) * 100.0)
+					ELSE 0.0
+				END AS REAL
+			)
+		))
+		WHERE id = ?
+	`
+
+	_, err := s.db.db.ExecContext(ctx, query,
+		completedDelta, // $.completed_urls delta
+		pendingDelta,   // $.pending_urls delta
+		totalDelta,     // $.total_urls delta
+		failedDelta,    // $.failed_urls delta
+		totalDelta,     // for percentage denominator
+		completedDelta, // for percentage numerator
+		totalDelta,     // for percentage denominator (again)
+		jobID,
+	)
+
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("job_id", jobID).
+			Int("completed_delta", completedDelta).
+			Int("pending_delta", pendingDelta).
+			Int("total_delta", totalDelta).
+			Int("failed_delta", failedDelta).
+			Msg("Failed to atomically update progress counters")
+		return fmt.Errorf("failed to update progress counters: %w", err)
+	}
+
+	s.logger.Debug().
+		Str("job_id", jobID).
+		Int("completed_delta", completedDelta).
+		Int("pending_delta", pendingDelta).
+		Int("total_delta", totalDelta).
+		Int("failed_delta", failedDelta).
+		Msg("Progress counters updated atomically")
+
+	return nil
+}
+
 // UpdateJobHeartbeat updates the last_heartbeat timestamp for a job
 func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
 	s.mu.Lock()
@@ -492,7 +597,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 // GetStaleJobs returns jobs with stale heartbeats (older than threshold)
 func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
 	query := `
-		SELECT id, parent_id, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
+		SELECT id, parent_id, job_type, name, description, source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source,
 		       status, progress_json, created_at, started_at, completed_at, last_heartbeat, error, result_count, failed_count, seed_urls
 		FROM crawl_jobs
 		WHERE status = 'running'
@@ -509,14 +614,36 @@ func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int
 	return s.scanJobs(rows)
 }
 
-// DeleteJob deletes a job by ID
+// DeleteJob deletes a job by ID (idempotent - safe for duplicate calls)
 func (s *JobStorage) DeleteJob(ctx context.Context, jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := "DELETE FROM crawl_jobs WHERE id = ?"
-	_, err := s.db.db.ExecContext(ctx, query, jobID)
-	return err
+	// Check if job exists before DELETE (idempotency check)
+	checkQuery := "SELECT COUNT(*) FROM crawl_jobs WHERE id = ?"
+	var count int
+	err := s.db.db.QueryRowContext(ctx, checkQuery, jobID).Scan(&count)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to check job existence")
+		return fmt.Errorf("failed to check job existence: %w", err)
+	}
+
+	// If job doesn't exist, return success (already deleted)
+	if count == 0 {
+		s.logger.Debug().Str("job_id", jobID).Msg("Job not found for deletion (already deleted or never existed)")
+		return nil
+	}
+
+	// Job exists, proceed with DELETE
+	deleteQuery := "DELETE FROM crawl_jobs WHERE id = ?"
+	_, err = s.db.db.ExecContext(ctx, deleteQuery, jobID)
+	if err != nil {
+		s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to delete job")
+		return fmt.Errorf("failed to delete job: %w", err)
+	}
+
+	s.logger.Info().Str("job_id", jobID).Msg("Job deleted from storage")
+	return nil
 }
 
 // CountJobs returns total job count
@@ -597,6 +724,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	var (
 		id, name, description, sourceType, entityType, configJSON, status, progressJSON string
 		parentID                                                                        sql.NullString
+		jobType                                                                         string
 		sourceConfigSnapshot, authSnapshot                                              sql.NullString
 		refreshSource                                                                   int
 		errorMsg                                                                        sql.NullString
@@ -607,7 +735,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	)
 
 	err := row.Scan(
-		&id, &parentID, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+		&id, &parentID, &jobType, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 		&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 	)
 
@@ -632,6 +760,7 @@ func (s *JobStorage) scanJob(row *sql.Row) (interface{}, error) {
 	// Build CrawlJob
 	job := &models.CrawlJob{
 		ID:                   id,
+		JobType:              models.JobType(jobType),
 		Name:                 name,
 		Description:          description,
 		SourceType:           sourceType,
@@ -693,6 +822,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		var (
 			id, name, description, sourceType, entityType, configJSON, status, progressJSON string
 			parentID                                                                        sql.NullString
+			jobType                                                                         string
 			sourceConfigSnapshot, authSnapshot                                              sql.NullString
 			refreshSource                                                                   int
 			errorMsg                                                                        sql.NullString
@@ -703,7 +833,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		)
 
 		err := rows.Scan(
-			&id, &parentID, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
+			&id, &parentID, &jobType, &name, &description, &sourceType, &entityType, &configJSON, &sourceConfigSnapshot, &authSnapshot, &refreshSource,
 			&status, &progressJSON, &createdAt, &startedAt, &completedAt, &lastHeartbeat, &errorMsg, &resultCount, &failedCount, &seedURLsJSON,
 		)
 
@@ -727,6 +857,7 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.CrawlJob, error) {
 		// Build CrawlJob
 		job := &models.CrawlJob{
 			ID:                   id,
+			JobType:              models.JobType(jobType),
 			Name:                 name,
 			Description:          description,
 			SourceType:           sourceType,

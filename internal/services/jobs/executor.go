@@ -129,9 +129,10 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		return nil, fmt.Errorf("invalid job definition: %w", err)
 	}
 
-	// Log execution start with distinction between workflow and task jobs
+	// Log execution start
 	e.logger.Info().
 		Str("job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Str("job_name", definition.Name).
 		Str("job_type", string(definition.Type)).
 		Int("step_count", len(definition.Steps)).
@@ -143,6 +144,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	if len(definition.PreJobs) > 0 {
 		e.logger.Info().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Int("pre_job_count", len(definition.PreJobs)).
 			Msg("Starting pre-job execution")
 
@@ -150,6 +152,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 			// Log pre-job execution
 			e.logger.Info().
 				Str("job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Str("pre_job_id", preJobID).
 				Msg("Executing pre-job")
 
@@ -160,6 +163,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 				e.logger.Error().
 					Err(err).
 					Str("job_id", definition.ID).
+					Str("job_definition_id", definition.ID).
 					Str("pre_job_id", preJobID).
 					Msg("Failed to fetch pre-job definition")
 
@@ -177,6 +181,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 				e.logger.Error().
 					Err(err).
 					Str("job_id", definition.ID).
+					Str("job_definition_id", definition.ID).
 					Str("pre_job_id", preJobID).
 					Msg("Pre-job execution failed")
 
@@ -189,6 +194,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 
 			e.logger.Info().
 				Str("job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Str("pre_job_id", preJobID).
 				Msg("Pre-job executed successfully")
 		}
@@ -222,6 +228,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		// Log step start
 		e.logger.Info().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Int("step_index", stepIndex).
 			Str("step_name", step.Name).
 			Str("action", step.Action).
@@ -229,6 +236,12 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 
 		// Publish step start event
 		e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "running", "")
+
+		// Store JobDefinitionID in step config for action handlers
+		if step.Config == nil {
+			step.Config = make(map[string]interface{})
+		}
+		step.Config["job_definition_id"] = definition.ID
 
 		// Retrieve action handler
 		handler, err := e.registry.GetAction(definition.Type, step.Action)
@@ -270,6 +283,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 
 					e.logger.Debug().
 						Str("job_id", definition.ID).
+						Str("job_definition_id", definition.ID).
 						Int("step_index", stepIndex).
 						Str("step_name", step.Name).
 						Int("crawl_job_count", len(jobIDs)).
@@ -296,6 +310,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 							e.logger.Error().
 								Err(pollErr).
 								Str("job_id", definition.ID).
+								Str("job_definition_id", definition.ID).
 								Int("step_index", stepIndex).
 								Msg("Async crawl polling failed")
 
@@ -305,6 +320,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 									e.logger.Error().
 										Err(callbackErr).
 										Str("job_id", definition.ID).
+										Str("job_definition_id", definition.ID).
 										Msg("Failed to invoke status callback for polling failure")
 								}
 							}
@@ -315,6 +331,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 							e.publishProgressEvent(pollingCtx, definition, len(definition.Steps)-1, "", "", "completed", "")
 							e.logger.Info().
 								Str("job_id", definition.ID).
+								Str("job_definition_id", definition.ID).
 								Int("step_index", stepIndex).
 								Msg("Async crawl polling completed successfully")
 
@@ -329,6 +346,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 									e.logger.Error().
 										Err(callbackErr).
 										Str("job_id", definition.ID).
+										Str("job_definition_id", definition.ID).
 										Msg("Failed to invoke status callback for polling success")
 								}
 							}
@@ -338,6 +356,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 					// Immediately return - polling continues in background
 					e.logger.Debug().
 						Str("job_id", definition.ID).
+						Str("job_definition_id", definition.ID).
 						Int("step_index", stepIndex).
 						Msg("Crawl step completed (polling in background)")
 					e.publishProgressEvent(ctx, definition, stepIndex, step.Name, step.Action, "running", "")
@@ -345,6 +364,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 					// No job IDs found, but step succeeded - publish completion event
 					e.logger.Warn().
 						Str("job_id", definition.ID).
+						Str("job_definition_id", definition.ID).
 						Int("step_index", stepIndex).
 						Str("step_name", step.Name).
 						Msg("Crawl action completed but no job IDs found for polling")
@@ -360,6 +380,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		stepDuration := time.Since(stepStartTime)
 		e.logger.Info().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Int("step_index", stepIndex).
 			Str("step_name", step.Name).
 			Dur("duration", stepDuration).
@@ -371,6 +392,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 		totalDuration := time.Since(startTime)
 		e.logger.Warn().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Int("error_count", len(errors)).
 			Dur("duration", totalDuration).
 			Msg("Job execution completed with errors")
@@ -385,6 +407,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	totalDuration := time.Since(startTime)
 	e.logger.Info().
 		Str("job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Dur("duration", totalDuration).
 		Msg("Job execution completed successfully")
 
@@ -398,6 +421,7 @@ func (e *JobExecutor) Execute(ctx context.Context, definition *models.JobDefinit
 	} else {
 		e.logger.Debug().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Msg("Async polling in progress - completion event deferred to polling goroutine")
 	}
 
@@ -421,6 +445,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 	// Log start of post-job execution
 	e.logger.Info().
 		Str("parent_job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Int("post_job_count", len(definition.PostJobs)).
 		Msg("Starting post-job execution")
 
@@ -433,6 +458,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 		e.logger.Debug().
 			Str("post_job_id", postJobID).
 			Str("parent_job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Msg("Fetching post-job definition")
 
 		// Fetch post-job definition from storage
@@ -443,6 +469,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 				Err(err).
 				Str("post_job_id", postJobID).
 				Str("parent_job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Msg("Failed to fetch post-job definition, skipping")
 			skippedCount++
 			continue
@@ -454,6 +481,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 				Str("post_job_id", postJobID).
 				Str("post_job_name", postJobDef.Name).
 				Str("parent_job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Msg("Post-job is disabled, skipping")
 			skippedCount++
 			continue
@@ -466,6 +494,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 				Str("post_job_id", postJobID).
 				Str("post_job_name", postJobDef.Name).
 				Str("parent_job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Msg("Post-job definition is invalid, skipping")
 			skippedCount++
 			continue
@@ -476,6 +505,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 			Str("post_job_id", postJobID).
 			Str("post_job_name", postJobDef.Name).
 			Str("parent_job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Msg("Triggering post-job execution")
 
 		// Invoke callback to trigger post-job (pass definition to avoid double-fetching)
@@ -485,6 +515,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 				Err(err).
 				Str("post_job_id", postJobID).
 				Str("parent_job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Msg("Failed to trigger post-job, continuing with remaining post-jobs")
 			skippedCount++
 			continue
@@ -495,6 +526,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 			Str("post_job_id", postJobID).
 			Str("post_job_name", postJobDef.Name).
 			Str("parent_job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Msg("Post-job triggered successfully")
 		triggeredCount++
 	}
@@ -502,6 +534,7 @@ func (e *JobExecutor) executePostJobs(ctx context.Context, definition *models.Jo
 	// Log completion with summary
 	e.logger.Info().
 		Str("parent_job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Int("triggered_count", triggeredCount).
 		Int("skipped_count", skippedCount).
 		Int("total_count", len(definition.PostJobs)).
@@ -522,6 +555,7 @@ func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.Jo
 	// Log error with structured fields
 	logEvent := e.logger.Error().
 		Str("job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Str("step_name", step.Name).
 		Str("action", step.Action).
 		Int("step_index", stepIndex).
@@ -533,6 +567,7 @@ func (e *JobExecutor) handleStepError(ctx context.Context, definition *models.Jo
 		// Log warning, add to error aggregation, and continue
 		e.logger.Warn().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Str("step_name", step.Name).
 			Str("action", step.Action).
 			Int("step_index", stepIndex).
@@ -603,6 +638,7 @@ func (e *JobExecutor) retryStep(ctx context.Context, definition *models.JobDefin
 		// Log retry attempt (execution detail)
 		e.logger.Debug().
 			Str("job_id", definition.ID).
+			Str("job_definition_id", definition.ID).
 			Str("step_name", step.Name).
 			Int("attempt", attempt).
 			Int("max_retries", maxRetries).
@@ -626,6 +662,7 @@ func (e *JobExecutor) retryStep(ctx context.Context, definition *models.JobDefin
 			// Success
 			e.logger.Info().
 				Str("job_id", definition.ID).
+				Str("job_definition_id", definition.ID).
 				Str("step_name", step.Name).
 				Int("attempt", attempt).
 				Msg("Step succeeded on retry")
@@ -715,6 +752,7 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 
 	e.logger.Debug().
 		Str("job_id", definition.ID).
+		Str("job_definition_id", definition.ID).
 		Int("step_index", stepIndex).
 		Str("step_name", step.Name).
 		Int("crawl_job_count", len(jobIDs)).
@@ -728,6 +766,7 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 			if ctx.Err() == context.DeadlineExceeded {
 				e.logger.Error().
 					Str("job_id", definition.ID).
+					Str("job_definition_id", definition.ID).
 					Int("step_index", stepIndex).
 					Msg("Polling timeout exceeded")
 				return fmt.Errorf("polling timeout exceeded")
@@ -735,6 +774,7 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 			if ctx.Err() == context.Canceled {
 				e.logger.Info().
 					Str("job_id", definition.ID).
+					Str("job_definition_id", definition.ID).
 					Int("step_index", stepIndex).
 					Msg("Polling cancelled via executor shutdown")
 				return fmt.Errorf("polling cancelled")
@@ -882,6 +922,7 @@ func (e *JobExecutor) pollCrawlJobs(ctx context.Context, definition *models.JobD
 
 				e.logger.Info().
 					Str("job_id", definition.ID).
+					Str("job_definition_id", definition.ID).
 					Int("step_index", stepIndex).
 					Int("crawl_job_count", len(jobIDs)).
 					Msg("All crawl jobs completed successfully")

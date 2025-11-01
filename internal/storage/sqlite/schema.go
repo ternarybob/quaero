@@ -103,11 +103,13 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 
 -- Crawler job history with configuration snapshots for re-runnable jobs
 -- Inspired by Firecrawl's async job model
--- Used by both JobExecutor (for JobDefinition workflows) and queue-based jobs
+-- Used by both JobExecutor (for JobDefinition jobs) and queue-based jobs
 -- The 'logs' column was removed in MIGRATION 13 (logs now in job_logs table)
+-- The 'metadata' column was added in MIGRATION 21 to store job_definition_id and other metadata
 CREATE TABLE IF NOT EXISTS crawl_jobs (
 	id TEXT PRIMARY KEY,
 	parent_id TEXT,
+	job_type TEXT DEFAULT 'parent',
 	name TEXT DEFAULT '',
 	description TEXT DEFAULT '',
 	source_type TEXT NOT NULL,
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 	seed_urls TEXT,
 	status TEXT NOT NULL,
 	progress_json TEXT,
+	metadata TEXT,
 	created_at INTEGER NOT NULL,
 	started_at INTEGER,
 	completed_at INTEGER,
@@ -132,7 +135,8 @@ CREATE TABLE IF NOT EXISTS crawl_jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crawl_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_crawl_jobs_type_status ON crawl_jobs(job_type, status, created_at DESC);
 
 -- Job seen URLs table for concurrency-safe URL deduplication (VERIFICATION COMMENT 1)
 -- Tracks URLs that have been enqueued for each job to prevent duplicate processing
@@ -206,6 +210,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	auto_start INTEGER DEFAULT 0,
 	config TEXT,
 	post_jobs TEXT,
+	error_tolerance TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
@@ -367,6 +372,32 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 17: Add pre_jobs column to job_definitions table
 	if err := s.migrateAddPreJobsColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 18: Add job_type column to crawl_jobs table
+	if err := s.migrateAddJobTypeColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 19: Rename idx_jobs_parent_id to idx_crawl_jobs_parent_id
+	if err := s.migrateRenameParentIdIndex(); err != nil {
+		return err
+	}
+
+	// MIGRATION 20: Add error_tolerance column to job_definitions table
+	if err := s.migrateAddErrorToleranceColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 21: Add metadata column to crawl_jobs table if it doesn't exist
+	if err := s.migrateAddMetadataColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 22: Cleanup orphaned orchestration jobs
+	// Removes jobs created by old ExecuteJobDefinitionHandler pattern that have been replaced
+	if err := s.migrateCleanupOrphanedOrchestrationJobs(); err != nil {
 		return err
 	}
 
@@ -1652,5 +1683,284 @@ func (s *SQLiteDB) migrateAddPreJobsColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: pre_jobs column added successfully")
+	return nil
+}
+
+// migrateAddJobTypeColumn adds job_type column to crawl_jobs table
+func (s *SQLiteDB) migrateAddJobTypeColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasJobType := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "job_type" {
+			hasJobType = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasJobType {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding job_type column to crawl_jobs")
+
+	// Add the job_type column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN job_type TEXT DEFAULT 'parent'`); err != nil {
+		return err
+	}
+
+	// Backfill existing rows
+	s.logger.Info().Msg("Backfilling existing rows with default job_type")
+	if _, err := s.db.Exec(`UPDATE crawl_jobs SET job_type = 'parent' WHERE job_type IS NULL`); err != nil {
+		return err
+	}
+
+	// Create the index
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_crawl_jobs_type_status ON crawl_jobs(job_type, status, created_at DESC)`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: job_type column added successfully")
+	return nil
+}
+
+// migrateRenameParentIdIndex renames idx_jobs_parent_id to idx_crawl_jobs_parent_id
+func (s *SQLiteDB) migrateRenameParentIdIndex() error {
+	// Check if old index exists
+	indexQuery := `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_parent_id'`
+	var indexName string
+	err := s.db.QueryRow(indexQuery).Scan(&indexName)
+	if err != nil {
+		// Index doesn't exist, migration already completed or not needed
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Renaming idx_jobs_parent_id to idx_crawl_jobs_parent_id")
+
+	// Drop the old index
+	if _, err := s.db.Exec(`DROP INDEX IF EXISTS idx_jobs_parent_id`); err != nil {
+		return err
+	}
+
+	// Create the new index with correct name
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_crawl_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC)`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: idx_jobs_parent_id renamed to idx_crawl_jobs_parent_id successfully")
+	return nil
+}
+
+// migrateAddErrorToleranceColumn adds error_tolerance column to job_definitions table
+func (s *SQLiteDB) migrateAddErrorToleranceColumn() error {
+	columnsQuery := `PRAGMA table_info(job_definitions)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasErrorTolerance := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "error_tolerance" {
+			hasErrorTolerance = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasErrorTolerance {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding error_tolerance column to job_definitions")
+
+	// Add the error_tolerance column
+	if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN error_tolerance TEXT`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: error_tolerance column added successfully")
+	return nil
+}
+
+// migrateAddMetadataColumn adds metadata column to crawl_jobs table if it doesn't exist
+func (s *SQLiteDB) migrateAddMetadataColumn() error {
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasMetadata := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "metadata" {
+			hasMetadata = true
+			break
+		}
+	}
+
+	// If column already exists, migration already completed
+	if hasMetadata {
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding metadata column to crawl_jobs")
+
+	// Add the metadata column
+	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN metadata TEXT`); err != nil {
+		return err
+	}
+
+	s.logger.Info().Msg("Migration: metadata column added successfully")
+	return nil
+}
+
+// migrateCleanupOrphanedOrchestrationJobs removes orphaned orchestration jobs
+// from the old dual-job creation pattern where ExecuteJobDefinitionHandler
+// created a parent job before JobExecutor created the actual crawler job.
+// After the refactoring, ExecuteJobDefinitionHandler no longer creates jobs,
+// so any remaining orchestration wrapper jobs can be safely cleaned up.
+// This migration uses narrow criteria to avoid deleting legitimate jobs.
+func (s *SQLiteDB) migrateCleanupOrphanedOrchestrationJobs() error {
+	s.logger.Info().Msg("Running migration: Cleaning up orphaned orchestration jobs")
+
+	// First, verify required columns exist before attempting deletion
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Could not verify crawl_jobs schema (non-critical)")
+		return nil
+	}
+
+	hasMetadata := false
+	hasJobType := false
+	hasSourceType := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			s.logger.Warn().Err(err).Msg("Could not scan column info (non-critical)")
+			return nil
+		}
+		if name == "metadata" {
+			hasMetadata = true
+		}
+		if name == "job_type" {
+			hasJobType = true
+		}
+		if name == "source_type" {
+			hasSourceType = true
+		}
+	}
+	rows.Close()
+
+	// If required columns don't exist, skip migration
+	if !hasMetadata || !hasJobType || !hasSourceType {
+		s.logger.Debug().
+			Bool("has_metadata", hasMetadata).
+			Bool("has_job_type", hasJobType).
+			Bool("has_source_type", hasSourceType).
+			Msg("Required columns not present, skipping orphaned job cleanup")
+		return nil
+	}
+
+	// Query for orphaned orchestration wrapper jobs using narrow criteria:
+	// 1. job_type='parent' (orchestration wrapper type)
+	// 2. source_type is empty or NULL (orchestration wrappers don't have actual source data)
+	// 3. No job_definition_id in metadata (orphaned from old pattern)
+	// 4. Has no child jobs (safe to delete)
+	orphanedJobsQuery := `
+		SELECT id FROM crawl_jobs
+		WHERE job_type = 'parent'
+		  AND (source_type = '' OR source_type IS NULL)
+		  AND (metadata IS NULL
+		       OR json_extract(metadata, '$.job_definition_id') IS NULL
+		       OR json_extract(metadata, '$.job_definition_id') = '')
+		  AND (SELECT COUNT(1) FROM crawl_jobs c WHERE c.parent_id = crawl_jobs.id) = 0
+		LIMIT 1000
+	`
+
+	orphanedRows, err := s.db.Query(orphanedJobsQuery)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Could not query orphaned jobs (non-critical)")
+		return nil
+	}
+	defer orphanedRows.Close()
+
+	var orphanedIDs []string
+	for orphanedRows.Next() {
+		var id string
+		if err := orphanedRows.Scan(&id); err != nil {
+			s.logger.Warn().Err(err).Msg("Could not scan orphaned job ID")
+			continue
+		}
+		orphanedIDs = append(orphanedIDs, id)
+	}
+
+	if len(orphanedIDs) == 0 {
+		s.logger.Debug().Msg("No orphaned orchestration jobs found")
+		return nil
+	}
+
+	s.logger.Info().
+		Int("orphaned_count", len(orphanedIDs)).
+		Strs("orphaned_ids", orphanedIDs).
+		Msg("Found orphaned orchestration jobs to delete")
+
+	// Delete the identified orphaned jobs
+	result, err := s.db.Exec(`
+		DELETE FROM crawl_jobs
+		WHERE id IN (
+			SELECT id FROM crawl_jobs
+			WHERE job_type = 'parent'
+			  AND (source_type = '' OR source_type IS NULL)
+			  AND (metadata IS NULL
+			       OR json_extract(metadata, '$.job_definition_id') IS NULL
+			       OR json_extract(metadata, '$.job_definition_id') = '')
+			  AND (SELECT COUNT(1) FROM crawl_jobs c WHERE c.parent_id = crawl_jobs.id) = 0
+			LIMIT 1000
+		)
+	`)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Could not delete orphaned jobs (non-critical)")
+		return nil
+	}
+
+	orphanedCount, _ := result.RowsAffected()
+	if orphanedCount > 0 {
+		s.logger.Info().
+			Int64("orphaned_jobs_deleted", orphanedCount).
+			Strs("deleted_ids", orphanedIDs).
+			Msg("Orphaned orchestration jobs cleaned up successfully")
+	}
+
 	return nil
 }

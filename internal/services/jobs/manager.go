@@ -285,6 +285,108 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 	return newJob.ID, nil
 }
 
+// StopAllChildJobs cancels all running and pending child jobs of the specified parent job.
+// This is used by error tolerance threshold management to stop child jobs
+// when the parent job's failure threshold is exceeded.
+// Returns the count of jobs that were successfully cancelled.
+func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
+	// Query all running child jobs
+	runningChildren, err := m.jobStorage.ListJobs(ctx, &interfaces.JobListOptions{
+		ParentID: parentID,
+		Status:   string(models.JobStatusRunning),
+		Limit:    0, // No limit - get all running children
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list running child jobs: %w", err)
+	}
+
+	// Query all pending child jobs
+	pendingChildren, err := m.jobStorage.ListJobs(ctx, &interfaces.JobListOptions{
+		ParentID: parentID,
+		Status:   string(models.JobStatusPending),
+		Limit:    0, // No limit - get all pending children
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to list pending child jobs: %w", err)
+	}
+
+	totalChildren := len(runningChildren) + len(pendingChildren)
+	if totalChildren == 0 {
+		m.logger.Debug().
+			Str("parent_id", parentID).
+			Msg("No running or pending child jobs to cancel")
+		return 0, nil
+	}
+
+	m.logger.Info().
+		Str("parent_id", parentID).
+		Int("running_count", len(runningChildren)).
+		Int("pending_count", len(pendingChildren)).
+		Int("total_count", totalChildren).
+		Msg("Stopping all running and pending child jobs due to error tolerance threshold")
+
+	cancelledRunning := 0
+	cancelledPending := 0
+
+	// Cancel running children
+	for _, child := range runningChildren {
+		child.Status = models.JobStatusCancelled
+		child.Error = "Cancelled by parent job error tolerance threshold"
+
+		if err := m.jobStorage.SaveJob(ctx, child); err != nil {
+			m.logger.Warn().
+				Err(err).
+				Str("parent_id", parentID).
+				Str("child_id", child.ID).
+				Msg("Failed to cancel running child job, continuing with others")
+			continue
+		}
+
+		m.logger.Debug().
+			Str("parent_id", parentID).
+			Str("child_id", child.ID).
+			Str("original_status", "running").
+			Msg("Child job cancelled")
+
+		cancelledRunning++
+	}
+
+	// Cancel pending children
+	for _, child := range pendingChildren {
+		child.Status = models.JobStatusCancelled
+		child.Error = "Cancelled by parent job error tolerance threshold"
+
+		if err := m.jobStorage.SaveJob(ctx, child); err != nil {
+			m.logger.Warn().
+				Err(err).
+				Str("parent_id", parentID).
+				Str("child_id", child.ID).
+				Msg("Failed to cancel pending child job, continuing with others")
+			continue
+		}
+
+		m.logger.Debug().
+			Str("parent_id", parentID).
+			Str("child_id", child.ID).
+			Str("original_status", "pending").
+			Msg("Child job cancelled")
+
+		cancelledPending++
+	}
+
+	totalCancelled := cancelledRunning + cancelledPending
+
+	m.logger.Info().
+		Str("parent_id", parentID).
+		Int("cancelled_running", cancelledRunning).
+		Int("cancelled_pending", cancelledPending).
+		Int("total_cancelled", totalCancelled).
+		Int("total_children", totalChildren).
+		Msg("Completed stopping child jobs")
+
+	return totalCancelled, nil
+}
+
 // VERIFICATION COMMENT 2: GetJobWithChildren removed - flat hierarchy model adopted
 // Design Decision: FLAT HIERARCHY (chosen over nested tree)
 //

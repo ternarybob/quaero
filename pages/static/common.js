@@ -236,6 +236,43 @@ document.addEventListener('alpine:init', () => {
     }
   }));
 
+  // Job Type Utility Functions
+  // These functions provide consistent styling and display for job types across the UI
+  function getJobTypeBadgeClass(jobType) {
+    const mapping = {
+      'pre_validation': 'label-warning',   // Orange
+      'crawler_url': 'label-info',         // Blue
+      'post_summary': 'label-primary',     // Purple
+      'parent': 'label-success',           // Green
+    };
+    return mapping[jobType] || 'label';  // Gray default
+  }
+
+  function getJobTypeIcon(jobType) {
+    const mapping = {
+      'pre_validation': 'fa-check-circle',
+      'crawler_url': 'fa-link',
+      'post_summary': 'fa-file-alt',
+      'parent': 'fa-folder',
+    };
+    return mapping[jobType] || 'fa-question-circle';  // Default
+  }
+
+  function getJobTypeDisplayName(jobType) {
+    const mapping = {
+      'pre_validation': 'Pre-Validation',
+      'crawler_url': 'URL Crawl',
+      'post_summary': 'Post-Summary',
+      'parent': 'Parent Job',
+    };
+    return mapping[jobType] || 'Unknown Type';
+  }
+
+  // Export to window for use in queue.html Alpine.js components
+  window.getJobTypeBadgeClass = getJobTypeBadgeClass;
+  window.getJobTypeIcon = getJobTypeIcon;
+  window.getJobTypeDisplayName = getJobTypeDisplayName;
+
   // Source Management Component
   Alpine.data('sourceManagement', () => ({
     sources: [],

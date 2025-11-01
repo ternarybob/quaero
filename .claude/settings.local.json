@@ -1,120 +1,118 @@
 {
-  "model": "claude-sonnet-4-5-20250929",
-  "maxTokens": 8192,
-  "permissions": {
-    "allow": [
-      "mcp__chrome-devtools__evaluate_script"
-    ],
-    "deny": [],
-    "ask": []
-  },
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
+    "permissions": {
+        "allow": [
+            "mcp__chrome-devtools__evaluate_script"
+        ],
+        "deny": [],
+        "ask": []
+    },
+    "hooks": {
+        "UserPromptSubmit": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node .claude/hooks/project-standards.js"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Write|Edit|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node .claude/hooks/project-standards.js"
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Write|Edit|MultiEdit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node .claude/hooks/project-standards.js"
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Session completed'"
+                    }
+                ]
+            }
+        ],
+        "SessionStart": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Session started'"
+                    }
+                ]
+            }
+        ],
+        "SessionEnd": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Session ended'"
+                    }
+                ]
+            }
+        ],
+        "Notification": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Claude notification'"
+                    }
+                ]
+            }
+        ],
+        "SubagentStop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'Subagent stopped'"
+                    }
+                ]
+            }
+        ],
+        "PreCompact": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "echo 'About to compact context'"
+                    }
+                ]
+            }
         ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session completed'"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session started'"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session ended'"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Claude notification'"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Subagent stopped'"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'About to compact context'"
-          }
-        ]
-      }
-    ]
-  },
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
-    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
-    "DISABLE_TELEMETRY": "1",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
-  },
-  "spinnerTipsEnabled": false,
-  "statusLine": "custom-status-message"
+    },
+    "env": {
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
+        "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+        "DISABLE_TELEMETRY": "1",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+    },
+    "spinnerTipsEnabled": false,
+    "statusLine": "custom-status-message"
 }

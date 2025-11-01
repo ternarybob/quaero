@@ -74,3 +74,47 @@ func (b *BaseJob) LogJobEvent(ctx context.Context, jobID string, level string, m
 
 	return nil
 }
+
+// CreateChildJobRecord creates and persists a child job record to the database
+// This centralizes child job creation logic for consistency across all job types
+func (b *BaseJob) CreateChildJobRecord(ctx context.Context, parentID, childID, url, sourceType, entityType string, config models.CrawlConfig) error {
+	// Create child CrawlJob record with proper hierarchy
+	childJob := &models.CrawlJob{
+		ID:         childID,
+		ParentID:   parentID, // Inherit root job ID (flat hierarchy)
+		JobType:    models.JobTypeCrawlerURL,
+		Name:       fmt.Sprintf("URL: %s", url),
+		SourceType: sourceType,
+		EntityType: entityType,
+		Config:     config,
+		Status:     models.JobStatusPending,
+		Progress: models.CrawlProgress{
+			TotalURLs:     1,
+			PendingURLs:   1,
+			CompletedURLs: 0,
+			FailedURLs:    0,
+			StartTime:     time.Now(),
+		},
+		CreatedAt: time.Now(),
+	}
+
+	// Persist child job to database via JobManager
+	if err := b.jobManager.UpdateJob(ctx, childJob); err != nil {
+		b.logger.Warn().
+			Err(err).
+			Str("child_id", childID).
+			Str("child_url", url).
+			Msg("Failed to persist child job to database")
+		return fmt.Errorf("failed to persist child job: %w", err)
+	}
+
+	b.logger.Debug().
+		Str("child_id", childID).
+		Str("child_url", url).
+		Str("parent_id", parentID).
+		Str("source_type", sourceType).
+		Str("entity_type", entityType).
+		Msg("Child job persisted to database")
+
+	return nil
+}

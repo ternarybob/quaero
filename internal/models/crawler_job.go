@@ -2,7 +2,10 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/ternarybob/quaero/internal/interfaces/jobtypes"
 )
 
 // JobStatus represents the state of a crawl job
@@ -14,6 +17,16 @@ const (
 	JobStatusCompleted JobStatus = "completed"
 	JobStatusFailed    JobStatus = "failed"
 	JobStatusCancelled JobStatus = "cancelled"
+)
+
+// JobType represents the type of a crawl job in the hierarchy
+type JobType string
+
+const (
+	JobTypeParent         JobType = "parent"          // Parent job that spawns child jobs
+	JobTypePreValidation  JobType = "pre_validation"  // Pre-flight validation job
+	JobTypeCrawlerURL     JobType = "crawler_url"     // Individual URL crawling job
+	JobTypePostSummary    JobType = "post_summary"    // Post-processing summarization job
 )
 
 // Content type and output format constants for Firecrawl-style scraping
@@ -34,6 +47,7 @@ type CrawlJob struct {
 	// Child crawler_url jobs reference their root parent job ID
 	// Used for hierarchical display in Queue Management UI
 	ParentID             string        `json:"parent_id,omitempty"`
+	JobType              JobType       `json:"job_type"`               // Type of job in hierarchy (parent, pre_validation, crawler_url, post_summary)
 	Name                 string        `json:"name"`                   // User-friendly name for the job
 	Description          string        `json:"description"`            // User-provided description
 	SourceType           string        `json:"source_type"`            // "jira", "confluence", "github"
@@ -60,10 +74,11 @@ type CrawlJob struct {
 	// FailedCount is a snapshot of Progress.FailedURLs at job completion
 	// Synced when job reaches terminal status (completed/failed/cancelled)
 	// Used for historical tracking and validation
-	FailedCount    int             `json:"failed_count"`
-	DocumentsSaved int             `json:"documents_saved"`     // Number of documents successfully saved to storage
-	SeedURLs       []string        `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
-	SeenURLs       map[string]bool `json:"seen_urls,omitempty"` // Track URLs that have been enqueued to prevent duplicates
+	FailedCount    int                    `json:"failed_count"`
+	DocumentsSaved int                    `json:"documents_saved"`     // Number of documents successfully saved to storage
+	SeedURLs       []string               `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
+	SeenURLs       map[string]bool        `json:"seen_urls,omitempty"` // Track URLs that have been enqueued to prevent duplicates
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`  // Custom metadata (e.g., corpus_summary, corpus_keywords)
 }
 
 // CrawlConfig defines crawl behavior
@@ -295,4 +310,63 @@ func containsCaseInsensitive(s, substr string) bool {
 	}
 
 	return false
+}
+
+// GetStatusReport returns a standardized status report for this job
+// This method encapsulates status calculation logic and provides consistent reporting
+// for both parent and child jobs. Accepts childStats which may be nil for jobs without children.
+func (j *CrawlJob) GetStatusReport(childStats *jobtypes.JobChildStats) *jobtypes.JobStatusReport {
+	report := &jobtypes.JobStatusReport{
+		Status:   string(j.Status),
+		Errors:   []string{},
+		Warnings: []string{},
+	}
+
+	// Calculate child job statistics
+	if childStats != nil {
+		report.ChildCount = childStats.ChildCount
+		report.CompletedChildren = childStats.CompletedChildren
+		report.FailedChildren = childStats.FailedChildren
+		report.RunningChildren = childStats.ChildCount - childStats.CompletedChildren - childStats.FailedChildren
+		if report.RunningChildren < 0 {
+			report.RunningChildren = 0
+		}
+	} else {
+		report.ChildCount = 0
+		report.CompletedChildren = 0
+		report.FailedChildren = 0
+		report.RunningChildren = 0
+	}
+
+	// Generate progress text based on job type and available data
+	if j.ParentID == "" {
+		// This is a parent job
+		if report.ChildCount == 0 {
+			report.ProgressText = "No child jobs spawned yet"
+		} else {
+			report.ProgressText = fmt.Sprintf("Completed: %d | Failed: %d | Running: %d | Total: %d",
+				report.CompletedChildren,
+				report.FailedChildren,
+				report.RunningChildren,
+				report.ChildCount)
+		}
+	} else {
+		// This is a child job - use job's own progress
+		if j.Progress.TotalURLs > 0 {
+			report.ProgressText = fmt.Sprintf("%d URLs (%d completed, %d failed, %d running)",
+				j.Progress.TotalURLs,
+				j.Progress.CompletedURLs,
+				j.Progress.FailedURLs,
+				j.Progress.PendingURLs)
+		} else {
+			report.ProgressText = fmt.Sprintf("Status: %s", j.Status)
+		}
+	}
+
+	// Extract errors from job.Error field
+	if j.Error != "" {
+		report.Errors = append(report.Errors, j.Error)
+	}
+
+	return report
 }

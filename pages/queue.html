@@ -5,40 +5,6 @@
     {{template "head.html" .}}
     <title>Queue Management - Quaero</title>
     <style>
-        /* Progress Bar Styles */
-        .progress-container {
-            width: 100%;
-            background-color: #f0f0f0;
-            border-radius: 4px;
-            height: 20px;
-            margin: 0.5rem 0;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background-color: #5755d9;
-            transition: width 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-
-        .progress-bar.progress-success {
-            background-color: #32b643;
-        }
-
-        .progress-bar.progress-warning {
-            background-color: #ffb700;
-        }
-
-        .progress-bar.progress-error {
-            background-color: #e85600;
-        }
-
         /* Parent Job Indicator */
         .parent-job-badge {
             display: inline-block;
@@ -151,9 +117,6 @@
                         <button type="button" class="btn btn-sm" onclick="showFilterModal()">
                             <i class="fas fa-filter"></i> Filter
                         </button>
-                        <button type="button" class="btn btn-sm" @click="toggleShowChildJobs()" :class="showChildJobs ? 'btn-primary' : ''" id="toggle-children-btn">
-                            <i class="fas fa-sitemap"></i> <span x-text="showChildJobs ? 'Show Parent Jobs Only' : 'Show All Jobs'" id="toggle-children-text"></span>
-                        </button>
                         <div id="filter-chips-container"></div>
                     </div>
 
@@ -183,8 +146,7 @@
                                             'bg-gray': selectedJob && selectedJob.id === item.job.id,
                                             'job-card-parent': item.type === 'parent',
                                             'job-card-child': item.type === 'child',
-                                            'job-card-flat': item.type === 'flat',
-                                            'job-card-workflow': !isValidSourceType(item.job.source_type)
+                                            'job-card-flat': item.type === 'flat'
                                         }" style="margin-bottom: 0.8rem;">
                                 <div class="card-body">
                                     <div class="columns">
@@ -206,16 +168,11 @@
                                                 </template>
                                                 <i class="fas" :class="{
                                                     'fa-file job-type-icon child-icon': item.type === 'child',
-                                                    'fa-project-diagram job-type-icon workflow-icon': !isValidSourceType(item.job.source_type),
-                                                    'fa-folder job-type-icon parent-icon': item.type === 'parent' && isValidSourceType(item.job.source_type)
+                                                    'fa-folder job-type-icon parent-icon': item.type === 'parent'
                                                 }"></i>
                                                 Job ID: <span x-text="item.job.id ? item.job.id.substring(0, 8) : 'N/A'"></span>
                                                 <template x-if="item.type === 'parent'">
                                                     <span class="parent-job-badge">PARENT</span>
-                                                </template>
-                                                <!-- Warning indicator for parent jobs with invalid source types -->
-                                                <template x-if="item.type === 'parent' && !isValidSourceType(item.job.source_type)">
-                                                    <span class="label label-warning" style="margin-left: 0.5rem; font-size: 0.7rem;">ORCHESTRATION</span>
                                                 </template>
                                                 <template x-if="item.type === 'parent' && item.job.entity_type === 'job_definition'">
                                                     <span class="label label-info" style="margin-left: 0.5rem; font-size: 0.7rem;">JOB DEFINITION</span>
@@ -223,11 +180,6 @@
                                             </div>
                                             <div class="card-subtitle text-gray">
                                                 <span x-text="getSourceTypeDisplay(item.job.source_type)"></span>
-                                                <!-- Warning badge for workflow jobs -->
-                                                <template x-if="!isValidSourceType(item.job.source_type)">
-                                                    <span class="label label-warning" style="margin-left: 0.5rem; font-size: 0.7rem;" 
-                                                          title="Workflow orchestration job vs source crawling job">WORKFLOW</span>
-                                                </template>
                                             </div>
 
                                             <!-- Metadata -->
@@ -238,6 +190,17 @@
                                                           :class="getStatusBadgeClass(item.type, item.job.status, item.job)"
                                                           x-text="getStatusBadgeText(item.type, item.job.status, item.job)"></span>
                                                 </div>
+                                                <!-- Job Type Badge -->
+                                                <template x-if="item.job.job_type && item.job.job_type !== 'parent'">
+                                                    <div>
+                                                        <span class="label"
+                                                              :class="window.getJobTypeBadgeClass(item.job.job_type)"
+                                                              :title="window.getJobTypeDisplayName(item.job.job_type)">
+                                                            <i class="fas" :class="window.getJobTypeIcon(item.job.job_type)"></i>
+                                                            <span x-text="window.getJobTypeDisplayName(item.job.job_type)"></span>
+                                                        </span>
+                                                    </div>
+                                                </template>
                                                 <!-- Documents -->
                                                 <div>
                                                     <i class="fas fa-file-alt"></i>
@@ -264,40 +227,102 @@
                                                 </div>
                                             </template>
 
-                                            <!-- Parent progress display -->
+                                            <!-- Parent progress display from backend status_report -->
                                             <template x-if="item.type === 'parent'">
                                                 <div class="parent-progress-container">
-                                                    <div class="parent-progress">
-                                                        <div class="parent-progress-text"
-                                                             x-text="getParentProgressText(item.job)"></div>
-                                                        <div class="parent-progress-bar">
-                                                            <div class="parent-progress-bar-fill"
-                                                                 :style="Object.assign(getParentProgressBarStyle(item.job), { transition: 'background 0.3s ease' })"></div>
-                                                        </div>
+                                                    <!-- Progress text from backend -->
+                                                    <div style="margin-top: 0.8rem; padding: 0.5rem; background-color: #f5f5f5; border-radius: 4px; font-size: 0.875rem;">
+                                                        <strong>Progress:</strong> <span x-text="item.job.status_report?.progress_text || 'No progress data'"></span>
                                                     </div>
 
-                                                    <!-- Spawned child jobs list (if any) -->
-                                                    <template x-if="childJobsList.has(item.job.id) && childJobsList.get(item.job.id).length > 0">
-                                                        <div class="child-jobs-list-container">
+                                                    <!-- Errors from backend -->
+                                                    <template x-if="item.job.status_report?.errors && item.job.status_report.errors.length > 0">
+                                                        <div style="margin-top: 0.5rem; padding: 0.5rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
+                                                            <strong style="color: var(--color-danger);"><i class="fas fa-exclamation-circle"></i> Errors:</strong>
+                                                            <ul style="margin: 0.25rem 0 0 1.5rem; padding: 0;">
+                                                                <template x-for="error in item.job.status_report.errors" :key="error">
+                                                                    <li x-text="error"></li>
+                                                                </template>
+                                                            </ul>
+                                                        </div>
+                                                    </template>
+
+                                                    <!-- Warnings from backend -->
+                                                    <template x-if="item.job.status_report?.warnings && item.job.status_report.warnings.length > 0">
+                                                        <div style="margin-top: 0.5rem; padding: 0.5rem; background-color: #fff3cd; border-left: 4px solid var(--color-warning); border-radius: 4px; font-size: 0.875rem;">
+                                                            <strong style="color: #856404;"><i class="fas fa-exclamation-triangle"></i> Warnings:</strong>
+                                                            <ul style="margin: 0.25rem 0 0 1.5rem; padding: 0;">
+                                                                <template x-for="warning in item.job.status_report.warnings" :key="warning">
+                                                                    <li x-text="warning"></li>
+                                                                </template>
+                                                            </ul>
+                                                        </div>
+                                                    </template>
+
+                                                    <!-- Spawned child jobs tree (if any) -->
+                                                    <template x-if="item.isExpanded && childJobsList.has(item.job.id) && childJobsList.get(item.job.id).length > 0">
+                                                        <div class="child-jobs-list-container" role="tree" aria-label="Spawned child jobs">
                                                             <div class="child-jobs-list-header">
-                                                                <span x-text="'Spawned URLs (' + childJobsList.get(item.job.id).length + ')' "></span>
+                                                                <span x-text="'Spawned Jobs (showing ' + getVisibleChildJobs(item.job.id).length + ' of ' + childJobsList.get(item.job.id).length + ')' "></span>
                                                             </div>
-                                                            <div class="child-jobs-list">
-                                                                <template x-for="child in childJobsList.get(item.job.id)" :key="child.id">
-                                                                    <div class="child-job-item">
-                                                                        <span class="label label-sm"
-                                                                              :class="{
-                                                                                  'label-secondary': child.status === 'pending',
-                                                                                  'label-primary': child.status === 'running',
-                                                                                  'label-success': child.status === 'completed',
-                                                                                  'label-error': child.status === 'failed'
-                                                                              }"
-                                                                              x-text="child.status"></span>
-                                                                        <span class="child-job-url" :title="child.url" x-text="child.url"></span>
-                                                                        <span class="child-job-depth" x-text="'Depth: ' + child.depth"></span>
+                                                            <div class="child-jobs-tree">
+                                                                <template x-for="child in getVisibleChildJobs(item.job.id)" :key="child.id">
+                                                                    <div class="tree-item" :class="'depth-' + child.depth"
+                                                                         :style="'--depth: ' + child.depth"
+                                                                         :class="{ 'tree-item-collapsed': isChildCollapsed(item.job.id, child) }"
+                                                                         role="treeitem"
+                                                                         :aria-level="child.depth + 1"
+                                                                         :aria-expanded="mightHaveChildren(item.job.id, child) ? !isNodeCollapsed(item.job.id, child.id) : undefined"
+                                                                         :aria-setsize="getVisibleTreeItems(item.job.id).length"
+                                                                         :aria-posinset="getTreeItemIndex(item.job.id, child.id) + 1"
+                                                                         tabindex="0"
+                                                                         @keydown="handleTreeKeydown($event, item.job.id, child)"
+                                                                         x-init="$nextTick(() => jobList.treeItemRefs.set(child.id, $el))"
+                                                                         @destroy="jobList.treeItemRefs.delete(child.id)">
+                                                                        
+                                                                        <!-- Collapsible toggle (for items that might have children) -->
+                                                                        <button x-show="mightHaveChildren(item.job.id, child)"
+                                                                                class="tree-node-toggle"
+                                                                                @click.stop="toggleNodeCollapse(item.job.id, child.id)"
+                                                                                :aria-label="isNodeCollapsed(item.job.id, child.id) ? 'Expand' : 'Collapse'"
+                                                                                :class="{ 'rotated': !isNodeCollapsed(item.job.id, child.id) }">
+                                                                            <i class="fas fa-chevron-right"
+                                                                               :class="{ 'rotated': !isNodeCollapsed(item.job.id, child.id) }"></i>
+                                                                        </button>
+                                                                        
+                                                                        <!-- Status icon (replaces status badge) -->
+                                                                        <i class="tree-status-icon" 
+                                                                           :class="[
+                                                                             getStatusIcon(child.status),
+                                                                             'status-' + child.status
+                                                                           ]"
+                                                                           :title="getStatusDisplayText(child.status)"></i>
+                                                                        
+                                                                        <!-- Job type icon (replaces job type badge) -->
+                                                                        <template x-if="child.job_type">
+                                                                            <i class="fas tree-job-type-icon" 
+                                                                               :class="window.getJobTypeIcon(child.job_type)"
+                                                                               :title="window.getJobTypeDisplayName(child.job_type)"></i>
+                                                                        </template>
+                                                                        
+                                                                        <!-- URL (main content) -->
+                                                                        <span class="tree-item-url" :title="child.url" x-text="child.url"></span>
+                                                                        
+                                                                        <!-- Metadata (depth) -->
+                                                                        <span class="tree-item-meta">
+                                                                            <span class="tree-item-depth" x-text="'D' + child.depth"></span>
+                                                                        </span>
                                                                     </div>
                                                                 </template>
                                                             </div>
+                                                            <!-- Load More Button -->
+                                                            <template x-if="(childJobsVisibleCount.get(item.job.id) || childJobsPageSize) < childJobsList.get(item.job.id).length">
+                                                                <div class="load-more-container" style="margin-top: 0.5rem;">
+                                                                    <button class="btn btn-sm" @click.stop="loadMoreChildJobs(item.job.id)" style="font-size: 0.85rem;">
+                                                                        Load More Jobs (showing <span x-text="visibleTreeItemCount(item.job.id)"></span> of <span x-text="childJobsList.get(item.job.id).length"></span>)
+                                                                    </button>
+                                                                </div>
+                                                            </template>
                                                         </div>
                                                     </template>
                                                 </div>
@@ -310,17 +335,17 @@
                                                 <i class="fa-solid fa-file-lines"></i>
                                             </button>
                                             <template x-if="item.job.status !== 'running'">
-                                                <button class="btn btn-sm" @click="window.rerunJob(item.job.id)" title="Copy Job and Add to Queue">
+                                                <button class="btn btn-sm" @click="window.rerunJob(item.job.id, $event)" title="Copy Job and Add to Queue">
                                                     <i class="fa-solid fa-rotate-right"></i>
                                                 </button>
                                             </template>
                                             <template x-if="item.job.status === 'running'">
-                                                <button class="btn btn-sm btn-warning" @click="window.cancelJob(item.job.id)" title="Cancel Job">
+                                                <button class="btn btn-sm btn-warning" @click="window.cancelJob(item.job.id, $event)" title="Cancel Job">
                                                     <i class="fas fa-stop"></i>
                                                 </button>
                                             </template>
                                             <template x-if="item.job.status !== 'running'">
-                                                <button class="btn btn-sm btn-error" @click="window.deleteJob(item.job.id)" title="Delete Job">
+                                                <button class="btn btn-sm btn-error" @click="window.deleteJob(item.job.id, $event)" title="Delete Job">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                             </template>
@@ -429,19 +454,6 @@
                             <i class="form-icon"></i> Repos
                         </label>
                     </div>
-
-                    <!-- Job Type Filters -->
-                    <div class="form-group">
-                        <label class="form-label"><strong>Job Types</strong></label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-job-type" value="workflow" checked>
-                            <i class="form-icon"></i> Show Workflow Jobs
-                        </label>
-                        <label class="form-checkbox">
-                            <input type="checkbox" class="filter-job-type" value="task" checked>
-                            <i class="form-icon"></i> Show Task Jobs
-                        </label>
-                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -517,10 +529,7 @@
         let selectedJob = null;
 
         // Hierarchy state management
-        let showChildJobs = false; // Toggle between parent-only and all-jobs view
         let expandedParents = new Set(); // Track expanded parent jobs
-        let childJobsCache = new Map(); // Cache: parentID -> array of child jobs
-        let loadingParents = new Set(); // Track parents currently loading children
 
         // WebSocket connection state
         let jobsWS = null;
@@ -533,16 +542,14 @@
         const defaultFilters = {
             status: new Set(['pending', 'running', 'completed', 'failed', 'cancelled']),
             source: new Set(),
-            entity: new Set(),
-            jobType: new Set(['workflow', 'task'])
+            entity: new Set()
         };
 
         // Filter state - initialize immediately with defaults to prevent undefined errors
         let activeFilters = {
             status: new Set(defaultFilters.status),
             source: new Set(defaultFilters.source),
-            entity: new Set(defaultFilters.entity),
-            jobType: new Set(defaultFilters.jobType)
+            entity: new Set(defaultFilters.entity)
         };
 
         // Initialize filters immediately on script load
@@ -557,15 +564,13 @@
                     activeFilters.status = new Set(parsed.status || []);
                     activeFilters.source = new Set(parsed.source || []);
                     activeFilters.entity = new Set(parsed.entity || []);
-                    activeFilters.jobType = new Set(parsed.jobType || []);
 
                     // If no filters were saved, use defaults
-                    if (activeFilters.status.size === 0 && activeFilters.source.size === 0 && activeFilters.entity.size === 0 && activeFilters.jobType.size === 0) {
+                    if (activeFilters.status.size === 0 && activeFilters.source.size === 0 && activeFilters.entity.size === 0) {
                         activeFilters = {
                             status: new Set(defaultFilters.status),
                             source: new Set(defaultFilters.source),
-                            entity: new Set(defaultFilters.entity),
-                            jobType: new Set(defaultFilters.jobType)
+                            entity: new Set(defaultFilters.entity)
                         };
                     }
                 } else {
@@ -573,8 +578,7 @@
                     activeFilters = {
                         status: new Set(defaultFilters.status),
                         source: new Set(defaultFilters.source),
-                        entity: new Set(defaultFilters.entity),
-                        jobType: new Set(defaultFilters.jobType)
+                        entity: new Set(defaultFilters.entity)
                     };
                 }
             } catch (error) {
@@ -583,8 +587,7 @@
                 activeFilters = {
                     status: new Set(defaultFilters.status),
                     source: new Set(defaultFilters.source),
-                    entity: new Set(defaultFilters.entity),
-                    jobType: new Set(defaultFilters.jobType)
+                    entity: new Set(defaultFilters.entity)
                 };
             }
         }
@@ -595,8 +598,7 @@
                 const toSave = {
                     status: Array.from(activeFilters.status),
                     source: Array.from(activeFilters.source),
-                    entity: Array.from(activeFilters.entity),
-                    jobType: Array.from(activeFilters.jobType)
+                    entity: Array.from(activeFilters.entity)
                 };
                 localStorage.setItem('quaero-job-filters', JSON.stringify(toSave));
             } catch (error) {
@@ -657,36 +659,18 @@
                 'confluence': 'Confluence',
                 'github': 'GitHub'
             };
-            
-            // If it's a valid source type, return the display name
+
+            // Return the display name if available, otherwise show the raw source type
             if (sourceType && displayName[sourceType]) {
                 return 'Source: ' + displayName[sourceType];
             }
-            
-            // For invalid/empty source types, return "Unknown Source" with a warning indicator
-            return 'Source: Unknown (' + (sourceType || 'N/A') + ')';
-        }
 
-        // Check if source type is valid
-        function isValidSourceType(sourceType) {
-            const validSourceTypes = ['jira', 'confluence', 'github'];
-            return sourceType && validSourceTypes.includes(sourceType);
+            // For any other source type, just display it as-is
+            return 'Source: ' + (sourceType || 'N/A');
         }
 
         // Check if job matches active filters
         function matchesActiveFilters(job) {
-            // Check if the job is a workflow job (has invalid source type) or a task job (has valid source type)
-            const isWorkflowJob = !isValidSourceType(job.source_type);
-            const isTaskJob = isValidSourceType(job.source_type);
-
-            // Check job type filter
-            if (isWorkflowJob && !activeFilters.jobType.has('workflow')) {
-                return false;
-            }
-            if (isTaskJob && !activeFilters.jobType.has('task')) {
-                return false;
-            }
-
             // Check status filter
             if (activeFilters.status.size > 0 && !activeFilters.status.has(job.status)) {
                 return false;
@@ -719,9 +703,6 @@
             document.querySelectorAll('.filter-entity').forEach(checkbox => {
                 checkbox.checked = activeFilters.entity.has(checkbox.value);
             });
-            document.querySelectorAll('.filter-job-type').forEach(checkbox => {
-                checkbox.checked = activeFilters.jobType.has(checkbox.value);
-            });
 
             modal.classList.add('active');
             document.body.classList.add('modal-open');
@@ -752,11 +733,6 @@
                 activeFilters.entity.add(cb.value);
             });
 
-            activeFilters.jobType.clear();
-            document.querySelectorAll('.filter-job-type:checked').forEach(cb => {
-                activeFilters.jobType.add(cb.value);
-            });
-
             // Save filters to localStorage
             saveFiltersToStorage();
 
@@ -767,12 +743,13 @@
             window.dispatchEvent(new CustomEvent('jobList:changePage', {
                 detail: { page: 1 }
             }));
+            window.dispatchEvent(new CustomEvent('jobList:load'));
         }
 
         // Clear all filters
         function clearAllFilters() {
             // Uncheck all checkboxes in modal
-            document.querySelectorAll('.filter-status, .filter-source, .filter-entity, .filter-job-type').forEach(cb => {
+            document.querySelectorAll('.filter-status, .filter-source, .filter-entity').forEach(cb => {
                 cb.checked = false;
             });
         }
@@ -820,16 +797,6 @@
                 `;
             });
 
-            // Job type chips
-            activeFilters.jobType.forEach(jobType => {
-                html += `
-                    <span class="label label-info">
-                        ${jobType === 'workflow' ? 'Workflow Jobs' : 'Task Jobs'}
-                        <a href="#" onclick="event.preventDefault(); removeFilter('jobType', '${jobType}')" class="btn btn-clear btn-sm" aria-label="Remove"></a>
-                    </span>
-                `;
-            });
-
             container.innerHTML = html;
         }
 
@@ -842,6 +809,7 @@
             window.dispatchEvent(new CustomEvent('jobList:changePage', {
                 detail: { page: 1 }
             }));
+            window.dispatchEvent(new CustomEvent('jobList:load'));
         }
 
         // Connect to WebSocket for real-time job updates
@@ -1033,15 +1001,13 @@
         }
 
         // Rerun a job
-        async function rerunJob(jobId) {
+        async function rerunJob(jobId, evt) {
             if (!confirm(`Copy and queue job ${jobId.substring(0, 8)}?\n\nThis will create a NEW job (copy) with the same configuration and add it to the queue.\nThe job will NOT execute immediately - it will be queued as "pending".\nThe original job will remain unchanged.`)) {
                 return;
             }
 
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
+            // Get button reference from event
+            const button = evt.target.closest('button');
 
             let originalIcon = null;
             if (button) {
@@ -1107,15 +1073,13 @@
         }
 
         // Cancel a running job
-        async function cancelJob(jobId) {
+        async function cancelJob(jobId, evt) {
             if (!confirm(`Cancel job ${jobId.substring(0, 8)}?\n\nThe job will be stopped immediately.`)) {
                 return;
             }
 
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
+            // Get button reference from event
+            const button = evt.target.closest('button');
 
             let originalIcon = null;
             if (button) {
@@ -1154,16 +1118,16 @@
         }
 
         // Delete a job
-        async function deleteJob(jobId) {
-            if (!confirm(`Delete job ${jobId.substring(0, 8)}?\n\nThis will permanently remove the job from the database.`)) {
+        async function deleteJob(jobId, evt) {
+            // Get button reference from event
+            const button = evt.target.closest('button');
+
+            // Idempotency check - prevent double-clicks
+            if (button && button.disabled) {
                 return;
             }
 
-            let button = null;
-            if (typeof event !== 'undefined' && event && event.target && typeof event.target.closest === 'function') {
-                button = event.target.closest('button');
-            }
-
+            // Disable button immediately before confirmation
             let originalIcon = null;
             if (button) {
                 button.disabled = true;
@@ -1174,6 +1138,20 @@
                 }
             }
 
+            // Show confirmation dialog
+            if (!confirm(`Delete job ${jobId.substring(0, 8)}?\n\nThis will permanently remove the job from the database.`)) {
+                // User cancelled - re-enable button
+                if (button) {
+                    button.disabled = false;
+                    const iconElement = button.querySelector('i');
+                    if (iconElement && originalIcon) {
+                        iconElement.className = originalIcon;
+                    }
+                }
+                return;
+            }
+
+            let deleteSuccess = false;
             try {
                 const response = await fetch(`/api/jobs/${jobId}`, {
                     method: 'DELETE'
@@ -1183,7 +1161,12 @@
                     throw new Error('Failed to delete job');
                 }
 
+                deleteSuccess = true;
                 window.showNotification('Job deleted successfully', 'success');
+
+                // Capture job information before removal for cleanup
+                const jobIndex = allJobs.findIndex(job => job.id === jobId);
+                const deletedJob = jobIndex >= 0 ? allJobs[jobIndex] : null;
 
                 // Remove job from allJobs array
                 const allJobsIndex = allJobs.findIndex(job => job.id === jobId);
@@ -1197,6 +1180,13 @@
                     filteredJobs.splice(filteredJobsIndex, 1);
                 }
 
+                // Dispatch cleanup event for Alpine component to handle childJobsList/expandedParents
+                if (deletedJob) {
+                    window.dispatchEvent(new CustomEvent('jobList:deleteCleanup', {
+                        detail: { jobId: jobId, parentId: deletedJob.parent_id }
+                    }));
+                }
+
                 // Re-render without API call
                 renderJobs();
                 loadStats();
@@ -1204,7 +1194,8 @@
                 console.error('Error deleting job:', error);
                 window.showNotification('Failed to delete job: ' + error.message, 'error');
             } finally {
-                if (button) {
+                // Only re-enable button if delete failed (on success, button will be removed from DOM)
+                if (button && !deleteSuccess) {
                     button.disabled = false;
                     const iconElement = button.querySelector('i');
                     if (iconElement && originalIcon) {
@@ -1238,19 +1229,12 @@
             loadStats();
             loadJobs();
 
-            // Add ESC key handler for filter modal and other shortcuts
+            // Add ESC key handler for filter modal
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') {
                     const modal = document.getElementById('filter-modal');
                     if (modal && modal.classList.contains('active')) {
                         closeFilterModal();
-                    }
-                }
-                // Toggle hierarchy view with 'h' key
-                if (e.key === 'h' && !e.ctrlKey && !e.metaKey) {
-                    const activeElement = document.activeElement;
-                    if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA') {
-                        window.dispatchEvent(new CustomEvent('jobList:toggleHierarchy'));
                     }
                 }
             });
@@ -1319,12 +1303,17 @@
             // Register jobList component
             Alpine.data('jobList', () => ({
                 // State management
-                showChildJobs: false, // Toggle between parent-only and all-jobs view
                 expandedParents: new Set(), // Track expanded parent jobs
-                childJobsCache: new Map(), // Cache: parentID -> array of child jobs
-                loadingParents: new Set(), // Track parents currently loading children
                 childJobsList: new Map(), // Map: parentID -> array of child job metadata
-                childListCap: 200,
+                childJobsPageSize: 25, // Number of children to show per page
+                childJobsVisibleCount: new Map(), // Map of parentId -> number of visible children
+                childJobsOffset: new Map(), // Map of parentId -> current fetch offset
+                childJobsFetchInProgress: new Map(), // Map of parentId -> boolean to guard against duplicate requests
+                collapsedDepths: new Map(), // Map<parentId, Set<depth>> to track which depth levels are collapsed per parent (deprecated, use collapsedNodes)
+                collapsedNodes: new Map(), // Map<parentId, Set<childId>> to track which nodes are collapsed per parent
+                focusedTreeItem: null, // Track currently focused tree item for keyboard navigation
+                treeItemRefs: new Map(), // Map<childId, HTMLElement> for focus management
+                childListCap: 500, // Reduced from 200 to 500 to prevent excessive data transfer
                 allJobs: [],
                 filteredJobs: [],
                 selectedJob: null,
@@ -1345,8 +1334,8 @@
                         this.currentPage = e.detail.page;
                         this.loadJobs();
                     });
-                    window.addEventListener('jobList:toggleHierarchy', () => this.toggleShowChildJobs());
                     window.addEventListener('jobList:deleteSelected', () => this.deleteSelectedJobs());
+                    window.addEventListener('jobList:deleteCleanup', (e) => this.handleDeleteCleanup(e.detail));
 
                     // Wait for DOM to be ready then initialize
                     this.loadJobs();
@@ -1362,12 +1351,22 @@
                         url: spawnData.url,
                         depth: spawnData.depth,
                         status: 'pending',
-                        timestamp: spawnData.timestamp
+                        timestamp: spawnData.timestamp,
+                        job_type: spawnData.job_type || 'crawler_url'
                     };
                     const list = this.childJobsList.get(parentId);
                     list.unshift(childMeta);
                     if (list.length > this.childListCap) {
                         list.length = this.childListCap;
+                    }
+
+                    // If the parent is expanded and visible count is not set, initialize it to childJobsPageSize
+                    if (this.expandedParents.has(parentId) && !this.childJobsVisibleCount.has(parentId)) {
+                        this.childJobsVisibleCount.set(parentId, this.childJobsPageSize);
+                    } else if (this.expandedParents.has(parentId) && this.childJobsVisibleCount.get(parentId) < this.childJobsList.get(parentId).length) {
+                        // If we have room to show the new child, increase visible count by 1
+                        const currentVisible = this.childJobsVisibleCount.get(parentId);
+                        this.childJobsVisibleCount.set(parentId, currentVisible + 1);
                     }
 
                     const parentJob = this.allJobs.find(j => j.id === parentId);
@@ -1378,11 +1377,15 @@
                     this.renderJobs();
                 },
 
-                handleChildJobStatus(jobId, status) {
+                handleChildJobStatus(jobId, status, jobType) {
                     for (const [parentId, children] of this.childJobsList.entries()) {
                         const child = children.find(c => c.id === jobId);
                         if (child) {
                             child.status = status;
+                            // Backfill missing job_type from update if available
+                            if (jobType) {
+                                child.job_type = child.job_type || jobType;
+                            }
                             const parentJob = this.allJobs.find(j => j.id === parentId);
                             if (parentJob) {
                                 if (status === 'completed') {
@@ -1396,6 +1399,48 @@
                         }
                     }
                 },
+
+                handleDeleteCleanup(deleteData) {
+                    const { jobId, parentId } = deleteData;
+
+                    // Check if deleted job is a parent
+                    if (!parentId) {
+                        // This is a parent job - clean up childJobsList, expandedParents, childJobsVisibleCount, collapsedDepths, and collapsedNodes
+                        this.childJobsList.delete(jobId);
+                        this.expandedParents.delete(jobId);
+                        this.childJobsVisibleCount.delete(jobId);
+                        this.collapsedDepths.delete(jobId);
+                        this.collapsedNodes.delete(jobId);
+                    } else {
+                        // This is a child job - find parent and remove child, decrement counts
+                        if (this.childJobsList.has(parentId)) {
+                            const children = this.childJobsList.get(parentId);
+                            const childIndex = children.findIndex(c => c.id === jobId);
+                            if (childIndex >= 0) {
+                                const child = children[childIndex];
+                                // Remove child from list
+                                children.splice(childIndex, 1);
+
+                                // Decrement parent's child counts
+                                const parentJob = this.allJobs.find(j => j.id === parentId);
+                                if (parentJob) {
+                                    if (parentJob.child_count > 0) {
+                                        parentJob.child_count--;
+                                    }
+                                    if (child.status === 'completed' && parentJob.completed_children > 0) {
+                                        parentJob.completed_children--;
+                                    }
+                                    if (child.status === 'failed' && parentJob.failed_children > 0) {
+                                        parentJob.failed_children--;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Trigger render to reflect cleanup
+                    this.renderJobs();
+                },
                 
                 async loadJobs() {
                     try {
@@ -1406,11 +1451,8 @@
                         params.append('order_by', 'created_at');
                         params.append('order_dir', 'DESC');
 
-                        // Add parent filter for hierarchy view
-                        // When showing only parent jobs, send parent_id=root to server
-                        if (!this.showChildJobs) {
-                            params.append('parent_id', 'root');
-                        }
+                        // Always fetch parent jobs only
+                        params.append('parent_id', 'root');
 
                         // Build filter parameters from activeFilters state (with safe checks)
                         if (window.activeFilters && window.activeFilters.status && window.activeFilters.status.size > 0) {
@@ -1433,10 +1475,6 @@
                         this.totalJobs = data.total_count || 0;
                         this.filteredJobs = [...this.allJobs];
 
-                        if (!this.showChildJobs) {
-                            this.expandedParents.clear(); // Reset expanded state when switching to parent-only view
-                        }
-                        
                         this.renderJobs();
 
                     } catch (error) {
@@ -1451,95 +1489,343 @@
                     }
                 },
                 
-                async loadChildJobs(parentId) {
+                async loadChildJobs(parentId, offset = 0) {
+                    // Guard against duplicate requests
+                    if (this.childJobsFetchInProgress.get(parentId)) {
+                        return [];
+                    }
                     
                     try {
+                        this.childJobsFetchInProgress.set(parentId, true);
+                        
                         const params = new URLSearchParams();
                         params.append('parent_id', parentId);
-                        params.append('limit', 1000); // Load all children (reasonable limit)
+                        params.append('limit', 500); // Load children in pages
+                        params.append('offset', offset);
                         params.append('order_by', 'created_at');
                         params.append('order_dir', 'DESC');
-                        
+
                         const response = await fetch(`/api/jobs?${params.toString()}`);
                         if (!response.ok) {
                             throw new Error('Failed to fetch child jobs');
                         }
-                        
+
                         const data = await response.json();
                         const children = data.jobs || [];
 
-                        // Hydrate unified child list state (metadata only)
+                        // Store child metadata for inline display
                         const meta = children.map(c => ({
                             id: c.id,
                             url: c.url || (c.config && c.config.url) || '',
                             depth: c.depth || (c.config && c.config.depth) || 0,
                             status: c.status || 'pending',
-                            timestamp: c.created_at || new Date().toISOString()
+                            timestamp: c.created_at || new Date().toISOString(),
+                            job_type: c.job_type || 'crawler_url'
                         }));
-                        this.childJobsList.set(parentId, meta);
-
-                        // Optionally retain full children in cache if other views rely on it (back-compat)
-                        this.childJobsCache.set(parentId, children);
+                        
+                        // If this is the first page (offset 0), set the list and initialize
+                        if (offset === 0) {
+                            this.childJobsList.set(parentId, meta);
+                            this.childJobsOffset.set(parentId, meta.length);
+                            // Initialize visible count to childJobsPageSize for this parent
+                            this.childJobsVisibleCount.set(parentId, this.childJobsPageSize);
+                        } else {
+                            // For subsequent pages, append to existing list
+                            const existingChildren = this.childJobsList.get(parentId) || [];
+                            existingChildren.push(...meta);
+                            this.childJobsList.set(parentId, existingChildren);
+                            this.childJobsOffset.set(parentId, existingChildren.length);
+                        }
 
                         return children;
                     } catch (error) {
                         console.error('[Queue] Error loading child jobs:', error);
                         return [];
+                    } finally {
+                        this.childJobsFetchInProgress.set(parentId, false);
                     }
                 },
                 
+                getVisibleChildJobs(parentId) {
+                    const children = this.childJobsList.get(parentId);
+                    if (!children) return [];
+
+                    // Filter out collapsed items before computing visible count
+                    const visibleChildren = children.filter(child => !this.isChildCollapsed(parentId, child));
+
+                    const visibleCount = this.childJobsVisibleCount.get(parentId) || this.childJobsPageSize;
+                    return visibleChildren.slice(0, Math.min(visibleCount, visibleChildren.length));
+                },
+
+                async loadMoreChildJobs(parentId) {
+                    const children = this.childJobsList.get(parentId);
+                    if (!children) return;
+
+                    const totalChildren = children.length;
+                    const currentVisibleCount = this.childJobsVisibleCount.get(parentId) || this.childJobsPageSize;
+                    
+                    // If we need more data from server
+                    if (currentVisibleCount >= totalChildren) {
+                        // Fetch more data from server using the current offset
+                        const offset = this.childJobsOffset.get(parentId) || 0;
+                        const moreChildren = await this.loadChildJobs(parentId, offset);
+                        
+                        // Update visible count with new data
+                        const newTotal = (this.childJobsList.get(parentId) || []).length;
+                        const newVisibleCount = Math.min(currentVisibleCount + this.childJobsPageSize, newTotal);
+                        this.childJobsVisibleCount.set(parentId, newVisibleCount);
+                    } else {
+                        // We have locally fetched data, just increase visible count
+                        const newVisibleCount = Math.min(currentVisibleCount + this.childJobsPageSize, totalChildren);
+                        this.childJobsVisibleCount.set(parentId, newVisibleCount);
+                    }
+                    
+                    this.renderJobs();
+                },
+
+                // Tree Collapse Management Functions (deprecated - kept for compatibility)
+                // Per-node collapse is now the default behavior
+
+                isChildCollapsed(parentId, child) {
+                    // Depth 0 items are never collapsed
+                    if (child.depth === 0) return false;
+
+                    // Use branch-aware ancestor checking
+                    const children = this.childJobsList.get(parentId);
+                    if (!children) return false;
+
+                    // Find this child in the list
+                    const idx = children.findIndex(c => c.id === child.id);
+                    if (idx === -1) return false;
+
+                    // Walk backward through siblings to find ancestor chain
+                    let neededDepth = child.depth - 1;
+                    for (let i = idx - 1; i >= 0; i--) {
+                        const prev = children[i];
+
+                        // If we've gone too far back, stop
+                        if (prev.depth < neededDepth) {
+                            break;
+                        }
+
+                        // If we found the immediate ancestor
+                        if (prev.depth === neededDepth) {
+                            // Check if this ancestor is collapsed
+                            if (this.isNodeCollapsed(parentId, prev.id)) {
+                                return true;
+                            }
+                            // Move to next ancestor up the chain
+                            neededDepth--;
+                            // Stop when we've checked all ancestors
+                            if (neededDepth < 0) {
+                                break;
+                            }
+                        }
+                    }
+
+                    return false;
+                },
+
+                // Per-node collapse helpers
+                toggleNodeCollapse(parentId, childId) {
+                    if (!this.collapsedNodes.has(parentId)) {
+                        this.collapsedNodes.set(parentId, new Set());
+                    }
+                    const collapsed = this.collapsedNodes.get(parentId);
+                    if (collapsed.has(childId)) {
+                        collapsed.delete(childId);
+                        this.announceToScreenReader(`Node expanded`);
+                    } else {
+                        collapsed.add(childId);
+                        this.announceToScreenReader(`Node collapsed`);
+                    }
+                    this.renderJobs();
+                },
+
+                isNodeCollapsed(parentId, childId) {
+                    return this.collapsedNodes.get(parentId)?.has(childId) || false;
+                },
+
+                mightHaveChildren(parentId, child) {
+                    const children = this.childJobsList.get(parentId);
+                    if (!children) return false;
+
+                    // Branch-aware check: find this child in the list and scan forward
+                    const childIndex = children.findIndex(c => c.id === child.id);
+                    if (childIndex === -1) return false;
+
+                    // Scan forward until we find an item at depth <= current depth
+                    for (let i = childIndex + 1; i < children.length; i++) {
+                        const nextChild = children[i];
+                        // If we find a child at depth == current + 1, this child has children
+                        if (nextChild.depth === child.depth + 1) {
+                            return true;
+                        }
+                        // If we find a child at depth <= current, we've left this branch
+                        if (nextChild.depth <= child.depth) {
+                            break;
+                        }
+                    }
+                    return false;
+                },
+
+                hasVisibleChildren(child) {
+                    // For our implementation, we'll check if this child has potential children at the next depth level
+                    // This is checked dynamically when needed
+                    return false; // This is a placeholder, actual implementation can be done as needed
+                },
+
+                // Status Icon Mapping Functions
+                getStatusIcon(status) {
+                    const iconMap = {
+                        'pending': 'fa-circle',
+                        'running': 'fa-spinner fa-pulse',
+                        'completed': 'fa-check-circle',
+                        'failed': 'fa-times-circle',
+                        'cancelled': 'fa-ban'
+                    };
+                    return iconMap[status] || 'fa-question-circle';
+                },
+
+                getStatusDisplayText(status) {
+                    const textMap = {
+                        'pending': 'Pending',
+                        'running': 'Running',
+                        'completed': 'Completed',
+                        'failed': 'Failed',
+                        'cancelled': 'Cancelled'
+                    };
+                    return textMap[status] || 'Unknown';
+                },
+
+                // Keyboard Navigation Handler
+                handleTreeKeydown(event, parentId, child) {
+                    const visibleItems = this.getVisibleTreeItems(parentId);
+                    const currentIndex = visibleItems.findIndex(c => c.id === child.id);
+                    
+                    switch(event.key) {
+                        case 'ArrowDown':
+                            event.preventDefault();
+                            if (currentIndex < visibleItems.length - 1) {
+                                this.focusTreeItem(visibleItems[currentIndex + 1].id);
+                            }
+                            break;
+                        case 'ArrowUp':
+                            event.preventDefault();
+                            if (currentIndex > 0) {
+                                this.focusTreeItem(visibleItems[currentIndex - 1].id);
+                            }
+                            break;
+                        case 'ArrowRight':
+                            if (this.mightHaveChildren(parentId, child) && this.isNodeCollapsed(parentId, child.id)) {
+                                event.preventDefault();
+                                this.toggleNodeCollapse(parentId, child.id);
+                            }
+                            break;
+                        case 'ArrowLeft':
+                            if (this.mightHaveChildren(parentId, child) && !this.isNodeCollapsed(parentId, child.id)) {
+                                event.preventDefault();
+                                this.toggleNodeCollapse(parentId, child.id);
+                            }
+                            break;
+                        case 'Enter':
+                        case ' ':
+                            if (this.mightHaveChildren(parentId, child)) {
+                                event.preventDefault();
+                                this.toggleNodeCollapse(parentId, child.id);
+                            }
+                            break;
+                        case 'Home':
+                            event.preventDefault();
+                            if (visibleItems.length > 0) {
+                                this.focusTreeItem(visibleItems[0].id);
+                            }
+                            break;
+                        case 'End':
+                            event.preventDefault();
+                            if (visibleItems.length > 0) {
+                                this.focusTreeItem(visibleItems[visibleItems.length - 1].id);
+                            }
+                            break;
+                    }
+                },
+
+                focusTreeItem(childId) {
+                    if (this.treeItemRefs.has(childId)) {
+                        const element = this.treeItemRefs.get(childId);
+                        element.focus();
+                        this.focusedTreeItem = childId;
+                    }
+                },
+
+                getVisibleTreeItems(parentId) {
+                    const allChildren = this.getVisibleChildJobs(parentId);
+                    return allChildren.filter(child => !this.isChildCollapsed(parentId, child));
+                },
+
+                getTreeItemIndex(parentId, childId) {
+                    const visibleItems = this.getVisibleTreeItems(parentId);
+                    return visibleItems.findIndex(item => item.id === childId);
+                },
+
+                visibleTreeItemCount(parentId) {
+                    return this.getVisibleTreeItems(parentId).length;
+                },
+
+                announceToScreenReader(message) {
+                    // Create an ARIA live region to announce changes to screen readers
+                    let liveRegion = document.getElementById('aria-live-region');
+                    if (!liveRegion) {
+                        // Create the live region if it doesn't exist
+                        const region = document.createElement('div');
+                        region.setAttribute('id', 'aria-live-region');
+                        region.setAttribute('aria-live', 'polite');
+                        region.setAttribute('aria-atomic', 'true');
+                        region.style.position = 'absolute';
+                        region.style.left = '-10000px';
+                        region.style.width = '1px';
+                        region.style.height = '1px';
+                        region.style.overflow = 'hidden';
+                        document.body.appendChild(region);
+                        liveRegion = region;
+                    }
+
+                    // Update live region content
+                    liveRegion.textContent = message;
+
+                    // Clear after a delay to avoid repeated announcements
+                    setTimeout(() => {
+                        liveRegion.textContent = '';
+                    }, 1000);
+                },
+
                 async toggleParentExpansion(parentId) {
                     if (this.expandedParents.has(parentId)) {
                         // Collapse
                         this.expandedParents.delete(parentId);
+                        // Clear visible count on collapse to free memory and avoid stale state
+                        this.childJobsVisibleCount.delete(parentId);
+                        // Clear collapsed depths on collapse to maintain consistent state
+                        this.collapsedDepths.delete(parentId);
+                        // Clear collapsed nodes on parent collapse
+                        this.collapsedNodes.delete(parentId);
+                        // Clear focused tree item
+                        this.focusedTreeItem = null;
                     } else {
-                        // Expand - add to loading state and load children
-                        this.loadingParents.add(parentId);
-                        
-                        await this.loadChildJobs(parentId);
-                        
-                        // Remove from loading and add to expanded
-                        this.loadingParents.delete(parentId);
+                        // Expand - load children and mark as expanded
                         this.expandedParents.add(parentId);
+                        await this.loadChildJobs(parentId);
                     }
-                    
+
                     // Re-render to show/hide children
                     this.renderJobs();
                 },
-                
-                toggleShowChildJobs() {
-                    this.showChildJobs = !this.showChildJobs;
-                    const btn = document.getElementById('toggle-children-btn');
-                    
-                    this.currentPage = 1; // Reset to first page
-                    this.loadJobs();
-                },
-                
-                renderJobs() {
-                    // Build hierarchical structure if showChildJobs is false
-                    let itemsToRender = [];
-                    if (!this.showChildJobs) {
-                        // Only show parent jobs with their children if expanded
-                        itemsToRender = this.filteredJobs.filter(job => !job.parent_id).map(parentJob => {
-                            return { type: 'parent', job: parentJob, isExpanded: this.expandedParents.has(parentJob.id) };
-                        });
 
-                        // Add loading indicators for parents currently loading and child jobs for expanded parents
-                        for (let i = 0; i < itemsToRender.length; i++) {
-                            const item = itemsToRender[i];
-                            if (item.type === 'parent') {
-                                // Add loading indicator if parent is currently loading
-                                if (this.loadingParents.has(item.job.id)) {
-                                    const loadingItem = { type: 'loading', job: item.job, parentId: item.job.id };
-                                    itemsToRender.splice(i + 1, 0, loadingItem);
-                                }
-                        // No longer inject full child cards here; a unified child list renders inside the parent card
-                            }
-                        }
-                    } else {
-                        // Show all jobs in flat structure when showing all
-                        itemsToRender = this.filteredJobs.map(job => ({ type: 'flat', job: job }));
-                    }
+                renderJobs() {
+                    // Always render parent jobs with expand/collapse capability
+                    const itemsToRender = this.filteredJobs.filter(job => !job.parent_id).map(parentJob => {
+                        return { type: 'parent', job: parentJob, isExpanded: this.expandedParents.has(parentJob.id) };
+                    });
 
                     this.itemsToRender = itemsToRender;
 
@@ -1548,54 +1834,6 @@
                     window.renderPagination(totalPages, this.currentPage);
                 },
                 
-                getParentProgressText(job) {
-                    if (this.loadingParents.has(job.id)) {
-                        return 'Loading children...';
-                    }
-
-                    const total = job.child_count || 0;
-                    const completed = job.completed_children || 0;
-                    const failed = job.failed_children || 0;
-                    const running = Math.max(0, total - completed - failed);
-
-                    if (total === 0) {
-                        return 'No child jobs spawned yet';
-                    }
-
-                    const parts = [];
-                    if (completed > 0) parts.push(`${completed} completed`);
-                    if (failed > 0) parts.push(`${failed} failed`);
-                    if (running > 0) parts.push(`${running} running`);
-
-                    return `${total} child jobs spawned (${parts.join(', ')})`;
-                },
-                
-                getParentProgressBarStyle(job) {
-                    const total = job.child_count || 0;
-                    if (total === 0) {
-                        return { width: '0%' };
-                    }
-
-                    const completed = job.completed_children || 0;
-                    const failed = job.failed_children || 0;
-                    const running = Math.max(0, total - completed - failed);
-
-                    const completedPercent = (completed / total) * 100;
-                    const failedPercent = (failed / total) * 100;
-                    const runningPercent = (running / total) * 100;
-
-                    return {
-                        width: '100%',
-                        background: `linear-gradient(to right,
-                            var(--color-success) 0% ${completedPercent}%,
-                            var(--color-danger) ${completedPercent}% ${completedPercent + failedPercent}%,
-                            var(--color-primary) ${completedPercent + failedPercent}% 100%)`
-                    };
-                },
-                
-                getParentProgressStyle(job) {
-                    return {};
-                },
                 
                 getDocumentsCount(job) {
                     // For completed/failed/cancelled jobs, use result_count (authoritative snapshot)
@@ -1885,6 +2123,13 @@
                     if (!job) {
                         try {
                             const response = await fetch(`/api/jobs/${update.job_id}`);
+
+                            // Handle 404 silently - job was deleted, ignore update
+                            if (response.status === 404) {
+                                console.debug('[Queue] Job deleted or not found:', update.job_id.substring(0, 8));
+                                return;
+                            }
+
                             if (response.ok) {
                                 job = await response.json();
                                 this.allJobs.unshift(job); // Insert at beginning (newest first)
@@ -1905,7 +2150,7 @@
                     job.status = update.status;
                     // If this is a child job reaching a terminal state, update in-memory child list immediately
                     if (job.parent_id && (update.status === 'completed' || update.status === 'failed')) {
-                        this.handleChildJobStatus(job.id, update.status);
+                        this.handleChildJobStatus(job.id, update.status, update.job_type);
                     }
 
 
@@ -1943,17 +2188,37 @@
                         job.error = update.error;
                     }
 
-                    // Check if job matches active filters
-                    const matchesFilters = window.matchesActiveFilters(job);
+                    // If this is a parent job (no parent_id), populate status_report from update fields immediately
+                    // This ensures UI shows current progress without waiting for debounced refresh
+                    if (!job.parent_id && (update.progress_text || update.errors || update.warnings || update.running_children !== undefined)) {
+                        if (!job.status_report) {
+                            job.status_report = {};
+                        }
+                        if (update.progress_text) {
+                            job.status_report.progress_text = update.progress_text;
+                        }
+                        if (update.errors) {
+                            job.status_report.errors = update.errors;
+                        }
+                        if (update.warnings) {
+                            job.status_report.warnings = update.warnings;
+                        }
+                        if (update.running_children !== undefined) {
+                            job.status_report.running_children = update.running_children;
+                        }
+                    }
 
-                    // Find job in filteredJobs
+                    // Find job in filteredJobs BEFORE checking filters
                     const filteredIndex = this.filteredJobs.findIndex(j => j.id === update.job_id);
 
-                    if (matchesFilters) {
-                        if (filteredIndex >= 0) {
-                            // Update in place
-                            this.filteredJobs[filteredIndex] = job;
-                        } else {
+                    // If job is already in filteredJobs, keep it visible and update in-place (sticky visibility)
+                    if (filteredIndex >= 0) {
+                        this.filteredJobs[filteredIndex] = job;
+                    } else {
+                        // For NEW jobs that are not yet in filteredJobs, apply filters as normal
+                        const matchesFilters = window.matchesActiveFilters(job);
+                        
+                        if (matchesFilters) {
                             // Insert at correct position (sorted by created_at DESC)
                             const insertIndex = this.filteredJobs.findIndex(j => {
                                 return new Date(j.created_at) < new Date(job.created_at);
@@ -1964,22 +2229,7 @@
                                 this.filteredJobs.push(job);
                             }
                         }
-                    } else {
-                        // Remove from filteredJobs if doesn't match filters
-                        if (filteredIndex >= 0) {
-                            this.filteredJobs.splice(filteredIndex, 1);
-                        }
-                    }
-
-                    // If this is a child job and parent is expanded, update cache
-                    if (job.parent_id && this.childJobsCache.has(job.parent_id)) {
-                        const cachedChildren = this.childJobsCache.get(job.parent_id);
-                        const childIndex = cachedChildren.findIndex(c => c.id === job.id);
-                        if (childIndex >= 0) {
-                            cachedChildren[childIndex] = job;
-                        } else {
-                            cachedChildren.unshift(job); // Add new child
-                        }
+                        // If doesn't match filters, don't add to filteredJobs (as before)
                     }
 
                     // If child job updated, refresh parent stats (debounced per parent_id)

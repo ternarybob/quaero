@@ -169,12 +169,10 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			jobMap := convertJobToMap(masked)
 			jobMap["parent_id"] = masked.ParentID
 
-			// Add job type enrichment
-			jobMap["is_workflow"] = (masked.SourceType == "" || masked.SourceType == "crawler")                                                                                  // Indicates if this is a Job Definition workflow
-			jobMap["is_task"] = (masked.SourceType == models.SourceTypeJira || masked.SourceType == models.SourceTypeConfluence || masked.SourceType == models.SourceTypeGithub) // Indicates if this is a task job
-
 			// Add child statistics
-			if stats, exists := childStatsMap[masked.ID]; exists {
+			var stats *interfaces.JobChildStats
+			if s, exists := childStatsMap[masked.ID]; exists {
+				stats = s
 				jobMap["child_count"] = stats.ChildCount
 				jobMap["completed_children"] = stats.CompletedChildren
 				jobMap["failed_children"] = stats.FailedChildren
@@ -182,6 +180,12 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 				jobMap["child_count"] = 0
 				jobMap["completed_children"] = 0
 				jobMap["failed_children"] = 0
+			}
+
+			// Add status_report from GetStatusReport()
+			statusReport := masked.GetStatusReport(stats)
+			if statusReport != nil {
+				jobMap["status_report"] = statusReport
 			}
 
 			enrichedJobs = append(enrichedJobs, jobMap)
@@ -244,7 +248,9 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		parentMap["parent_id"] = maskedParent.ParentID
 
 		// Add statistics
-		if stats, exists := childStatsMap[parentID]; exists {
+		var stats *interfaces.JobChildStats
+		if s, exists := childStatsMap[parentID]; exists {
+			stats = s
 			parentMap["child_count"] = stats.ChildCount
 			parentMap["completed_children"] = stats.CompletedChildren
 			parentMap["failed_children"] = stats.FailedChildren
@@ -252,6 +258,12 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			parentMap["child_count"] = 0
 			parentMap["completed_children"] = 0
 			parentMap["failed_children"] = 0
+		}
+
+		// Add status_report from GetStatusReport()
+		statusReport := maskedParent.GetStatusReport(stats)
+		if statusReport != nil {
+			parentMap["status_report"] = statusReport
 		}
 
 		// Mask children
@@ -325,7 +337,9 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 		jobMap["parent_id"] = masked.ParentID
 
 		// Add child statistics
-		if stats, exists := childStatsMap[masked.ID]; exists {
+		var stats *interfaces.JobChildStats
+		if s, exists := childStatsMap[masked.ID]; exists {
+			stats = s
 			jobMap["child_count"] = stats.ChildCount
 			jobMap["completed_children"] = stats.CompletedChildren
 			jobMap["failed_children"] = stats.FailedChildren
@@ -335,13 +349,27 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 			jobMap["failed_children"] = 0
 		}
 
+		// Add status_report from GetStatusReport()
+		statusReport := masked.GetStatusReport(stats)
+		if statusReport != nil {
+			jobMap["status_report"] = statusReport
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(jobMap)
 		return
 	}
 
+	// For child jobs, also include status_report
+	jobMap := convertJobToMap(masked)
+	jobMap["parent_id"] = masked.ParentID
+	statusReport := masked.GetStatusReport(nil)
+	if statusReport != nil {
+		jobMap["status_report"] = statusReport
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(masked)
+	json.NewEncoder(w).Encode(jobMap)
 }
 
 // GetJobResultsHandler returns the results of a completed job

@@ -82,6 +82,12 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 		return err
 	}
 
+	// Serialize ErrorTolerance to JSON using model helper
+	errorToleranceJSON, err := jobDef.MarshalErrorTolerance()
+	if err != nil {
+		return err
+	}
+
 	// Convert bools to integers
 	enabled := 0
 	if jobDef.Enabled {
@@ -100,8 +106,8 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	query := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -115,13 +121,14 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 			config = excluded.config,
 			pre_jobs = excluded.pre_jobs,
 			post_jobs = excluded.post_jobs,
+			error_tolerance = excluded.error_tolerance,
 			updated_at = excluded.updated_at
 	`
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.ID, jobDef.Name, string(jobDef.Type), jobDef.Description,
 		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, createdAt, updatedAt,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, createdAt, updatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save job definition: %w", err)
@@ -189,6 +196,12 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 		return err
 	}
 
+	// Serialize ErrorTolerance to JSON using model helper
+	errorToleranceJSON, err := jobDef.MarshalErrorTolerance()
+	if err != nil {
+		return err
+	}
+
 	// Convert bools to integers
 	enabled := 0
 	if jobDef.Enabled {
@@ -217,6 +230,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 			config = ?,
 			pre_jobs = ?,
 			post_jobs = ?,
+			error_tolerance = ?,
 			updated_at = ?
 		WHERE id = ?
 	`
@@ -224,7 +238,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.Name, string(jobDef.Type), jobDef.Description,
 		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, updatedAt, jobDef.ID,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, updatedAt, jobDef.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update job definition: %w", err)
@@ -242,7 +256,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE id = ?
 	`
@@ -263,7 +277,7 @@ func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) 
 func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE 1=1
 	`
@@ -328,7 +342,7 @@ func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *int
 func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE type = ?
 		ORDER BY created_at DESC
@@ -347,7 +361,7 @@ func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobT
 func (s *JobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE enabled = 1
 		ORDER BY created_at DESC
@@ -409,7 +423,7 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	dbMaintenanceJob := &models.JobDefinition{
 		ID:          "default-database-maintenance",
 		Name:        "Database Maintenance",
-		Type:        models.JobTypeCustom,
+		Type:        models.JobDefinitionTypeCustom,
 		Description: "Rebuilds the FTS5 full-text search index to ensure optimal search performance. Runs weekly to keep the search index synchronized with document changes.",
 		Sources:     []string{}, // This job doesn't operate on specific sources
 		Steps: []models.JobStep{
@@ -472,19 +486,25 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	createdAt := dbMaintenanceJob.CreatedAt.Unix()
 	updatedAt := dbMaintenanceJob.UpdatedAt.Unix()
 
+	// Serialize ErrorTolerance to JSON using model helper
+	errorToleranceJSON, err := dbMaintenanceJob.MarshalErrorTolerance()
+	if err != nil {
+		return fmt.Errorf("failed to marshal error_tolerance: %w", err)
+	}
+
 	// Insert job definition using ON CONFLICT DO NOTHING to preserve user customizations
 	query := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	result, err := s.db.DB().ExecContext(ctx, query,
 		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), dbMaintenanceJob.Description,
 		sourcesJSON, stepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, createdAt, updatedAt,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, createdAt, updatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -513,7 +533,7 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	corpusSummaryJob := &models.JobDefinition{
 		ID:          "default-corpus-summary",
 		Name:        "Corpus Summary Generation",
-		Type:        models.JobTypeCustom,
+		Type:        models.JobDefinitionTypeCustom,
 		Description: "Generates a summary document containing statistics about the document corpus (total documents, documents by source type). This summary is searchable and enables queries like 'how many documents are in the system'. Runs hourly to keep statistics current.",
 		Sources:     []string{}, // This job operates on all documents, not specific sources
 		Steps: []models.JobStep{
@@ -574,19 +594,25 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	corpusCreatedAt := corpusSummaryJob.CreatedAt.Unix()
 	corpusUpdatedAt := corpusSummaryJob.UpdatedAt.Unix()
 
+	// Serialize ErrorTolerance to JSON using model helper for corpus summary job
+	corpusErrorToleranceJSON, err := corpusSummaryJob.MarshalErrorTolerance()
+	if err != nil {
+		return fmt.Errorf("failed to marshal corpus summary error_tolerance: %w", err)
+	}
+
 	// Insert corpus summary job definition using ON CONFLICT DO NOTHING to preserve user customizations
 	corpusQuery := `
 		INSERT INTO job_definitions (
 			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	corpusResult, err := s.db.DB().ExecContext(ctx, corpusQuery,
 		corpusSummaryJob.ID, corpusSummaryJob.Name, string(corpusSummaryJob.Type), corpusSummaryJob.Description,
 		corpusSourcesJSON, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
-		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusCreatedAt, corpusUpdatedAt,
+		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusErrorToleranceJSON, corpusCreatedAt, corpusUpdatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -617,14 +643,14 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
-		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON string
-		enabled, autoStart                                                                                               int
-		createdAt, updatedAt                                                                                             int64
+		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
+		enabled, autoStart                                                                                                                    int
+		createdAt, updatedAt                                                                                                                  int64
 	)
 
 	err := row.Scan(
 		&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
-		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &createdAt, &updatedAt,
+		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -634,7 +660,7 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 	jobDef := &models.JobDefinition{
 		ID:          id,
 		Name:        name,
-		Type:        models.JobType(jobType),
+		Type:        models.JobDefinitionType(jobType),
 		Description: description,
 		Schedule:    schedule,
 		Timeout:     timeout,
@@ -689,6 +715,15 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 		jobDef.PostJobs = []string{}
 	}
 
+	// Deserialize ErrorTolerance JSON using model helper
+	if err := jobDef.UnmarshalErrorTolerance(errorToleranceJSON); err != nil {
+		s.logger.Warn().
+			Str("job_def_id", id).
+			Err(err).
+			Msg("Failed to unmarshal error_tolerance JSON")
+		jobDef.ErrorTolerance = nil
+	}
+
 	return jobDef, nil
 }
 
@@ -698,14 +733,14 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 
 	for rows.Next() {
 		var (
-			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON string
-			enabled, autoStart                                                                                               int
-			createdAt, updatedAt                                                                                             int64
+			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
+			enabled, autoStart                                                                                                                    int
+			createdAt, updatedAt                                                                                                                  int64
 		)
 
 		err := rows.Scan(
 			&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
-			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &createdAt, &updatedAt,
+			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			s.logger.Warn().
@@ -718,7 +753,7 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 		jobDef := &models.JobDefinition{
 			ID:          id,
 			Name:        name,
-			Type:        models.JobType(jobType),
+			Type:        models.JobDefinitionType(jobType),
 			Description: description,
 			Schedule:    schedule,
 			Timeout:     timeout,
@@ -771,6 +806,15 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 				Err(err).
 				Msg("Failed to unmarshal post_jobs JSON")
 			jobDef.PostJobs = []string{}
+		}
+
+		// Deserialize ErrorTolerance JSON using model helper
+		if err := jobDef.UnmarshalErrorTolerance(errorToleranceJSON); err != nil {
+			s.logger.Warn().
+				Str("job_def_id", id).
+				Err(err).
+				Msg("Failed to unmarshal error_tolerance JSON")
+			jobDef.ErrorTolerance = nil
 		}
 
 		jobDefs = append(jobDefs, jobDef)

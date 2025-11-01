@@ -8,6 +8,7 @@ package interfaces
 import (
 	"context"
 
+	"github.com/ternarybob/quaero/internal/interfaces/jobtypes"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -67,11 +68,8 @@ type DocumentStorage interface {
 }
 
 // JobChildStats holds aggregate statistics for a parent job's children
-type JobChildStats struct {
-	ChildCount        int
-	CompletedChildren int
-	FailedChildren    int
-}
+// This is a type alias to jobtypes.JobChildStats for backward compatibility
+type JobChildStats = jobtypes.JobChildStats
 
 // JobStorage - interface for crawler job persistence
 type JobStorage interface {
@@ -87,6 +85,7 @@ type JobStorage interface {
 	GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
+	UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error
 	UpdateJobHeartbeat(ctx context.Context, jobID string) error
 	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error)
 	DeleteJob(ctx context.Context, jobID string) error

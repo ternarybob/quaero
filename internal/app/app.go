@@ -9,18 +9,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/ternarybob/arbor"
-	arbormodels "github.com/ternarybob/arbor/models"
 
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	jobmgr "github.com/ternarybob/quaero/internal/jobs"
+	jobmgr "github.com/ternarybob/quaero/internal/services/jobs"
 	jobtypes "github.com/ternarybob/quaero/internal/jobs/types"
 	"github.com/ternarybob/quaero/internal/logs"
-	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/auth"
@@ -47,7 +46,6 @@ type App struct {
 	Config          *common.Config // Deprecated: Use ConfigService instead
 	ConfigService   interfaces.ConfigService
 	Logger          arbor.ILogger
-	logBatchChannel chan []arbormodels.LogEvent
 	ctx             context.Context
 	cancelCtx       context.CancelFunc
 	StorageManager  interfaces.StorageManager
@@ -91,7 +89,6 @@ type App struct {
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
 	WSHandler            *handlers.WebSocketHandler
-	WSWriter             *handlers.WebSocketWriter
 	CollectionHandler    *handlers.CollectionHandler
 	DocumentHandler      *handlers.DocumentHandler
 	SearchHandler        *handlers.SearchHandler
@@ -132,6 +129,19 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize handlers: %w", err)
 	}
 
+	// Initialize log service (after WSHandler is created)
+	logService := logs.NewService(app.StorageManager.JobLogStorage(), app.WSHandler, app.Logger)
+	if err := logService.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start log service: %w", err)
+	}
+	app.LogService = logService
+
+	// Configure Arbor with context channel (default buffering: batch size 5, flush interval 1s)
+	logBatchChannel := logService.GetChannel()
+	app.Logger.SetContextChannel(logBatchChannel)
+
+	app.Logger.Info().Msg("Log service initialized with Arbor context channel")
+
 	// Load stored authentication if available
 	if _, err := app.AuthService.LoadAuth(); err == nil {
 		logger.Info().Msg("Loaded stored authentication credentials")
@@ -140,25 +150,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Start WebSocket background tasks for real-time UI updates
 	app.WSHandler.StartStatusBroadcaster()
 
-	// Register WebSocket arbor writer for real-time log streaming
-	writerConfig := arbormodels.WriterConfiguration{
-		Type:       arbormodels.LogWriterTypeConsole,
-		TimeFormat: "15:04:05",
-	}
-	wsWriter, err := handlers.NewWebSocketWriter(app.WSHandler, writerConfig, &cfg.WebSocket)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create WebSocket writer: %w", err)
-	}
-	arbor.RegisterWriter("websocket", wsWriter)
-	app.WSWriter = wsWriter
-	logger.Info().
-		Str("min_level", cfg.WebSocket.MinLevel).
-		Int("exclude_patterns", len(cfg.WebSocket.ExcludePatterns)).
-		Int("allowed_events", len(cfg.WebSocket.AllowedEvents)).
-		Int("throttle_intervals", len(cfg.WebSocket.ThrottleIntervals)).
-		Msg("WebSocket arbor writer registered with config-driven filtering")
-
-	logger.Info().Msg("WebSocket handlers started (status broadcaster + arbor writer)")
+	logger.Info().Msg("WebSocket handlers started (status broadcaster)")
 
 	// Log initialization summary
 	enabledSources := []string{}
@@ -234,61 +226,6 @@ func (a *App) initServices() error {
 	a.Logger.Info().
 		Str("mode", string(mode)).
 		Msg("LLM service initialized")
-
-	// 1.5. Initialize log service (before context logging)
-	logService := logs.NewService(a.StorageManager.JobLogStorage(), a.Logger)
-	if err := logService.Start(); err != nil {
-		return fmt.Errorf("failed to start log service: %w", err)
-	}
-	a.LogService = logService
-	a.Logger.Info().Msg("Log service initialized")
-
-	// 1.6. Initialize context logging (after log service)
-	// Create channel for log batches (buffer size 10 allows up to 10 batches to queue)
-	logBatchChannel := make(chan []arbormodels.LogEvent, 10)
-	a.logBatchChannel = logBatchChannel
-
-	// Configure Arbor with context channel (default buffering: batch size 5, flush interval 1s)
-	a.Logger.SetContextChannel(logBatchChannel)
-
-	// Start consumer goroutine to process log batches and write to database
-	go func() {
-		for batch := range logBatchChannel {
-			for _, event := range batch {
-				// Extract jobID from CorrelationID
-				jobID := event.CorrelationID
-				if jobID == "" {
-					continue // Skip logs without jobID
-				}
-
-				// Convert Level.String() to lowercase (already lowercase from phuslu/log)
-				levelStr := event.Level.String()
-
-				// Format Timestamp to "15:04:05" format
-				formattedTime := event.Timestamp.Format("15:04:05")
-
-				// Build message with fields if present
-				message := event.Message
-				if len(event.Fields) > 0 {
-					// Append fields to message for database persistence
-					for key, value := range event.Fields {
-						message += fmt.Sprintf(" %s=%v", key, value)
-					}
-				}
-
-				// Create JobLogEntry
-				logEntry := models.JobLogEntry{
-					Timestamp: formattedTime,
-					Level:     levelStr,
-					Message:   message,
-				}
-
-				// Write to database (non-blocking, use background context)
-				a.LogService.AppendLog(context.Background(), jobID, logEntry)
-			}
-		}
-	}()
-	a.Logger.Info().Msg("Context logging initialized with database persistence")
 
 	// 2. Initialize embedding service (now uses LLM abstraction)
 	// NOTE: Phase 4 - EmbeddingService removed completely
@@ -370,8 +307,8 @@ func (a *App) initServices() error {
 	a.QueueManager = queueMgr
 	a.Logger.Info().Msg("Queue manager initialized")
 
-	// 5.9. Initialize job manager
-	jobMgr := jobmgr.NewManager(a.StorageManager.JobStorage(), queueMgr, logService, a.Logger)
+	// 5.9. Initialize job manager (LogService will be set later)
+	jobMgr := jobmgr.NewManager(a.StorageManager.JobStorage(), queueMgr, nil, a.Logger)
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 
@@ -435,12 +372,14 @@ func (a *App) initServices() error {
 	// 6.7. Register job handlers with worker pool
 	// Crawler job handler
 	crawlerJobDeps := &jobtypes.CrawlerJobDeps{
-		CrawlerService:  a.CrawlerService,
-		LogService:      a.LogService,
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-		QueueManager:    a.QueueManager,
-		JobStorage:      a.StorageManager.JobStorage(),
-		EventService:    a.EventService,
+		CrawlerService:       a.CrawlerService,
+		LogService:           a.LogService,
+		DocumentStorage:      a.StorageManager.DocumentStorage(),
+		QueueManager:         a.QueueManager,
+		JobStorage:           a.StorageManager.JobStorage(),
+		EventService:         a.EventService,
+		JobDefinitionStorage: a.StorageManager.JobDefinitionStorage(),
+		JobManager:           a.JobManager,
 	}
 	crawlerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
 		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
@@ -497,208 +436,34 @@ func (a *App) initServices() error {
 	a.WorkerPool.RegisterHandler("reindex", reindexJobHandler)
 	a.Logger.Info().Msg("Reindex job handler registered")
 
-	// Parent job handler (for job definition execution)
-	parentJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Determine target job ID for status updates (fallback to msg.ID if ParentID is empty)
-		targetID := msg.ParentID
-		if targetID == "" {
-			targetID = msg.ID
-		}
-
-		// Extract job definition ID from message
-		jobDefID := msg.JobDefinitionID
-		if jobDefID == "" {
-			if val, ok := msg.Config["job_definition_id"]; ok {
-				if id, ok := val.(string); ok {
-					jobDefID = id
-				}
-			}
-		}
-
-		if jobDefID == "" {
-			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", "Job definition ID not found in message")
-			return fmt.Errorf("job definition ID not found in parent message")
-		}
-
-		// Load job definition from storage
-		jobDef, err := a.StorageManager.JobDefinitionStorage().GetJobDefinition(ctx, jobDefID)
-		if err != nil {
-			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Failed to load job definition: %v", err))
-			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Msg("Failed to load job definition")
-			return fmt.Errorf("failed to load job definition: %w", err)
-		}
-
-		// Update job status to running
-		a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "running", fmt.Sprintf("Executing job definition: %s", jobDef.Name))
-
-		// Extract execution chain from parent message metadata for cycle prevention
-		executionChain := make(map[string]bool)
-		if msg.Metadata != nil {
-			if chain, ok := msg.Metadata["job_execution_chain"]; ok {
-				if chainSlice, ok := chain.([]interface{}); ok {
-					for _, id := range chainSlice {
-						if idStr, ok := id.(string); ok {
-							executionChain[idStr] = true
-						}
-					}
-				}
-			}
-		}
-
-		// Add current job to execution chain
-		executionChain[jobDefID] = true
-		a.Logger.Debug().
-			Str("job_def_id", jobDefID).
-			Int("chain_length", len(executionChain)).
-			Msg("Job execution chain initialized")
-
-		// Create post-job trigger callback for post-job execution
-		postJobCallback := func(callbackCtx context.Context, postJobDef *models.JobDefinition) error {
-			a.Logger.Info().
-				Str("parent_job_id", targetID).
-				Str("post_job_id", postJobDef.ID).
-				Str("post_job_name", postJobDef.Name).
-				Msg("Post-job trigger requested")
-
-			// Cycle detection: Check if postJobID is already in the execution chain
-			if executionChain[postJobDef.ID] {
-				a.Logger.Warn().
-					Str("post_job_id", postJobDef.ID).
-					Str("post_job_name", postJobDef.Name).
-					Str("parent_job_id", targetID).
-					Int("chain_length", len(executionChain)).
-					Msg("Cycle detected: post-job already in execution chain - skipping to prevent infinite loop")
-				return nil // Skip this post-job, but don't fail the parent
-			}
-
-			// Create a new parent job message for the post-job
-			config := map[string]interface{}{
-				"job_definition_id": postJobDef.ID,
-				"job_name":          postJobDef.Name,
-				"job_type":          string(postJobDef.Type),
-			}
-
-			// Add sources if present
-			if len(postJobDef.Sources) > 0 {
-				config["sources"] = postJobDef.Sources
-			}
-
-			// Add steps if present
-			if len(postJobDef.Steps) > 0 {
-				config["steps"] = postJobDef.Steps
-			}
-
-			// Add timeout if present
-			if postJobDef.Timeout != "" {
-				config["timeout"] = postJobDef.Timeout
-			}
-
-			parentMsg := queue.NewJobDefinitionMessage(postJobDef.ID, config)
-
-			// Propagate execution chain to post-job message for cycle prevention
-			// Convert map to slice for JSON serialization
-			chainSlice := make([]string, 0, len(executionChain))
-			for jobID := range executionChain {
-				chainSlice = append(chainSlice, jobID)
-			}
-			if parentMsg.Metadata == nil {
-				parentMsg.Metadata = make(map[string]interface{})
-			}
-			parentMsg.Metadata["job_execution_chain"] = chainSlice
-
-			a.Logger.Debug().
-				Str("post_job_id", postJobDef.ID).
-				Str("parent_job_id", targetID).
-				Int("chain_length", len(chainSlice)).
-				Msg("Propagated execution chain to post-job message")
-
-			// Create a job record in database
-			job := &models.CrawlJob{
-				ID:     parentMsg.ID,
-				Name:   postJobDef.Name,
-				Status: models.JobStatusPending,
-			}
-			if err := a.StorageManager.JobStorage().SaveJob(callbackCtx, job); err != nil {
-				a.Logger.Error().
-					Err(err).
-					Str("post_job_id", postJobDef.ID).
-					Str("message_id", parentMsg.ID).
-					Str("parent_job_id", targetID).
-					Msg("Failed to save post-job record")
-				return fmt.Errorf("failed to save post-job record: %w", err)
-			}
-
-			// Enqueue the message
-			if err := a.QueueManager.Enqueue(callbackCtx, parentMsg); err != nil {
-				a.Logger.Error().
-					Err(err).
-					Str("post_job_id", postJobDef.ID).
-					Str("message_id", parentMsg.ID).
-					Str("parent_job_id", targetID).
-					Msg("Failed to enqueue post-job")
-				return fmt.Errorf("failed to enqueue post-job: %w", err)
-			}
-
-			a.Logger.Info().
-				Str("post_job_id", postJobDef.ID).
-				Str("post_job_name", postJobDef.Name).
-				Str("message_id", parentMsg.ID).
-				Str("parent_job_id", targetID).
-				Msg("Post-job enqueued successfully")
-
-			return nil
-		}
-
-		// Create status update callback for async polling completion
-		statusCallback := func(callbackCtx context.Context, status string, errorMsg string) error {
-			if err := a.StorageManager.JobStorage().UpdateJobStatus(callbackCtx, targetID, status, errorMsg); err != nil {
-				a.Logger.Error().
-					Err(err).
-					Str("parent_job_id", targetID).
-					Str("status", status).
-					Msg("Failed to update parent job status from async polling callback")
-				return err
-			}
-
-			a.Logger.Info().
-				Str("parent_job_id", targetID).
-				Str("job_def_id", jobDefID).
-				Str("job_name", jobDef.Name).
-				Str("status", status).
-				Msg("Parent job status updated from async polling callback")
-
-			return nil
-		}
-
-		// Execute job definition steps with status callback and post-job callback
-		result, err := a.JobExecutor.Execute(ctx, jobDef, statusCallback, postJobCallback)
-		if err != nil {
-			// Only update status if async polling is NOT active
-			// (polling goroutine will handle status update via callback)
-			if result == nil || !result.AsyncPollingActive {
-				a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "failed", fmt.Sprintf("Job execution failed: %v", err))
-			}
-			a.Logger.Error().Err(err).Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition execution failed")
-			return fmt.Errorf("job definition execution failed: %w", err)
-		}
-
-		// Update job status to completed only if async polling is NOT active
-		// If async polling is active, the polling goroutine will handle status update via callback
-		if result != nil && result.AsyncPollingActive {
-			a.Logger.Debug().
-				Str("parent_job_id", targetID).
-				Str("job_def_id", jobDefID).
-				Str("job_name", jobDef.Name).
-				Msg("Async polling active - parent job status update deferred to polling callback")
-		} else {
-			a.StorageManager.JobStorage().UpdateJobStatus(ctx, targetID, "completed", "Job definition executed successfully")
-			a.Logger.Info().Str("job_def_id", jobDefID).Str("job_name", jobDef.Name).Msg("Job definition executed successfully")
-		}
-
-		return nil
+	// Pre-validation job handler
+	preValidationJobDeps := &jobtypes.PreValidationJobDeps{
+		AuthStorage:   a.StorageManager.AuthStorage(),
+		SourceStorage: a.StorageManager.SourceStorage(),
+		HTTPClient:    &http.Client{Timeout: 10 * time.Second},
 	}
-	a.WorkerPool.RegisterHandler("parent", parentJobHandler)
-	a.Logger.Info().Msg("Parent job handler registered")
+	preValidationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewPreValidationJob(baseJob, preValidationJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("pre_validation", preValidationJobHandler)
+	a.Logger.Info().Msg("Pre-validation job handler registered")
+
+	// Post-summarization job handler
+	postSummarizationJobDeps := &jobtypes.PostSummarizationJobDeps{
+		LLMService:      a.LLMService,
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+		JobStorage:      a.StorageManager.JobStorage(),
+	}
+	postSummarizationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		job := jobtypes.NewPostSummarizationJob(baseJob, postSummarizationJobDeps)
+		return job.Execute(ctx, msg)
+	}
+	a.WorkerPool.RegisterHandler("post_summarization", postSummarizationJobHandler)
+	a.Logger.Info().Msg("Post-summarization job handler registered")
+
 
 	// Start worker pool
 	if err := a.WorkerPool.Start(); err != nil {
@@ -880,7 +645,6 @@ func (a *App) initHandlers() error {
 		a.JobExecutor,
 		a.SourceService,
 		a.JobRegistry,
-		a.QueueManager,
 		a.Logger,
 	)
 	a.Logger.Info().Msg("Job definition handler initialized")
@@ -1013,23 +777,6 @@ func (a *App) Close() error {
 	// but should only be called once at end of shutdown sequence
 	a.Logger.Info().Msg("Flushing context logs")
 	common.Stop()
-
-	// Close WebSocket writer with graceful buffer draining
-	if a.WSWriter != nil {
-		if err := a.WSWriter.Close(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to close WebSocket writer")
-		} else {
-			a.Logger.Info().Msg("WebSocket writer closed (buffer drained)")
-		}
-	}
-
-	// Close log batch channel
-	if a.logBatchChannel != nil {
-		close(a.logBatchChannel)
-		// Allow consumer goroutine to process final batch
-		time.Sleep(100 * time.Millisecond)
-		a.Logger.Info().Msg("Context log channel closed")
-	}
 
 	// Stop scheduler service
 	if a.SchedulerService != nil {

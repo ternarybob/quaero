@@ -607,13 +607,13 @@ func RegisterSummarizerActions(registry *jobs.JobTypeRegistry, deps *SummarizerA
 
 	// Register all actions
 	for name, handler := range actions {
-		if err := registry.RegisterAction(models.JobTypeSummarizer, name, handler); err != nil {
+		if err := registry.RegisterAction(models.JobDefinitionTypeSummarizer, name, handler); err != nil {
 			return fmt.Errorf("failed to register %s action: %w", name, err)
 		}
 	}
 
 	deps.Logger.Info().
-		Str("job_type", string(models.JobTypeSummarizer)).
+		Str("job_type", string(models.JobDefinitionTypeSummarizer)).
 		Int("action_count", len(actions)).
 		Msg("Summarizer actions registered successfully")
 

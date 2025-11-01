@@ -20,8 +20,9 @@ type CrawlerService interface {
 	// refreshSource: If true, re-fetch latest source config and auth
 	// sourceConfigSnapshot: Optional point-in-time source configuration
 	// authSnapshot: Optional point-in-time authentication snapshot
+	// jobDefinitionID: Optional job definition ID for traceability (empty string if not from a job definition)
 	// Returns: jobID for tracking the crawl
-	StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error)
+	StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}, jobDefinitionID string) (string, error)
 
 	// GetJobStatus retrieves the current status of a crawl job
 	// Returns: *crawler.CrawlJob - caller must perform type assertion with proper error handling

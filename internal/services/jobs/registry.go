@@ -10,11 +10,11 @@
 // Quaero has two distinct job execution systems that serve different purposes:
 //
 // 1. JobTypeRegistry (THIS FILE) - Multi-step job definitions with action handlers
-//   - Purpose: Orchestrates complex, multi-step workflows with configurable actions
+//   - Purpose: Coordinates complex, multi-step jobs with configurable actions
 //   - Examples: Summarization jobs with scan/summarize/extract_keywords actions
 //   - Storage: Job definitions stored in database (job_definitions table)
 //   - Execution: Actions registered here and executed via executor service
-//   - Used for: User-defined scheduled jobs, batch processing workflows
+//   - Used for: User-defined scheduled jobs, batch processing jobs
 //
 // 2. Queue-based job types (internal/jobs/types/) - Single-purpose message handlers
 //   - Purpose: Process individual work items from goqite message queue
@@ -26,7 +26,7 @@
 // # Why Two Systems?
 //
 //   - JobTypeRegistry: Designed for user-facing job definitions where users configure
-//     multi-step workflows (e.g., "scan all docs, then summarize, then extract keywords")
+//     multi-step jobs (e.g., "scan all docs, then summarize, then extract keywords")
 //
 //   - Queue-based jobs: Designed for internal task distribution where a parent job
 //     creates many child tasks that workers process concurrently (e.g., parent crawler
@@ -35,7 +35,7 @@
 // # Naming Confusion
 //
 // Some overlap exists (e.g., "summarizer" appears in both systems):
-// - JobTypeRegistry "summarizer": Multi-step workflow definition
+// - JobTypeRegistry "summarizer": Multi-step job definition
 // - Queue SummarizerJob: Individual action execution message handler
 //
 // This is intentional: the registry action creates queue messages for async execution.
@@ -56,12 +56,12 @@ import (
 // and the list of sources to operate on
 type ActionHandler func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error
 
-// JobTypeRegistry manages the registration and retrieval of action handlers for different job types.
+// JobTypeRegistry manages the registration and retrieval of action handlers for different job definition types.
 //
 // This registry is for MULTI-STEP JOB DEFINITIONS with configurable actions.
 // For queue-based single-purpose job handlers, see internal/jobs/types/ and internal/queue/worker.go.
 type JobTypeRegistry struct {
-	actions map[models.JobType]map[string]ActionHandler // Nested map: job type → action name → handler
+	actions map[models.JobDefinitionType]map[string]ActionHandler // Nested map: job definition type → action name → handler
 	logger  arbor.ILogger
 	mu      sync.RWMutex // Read-write mutex for thread-safe access
 }
@@ -69,7 +69,7 @@ type JobTypeRegistry struct {
 // NewJobTypeRegistry creates a new job type registry
 func NewJobTypeRegistry(logger arbor.ILogger) *JobTypeRegistry {
 	registry := &JobTypeRegistry{
-		actions: make(map[models.JobType]map[string]ActionHandler),
+		actions: make(map[models.JobDefinitionType]map[string]ActionHandler),
 		logger:  logger,
 	}
 
@@ -80,8 +80,8 @@ func NewJobTypeRegistry(logger arbor.ILogger) *JobTypeRegistry {
 	return registry
 }
 
-// RegisterAction registers an action handler for a specific job type and action name
-func (r *JobTypeRegistry) RegisterAction(jobType models.JobType, actionName string, handler ActionHandler) error {
+// RegisterAction registers an action handler for a specific job definition type and action name
+func (r *JobTypeRegistry) RegisterAction(jobType models.JobDefinitionType, actionName string, handler ActionHandler) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -93,9 +93,9 @@ func (r *JobTypeRegistry) RegisterAction(jobType models.JobType, actionName stri
 		return fmt.Errorf("handler cannot be nil")
 	}
 
-	// Validate job type using centralized helper
-	if !models.IsValidJobType(jobType) {
-		return fmt.Errorf("invalid job type: %s", jobType)
+	// Validate job definition type using centralized helper
+	if !models.IsValidJobDefinitionType(jobType) {
+		return fmt.Errorf("invalid job definition type: %s", jobType)
 	}
 
 	// Check for duplicate registration
@@ -123,28 +123,28 @@ func (r *JobTypeRegistry) RegisterAction(jobType models.JobType, actionName stri
 	return nil
 }
 
-// GetAction retrieves an action handler for a specific job type and action name
-func (r *JobTypeRegistry) GetAction(jobType models.JobType, actionName string) (ActionHandler, error) {
+// GetAction retrieves an action handler for a specific job definition type and action name
+func (r *JobTypeRegistry) GetAction(jobType models.JobDefinitionType, actionName string) (ActionHandler, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Check if job type exists
+	// Check if job definition type exists
 	handlers, ok := r.actions[jobType]
 	if !ok {
-		return nil, fmt.Errorf("no actions registered for job type %s", jobType)
+		return nil, fmt.Errorf("no actions registered for job definition type %s", jobType)
 	}
 
 	// Check if action exists
 	handler, ok := handlers[actionName]
 	if !ok {
-		return nil, fmt.Errorf("action %s not found for job type %s", actionName, jobType)
+		return nil, fmt.Errorf("action %s not found for job definition type %s", actionName, jobType)
 	}
 
 	return handler, nil
 }
 
-// ListActions returns a sorted list of all registered action names for a specific job type
-func (r *JobTypeRegistry) ListActions(jobType models.JobType) []string {
+// ListActions returns a sorted list of all registered action names for a specific job definition type
+func (r *JobTypeRegistry) ListActions(jobType models.JobDefinitionType) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -166,13 +166,13 @@ func (r *JobTypeRegistry) ListActions(jobType models.JobType) []string {
 	return actions
 }
 
-// GetAllJobTypes returns a list of all job types that have registered actions
-func (r *JobTypeRegistry) GetAllJobTypes() []models.JobType {
+// GetAllJobTypes returns a list of all job definition types that have registered actions
+func (r *JobTypeRegistry) GetAllJobTypes() []models.JobDefinitionType {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Collect job types
-	jobTypes := make([]models.JobType, 0, len(r.actions))
+	// Collect job definition types
+	jobTypes := make([]models.JobDefinitionType, 0, len(r.actions))
 	for jobType := range r.actions {
 		jobTypes = append(jobTypes, jobType)
 	}

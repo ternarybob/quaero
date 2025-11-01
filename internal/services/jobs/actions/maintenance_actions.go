@@ -112,17 +112,17 @@ func RegisterMaintenanceActions(registry *jobs.JobTypeRegistry, deps *Maintenanc
 	}
 
 	// Register reindex action for custom job type
-	if err := registry.RegisterAction(models.JobTypeCustom, "reindex", reindexActionHandler); err != nil {
+	if err := registry.RegisterAction(models.JobDefinitionTypeCustom, "reindex", reindexActionHandler); err != nil {
 		return fmt.Errorf("failed to register reindex action: %w", err)
 	}
 
 	// Register corpus_summary action for custom job type
-	if err := registry.RegisterAction(models.JobTypeCustom, "corpus_summary", corpusSummaryActionHandler); err != nil {
+	if err := registry.RegisterAction(models.JobDefinitionTypeCustom, "corpus_summary", corpusSummaryActionHandler); err != nil {
 		return fmt.Errorf("failed to register corpus_summary action: %w", err)
 	}
 
 	deps.Logger.Info().
-		Str("job_type", string(models.JobTypeCustom)).
+		Str("job_type", string(models.JobDefinitionTypeCustom)).
 		Int("action_count", 2).
 		Msg("Maintenance actions registered successfully")
 

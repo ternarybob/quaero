@@ -8,6 +8,7 @@ import (
 
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
+	arbormodels "github.com/ternarybob/arbor/models"
 )
 
 // QueueManager manages the persistent message queue
@@ -24,12 +25,25 @@ type QueueManager interface {
 	GetQueueStats(ctx context.Context) (map[string]interface{}, error)
 }
 
+// LogEntry represents a log entry for WebSocket broadcasting
+type LogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+}
+
+// WebSocketHandler interface for broadcasting log entries
+type WebSocketHandler interface {
+	BroadcastLog(entry LogEntry)
+}
+
 // LogService manages batch log persistence
 type LogService interface {
 	Start() error
 	Stop() error
-	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry)
-	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry)
+	GetChannel() chan []arbormodels.LogEvent
+	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error
+	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error
 	GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error)
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
@@ -55,6 +69,12 @@ type JobManager interface {
 
 	CopyJob(ctx context.Context, jobID string) (string, error)
 	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
+
+	// StopAllChildJobs cancels all running child jobs of the specified parent job.
+	// Used by error tolerance threshold management to stop child jobs when the parent's failure threshold is exceeded.
+	// Returns the count of jobs that were successfully cancelled.
+	StopAllChildJobs(ctx context.Context, parentID string) (int, error)
+
 	// VERIFICATION COMMENT 2: GetJobWithChildren removed - flat hierarchy does not require tree traversal
 	// All child messages point to root job ID for centralized progress tracking
 }

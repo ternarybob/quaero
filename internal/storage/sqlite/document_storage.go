@@ -401,10 +401,42 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 	query := "SELECT id, source_type, source_id, title, content_markdown, detail_level, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
 	args := []interface{}{}
 
-	// Add WHERE clause if filtering by source (using placeholder)
+	// Build WHERE clauses for filtering
+	whereClauses := []string{}
+
+	// Filter by source type
 	if opts.SourceType != "" {
-		query += " WHERE source_type = ?"
+		whereClauses = append(whereClauses, "source_type = ?")
 		args = append(args, opts.SourceType)
+	}
+
+	// Filter by created_at range
+	if opts.CreatedAfter != nil && *opts.CreatedAfter != "" {
+		createdAfter, err := time.Parse(time.RFC3339, *opts.CreatedAfter)
+		if err == nil {
+			whereClauses = append(whereClauses, "created_at >= ?")
+			args = append(args, createdAfter.Unix())
+		} else {
+			d.logger.Warn().Err(err).Str("created_after", *opts.CreatedAfter).Msg("Failed to parse CreatedAfter timestamp")
+		}
+	}
+
+	if opts.CreatedBefore != nil && *opts.CreatedBefore != "" {
+		createdBefore, err := time.Parse(time.RFC3339, *opts.CreatedBefore)
+		if err == nil {
+			whereClauses = append(whereClauses, "created_at <= ?")
+			args = append(args, createdBefore.Unix())
+		} else {
+			d.logger.Warn().Err(err).Str("created_before", *opts.CreatedBefore).Msg("Failed to parse CreatedBefore timestamp")
+		}
+	}
+
+	// Combine WHERE clauses
+	if len(whereClauses) > 0 {
+		query += " WHERE " + whereClauses[0]
+		for i := 1; i < len(whereClauses); i++ {
+			query += " AND " + whereClauses[i]
+		}
 	}
 
 	// Add ORDER BY (safe after whitelist validation)
