@@ -16,8 +16,8 @@ type QueueManager interface {
 	Start() error
 	Stop() error
 	Restart() error
-	Enqueue(ctx context.Context, msg *queue.JobMessage) error
-	EnqueueWithDelay(ctx context.Context, msg *queue.JobMessage, delay time.Duration) error
+	Enqueue(ctx context.Context, msg *queue.Message) error
+	EnqueueWithDelay(ctx context.Context, msg *queue.Message, delay time.Duration) error
 	Receive(ctx context.Context) (*goqite.Message, error)
 	Delete(ctx context.Context, msg goqite.Message) error
 	Extend(ctx context.Context, msg goqite.Message, duration time.Duration) error
@@ -110,7 +110,8 @@ type JobManager interface {
 
 // WorkerPool manages concurrent job processing
 type WorkerPool interface {
-	RegisterHandler(jobType string, handler queue.JobHandler)
+	// Note: This interface is deprecated - use worker.Executor instead
+	RegisterHandler(jobType string, handler interface{})
 	Start() error
 	Stop() error
 }
