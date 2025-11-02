@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 21st October 2025 5:50:00 pm
-// Modified By: Claude Code
+// Last Modified: Monday, 3rd November 2025 10:10:42 am
+// Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
 package jobs
@@ -262,7 +262,7 @@ func (m *mockCrawlerService) Start() error {
 	return nil
 }
 
-func (m *mockCrawlerService) StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}) (string, error) {
+func (m *mockCrawlerService) StartCrawl(sourceType, entityType string, seedURLs []string, config interface{}, sourceID string, refreshSource bool, sourceConfigSnapshot interface{}, authSnapshot interface{}, jobDefinitionID string) (string, error) {
 	return "mock-job-id", nil
 }
 
@@ -284,7 +284,7 @@ func (m *mockCrawlerService) GetJobResults(jobID string) (interface{}, error) {
 	return nil, nil
 }
 
-func (m *mockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
+func (m *mockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) (interface{}, error) {
 	return nil, nil
 }
 
@@ -346,7 +346,7 @@ func (m *statefulMockCrawlerService) GetJobResults(jobID string) (interface{}, e
 	return nil, nil
 }
 
-func (m *statefulMockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.ListOptions) (interface{}, error) {
+func (m *statefulMockCrawlerService) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) (interface{}, error) {
 	return nil, nil
 }
 
@@ -443,7 +443,7 @@ func createTestJobDefinition(jobType models.JobType, sources []string, steps []m
 	return &models.JobDefinition{
 		ID:          "test-job-1",
 		Name:        "Test Job",
-		Type:        jobType,
+		Type:        models.JobDefinitionType(jobType),
 		Description: "Test job definition",
 		Sources:     sources,
 		Steps:       steps,
@@ -569,15 +569,15 @@ func TestExecute_Success(t *testing.T) {
 	sourceStorage.sources["source-2"] = sourcesData[1]
 
 	// Register action handlers
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(false, 0))
-	registry.RegisterAction(models.JobTypeCrawler, "transform", createMockActionHandler(false, 0))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(false, 0))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "transform", createMockActionHandler(false, 0))
 
 	// Create job definition
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyFail},
 		{Name: "step2", Action: "transform", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1", "source-2"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1", "source-2"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -609,7 +609,7 @@ func TestExecute_InvalidJobDefinition(t *testing.T) {
 	jobDef := &models.JobDefinition{
 		ID:   "",
 		Name: "",
-		Type: models.JobTypeCrawler,
+		Type: models.JobDefinitionTypeCrawler,
 	}
 
 	ctx := context.Background()
@@ -632,7 +632,7 @@ func TestExecute_SourceFetchFailure(t *testing.T) {
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -657,15 +657,15 @@ func TestExecute_StepFailure_Continue(t *testing.T) {
 	sourceStorage.sources["source-1"] = sourcesData[0]
 
 	// Register action handlers - first fails, second succeeds
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 100))
-	registry.RegisterAction(models.JobTypeCrawler, "transform", createMockActionHandler(false, 0))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 100))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "transform", createMockActionHandler(false, 0))
 
 	// Create job definition with Continue strategy
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyContinue},
 		{Name: "step2", Action: "transform", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -693,15 +693,15 @@ func TestExecute_StepFailure_Fail(t *testing.T) {
 	sourceStorage.sources["source-1"] = sources[0]
 
 	// Register action handlers - first fails
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 100))
-	registry.RegisterAction(models.JobTypeCrawler, "transform", createMockActionHandler(false, 0))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 100))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "transform", createMockActionHandler(false, 0))
 
 	// Create job definition with Fail strategy
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyFail},
 		{Name: "step2", Action: "transform", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -732,7 +732,7 @@ func TestExecute_StepFailure_Retry(t *testing.T) {
 	sourceStorage.sources["source-1"] = sources[0]
 
 	// Register action handler that fails first 2 times, succeeds on 3rd
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 2))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 2))
 
 	// Create job definition with Retry strategy
 	steps := []models.JobStep{
@@ -748,7 +748,7 @@ func TestExecute_StepFailure_Retry(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -779,7 +779,7 @@ func TestExecute_ActionHandlerNotFound(t *testing.T) {
 	steps := []models.JobStep{
 		{Name: "step1", Action: "nonexistent", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -804,7 +804,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 	sourceStorage.sources["source-1"] = sources[0]
 
 	// Register action handler that checks context
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -817,7 +817,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyFail},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Create cancellable context and cancel immediately
 	ctx, cancel := context.WithCancel(context.Background())
@@ -842,15 +842,15 @@ func TestExecute_MultipleStepFailures(t *testing.T) {
 	sourceStorage.sources["source-1"] = sources[0]
 
 	// Register failing action handlers
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 100))
-	registry.RegisterAction(models.JobTypeCrawler, "transform", createMockActionHandler(true, 100))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 100))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "transform", createMockActionHandler(true, 100))
 
 	// Create job definition with Continue strategy
 	steps := []models.JobStep{
 		{Name: "step1", Action: "crawl", OnError: models.ErrorStrategyContinue},
 		{Name: "step2", Action: "transform", OnError: models.ErrorStrategyContinue},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -881,7 +881,7 @@ func TestHandleStepError_Continue(t *testing.T) {
 		Action:  "test",
 		OnError: models.ErrorStrategyContinue,
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{}, []models.JobStep{step})
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{}, []models.JobStep{step})
 
 	ctx := context.Background()
 	testErr := errors.New("test error")
@@ -904,7 +904,7 @@ func TestHandleStepError_Fail(t *testing.T) {
 		Action:  "test",
 		OnError: models.ErrorStrategyFail,
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{}, []models.JobStep{step})
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{}, []models.JobStep{step})
 
 	ctx := context.Background()
 	testErr := errors.New("test error")
@@ -923,7 +923,7 @@ func TestRetryStep_SuccessOnFirstRetry(t *testing.T) {
 	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that succeeds immediately
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(false, 0))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(false, 0))
 
 	step := models.JobStep{
 		Name:   "test",
@@ -932,7 +932,7 @@ func TestRetryStep_SuccessOnFirstRetry(t *testing.T) {
 			"max_retries": 3,
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{}, []models.JobStep{step})
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{}, []models.JobStep{step})
 
 	ctx := context.Background()
 	err := executor.retryStep(ctx, jobDef, step, []*models.SourceConfig{})
@@ -947,7 +947,7 @@ func TestRetryStep_SuccessAfterMultipleRetries(t *testing.T) {
 	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that fails twice, succeeds on third
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 2))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 2))
 
 	step := models.JobStep{
 		Name:   "test",
@@ -957,7 +957,7 @@ func TestRetryStep_SuccessAfterMultipleRetries(t *testing.T) {
 			"initial_backoff": 0.1,
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{}, []models.JobStep{step})
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{}, []models.JobStep{step})
 
 	ctx := context.Background()
 	err := executor.retryStep(ctx, jobDef, step, []*models.SourceConfig{})
@@ -972,7 +972,7 @@ func TestRetryStep_ExhaustedRetries(t *testing.T) {
 	executor, _, _, registry, _ := createTestExecutor()
 
 	// Register handler that always fails
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", createMockActionHandler(true, 100))
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", createMockActionHandler(true, 100))
 
 	step := models.JobStep{
 		Name:   "test",
@@ -982,7 +982,7 @@ func TestRetryStep_ExhaustedRetries(t *testing.T) {
 			"initial_backoff": 0.1,
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{}, []models.JobStep{step})
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{}, []models.JobStep{step})
 
 	ctx := context.Background()
 	err := executor.retryStep(ctx, jobDef, step, []*models.SourceConfig{})
@@ -1154,7 +1154,7 @@ func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
 	sourceStorage.sources["source-1"] = sourcesData[0]
 
 	// Register action handler that stores job IDs for polling
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		// Simulate crawler action storing job IDs
 		if step.Config == nil {
 			step.Config = make(map[string]interface{})
@@ -1175,7 +1175,7 @@ func TestAsyncPolling_SuccessfulCompletion(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -1264,7 +1264,7 @@ func TestAsyncPolling_JobFailure(t *testing.T) {
 	sourceStorage.sources["source-2"] = sourcesData[1]
 
 	// Register action handler that stores job IDs for polling
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		if step.Config == nil {
 			step.Config = make(map[string]interface{})
 		}
@@ -1284,7 +1284,7 @@ func TestAsyncPolling_JobFailure(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-2"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-2"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -1370,7 +1370,7 @@ func TestAsyncPolling_ContextCancellation(t *testing.T) {
 	sourceStorage.sources["source-1"] = sourcesData[0]
 
 	// Register action handler
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		if step.Config == nil {
 			step.Config = make(map[string]interface{})
 		}
@@ -1390,7 +1390,7 @@ func TestAsyncPolling_ContextCancellation(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job with cancellable context
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -1437,7 +1437,7 @@ func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
 	sourceStorage.sources["source-1"] = sourcesData[0]
 
 	// Register action handler that stores job IDs but sets wait_for_completion = false
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		if step.Config == nil {
 			step.Config = make(map[string]interface{})
 		}
@@ -1457,7 +1457,7 @@ func TestAsyncPolling_SkipWhenWaitForCompletionFalse(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1"}, steps)
 
 	// Execute job
 	ctx := context.Background()
@@ -1542,7 +1542,7 @@ func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
 	sourceStorage.sources["source-2"] = sourcesData[1]
 
 	// Register action handler that stores multiple job IDs
-	registry.RegisterAction(models.JobTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
+	registry.RegisterAction(models.JobDefinitionTypeCrawler, "crawl", func(ctx context.Context, step *models.JobStep, sources []*models.SourceConfig) error {
 		if step.Config == nil {
 			step.Config = make(map[string]interface{})
 		}
@@ -1562,7 +1562,7 @@ func TestAsyncPolling_MultipleJobsWithMixedOutcomes(t *testing.T) {
 			},
 		},
 	}
-	jobDef := createTestJobDefinition(models.JobTypeCrawler, []string{"source-1", "source-2"}, steps)
+	jobDef := createTestJobDefinition(models.JobDefinitionTypeCrawler, []string{"source-1", "source-2"}, steps)
 
 	// Execute job
 	ctx := context.Background()

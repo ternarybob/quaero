@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Friday, 24th October 2025 4:11:54 pm
+// Last Modified: Monday, 3rd November 2025 9:49:58 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -120,7 +120,7 @@ func (m *mockJobStorage) GetJob(ctx context.Context, jobID string) (interface{},
 	return m.jobs[jobID], nil
 }
 
-func (m *mockJobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+func (m *mockJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
 	if m.jobs == nil {
 		return []*models.CrawlJob{}, nil
 	}
@@ -146,7 +146,7 @@ func (m *mockJobStorage) CountJobs(ctx context.Context) (int, error) {
 	return len(m.jobs), nil
 }
 
-func (m *mockJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+func (m *mockJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
 	// Simple mock implementation - just return total count
 	return m.CountJobs(ctx)
 }
@@ -200,6 +200,18 @@ func (m *mockJobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) e
 
 func (m *mockJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error) {
 	return []*models.CrawlJob{}, nil
+}
+
+func (m *mockJobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+	return nil, nil
+}
+
+func (m *mockJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error) {
+	return nil, nil
+}
+
+func (m *mockJobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error {
+	return nil
 }
 
 func (m *mockJobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
@@ -543,7 +555,7 @@ func TestStartCrawl(t *testing.T) {
 			service := createTestService()
 			defer service.Close()
 
-			jobID, err := service.StartCrawl(tt.sourceType, tt.entityType, tt.seedURLs, tt.config, "", false, nil, nil)
+			jobID, err := service.StartCrawl(tt.sourceType, tt.entityType, tt.seedURLs, tt.config, "", false, nil, nil, "")
 			if err != nil {
 				t.Fatalf("StartCrawl failed: %v", err)
 			}
@@ -606,7 +618,7 @@ func TestGetJobStatus(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil, "")
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -647,7 +659,7 @@ func TestCancelJob(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil, "")
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -701,7 +713,7 @@ func TestGetJobResults(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
+	jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil, "")
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}
@@ -753,7 +765,7 @@ func TestListJobs(t *testing.T) {
 
 	jobIDs := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
+		jobID, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil, "")
 		if err != nil {
 			t.Fatalf("StartCrawl failed: %v", err)
 		}
@@ -889,7 +901,7 @@ func TestServiceShutdown(t *testing.T) {
 		Concurrency: 1,
 		RateLimit:   time.Millisecond * 100,
 	}
-	_, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil)
+	_, err := service.StartCrawl("jira", "projects", []string{"https://test.atlassian.net/api"}, config, "", false, nil, nil, "")
 	if err != nil {
 		t.Fatalf("StartCrawl failed: %v", err)
 	}

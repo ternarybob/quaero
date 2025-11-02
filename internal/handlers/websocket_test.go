@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Monday, 3rd November 2025 9:47:18 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package handlers
 
 import (
@@ -14,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
 // TestLogDispatchFanOut verifies that log broadcast correctly fans out to multiple subscribers
@@ -36,7 +42,7 @@ func TestLogDispatchFanOut(t *testing.T) {
 	numSubscribers := 5
 
 	// Track received messages for each subscriber
-	receivedMessages := make([][]LogEntry, numSubscribers)
+	receivedMessages := make([][]interfaces.LogEntry, numSubscribers)
 	var receivedMutex sync.Mutex
 
 	// WaitGroup for subscribers
@@ -81,7 +87,7 @@ func TestLogDispatchFanOut(t *testing.T) {
 						continue
 					}
 
-					var logEntry LogEntry
+					var logEntry interfaces.LogEntry
 					if err := json.Unmarshal(logData, &logEntry); err != nil {
 						continue
 					}
@@ -183,7 +189,7 @@ func TestLogDispatchFanOut(t *testing.T) {
 	// Verify messages were received in order for each subscriber
 	for i, messages := range receivedMessages {
 		// Extract our test messages
-		var testMessages []LogEntry
+		var testMessages []interfaces.LogEntry
 		for _, msg := range messages {
 			for _, testLog := range testLogs {
 				if msg.Level == strings.ToLower(testLog.level) && msg.Message == testLog.message {

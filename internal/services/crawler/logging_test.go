@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Monday, 3rd November 2025 9:51:04 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package crawler
 
 import (
@@ -68,6 +73,7 @@ func TestCrawlerServiceLogging(t *testing.T) {
 		false,
 		nil,
 		nil,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("Failed to start crawl job: %v", err)
@@ -191,6 +197,7 @@ func TestCrawlerLoggingWithFollowLinksDisabled(t *testing.T) {
 		false,
 		nil,
 		nil,
+		"",
 	)
 	if err != nil {
 		t.Fatalf("Failed to start crawl job: %v", err)
@@ -421,7 +428,7 @@ func (s *InMemoryJobStorage) UpdateJob(ctx context.Context, job interface{}) err
 	return nil
 }
 
-func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.ListOptions) ([]*models.CrawlJob, error) {
+func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
 	jobs := make([]*models.CrawlJob, 0, len(s.jobs))
 	for _, job := range s.jobs {
 		// Type assert to *CrawlJob (which is an alias for *models.CrawlJob)
@@ -487,8 +494,20 @@ func (s *InMemoryJobStorage) CountJobsByStatus(ctx context.Context, status strin
 	return count, nil
 }
 
-func (s *InMemoryJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.ListOptions) (int, error) {
+func (s *InMemoryJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
 	return len(s.jobs), nil
+}
+
+func (s *InMemoryJobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+	return nil, nil
+}
+
+func (s *InMemoryJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error) {
+	return nil, nil
+}
+
+func (s *InMemoryJobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error {
+	return nil
 }
 
 func (s *InMemoryJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
