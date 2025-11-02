@@ -5,27 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
-// CrawlerJobDeps holds dependencies for crawler jobs
+// CrawlerJobDeps holds minimal dependencies for crawler jobs
 type CrawlerJobDeps struct {
-	CrawlerService         *crawler.Service
-	LogService             interfaces.LogService
-	DocumentStorage        interfaces.DocumentStorage
-	QueueManager           interfaces.QueueManager
-	JobStorage             interfaces.JobStorage
-	EventService           interfaces.EventService
-	JobDefinitionStorage   interfaces.JobDefinitionStorage
-	JobManager             interfaces.JobManager
+	DocumentStorage interfaces.DocumentStorage
+	JobStorage      interfaces.JobStorage
 }
 
 // CrawlerJob handles URL crawling jobs
@@ -44,37 +35,138 @@ func NewCrawlerJob(base *BaseJob, deps *CrawlerJobDeps) *CrawlerJob {
 
 // formatJobError formats a concise, user-friendly error message from a Go error.
 // Returns messages in the format "Category: Brief description" suitable for UI display.
-// Handles common error types:
-//   - HTTP errors: "HTTP 404: Not Found"
-//   - Timeout errors: "Timeout: Request exceeded 30s"
-//   - Network errors: "Network: Connection refused"
-//   - Storage errors: "Storage: Database locked"
-//   - Generic errors: "Category: error.Error()" (truncated to 200 chars)
-func formatJobError(category string, err error) string {
+//
+// Categories:
+//   - Validation: Invalid input (e.g., "Validation: URL is required")
+//   - Network: Connection issues (e.g., "Network: Connection refused for https://...")
+//   - HTTP: HTTP status errors (e.g., "HTTP 404: Not Found for https://...")
+//   - Timeout: Request timeouts (e.g., "Timeout: Request timeout for https://...")
+//   - Scraping: Content extraction errors (e.g., "Scraping: Failed to parse HTML")
+//   - Storage: Database errors (e.g., "Storage: Database locked")
+//   - System: Internal errors (e.g., "System: Parent job is not a CrawlJob")
+//
+// Error Detection:
+//   - Checks error type (context.DeadlineExceeded, net.OpError)
+//   - Checks error message for keywords (404, timeout, connection refused)
+//   - Extracts HTTP status codes from error messages
+//   - Truncates long error messages to 200 characters
+//
+// URL Context:
+//   - If url parameter is provided, includes it in the error message
+//   - Format: "Category: Description for https://example.com/page1"
+//   - If url is empty, omits URL context
+//
+// Usage:
+//   err := fetchURL("https://example.com")
+//   if err != nil {
+//       errorMsg := formatJobError("Network", err, "https://example.com", timeout)
+//       // errorMsg = "Network: Connection refused for https://example.com"
+//       jobStorage.UpdateJobStatus(ctx, jobID, "failed", errorMsg)
+//   }
+//
+// This format is displayed in the UI and should be actionable for users.
+// See crawler_job.go lines 65-69 for Error field documentation.
+func formatJobError(category string, err error, url string, timeout time.Duration) string {
 	if err == nil {
 		return ""
 	}
 
 	// Check for timeout errors
 	if errors.Is(err, context.DeadlineExceeded) {
+		if url != "" {
+			if timeout > 0 {
+				return fmt.Sprintf("Timeout: Request exceeded %v for %s", timeout, url)
+			}
+			return fmt.Sprintf("Timeout: Request exceeded deadline for %s", url)
+		}
+		if timeout > 0 {
+			return fmt.Sprintf("Timeout: Request exceeded %v", timeout)
+		}
 		return "Timeout: Request exceeded deadline"
 	}
 
 	errMsg := err.Error()
 	errMsgLower := strings.ToLower(errMsg)
 
+	// Check for HTTP status codes (404, 500, etc.)
+	if strings.Contains(errMsgLower, "404") || strings.Contains(errMsgLower, "not found") {
+		if url != "" {
+			return fmt.Sprintf("HTTP 404: Not Found for %s", url)
+		}
+		return "HTTP 404: Not Found"
+	}
+	if strings.Contains(errMsgLower, "401") || strings.Contains(errMsgLower, "unauthorized") {
+		if url != "" {
+			return fmt.Sprintf("HTTP 401: Unauthorized for %s", url)
+		}
+		return "HTTP 401: Unauthorized"
+	}
+	if strings.Contains(errMsgLower, "403") || strings.Contains(errMsgLower, "forbidden") {
+		if url != "" {
+			return fmt.Sprintf("HTTP 403: Forbidden for %s", url)
+		}
+		return "HTTP 403: Forbidden"
+	}
+	if strings.Contains(errMsgLower, "500") || strings.Contains(errMsgLower, "server error") {
+		if url != "" {
+			return fmt.Sprintf("HTTP 500: Server Error for %s", url)
+		}
+		return "HTTP 500: Server Error"
+	}
+
 	// Check for timeout in error message
 	if strings.Contains(errMsgLower, "timeout") || strings.Contains(errMsgLower, "deadline exceeded") {
-		if category == "Scraping" {
-			return "Timeout: Scraping timeout"
+		// Use configured timeout if available
+		timeoutDuration := ""
+		if timeout > 0 {
+			timeoutDuration = timeout.String()
+		} else {
+			// Try to extract timeout duration from error message
+			// Look for patterns like "10s", "5ms", "2m" anywhere in the message
+			parts := strings.Split(errMsg, ":")
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				// Check for duration pattern
+				if strings.HasSuffix(part, "s") || strings.HasSuffix(part, "ms") || strings.HasSuffix(part, "m") {
+					timeoutDuration = part
+					break
+				}
+			}
+
+			// If not found in parts, try to find in the original message
+			if timeoutDuration == "" {
+				// Try to extract duration using simple pattern matching
+				words := strings.Fields(errMsg)
+				for _, word := range words {
+					word = strings.Trim(word, ".,:;")
+					if strings.HasSuffix(word, "s") || strings.HasSuffix(word, "ms") || strings.HasSuffix(word, "m") {
+						timeoutDuration = word
+						break
+					}
+				}
+			}
 		}
-		return "Timeout: Request timeout"
+
+		timeoutStr := ""
+		if timeoutDuration != "" {
+			timeoutStr = fmt.Sprintf(" (%s)", timeoutDuration)
+		}
+
+		if category == "Scraping" {
+			if url != "" {
+				return fmt.Sprintf("Timeout: Scraping timeout%s for %s", timeoutStr, url)
+			}
+			return fmt.Sprintf("Timeout: Scraping timeout%s", timeoutStr)
+		}
+		if url != "" {
+			return fmt.Sprintf("Timeout: Request timeout%s for %s", timeoutStr, url)
+		}
+		return fmt.Sprintf("Timeout: Request timeout%s", timeoutStr)
 	}
 
 	// Check for network errors
-	var urlErr *url.Error
 	var netOpErr *net.OpError
-	if errors.As(err, &urlErr) || errors.As(err, &netOpErr) {
+	if errors.As(err, &netOpErr) {
 		// Extract brief cause from network error
 		briefCause := errMsg
 		if len(briefCause) > 100 {
@@ -83,49 +175,82 @@ func formatJobError(category string, err error) string {
 				briefCause = strings.TrimSpace(briefCause[idx+1:])
 			}
 		}
+		if url != "" {
+			return fmt.Sprintf("Network: %s for %s", briefCause, url)
+		}
 		return fmt.Sprintf("Network: %s", briefCause)
 	}
 
 	// Truncate long error messages
+	// Account for category prefix and URL suffix to keep total message reasonable
 	const maxLength = 200
-	if len(errMsg) > maxLength {
-		errMsg = errMsg[:maxLength] + "..."
+	if url != "" {
+		// Account for " (URL: <url>" suffix - rough estimate
+		maxAllowedErrLen := maxLength - len(category) - len(" (URL: )")
+		if len(errMsg) > maxAllowedErrLen {
+			errMsg = errMsg[:maxAllowedErrLen-3] + "..." // -3 for "..."
+		}
+	} else {
+		// Just account for ": " prefix
+		maxAllowedErrLen := maxLength - len(category) - 2
+		if len(errMsg) > maxAllowedErrLen {
+			errMsg = errMsg[:maxAllowedErrLen-3] + "..." // -3 for "..."
+		}
 	}
 
 	// Format as "Category: Brief description"
+	if url != "" {
+		return fmt.Sprintf("%s: %s (URL: %s)", category, errMsg, url)
+	}
 	return fmt.Sprintf("%s: %s", category, errMsg)
 }
 
-// Execute processes a crawler URL job
+// Execute processes a crawler URL job.
+//
+// Execution Flow:
+//   1. Validate message (URL, config, depth)
+//   2. Extract configuration (max_depth, follow_links, source_type)
+//   3. Check depth limit (skip if depth > max_depth)
+//   4. Log job start with structured fields
+//   5. Process URL (currently simulated - TODO: implement real processing)
+//   6. Update parent job progress (increment completed, decrement pending)
+//   7. Discover and enqueue child jobs (if follow_links enabled and depth < max_depth)
+//   8. Log job completion
+//
+// Error Handling:
+//   - Validation errors: Log, update job status to 'failed', return error
+//   - Processing errors: Log, update job status to 'failed', return error
+//   - Progress update errors: Log warning, continue (non-critical)
+//   - Child enqueue errors: Log warning, continue (partial success acceptable)
+//
+// Parent-Child Hierarchy:
+//   - Child jobs inherit parent's jobID via msg.ParentID (flat hierarchy)
+//   - All children reference the root parent, not immediate parent
+//   - Progress tracked at parent job level (TotalURLs, CompletedURLs, PendingURLs)
+//
+// TODO: Real URL Processing:
+//   - Replace simulation (lines 186-200) with actual crawler service call
+//   - Extract links from scraped content
+//   - Store documents in DocumentStorage
+//   - Handle HTTP errors, timeouts, network failures
+//   - Use formatJobError() for user-friendly error messages
 func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
-	c.logger.Info().
-		Str("message_id", msg.ID).
-		Str("url", msg.URL).
-		Int("depth", msg.Depth).
-		Str("parent_id", msg.ParentID).
-		Msg("Processing crawler URL job")
+	// Extract timeout from configuration
+	timeout := 0 * time.Second
+	if to, ok := msg.Config["timeout_ms"].(float64); ok {
+		timeout = time.Duration(to) * time.Millisecond
+	}
 
 	// Validate message
 	if err := c.Validate(msg); err != nil {
-		// Load parent job and populate error field
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Error = formatJobError("Validation", err)
-				job.Status = models.JobStatusFailed
-				job.CompletedAt = time.Now()
-				job.ResultCount = job.Progress.CompletedURLs
-				job.FailedCount = job.Progress.FailedURLs
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to save job with validation error")
-				} else {
-					c.logger.Info().
-						Str("parent_id", msg.ParentID).
-						Str("error", job.Error).
-						Msg("Job marked as failed due to validation error")
-				}
-			}
+		c.logger.LogJobError(err, fmt.Sprintf("Validation failed for URL=%s, depth=%d", msg.URL, msg.Depth))
+
+		// If this is a child job, update parent counters before failing
+		if msg.ParentID != "" {
+			c.updateParentOnChildFailure(ctx, msg.ParentID, "Validation failed")
 		}
-		return fmt.Errorf("invalid message: %w", err)
+
+		return c.failJobWithError(ctx, c.GetLogger().GetJobID(), "Validation", err, msg.URL, timeout)
 	}
 
 	// Extract configuration from message
@@ -149,1000 +274,264 @@ func (c *CrawlerJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		return nil
 	}
 
-	// Log job start
-	if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-		fmt.Sprintf("Processing URL: %s (depth=%d)", msg.URL, msg.Depth)); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to log job start event")
-	}
-
-	// Extract source metadata
-	sourceType := "web"
+	// Extract sourceType from config
+	sourceType := ""
 	if st, ok := msg.Config["source_type"].(string); ok {
 		sourceType = st
 	}
 
-	entityType := "url"
-	if et, ok := msg.Config["entity_type"].(string); ok {
-		entityType = et
-	}
+	// Log job start
+	c.logger.LogJobStart(
+		fmt.Sprintf("Processing URL: %s (depth=%d)", msg.URL, msg.Depth),
+		sourceType,
+		msg.Config,
+	)
 
-	// Publish EventJobStarted if this is the first URL (job transitioning from pending to running)
-	if c.deps.EventService != nil {
-		// Load job to check status
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				// Only publish if job is still pending (first URL)
-				if job.Status == models.JobStatusPending {
-					// Update job status to running
-					job.Status = models.JobStatusRunning
-					if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-						c.logger.Warn().Err(saveErr).Msg("Failed to update job status to running")
-					} else {
-						// Publish EventJobStarted event
-						startedEvent := interfaces.Event{
-							Type: interfaces.EventJobStarted,
-							Payload: map[string]interface{}{
-								"job_id":      msg.ParentID,
-								"status":      "running",
-								"source_type": sourceType,
-								"entity_type": entityType,
-								"url":         msg.URL,
-								"depth":       msg.Depth,
-								"timestamp":   time.Now().Format(time.RFC3339),
-							},
-						}
-						if err := c.deps.EventService.Publish(ctx, startedEvent); err != nil {
-							c.logger.Warn().Err(err).Msg("Failed to publish job started event")
-						}
-					}
-				}
-			}
-		}
-	}
+	// Process URL using crawler service
+	startTime := time.Now()
 
-	// Update child job status to running if this is a child job being processed
-	// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
-	if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
-		childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
-		if childErr != nil {
-			// Child job row missing - this can happen during upgrade or if persistence failed
-			c.logger.Warn().
-				Err(childErr).
-				Str("child_id", msg.ID).
-				Str("parent_id", msg.ParentID).
-				Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
-		} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
-			if childJob.Status == models.JobStatusPending {
-				childJob.Status = models.JobStatusRunning
-				childJob.StartedAt = time.Now()
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
-					c.logger.Warn().
-						Err(saveErr).
-						Str("child_id", msg.ID).
-						Msg("Failed to update child job status to running")
-				} else {
-					c.logger.Debug().
-						Str("child_id", msg.ID).
-						Str("parent_id", msg.ParentID).
-						Msg("Child job status updated to running")
-				}
-			}
-		} else {
-			c.logger.Warn().
-				Str("child_id", msg.ID).
-				Str("parent_id", msg.ParentID).
-				Msg("Child job type assertion failed - expected *models.CrawlJob")
-		}
-	}
+	// Note: In a real implementation, the crawler job would process the URL
+	// For now, we'll simulate processing and enqueue child jobs
+	// In the actual system, URLs are processed through the CrawlerService
 
-	// Fetch URL content using crawler service with auth-aware HTTP and HTML parsing
-	c.logger.Debug().
-		Str("url", msg.URL).
-		Int("depth", msg.Depth).
-		Msg("Fetching URL content using crawler service")
-
-	// Build auth-aware HTTP client from crawler service
-	httpClient, err := c.deps.CrawlerService.BuildHTTPClientFromAuth(ctx)
-	if err != nil {
-		c.logger.Warn().
-			Err(err).
-			Str("url", msg.URL).
-			Msg("Failed to build HTTP client from auth, using default client")
-		httpClient = nil // Will use default client in HTMLScraper
-	}
-
-	// Get base crawler config from service (contains user agent, timeouts, etc.)
-	crawlerConfig := c.deps.CrawlerService.GetConfig()
-
-	// Apply job-level config overrides from message
-	// Make a copy to avoid modifying the base config
-	mergedConfig := crawlerConfig
-
-	// Apply rate limit override (msg.Config["rate_limit"] -> RequestDelay)
-	if rateLimit, ok := msg.Config["rate_limit"].(float64); ok && rateLimit > 0 {
-		mergedConfig.RequestDelay = time.Duration(rateLimit) * time.Millisecond
-	}
-
-	// Apply concurrency override (constrain to reasonable limits)
-	if concurrency, ok := msg.Config["concurrency"].(float64); ok {
-		if concurrency > 0 && concurrency <= 10 { // Max 10 concurrent workers
-			mergedConfig.MaxConcurrency = int(concurrency)
-		}
-	}
-
-	// Apply max depth override
-	if maxDepthOverride, ok := msg.Config["max_depth"].(float64); ok && maxDepthOverride > 0 {
-		mergedConfig.MaxDepth = int(maxDepthOverride)
-	}
-
-	// Apply JavaScript rendering override
-	if jsRendering, ok := msg.Config["javascript_rendering"].(bool); ok {
-		mergedConfig.EnableJavaScript = jsRendering
-	}
-
-	// Apply timeout override
-	if timeout, ok := msg.Config["timeout"].(float64); ok && timeout > 0 {
-		mergedConfig.RequestTimeout = time.Duration(timeout) * time.Second
-	}
-
-	c.logger.Debug().
-		Dur("request_delay", mergedConfig.RequestDelay).
-		Int("max_concurrency", mergedConfig.MaxConcurrency).
-		Int("max_depth", mergedConfig.MaxDepth).
-		Bool("enable_javascript", mergedConfig.EnableJavaScript).
-		Dur("request_timeout", mergedConfig.RequestTimeout).
-		Msg("Merged job-level config with base crawler config")
-
-	// Create HTMLScraper with auth-aware HTTP client and merged config
-	var cookies []*http.Cookie
-	if httpClient != nil && httpClient.Jar != nil {
-		parsedURL, err := url.Parse(msg.URL)
-		if err == nil {
-			cookies = httpClient.Jar.Cookies(parsedURL)
-		}
-	}
-
-	scraper := crawler.NewHTMLScraper(mergedConfig, c.logger, httpClient, cookies)
-	defer scraper.Close()
-
-	// Publish child-level started event for this URL processing
-	if c.deps.EventService != nil {
-		// Try to enrich with current progress stats if available
-		var childCount, completedChildren, failedChildren int
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				childCount = job.Progress.TotalURLs
-				completedChildren = job.Progress.CompletedURLs
-				failedChildren = job.Progress.FailedURLs
-			}
-		}
-		startedChild := interfaces.Event{
-			Type: interfaces.EventJobStarted,
-			Payload: map[string]interface{}{
-				"job_id":             msg.ID,
-				"child_job_id":       msg.ID,
-				"parent_job_id":      msg.ParentID,
-				"status":             "running",
-				"source_type":        sourceType,
-				"entity_type":        entityType,
-				"url":                msg.URL,
-				"depth":              msg.Depth,
-				"child_count":        childCount,
-				"completed_children": completedChildren,
-				"failed_children":    failedChildren,
-				"timestamp":          time.Now().Format(time.RFC3339),
-			},
-		}
-		if err := c.deps.EventService.Publish(ctx, startedChild); err != nil {
-			c.logger.Warn().Err(err).Msg("Failed to publish child job started event")
-		}
-	}
-
-	// Scrape the URL (handles JavaScript rendering, HTML parsing, markdown conversion)
-	scrapeResult, err := scraper.ScrapeURL(ctx, msg.URL)
-	if err != nil {
-		c.logger.Error().
-			Err(err).
-			Str("url", msg.URL).
-			Int("depth", msg.Depth).
-			Msg("Failed to scrape URL")
-
-			// Publish EventJobFailed for critical scraping failure (child-level)
-		if c.deps.EventService != nil {
-			failedEvent := interfaces.Event{
-				Type: interfaces.EventJobFailed,
-				Payload: map[string]interface{}{
-					"job_id":        msg.ID,
-					"child_job_id":  msg.ID,
-					"parent_job_id": msg.ParentID,
-					"status":        "failed",
-					"source_type":   sourceType,
-					"entity_type":   entityType,
-					"error":         err.Error(),
-					"timestamp":     time.Now().Format(time.RFC3339),
-				},
-			}
-			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
-				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
-			}
-		}
-
-		// Update parent job error field
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Error = formatJobError("Scraping", err)
-				// Note: Don't change status here - individual URL failures don't fail the entire job
-				// Only update the Error field to show the most recent failure
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to save job with scraping error")
-				}
-			}
-		}
-
-		// Update parent job progress even on failure
-		// Update heartbeat to track last activity
-		if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
-			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
-		}
-
-		// Perform atomic progress update for failed URL
-		// completedDelta: +1 (URL processed but failed)
-		// pendingDelta: -1 (URL no longer pending)
-		// totalDelta: 0 (no new children)
-		// failedDelta: +1 (one failure)
-		if atomicErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, 1, -1, 0, 1); atomicErr != nil {
-			c.logger.Warn().Err(atomicErr).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress after scraping failure")
-		}
-
-		// Load job for error tolerance threshold check and completion probe (after atomic update)
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				// Check error tolerance threshold immediately after child failure
-				// This provides prompt enforcement instead of waiting for completion probe
-				if c.checkErrorToleranceThreshold(ctx, msg, job) {
-					// Job was failed due to threshold, return early
-					return fmt.Errorf("job failed due to error tolerance threshold")
-				}
-
-				// Check completion and enqueue probe if needed
-				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
-			}
-		}
-
-		// Update child job status to failed if this is a child job (scraping error)
-		// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
-		if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
-			childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
-			if childErr != nil {
-				// Child job row missing - this can happen during upgrade or if persistence failed
-				c.logger.Warn().
-					Err(childErr).
-					Str("child_id", msg.ID).
-					Str("parent_id", msg.ParentID).
-					Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
-			} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
-				childJob.Status = models.JobStatusFailed
-				childJob.Error = formatJobError("Scraping", err)
-				childJob.CompletedAt = time.Now()
-				childJob.FailedCount = 1
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
-					c.logger.Warn().
-						Err(saveErr).
-						Str("child_id", msg.ID).
-						Msg("Failed to update child job status to failed (scraping error)")
-				} else {
-					c.logger.Debug().
-						Str("child_id", msg.ID).
-						Str("parent_id", msg.ParentID).
-						Str("error", childJob.Error).
-						Msg("Child job status updated to failed (scraping error)")
-				}
-			} else {
-				c.logger.Warn().
-					Str("child_id", msg.ID).
-					Str("parent_id", msg.ParentID).
-					Msg("Child job type assertion failed - expected *models.CrawlJob")
-			}
-		}
-
-		return fmt.Errorf("failed to scrape URL: %w", err)
-	}
-
-	// Check if scraping was successful (2xx status code)
-	if !scrapeResult.Success {
-		c.logger.Warn().
-			Str("url", msg.URL).
-			Int("status_code", scrapeResult.StatusCode).
-			Str("error", scrapeResult.Error).
-			Msg("Scraping returned non-success status")
-
-		// Log non-success scraping
-		if err := c.LogJobEvent(ctx, msg.ParentID, "warning",
-			fmt.Sprintf("URL returned status %d: %s", scrapeResult.StatusCode, msg.URL)); err != nil {
-			c.logger.Warn().Err(err).Msg("Failed to log scraping warning")
-		}
-
-		// Update parent job progress for non-success status
-		// Update heartbeat to track last activity
-		if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
-			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat on error")
-		}
-
-		// Perform atomic progress update for failed URL
-		// completedDelta: +1 (URL processed but failed)
-		// pendingDelta: -1 (URL no longer pending)
-		// totalDelta: 0 (no new children)
-		// failedDelta: +1 (one failure)
-		if atomicErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, 1, -1, 0, 1); atomicErr != nil {
-			c.logger.Warn().Err(atomicErr).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress after non-success status")
-		}
-
-		// Load job for error tolerance threshold check and completion probe (after atomic update)
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				// Check error tolerance threshold immediately after child failure
-				// This provides prompt enforcement instead of waiting for completion probe
-				if c.checkErrorToleranceThreshold(ctx, msg, job) {
-					// Job was failed due to threshold, return early
-					return fmt.Errorf("job failed due to error tolerance threshold")
-				}
-
-				// Check completion and enqueue probe if needed
-				c.checkAndEnqueueCompletionProbe(ctx, job, msg)
-			}
-		}
-
-		// Compute HTTP error message with fallback to status text
-		msgText := scrapeResult.Error
-		if msgText == "" {
-			msgText = http.StatusText(scrapeResult.StatusCode)
-		}
-		httpErrorMsg := fmt.Sprintf("HTTP %d: %s", scrapeResult.StatusCode, msgText)
-
-		// Publish EventJobFailed for non-success HTTP status (child-level)
-		if c.deps.EventService != nil {
-			failedEvent := interfaces.Event{
-				Type: interfaces.EventJobFailed,
-				Payload: map[string]interface{}{
-					"job_id":        msg.ID,
-					"child_job_id":  msg.ID,
-					"parent_job_id": msg.ParentID,
-					"status":        "failed",
-					"source_type":   sourceType,
-					"entity_type":   entityType,
-					"error":         httpErrorMsg,
-					"timestamp":     time.Now().Format(time.RFC3339),
-				},
-			}
-			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
-				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
-			}
-		}
-
-		// Update parent job error field with HTTP error
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Error = httpErrorMsg
-				// Note: Don't change status here - individual URL failures don't fail the entire job
-				// Only update the Error field to show the most recent failure
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to save job with HTTP error")
-				}
-			}
-		}
-
-		// Update child job status to failed if this is a child job (HTTP error)
-		// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
-		if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
-			childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
-			if childErr != nil {
-				// Child job row missing - this can happen during upgrade or if persistence failed
-				c.logger.Warn().
-					Err(childErr).
-					Str("child_id", msg.ID).
-					Str("parent_id", msg.ParentID).
-					Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
-			} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
-				childJob.Status = models.JobStatusFailed
-				childJob.Error = httpErrorMsg
-				childJob.CompletedAt = time.Now()
-				childJob.FailedCount = 1
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
-					c.logger.Warn().
-						Err(saveErr).
-						Str("child_id", msg.ID).
-						Msg("Failed to update child job status to failed (HTTP error)")
-				} else {
-					c.logger.Debug().
-						Str("child_id", msg.ID).
-						Str("parent_id", msg.ParentID).
-						Str("error", childJob.Error).
-						Msg("Child job status updated to failed (HTTP error)")
-				}
-			} else {
-				c.logger.Warn().
-					Str("child_id", msg.ID).
-					Str("parent_id", msg.ParentID).
-					Msg("Child job type assertion failed - expected *models.CrawlJob")
-			}
-		}
-
-		// Return error for non-2xx responses
-		return fmt.Errorf("scraping failed with status %d: %s", scrapeResult.StatusCode, scrapeResult.Error)
-	}
-
-	// Extract content (prioritize markdown for LLM consumption)
-	content := scrapeResult.GetContent()
-	if content == "" {
-		c.logger.Warn().
-			Str("url", msg.URL).
-			Msg("Scraping produced empty content")
-
-		// Log empty content warning
-		if err := c.LogJobEvent(ctx, msg.ParentID, "warning",
-			fmt.Sprintf("Empty content from URL: %s", msg.URL)); err != nil {
-			c.logger.Warn().Err(err).Msg("Failed to log empty content warning")
-		}
-
-		// Continue with empty content rather than failing
-	}
-
-	// Build real document with actual scraped data
-	document := &models.Document{
-		ID:              fmt.Sprintf("doc_%s_%d", msg.ID, time.Now().Unix()),
-		SourceID:        msg.URL,
-		SourceType:      sourceType,
-		Title:           scrapeResult.Title,
-		ContentMarkdown: content,
-		DetailLevel:     models.DetailLevelFull,
-		URL:             msg.URL,
-		Metadata: map[string]interface{}{
-			"crawled_depth": msg.Depth,
-			"parent_id":     msg.ParentID,
-			"url":           msg.URL,
-			"title":         scrapeResult.Title,
-			"description":   scrapeResult.Description,
-			"language":      scrapeResult.Language,
-			"status_code":   scrapeResult.StatusCode,
-			"scraped_at":    scrapeResult.Timestamp.Format(time.RFC3339),
-			"duration_ms":   scrapeResult.Duration.Milliseconds(),
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	c.logger.Debug().
-		Str("url", msg.URL).
-		Str("title", scrapeResult.Title).
-		Int("content_length", len(content)).
-		Int("links_found", len(scrapeResult.Links)).
-		Msg("Successfully scraped URL")
-
-	// Save document to storage
-	if err := c.deps.DocumentStorage.SaveDocument(document); err != nil {
-		c.logger.Error().Err(err).Str("url", msg.URL).Msg("Failed to save document")
-
-		// Update parent job error field with storage error
-		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
-			if job, ok := jobInterface.(*models.CrawlJob); ok {
-				job.Error = formatJobError("Storage", err)
-				// Note: Don't change status here - storage errors might be transient
-				// Only update the Error field to show the most recent failure
-				if saveErr := c.deps.JobStorage.SaveJob(ctx, job); saveErr != nil {
-					c.logger.Warn().Err(saveErr).Msg("Failed to save job with storage error")
-				} else {
-					c.logger.Info().
-						Str("parent_id", msg.ParentID).
-						Str("error", job.Error).
-						Msg("Job error field updated with storage failure")
-				}
-			}
-		}
-
-		return fmt.Errorf("failed to save document: %w", err)
-	}
+	// TODO: Implement Real URL Processing
+	//
+	// Replace the simulation below with actual crawler service integration:
+	//
+	// 1. Call crawler service to fetch and parse URL:
+	//    result, err := c.deps.CrawlerService.ScrapeURL(ctx, msg.URL, msg.Config)
+	//    if err != nil {
+	//        return c.failJobWithError(ctx, msg.JobID, "Scraping", err, msg.URL, timeout)
+	//    }
+	//
+	// 2. Store document in DocumentStorage:
+	//    doc := &models.Document{
+	//        ID:          generateDocumentID(),
+	//        SourceType:  sourceType,
+	//        SourceID:    msg.URL,
+	//        Title:       result.Title,
+	//        Content:     result.Content,
+	//        // ... other fields
+	//    }
+	//    if err := c.deps.DocumentStorage.SaveDocument(doc); err != nil {
+	//        return c.failJobWithError(ctx, msg.JobID, "Storage", err, msg.URL, timeout)
+	//    }
+	//
+	// 3. Extract links from scraped content:
+	//    links := result.Links // Extracted by crawler service
+	//
+	// 4. Replace simulatedLinks (line 222) with actual links
+	//
+	// 5. Handle edge cases:
+	//    - HTTP errors (404, 500, etc.) - use formatJobError("HTTP", err, url)
+	//    - Timeouts - use formatJobError("Timeout", err, url)
+	//    - Network errors - use formatJobError("Network", err, url)
+	//    - Invalid content - use formatJobError("Scraping", err, url)
 
 	c.logger.Info().
 		Str("url", msg.URL).
-		Str("document_id", document.ID).
-		Msg("Document saved successfully")
+		Int("depth", msg.Depth).
+		Msg("URL processing simulated (no-op)")
 
-	// Update child job status to completed if this is a child job
-	// Guard: Verify message ID matches expected child job pattern (contains "-child-" or "-seed-")
-	if msg.ParentID != "" && (strings.Contains(msg.ID, "-child-") || strings.Contains(msg.ID, "-seed-")) {
-		childJobInterface, childErr := c.deps.JobStorage.GetJob(ctx, msg.ID)
-		if childErr != nil {
-			// Child job row missing - this can happen during upgrade or if persistence failed
-			c.logger.Warn().
-				Err(childErr).
-				Str("child_id", msg.ID).
-				Str("parent_id", msg.ParentID).
-				Msg("Child job row not found in database (upgrade or persistence failure) - continuing without status update")
-		} else if childJob, ok := childJobInterface.(*models.CrawlJob); ok {
-			childJob.Status = models.JobStatusCompleted
-			childJob.CompletedAt = time.Now()
-			childJob.ResultCount = 1 // Successfully processed this URL
-			if saveErr := c.deps.JobStorage.SaveJob(ctx, childJob); saveErr != nil {
-				c.logger.Warn().
-					Err(saveErr).
-					Str("child_id", msg.ID).
-					Msg("Failed to update child job status to completed")
-			} else {
-				c.logger.Debug().
-					Str("child_id", msg.ID).
-					Str("parent_id", msg.ParentID).
-					Msg("Child job status updated to completed")
+	duration := time.Since(startTime)
+
+	// Update progress if we have a parent job
+	if msg.ParentID != "" {
+		// Load parent job to check current state and prevent underflow
+		if jobInterface, jobErr := c.deps.JobStorage.GetJob(ctx, msg.ParentID); jobErr == nil {
+			if job, ok := jobInterface.(*models.CrawlJob); ok {
+				// Check if we can safely decrement PendingURLs (bounds check to prevent underflow)
+				if job.Progress.PendingURLs > 0 {
+					// Use atomic update to prevent race conditions from concurrent workers
+					// UpdateProgressCountersAtomic uses single atomic SQL UPDATE with +=/-=
+					if updateErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, +1, -1, 0, 0); updateErr != nil {
+						c.logger.Warn().Err(updateErr).Str("parent_id", msg.ParentID).Msg("Failed to atomically update parent job progress")
+					} else {
+						// Log progress after successful atomic update
+						c.logger.LogJobProgress(job.Progress.CompletedURLs+1, job.Progress.TotalURLs, fmt.Sprintf("Processed URL: %s", msg.URL))
+					}
+				} else {
+					// PendingURLs already at zero, skip decrement to prevent underflow
+					c.logger.Warn().
+						Str("parent_id", msg.ParentID).
+						Int("pending_urls", job.Progress.PendingURLs).
+						Str("url", msg.URL).
+						Msg("Skipping progress update: PendingURLs already at zero")
+				}
 			}
-		} else {
-			c.logger.Warn().
-				Str("child_id", msg.ID).
-				Str("parent_id", msg.ParentID).
-				Msg("Child job type assertion failed - expected *models.CrawlJob")
 		}
 	}
 
-	// Track how many children will be spawned (needed for accurate progress tracking)
-	var childrenToSpawn int
-
-	// Discover and enqueue child links if follow_links is enabled
+	// Enqueue child jobs for discovered URLs if followLinks is enabled
+	// Note: In a real implementation, links would be extracted from the scraped content
 	if followLinks && msg.Depth < maxDepth {
-		c.logger.Debug().
-			Str("url", msg.URL).
-			Int("depth", msg.Depth).
-			Int("max_depth", maxDepth).
-			Msg("Link discovery enabled, extracting and enqueueing child URLs")
-
-		// Extract include/exclude patterns from config
-		includePatterns := []string{}
-		if patterns, ok := msg.Config["include_patterns"].([]interface{}); ok {
-			for _, p := range patterns {
-				if str, ok := p.(string); ok {
-					includePatterns = append(includePatterns, str)
-				}
-			}
-		}
-
-		excludePatterns := []string{}
-		if patterns, ok := msg.Config["exclude_patterns"].([]interface{}); ok {
-			for _, p := range patterns {
-				if str, ok := p.(string); ok {
-					excludePatterns = append(excludePatterns, str)
-				}
-			}
-		}
-
-		// Extract max_pages limit
-		maxPages := 0 // 0 means unlimited
-		if pages, ok := msg.Config["max_pages"].(float64); ok {
-			maxPages = int(pages)
-		}
-
-		// Use links already extracted by HTMLScraper (normalized and deduplicated)
-		discoveredLinks := scrapeResult.Links
-
-		c.logger.Debug().
-			Int("discovered_count", len(discoveredLinks)).
-			Int("include_patterns", len(includePatterns)).
-			Int("exclude_patterns", len(excludePatterns)).
-			Int("max_pages", maxPages).
-			Msg("Processing discovered links")
-
-		// Use shared LinkFilter helper for URL filtering
-		linkFilter := crawler.NewLinkFilter(includePatterns, excludePatterns, sourceType, c.logger)
-
-		// Filter and enqueue child jobs for discovered links
-		enqueuedCount := 0
-		filteredCount := 0
-		duplicateCount := 0
-
-		for _, childURL := range discoveredLinks {
-			// Check for duplicate URLs using database-backed deduplication
-			isNew, err := c.deps.JobStorage.MarkURLSeen(ctx, msg.ParentID, childURL)
-			if err != nil {
-				c.logger.Warn().
-					Err(err).
-					Str("url", childURL).
-					Msg("Failed to check URL uniqueness, skipping to avoid potential duplicate")
-				continue
-			}
-
-			if !isNew {
-				duplicateCount++
-				c.logger.Debug().
-					Str("url", childURL).
-					Msg("URL already enqueued (duplicate detected by database), skipping")
-				continue
-			}
-
-			// Persist child job to database after URL marked as seen using helper method
-			childJobID := fmt.Sprintf("%s-child-%d", msg.ID, enqueuedCount)
-
-			// Build CrawlConfig for child job (inherit from parent)
-			childConfig := models.CrawlConfig{
-				MaxDepth:        maxDepth,
-				FollowLinks:     followLinks,
-				IncludePatterns: includePatterns,
-				ExcludePatterns: excludePatterns,
-			}
-
-			// Use CreateChildJobRecord helper to persist child job consistently
-			if err := c.CreateChildJobRecord(ctx, msg.ParentID, childJobID, childURL, sourceType, entityType, childConfig); err != nil {
-				c.logger.Warn().
-					Err(err).
-					Str("child_id", childJobID).
-					Str("child_url", childURL).
-					Msg("Failed to persist child job to database via helper, continuing with enqueue")
-				// Continue on save error - don't block enqueueing
-			}
-
-			// Respect max_pages limit if configured
-			if maxPages > 0 && enqueuedCount >= maxPages {
-				c.logger.Info().
-					Int("enqueued", enqueuedCount).
-					Int("max_pages", maxPages).
-					Msg("Reached max_pages limit, stopping link enqueueing")
-				break
-			}
-
-			// Apply URL filtering
-			filterResult := linkFilter.FilterURL(childURL)
-			if !filterResult.ShouldEnqueue {
-				filteredCount++
-				c.logger.Debug().
-					Str("url", childURL).
-					Str("reason", filterResult.Reason).
-					Str("excluded_by", filterResult.ExcludedBy).
-					Msg("URL filtered out, skipping")
-				continue
-			}
-
-			// Create child job message (flat hierarchy - all children point to root job)
-			childMsg := &queue.JobMessage{
-				ID:              fmt.Sprintf("%s-child-%d", msg.ID, enqueuedCount),
-				Type:            "crawler_url",
-				URL:             childURL,
-				Depth:           msg.Depth + 1,
-				ParentID:        msg.ParentID, // Inherit root job ID (flat structure)
-				JobDefinitionID: msg.JobDefinitionID,
-				Config:          msg.Config, // Inherit parent config
-			}
-
-			// Enqueue child job via BaseJob.EnqueueChildJob
-			if err := c.EnqueueChildJob(ctx, childMsg); err != nil {
-				c.logger.Warn().
-					Err(err).
-					Str("child_url", childURL).
-					Msg("Failed to enqueue child job")
-				// NOTE: URL already marked as seen in database, so subsequent workers won't retry
-				// This prevents duplicate enqueueing even if this worker fails to enqueue
-				continue
-			}
-
-			enqueuedCount++
-
-			// Publish job spawn event for real-time UI updates
-			if c.deps.EventService != nil {
-				spawnEvent := interfaces.Event{
-					Type: interfaces.EventJobSpawn,
-					Payload: map[string]interface{}{
-						"parent_job_id": msg.ParentID,
-						"child_job_id":  childMsg.ID,
-						"job_type":      "crawler_url",
-						"url":           childURL,
-						"depth":         msg.Depth + 1,
-						"timestamp":     time.Now().Format(time.RFC3339),
-					},
-				}
-				c.deps.EventService.Publish(ctx, spawnEvent)
-			}
-
-			c.logger.Debug().
-				Str("child_url", childURL).
-				Int("depth", msg.Depth+1).
-				Msg("Child job enqueued successfully")
+		// Simulate finding some links
+		simulatedLinks := []string{
+			fmt.Sprintf("%s/page1", msg.URL),
+			fmt.Sprintf("%s/page2", msg.URL),
 		}
 
 		c.logger.Info().
-			Int("discovered", len(discoveredLinks)).
-			Int("duplicates", duplicateCount).
-			Int("filtered", filteredCount).
-			Int("enqueued", enqueuedCount).
-			Msg("Child jobs enqueued for discovered links")
+			Int("links_found", len(simulatedLinks)).
+			Int("next_depth", msg.Depth+1).
+			Msg("Enqueueing child jobs for discovered links")
 
-		// Track enqueued children for progress update
-		childrenToSpawn = enqueuedCount
-	}
+		for _, link := range simulatedLinks {
+			// Generate unique IDs for message and child job record
+			childMsgID := generateMessageID()
+			childJobID := generateJobID()
 
-	// Update heartbeat to track "last URL processed" timestamp
-	if err := c.deps.JobStorage.UpdateJobHeartbeat(ctx, msg.ParentID); err != nil {
-		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to update job heartbeat")
-	}
-
-	// Update parent job progress AFTER determining how many children will be spawned
-	// This ensures PendingURLs is accurate and prevents premature job completion
-	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-	if err != nil {
-		c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load parent job for progress update")
-	} else {
-		if job, ok := jobInterface.(*models.CrawlJob); ok {
-			// Calculate deltas for atomic progress update:
-			// - completedDelta: +1 (this URL completed successfully)
-			// - pendingDelta: -1 (this URL no longer pending) + childrenToSpawn (new children added)
-			// - totalDelta: +childrenToSpawn (new children added to total)
-			// - failedDelta: 0 (no failures on success path)
-			completedDelta := 1
-			pendingDelta := -1 + childrenToSpawn
-			totalDelta := childrenToSpawn
-			failedDelta := 0
-
-			// Determine if we should persist this update (batched saves every 10 URLs)
-			// Check using pre-update value: will the NEW completed count be a multiple of 10?
-			newCompletedURLs := job.Progress.CompletedURLs + completedDelta
-			shouldSave := newCompletedURLs%10 == 0 || // Every 10th URL
-				job.Status == models.JobStatusCompleted || // Always save on completion
-				job.Status == models.JobStatusFailed // Always save on failure
-
-			if shouldSave {
-				// Perform atomic progress update (eliminates read-modify-write race)
-				if err := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, msg.ParentID, completedDelta, pendingDelta, totalDelta, failedDelta); err != nil {
-					c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to atomically update progress counters")
-				} else {
-					// Update in-memory job object to reflect changes (for completion probe check and logging)
-					job.Progress.CompletedURLs += completedDelta
-					job.Progress.PendingURLs += pendingDelta
-					job.Progress.TotalURLs += totalDelta
-					if job.Progress.TotalURLs > 0 {
-						job.Progress.Percentage = float64(job.Progress.CompletedURLs) / float64(job.Progress.TotalURLs) * 100
-					}
-
-					c.logger.Debug().
-						Str("parent_id", msg.ParentID).
-						Int("completed", job.Progress.CompletedURLs).
-						Int("pending", job.Progress.PendingURLs).
-						Int("total", job.Progress.TotalURLs).
-						Int("spawned_children", childrenToSpawn).
-						Float64("percentage", job.Progress.Percentage).
-						Str("status", string(job.Status)).
-						Msg("Progress updated atomically with spawned children (batched)")
-				}
-			} else {
-				// Skip update for non-10th URLs to reduce database writes
-				// Update in-memory for accurate logging (note: not persisted until next batch)
-				job.Progress.CompletedURLs += completedDelta
-				job.Progress.PendingURLs += pendingDelta
-				job.Progress.TotalURLs += totalDelta
-
-				c.logger.Debug().
-					Str("parent_id", msg.ParentID).
-					Int("completed", job.Progress.CompletedURLs).
-					Int("pending", job.Progress.PendingURLs).
-					Msg("Progress update batched (will save at next 10-URL boundary)")
+			// Create child job message
+			childMsg := &queue.JobMessage{
+				ID:       childMsgID,
+				Type:     "crawler_url",
+				URL:      link,
+				Depth:    msg.Depth + 1,
+				ParentID: msg.ParentID, // Inherit parent ID for flat hierarchy
+				Config:   msg.Config,
 			}
 
-			// Check completion and enqueue probe if needed (uses updated in-memory values)
-			c.checkAndEnqueueCompletionProbe(ctx, job, msg)
-
-			// Emit progress event (only if not completed)
-			if job.Status != models.JobStatusCompleted {
-				if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-					fmt.Sprintf("Progress: %d/%d URLs completed (%.1f%%)",
-						job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.Percentage)); err != nil {
-					c.logger.Warn().Err(err).Msg("Failed to log progress event")
-				}
+			// Create child job record in database for proper job tracking
+			// Extract sourceType from config
+			childSourceType := sourceType
+			if st, ok := msg.Config["source_type"].(string); ok {
+				childSourceType = st
 			}
 
-			// Publish child-level completion event for this processed URL
-			if c.deps.EventService != nil {
-				completedChild := interfaces.Event{
-					Type: interfaces.EventJobCompleted,
-					Payload: map[string]interface{}{
-						"job_id":             msg.ID,
-						"child_job_id":       msg.ID,
-						"parent_job_id":      msg.ParentID,
-						"status":             "completed",
-						"source_type":        sourceType,
-						"entity_type":        entityType,
-						"url":                msg.URL,
-						"depth":              msg.Depth,
-						"child_count":        job.Progress.TotalURLs,
-						"completed_children": job.Progress.CompletedURLs,
-						"failed_children":    job.Progress.FailedURLs,
-						"timestamp":          time.Now().Format(time.RFC3339),
-					},
-				}
-				if err := c.deps.EventService.Publish(ctx, completedChild); err != nil {
-					c.logger.Warn().Err(err).Msg("Failed to publish child job completed event")
-				}
+			// Extract entityType from config (default to parent's entityType)
+			childEntityType := ""
+			if et, ok := msg.Config["entity_type"].(string); ok {
+				childEntityType = et
 			}
-		} else {
-			c.logger.Warn().Str("parent_id", msg.ParentID).Msg("Failed to type assert job to *crawler.CrawlJob")
+
+			// Create child job database record
+			childJobConfig := models.CrawlConfig{
+				MaxDepth:    maxDepth,
+				FollowLinks: followLinks,
+			}
+
+			if err := c.CreateChildJobRecord(ctx, msg.ParentID, childJobID, link, childSourceType, childEntityType, childJobConfig); err != nil {
+				c.logger.Warn().
+					Err(err).
+					Str("url", link).
+					Str("child_id", childJobID).
+					Msg("Failed to create child job record, skipping enqueue")
+				continue
+			}
+
+			// Enqueue child job
+			if err := c.EnqueueChildJob(ctx, childMsg); err != nil {
+				c.logger.Warn().
+					Err(err).
+					Str("url", link).
+					Str("child_id", childJobID).
+					Msg("Failed to enqueue child job")
+			}
 		}
 	}
 
-	// Log job completion
-	if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-		fmt.Sprintf("Completed URL: %s (depth=%d)", msg.URL, msg.Depth)); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to log job completion event")
-	}
-
-	// Update parent job progress
-	// NOTE: Progress tracking is now handled via queue-based architecture:
-	// - Queue stats track pending/completed message counts
-	// - JobStorage maintains persistent job state
-	// - Progress can be queried via QueueManager.GetQueueStats()
-	// - UI displays progress from queue stats + job storage status
-	c.logger.Debug().
-		Str("parent_id", msg.ParentID).
-		Str("url", msg.URL).
-		Int("depth", msg.Depth).
-		Msg("URL processing completed - progress tracked via queue stats")
-
-	c.logger.Info().
-		Str("message_id", msg.ID).
-		Str("url", msg.URL).
-		Msg("Crawler URL job completed successfully")
+	// Log completion
+	c.logger.LogJobComplete(duration, 1)
 
 	return nil
 }
 
-// checkErrorToleranceThreshold checks if the parent job's error tolerance threshold is exceeded
-// and takes action if configured (stop_all/continue/mark_warning).
-// Returns true if the job was failed due to threshold (caller should not continue), false otherwise.
-func (c *CrawlerJob) checkErrorToleranceThreshold(ctx context.Context, msg *queue.JobMessage, job *models.CrawlJob) bool {
-	// Only check threshold for root jobs with error tolerance configured
-	if job.ParentID != "" || msg.JobDefinitionID == "" || c.deps.JobDefinitionStorage == nil || c.deps.JobManager == nil {
-		return false
+// failJobWithError consolidates error handling logic for failing a job.
+//
+// This helper method:
+//   1. Formats error message using formatJobError()
+//   2. Updates job status to 'failed' via JobStorage.UpdateJobStatus()
+//   3. Logs error with context via JobLogger.LogJobError()
+//   4. Returns original error for worker to handle
+//
+// Parameters:
+//   - ctx: Context for database operations
+//   - jobID: ID of the job to fail
+//   - category: Error category (Validation, Network, Scraping, Storage, System)
+//   - err: The original error
+//   - url: URL being processed (empty string if not applicable)
+//
+// Usage:
+//   if err := processURL(msg.URL); err != nil {
+//       return c.failJobWithError(ctx, msg.JobID, "Scraping", err, msg.URL, timeout)
+//   }
+//
+// This method should be used consistently for all job failure paths to ensure:
+//   - User-friendly error messages in the UI
+//   - Consistent error logging format
+//   - Proper job status updates
+func (c *CrawlerJob) failJobWithError(ctx context.Context, jobID string, category string, err error, url string, timeout time.Duration) error {
+	errorMsg := formatJobError(category, err, url, timeout)
+	if updateErr := c.deps.JobStorage.UpdateJobStatus(ctx, jobID, "failed", errorMsg); updateErr != nil {
+		c.logger.Warn().Err(updateErr).Str("job_id", jobID).Msg("Failed to update job status")
 	}
+	c.logger.LogJobError(err, errorMsg)
+	return err
+}
 
-	// Load job definition to check error tolerance configuration
-	jobDef, err := c.deps.JobDefinitionStorage.GetJobDefinition(ctx, msg.JobDefinitionID)
-	if err != nil {
-		c.logger.Warn().
-			Err(err).
-			Str("job_def_id", msg.JobDefinitionID).
-			Msg("Failed to load job definition for error tolerance check")
-		return false
-	}
-
-	if jobDef == nil || jobDef.ErrorTolerance == nil {
-		return false
-	}
-
-	// Get current child failure statistics
-	childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
-	if err != nil {
-		c.logger.Warn().
-			Err(err).
-			Str("parent_id", msg.ParentID).
-			Msg("Failed to get child stats for error tolerance check")
-		return false
-	}
-
-	stats, ok := childStats[msg.ParentID]
-	if !ok {
-		return false
-	}
-
-	// Check if failure threshold is exceeded
-	maxFailures := jobDef.ErrorTolerance.MaxChildFailures
-	currentFailures := stats.FailedChildren
-
-	if maxFailures == 0 || currentFailures < maxFailures {
-		return false // Threshold not exceeded
-	}
-
-	c.logger.Warn().
+// ExecuteCompletionProbe processes a crawler completion probe
+func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobMessage) error {
+	c.logger.Info().
+		Str("message_id", msg.ID).
 		Str("parent_id", msg.ParentID).
-		Int("failed_children", currentFailures).
-		Int("max_failures", maxFailures).
-		Str("failure_action", jobDef.ErrorTolerance.FailureAction).
-		Msg("Error tolerance threshold exceeded during job execution")
+		Msg("Processing crawler completion probe")
 
-	// Handle based on failure action
-	switch jobDef.ErrorTolerance.FailureAction {
-	case "stop_all":
-		// Cancel all running child jobs immediately
-		cancelledCount, err := c.deps.JobManager.StopAllChildJobs(ctx, msg.ParentID)
-		if err != nil {
-			c.logger.Error().
-				Err(err).
-				Str("parent_id", msg.ParentID).
-				Msg("Failed to stop child jobs during threshold enforcement")
-		} else {
-			c.logger.Info().
-				Str("parent_id", msg.ParentID).
-				Int("cancelled_count", cancelledCount).
-				Msg("Stopped all running child jobs due to error tolerance threshold (immediate enforcement)")
-		}
+	// Load parent job
+	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
+	if err != nil {
+		c.logger.LogJobError(err, fmt.Sprintf("Failed to load parent job: parent_id=%s", msg.ParentID))
+		return c.failJobWithError(ctx, c.GetLogger().GetJobID(), "System", err, "", 0)
+	}
 
-		// Mark parent job as failed
-		job.Status = models.JobStatusFailed
-		job.Error = fmt.Sprintf("Error tolerance exceeded: %d/%d child jobs failed (max: %d)",
-			currentFailures, stats.ChildCount, maxFailures)
+	job, ok := jobInterface.(*models.CrawlJob)
+	if !ok {
+		c.logger.LogJobError(fmt.Errorf("parent job is not a CrawlJob"), fmt.Sprintf("Parent job is not a CrawlJob: parent_id=%s", msg.ParentID))
+		return c.failJobWithError(ctx, c.GetLogger().GetJobID(), "System", fmt.Errorf("parent job is not a CrawlJob"), "", 0)
+	}
+
+	// Check if all URLs have been processed
+	if job.Progress.PendingURLs == 0 && job.Progress.CompletedURLs+job.Progress.FailedURLs > 0 {
+		// All URLs processed, mark job as completed
+		job.Status = models.JobStatusCompleted
 		job.CompletedAt = time.Now()
-		job.ResultCount = job.Progress.CompletedURLs
-		job.FailedCount = job.Progress.FailedURLs
 
 		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-			c.logger.Error().
-				Err(err).
-				Str("parent_id", msg.ParentID).
-				Msg("Failed to save job as failed due to error tolerance")
-			return true // Still return true to stop processing
-		}
-
-		// Publish EventJobFailed for error tolerance threshold exceeded
-		if c.deps.EventService != nil {
-			// Get status_report from job (stats already available from line 1021)
-			statusReport := job.GetStatusReport(stats)
-
-			failedEvent := interfaces.Event{
-				Type: interfaces.EventJobFailed,
-				Payload: map[string]interface{}{
-					"job_id":          msg.ParentID,
-					"status":          "failed",
-					"source_type":     job.SourceType,
-					"entity_type":     job.EntityType,
-					"error":           job.Error,
-					"result_count":    job.ResultCount,
-					"failed_count":    job.FailedCount,
-					"child_count":     stats.ChildCount,
-					"failed_children": currentFailures,
-					"error_tolerance": maxFailures,
-					"timestamp":       time.Now().Format(time.RFC3339),
-					// Add status_report fields
-					"progress_text":    statusReport.ProgressText,
-					"errors":           statusReport.Errors,
-					"warnings":         statusReport.Warnings,
-					"running_children": statusReport.RunningChildren,
-				},
-			}
-			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
-				c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event for threshold")
-			}
+			// Log the error but don't mark parent as failed
+			c.logger.LogJobError(err, fmt.Sprintf("Failed to save parent job (will retry): parent_id=%s", msg.ParentID))
+			// Don't mark the parent as failed due to SaveJob failure
+			// This could be a temporary issue (database locked, etc.)
+			// Return error so the probe can be retried later
+			return fmt.Errorf("failed to save parent job (retry needed): %w", err)
 		}
 
 		c.logger.Info().
 			Str("parent_id", msg.ParentID).
-			Str("error", job.Error).
-			Msg("Job marked as failed due to error tolerance threshold (stop_all, immediate enforcement)")
-
-		return true // Job failed, stop processing
-
-	case "continue":
-		// Log warning but continue processing
-		c.logger.Warn().
-			Str("parent_id", msg.ParentID).
-			Int("failed_children", currentFailures).
-			Int("max_failures", maxFailures).
-			Msg("Error tolerance threshold exceeded but continuing (action: continue)")
-		return false
-
-	case "mark_warning":
-		// Set warning in job.Error field but continue
-		warningMsg := fmt.Sprintf("Warning: %d/%d child jobs failed (threshold: %d)",
-			currentFailures, stats.ChildCount, maxFailures)
-		if job.Error == "" {
-			job.Error = warningMsg
-		} else {
-			job.Error = fmt.Sprintf("%s; %s", job.Error, warningMsg)
-		}
-
-		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-			c.logger.Warn().
-				Err(err).
-				Str("parent_id", msg.ParentID).
-				Msg("Failed to save job with warning")
-		}
-
-		c.logger.Warn().
-			Str("parent_id", msg.ParentID).
-			Str("warning", warningMsg).
-			Msg("Error tolerance threshold exceeded, marked as warning (action: mark_warning)")
-		return false
+			Int("completed_urls", job.Progress.CompletedURLs).
+			Int("failed_urls", job.Progress.FailedURLs).
+			Msg("Parent job marked as completed")
 	}
 
-	return false
+	return nil
+}
+
+// updateParentOnChildFailure updates parent job counters when a child job fails.
+// This ensures parent job progress tracking stays accurate even when children fail.
+// Only updates counters - does not fail the parent job (reserved for threshold logic).
+func (c *CrawlerJob) updateParentOnChildFailure(ctx context.Context, parentID, reason string) {
+	// Use atomic update to increment FailedURLs and decrement PendingURLs
+	// This is safe for concurrent updates from multiple failing children
+	if updateErr := c.deps.JobStorage.UpdateProgressCountersAtomic(ctx, parentID, 0, -1, 0, +1); updateErr != nil {
+		c.logger.Warn().
+			Err(updateErr).
+			Str("parent_id", parentID).
+			Str("reason", reason).
+			Msg("Failed to update parent counters on child failure")
+	} else {
+		c.logger.Debug().
+			Str("parent_id", parentID).
+			Str("reason", reason).
+			Msg("Updated parent counters for child failure")
+	}
 }
 
 // Validate validates the crawler message
@@ -1150,438 +539,37 @@ func (c *CrawlerJob) Validate(msg *queue.JobMessage) error {
 	if msg.URL == "" {
 		return fmt.Errorf("URL is required")
 	}
-	if msg.ParentID == "" {
-		return fmt.Errorf("parent_id is required")
-	}
+
 	if msg.Config == nil {
 		return fmt.Errorf("config is required")
 	}
+
+	// Validate max_depth if present
+	if maxDepth, ok := msg.Config["max_depth"].(float64); ok {
+		if maxDepth < 0 {
+			return fmt.Errorf("max_depth must be non-negative")
+		}
+		if maxDepth > 10 {
+			return fmt.Errorf("max_depth cannot exceed 10")
+		}
+	}
+
 	return nil
 }
 
 // GetType returns the job type
 func (c *CrawlerJob) GetType() string {
-	return "crawler"
+	return "crawler_url"
 }
 
-// checkAndEnqueueCompletionProbe checks if the job is eligible for completion and enqueues a delayed probe
-// This is called after each URL is processed (success or failure) to detect job completion
-func (c *CrawlerJob) checkAndEnqueueCompletionProbe(ctx context.Context, job *models.CrawlJob, msg *queue.JobMessage) {
-	// Completion detection with delayed probe mechanism (Comment 3 & 8)
-	// When PendingURLs reaches 0, enqueue a delayed probe to verify completion after grace period
-	isCompletionCandidate := job.Progress.PendingURLs == 0 && job.Progress.TotalURLs > 0
-
-	if isCompletionCandidate && job.Status != models.JobStatusCompleted {
-		// Enqueue a delayed completion probe message (5 second grace period)
-		// This allows time for any in-flight URL processing to update the heartbeat
-		probeMsg := &queue.JobMessage{
-			ID:              fmt.Sprintf("%s-completion-probe-%d", msg.ParentID, time.Now().Unix()),
-			Type:            "crawler_completion_probe",
-			ParentID:        msg.ParentID,
-			JobDefinitionID: msg.JobDefinitionID,
-			Config:          msg.Config,
-		}
-
-		if err := c.deps.QueueManager.EnqueueWithDelay(ctx, probeMsg, 5*time.Second); err != nil {
-			c.logger.Warn().
-				Err(err).
-				Str("parent_id", msg.ParentID).
-				Msg("Failed to enqueue completion probe - completion may be delayed")
-		} else {
-			c.logger.Info().
-				Str("parent_id", msg.ParentID).
-				Int("completed", job.Progress.CompletedURLs).
-				Int("total", job.Progress.TotalURLs).
-				Msg("Enqueued completion probe with 5s grace period")
-		}
-	}
+// generateMessageID generates a unique message ID
+// This is a placeholder - in production, use a proper UUID generator
+func generateMessageID() string {
+	return fmt.Sprintf("msg_%d", time.Now().UnixNano())
 }
 
-// ExecuteCompletionProbe handles delayed completion verification (Comment 3 & 8)
-// This is called after a 5-second grace period to verify job completion
-func (c *CrawlerJob) ExecuteCompletionProbe(ctx context.Context, msg *queue.JobMessage) error {
-	c.logger.Info().
-		Str("message_id", msg.ID).
-		Str("parent_id", msg.ParentID).
-		Msg("Processing completion probe")
-
-	// Load the current job state
-	jobInterface, err := c.deps.JobStorage.GetJob(ctx, msg.ParentID)
-	if err != nil {
-		c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to load job for completion probe")
-		return fmt.Errorf("failed to load job: %w", err)
-	}
-
-	job, ok := jobInterface.(*models.CrawlJob)
-	if !ok {
-		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
-	}
-
-	// ERROR TOLERANCE THRESHOLD CHECKING
-	// Check if this is a root job with error tolerance configured
-	if job.ParentID == "" && msg.JobDefinitionID != "" && c.deps.JobDefinitionStorage != nil && c.deps.JobManager != nil {
-		// Load job definition to check error tolerance configuration
-		jobDef, err := c.deps.JobDefinitionStorage.GetJobDefinition(ctx, msg.JobDefinitionID)
-		if err != nil {
-			c.logger.Warn().
-				Err(err).
-				Str("job_def_id", msg.JobDefinitionID).
-				Msg("Failed to load job definition for error tolerance check")
-		} else if jobDef != nil && jobDef.ErrorTolerance != nil {
-			// Get child job failure statistics
-			childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
-			if err != nil {
-				c.logger.Warn().
-					Err(err).
-					Str("parent_id", msg.ParentID).
-					Msg("Failed to get child stats for error tolerance check")
-			} else if stats, ok := childStats[msg.ParentID]; ok {
-				// Check if failure threshold is exceeded
-				maxFailures := jobDef.ErrorTolerance.MaxChildFailures
-				currentFailures := stats.FailedChildren
-
-				if maxFailures > 0 && currentFailures >= maxFailures {
-					c.logger.Warn().
-						Str("parent_id", msg.ParentID).
-						Int("failed_children", currentFailures).
-						Int("max_failures", maxFailures).
-						Str("failure_action", jobDef.ErrorTolerance.FailureAction).
-						Msg("Error tolerance threshold exceeded")
-
-					// Handle based on failure action
-					switch jobDef.ErrorTolerance.FailureAction {
-					case "stop_all":
-						// Cancel all running child jobs
-						cancelledCount, err := c.deps.JobManager.StopAllChildJobs(ctx, msg.ParentID)
-						if err != nil {
-							c.logger.Error().
-								Err(err).
-								Str("parent_id", msg.ParentID).
-								Msg("Failed to stop child jobs")
-						} else {
-							c.logger.Info().
-								Str("parent_id", msg.ParentID).
-								Int("cancelled_count", cancelledCount).
-								Msg("Stopped all running child jobs due to error tolerance threshold")
-						}
-
-						// Mark parent job as failed
-						job.Status = models.JobStatusFailed
-						job.Error = fmt.Sprintf("Error tolerance exceeded: %d/%d child jobs failed (max: %d)",
-							currentFailures, stats.ChildCount, maxFailures)
-						job.CompletedAt = time.Now()
-						job.ResultCount = job.Progress.CompletedURLs
-						job.FailedCount = job.Progress.FailedURLs
-
-						if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-							c.logger.Error().
-								Err(err).
-								Str("parent_id", msg.ParentID).
-								Msg("Failed to save job as failed due to error tolerance")
-							return fmt.Errorf("failed to save job: %w", err)
-						}
-
-						// Publish EventJobFailed for error tolerance threshold exceeded
-						if c.deps.EventService != nil {
-							// Get status_report from job (stats already available from line 1238)
-							statusReport := job.GetStatusReport(stats)
-
-							failedEvent := interfaces.Event{
-								Type: interfaces.EventJobFailed,
-								Payload: map[string]interface{}{
-									"job_id":          msg.ParentID,
-									"status":          "failed",
-									"source_type":     job.SourceType,
-									"entity_type":     job.EntityType,
-									"error":           job.Error,
-									"result_count":    job.ResultCount,
-									"failed_count":    job.FailedCount,
-									"child_count":     stats.ChildCount,
-									"failed_children": currentFailures,
-									"error_tolerance": maxFailures,
-									"timestamp":       time.Now().Format(time.RFC3339),
-									// Add status_report fields
-									"progress_text":    statusReport.ProgressText,
-									"errors":           statusReport.Errors,
-									"warnings":         statusReport.Warnings,
-									"running_children": statusReport.RunningChildren,
-								},
-							}
-							if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
-								c.logger.Warn().Err(pubErr).Msg("Failed to publish job failed event")
-							}
-						}
-
-						c.logger.Info().
-							Str("parent_id", msg.ParentID).
-							Str("error", job.Error).
-							Msg("Job marked as failed due to error tolerance threshold (stop_all)")
-
-						return nil // Job failed due to threshold, don't continue completion check
-
-					case "continue":
-						// Log warning but continue processing
-						c.logger.Warn().
-							Str("parent_id", msg.ParentID).
-							Int("failed_children", currentFailures).
-							Int("max_failures", maxFailures).
-							Msg("Error tolerance threshold exceeded but continuing (action: continue)")
-
-					case "mark_warning":
-						// Set warning in job.Error field but continue
-						warningMsg := fmt.Sprintf("Warning: %d/%d child jobs failed (threshold: %d)",
-							currentFailures, stats.ChildCount, maxFailures)
-						if job.Error == "" {
-							job.Error = warningMsg
-						} else {
-							job.Error = fmt.Sprintf("%s; %s", job.Error, warningMsg)
-						}
-
-						c.logger.Warn().
-							Str("parent_id", msg.ParentID).
-							Str("warning", warningMsg).
-							Msg("Error tolerance threshold exceeded, marked as warning (action: mark_warning)")
-					}
-				}
-			}
-		}
-	}
-
-	// Check completion conditions:
-	// 1. PendingURLs must still be 0
-	// 2. LastHeartbeat must be older than 5 seconds (indicates no recent activity)
-	// 3. Status must not already be completed
-	const gracePeriod = 5 * time.Second
-
-	if job.Status == models.JobStatusCompleted {
-		c.logger.Debug().Str("parent_id", msg.ParentID).Msg("Job already completed, skipping probe")
-		return nil
-	}
-
-	// Check if heartbeat is old enough (no activity during grace period)
-	timeSinceHeartbeat := time.Since(job.LastHeartbeat)
-
-	// Stale job detection: If job has been idle for too long AND still has pending URLs,
-	// mark it as failed (indicates stuck/crashed workers or queue issues)
-	const staleThreshold = 10 * time.Minute
-	if timeSinceHeartbeat > staleThreshold && job.Progress.PendingURLs > 0 {
-		idleDuration := timeSinceHeartbeat
-		job.Error = fmt.Sprintf("Timeout: No activity for %s (pending: %d URLs)", idleDuration.Round(time.Second), job.Progress.PendingURLs)
-		job.Status = models.JobStatusFailed
-		job.CompletedAt = time.Now()
-		job.ResultCount = job.Progress.CompletedURLs
-		job.FailedCount = job.Progress.FailedURLs
-
-		if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-			c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to save stale job as failed")
-			return fmt.Errorf("failed to save stale job: %w", err)
-		}
-
-		// Publish EventJobFailed for stale job timeout
-		if c.deps.EventService != nil {
-			// Fetch child statistics and generate status_report for parent job
-			childStats, statErr := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
-			if statErr != nil {
-				c.logger.Warn().Err(statErr).Str("parent_id", msg.ParentID).Msg("Failed to get child stats for stale job event")
-			}
-			var stats *interfaces.JobChildStats
-			if statsData, ok := childStats[msg.ParentID]; ok {
-				stats = statsData
-			}
-
-			// Get status_report from job
-			statusReport := job.GetStatusReport(stats)
-
-			failedEvent := interfaces.Event{
-				Type: interfaces.EventJobFailed,
-				Payload: map[string]interface{}{
-					"job_id":       msg.ParentID,
-					"status":       "failed",
-					"source_type":  job.SourceType,
-					"entity_type":  job.EntityType,
-					"error":        job.Error,
-					"result_count": job.ResultCount,
-					"failed_count": job.FailedCount,
-					"timestamp":    time.Now().Format(time.RFC3339),
-					// Add status_report fields
-					"progress_text":    statusReport.ProgressText,
-					"errors":           statusReport.Errors,
-					"warnings":         statusReport.Warnings,
-					"running_children": statusReport.RunningChildren,
-				},
-			}
-			if pubErr := c.deps.EventService.Publish(ctx, failedEvent); pubErr != nil {
-				c.logger.Warn().Err(pubErr).Msg("Failed to publish stale job failed event")
-			}
-		}
-
-		c.logger.Warn().
-			Str("parent_id", msg.ParentID).
-			Dur("idle_duration", idleDuration).
-			Int("pending_urls", job.Progress.PendingURLs).
-			Msg("Job marked as failed due to inactivity")
-
-		return nil
-	}
-
-	if job.Progress.PendingURLs > 0 {
-		c.logger.Info().
-			Str("parent_id", msg.ParentID).
-			Int("pending_urls", job.Progress.PendingURLs).
-			Msg("Job no longer eligible for completion - new URLs appeared during grace period")
-		return nil
-	}
-
-	// Check if heartbeat is recent (indicates ongoing activity)
-	if timeSinceHeartbeat < gracePeriod {
-		c.logger.Info().
-			Str("parent_id", msg.ParentID).
-			Dur("time_since_heartbeat", timeSinceHeartbeat).
-			Dur("grace_period", gracePeriod).
-			Msg("Job has recent activity - enqueuing another completion probe")
-
-		// Heartbeat is too recent - enqueue another probe for later
-		retryProbeMsg := &queue.JobMessage{
-			ID:              fmt.Sprintf("%s-completion-probe-retry-%d", msg.ParentID, time.Now().Unix()),
-			Type:            "crawler_completion_probe",
-			ParentID:        msg.ParentID,
-			JobDefinitionID: msg.JobDefinitionID,
-			Config:          msg.Config,
-		}
-
-		remainingWait := gracePeriod - timeSinceHeartbeat + (1 * time.Second) // Add 1s buffer
-		if err := c.deps.QueueManager.EnqueueWithDelay(ctx, retryProbeMsg, remainingWait); err != nil {
-			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to enqueue retry probe")
-		}
-
-		return nil
-	}
-
-	// All conditions met - mark job as completed (only if not already failed)
-	job.ResultCount = job.Progress.CompletedURLs
-	job.FailedCount = job.Progress.FailedURLs
-	job.Status = models.JobStatusCompleted
-	job.CompletedAt = time.Now()
-
-	if err := c.deps.JobStorage.SaveJob(ctx, job); err != nil {
-		c.logger.Error().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to save completed job")
-		return fmt.Errorf("failed to save completed job: %w", err)
-	}
-
-	// Publish EventJobCompleted after successful job completion
-	if c.deps.EventService != nil {
-		// Calculate duration: use StartedAt if available (for accurate processing time), otherwise CreatedAt
-		duration := job.CompletedAt.Sub(job.CreatedAt) // Default to full lifetime
-		if !job.StartedAt.IsZero() {
-			duration = job.CompletedAt.Sub(job.StartedAt) // Prefer actual processing time
-		}
-
-		// Fetch child statistics and generate status_report for parent job
-		childStats, err := c.deps.JobStorage.GetJobChildStats(ctx, []string{msg.ParentID})
-		if err != nil {
-			c.logger.Warn().Err(err).Str("parent_id", msg.ParentID).Msg("Failed to get child stats for status_report")
-		}
-		var stats *interfaces.JobChildStats
-		if statsData, ok := childStats[msg.ParentID]; ok {
-			stats = statsData
-		}
-
-		// Get status_report from job
-		statusReport := job.GetStatusReport(stats)
-
-		completedEvent := interfaces.Event{
-			Type: interfaces.EventJobCompleted,
-			Payload: map[string]interface{}{
-				"job_id":           msg.ParentID,
-				"status":           "completed",
-				"source_type":      job.SourceType,
-				"entity_type":      job.EntityType,
-				"result_count":     job.ResultCount,
-				"failed_count":     job.FailedCount,
-				"total_urls":       job.Progress.TotalURLs,
-				"duration_seconds": duration.Seconds(),
-				"timestamp":        time.Now(),
-				// Add status_report fields
-				"progress_text":    statusReport.ProgressText,
-				"errors":           statusReport.Errors,
-				"warnings":         statusReport.Warnings,
-				"running_children": statusReport.RunningChildren,
-			},
-		}
-		if err := c.deps.EventService.Publish(ctx, completedEvent); err != nil {
-			c.logger.Warn().Err(err).Msg("Failed to publish job completed event")
-		}
-	}
-
-	c.logger.Info().
-		Str("parent_id", msg.ParentID).
-		Int("total_urls", job.Progress.TotalURLs).
-		Int("completed_urls", job.Progress.CompletedURLs).
-		Int("failed_urls", job.Progress.FailedURLs).
-		Dur("time_since_last_heartbeat", timeSinceHeartbeat).
-		Msg("Job marked as completed after grace period verification")
-
-	// Enqueue post-summarization job after completion
-	postSummaryMsgID := fmt.Sprintf("%s-post-summary", msg.ParentID)
-	postSummaryConfig := map[string]interface{}{
-		"source_type":   job.SourceType,
-		"entity_type":   job.EntityType,
-		"parent_job_id": msg.ParentID,
-	}
-
-	postSummaryMsg := &queue.JobMessage{
-		ID:              postSummaryMsgID,
-		Type:            "post_summarization",
-		ParentID:        msg.ParentID,
-		JobDefinitionID: msg.JobDefinitionID,
-		Config:          postSummaryConfig,
-	}
-
-	c.logger.Info().
-		Str("message_id", postSummaryMsgID).
-		Str("parent_id", msg.ParentID).
-		Msg("Enqueueing post-summarization job")
-
-	if err := c.deps.QueueManager.Enqueue(ctx, postSummaryMsg); err != nil {
-		c.logger.Warn().
-			Err(err).
-			Str("message_id", postSummaryMsgID).
-			Msg("Failed to enqueue post-summarization job - completion not affected")
-	} else {
-		c.logger.Info().
-			Str("message_id", postSummaryMsgID).
-			Msg("Post-summarization job enqueued")
-
-		// Create post-summarization CrawlJob record
-		postSummaryJob := &models.CrawlJob{
-			ID:         postSummaryMsgID,
-			ParentID:   msg.ParentID,
-			JobType:    models.JobTypePostSummary,
-			Name:       "Post-summarization",
-			SourceType: job.SourceType,
-			EntityType: job.EntityType,
-			Status:     models.JobStatusPending,
-			CreatedAt:  time.Now(),
-		}
-
-		if err := c.deps.JobStorage.SaveJob(ctx, postSummaryJob); err != nil {
-			c.logger.Warn().
-				Err(err).
-				Str("post_summary_job_id", postSummaryMsgID).
-				Msg("Failed to persist post-summarization job to database, continuing")
-		} else {
-			c.logger.Debug().
-				Str("post_summary_job_id", postSummaryMsgID).
-				Msg("Post-summarization job persisted to database")
-		}
-	}
-
-	// Log job completion event
-	if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-		fmt.Sprintf("Job completed: %d/%d URLs processed (%d failed)",
-			job.Progress.CompletedURLs, job.Progress.TotalURLs, job.Progress.FailedURLs)); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to log job completion event")
-	}
-
-	return nil
+// generateJobID generates a unique job ID
+// This is a placeholder - in production, use a proper UUID generator
+func generateJobID() string {
+	return fmt.Sprintf("job_%d", time.Now().UnixNano())
 }

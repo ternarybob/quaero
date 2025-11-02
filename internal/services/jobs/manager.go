@@ -1,3 +1,64 @@
+// Package jobs provides the JobManager for CRUD operations on crawl jobs.
+//
+// JobManager Responsibilities:
+//
+// The JobManager is responsible for job lifecycle management:
+//   - Creating jobs (CreateJob)
+//   - Reading jobs (GetJob, ListJobs, CountJobs)
+//   - Updating jobs (UpdateJob)
+//   - Deleting jobs (DeleteJob with cascade)
+//   - Copying jobs (CopyJob for rerun)
+//   - Managing child jobs (StopAllChildJobs for error tolerance)
+//
+// JobManager does NOT:
+//   - Execute jobs (handled by job types in internal/jobs/types/)
+//   - Log job events (handled by JobLogger)
+//   - Manage queue messages (handled by QueueManager)
+//
+// Architecture Pattern:
+//
+// JobManager follows the Repository pattern:
+//   - Abstracts database operations via JobStorage interface
+//   - Provides business logic layer above storage
+//   - Handles cascade operations (delete parent → delete children)
+//   - Validates business rules (e.g., cannot delete running jobs)
+//
+// Separation of Concerns:
+//
+//   JobManager (this file):
+//     - CRUD operations
+//     - Business logic (cascade delete, error tolerance)
+//     - Status validation
+//
+//   JobStorage (internal/storage/sqlite/job_storage.go):
+//     - Database queries
+//     - Transaction management
+//     - Schema operations
+//
+//   Job Types (internal/jobs/types/):
+//     - Job execution logic
+//     - URL processing, summarization, cleanup
+//     - Progress tracking
+//
+//   JobLogger (internal/jobs/types/logger.go):
+//     - Structured logging with correlation
+//     - Log aggregation for parent-child jobs
+//
+// Usage Example:
+//
+//   manager := NewManager(jobStorage, queueMgr, logService, logger)
+//
+//   // Create job
+//   jobID, err := manager.CreateJob(ctx, "jira", "projects", config)
+//
+//   // List jobs
+//   jobs, err := manager.ListJobs(ctx, &interfaces.JobListOptions{
+//       Status: "running",
+//       Limit:  10,
+//   })
+//
+//   // Delete job (cascade deletes children)
+//   cascadeCount, err := manager.DeleteJob(ctx, jobID)
 package jobs
 
 import (
@@ -10,7 +71,18 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// Manager manages job CRUD operations
+// Manager manages job CRUD operations.
+//
+// Dependencies:
+//   - queueManager: For enqueueing job messages (currently unused - see CreateJob)
+//   - jobStorage: For database operations (GetJob, SaveJob, DeleteJob, etc.)
+//   - logService: For log operations (currently unused - logs via JobLogger)
+//   - logger: For operational logging (not job logs)
+//
+// Thread Safety:
+//   - Manager methods are thread-safe (delegate to thread-safe storage)
+//   - Concurrent calls to DeleteJob on same job are safe (idempotent)
+//   - Concurrent calls to UpdateJob may have race conditions (last write wins)
 type Manager struct {
 	queueManager interfaces.QueueManager
 	jobStorage   interfaces.JobStorage
@@ -64,6 +136,22 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 	// NOTE: Parent message enqueuing removed - seed URLs are enqueued directly
 	// by CrawlerService.StartCrawl() which creates individual crawler_url messages.
 	// Job tracking is handled via JobStorage, not via queue messages.
+	//
+	// Historical Context:
+	//   - Previous implementation enqueued a "parent" message to the queue
+	//   - Parent message would spawn child crawler_url messages
+	//   - This created tight coupling between job creation and queue
+	//
+	// Current Design:
+	//   - CreateJob only creates the job record in database
+	//   - CrawlerService.StartCrawl() enqueues seed URLs as crawler_url messages
+	//   - Each crawler_url message references the parent job ID
+	//   - Job progress tracked via JobStorage.UpdateProgressCountersAtomic()
+	//
+	// Benefits:
+	//   - Decouples job creation from queue operations
+	//   - Allows creating jobs without immediately starting them
+	//   - Simplifies job rerun (just call StartCrawl again with same job ID)
 
 	m.logger.Info().
 		Str("job_id", jobID).
@@ -132,35 +220,93 @@ func (m *Manager) UpdateJob(ctx context.Context, job interface{}) error {
 	return nil
 }
 
+// Status Update Pattern:
+//
+// Job status updates happen in multiple places:
+//   1. Job types (crawler.go, summarizer.go): Update status on failure via JobStorage.UpdateJobStatus()
+//   2. Completion probe (crawler.go): Marks parent as completed when all children done
+//   3. Error tolerance (manager.go): Cancels children when parent threshold exceeded
+//   4. Stale job detection (app.go): Marks stale jobs as failed
+//
+// Status Transitions:
+//   pending → running → completed (success path)
+//   pending → running → failed (error path)
+//   pending → running → cancelled (user/system cancellation)
+//   running → pending (graceful shutdown via MarkRunningJobsAsPending)
+//
+// Validation:
+//   - Cannot delete running jobs (enforced in DeleteJob)
+//   - Cannot transition from terminal state (completed/failed/cancelled) to non-terminal
+//   - No validation enforced by JobManager (storage layer is source of truth)
+//
+// Logging:
+//   - Status updates are logged by job types via JobLogger
+//   - Manager logs operational events (job created, deleted, etc.)
+//   - No centralized status transition logging (distributed across job types)
+
 // DeleteJob deletes a job and all its child jobs recursively.
-// If the job has children, they are deleted first in a cascade operation.
-// Each deletion is logged individually for audit purposes.
-// If any child deletion fails, the error is logged but deletion continues.
-// The parent job is deleted even if some children fail to delete.
-// Returns an aggregated error if any deletions failed.
-func (m *Manager) DeleteJob(ctx context.Context, jobID string) error {
+//
+// Cascade Deletion:
+//   - If the job has children, they are deleted first in a cascade operation
+//   - Each deletion is logged individually for audit purposes
+//   - If any child deletion fails, the error is logged but deletion continues
+//   - The parent job is deleted even if some children fail to delete
+//   - Returns the count of cascade-deleted jobs (children + grandchildren + ...)
+//
+// Database Cascade:
+//   - FK CASCADE automatically deletes associated job_logs and job_seen_urls
+//   - No need to manually delete logs - handled by database constraints
+//   - See schema.go for FK CASCADE definitions
+//
+// Error Handling:
+//   - Returns error if job is running (cannot delete running jobs)
+//   - Returns error if job not found
+//   - Returns error if parent deletion fails (even if children deleted)
+//   - Logs warnings for child deletion failures but continues
+//
+// Recursion:
+//   - Uses deleteJobRecursive() with depth tracking to prevent infinite loops
+//   - Maximum recursion depth: 10 levels
+//   - Depth tracking prevents circular references (should not exist but safety check)
+//
+// Usage:
+//   cascadeCount, err := manager.DeleteJob(ctx, "parent-job-id")
+//   if err != nil {
+//       // Handle error (job not found, running, or deletion failed)
+//   }
+//   // cascadeCount = number of children deleted (not including parent)
+func (m *Manager) DeleteJob(ctx context.Context, jobID string) (int, error) {
 	return m.deleteJobRecursive(ctx, jobID, 0)
 }
 
 // deleteJobRecursive handles recursive deletion with depth tracking
-func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth int) error {
+// Returns the count of cascade-deleted jobs (children + grandchildren + ...)
+func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth int) (int, error) {
 	// Prevent infinite recursion
 	const maxDepth = 10
 	if depth > maxDepth {
-		return fmt.Errorf("maximum recursion depth (%d) exceeded for job %s", maxDepth, jobID)
+		return 0, fmt.Errorf("maximum recursion depth (%d) exceeded for job %s", maxDepth, jobID)
 	}
 
 	// Get job to check status
 	jobInterface, err := m.GetJob(ctx, jobID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Type assert to concrete type
 	job, ok := jobInterface.(*models.CrawlJob)
 	if !ok {
-		return fmt.Errorf("invalid job type: expected *models.CrawlJob")
+		return 0, fmt.Errorf("invalid job type: expected *models.CrawlJob")
 	}
+
+	// Check for running jobs and return error instead of auto-cancelling
+	if job.Status == models.JobStatusRunning {
+		return 0, fmt.Errorf("cannot delete running job %s: job is currently executing", jobID)
+	}
+
+	// Track cascade deletion count
+	totalCascadeDeleted := 0
 
 	// Check for child jobs and cascade delete
 	children, err := m.jobStorage.GetChildJobs(ctx, jobID)
@@ -186,7 +332,8 @@ func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth in
 				Msg("Deleting child job")
 
 			// Recursively delete child (which will delete its children if any)
-			if err := m.deleteJobRecursive(ctx, child.ID, depth+1); err != nil {
+			childCascadeCount, err := m.deleteJobRecursive(ctx, child.ID, depth+1)
+			if err != nil {
 				m.logger.Warn().
 					Err(err).
 					Str("parent_id", jobID).
@@ -196,6 +343,8 @@ func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth in
 				errorCount++
 			} else {
 				successCount++
+				// Accumulate cascade count (children deleted by this child)
+				totalCascadeDeleted += childCascadeCount
 			}
 		}
 
@@ -214,25 +363,18 @@ func (m *Manager) deleteJobRecursive(ctx context.Context, jobID string, depth in
 		}
 	}
 
-	// Cancel if running
-	if job.Status == models.JobStatusRunning {
-		job.Status = models.JobStatusCancelled
-		if err := m.jobStorage.SaveJob(ctx, job); err != nil {
-			m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status to cancelled")
-		}
-	}
-
 	// Delete job from storage
 	// Note: FK CASCADE automatically deletes associated job_logs and job_seen_urls
 	if err := m.jobStorage.DeleteJob(ctx, jobID); err != nil {
-		return fmt.Errorf("failed to delete job: %w", err)
+		return 0, fmt.Errorf("failed to delete job: %w", err)
 	}
 
 	m.logger.Info().
 		Str("job_id", jobID).
 		Msg("Job deleted successfully (logs cascade deleted by FK)")
 
-	return nil
+	// Return cascade count (number of children deleted) plus this job
+	return totalCascadeDeleted, nil
 }
 
 // CopyJob duplicates a job with a new ID
@@ -286,9 +428,36 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 }
 
 // StopAllChildJobs cancels all running and pending child jobs of the specified parent job.
-// This is used by error tolerance threshold management to stop child jobs
-// when the parent job's failure threshold is exceeded.
-// Returns the count of jobs that were successfully cancelled.
+//
+// Use Case:
+//   - Error tolerance threshold management
+//   - When parent job's failure threshold is exceeded, stop all children
+//   - Prevents wasting resources on jobs that will be discarded
+//
+// Behavior:
+//   - Queries all running children (status='running')
+//   - Queries all pending children (status='pending')
+//   - Updates status to 'cancelled' for all children
+//   - Sets error message: "Cancelled by parent job error tolerance threshold"
+//   - Continues on individual failures (logs warning, continues with others)
+//   - Returns count of successfully cancelled jobs
+//
+// Status Transitions:
+//   - running → cancelled
+//   - pending → cancelled
+//   - Does NOT cancel completed/failed/cancelled children (already terminal)
+//
+// Error Handling:
+//   - Returns error if ListJobs fails (cannot query children)
+//   - Logs warning if individual child update fails
+//   - Returns total count of successfully cancelled jobs (may be less than total)
+//
+// Usage:
+//   cancelledCount, err := manager.StopAllChildJobs(ctx, "parent-job-id")
+//   if err != nil {
+//       // Handle error (failed to query children)
+//   }
+//   // cancelledCount = number of children successfully cancelled
 func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
 	// Query all running child jobs
 	runningChildren, err := m.jobStorage.ListJobs(ctx, &interfaces.JobListOptions{

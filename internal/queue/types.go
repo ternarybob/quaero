@@ -8,14 +8,27 @@ import (
 )
 
 // JobMessage represents a queue message for job processing
+//
+// Correlation Strategy:
+// - ID: The unique message ID, used as the job ID for log correlation
+// - ParentID: The parent job ID for child jobs (empty for parent jobs)
+//   - Parent jobs: logs use ID as CorrelationID
+//   - Child jobs: logs use ParentID as CorrelationID (inherits parent's context)
+// - JobDefinitionID: Optional job definition ID for traceability
+//
+// Log Aggregation:
+// This creates a flat log hierarchy where all logs for a job family share the same CorrelationID.
+// Child jobs inherit their parent's CorrelationID for log aggregation purposes.
+// The LogService extracts the CorrelationID and stores logs in the database with the correct jobID.
 type JobMessage struct {
-	// ID is the unique message ID
+	// ID is the unique message ID, used as the job ID for log correlation
 	ID string `json:"id"`
 
 	// Type is the job type: "parent", "crawler_url", "summarizer", "cleanup"
 	Type string `json:"type"`
 
 	// ParentID is the parent job ID for child jobs (empty for parent jobs)
+	// Used as CorrelationID for child jobs to aggregate logs with parent
 	ParentID string `json:"parent_id"`
 
 	// JobDefinitionID references a job definition if applicable

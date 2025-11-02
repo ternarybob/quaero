@@ -392,17 +392,11 @@ func createJobMessage(parentID, url string, index int, jobDefID string) *queue.J
 	}
 }
 
-// createCrawlerJob creates a CrawlerJob instance with all dependencies
+// createCrawlerJob creates a CrawlerJob instance with minimal dependencies
 func createCrawlerJob(app *TestApp, t *testing.T) *types.CrawlerJob {
 	deps := &types.CrawlerJobDeps{
-		CrawlerService:       app.CrawlerService,
-		LogService:           app.LogService,
-		DocumentStorage:      app.StorageManager.DocumentStorage(),
-		QueueManager:         app.QueueManager,
-		JobStorage:           app.StorageManager.JobStorage(),
-		EventService:         app.EventService,
-		JobDefinitionStorage: app.StorageManager.JobDefinitionStorage(),
-		JobManager:           app.JobManager,
+		DocumentStorage: app.StorageManager.DocumentStorage(),
+		JobStorage:      app.StorageManager.JobStorage(),
 	}
 
 	baseJob := types.NewBaseJob(

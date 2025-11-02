@@ -13,6 +13,13 @@ import (
 type CleanupJobDeps struct {
 	JobManager interfaces.JobManager // Changed from JobStorage to use cascade deletion logic
 	LogService interfaces.LogService
+	// NOTE: CleanupJob uses JobManager instead of JobStorage for deletion.
+	// This is intentional because:
+	//   1. JobManager.DeleteJob() handles cascade deletion of children
+	//   2. JobManager.DeleteJob() validates business rules (e.g., cannot delete running jobs)
+	//   3. JobStorage.DeleteJob() is a low-level operation without validation
+	//
+	// Using JobManager ensures cleanup jobs follow the same deletion logic as manual deletions.
 }
 
 // CleanupJob handles job and log cleanup operations
@@ -31,14 +38,18 @@ func NewCleanupJob(base *BaseJob, deps *CleanupJobDeps) *CleanupJob {
 
 // Execute processes a cleanup job
 func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
-	c.logger.Info().
-		Str("message_id", msg.ID).
-		Msg("Processing cleanup job")
+	startTime := time.Now()
 
 	// Validate message
 	if err := c.Validate(msg); err != nil {
+		c.logger.LogJobError(err, fmt.Sprintf("Validation failed for age_threshold=%v, status_filter=%v", msg.Config["age_threshold_days"], msg.Config["status_filter"]))
+		// Note: CleanupJob doesn't have JobStorage dependency to update status
+		// Status update would require adding JobStorage to CleanupJobDeps
 		return fmt.Errorf("invalid message: %w", err)
 	}
+
+	// TODO: Add JobStorage to CleanupJobDeps to enable status updates on validation failure
+	// This would allow consistent error handling across all job types
 
 	// Extract cleanup criteria from config
 	ageThreshold := 30 // Default: 30 days
@@ -66,24 +77,15 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		dryRun = dry
 	}
 
-	// Log job start
-	if err := c.LogJobEvent(ctx, msg.ParentID, "info",
-		fmt.Sprintf("Starting cleanup: age_threshold=%d days, status=%s, dry_run=%v",
-			ageThreshold, statusFilter, dryRun)); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to log job start event")
-	}
-
-	c.logger.Info().
-		Int("age_threshold_days", ageThreshold).
-		Str("status_filter", statusFilter).
-		Bool("dry_run", dryRun).
-		Msg("Starting cleanup with criteria")
+	// Log job start using JobLogger
+	c.logger.LogJobStart(
+		fmt.Sprintf("Cleanup: age_threshold=%d days, status=%s, dry_run=%v", ageThreshold, statusFilter, dryRun),
+		"maintenance",
+		msg.Config,
+	)
 
 	// Calculate cleanup cutoff time
 	cleanupTime := time.Now().Add(-time.Duration(ageThreshold) * 24 * time.Hour)
-	c.logger.Info().
-		Str("cleanup_before", cleanupTime.Format(time.RFC3339)).
-		Msg("Cleanup cutoff time calculated")
 
 	// Query jobs matching criteria
 	// Build filter for status
@@ -93,11 +95,6 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 	} else {
 		statuses = []string{statusFilter}
 	}
-
-	c.logger.Info().
-		Str("cutoff", cleanupTime.Format(time.RFC3339)).
-		Strs("statuses", statuses).
-		Msg("Querying jobs for cleanup")
 
 	// Query and collect eligible job IDs across all statuses
 	jobsToClean := []string{}
@@ -112,10 +109,7 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		for {
 			jobs, err := c.deps.JobManager.ListJobs(ctx, opts)
 			if err != nil {
-				c.logger.Error().
-					Err(err).
-					Str("status", status).
-					Msg("Failed to list jobs")
+				c.logger.LogJobError(err, fmt.Sprintf("Failed to list jobs: status=%s", status))
 				break // Continue with other statuses
 			}
 
@@ -149,65 +143,38 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 		}
 	}
 
-	c.logger.Info().
-		Int("jobs_found", len(jobsToClean)).
-		Bool("dry_run", dryRun).
-		Msg("Jobs identified for cleanup")
+	c.logger.LogJobProgress(len(jobsToClean), len(jobsToClean), fmt.Sprintf("Found %d jobs to clean", len(jobsToClean)))
 
 	logsDeleted := 0
 	jobsDeleted := 0
 
 	// Perform cleanup if not dry run
 	if !dryRun && len(jobsToClean) > 0 {
-		c.logger.Info().
-			Int("jobs_to_clean", len(jobsToClean)).
-			Msg("Starting job deletion")
-
 		for i, jobID := range jobsToClean {
 			// Delete job (children and logs are cascade deleted with the job)
-			if err := c.deps.JobManager.DeleteJob(ctx, jobID); err != nil {
-				c.logger.Error().
-					Err(err).
-					Str("job_id", jobID).
-					Msg("Failed to delete job")
+			if _, err := c.deps.JobManager.DeleteJob(ctx, jobID); err != nil {
+				c.logger.LogJobError(err, fmt.Sprintf("Failed to delete job: status=%s, job_id=%s", statusFilter, jobID))
 				continue
 			}
 
 			jobsDeleted++
 			logsDeleted++ // Assume logs deleted with job
 
-			// Log progress every 10 deletions
-			if (i+1)%10 == 0 {
-				c.logger.Info().
-					Int("progress", i+1).
-					Int("total", len(jobsToClean)).
-					Msg("Deletion progress")
-			}
+			// Log progress
+			c.logger.LogJobProgress(i+1, len(jobsToClean), fmt.Sprintf("Deleted %d/%d jobs", i+1, len(jobsToClean)))
 		}
 
 		c.logger.Info().
 			Int("jobs_deleted", jobsDeleted).
-			Msg("Job deletion completed")
-	} else if dryRun {
-		c.logger.Info().
-			Int("jobs_found", len(jobsToClean)).
-			Msg("Dry run mode - no actual deletion performed")
+			Int("logs_deleted", logsDeleted).
+			Msg("Cleanup completed")
 	}
 
-	// Log cleanup summary
-	summaryMsg := fmt.Sprintf("Cleanup completed: jobs_deleted=%d, logs_deleted=%d, dry_run=%v",
-		jobsDeleted, logsDeleted, dryRun)
-
-	if err := c.LogJobEvent(ctx, msg.ParentID, "info", summaryMsg); err != nil {
-		c.logger.Warn().Err(err).Msg("Failed to log job completion event")
-	}
-
-	c.logger.Info().
-		Str("message_id", msg.ID).
-		Int("jobs_deleted", jobsDeleted).
-		Int("logs_deleted", logsDeleted).
-		Bool("dry_run", dryRun).
-		Msg("Cleanup job completed successfully")
+	// Log cleanup summary using JobLogger
+	c.logger.LogJobComplete(
+		time.Since(startTime),
+		jobsDeleted,
+	)
 
 	return nil
 }
@@ -216,11 +183,6 @@ func (c *CleanupJob) Execute(ctx context.Context, msg *queue.JobMessage) error {
 func (c *CleanupJob) Validate(msg *queue.JobMessage) error {
 	if msg.Config == nil {
 		return fmt.Errorf("config is required")
-	}
-
-	// Validate ParentID is present (required for logging)
-	if msg.ParentID == "" {
-		return fmt.Errorf("parent_id is required for logging job events")
 	}
 
 	// Validate age threshold if present

@@ -156,6 +156,11 @@ type JobLogStorage interface {
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
+
+	// GetLogsWithOffset fetches logs starting from an offset (for pagination)
+	// offset is the number of most recent logs to skip
+	GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.JobLogEntry, error)
+	GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.JobLogEntry, error)
 }
 
 // StorageManager - composite interface for all storage operations

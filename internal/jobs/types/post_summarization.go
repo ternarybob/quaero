@@ -58,9 +58,7 @@ func (p *PostSummarizationJob) Execute(ctx context.Context, msg *queue.JobMessag
 	_ = msg.Config["entity_type"] // Acknowledge variable for future use
 
 	// Log job start
-	if err := p.LogJobEvent(ctx, parentID, "info", "Starting post-summarization"); err != nil {
-		p.logger.Warn().Err(err).Msg("Failed to log job start event")
-	}
+	p.logger.LogJobStart("post-summarization", sourceType, msg.Config)
 
 	// Load Parent Job
 	jobInterface, err := p.deps.JobStorage.GetJob(ctx, parentID)
@@ -113,9 +111,6 @@ func (p *PostSummarizationJob) Execute(ctx context.Context, msg *queue.JobMessag
 		p.logger.Info().
 			Str("parent_id", parentID).
 			Msg("No documents found for summarization")
-		if err := p.LogJobEvent(ctx, parentID, "info", "No documents found for summarization"); err != nil {
-			p.logger.Warn().Err(err).Msg("Failed to log event")
-		}
 		return nil
 	}
 
@@ -238,10 +233,6 @@ func (p *PostSummarizationJob) Execute(ctx context.Context, msg *queue.JobMessag
 			Str("parent_id", parentID).
 			Msg("Failed to reload parent job")
 		// Don't fail - summary was generated successfully
-		if logErr := p.LogJobEvent(ctx, parentID, "warning",
-			"Failed to reload parent job for metadata update"); logErr != nil {
-			p.logger.Warn().Err(logErr).Msg("Failed to log warning event")
-		}
 	} else {
 		job, ok = jobInterface.(*models.CrawlJob)
 		if !ok {
@@ -267,10 +258,6 @@ func (p *PostSummarizationJob) Execute(ctx context.Context, msg *queue.JobMessag
 					Str("parent_id", parentID).
 					Msg("Failed to update parent job with metadata")
 				// Don't fail - summary was generated successfully
-				if logErr := p.LogJobEvent(ctx, parentID, "warning",
-					"Failed to update parent job metadata"); logErr != nil {
-					p.logger.Warn().Err(logErr).Msg("Failed to log warning event")
-				}
 			} else {
 				p.logger.Info().
 					Str("parent_id", parentID).
@@ -280,11 +267,7 @@ func (p *PostSummarizationJob) Execute(ctx context.Context, msg *queue.JobMessag
 	}
 
 	// Log completion
-	completionMsg := fmt.Sprintf("Post-summarization completed: %d documents, %d keywords",
-		len(filteredDocs), len(keywords))
-	if err := p.LogJobEvent(ctx, parentID, "info", completionMsg); err != nil {
-		p.logger.Warn().Err(err).Msg("Failed to log completion event")
-	}
+	p.logger.LogJobComplete(time.Since(time.Now()), len(filteredDocs))
 
 	p.logger.Info().
 		Str("message_id", msg.ID).

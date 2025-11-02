@@ -32,6 +32,15 @@ type LogEntry struct {
 	Message   string `json:"message"`
 }
 
+// AggregatedJobMeta contains metadata for a job used in aggregated logs
+type AggregatedJobMeta struct {
+	JobName  string `json:"job_name"`  // User-friendly job name
+	JobURL   string `json:"job_url"`   // URL being crawled (from Config or Progress)
+	JobDepth int    `json:"job_depth"` // Crawl depth (from Config)
+	JobType  string `json:"job_type"`  // Job type (from JobType)
+	ParentID string `json:"parent_id"` // Parent job ID (empty for parent jobs)
+}
+
 // WebSocketHandler interface for broadcasting log entries
 type WebSocketHandler interface {
 	BroadcastLog(entry LogEntry)
@@ -48,6 +57,26 @@ type LogService interface {
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
+	// GetAggregatedLogs fetches logs for parent job and optionally all child jobs
+	// Merges logs from all jobs using k-way merge with cursor-based pagination
+	// Returns logs slice and metadata map containing job context for enrichment
+	// Metadata map structure: map[jobID]*AggregatedJobMeta with fields:
+	//   JobName: User-friendly job name
+	//   JobURL: URL being crawled (from Config or Progress)
+	//   JobDepth: Crawl depth (from Config)
+	//   JobType: Job type (from JobType)
+	//   ParentID: Parent job ID (empty for parent jobs)
+	// If includeChildren is false, only parent logs are returned
+	// If level is non-empty, filters logs by level before merging
+	// limit caps total logs returned across all jobs (default: 1000)
+	// cursor is an opaque base64-encoded string encoding (full_timestamp|job_id|seq) for pagination
+	//   where seq is a per-job sequence number for stable tie-breaking when timestamps are equal
+	//   If cursor is empty, starts from the beginning (oldest for asc, newest for desc)
+	// order determines sort order: "asc" (oldest-first) or "desc" (newest-first)
+	// Returns next_cursor for chaining pagination requests (empty string when no more results)
+	// The cursor is opaque and should be treated as an implementation detail - clients should
+	// simply pass the returned cursor in subsequent requests to continue pagination
+	GetAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string, limit int, cursor string, order string) ([]models.JobLogEntry, map[string]*AggregatedJobMeta, string, error)
 }
 
 // JobManager manages job CRUD operations and queue integration
@@ -64,8 +93,8 @@ type JobManager interface {
 	// Each deletion is logged individually for audit purposes.
 	// If any child deletion fails, the error is logged but deletion continues.
 	// The parent job is deleted even if some children fail to delete.
-	// Returns an aggregated error if any deletions failed.
-	DeleteJob(ctx context.Context, jobID string) error
+	// Returns the count of cascade-deleted jobs (children + grandchildren + ...) and an error if any deletions failed.
+	DeleteJob(ctx context.Context, jobID string) (int, error)
 
 	CopyJob(ctx context.Context, jobID string) (string, error)
 	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)

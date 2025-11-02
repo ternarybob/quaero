@@ -72,6 +72,28 @@ if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir | Out-Null
 }
 $logFile = "$logDir/build-$(Get-Date -Format 'yyyy-MM-dd-HH-mm-ss').log"
+
+# Function to limit log files to most recent 10
+function Limit-LogFiles {
+    param(
+        [string]$LogDirectory,
+        [int]$MaxLogs = 10
+    )
+    
+    $logFiles = Get-ChildItem -Path $LogDirectory -Filter "build-*.log" | Sort-Object CreationTime -Descending
+    
+    if (@($logFiles).Count -gt $MaxLogs) {
+        $filesToDelete = $logFiles | Select-Object -Skip $MaxLogs
+        foreach ($file in $filesToDelete) {
+            Remove-Item -Path $file.FullName -Force
+            Write-Host "Removed old log file: $($file.Name)" -ForegroundColor Gray
+        }
+    }
+}
+
+# Limit old log files before starting transcript
+Limit-LogFiles -LogDirectory $logDir -MaxLogs 10
+
 Start-Transcript -Path $logFile -Append
 
 try {

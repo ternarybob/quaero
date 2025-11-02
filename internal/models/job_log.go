@@ -14,9 +14,9 @@ package models
 //   - Truncation is transparent and automatic (no manual cleanup required)
 //
 // Timestamp Format:
-//   - Uses "15:04:05" format (HH:MM:SS, 24-hour clock)
-//   - Consistent across all log entries for easy visual scanning
-//   - Example: "14:23:45" for 2:23:45 PM
+//   - Uses "15:04:05" format (HH:MM:SS, 24-hour clock) for display
+//   - Includes FullTimestamp (RFC3339) for accurate chronological sorting across days
+//   - Example: "14:23:45" for display, "2025-11-01T14:23:45Z" for sorting
 //
 // Log Levels:
 //   - "info":  Normal operational events (job started, progress milestones, completion)
@@ -27,7 +27,8 @@ package models
 // Usage Example:
 //
 //	logEntry := models.JobLogEntry{
-//	    Timestamp: time.Now().Format("15:04:05"),
+//	    Timestamp:      time.Now().Format("15:04:05"),
+//	    FullTimestamp:  time.Now().Format(time.RFC3339),
 //	    Level:     "info",
 //	    Message:   "Job started: source=jira/issues, seeds=5, max_depth=3",
 //	}
@@ -35,7 +36,9 @@ package models
 //	    logger.Warn().Err(err).Msg("Failed to append log")
 //	}
 type JobLogEntry struct {
-	Timestamp string `json:"timestamp"` // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
-	Level     string `json:"level"`     // Log level: "info", "warn", "error", "debug"
-	Message   string `json:"message"`   // Human-readable log message with structured data
+	Timestamp      string `json:"timestamp"`       // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
+	FullTimestamp  string `json:"full_timestamp"` // RFC3339 format for accurate sorting, e.g., "2025-11-01T14:23:45Z"
+	Level          string `json:"level"`          // Log level: "info", "warn", "error", "debug"
+	Message        string `json:"message"`        // Human-readable log message with structured data
+	AssociatedJobID string `json:"job_id"`       // ID of the job that generated this log (populated during aggregation)
 }

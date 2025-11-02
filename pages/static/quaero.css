@@ -1311,3 +1311,117 @@ body.modal-open {
 .tree-item.fade-in {
     animation: treeItemFadeIn 0.2s ease-out;
 }
+
+/* 15. QUEUE PAGE SPECIFIC STYLES
+   ========================================================================== */
+
+/* Parent Job Indicator */
+.parent-job-badge {
+    display: inline-block;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.7rem;
+    border-radius: 2px;
+    background-color: #5755d9;
+    color: white;
+    margin-left: 0.25rem;
+}
+
+/* Enhanced Parent Job Card Styling */
+.job-card-parent {
+    border-left: 4px solid #3b82f6;
+    background-color: #f8fafc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 1.2rem;
+}
+
+.job-card-parent:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+    transition: all 0.2s ease;
+}
+
+.job-card-parent .card-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+/* Status Icon Colors */
+.status-icon-pending { color: #f59e0b; }
+.status-icon-running { color: #3b82f6; }
+.status-icon-completed { color: #10b981; }
+.status-icon-failed { color: #ef4444; }
+.status-icon-cancelled { color: #6b7280; }
+
+/* Enhanced Status Badge Colors */
+.label-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fbbf24;
+}
+
+.label-primary {
+    background-color: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #3b82f6;
+}
+
+.label-success {
+    background-color: #d1fae5;
+    color: #065f46;
+    border: 1px solid #10b981;
+}
+
+.label-error {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #ef4444;
+}
+
+/* Job Context Styling for Log Display */
+.terminal-job-context {
+    color: #58a6ff;
+    font-weight: 500;
+    margin-right: 0.5rem;
+    font-size: 0.9em;
+}
+
+/* Pulse Animation for Streaming Indicator */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Auto-Scroll Button Active State */
+.btn.btn-primary.auto-scroll-active {
+    background-color: #3b82f6;
+    color: white;
+}
+
+/* Log Count Display */
+.log-count-display {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+
+/* Terminal Container Scroll Enhancement */
+.terminal {
+    scroll-behavior: smooth;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .job-card-parent {
+        border-left-width: 3px;
+    }
+    .job-card-parent .card-title {
+        font-size: 1.1rem;
+    }
+    .modal-body .btn-sm {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.4rem;
+    }
+    .terminal-job-context {
+        display: none;
+    }
+}

@@ -7,6 +7,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/sources"
@@ -523,6 +526,145 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetAggregatedJobLogsHandler returns aggregated logs for a job and its children
+// GET /api/jobs/{id}/logs/aggregated?level=error&limit=500&include_children=true&order=asc
+func (h *JobHandler) GetAggregatedJobLogsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/logs/aggregated
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse query parameters
+	// level: Log level filter (error, warn, info, debug, all) - default: "all"
+	level := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level")))
+	if level == "" {
+		level = "all"
+	}
+
+	// limit: Max logs to return - default: 1000
+	limit := 1000
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	// include_children: Include child job logs - default: true
+	includeChildren := true
+	if includeChildrenStr := r.URL.Query().Get("include_children"); includeChildrenStr != "" {
+		includeChildren = includeChildrenStr == "true"
+	}
+
+	// order: Sort order (asc=oldest-first, desc=newest-first) - default: "asc"
+	order := r.URL.Query().Get("order")
+	if order == "" {
+		order = "asc"
+	}
+
+	// cursor: Pagination cursor (opaque, base64-encoded) - default: ""
+	cursor := r.URL.Query().Get("cursor")
+
+	// Normalize level aliases to match storage layer conventions
+	levelAliases := map[string]string{
+		"warning": "warn", // "warning" → "warn"
+		"err":     "error", // "err" → "error"
+	}
+	if normalized, exists := levelAliases[level]; exists {
+		level = normalized
+	}
+
+	// Validate level parameter
+	if level != "all" {
+		validLevels := map[string]bool{
+			"error": true,
+			"warn":  true,
+			"info":  true,
+			"debug": true,
+		}
+		if !validLevels[level] {
+			h.logger.Warn().Str("job_id", jobID).Str("level", level).Msg("Invalid log level requested")
+			http.Error(w, "Invalid log level. Valid levels are: error, warn/warning, info, debug, all", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Fetch aggregated logs with pagination support (Comment 2)
+	logEntries, metadata, nextCursor, err := h.logService.GetAggregatedLogs(ctx, jobID, includeChildren, level, limit, cursor, order)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get aggregated logs")
+		// Check for job not found using errors.Is (Comment 3)
+		if errors.Is(err, logs.ErrJobNotFound) {
+			http.Error(w, "Job not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to get aggregated logs", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Enrich logs with job context from metadata using AssociatedJobID (Comment 1)
+	enrichedLogs := make([]map[string]interface{}, 0, len(logEntries))
+	for _, log := range logEntries {
+		// Use AssociatedJobID to find the correct metadata for this log
+		enrichedLog := map[string]interface{}{
+			"timestamp":      log.Timestamp,
+			"full_timestamp": log.FullTimestamp,
+			"level":          log.Level,
+			"message":        log.Message,
+			"job_id":         log.AssociatedJobID,
+		}
+
+		// Find metadata for the job that produced this log
+		if meta, exists := metadata[log.AssociatedJobID]; exists {
+			enrichedLog["job_name"] = meta.JobName
+			enrichedLog["job_url"] = meta.JobURL
+			enrichedLog["job_depth"] = meta.JobDepth
+			enrichedLog["job_type"] = meta.JobType
+			enrichedLog["parent_id"] = meta.ParentID
+		} else {
+			// Use default values if no metadata found
+			enrichedLog["job_name"] = fmt.Sprintf("Job %s", log.AssociatedJobID)
+			enrichedLog["job_type"] = "unknown"
+			enrichedLog["parent_id"] = ""
+		}
+
+		enrichedLogs = append(enrichedLogs, enrichedLog)
+	}
+
+	// Apply ordering: logs come from LogService in oldest-first order (asc)
+	// If desc requested, reverse the slice
+	if order == "desc" {
+		// Reverse slice for newest-first ordering
+		for i, j := 0, len(enrichedLogs)-1; i < j; i, j = i+1, j-1 {
+			enrichedLogs[i], enrichedLogs[j] = enrichedLogs[j], enrichedLogs[i]
+		}
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"job_id":           jobID,
+		"logs":             enrichedLogs,
+		"count":            len(enrichedLogs),
+		"order":            order,
+		"level":            level,
+		"include_children": includeChildren,
+		"metadata":         metadata,
+		"next_cursor":      nextCursor, // For pagination
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // RerunJobHandler re-executes a previous job
 // POST /api/jobs/{id}/rerun
 func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
@@ -650,6 +792,39 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteJobErrorResponse represents a structured error response for job deletion
+type DeleteJobErrorResponse struct {
+	Error      string `json:"error"`
+	Details    string `json:"details,omitempty"`
+	JobID      string `json:"job_id,omitempty"`
+	Status     string `json:"status,omitempty"`
+	ChildCount int    `json:"child_count,omitempty"`
+}
+
+// writeDeleteError writes a structured JSON error response
+func (h *JobHandler) writeDeleteError(w http.ResponseWriter, statusCode int, errorMsg, details, jobID, jobStatus string, childCount int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	response := DeleteJobErrorResponse{
+		Error:      errorMsg,
+		Details:    details,
+		JobID:      jobID,
+		Status:     jobStatus,
+		ChildCount: childCount,
+	}
+
+	json.NewEncoder(w).Encode(response)
+
+	h.logger.Error().
+		Str("job_id", jobID).
+		Str("status", jobStatus).
+		Int("child_count", childCount).
+		Str("error", errorMsg).
+		Str("details", details).
+		Msg("Job deletion error")
+}
+
 // CopyJobHandler duplicates a job with a new ID
 // POST /api/jobs/{id}/copy
 func (h *JobHandler) CopyJobHandler(w http.ResponseWriter, r *http.Request) {
@@ -700,33 +875,75 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if job is still running
-	jobInterface, err := h.crawlerService.GetJobStatus(jobID)
-	if err == nil && jobInterface != nil {
-		job, ok := jobInterface.(*models.CrawlJob)
-		if !ok {
-			http.Error(w, "Invalid job type", http.StatusInternalServerError)
-			return
-		}
-		if job.Status == models.JobStatusRunning {
-			http.Error(w, "Cannot delete a running job. Cancel it first.", http.StatusBadRequest)
-			return
-		}
-	}
-
-	err = h.jobManager.DeleteJob(ctx, jobID)
+	// Check if job exists and get its status
+	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
 	if err != nil {
-		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to delete job")
-		http.Error(w, "Failed to delete job", http.StatusInternalServerError)
+		// Job not found
+		h.logger.Debug().Str("job_id", jobID).Msg("Job not found for deletion")
+		h.writeDeleteError(w, 404, "Job not found", fmt.Sprintf("Job %s does not exist", jobID), jobID, "", 0)
 		return
 	}
 
-	h.logger.Info().Str("job_id", jobID).Msg("Job deleted")
+	// Type assert to get job details
+	job, ok := jobInterface.(*models.CrawlJob)
+	if !ok {
+		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type retrieved")
+		h.writeDeleteError(w, 500, "Internal server error", "Invalid job type", jobID, "", 0)
+		return
+	}
 
+	// Check if job is running
+	if job.Status == models.JobStatusRunning {
+		h.logger.Warn().Str("job_id", jobID).Msg("Attempt to delete running job blocked")
+		h.writeDeleteError(w, 400, "Cannot delete running job", fmt.Sprintf("Job %s is currently running. Cancel it first.", jobID), jobID, string(job.Status), 0)
+		return
+	}
+
+	// Get child count for response
+	childStatsMap, err := h.jobManager.GetJobChildStats(ctx, []string{jobID})
+	childCount := 0
+	if err == nil {
+		if stats, exists := childStatsMap[jobID]; exists {
+			childCount = stats.ChildCount
+		}
+	}
+
+	// Log deletion attempt
+	h.logger.Info().
+		Str("job_id", jobID).
+		Int("child_count", childCount).
+		Msg("Attempting to delete job")
+
+	// Attempt to delete job
+	cascadeDeleted, err := h.jobManager.DeleteJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to delete job")
+		// Determine error type and return structured response
+		errorMsg := err.Error()
+		if strings.Contains(strings.ToLower(errorMsg), "running") {
+			h.writeDeleteError(w, 400, "Cannot delete running job", errorMsg, jobID, string(job.Status), childCount)
+		} else if strings.Contains(strings.ToLower(errorMsg), "not found") {
+			h.writeDeleteError(w, 404, "Job not found", errorMsg, jobID, "", childCount)
+		} else {
+			h.writeDeleteError(w, 500, "Failed to delete job", errorMsg, jobID, string(job.Status), childCount)
+		}
+		return
+	}
+
+	// Log successful deletion
+	h.logger.Info().
+		Str("job_id", jobID).
+		Int("cascade_deleted", cascadeDeleted).
+		Int("child_count", childCount).
+		Msg("Job deleted successfully")
+
+	// Return success response with cascade info
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"job_id":  jobID,
-		"message": "Job deleted successfully",
+		"job_id":          jobID,
+		"message":         "Job deleted successfully",
+		"cascade_deleted": cascadeDeleted,
+		"child_count":     childCount,
 	})
 }
 

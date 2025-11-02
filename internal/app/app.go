@@ -119,7 +119,28 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
-	// Initialize services
+	// Initialize WebSocket handler (required for LogService)
+	// Must be created early so LogService can broadcast logs via WebSocket
+	// EventService is needed for WebSocketHandler initialization
+	app.EventService = events.NewService(app.Logger)
+	app.WSHandler = handlers.NewWebSocketHandler(app.EventService, app.Logger, &app.Config.WebSocket)
+
+	// Initialize log service BEFORE initServices to ensure context channel is set
+	// This allows all derived loggers (via WithCorrelationId) to inherit the configured context channel
+	logService := logs.NewService(app.StorageManager.JobLogStorage(), app.StorageManager.JobStorage(), app.WSHandler, app.Logger)
+	if err := logService.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start log service: %w", err)
+	}
+	app.LogService = logService
+
+	// Configure Arbor with context channel BEFORE any services create loggers
+	// This ensures all derived loggers (via WithCorrelationId) inherit the configured context channel
+	logBatchChannel := logService.GetChannel()
+	app.Logger.SetContextChannel(logBatchChannel)
+
+	app.Logger.Info().Msg("Log service initialized with Arbor context channel")
+
+	// Initialize services (AFTER LogService is configured)
 	if err := app.initServices(); err != nil {
 		return nil, fmt.Errorf("failed to initialize services: %w", err)
 	}
@@ -128,19 +149,6 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	if err := app.initHandlers(); err != nil {
 		return nil, fmt.Errorf("failed to initialize handlers: %w", err)
 	}
-
-	// Initialize log service (after WSHandler is created)
-	logService := logs.NewService(app.StorageManager.JobLogStorage(), app.WSHandler, app.Logger)
-	if err := logService.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start log service: %w", err)
-	}
-	app.LogService = logService
-
-	// Configure Arbor with context channel (default buffering: batch size 5, flush interval 1s)
-	logBatchChannel := logService.GetChannel()
-	app.Logger.SetContextChannel(logBatchChannel)
-
-	app.Logger.Info().Msg("Log service initialized with Arbor context channel")
 
 	// Load stored authentication if available
 	if _, err := app.AuthService.LoadAuth(); err == nil {
@@ -261,7 +269,8 @@ func (a *App) initServices() error {
 	)
 
 	// 5. Initialize event service (must be early for subscriptions)
-	a.EventService = events.NewService(a.Logger)
+	// Already initialized in New() before LogService setup
+	// NOTE: EventService is created early to support WebSocketHandler initialization
 
 	// 5.5. Initialize status service
 	a.StatusService = status.NewService(a.EventService, a.Logger)
@@ -372,17 +381,14 @@ func (a *App) initServices() error {
 	// 6.7. Register job handlers with worker pool
 	// Crawler job handler
 	crawlerJobDeps := &jobtypes.CrawlerJobDeps{
-		CrawlerService:       a.CrawlerService,
-		LogService:           a.LogService,
-		DocumentStorage:      a.StorageManager.DocumentStorage(),
-		QueueManager:         a.QueueManager,
-		JobStorage:           a.StorageManager.JobStorage(),
-		EventService:         a.EventService,
-		JobDefinitionStorage: a.StorageManager.JobDefinitionStorage(),
-		JobManager:           a.JobManager,
+		DocumentStorage: a.StorageManager.DocumentStorage(),
+		JobStorage:      a.StorageManager.JobStorage(),
 	}
 	crawlerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -391,7 +397,10 @@ func (a *App) initServices() error {
 
 	// Crawler completion probe handler (for delayed completion verification)
 	completionProbeHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
 		return job.ExecuteCompletionProbe(ctx, msg)
 	}
@@ -404,7 +413,10 @@ func (a *App) initServices() error {
 		DocumentStorage: a.StorageManager.DocumentStorage(),
 	}
 	summarizerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewSummarizerJob(baseJob, summarizerJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -417,7 +429,10 @@ func (a *App) initServices() error {
 		LogService: a.LogService,
 	}
 	cleanupJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewCleanupJob(baseJob, cleanupJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -429,7 +444,10 @@ func (a *App) initServices() error {
 		DocumentStorage: a.StorageManager.DocumentStorage(),
 	}
 	reindexJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewReindexJob(baseJob, reindexJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -443,7 +461,10 @@ func (a *App) initServices() error {
 		HTTPClient:    &http.Client{Timeout: 10 * time.Second},
 	}
 	preValidationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewPreValidationJob(baseJob, preValidationJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -457,7 +478,10 @@ func (a *App) initServices() error {
 		JobStorage:      a.StorageManager.JobStorage(),
 	}
 	postSummarizationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
+		// Extract jobID (message ID) and parentID for correlation
+		jobID := msg.ID
+		parentID := msg.ParentID
+		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
 		job := jobtypes.NewPostSummarizationJob(baseJob, postSummarizationJobDeps)
 		return job.Execute(ctx, msg)
 	}
@@ -575,7 +599,8 @@ func (a *App) initServices() error {
 func (a *App) initHandlers() error {
 	// Initialize handlers
 	a.APIHandler = handlers.NewAPIHandler(a.Logger)
-	a.WSHandler = handlers.NewWebSocketHandler(a.EventService, a.Logger, &a.Config.WebSocket)
+	// WSHandler already initialized in New() before LogService setup
+	// NOTE: WebSocketHandler is created early to support LogService broadcasting
 
 	// Initialize EventSubscriber for job lifecycle events with config-driven filtering
 	// Subscribes to EventJobCreated, EventJobStarted, EventJobCompleted, EventJobFailed, EventJobCancelled
@@ -680,16 +705,24 @@ func (a *App) initHandlers() error {
 							context.Background(),
 							job.ID,
 							"failed",
-							"Job stalled - no heartbeat for 15+ minutes",
+							"Timeout: No activity for 15+ minutes - check network connectivity, increase timeout, or verify job is not stuck",
 						); err != nil {
 							a.Logger.Warn().
 								Err(err).
 								Str("job_id", job.ID).
 								Msg("Failed to mark stale job as failed")
 						} else {
+							// Log with job context for better debugging
+							var url string
+							if job.SeedURLs != nil && len(job.SeedURLs) > 0 {
+								url = job.SeedURLs[0]
+							}
 							a.Logger.Info().
 								Str("job_id", job.ID).
 								Str("job_name", job.Name).
+								Str("job_type", string(job.JobType)).
+								Str("url", url).
+								Str("last_heartbeat", job.LastHeartbeat.Format(time.RFC3339)).
 								Msg("Marked stale job as failed")
 						}
 					}

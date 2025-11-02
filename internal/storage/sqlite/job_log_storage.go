@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -199,4 +200,92 @@ func (s *JobLogStorage) CountLogs(ctx context.Context, jobID string) (int, error
 	}
 
 	return count, nil
+}
+
+// GetLogsWithOffset retrieves log entries for a job with offset-based pagination
+// ORDERING: Returns logs in newest-first order (ORDER BY created_at DESC).
+// offset is the number of most recent logs to skip (e.g., offset=10 skips the 10 most recent logs)
+func (s *JobLogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.JobLogEntry, error) {
+	query := `
+		SELECT timestamp, level, message
+		FROM job_logs
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+	`
+
+	clauses := []string{}
+	if limit > 0 {
+		clauses = append(clauses, fmt.Sprintf("LIMIT %d", limit))
+	}
+	if offset > 0 {
+		clauses = append(clauses, fmt.Sprintf("OFFSET %d", offset))
+	}
+	if len(clauses) > 0 {
+		query += " " + strings.Join(clauses, " ")
+	}
+
+	rows, err := s.db.db.QueryContext(ctx, query, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query logs with offset: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []models.JobLogEntry
+	for rows.Next() {
+		var log models.JobLogEntry
+		if err := rows.Scan(&log.Timestamp, &log.Level, &log.Message); err != nil {
+			return nil, fmt.Errorf("failed to scan log entry: %w", err)
+		}
+		logs = append(logs, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating logs: %w", err)
+	}
+
+	return logs, nil
+}
+
+// GetLogsByLevelWithOffset retrieves log entries filtered by level with offset-based pagination
+// ORDERING: Returns logs in newest-first order (ORDER BY created_at DESC).
+// offset is the number of most recent logs to skip
+func (s *JobLogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.JobLogEntry, error) {
+	query := `
+		SELECT timestamp, level, message
+		FROM job_logs
+		WHERE job_id = ? AND level = ?
+		ORDER BY created_at DESC
+	`
+
+	clauses := []string{}
+	if limit > 0 {
+		clauses = append(clauses, fmt.Sprintf("LIMIT %d", limit))
+	}
+	if offset > 0 {
+		clauses = append(clauses, fmt.Sprintf("OFFSET %d", offset))
+	}
+	if len(clauses) > 0 {
+		query += " " + strings.Join(clauses, " ")
+	}
+
+	rows, err := s.db.db.QueryContext(ctx, query, jobID, level)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query logs by level with offset: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []models.JobLogEntry
+	for rows.Next() {
+		var log models.JobLogEntry
+		if err := rows.Scan(&log.Timestamp, &log.Level, &log.Message); err != nil {
+			return nil, fmt.Errorf("failed to scan log entry: %w", err)
+		}
+		logs = append(logs, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating logs: %w", err)
+	}
+
+	return logs, nil
 }
