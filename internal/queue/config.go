@@ -24,7 +24,7 @@ type Config struct {
 func NewDefaultConfig() Config {
 	return Config{
 		PollInterval:      1 * time.Second,
-		Concurrency:       3,
+		Concurrency:       2, // Reduced to 2 to mitigate SQLite lock contention
 		VisibilityTimeout: 5 * time.Minute,
 		MaxReceive:        3,
 		QueueName:         "quaero_jobs",

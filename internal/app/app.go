@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 8th October 2025 12:57:30 pm
+// Last Modified: Monday, 3rd November 2025 8:10:38 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -570,26 +570,28 @@ func (a *App) initServices() error {
 		a.JobExecutor,
 	)
 
-	// Load persisted job settings from database
+	// NOTE: Scheduler triggers event-driven processing:
+	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
+	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
+	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
+	// Start scheduler BEFORE loading job settings to ensure job definitions are loaded first
+	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
+	} else {
+		a.Logger.Info().Msg("Scheduler service started")
+	}
+
+	// Load persisted job settings from database AFTER scheduler has started
+	// This ensures job definitions are loaded before applying settings
 	if loadSvc, ok := a.SchedulerService.(interface{ LoadJobSettings() error }); ok {
 		if err := loadSvc.LoadJobSettings(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to load job settings from database")
 		}
 	}
 
-	// Cleanup orphaned jobs from previous run before starting scheduler
+	// Cleanup orphaned jobs from previous run
 	if err := a.SchedulerService.CleanupOrphanedJobs(); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to cleanup orphaned jobs")
-	}
-
-	// NOTE: Scheduler triggers event-driven processing:
-	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
-	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
-	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
-	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
-		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
-	} else {
-		a.Logger.Info().Msg("Scheduler service started")
 	}
 
 	return nil

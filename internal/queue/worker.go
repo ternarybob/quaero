@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"maragu.dev/goqite"
 )
 
 // JobHandler is a function that handles a specific job type
@@ -154,9 +155,12 @@ func (wp *WorkerPool) processMessage(workerID int) error {
 			Str("message_id", string(msg.ID)).
 			Int("worker_id", workerID).
 			Msg("Failed to decode message body")
-		// Delete invalid message
-		if delErr := wp.queueMgr.Delete(wp.ctx, *msg); delErr != nil {
-			wp.logger.Warn().Err(delErr).Msg("Failed to delete invalid message")
+		// Delete invalid message with retry logic
+		if err := wp.retryDelete(*msg, "invalid message"); err != nil {
+			wp.logger.Warn().
+				Err(err).
+				Str("message_id", string(msg.ID)).
+				Msg("Failed to delete invalid message after retries")
 		}
 		return fmt.Errorf("invalid message body: %w", err)
 	}
@@ -178,9 +182,12 @@ func (wp *WorkerPool) processMessage(workerID int) error {
 			Str("type", jobMsg.Type).
 			Str("message_id", jobMsg.ID).
 			Msg("No handler registered for job type")
-		// Delete message with unknown type
-		if delErr := wp.queueMgr.Delete(wp.ctx, *msg); delErr != nil {
-			wp.logger.Warn().Err(delErr).Msg("Failed to delete unknown job type message")
+		// Delete message with unknown type with retry logic
+		if err := wp.retryDelete(*msg, "unknown job type"); err != nil {
+			wp.logger.Warn().
+				Err(err).
+				Str("message_id", jobMsg.ID).
+				Msg("Failed to delete unknown job type message after retries")
 		}
 		return fmt.Errorf("no handler for job type: %s", jobMsg.Type)
 	}
@@ -202,15 +209,14 @@ func (wp *WorkerPool) processMessage(workerID int) error {
 			Int("worker_id", workerID).
 			Msg("Job handler failed")
 
-		// Delete failed message from queue
+		// Delete failed message from queue with retry logic
 		// Note: goqite v0.3.1 handles max receives internally via MaxReceive config
 		// Messages that exceed max receives are automatically moved to dead-letter
-		if err := wp.queueMgr.Delete(wp.ctx, *msg); err != nil {
-			wp.logger.Warn().
+		if err := wp.retryDelete(*msg, "handler failed"); err != nil {
+			wp.logger.Error().
 				Err(err).
 				Str("message_id", jobMsg.ID).
-				Msg("Failed to delete message after failure")
-			return err
+				Msg("Failed to delete message after failure - will be redelivered by queue")
 		}
 
 		return handlerErr
@@ -227,14 +233,67 @@ func (wp *WorkerPool) processMessage(workerID int) error {
 		Int("worker_id", workerID).
 		Msg("Job completed successfully")
 
-	// Delete message from queue (success)
-	if err := wp.queueMgr.Delete(wp.ctx, *msg); err != nil {
-		wp.logger.Warn().
+	// Delete message from queue (success) with retry logic
+	if err := wp.retryDelete(*msg, "job completed"); err != nil {
+		wp.logger.Error().
 			Err(err).
 			Str("message_id", jobMsg.ID).
-			Msg("Failed to delete message after successful processing")
+			Msg("Failed to delete message after successful processing - will be redelivered by queue")
 		return err
 	}
 
 	return nil
+}
+
+// retryDelete retries queue message deletion with exponential backoff for SQLITE_BUSY errors
+func (wp *WorkerPool) retryDelete(msg goqite.Message, context string) error {
+	var lastErr error
+	delay := 200 * time.Millisecond // Initial delay
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		lastErr = wp.queueMgr.Delete(wp.ctx, msg)
+		if lastErr == nil {
+			return nil
+		}
+
+		// Check if error is SQLITE_BUSY
+		errMsg := lastErr.Error()
+		isBusyError := strings.Contains(errMsg, "database is locked") || strings.Contains(errMsg, "SQLITE_BUSY")
+
+		if !isBusyError {
+			// Non-transient error, don't retry
+			return lastErr
+		}
+
+		if attempt < 3 {
+			// Log retry attempt
+			wp.logger.Warn().
+				Int("attempt", attempt).
+				Int("max_attempts", 3).
+				Str("delay", delay.String()).
+				Str("context", context).
+				Str("error", errMsg).
+				Str("message_id", string(msg.ID)).
+				Msg("Queue delete failed, retrying")
+
+			// Wait before retry
+			select {
+			case <-wp.ctx.Done():
+				return wp.ctx.Err()
+			case <-time.After(delay):
+			}
+
+			// Exponential backoff: double the delay
+			delay *= 2
+		}
+	}
+
+	// All attempts exhausted
+	wp.logger.Error().
+		Int("max_attempts", 3).
+		Str("context", context).
+		Err(lastErr).
+		Str("message_id", string(msg.ID)).
+		Msg("All retry attempts exhausted for queue delete")
+	return lastErr
 }

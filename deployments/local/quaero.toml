@@ -27,13 +27,14 @@ environment = "development"  # "development" or "production"
 # =============================================================================
 # Server Configuration
 # =============================================================================
-# Defaults: port=8080, host="localhost"
+# Defaults: port=8080, host="localhost", llama_dir="./llama"
 # CLI flags: --port, --host (highest priority)
-# Env vars: QUAERO_SERVER_PORT, QUAERO_SERVER_HOST
+# Env vars: QUAERO_SERVER_PORT, QUAERO_SERVER_HOST, QUAERO_SERVER_LLAMA_DIR
 
 [server]
 # port = 8080         # Default: 8080
 # host = "localhost"  # Default: localhost
+# llama_dir = "./llama"  # Directory containing llama-server binary
 
 # =============================================================================
 # Data Sources Configuration
@@ -70,18 +71,67 @@ repos = ["your-org/repo1"] # Customize: Your GitHub repositories
 # =============================================================================
 # LLM Configuration
 # =============================================================================
-# Two modes available: "offline" (local, no network) or "cloud" (API-based)
-# Default: offline (secure by default)
+# ⚠️  CRITICAL: Offline LLM requires llama-server binary + model files
+# If llama-server binary is not found, service will automatically fall back
+# to MOCK mode and emit detailed warnings about missing offline LLM setup.
+#
+# REQUIREMENTS for offline mode:
+# 1. llama-server binary (see installation instructions below)
+# 2. GGUF model files (embedding + chat models)
+#
+# 📖 See README.md 'LLM Setup' section for complete installation guide
+#
+# Modes:
+# - "offline" (default): Local models via llama-server (100% local, no network)
+# - "cloud": External API providers (sends data externally - security implications)
+# - "mock": Fake responses for testing (used when offline setup incomplete)
+#
 # Env var: QUAERO_LLM_MODE
 
 [llm]
 mode = "offline"  # "offline" or "cloud"
 
-# Offline Mode - Local models via llama-cli (100% local, no network calls)
+# Offline Mode - Local models via llama-server (100% local, no network calls)
+#
+# 🔧 llama-server binary search paths (checked in order):
+#   1. {server.llama_dir}/llama-server (default: ./llama/llama-server)
+#   2. ./bin/llama-server
+#   3. ./llama-server
+#   4. System PATH (llama-server command)
+#
+# 💡 Override search paths:
+#   - Config: server.llama_dir = "/custom/path"
+#   - Env: QUAERO_SERVER_LLAMA_DIR="/custom/path"
+#
+# 📦 llama-server installation methods:
+#   - Windows (winget): winget install llama.cpp
+#   - macOS (Homebrew): brew install llama.cpp
+#   - Linux (Nix): nix profile install nixpkgs#llama-cpp
+#   - Manual: Download from https://github.com/ggml-org/llama.cpp/releases
+#
+# 🤖 Model requirements:
+#   - Embedding model: nomic-embed-text-v1.5-q8.gguf (~150MB)
+#   - Chat model: qwen2.5-7b-instruct-q4.gguf (~4.5GB)
+#
+# 📁 Directory structure expected:
+#   ./llama/llama-server.exe    # Binary
+#   ./models/nomic-embed-text-v1.5-q8.gguf
+#   ./models/qwen2.5-7b-instruct-q4.gguf
+#
+# ⚠️  Troubleshooting: Check server startup logs for:
+#   - "LLM service initialized in offline mode" ✅
+#   - "Failed to create offline LLM service, falling back to MOCK mode" ❌
+#
+# 🔗 Model downloads:
+#   - Embedding: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
+#   - Chat: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf
+
 [llm.offline]
 model_dir = "./models"                          # Directory containing GGUF model files
 embed_model = "nomic-embed-text-v1.5-q8.gguf"  # Embedding model (~150MB)
+# Download: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
 chat_model = "qwen2.5-7b-instruct-q4.gguf"     # Chat model (~4.5GB)
+# Download: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf
 
 # Cloud Mode - API providers (sends data to external APIs)
 # WARNING: Only use cloud mode if you understand the security implications

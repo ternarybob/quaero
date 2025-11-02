@@ -155,6 +155,159 @@ docker-compose -f deployments/docker/docker-compose.yml up
 4. Select the `cmd/quaero-chrome-extension/` directory
 5. **Configure server URL** in extension settings if not using default `http://localhost:8080`
 
+## LLM Setup (Offline Mode)
+
+**Security & Privacy**: Offline mode is the default and recommended configuration for Quaero. All LLM processing happens locally on your machine with no network calls or data transmission.
+
+⚠️ **Important**: If the `llama-server` binary is not found during startup, the service will automatically fall back to **MOCK mode**, which provides fake responses for testing only. Real embeddings and chat will not function in mock mode.
+
+### Prerequisites
+
+To run Quaero in offline mode, you need:
+- The `llama-server` binary from llama.cpp
+- Two model files: one for embeddings, one for chat completions
+- Sufficient RAM (4-16GB depending on model size)
+
+### Quick Start
+
+#### 1. Download llama-server Binary
+
+**Option A: Prebuilt Binaries (Recommended)**
+
+Download from the official llama.cpp releases page: https://github.com/ggml-org/llama.cpp/releases
+
+Choose the appropriate binary for your platform:
+- **Windows**: `llama-b6922-bin-win-cpu-x64.zip` (CPU) or CUDA/ROCm variants
+- **macOS**: `llama-b6922-bin-macos-arm64.zip` (Apple Silicon) or x64 (Intel)
+- **Linux**: `llama-b6922-bin-ubuntu-x64.zip` (CPU) or Vulkan variant
+
+Extract and place in `./llama/` directory:
+```powershell
+# Windows PowerShell
+New-Item -ItemType Directory -Force -Path "./llama"
+Expand-Archive -Path "llama-b6922-bin-win-cpu-x64.zip" -DestinationPath "./llama"
+```
+
+```bash
+# Linux/macOS
+mkdir -p ./llama
+unzip llama-b6922-bin-ubuntu-x64.zip -d ./llama
+```
+
+**Option B: Package Managers**
+
+```bash
+# macOS/Linux (Homebrew)
+brew install llama.cpp
+
+# Windows (winget)
+winget install llama.cpp
+
+# MacPorts (macOS)
+sudo port install llama.cpp
+
+# Nix (macOS/Linux)
+nix profile install nixpkgs#llama-cpp
+```
+
+**Option C: Build from Source**
+
+See detailed instructions in `internal/services/llm/offline/README.md`
+
+#### 2. Download Models
+
+Create the models directory and download the recommended models:
+
+```bash
+# Create models directory
+mkdir -p models
+
+# Download embedding model (~137 MB)
+wget https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf \
+  -O models/nomic-embed-text-v1.5-q8.gguf
+
+# Download chat model (~4.3 GB) - choose ONE
+wget https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf \
+  -O models/qwen2.5-7b-instruct-q4.gguf
+
+# OR smaller option (~2.1 GB)
+wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_0.gguf \
+  -O models/qwen2.5-3b-instruct-q4.gguf
+```
+
+#### 3. Binary Placement
+
+The service searches for `llama-server` in the following locations (in order):
+1. `./llama/llama-server` (or `.exe` on Windows)
+2. `./bin/llama-server` (or `.exe`)
+3. `./llama-server` (or `.exe`)
+4. System PATH
+
+**Recommended placement**: `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
+
+```powershell
+# Windows
+# Place llama-server.exe in the ./llama directory
+
+# Linux/macOS
+chmod +x ./llama/llama-server
+```
+
+#### 4. Verification
+
+Start Quaero and check the startup logs:
+
+**✅ Success** - Look for this message:
+```
+LLM service initialized in offline mode
+```
+
+**❌ Failure** - If you see this message, the binary or models are missing:
+```
+Failed to create offline LLM service, falling back to MOCK mode
+```
+
+Verify binary exists:
+```powershell
+# Windows
+where llama-server
+# Or check manually
+Test-Path .\llama\llama-server.exe
+
+# Linux/macOS
+which llama-server
+# Or check manually
+ls -la ./llama/llama-server
+```
+
+Verify models exist:
+```bash
+ls -lh models/
+# Should show:
+# nomic-embed-text-v1.5-q8.gguf
+# qwen2.5-7b-instruct-q4.gguf (or your chosen model)
+```
+
+### Troubleshooting
+
+**Binary Not Found**: Ensure `llama-server` is in one of the search paths listed above.
+
+**Models Not Found**: Check that model files exist in the `model_dir` configured in your quaero.toml (default: `./models`).
+
+**Out of Memory**: Use smaller models (3B instead of 7B) or reduce `context_size` in configuration.
+
+**Slow Performance**: Adjust `thread_count` to match your CPU cores, or enable GPU layers if available.
+
+See `internal/services/llm/offline/README.md` for detailed troubleshooting and AGENTS.md for developer-focused debug steps.
+
+### Mode Comparison
+
+| Mode | Security | Performance | Requirements | Use Case |
+|------|----------|-------------|--------------|----------|
+| **offline** | ✅ 100% local | 🐌 CPU, ⚡ GPU | llama-server + models | Production, sensitive data |
+| **mock** | ✅ 100% local | ⚡ Instant | None | Testing, development |
+| **cloud** | ⚠️ External APIs | ⚡ Fast | API keys | Development, non-sensitive data |
+
 ### Using Quaero
 
 1. **Start the server:**
@@ -609,7 +762,7 @@ Model Context Protocol integration (internal for Claude Code only):
    ↓
 2. Extension captures session cookies
    ↓
-3. Extension sends POST to localhost:8085/api/auth
+3. Extension sends POST to localhost:8080/api/auth
    ↓
 4. Server stores cookies in SQLite
    ↓
@@ -975,7 +1128,7 @@ type quaero.toml
 
 ### Extension not connecting
 
-1. Check server is running: http://localhost:8085/health
+1. Check server is running: http://localhost:8080/health
 2. Check extension permissions in Chrome
 3. Reload extension
 4. Check browser console for errors

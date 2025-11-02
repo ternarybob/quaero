@@ -4,7 +4,7 @@
 
 ## Architecture
 
-The offline LLM service uses binary execution of `llama-cli` (from llama.cpp) instead of CGo bindings. This provides:
+The offline LLM service uses HTTP API execution of `llama-server` (from llama.cpp) instead of CGo bindings. This provides:
 
 - **No CGo dependencies** - Simpler builds and cross-platform support
 - **Better process isolation** - Clear security boundary
@@ -26,14 +26,14 @@ Manages model file verification and path resolution.
 
 ### OfflineLLMService (`llama.go`)
 
-Implements `interfaces.LLMService` using local llama-cli binary execution.
+Implements `interfaces.LLMService` using local llama-server binary with HTTP API.
 
 **Interface Methods:**
 - `Embed(ctx, text)` - Generate 768-dimension embedding vector
 - `Chat(ctx, messages)` - Generate chat completion
 - `HealthCheck(ctx)` - Verify service is operational
 - `GetMode()` - Returns `LLMModeOffline`
-- `Close()` - Release resources (no-op for binary execution)
+- `Close()` - Release resources (stops llama-server subprocess)
 
 **Testing Methods:**
 - `SetMockMode(enabled)` - Enable/disable mock mode for testing
@@ -51,6 +51,7 @@ import (
 logger := arbor.NewLogger()
 
 service, err := offline.NewOfflineLLMService(
+    "./llama",                            // llama-server binary directory
     "./models",                           // Model directory
     "nomic-embed-text-v1.5-q8.gguf",     // Embedding model
     "qwen2.5-7b-instruct-q4.gguf",       // Chat model
@@ -105,35 +106,44 @@ if err := service.HealthCheck(ctx); err != nil {
 }
 ```
 
-## llama-cli Binary
+## llama-server Binary
 
-The service searches for `llama-cli` in the following locations:
-1. `./bin/llama-cli` (or `.exe` on Windows)
-2. `./llama-cli` (or `.exe` on Windows)
-3. `llama-cli` in PATH
+**Important**: The service uses `llama-server` (HTTP API mode), not `llama-cli` (CLI mode). The HTTP server binary was renamed from `server` to `llama-server` in 2024.
 
-### Building llama-cli
+The service searches for `llama-server` in the following locations:
+1. `{llamaDir}/llama-server` (or `.exe` on Windows) - where llamaDir defaults to `./llama`
+2. `./bin/llama-server` (or `.exe`)
+3. `./llama-server` (or `.exe`)
+4. `llama-server` in PATH
+
+You can configure the llama directory via:
+- `config.Server.LlamaDir` in quaero.toml
+- `QUAERO_SERVER_LLAMA_DIR` environment variable
+
+### Building llama-server
 
 To build from llama.cpp source:
 
 ```bash
 git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
-make llama-cli
+make llama-server
 
 # Copy to Quaero bin directory
-cp llama-cli /path/to/quaero/bin/
+cp llama-server /path/to/quaero/bin/
 ```
 
 For GPU support (CUDA):
 ```bash
-make llama-cli LLAMA_CUBLAS=1
+make llama-server LLAMA_CUBLAS=1
 ```
 
 For GPU support (Metal on macOS):
 ```bash
-make llama-cli LLAMA_METAL=1
+make llama-server LLAMA_METAL=1
 ```
+
+**Note**: The service manages llama-server as a subprocess with OpenAI-compatible HTTP endpoints. The binary is automatically started, stopped, and health-checked by the service.
 
 ## Models
 
@@ -252,32 +262,59 @@ response, _ := service.Chat(ctx, messages)
 ## Security Guarantees
 
 **This service guarantees 100% local operation:**
-- ✅ No network imports (`net/http`, `net`, etc.)
+- ✅ Localhost-only HTTP communication using net/http with dialer enforcing 127.0.0.1 only (no external network connections)
 - ✅ Only file system I/O (local models)
 - ✅ Only local binary execution (`os/exec`)
 - ✅ No external API calls
 - ✅ No telemetry or logging to external services
 
 **Code audit checklist:**
-1. No `import "net/http"` or networking packages
+1. Only net/http with localhost enforcement (127.0.0.1 only)
 2. Only `os/exec` for binary execution
 3. All file paths are local
-4. No HTTP clients or network connections
+4. No HTTP clients or external network connections
 5. Binary must be local (not downloaded at runtime)
 
 ## Troubleshooting
 
 ### Binary Not Found
 
-**Error:** `llama-cli binary not found`
+**Error:** `llama-server binary not found`
 
-**Solution:** Ensure llama-cli is in one of the search paths:
+**Solution:** Ensure llama-server is in one of the search paths:
 ```bash
-# Check if binary exists
-which llama-cli
+# Check if binary exists (Windows)
+where llama-server
+
+# Check if binary exists (Unix/macOS)
+which llama-server
 
 # Or place in project bin directory
-cp /path/to/llama-cli ./bin/
+cp /path/to/llama-server ./bin/
+```
+
+### Service Falls Back to Mock Mode
+
+**Symptom:** Log shows "Failed to create offline LLM service, falling back to MOCK mode"
+
+**Cause:** llama-server binary not found in any search path
+
+**Solution:**
+1. Verify binary exists with the commands above
+2. Check the configured llama_dir matches the binary location
+3. Ensure binary has execute permissions (Unix/macOS): `chmod +x ./llama/llama-server`
+
+**Verification commands:**
+```powershell
+# Windows
+where llama-server
+Test-Path .\llama\llama-server.exe
+dir .\llama\llama-server.exe
+
+# Unix/macOS
+which llama-server
+ls -la ./llama/llama-server
+./llama/llama-server --version
 ```
 
 ### Models Not Found

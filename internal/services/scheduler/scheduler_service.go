@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Monday, 3rd November 2025 7:37:30 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package scheduler
 
 import (
@@ -918,7 +923,7 @@ func (s *Service) CleanupOrphanedJobs() error {
 		}
 	}
 
-	s.logger.Info().Int("count", cleanedCount).Msg("Orphaned jobs cleaned up")
+	s.logger.Warn().Int("count", cleanedCount).Msg("⚠️  Orphaned jobs cleaned up (service was likely not shutdown gracefully)")
 	return nil
 }
 

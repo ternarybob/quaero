@@ -171,6 +171,7 @@ func (b *BaseJob) CreateChildJobRecord(ctx context.Context, parentID, childID, u
 
 	// Persist child job to database via JobStorage
 	// JobStorage.SaveJob handles both create and update (upsert semantics)
+	// Retry logic is built into SaveJob for SQLITE_BUSY errors
 	if err := b.jobManager.UpdateJob(ctx, childJob); err != nil {
 		b.logger.Error().Err(err).Str("child_id", childID).Str("child_url", url).Msg("Failed to persist child job to database")
 		return fmt.Errorf("failed to persist child job: %w", err)
@@ -186,3 +187,4 @@ func (b *BaseJob) CreateChildJobRecord(ctx context.Context, parentID, childID, u
 
 	return nil
 }
+

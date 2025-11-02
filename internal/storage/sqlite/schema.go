@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Monday, 3rd November 2025 8:09:58 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package sqlite
 
 import (
@@ -398,6 +403,12 @@ func (s *SQLiteDB) runMigrations() error {
 	// MIGRATION 22: Cleanup orphaned orchestration jobs
 	// Removes jobs created by old ExecuteJobDefinitionHandler pattern that have been replaced
 	if err := s.migrateCleanupOrphanedOrchestrationJobs(); err != nil {
+		return err
+	}
+
+	// MIGRATION 23: Cleanup orphaned job_settings entries
+	// Removes job_settings rows whose job names no longer exist in job_definitions table
+	if err := s.migrateCleanupOrphanedJobSettings(); err != nil {
 		return err
 	}
 
@@ -1960,6 +1971,52 @@ func (s *SQLiteDB) migrateCleanupOrphanedOrchestrationJobs() error {
 			Int64("orphaned_jobs_deleted", orphanedCount).
 			Strs("deleted_ids", orphanedIDs).
 			Msg("Orphaned orchestration jobs cleaned up successfully")
+	}
+
+	return nil
+}
+
+// migrateCleanupOrphanedJobSettings deletes orphaned job_settings entries
+// for job names that no longer exist in the job_definitions table.
+// This migration ensures that startup warnings about missing job definitions
+// don't occur when job definitions have been deleted but their settings remain.
+func (s *SQLiteDB) migrateCleanupOrphanedJobSettings() error {
+	// Check if the job_settings table exists
+	tableQuery := `SELECT name FROM sqlite_master WHERE type='table' AND name='job_settings'`
+	var tableName string
+	err := s.db.QueryRow(tableQuery).Scan(&tableName)
+	if err != nil {
+		// Table doesn't exist, migration already completed
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Cleaning up orphaned job_settings entries")
+
+	// Check if job_definitions table exists
+	tableQuery = `SELECT name FROM sqlite_master WHERE type='table' AND name='job_definitions'`
+	err = s.db.QueryRow(tableQuery).Scan(&tableName)
+	if err != nil {
+		// job_definitions table doesn't exist, skip migration
+		s.logger.Debug().Msg("job_definitions table not found, skipping orphaned job_settings cleanup")
+		return nil
+	}
+
+	// Delete orphaned job_settings where job_name doesn't match any job_definitions.id
+	result, err := s.db.Exec(`
+		DELETE FROM job_settings
+		WHERE job_name NOT IN (SELECT id FROM job_definitions)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup orphaned job settings: %w", err)
+	}
+
+	deletedCount, _ := result.RowsAffected()
+	if deletedCount > 0 {
+		s.logger.Info().
+			Int64("deleted_count", deletedCount).
+			Msg("Migration: Cleaned up orphaned job_settings entries")
+	} else {
+		s.logger.Info().Msg("Migration: No orphaned job_settings entries found")
 	}
 
 	return nil

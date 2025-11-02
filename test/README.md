@@ -110,6 +110,59 @@ go test -v ./test/ui
 
 ## Test Organization
 
+### Load Tests (`test/api/job_load_test.go`)
+
+- **Purpose:** Validates database lock fixes under high-concurrency scenarios
+- **Tests SQLITE_BUSY error prevention with retry logic**
+- **Tests queue message deletion success rate**
+- **Tests job hierarchy integrity under concurrent operations**
+- **Tests worker pool staggering effectiveness**
+- **Tests system throughput and performance metrics**
+
+**Load Test Scenarios:**
+- **Light Load:** 5 parent jobs × 20 child URLs (100 total jobs)
+- **Medium Load:** 10 parent jobs × 50 child URLs (500 total jobs)  
+- **Heavy Load:** 15 parent jobs × 100 child URLs (1500 total jobs)
+
+**Critical Pass/Fail Criteria:**
+- Zero SQLITE_BUSY errors (database lock resilience)
+- 100% queue message deletion success rate
+- 100% job hierarchy integrity maintenance
+- Linear performance scaling validation
+
+**Running Load Tests:**
+```powershell
+# Run light load test (100 jobs, ~5 minutes)
+go test -v ./test/api -run TestJobLoadLight
+
+# Run medium load test (500 jobs, ~10 minutes)
+go test -v ./test/api -run TestJobLoadMedium
+
+# Run heavy load test (1500 jobs, ~20 minutes)
+go test -v ./test/api -run TestJobLoadHeavy
+
+# Run all load tests (comprehensive validation)
+go test -v ./test/api -run TestJobLoad
+```
+
+**Test Fixtures:**
+Load tests use shared fixtures from `test_fixtures.go`:
+- `LoadTestConfig()` - Load test configuration with cleanup
+- `InitializeTestApp()` - Full application with real database
+- `createLoadTestHTTPServer()` - Test HTTP server with configurable responses
+- `validateJobHierarchy()` - Parent-child relationship validation
+- `queryQueueMessageCount()` - Direct database queries for validation
+
+**Results Documentation:**
+Load test results are documented in `docs/redesign-job-queue-post/load-test-results.md`
+
+**When to Run Load Tests:**
+- Before major releases
+- After making concurrency-related changes
+- When validating database lock fixes
+- As part of performance regression testing
+- Monthly production readiness validation
+
 ```
 test/
 ├── README.md              # This file
@@ -144,6 +197,59 @@ func TestExample(t *testing.T) {
     h.AssertStatusCode(resp, http.StatusOK)
 }
 ```
+### Test Fixtures (`test/api/test_fixtures.go`)
+
+Shared helper functions for load testing and complex test scenarios:
+
+**Configuration Helpers:**
+- `LoadTestConfig()` - Load test configuration with cleanup function
+- `InitializeTestApp()` - Initialize full application with all services
+
+**Job Creation Helpers:**
+- `createLoadTestJobDefinition()` - Generate job definition with specified child URL count
+- `createLoadTestHTTPServer()` - Create HTTP server with configurable responses
+- `createLoadTestSource()` - Generate source configuration for load testing
+
+**Validation Helpers:**
+- `validateJobHierarchy()` - Verify parent-child relationships remain intact
+- `queryJobCount()` - Query crawl_jobs table for count by status
+- `queryQueueMessageCount()` - Query goqite table for pending message count
+- `waitForJobCompletion()` - Poll job until terminal status
+
+**Database Access Helpers:**
+- `getDirectDBConnection()` - Open direct SQLite connection for queries
+- `parseLogForPattern()` - Parse log file for regex pattern matches
+- `countLogOccurrences()` - Count occurrences of pattern in log file
+
+**Usage Example:**
+```go
+func TestMyLoadScenario(t *testing.T) {
+    config, cleanup := LoadTestConfig(t)
+    defer cleanup()
+    
+    app := InitializeTestApp(t, config)
+    defer app.Close()
+    
+    server := createLoadTestHTTPServer(t)
+    defer server.Close()
+    
+    // Use helper functions for test setup
+    jobDef := createLoadTestJobDefinition("test-job", "test-source", 50)
+    
+    // Use validation helpers
+    err := validateJobHierarchy(ctx, app.StorageManager.JobStorage(), parentID, 50)
+    if err != nil {
+        t.Errorf("Job hierarchy validation failed: %v", err)
+    }
+}
+```
+
+**When to Use Fixtures:**
+- Load testing scenarios requiring complex setup
+- Tests needing temporary database isolation
+- Validation of database operations under load
+- Integration tests requiring full application context
+
 
 ### UI Tests (`test/ui/`)
 

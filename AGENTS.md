@@ -311,13 +311,30 @@ The LLM service provides a unified interface for embeddings and chat:
 - Embedding model: nomic-embed-text-v1.5 (768 dimensions)
 - Chat model: qwen2.5-7b-instruct-q4
 
-**Configuration:**
+**Binary Search Order:**
+
+The service searches for `llama-server` in this order:
+1. `{llamaDir}/llama-server` (or `.exe` on Windows) - llamaDir defaults to `./llama`
+2. `./bin/llama-server` (or `.exe`)
+3. `./llama-server` (or `.exe`)
+4. `llama-server` in system PATH
+
+You can override the llama directory via:
+- Configuration file: `config.Server.LlamaDir`
+- Environment variable: `QUAERO_SERVER_LLAMA_DIR`
+
+**Example configuration:**
 ```toml
 [llm]
 mode = "offline"  # or "mock"
 
+[server]
+llama_dir = "./llama"  # Default: searches ./llama, ./bin, and PATH
+# Or override with environment variable
+# QUAERO_SERVER_LLAMA_DIR="C:/llama.cpp"  # Windows example
+# QUAERO_SERVER_LLAMA_DIR="/usr/local/llama"  # Unix example
+
 [llm.offline]
-llama_dir = "./llama.cpp"
 model_dir = "./models"
 embed_model = "nomic-embed-text-v1.5-q8.gguf"
 chat_model = "qwen2.5-7b-instruct-q4.gguf"
@@ -326,6 +343,8 @@ thread_count = 4
 gpu_layers = 0
 mock_mode = false  # Set to true for testing
 ```
+
+**See main README.md 'LLM Setup' section for quick start guide and `internal/services/llm/offline/README.md` for detailed technical documentation.**
 
 ### Storage Schema
 
@@ -849,11 +868,67 @@ Check:
 ### llama-server Issues
 
 Check:
-1. `llama-server` binary exists in configured llama_dir
-2. Model files exist and are valid GGUF format
-3. Sufficient RAM available (8-16GB)
-4. Check logs for subprocess errors
-5. Try mock_mode=true for testing without models
+0. Check startup logs for 'LLM service initialized in offline mode' vs 'falling back to MOCK mode'
+1. `llama-server` binary exists in configured llama_dir:
+   - Windows: `where llama-server` or `Test-Path .\llama\llama-server.exe`
+   - Unix: `which llama-server` or `ls -la ./llama/llama-server`
+2. Binary has execute permissions (Unix/macOS only): `chmod +x ./llama/llama-server`
+3. Model files exist:
+   - `ls -lh ./models/nomic-embed-text-v1.5-q8.gguf`
+   - `ls -lh ./models/qwen2.5-7b-instruct-q4.gguf`
+4. Sufficient RAM available (8-16GB)
+5. Check llama-server version compatibility: `./llama/llama-server --version`
+6. Check logs for subprocess errors
+7. Try mock_mode=true for testing without models
+
+**See `internal/services/llm/offline/README.md` for detailed installation and troubleshooting.**
+
+### Installing llama-server Binary
+
+**Quick Reference for Installation Methods:**
+
+**Prebuilt Binaries:**
+- Download from https://github.com/ggml-org/llama.cpp/releases
+- Windows: `llama-b6922-bin-win-cpu-x64.zip` (CPU) or CUDA/ROCm variants
+- macOS: `llama-b6922-bin-macos-arm64.zip` (Apple Silicon) or x64 (Intel)
+- Linux: `llama-b6922-bin-ubuntu-x64.zip` (CPU) or Vulkan variant
+- Extract to `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
+
+**Package Managers:**
+- Homebrew (macOS/Linux): `brew install llama.cpp`
+- winget (Windows): `winget install llama.cpp`
+- MacPorts (macOS): `sudo port install llama.cpp`
+- Nix (macOS/Linux): `nix profile install nixpkgs#llama-cpp`
+
+**Build from Source:**
+- See detailed instructions in `internal/services/llm/offline/README.md`
+
+**Recommended placement:** `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
+
+**Note:** If installed via package manager, llama-server will be in PATH and automatically found.
+
+### Verifying Offline Mode
+
+**Expected startup log output:**
+
+✅ **Success:**
+```
+LLM service initialized in offline mode
+```
+
+❌ **Failure:**
+```
+Failed to create offline LLM service, falling back to MOCK mode
+```
+
+**Explanation:** Mock mode provides fake responses for testing. Embeddings and chat will not work properly.
+
+**Health check endpoint:**
+```bash
+curl http://localhost:8085/api/health
+```
+
+**Note:** Adjust port if configured differently in your quaero.toml.
 
 ## API Endpoints Reference
 

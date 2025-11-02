@@ -11,9 +11,20 @@ This Chrome extension captures authentication data from your active Jira/Conflue
 5. Click "Load unpacked"
 6. Select the `bin/quaero-chrome-extension` directory
 
+## LLM Setup (Offline Mode)
+
+**Important**: Quaero requires the `llama-server` binary and model files for offline mode functionality.
+
+For complete installation instructions, see the main `README.md` "LLM Setup (Offline Mode)" section.
+
+**Quick Summary:**
+- Binary location: `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix), or in system PATH
+- Models location: `./models/` directory
+- Default server port: 8080 (change in extension settings if customized)
+
 ## Usage
 
-1. Start the Quaero service (default: `http://localhost:8085`)
+1. Start the Quaero service (default: `http://localhost:8080`)
 2. Navigate to your Jira or Confluence instance and log in
 3. Click the Quaero extension icon in Chrome toolbar
 4. The popup will show current status and server connectivity
@@ -25,7 +36,7 @@ This Chrome extension captures authentication data from your active Jira/Conflue
 - **Dropdown Popup Interface**: Compact popup UI with all essential features
 - **Authentication Capture**: Extracts cookies and tokens from Atlassian sites
 - **Server Status**: Real-time check of Quaero server connection
-- **Settings**: Configurable server URL (default: http://localhost:8085)
+- **Settings**: Configurable server URL (default: http://localhost:8080, change if you customize the port)
 - **Version Display**: Shows both extension and server version
 - **Last Capture Tracking**: Displays when authentication was last captured
 - **Domain Validation**: Ensures you're on a Jira/Confluence page before capturing
@@ -39,7 +50,7 @@ The extension uses the following Quaero API endpoints:
 
 ## Security
 
-- Authentication data is only sent to localhost (default: `localhost:8085`)
+- Authentication data is only sent to localhost (default: `localhost:8080`)
 - No data is sent to external servers
 - All communication is local to your machine
 - Domain validation prevents accidental capture on wrong sites

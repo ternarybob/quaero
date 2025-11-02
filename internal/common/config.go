@@ -217,7 +217,7 @@ func NewDefaultConfig() *Config {
 		},
 		Queue: QueueConfig{
 			PollInterval:      "1s",
-			Concurrency:       3,
+			Concurrency:       2, // Reduced from 3 to minimize database lock contention
 			VisibilityTimeout: "5m",
 			MaxReceive:        3,
 			QueueName:         "quaero_jobs",
@@ -231,7 +231,7 @@ func NewDefaultConfig() *Config {
 				EmbeddingDimension: 768,  // Matches nomic-embed-text model output
 				CacheSizeMB:        64,   // Balanced performance for typical workloads
 				WALMode:            true, // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS:      5000, // 5 seconds for lock contention scenarios
+				BusyTimeoutMS:      10000, // 10 seconds for high-concurrency job processing
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",

@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Monday, 3rd November 2025 7:35:40 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package sqlite
 
 import (
@@ -49,6 +54,55 @@ func NewJobStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.JobStorage {
 		db:     db,
 		logger: logger,
 	}
+}
+
+// retryWithExponentialBackoff retries an operation with exponential backoff for transient errors
+func retryWithExponentialBackoff(ctx context.Context, operation func() error, maxAttempts int, initialDelay time.Duration, logger arbor.ILogger) error {
+	var lastErr error
+	delay := initialDelay
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		lastErr = operation()
+		if lastErr == nil {
+			return nil
+		}
+
+		// Check if error is SQLITE_BUSY
+		errMsg := lastErr.Error()
+		isBusyError := strings.Contains(errMsg, "database is locked") || strings.Contains(errMsg, "SQLITE_BUSY")
+
+		if !isBusyError {
+			// Non-transient error, don't retry
+			return lastErr
+		}
+
+		if attempt < maxAttempts {
+			// Log retry attempt
+			logger.Warn().
+				Int("attempt", attempt).
+				Int("max_attempts", maxAttempts).
+				Str("delay", delay.String()).
+				Str("error", errMsg).
+				Msg("Database locked, retrying operation")
+
+			// Wait before retry
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+
+			// Exponential backoff: double the delay
+			delay *= 2
+		}
+	}
+
+	// All attempts exhausted
+	logger.Error().
+		Int("max_attempts", maxAttempts).
+		Err(lastErr).
+		Msg("All retry attempts exhausted")
+	return lastErr
 }
 
 // SaveJob creates or updates a job in the database
@@ -163,31 +217,40 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 			seed_urls = excluded.seed_urls
 	`
 
-	_, err = s.db.db.ExecContext(ctx, query,
-		crawlJob.ID,
-		parentID,
-		string(crawlJob.JobType),
-		crawlJob.Name,
-		crawlJob.Description,
-		crawlJob.SourceType,
-		crawlJob.EntityType,
-		configJSON,
-		sourceConfigSnapshot,
-		authSnapshot,
-		refreshSource,
-		string(crawlJob.Status),
-		progressJSON,
-		createdAt,
-		startedAt,
-		completedAt,
-		crawlJob.Error,
-		crawlJob.ResultCount,
-		crawlJob.FailedCount,
-		seedURLsJSON,
+	// Wrap database write operation with retry logic for SQLITE_BUSY errors
+	err = retryWithExponentialBackoff(ctx,
+		func() error {
+			_, dbErr := s.db.db.ExecContext(ctx, query,
+				crawlJob.ID,
+				parentID,
+				string(crawlJob.JobType),
+				crawlJob.Name,
+				crawlJob.Description,
+				crawlJob.SourceType,
+				crawlJob.EntityType,
+				configJSON,
+				sourceConfigSnapshot,
+				authSnapshot,
+				refreshSource,
+				string(crawlJob.Status),
+				progressJSON,
+				createdAt,
+				startedAt,
+				completedAt,
+				crawlJob.Error,
+				crawlJob.ResultCount,
+				crawlJob.FailedCount,
+				seedURLsJSON,
+			)
+			return dbErr
+		},
+		5,   // max attempts
+		100*time.Millisecond, // initial delay
+		s.logger,
 	)
 
 	if err != nil {
-		s.logger.Error().Err(err).Str("job_id", crawlJob.ID).Msg("Failed to save job")
+		s.logger.Error().Err(err).Str("job_id", crawlJob.ID).Msg("Failed to save job after retries")
 		return fmt.Errorf("failed to save job: %w", err)
 	}
 
