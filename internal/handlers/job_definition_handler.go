@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/executor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
@@ -23,9 +23,8 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 type JobDefinitionHandler struct {
 	jobDefStorage interfaces.JobDefinitionStorage
 	jobStorage    interfaces.JobStorage
-	jobExecutor   *jobs.JobExecutor
+	jobExecutor   *executor.JobExecutor
 	sourceService *sources.Service
-	jobRegistry   *jobs.JobTypeRegistry
 	logger        arbor.ILogger
 }
 
@@ -33,9 +32,8 @@ type JobDefinitionHandler struct {
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.JobStorage,
-	jobExecutor *jobs.JobExecutor,
+	jobExecutor *executor.JobExecutor,
 	sourceService *sources.Service,
-	jobRegistry *jobs.JobTypeRegistry,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -50,23 +48,79 @@ func NewJobDefinitionHandler(
 	if sourceService == nil {
 		panic("sourceService cannot be nil")
 	}
-	if jobRegistry == nil {
-		panic("jobRegistry cannot be nil")
-	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
 
-	logger.Info().Msg("Job definition handler initialized")
+	logger.Info().Msg("Job definition handler initialized with job executor")
 
 	return &JobDefinitionHandler{
 		jobDefStorage: jobDefStorage,
 		jobStorage:    jobStorage,
 		jobExecutor:   jobExecutor,
 		sourceService: sourceService,
-		jobRegistry:   jobRegistry,
 		logger:        logger,
 	}
+}
+
+// GetJobTreeStatusHandler handles GET /api/jobs/{id}/status
+// Returns aggregated status for a parent job and all its children
+func (h *JobDefinitionHandler) GetJobTreeStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	// Extract job ID from path
+	jobID := extractJobID(r.URL.Path)
+	if jobID == "" {
+		WriteError(w, http.StatusBadRequest, "Job ID is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get job manager from job storage (type assertion)
+	jobManager, ok := h.jobStorage.(interface {
+		GetJobTreeStatus(ctx context.Context, parentJobID string) (*jobs.JobTreeStatus, error)
+	})
+
+	if !ok {
+		h.logger.Error().Msg("Job storage does not implement GetJobTreeStatus")
+		WriteError(w, http.StatusInternalServerError, "Status aggregation not supported")
+		return
+	}
+
+	// Get aggregated status
+	status, err := jobManager.GetJobTreeStatus(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job tree status")
+		WriteError(w, http.StatusInternalServerError, "Failed to get job status")
+		return
+	}
+
+	h.logger.Info().
+		Str("job_id", jobID).
+		Int("total_children", status.TotalChildren).
+		Int("completed", status.CompletedCount).
+		Int("failed", status.FailedCount).
+		Float64("progress", status.OverallProgress).
+		Msg("Retrieved job tree status")
+
+	WriteJSON(w, http.StatusOK, status)
+}
+
+// extractJobID extracts the job ID from the URL path
+func extractJobID(path string) string {
+	// Handle paths like "/api/jobs/{id}/status" or "/api/jobs/{id}"
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, "/status")
+
+	parts := strings.Split(path, "/")
+	if len(parts) >= 4 && parts[1] == "api" && parts[2] == "jobs" {
+		return parts[3]
+	}
+
+	return ""
 }
 
 // CreateJobDefinitionHandler handles POST /api/job-definitions
@@ -374,47 +428,37 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
-	// Generate unique execution ID for tracking
-	executionID := fmt.Sprintf("exec-%s-%d", jobDef.ID, time.Now().Unix())
-
 	h.logger.Info().
-		Str("job_def_id", id).
-		Str("execution_id", executionID).
-		Msg("Starting job definition execution asynchronously")
+		Str("job_def_id", jobDef.ID).
+		Str("job_name", jobDef.Name).
+		Int("step_count", len(jobDef.Steps)).
+		Int("source_count", len(jobDef.Sources)).
+		Msg("Executing job definition")
 
-	// Launch goroutine to execute job definition directly via JobExecutor
-	// No orchestration job is created - JobExecutor will call StartCrawl() which creates the crawler parent job
+	// Launch goroutine to execute job definition asynchronously
 	go func() {
-		// Create background context for async execution
 		bgCtx := context.Background()
 
-		h.logger.Info().
-			Str("job_def_id", jobDef.ID).
-			Str("execution_id", executionID).
-			Msg("Job definition execution started")
-
-		// Execute job definition directly
-		// Pass nil callbacks since there's no orchestration job to update
-		if _, err := h.jobExecutor.Execute(bgCtx, jobDef, nil, nil); err != nil {
+		parentJobID, err := h.jobExecutor.Execute(bgCtx, jobDef)
+		if err != nil {
 			h.logger.Error().
 				Err(err).
 				Str("job_def_id", jobDef.ID).
-				Str("execution_id", executionID).
 				Msg("Job definition execution failed")
 			return
 		}
 
 		h.logger.Info().
 			Str("job_def_id", jobDef.ID).
-			Str("execution_id", executionID).
-			Msg("Job definition execution completed")
+			Str("parent_job_id", parentJobID).
+			Msg("Job definition execution completed successfully")
 	}()
 
 	response := map[string]interface{}{
-		"execution_id": executionID,
-		"job_name":     jobDef.Name,
-		"status":       "running",
-		"message":      "Job execution started",
+		"job_id":   jobDef.ID,
+		"job_name": jobDef.Name,
+		"status":   "running",
+		"message":  "Job execution started",
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
@@ -431,13 +475,20 @@ func (h *JobDefinitionHandler) validateSourceIDs(ctx context.Context, sourceIDs 
 }
 
 // validateStepActions validates that all step actions are registered
+// TODO Phase 8-11: Re-enable when job registry is re-integrated
 func (h *JobDefinitionHandler) validateStepActions(jobType models.JobDefinitionType, steps []models.JobStep) error {
-	for _, step := range steps {
-		if _, err := h.jobRegistry.GetAction(jobType, step.Action); err != nil {
-			return fmt.Errorf("unknown action '%s' for step '%s'", step.Action, step.Name)
-		}
-	}
-	return nil
+	// Temporarily disabled during queue refactor - jobRegistry is interface{} with no methods
+	_ = jobType // Suppress unused variable
+	_ = steps   // Suppress unused variable
+	return nil  // Skip validation during refactor
+
+	// TODO Phase 8-11: Uncomment when job registry is available
+	// for _, step := range steps {
+	// 	if _, err := h.jobRegistry.GetAction(jobType, step.Action); err != nil {
+	// 		return fmt.Errorf("unknown action '%s' for step '%s'", step.Action, step.Name)
+	// 	}
+	// }
+	// return nil
 }
 
 // extractJobDefinitionID extracts the job definition ID from the URL path

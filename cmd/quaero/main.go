@@ -224,10 +224,19 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	// Start server in goroutine
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Fatal().Str("panic", fmt.Sprintf("%v", r)).Msg("Server goroutine panicked")
+			}
+		}()
+
 		if err := srv.Start(); err != nil {
-			logger.Fatal().Err(err).Msg("Server failed")
+			logger.Fatal().Err(err).Msg("Server failed to start")
 		}
 	}()
+
+	// Give goroutine a moment to start
+	time.Sleep(100 * time.Millisecond)
 
 	logger.Info().
 		Str("url", fmt.Sprintf("http://%s:%d", config.Server.Host, config.Server.Port)).

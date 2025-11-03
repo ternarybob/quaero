@@ -9,7 +9,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -17,8 +16,9 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	jobmgr "github.com/ternarybob/quaero/internal/services/jobs"
-	jobtypes "github.com/ternarybob/quaero/internal/jobs/types"
+	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/executor"
+	"github.com/ternarybob/quaero/internal/jobs/processor"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/atlassian"
@@ -29,8 +29,6 @@ import (
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
-	"github.com/ternarybob/quaero/internal/services/jobs"
-	"github.com/ternarybob/quaero/internal/services/jobs/actions"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -38,7 +36,9 @@ import (
 	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
+	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
+	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 // App holds all application components and dependencies
@@ -63,13 +63,12 @@ type App struct {
 	SchedulerService interfaces.SchedulerService
 	SummaryService   *summary.Service
 
-	// Job execution
-	JobRegistry  *jobs.JobTypeRegistry
-	JobExecutor  *jobs.JobExecutor
-	QueueManager interfaces.QueueManager
+	// Job execution (using concrete types for refactored queue system)
+	QueueManager *queue.Manager
 	LogService   interfaces.LogService
-	JobManager   interfaces.JobManager
-	WorkerPool   interfaces.WorkerPool
+	JobManager   *jobs.Manager
+	JobProcessor *processor.JobProcessor
+	JobExecutor  *executor.JobExecutor
 
 	// Specialized transformers
 	JiraTransformer       *atlassian.JiraTransformer
@@ -84,6 +83,9 @@ type App struct {
 
 	// Crawler service
 	CrawlerService *crawler.Service
+
+	// Transform service
+	TransformService *transform.Service
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -150,6 +152,11 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 		return nil, fmt.Errorf("failed to initialize handlers: %w", err)
 	}
 
+	// Start job processor AFTER all handlers are initialized
+	// This prevents log channel blocking during initialization
+	app.JobProcessor.Start()
+	app.Logger.Info().Msg("Job processor started")
+
 	// Load stored authentication if available
 	if _, err := app.AuthService.LoadAuth(); err == nil {
 		logger.Info().Msg("Loaded stored authentication credentials")
@@ -202,10 +209,10 @@ func (a *App) initDatabase() error {
 // initServices initializes all business services in dependency order.
 //
 // QUEUE-BASED JOB ARCHITECTURE:
-// 1. QueueManager (goqite-backed) - Persistent queue with worker pool
+// 1. QueueManager (goqite-backed) - Persistent queue
 // 2. JobManager - CRUD operations for jobs
-// 3. WorkerPool - Registers handlers for job types (crawler_url, summarizer, cleanup, reindex, parent)
-// 4. Job Types - CrawlerJob, SummarizerJob, CleanupJob, ReindexJob (handle individual tasks)
+// 3. JobProcessor - Processes jobs from the queue (replaced legacy WorkerPool)
+// 4. Job Executors - CrawlerExecutor handles crawler_url jobs
 //
 // JOB DEFINITION ARCHITECTURE:
 // 1. JobRegistry - Maps job types to action handlers
@@ -286,59 +293,23 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Source service initialized")
 
-	// 5.7. Initialize queue manager
-	// Parse configured queue settings
-	pollInterval, err := time.ParseDuration(a.Config.Queue.PollInterval)
-	if err != nil {
-		return fmt.Errorf("failed to parse queue poll interval: %w", err)
-	}
-
-	visibilityTimeout, err := time.ParseDuration(a.Config.Queue.VisibilityTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to parse queue visibility timeout: %w", err)
-	}
-
-	queueConfig := queue.Config{
-		PollInterval:      pollInterval,
-		Concurrency:       a.Config.Queue.Concurrency,
-		VisibilityTimeout: visibilityTimeout,
-		MaxReceive:        a.Config.Queue.MaxReceive,
-		QueueName:         a.Config.Queue.QueueName,
-	}
-
-	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), queueConfig, a.Logger)
+	// 5.7. Initialize queue manager (goqite-backed)
+	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), a.Config.Queue.QueueName)
 	if err != nil {
 		return fmt.Errorf("failed to initialize queue manager: %w", err)
 	}
-	if err := queueMgr.Start(); err != nil {
-		return fmt.Errorf("failed to start queue manager: %w", err)
-	}
 	a.QueueManager = queueMgr
-	a.Logger.Info().Msg("Queue manager initialized")
+	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
-	// 5.9. Initialize job manager (LogService will be set later)
-	jobMgr := jobmgr.NewManager(a.StorageManager.JobStorage(), queueMgr, nil, a.Logger)
+	// 5.8. Initialize job manager
+	jobMgr := jobs.NewManager(a.StorageManager.DB().(*sql.DB), queueMgr)
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 
-	// 5.10. Initialize worker pool with job storage for lifecycle management
-	workerPool := queue.NewWorkerPool(queueMgr, a.StorageManager.JobStorage(), a.Logger)
-	a.WorkerPool = workerPool
-	a.Logger.Info().Msg("Worker pool initialized")
-
-	// 5.11. Startup recovery: Mark orphaned running jobs from previous session
-	// These jobs were interrupted by ungraceful shutdown or crash
-	orphanedCount, err := a.StorageManager.JobStorage().MarkRunningJobsAsPending(
-		context.Background(),
-		"Service restart detected - resuming interrupted jobs",
-	)
-	if err != nil {
-		a.Logger.Warn().Err(err).Msg("Failed to mark orphaned running jobs on startup")
-	} else if orphanedCount > 0 {
-		a.Logger.Warn().
-			Int("count", orphanedCount).
-			Msg("Marked orphaned running jobs as pending for recovery")
-	}
+	// 5.9. Initialize job processor (replaces worker pool)
+	jobProcessor := processor.NewJobProcessor(queueMgr, jobMgr, a.Logger)
+	a.JobProcessor = jobProcessor
+	a.Logger.Info().Msg("Job processor initialized")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -349,8 +320,8 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize auth service: %w", err)
 	}
 
-	// 6.5. Initialize crawler service
-	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), a.QueueManager, a.Logger, a.Config)
+	// 6.5. Initialize crawler service with queue manager for job enqueueing
+	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -378,122 +349,30 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
 
-	// 6.7. Register job handlers with worker pool
-	// Crawler job handler
-	crawlerJobDeps := &jobtypes.CrawlerJobDeps{
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-		JobStorage:      a.StorageManager.JobStorage(),
-	}
-	crawlerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("crawler_url", crawlerJobHandler)
-	a.Logger.Info().Msg("Crawler job handler registered")
+	// 6.7. Register job executors with job processor
+	crawlerExecutor := processor.NewCrawlerExecutor(a.CrawlerService, a.JobManager, a.StorageManager.JobStorage(), a.Config, a.Logger)
+	jobProcessor.RegisterExecutor("crawler_url", crawlerExecutor)
+	a.Logger.Info().Msg("Crawler executor registered for job type: crawler_url")
 
-	// Crawler completion probe handler (for delayed completion verification)
-	completionProbeHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewCrawlerJob(baseJob, crawlerJobDeps)
-		return job.ExecuteCompletionProbe(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("crawler_completion_probe", completionProbeHandler)
-	a.Logger.Info().Msg("Crawler completion probe handler registered")
+	// 6.8. Initialize Transform service
+	a.TransformService = transform.NewService(a.Logger)
+	a.Logger.Info().Msg("Transform service initialized")
 
-	// Summarizer job handler
-	summarizerJobDeps := &jobtypes.SummarizerJobDeps{
-		LLMService:      a.LLMService,
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-	}
-	summarizerJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewSummarizerJob(baseJob, summarizerJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("summarizer", summarizerJobHandler)
-	a.Logger.Info().Msg("Summarizer job handler registered")
+	// 6.9. Initialize JobExecutor for job definition execution
+	a.JobExecutor = executor.NewJobExecutor(jobMgr, a.Logger)
 
-	// Cleanup job handler
-	cleanupJobDeps := &jobtypes.CleanupJobDeps{
-		JobManager: a.JobManager,
-		LogService: a.LogService,
-	}
-	cleanupJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewCleanupJob(baseJob, cleanupJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("cleanup", cleanupJobHandler)
-	a.Logger.Info().Msg("Cleanup job handler registered")
+	// Register step executors
+	crawlerStepExecutor := executor.NewCrawlerStepExecutor(a.CrawlerService, a.SourceService, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(crawlerStepExecutor)
+	a.Logger.Info().Msg("Crawler step executor registered")
 
-	// Reindex job handler
-	reindexJobDeps := &jobtypes.ReindexJobDeps{
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-	}
-	reindexJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewReindexJob(baseJob, reindexJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("reindex", reindexJobHandler)
-	a.Logger.Info().Msg("Reindex job handler registered")
+	transformStepExecutor := executor.NewTransformStepExecutor(a.TransformService, a.JobManager, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(transformStepExecutor)
+	a.Logger.Info().Msg("Transform step executor registered")
 
-	// Pre-validation job handler
-	preValidationJobDeps := &jobtypes.PreValidationJobDeps{
-		AuthStorage:   a.StorageManager.AuthStorage(),
-		SourceStorage: a.StorageManager.SourceStorage(),
-		HTTPClient:    &http.Client{Timeout: 10 * time.Second},
-	}
-	preValidationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewPreValidationJob(baseJob, preValidationJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("pre_validation", preValidationJobHandler)
-	a.Logger.Info().Msg("Pre-validation job handler registered")
+	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
 
-	// Post-summarization job handler
-	postSummarizationJobDeps := &jobtypes.PostSummarizationJobDeps{
-		LLMService:      a.LLMService,
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-		JobStorage:      a.StorageManager.JobStorage(),
-	}
-	postSummarizationJobHandler := func(ctx context.Context, msg *queue.JobMessage) error {
-		// Extract jobID (message ID) and parentID for correlation
-		jobID := msg.ID
-		parentID := msg.ParentID
-		baseJob := jobtypes.NewBaseJob(msg.ID, msg.JobDefinitionID, jobID, parentID, a.Logger, a.JobManager, a.QueueManager, a.StorageManager.JobLogStorage())
-		job := jobtypes.NewPostSummarizationJob(baseJob, postSummarizationJobDeps)
-		return job.Execute(ctx, msg)
-	}
-	a.WorkerPool.RegisterHandler("post_summarization", postSummarizationJobHandler)
-	a.Logger.Info().Msg("Post-summarization job handler registered")
-
-
-	// Start worker pool
-	if err := a.WorkerPool.Start(); err != nil {
-		return fmt.Errorf("failed to start worker pool: %w", err)
-	}
-	a.Logger.Info().Msg("Worker pool started")
+	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
 	// 7. Initialize embedding coordinator
 	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
@@ -516,48 +395,8 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 
-	// Initialize job executor for job definition execution
-	a.JobRegistry = jobs.NewJobTypeRegistry(a.Logger)
-	a.JobExecutor, err = jobs.NewJobExecutor(a.JobRegistry, a.SourceService, a.EventService, a.CrawlerService, a.StorageManager.JobDefinitionStorage(), a.Logger)
-	if err != nil {
-		return fmt.Errorf("failed to initialize job executor: %w", err)
-	}
-	a.Logger.Info().Msg("Job executor initialized")
-
-	// Register crawler actions with the job type registry
-	crawlerDeps := &actions.CrawlerActionDeps{
-		CrawlerService: a.CrawlerService,
-		AuthStorage:    a.StorageManager.AuthStorage(),
-		EventService:   a.EventService,
-		Config:         a.Config,
-		Logger:         a.Logger,
-	}
-	if err = actions.RegisterCrawlerActions(a.JobRegistry, crawlerDeps); err != nil {
-		return fmt.Errorf("failed to register crawler actions: %w", err)
-	}
-	a.Logger.Info().Msg("Crawler actions registered with job type registry")
-
-	// Register summarizer actions with the job type registry
-	summarizerDeps := &actions.SummarizerActionDeps{
-		DocStorage: a.StorageManager.DocumentStorage(),
-		LLMService: a.LLMService,
-		Logger:     a.Logger,
-	}
-	if err = actions.RegisterSummarizerActions(a.JobRegistry, summarizerDeps); err != nil {
-		return fmt.Errorf("failed to register summarizer actions: %w", err)
-	}
-	a.Logger.Info().Msg("Summarizer actions registered with job type registry")
-
-	// Register maintenance actions with the job type registry
-	maintenanceDeps := &actions.MaintenanceActionDeps{
-		DocumentStorage: a.StorageManager.DocumentStorage(),
-		SummaryService:  a.SummaryService,
-		Logger:          a.Logger,
-	}
-	if err = actions.RegisterMaintenanceActions(a.JobRegistry, maintenanceDeps); err != nil {
-		return fmt.Errorf("failed to register maintenance actions: %w", err)
-	}
-	a.Logger.Info().Msg("Maintenance actions registered with job type registry")
+	// NOTE: Old job executor/registry/actions system removed
+	// Queue-based system (goqite + JobProcessor + Executors) now handles all job execution
 
 	// 12. Initialize scheduler service with database persistence and job definition support
 	a.SchedulerService = scheduler.NewServiceWithDB(
@@ -567,7 +406,7 @@ func (a *App) initServices() error {
 		a.CrawlerService,
 		a.StorageManager.JobStorage(),
 		a.StorageManager.JobDefinitionStorage(),
-		a.JobExecutor,
+		nil, // JobExecutor temporarily disabled
 	)
 
 	// NOTE: Scheduler triggers event-driven processing:
@@ -575,11 +414,13 @@ func (a *App) initServices() error {
 	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
 	// Start scheduler BEFORE loading job settings to ensure job definitions are loaded first
+	a.Logger.Info().Msg("Calling SchedulerService.Start()")
 	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
 	} else {
 		a.Logger.Info().Msg("Scheduler service started")
 	}
+	a.Logger.Info().Msg("SchedulerService.Start() returned")
 
 	// Load persisted job settings from database AFTER scheduler has started
 	// This ensures job definitions are loaded before applying settings
@@ -593,6 +434,9 @@ func (a *App) initServices() error {
 	if err := a.SchedulerService.CleanupOrphanedJobs(); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to cleanup orphaned jobs")
 	}
+
+	// NOTE: JobProcessor.Start() moved to New() after initHandlers() completes
+	// This prevents log channel blocking during handler initialization
 
 	return nil
 }
@@ -614,29 +458,35 @@ func (a *App) initHandlers() error {
 		Msg("EventSubscriber initialized with config-driven filtering and throttling")
 
 	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.StorageManager.AuthStorage(), a.WSHandler, a.Logger)
+
 	a.CollectionHandler = handlers.NewCollectionHandler(
 		a.EventService,
 		a.Logger,
 	)
+
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
 	)
+
 	a.SearchHandler = handlers.NewSearchHandler(
 		a.SearchService,
 		a.Logger,
 	)
+
 	a.SchedulerHandler = handlers.NewSchedulerHandler(
 		a.SchedulerService,
 		a.StorageManager.DocumentStorage(),
 	)
+
 	// NOTE: Phase 4 - EmbeddingHandler removed (no longer needed)
 	// a.EmbeddingHandler = handlers.NewEmbeddingHandler(
 	// 	a.EmbeddingService,
 	// 	a.StorageManager.DocumentStorage(),
 	// 	a.Logger,
 	// )
+
 	a.ChatHandler = handlers.NewChatHandler(
 		a.ChatService,
 		a.Logger,
@@ -650,8 +500,9 @@ func (a *App) initHandlers() error {
 	)
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
-	// Initialize job handler
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
+	// Initialize job handler (using JobManagerAdapter to adapt JobStorage to JobManager interface)
+	jobManagerAdapter := sqlite.NewJobManagerAdapter(a.StorageManager.JobStorage().(*sqlite.JobStorage))
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, jobManagerAdapter, a.Config, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
@@ -666,15 +517,15 @@ func (a *App) initHandlers() error {
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)
 
 	// Initialize job definition handler
+	// Note: JobExecutor and JobRegistry are nil during queue refactor, but handler can work without them
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
 		a.JobExecutor,
 		a.SourceService,
-		a.JobRegistry,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Job definition handler initialized")
+	a.Logger.Info().Msg("Job definition handler initialized with job executor")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
@@ -738,37 +589,38 @@ func (a *App) initHandlers() error {
 	a.Logger.Info().Msg("Stale job detector started (checks every 5 minutes)")
 
 	// Start queue stats broadcaster
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
+	// TODO Phase 8-11: Re-enable when queue manager is integrated
+	// go func() {
+	// 	ticker := time.NewTicker(5 * time.Second)
+	// 	defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				// Get queue stats
-				stats, err := a.QueueManager.GetQueueStats(context.Background())
-				if err != nil {
-					a.Logger.Warn().Err(err).Msg("Failed to get queue stats")
-					continue
-				}
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			// Get queue stats
+	// 			stats, err := a.QueueManager.GetQueueStats(context.Background())
+	// 			if err != nil {
+	// 				a.Logger.Warn().Err(err).Msg("Failed to get queue stats")
+	// 				continue
+	// 			}
 
-				// Broadcast to WebSocket clients
-				update := handlers.QueueStatsUpdate{
-					TotalMessages:    getInt(stats, "total_messages"),
-					PendingMessages:  getInt(stats, "pending_messages"),
-					InFlightMessages: getInt(stats, "in_flight_messages"),
-					QueueName:        getString(stats, "queue_name"),
-					Concurrency:      getInt(stats, "concurrency"),
-					Timestamp:        time.Now(),
-				}
-				a.WSHandler.BroadcastQueueStats(update)
-			case <-a.ctx.Done():
-				a.Logger.Info().Msg("Queue stats broadcaster shutting down")
-				return
-			}
-		}
-	}()
-	a.Logger.Info().Msg("Queue stats broadcaster started")
+	// 			// Broadcast to WebSocket clients
+	// 			update := handlers.QueueStatsUpdate{
+	// 				TotalMessages:    getInt(stats, "total_messages"),
+	// 				PendingMessages:  getInt(stats, "pending_messages"),
+	// 				InFlightMessages: getInt(stats, "in_flight_messages"),
+	// 				QueueName:        getString(stats, "queue_name"),
+	// 				Concurrency:      getInt(stats, "concurrency"),
+	// 				Timestamp:        time.Now(),
+	// 			}
+	// 			a.WSHandler.BroadcastQueueStats(update)
+	// 		case <-a.ctx.Done():
+	// 			a.Logger.Info().Msg("Queue stats broadcaster shutting down")
+	// 			return
+	// 		}
+	// 	}
+	// }()
+	// a.Logger.Info().Msg("Queue stats broadcaster started")
 
 	return nil
 }
@@ -820,13 +672,10 @@ func (a *App) Close() error {
 		}
 	}
 
-	// Stop worker pool
-	if a.WorkerPool != nil {
-		if err := a.WorkerPool.Stop(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to stop worker pool")
-		} else {
-			a.Logger.Info().Msg("Worker pool stopped")
-		}
+	// Stop job processor
+	if a.JobProcessor != nil {
+		a.JobProcessor.Stop()
+		a.Logger.Info().Msg("Job processor stopped")
 	}
 
 	// Stop log service
@@ -838,19 +687,14 @@ func (a *App) Close() error {
 		}
 	}
 
-	// Stop queue manager
-	if a.QueueManager != nil {
-		if err := a.QueueManager.Stop(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to stop queue manager")
-		}
-		a.Logger.Info().Msg("Queue manager stopped")
-	}
+	// Note: QueueManager (goqite) doesn't require explicit stop - it's stateless
 
 	// Shutdown job executor (cancels all background polling tasks)
-	if a.JobExecutor != nil {
-		a.JobExecutor.Shutdown()
-		a.Logger.Info().Msg("Job executor shutdown complete")
-	}
+	// TODO Phase 8-11: Re-enable once JobExecutor is re-integrated
+	// if a.JobExecutor != nil {
+	// 	a.JobExecutor.Shutdown()
+	// 	a.Logger.Info().Msg("Job executor shutdown complete")
+	// }
 
 	// Close crawler service
 	if a.CrawlerService != nil {

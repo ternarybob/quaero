@@ -175,12 +175,19 @@ async function captureAuth() {
     // Update last capture time
     const now = new Date().toLocaleString();
     document.getElementById('last-capture').textContent = now;
-    await chrome.storage.sync.set({ lastCapture: now });
 
-    showSuccess(result.message || 'Authentication captured! Scraping started.');
+    try {
+      await chrome.storage.sync.set({ lastCapture: now });
+    } catch (storageError) {
+      console.warn('Failed to save last capture time to storage:', storageError);
+      // Non-critical error, continue with success message
+    }
+
+    showSuccess(result.message || 'Authentication captured successfully');
 
   } catch (error) {
-    showError(`Error: ${error.message}`);
+    console.error('Auth capture error:', error);
+    showError(`Failed to capture authentication: ${error.message}`);
   } finally {
     button.disabled = false;
     button.textContent = 'Capture Authentication';

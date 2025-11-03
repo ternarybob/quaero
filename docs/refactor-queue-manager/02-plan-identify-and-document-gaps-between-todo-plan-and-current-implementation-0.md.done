@@ -1,0 +1,410 @@
+I have created the following plan after thorough exploration and analysis of the codebase. Follow the below plan verbatim. Trust the files and references. Do not re-verify what's written in the plan. Explore only when absolutely necessary. First implement all the proposed file changes and then I'll review all the changes together at the end.
+
+### Observations
+
+## Key Findings from Codebase Analysis
+
+### Critical Schema Mismatch (P0 - Blocks Functionality)
+
+**The most critical issue**: Code references `jobs` table but schema defines `crawl_jobs` table.
+
+**Evidence:**
+- `internal/jobs/manager.go` lines 65, 96, 126, 163, 209, 257, 278, 287, 301 all query `jobs` table
+- `internal/storage/sqlite/schema.go` line 114 defines `CREATE TABLE IF NOT EXISTS crawl_jobs`
+- **This will cause runtime failures** when JobManager tries to create/query jobs
+
+**Impact**: Any attempt to use the new queue system will fail with "no such table: jobs" errors.
+
+### Implementation State Summary
+
+**✅ Completed (Matches Refactor Plan):**
+- Queue Manager (`internal/queue/manager.go`) - goqite wrapper implemented
+- Message struct (`internal/queue/types.go`) - simplified 3-field structure
+- Worker Pool (`internal/worker/pool.go`) - executor pattern fully implemented
+- Job Manager (`internal/jobs/manager.go`) - CRUD operations implemented (but queries wrong table)
+
+**⚠️ Placeholder/Incomplete:**
+- CrawlerExecutor (`internal/worker/crawler_executor.go` line 48) - "not yet fully implemented"
+- JobExecutor system (`internal/app/app.go` lines 374-416) - disabled with TODO comments
+- Queue management UI (`pages/jobs.html`) - focuses on auth/sources, not queue monitoring
+
+**❌ Missing:**
+- Database migration from `crawl_jobs` to `jobs` table
+- Real crawler integration in CrawlerExecutor
+- Queue monitoring UI components
+- Job logs viewer UI
+- WebSocket real-time updates for queue
+
+### Architectural Divergences
+
+**1. Table Structure:**
+- **Plan**: Simple `jobs` table (id, parent_id, job_type, phase, status, timestamps, payload, result, error, progress_current, progress_total)
+- **Reality**: Complex `crawl_jobs` table (adds source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source, seed_urls, metadata, result_count, failed_count)
+
+**2. Job Logs:**
+- **Plan**: job_logs table (id, job_id, timestamp, level, message)
+- **Reality**: job_logs table (id, job_id, timestamp, level, message, created_at) - extra field
+
+**3. Dual Job Systems:**
+- **Plan**: Single queue-based system
+- **Reality**: Two systems coexist (queue-based + JobExecutor for workflows), but JobExecutor is disabled
+
+### Missing Package Issue
+
+`internal/logs` package is imported in:
+- `internal/app/app.go` line 20
+- Used at line 128: `logs.NewService(...)`
+
+Need to verify this package exists or the imports will fail.
+
+### Approach
+
+Create a comprehensive gap analysis document that compares the original queue refactor plan with the actual implementation. The document will:
+
+1. **Identify Critical Mismatches**: Database schema (jobs vs crawl_jobs), code references, and runtime failures
+2. **Categorize Gaps by Priority**: P0 (blocks functionality), P1 (degrades UX), P2 (technical debt)
+3. **Document Architectural Divergences**: Message structure, executor pattern, JobExecutor system
+4. **Provide Actionable Recommendations**: Clear next steps with effort estimates and dependencies
+
+The analysis will serve as a roadmap for completing the queue refactor and resolving the transition state.
+
+### Reasoning
+
+Started by reading the user-provided files:
+1. Read `IMPLEMENTATION_TODO.md` - found refactor is marked "COMPLETED" but with warnings about schema mismatch
+2. Read `01-refactor.md` - reviewed original plan with `jobs` table design
+3. Read `internal/jobs/types/crawler.go` - found empty file (job types removed)
+4. Read `internal/storage/sqlite/schema.go` - discovered `crawl_jobs` table definition
+5. Read `internal/queue/types.go` - confirmed simplified Message struct
+6. Read `internal/jobs/manager.go` - found code queries `jobs` table (mismatch!)
+7. Read `internal/worker/pool.go` - confirmed WorkerPool fully implemented
+8. Read `internal/worker/crawler_executor.go` - found placeholder implementation
+9. Read `internal/queue/manager.go` - confirmed goqite wrapper complete
+10. Read `internal/app/app.go` - found JobExecutor disabled, internal/logs imported
+11. Read `pages/jobs.html` - confirmed UI focuses on auth/sources, not queue management
+
+Identified critical gaps and prioritized by impact on functionality.
+
+## Proposed File Changes
+
+### docs\refactor-queue-manager\GAP_ANALYSIS.md(NEW)
+
+References: 
+
+- docs\refactor-queue-manager\IMPLEMENTATION_TODO.md
+- docs\refactor-queue-manager\01-refactor.md
+- internal\storage\sqlite\schema.go
+- internal\jobs\manager.go
+- internal\worker\pool.go
+- internal\worker\crawler_executor.go
+- internal\queue\manager.go
+- internal\queue\types.go
+- internal\app\app.go
+- pages\jobs.html
+- docs\architecture\QUEUE_ARCHITECTURE.md
+
+Create comprehensive gap analysis document with the following structure:
+
+**1. Executive Summary**
+- Current state: Queue refactor is 60% complete, in transition state
+- Critical blocker: Database schema mismatch (jobs vs crawl_jobs table)
+- System is non-functional for new queue operations
+- Estimated completion: 20-35 hours of work remaining
+
+**2. Critical Gaps (P0 - Blocks Functionality)**
+
+**Gap 2.1: Database Schema Mismatch**
+- **Severity**: P0 - Critical
+- **Impact**: Runtime failures when creating/querying jobs
+- **Evidence**:
+  - Code in `internal/jobs/manager.go` queries `jobs` table (lines 65, 96, 126, 163, 209, 257, 278, 287, 301)
+  - Schema in `internal/storage/sqlite/schema.go` defines `crawl_jobs` table (line 114)
+  - No migration exists to create `jobs` table
+- **Root Cause**: Refactor plan proposed new `jobs` table, but schema was never migrated from existing `crawl_jobs` table
+- **Recommendation**: 
+  - Option A: Migrate schema to use `jobs` table (requires data migration, breaking change)
+  - Option B: Update code to use `crawl_jobs` table (simpler, preserves existing data)
+  - **Recommended**: Option B - update `internal/jobs/manager.go` to query `crawl_jobs` table and map fields appropriately
+- **Effort**: 4-8 hours (field mapping, testing)
+- **Dependencies**: None
+
+**Gap 2.2: CrawlerExecutor Not Implemented**
+- **Severity**: P0 - Critical
+- **Impact**: Jobs cannot execute, worker pool processes messages but fails
+- **Evidence**: `internal/worker/crawler_executor.go` line 48 returns error "not yet fully implemented"
+- **Root Cause**: Placeholder created during refactor, integration with `crawler.Service` never completed
+- **Recommendation**: Implement `Execute()` method to:
+  - Parse CrawlerPayload (URL, Config)
+  - Call `crawler.Service` methods to fetch URL
+  - Extract links and create child jobs via `JobManager.CreateChildJob()`
+  - Update progress via `JobManager.UpdateJobProgress()`
+  - Log events via `JobManager.AddJobLog()`
+- **Effort**: 8-16 hours (integration, testing, error handling)
+- **Dependencies**: Gap 2.1 must be resolved first
+- **Reference Implementation**: See `01-refactor.md` lines 877-922 for example code structure
+
+**Gap 2.3: Missing internal/logs Package**
+- **Severity**: P0 - Critical (if package doesn't exist)
+- **Impact**: Compilation failure
+- **Evidence**: 
+  - Imported in `internal/app/app.go` line 20
+  - Used at line 128: `logs.NewService(...)`
+- **Recommendation**: Verify package exists at `internal/logs/`. If missing, either:
+  - Create the package (if it was deleted during refactor)
+  - Remove imports and refactor LogService initialization
+- **Effort**: 1-2 hours (verification and fix)
+- **Dependencies**: None
+
+**3. High-Priority Gaps (P1 - Degrades UX)**
+
+**Gap 3.1: JobExecutor System Disabled**
+- **Severity**: P1 - High
+- **Impact**: Multi-step workflows (JobDefinitions) cannot execute
+- **Evidence**: `internal/app/app.go` lines 374-416 commented out with TODO
+- **Root Cause**: JobExecutor depends on deleted `internal/services/jobs` package
+- **Recommendation**: 
+  - Option A: Re-enable JobExecutor with new queue system integration
+  - Option B: Migrate JobDefinition execution to queue-based jobs
+  - **Recommended**: Option A - JobExecutor serves different purpose (workflow orchestration vs task execution)
+- **Effort**: 8-12 hours (refactoring, testing)
+- **Dependencies**: Gap 2.1 and 2.2 must be resolved first
+
+**Gap 3.2: Queue Management UI Missing**
+- **Severity**: P1 - High
+- **Impact**: No visibility into queue state, job progress, or logs
+- **Evidence**: `pages/jobs.html` focuses on authentication/sources/job definitions, not queue monitoring
+- **Root Cause**: UI was planned (see `01-refactor.md` lines 1080-1403) but never implemented
+- **Recommendation**: Create queue management UI with:
+  - Parent jobs table (status, progress, timestamps)
+  - Child jobs expandable view
+  - Job logs modal with real-time streaming
+  - Auto-refresh every 5 seconds
+  - Filter by status (pending, running, completed, failed)
+- **Effort**: 6-10 hours (HTML/Alpine.js, API integration, testing)
+- **Dependencies**: Gap 2.1 and 2.2 must be resolved first
+- **Reference**: See `01-refactor.md` lines 1080-1403 for complete UI template
+
+**Gap 3.3: WebSocket Real-Time Updates Missing**
+- **Severity**: P1 - High
+- **Impact**: UI requires manual refresh, no live progress updates
+- **Evidence**: `internal/app/app.go` lines 600-632 show queue stats broadcaster is commented out
+- **Root Cause**: Disabled during refactor, never re-enabled
+- **Recommendation**: Re-enable WebSocket broadcasting for:
+  - Job status changes (pending → running → completed/failed)
+  - Progress updates (current/total)
+  - New log entries
+  - Queue statistics (pending, in-flight messages)
+- **Effort**: 4-6 hours (event publishing, WebSocket integration)
+- **Dependencies**: Gap 3.2 (UI must exist to receive updates)
+
+**4. Technical Debt (P2 - Maintenance)**
+
+**Gap 4.1: Documentation Outdated**
+- **Severity**: P2 - Medium
+- **Impact**: Confusion for developers, incorrect assumptions
+- **Evidence**: 
+  - `IMPLEMENTATION_TODO.md` marked as "COMPLETED" but system is incomplete
+  - `AGENTS.md` describes old architecture with complex JobMessage
+  - README.md likely references old queue system
+- **Recommendation**: Update documentation to reflect:
+  - Current transition state
+  - Schema mismatch and workaround
+  - Simplified Message structure
+  - Disabled JobExecutor system
+  - Remaining work items
+- **Effort**: 2-4 hours (documentation updates)
+- **Dependencies**: Should be done after P0/P1 gaps are resolved
+
+**Gap 4.2: Test Coverage Incomplete**
+- **Severity**: P2 - Medium
+- **Impact**: Regressions may go undetected
+- **Evidence**: `IMPLEMENTATION_TODO.md` shows Phase 13-14 (Testing) marked as "⚠️ Partially Complete"
+- **Recommendation**: Write tests for:
+  - JobManager CRUD operations with `crawl_jobs` table
+  - CrawlerExecutor integration with crawler.Service
+  - Worker pool job processing end-to-end
+  - API endpoints for job management
+- **Effort**: 4-6 hours (test writing, fixtures)
+- **Dependencies**: Gap 2.1 and 2.2 must be resolved first
+
+**Gap 4.3: Migration File Not Applied**
+- **Severity**: P2 - Medium
+- **Impact**: Confusion about intended schema
+- **Evidence**: `docs/migrations/008_redesign_job_queue.sql` exists but was never applied
+- **Recommendation**: 
+  - If using Option A (migrate to `jobs` table): Apply migration
+  - If using Option B (keep `crawl_jobs` table): Delete or archive migration file
+- **Effort**: 1 hour (decision and cleanup)
+- **Dependencies**: Gap 2.1 resolution determines action
+
+**5. Architectural Divergences**
+
+**5.1: Table Structure Complexity**
+- **Plan**: Simple `jobs` table with 12 fields (id, parent_id, job_type, phase, status, timestamps, payload, result, error, progress_current, progress_total)
+- **Reality**: Complex `crawl_jobs` table with 17 fields (adds source_type, entity_type, config_json, source_config_snapshot, auth_snapshot, refresh_source, seed_urls, metadata, result_count, failed_count)
+- **Analysis**: 
+  - **Pros of Reality**: Domain-specific fields support crawler use cases
+  - **Cons of Reality**: Violates separation of concerns (job metadata mixed with crawler config)
+- **Recommendation**: Accept current structure for pragmatism, but document that `crawl_jobs` serves dual purpose
+
+**5.2: Job Logs Table**
+- **Plan**: 5 fields (id, job_id, timestamp, level, message)
+- **Reality**: 6 fields (adds created_at)
+- **Analysis**: Minor divergence, `created_at` is redundant with `timestamp` but harmless
+- **Recommendation**: No action needed, accept as-is
+
+**5.3: Dual Job Systems**
+- **Plan**: Single queue-based system for all job execution
+- **Reality**: Two systems coexist:
+  - Queue-based (goqite + WorkerPool + Executors) for task execution
+  - JobExecutor for workflow orchestration (currently disabled)
+- **Analysis**: 
+  - **Pros**: Separation of concerns (tasks vs workflows)
+  - **Cons**: Complexity, two systems to maintain
+- **Recommendation**: Accept dual system architecture, document clearly in README.md and AGENTS.md
+
+**6. Comparison Table: Plan vs Reality**
+
+| Component | Original Plan | Current Reality | Status |
+|-----------|--------------|-----------------|--------|
+| Queue Manager | goqite wrapper | ✅ Implemented | Complete |
+| Message Struct | 3 fields (JobID, Type, Payload) | ✅ Implemented | Complete |
+| Worker Pool | Executor pattern | ✅ Implemented | Complete |
+| Job Manager | CRUD for `jobs` table | ⚠️ Queries `jobs`, schema has `crawl_jobs` | **MISMATCH** |
+| CrawlerExecutor | Full implementation | ❌ Placeholder only | **INCOMPLETE** |
+| SummarizerExecutor | Planned | ❌ Not created | Not Started |
+| CleanupExecutor | Planned | ❌ Not created | Not Started |
+| JobExecutor | Not mentioned | ⚠️ Exists but disabled | **DISABLED** |
+| Queue UI | Full management page | ❌ Auth/sources page only | **MISSING** |
+| WebSocket Updates | Real-time job status | ❌ Commented out | **DISABLED** |
+| Database Migration | `jobs` table | ❌ `crawl_jobs` table | **NOT APPLIED** |
+| Job Logs Table | 5 fields | ✅ 6 fields (extra created_at) | Minor Divergence |
+| API Endpoints | Full CRUD | ⚠️ Implemented but unused | Untested |
+| Tests | Unit + Integration | ⚠️ Partial coverage | Incomplete |
+
+**7. Recommendations by Priority**
+
+**Phase 1: Critical Fixes (P0) - 13-26 hours**
+1. Verify `internal/logs` package exists (1-2 hours)
+2. Resolve schema mismatch - update `internal/jobs/manager.go` to use `crawl_jobs` table (4-8 hours)
+3. Implement CrawlerExecutor integration with `crawler.Service` (8-16 hours)
+4. Test end-to-end job execution (included in above)
+
+**Phase 2: UX Improvements (P1) - 18-28 hours**
+1. Create queue management UI (6-10 hours)
+2. Re-enable WebSocket real-time updates (4-6 hours)
+3. Re-enable JobExecutor system (8-12 hours)
+4. Test UI and workflows (included in above)
+
+**Phase 3: Technical Debt (P2) - 7-11 hours**
+1. Update documentation (2-4 hours)
+2. Write comprehensive tests (4-6 hours)
+3. Clean up migration file (1 hour)
+
+**Total Estimated Effort: 38-65 hours**
+
+**8. Decision Points**
+
+**Decision 1: Schema Migration Strategy**
+- **Option A**: Migrate to `jobs` table (as planned)
+  - Pros: Cleaner separation, matches refactor plan
+  - Cons: Breaking change, data migration required, 8-12 hours extra work
+- **Option B**: Keep `crawl_jobs` table, update code
+  - Pros: Preserves data, simpler, faster (4-8 hours)
+  - Cons: Violates separation of concerns, domain-specific fields in generic table
+- **Recommendation**: Option B for pragmatism
+
+**Decision 2: JobExecutor System**
+- **Option A**: Re-enable with new queue integration
+  - Pros: Supports multi-step workflows, user-defined job definitions
+  - Cons: Adds complexity, 8-12 hours work
+- **Option B**: Remove entirely, use queue-based jobs only
+  - Pros: Simpler architecture, one system to maintain
+  - Cons: Loses workflow orchestration capability
+- **Recommendation**: Option A - workflows are valuable feature
+
+**Decision 3: Additional Executors**
+- **Option A**: Implement SummarizerExecutor, CleanupExecutor now
+  - Pros: Complete refactor vision
+  - Cons: 12-20 hours additional work
+- **Option B**: Defer to future iterations
+  - Pros: Focus on core functionality first
+  - Cons: Incomplete system
+- **Recommendation**: Option B - get core working first
+
+**9. Success Criteria**
+
+The refactor will be considered complete when:
+1. ✅ Jobs can be created via API without errors
+2. ✅ Worker pool processes jobs successfully
+3. ✅ CrawlerExecutor fetches URLs and creates child jobs
+4. ✅ Job status transitions correctly (pending → running → completed/failed)
+5. ✅ Job logs are stored and retrievable
+6. ✅ Queue management UI displays jobs and logs
+7. ✅ WebSocket updates provide real-time progress
+8. ✅ JobExecutor can orchestrate multi-step workflows
+9. ✅ All tests pass (unit + integration)
+10. ✅ Documentation reflects current architecture
+
+**10. Risk Assessment**
+
+**High Risk:**
+- Schema mismatch may have cascading effects on other systems
+- CrawlerExecutor integration may reveal additional missing dependencies
+- Re-enabling JobExecutor may conflict with queue-based jobs
+
+**Medium Risk:**
+- UI implementation may require additional API endpoints
+- WebSocket updates may cause performance issues under load
+- Test coverage gaps may hide regressions
+
+**Low Risk:**
+- Documentation updates are straightforward
+- Migration file cleanup has no functional impact
+
+**11. Next Steps**
+
+**Immediate Actions (This Week):**
+1. Verify `internal/logs` package exists
+2. Create branch for schema mismatch fix
+3. Update `internal/jobs/manager.go` to query `crawl_jobs` table
+4. Test job creation and retrieval
+
+**Short-Term (Next 2 Weeks):**
+1. Implement CrawlerExecutor
+2. Test end-to-end job execution
+3. Create queue management UI
+4. Re-enable WebSocket updates
+
+**Medium-Term (Next Month):**
+1. Re-enable JobExecutor system
+2. Write comprehensive tests
+3. Update all documentation
+4. Consider implementing additional executors
+
+**12. References**
+
+**Key Files:**
+- Original Plan: `docs/refactor-queue-manager/01-refactor.md`
+- Implementation Tracker: `docs/refactor-queue-manager/IMPLEMENTATION_TODO.md`
+- Current Architecture: `docs/architecture/QUEUE_ARCHITECTURE.md`
+- Schema: `internal/storage/sqlite/schema.go` (lines 114-173)
+- Job Manager: `internal/jobs/manager.go`
+- Worker Pool: `internal/worker/pool.go`
+- Crawler Executor: `internal/worker/crawler_executor.go`
+- App Initialization: `internal/app/app.go` (lines 200-455)
+- Queue Manager: `internal/queue/manager.go`
+- Message Types: `internal/queue/types.go`
+
+**Related Documents:**
+- Architecture Overview: `docs/architecture/QUEUE_ARCHITECTURE.md`
+- Agent Guidelines: `AGENTS.md` (needs update)
+- Main README: `README.md` (needs update)
+
+**13. Conclusion**
+
+The queue refactor is **60% complete** with critical gaps blocking functionality. The primary blocker is the database schema mismatch between code (`jobs` table) and schema (`crawl_jobs` table). Once resolved, the CrawlerExecutor implementation and UI development can proceed.
+
+The system is in a **transition state** - core infrastructure is solid (goqite, WorkerPool, Message struct) but business logic is incomplete. With focused effort on P0 and P1 gaps, the system can be production-ready in 3-4 weeks.
+
+**Recommended Approach**: Fix schema mismatch first (Option B - update code to use `crawl_jobs`), then implement CrawlerExecutor, then build UI. Defer additional executors and JobExecutor re-enablement to Phase 2.

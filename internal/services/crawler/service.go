@@ -557,68 +557,11 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	}
 
-	// Enqueue pre-validation job BEFORE seed URLs
-	preValidationMsgID := fmt.Sprintf("%s-pre-validation", jobID)
-	preValidationConfig := map[string]interface{}{
-		"source_type": sourceType,
-		"entity_type": entityType,
-		"seed_urls":   seedURLs,
-	}
-	if sourceID != "" {
-		preValidationConfig["source_id"] = sourceID
-	}
-	if authSnapshot != nil {
-		preValidationConfig["auth_id"] = authSnapshot.ID
-	}
-
-	preValidationMsg := &queue.JobMessage{
-		ID:              preValidationMsgID,
-		Type:            "pre_validation",
-		ParentID:        jobID,
-		JobDefinitionID: jobDefinitionID,
-		Config:          preValidationConfig,
-	}
-
+	// NOTE: Pre-validation disabled - no executor registered for this job type yet
+	// To implement: create PreValidationExecutor and register with JobProcessor
 	contextLogger.Debug().
-		Str("message_id", preValidationMsgID).
 		Str("job_id", jobID).
-		Msg("Enqueueing pre-validation job")
-
-	if err := s.queueManager.Enqueue(s.ctx, preValidationMsg); err != nil {
-		contextLogger.Warn().
-			Err(err).
-			Str("message_id", preValidationMsgID).
-			Msg("Failed to enqueue pre-validation job, continuing with crawl")
-	} else {
-		contextLogger.Info().
-			Str("message_id", preValidationMsgID).
-			Msg("Pre-validation job enqueued")
-
-		// Create pre-validation CrawlJob record
-		preValidationJob := &CrawlJob{
-			ID:         preValidationMsgID,
-			ParentID:   jobID,
-			JobType:    models.JobTypePreValidation,
-			Name:       "Pre-validation",
-			SourceType: sourceType,
-			EntityType: entityType,
-			Status:     JobStatusPending,
-			CreatedAt:  time.Now(),
-		}
-
-		if s.jobStorage != nil {
-			if err := s.jobStorage.SaveJob(s.ctx, preValidationJob); err != nil {
-				contextLogger.Warn().
-					Err(err).
-					Str("pre_validation_job_id", preValidationMsgID).
-					Msg("Failed to persist pre-validation job to database, continuing")
-			} else {
-				contextLogger.Debug().
-					Str("pre_validation_job_id", preValidationMsgID).
-					Msg("Pre-validation job persisted to database")
-			}
-		}
-	}
+		Msg("Pre-validation skipped (not yet implemented in new queue system)")
 
 	s.jobsMu.Lock()
 	s.activeJobs[jobID] = job
@@ -650,20 +593,13 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Enqueue seed URLs as job messages
 	actuallyEnqueued := 0
 	for i, seedURL := range seedURLs {
-		msg := &queue.JobMessage{
-			ID:              fmt.Sprintf("%s-seed-%d", jobID, i),
-			Type:            "crawler_url",
-			URL:             seedURL,
-			Depth:           0,
-			ParentID:        jobID,
-			JobDefinitionID: jobDefinitionID,
-			Config:          jobConfig,
-		}
+		// Generate child job ID
+		childID := fmt.Sprintf("%s-seed-%d", jobID, i)
 
 		// Persist seed URL as child CrawlJob record before enqueueing
 		// This ensures child job exists in database when worker picks up the message
 		childJob := &CrawlJob{
-			ID:         msg.ID, // Match message ID for GetJob() lookups during execution
+			ID:         childID, // Match message ID for GetJob() lookups during execution
 			ParentID:   jobID,  // Link to parent job for hierarchy
 			JobType:    models.JobTypeCrawlerURL,
 			Name:       fmt.Sprintf("URL: %s", seedURL),
@@ -686,25 +622,57 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			if err := s.jobStorage.SaveJob(s.ctx, childJob); err != nil {
 				contextLogger.Warn().
 					Err(err).
-					Str("child_id", msg.ID).
+					Str("child_id", childID).
 					Str("seed_url", seedURL).
 					Msg("Failed to persist seed child job to database, continuing with enqueue")
 				// Continue on save error - don't block enqueueing
 			} else {
 				contextLogger.Debug().
-					Str("child_id", msg.ID).
+					Str("child_id", childID).
 					Str("seed_url", seedURL).
 					Str("parent_id", jobID).
 					Msg("Seed child job persisted to database")
 			}
 		}
 
-		if err := s.queueManager.Enqueue(s.ctx, msg); err != nil {
-			contextLogger.Warn().
-				Err(err).
+		// Enqueue message to queue for processing
+		if s.queueManager != nil {
+			msgPayload := map[string]interface{}{
+				"url":               seedURL,
+				"depth":             0,
+				"parent_id":         jobID,
+				"job_definition_id": jobDefinitionID,
+				"config":            jobConfig,
+			}
+
+			payloadJSON, err := json.Marshal(msgPayload)
+			if err != nil {
+				contextLogger.Warn().
+					Err(err).
+					Str("seed_url", seedURL).
+					Msg("Failed to marshal payload")
+				continue
+			}
+
+			msg := queue.Message{
+				JobID:   childID,
+				Type:    "crawler_url",
+				Payload: payloadJSON,
+			}
+
+			if err := s.queueManager.Enqueue(s.ctx, msg); err != nil {
+				contextLogger.Warn().
+					Err(err).
+					Str("seed_url", seedURL).
+					Str("child_id", childID).
+					Msg("Failed to enqueue seed URL")
+				continue
+			}
+
+			contextLogger.Debug().
+				Str("child_id", childID).
 				Str("seed_url", seedURL).
-				Msg("Failed to enqueue seed URL")
-			continue
+				Msg("Seed URL enqueued successfully")
 		}
 
 		actuallyEnqueued++

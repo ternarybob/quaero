@@ -81,8 +81,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/jobs/", s.handleJobRoutes) // Handles /api/jobs/{id} and subpaths
 
 	// API routes - Job Definitions (configurable job management)
-	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)  // GET (list), POST (create)
-	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes) // GET/PUT/DELETE /{id}, POST /{id}/execute
+	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)
+	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes)
 
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
@@ -230,6 +230,12 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)
+		return
+	}
+
+	// Check for /status suffix (job tree status aggregation)
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/status") {
+		s.app.JobDefinitionHandler.GetJobTreeStatusHandler(w, r)
 		return
 	}
 

@@ -10,6 +10,10 @@ import (
 	"github.com/ternarybob/quaero/test"
 )
 
+// NOTE: These tests are for the old completion probe system and may not be relevant
+// with the new parent-child job hierarchy. Consider deprecating or updating.
+// See job_definition_execution_test.go for tests aligned with the new architecture.
+
 // TestJobCompletionDelayed verifies that job completion is delayed by ~5s grace period after PendingURLs reaches 0
 // This ensures in-flight URL processing can complete before marking the job as done
 func TestJobCompletionDelayed(t *testing.T) {

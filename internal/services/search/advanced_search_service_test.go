@@ -168,6 +168,7 @@ func (m *mockAdvancedDocumentStorage) GetUnvectorizedDocuments(limit int) ([]*mo
 }
 func (m *mockAdvancedDocumentStorage) ClearAllEmbeddings() (int, error) { return 0, nil }
 func (m *mockAdvancedDocumentStorage) ClearAll() error                  { return nil }
+func (m *mockAdvancedDocumentStorage) RebuildFTS5Index() error          { return nil }
 
 // Test data
 func getTestDocuments() []*models.Document {
@@ -226,7 +227,7 @@ func getTestDocuments() []*models.Document {
 }
 
 func TestParseQuery_SimpleOR(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name          string
@@ -272,7 +273,7 @@ func TestParseQuery_SimpleOR(t *testing.T) {
 }
 
 func TestParseQuery_RequiredAND(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name         string
@@ -303,7 +304,7 @@ func TestParseQuery_RequiredAND(t *testing.T) {
 }
 
 func TestParseQuery_MixedANDOR(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name         string
@@ -334,7 +335,7 @@ func TestParseQuery_MixedANDOR(t *testing.T) {
 }
 
 func TestParseQuery_QuotedPhrase(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name         string
@@ -370,7 +371,7 @@ func TestParseQuery_QuotedPhrase(t *testing.T) {
 }
 
 func TestParseQuery_Qualifiers(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name            string
@@ -414,7 +415,7 @@ func TestParseQuery_Qualifiers(t *testing.T) {
 }
 
 func TestParseQuery_CaseMatch(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	tests := []struct {
 		name             string
@@ -445,7 +446,7 @@ func TestParseQuery_CaseMatch(t *testing.T) {
 }
 
 func TestParseQuery_EmptyQuery(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	parsed := service.parseQuery("")
 
@@ -457,7 +458,7 @@ func TestParseQuery_EmptyQuery(t *testing.T) {
 func TestSearch_SimpleQuery(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	results, err := service.Search(ctx, "authentication", interfaces.SearchOptions{Limit: 10})
 
@@ -473,7 +474,7 @@ func TestSearch_SimpleQuery(t *testing.T) {
 func TestSearch_WithDocumentTypeFilter(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	results, err := service.Search(ctx, "document_type:jira authentication", interfaces.SearchOptions{Limit: 10})
 
@@ -493,7 +494,7 @@ func TestSearch_WithDocumentTypeFilter(t *testing.T) {
 func TestSearch_WithCaseSensitive(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	// Search for uppercase "CAT" with case:match
 	results, err := service.Search(ctx, "case:match CAT", interfaces.SearchOptions{Limit: 10})
@@ -515,7 +516,7 @@ func TestSearch_WithCaseSensitive(t *testing.T) {
 func TestSearch_EmptyQuery(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	results, err := service.Search(ctx, "", interfaces.SearchOptions{Limit: 10})
 
@@ -532,7 +533,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 func TestSearch_NoResults(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	results, err := service.Search(ctx, "nonexistent", interfaces.SearchOptions{Limit: 10})
 
@@ -548,7 +549,7 @@ func TestSearch_NoResults(t *testing.T) {
 func TestSearch_ComplexQuery(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	// Complex query: +cat dog "on the mat" document_type:confluence
 	results, err := service.Search(ctx, `+cat dog document_type:confluence`, interfaces.SearchOptions{Limit: 10})
@@ -568,7 +569,7 @@ func TestSearch_ComplexQuery(t *testing.T) {
 }
 
 func TestEdgeCase_UnbalancedQuotes(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	// Unbalanced quote should still parse (treat as phrase)
 	parsed := service.parseQuery(`"cat dog`)
@@ -580,7 +581,7 @@ func TestEdgeCase_UnbalancedQuotes(t *testing.T) {
 }
 
 func TestEdgeCase_MultipleQualifiers(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	parsed := service.parseQuery("document_type:jira case:match cat")
 
@@ -598,7 +599,7 @@ func TestEdgeCase_MultipleQualifiers(t *testing.T) {
 }
 
 func TestEdgeCase_OnlyPlusSign(t *testing.T) {
-	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil)
+	service := NewAdvancedSearchService(&mockAdvancedDocumentStorage{}, nil, nil)
 
 	parsed := service.parseQuery("+")
 
@@ -610,7 +611,7 @@ func TestEdgeCase_OnlyPlusSign(t *testing.T) {
 func TestAdvancedSearchService_GetByID(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	doc, err := service.GetByID(ctx, "doc_1")
 
@@ -630,7 +631,7 @@ func TestAdvancedSearchService_GetByID(t *testing.T) {
 func TestAdvancedSearchService_SearchByReference(t *testing.T) {
 	ctx := context.Background()
 	storage := &mockAdvancedDocumentStorage{documents: getTestDocuments()}
-	service := NewAdvancedSearchService(storage, nil)
+	service := NewAdvancedSearchService(storage, nil, nil)
 
 	t.Run("Simple reference", func(t *testing.T) {
 		results, err := service.SearchByReference(ctx, "PROJ-123", interfaces.SearchOptions{Limit: 10})
@@ -658,7 +659,7 @@ func TestAdvancedSearchService_SearchByReference(t *testing.T) {
 			UpdatedAt:       time.Now(),
 		})
 		storage := &mockAdvancedDocumentStorage{documents: docs}
-		service := NewAdvancedSearchService(storage, nil)
+		service := NewAdvancedSearchService(storage, nil, nil)
 
 		// Search for reference containing a quote
 		results, err := service.SearchByReference(ctx, `"quotes"`, interfaces.SearchOptions{Limit: 10})

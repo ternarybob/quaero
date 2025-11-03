@@ -13,16 +13,10 @@ import (
 
 // QueueManager manages the persistent message queue
 type QueueManager interface {
-	Start() error
-	Stop() error
-	Restart() error
-	Enqueue(ctx context.Context, msg *queue.Message) error
-	EnqueueWithDelay(ctx context.Context, msg *queue.Message, delay time.Duration) error
-	Receive(ctx context.Context) (*goqite.Message, error)
-	Delete(ctx context.Context, msg goqite.Message) error
-	Extend(ctx context.Context, msg goqite.Message, duration time.Duration) error
-	GetQueueLength(ctx context.Context) (int, error)
-	GetQueueStats(ctx context.Context) (map[string]interface{}, error)
+	Enqueue(ctx context.Context, msg queue.Message) error
+	Receive(ctx context.Context) (*queue.Message, func() error, error)
+	Extend(ctx context.Context, messageID goqite.ID, duration time.Duration) error
+	Close() error
 }
 
 // LogEntry represents a log entry for WebSocket broadcasting

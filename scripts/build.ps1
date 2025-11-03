@@ -9,7 +9,8 @@ param (
     [switch]$Verbose,
     [switch]$Release,
     [switch]$Run,
-    [switch]$Web
+    [switch]$Web,
+    [switch]$ResetDatabase
 )
 
 <#
@@ -41,6 +42,9 @@ param (
 .PARAMETER Web
     Deploy web content only (skip build, deploy pages/, restart server)
 
+.PARAMETER ResetDatabase
+    Backup and delete the database after stopping the service
+
 .EXAMPLE
     .\build.ps1
     Build quaero for development
@@ -60,6 +64,10 @@ param (
 .EXAMPLE
     .\build.ps1 -Run
     Build and run the application in a new terminal
+
+.EXAMPLE
+    .\build.ps1 -ResetDatabase
+    Backup and delete the database for a clean start
 #>
 
 # Error handling
@@ -492,6 +500,72 @@ try {
 }
 catch {
     Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
+}
+
+# Backup and delete database if requested
+if ($ResetDatabase) {
+    Write-Host "`n==== Database Reset ====" -ForegroundColor Cyan
+
+    # Read database path from config
+    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
+    $dbPath = Join-Path -Path $binDir -ChildPath "data\quaero.db"  # Default
+
+    if (Test-Path $configPath) {
+        $configContent = Get-Content $configPath
+        foreach ($line in $configContent) {
+            if ($line -match '^\s*path\s*=\s*[''"](.+)[''"]') {
+                $dbPath = $matches[1]
+                # Make path relative to bin directory if not absolute
+                if (-not [System.IO.Path]::IsPathRooted($dbPath)) {
+                    $dbPath = Join-Path -Path $binDir -ChildPath $dbPath
+                }
+                break
+            }
+        }
+    }
+
+    Write-Host "Database path: $dbPath" -ForegroundColor Gray
+
+    if (Test-Path $dbPath) {
+        # Create backup directory
+        $backupDir = Join-Path -Path $binDir -ChildPath "backups"
+        if (-not (Test-Path $backupDir)) {
+            New-Item -ItemType Directory -Path $backupDir | Out-Null
+        }
+
+        # Create backup with timestamp
+        $timestamp = Get-Date -Format "yyyy-MM-dd-HH-mm-ss"
+        $backupPath = Join-Path -Path $backupDir -ChildPath "quaero-$timestamp.db"
+
+        Write-Host "Backing up database..." -ForegroundColor Yellow
+        Copy-Item -Path $dbPath -Destination $backupPath
+        Write-Host "  Backup created: $backupPath" -ForegroundColor Green
+
+        # Delete database files
+        Write-Host "Deleting database files..." -ForegroundColor Yellow
+        Remove-Item -Path $dbPath -Force
+        Write-Host "  Deleted: $dbPath" -ForegroundColor Green
+
+        # Delete WAL file if exists
+        $walPath = "$dbPath-wal"
+        if (Test-Path $walPath) {
+            Remove-Item -Path $walPath -Force
+            Write-Host "  Deleted: $walPath" -ForegroundColor Green
+        }
+
+        # Delete SHM file if exists
+        $shmPath = "$dbPath-shm"
+        if (Test-Path $shmPath) {
+            Remove-Item -Path $shmPath -Force
+            Write-Host "  Deleted: $shmPath" -ForegroundColor Green
+        }
+
+        Write-Host "Database reset complete!" -ForegroundColor Green
+        Write-Host "  Backup location: $backupPath" -ForegroundColor Cyan
+    } else {
+        Write-Host "Database file not found: $dbPath" -ForegroundColor Yellow
+        Write-Host "  This is normal for first run or if database was already deleted" -ForegroundColor Gray
+    }
 }
 
 # Tidy and download dependencies

@@ -73,13 +73,13 @@ type StorageConfig struct {
 }
 
 type SQLiteConfig struct {
-	Path               string `toml:"path"`                // Database file path
-	EnableFTS5         bool   `toml:"enable_fts5"`         // Enable full-text search
-	EnableVector       bool   `toml:"enable_vector"`       // Enable sqlite-vec extension
-	EmbeddingDimension int    `toml:"embedding_dimension"` // Vector dimension for embeddings
-	CacheSizeMB        int    `toml:"cache_size_mb"`       // Cache size in MB
-	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
-	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
+	Path               string `toml:"path"`                  // Database file path
+	EnableFTS5         bool   `toml:"enable_fts5"`           // Enable full-text search
+	EnableVector       bool   `toml:"enable_vector"`         // Enable sqlite-vec extension
+	EmbeddingDimension int    `toml:"embedding_dimension"`   // Vector dimension for embeddings
+	CacheSizeMB        int    `toml:"cache_size_mb"`         // Cache size in MB
+	WALMode            bool   `toml:"wal_mode"`              // Enable WAL mode for better concurrency
+	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`       // Busy timeout in milliseconds
 }
 
 type RavenDBConfig struct {
@@ -226,11 +226,11 @@ func NewDefaultConfig() *Config {
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
 				Path:               "./data/quaero.db",
-				EnableFTS5:         true, // Full-text search for keyword queries
-				EnableVector:       true, // Vector embeddings for semantic search
-				EmbeddingDimension: 768,  // Matches nomic-embed-text model output
-				CacheSizeMB:        64,   // Balanced performance for typical workloads
-				WALMode:            true, // Write-Ahead Logging for better concurrency
+				EnableFTS5:         true,  // Full-text search for keyword queries
+				EnableVector:       true,  // Vector embeddings for semantic search
+				EmbeddingDimension: 768,   // Matches nomic-embed-text model output
+				CacheSizeMB:        64,    // Balanced performance for typical workloads
+				WALMode:            true,  // Write-Ahead Logging for better concurrency
 				BusyTimeoutMS:      10000, // 10 seconds for high-concurrency job processing
 			},
 			Filesystem: FilesystemConfig{

@@ -200,7 +200,7 @@ func (s *AdvancedSearchService) calculateSearchLimit(requestedLimit int, caseSen
 
 	// If case-sensitive filtering is enabled, fetch more results to account for post-filtering
 	// Case-sensitive filtering may eliminate some results, so we fetch extra to avoid under-delivery
-	if caseSensitive {
+	if caseSensitive && s.config != nil {
 		// Use configured multiplier and max cap
 		multiplier := s.config.Search.CaseSensitiveMultiplier
 		maxCap := s.config.Search.CaseSensitiveMaxCap

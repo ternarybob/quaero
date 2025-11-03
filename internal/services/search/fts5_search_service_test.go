@@ -113,6 +113,7 @@ func (m *mockDocumentStorage) GetUnvectorizedDocuments(limit int) ([]*models.Doc
 }
 func (m *mockDocumentStorage) ClearAllEmbeddings() (int, error) { return 0, nil }
 func (m *mockDocumentStorage) ClearAll() error                  { return nil }
+func (m *mockDocumentStorage) RebuildFTS5Index() error          { return nil }
 
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

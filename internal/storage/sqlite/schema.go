@@ -805,48 +805,13 @@ func (s *SQLiteDB) migrateAddLastRunColumn() error {
 	return nil
 }
 
-// migrateAddJobLogsColumn adds logs column to crawl_jobs table
+// migrateAddJobLogsColumn is deprecated and does nothing
+// DEPRECATED: This migration has been superseded by MIGRATION 13 (migrateRemoveLogsColumn)
+// which removes the logs column entirely in favor of the dedicated job_logs table.
+// This function is kept for API compatibility but always returns nil without doing anything.
 func (s *SQLiteDB) migrateAddJobLogsColumn() error {
-	columnsQuery := `PRAGMA table_info(crawl_jobs)`
-	rows, err := s.db.Query(columnsQuery)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	hasLogs := false
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notnull, dfltValue, pk interface{}
-		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "logs" {
-			hasLogs = true
-			break
-		}
-	}
-
-	// If column already exists, migration already completed
-	if hasLogs {
-		return nil
-	}
-
-	s.logger.Info().Msg("Running migration: Adding logs column to crawl_jobs")
-
-	// Add the logs column
-	if _, err := s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN logs TEXT`); err != nil {
-		return err
-	}
-
-	// Set default value to empty JSON array for existing rows
-	s.logger.Info().Msg("Setting default logs values for existing jobs")
-	if _, err := s.db.Exec(`UPDATE crawl_jobs SET logs = '[]' WHERE logs IS NULL`); err != nil {
-		return err
-	}
-
-	s.logger.Info().Msg("Migration: logs column added successfully")
+	// Migration deprecated - logs column replaced by job_logs table
+	// Do nothing to avoid conflict with MIGRATION 13
 	return nil
 }
 

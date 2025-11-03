@@ -17,7 +17,8 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/services/crawler"
-	"github.com/ternarybob/quaero/internal/services/jobs"
+	// TODO Phase 8-11: Re-enable once job executor is re-integrated
+	// "github.com/ternarybob/quaero/internal/services/jobs"
 )
 
 // jobEntry represents a registered job with metadata
@@ -51,7 +52,7 @@ type Service struct {
 	running        bool
 	staleJobTicker *time.Ticker // For stale job detection cleanup goroutine
 	jobDefStorage  interfaces.JobDefinitionStorage
-	jobExecutor    *jobs.JobExecutor
+	jobExecutor    interface{} // *jobs.JobExecutor - temporarily disabled during queue refactor
 }
 
 // NewService creates a new scheduler service
@@ -65,13 +66,14 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 }
 
 // NewServiceWithDB creates a new scheduler service with database persistence
-func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor *jobs.JobExecutor) interfaces.SchedulerService {
+// TODO Phase 8-11: Re-enable proper jobExecutor type once job system is re-integrated
+func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
 	return &Service{
 		eventService:   eventService,
 		crawlerService: crawlerService,
 		jobStorage:     jobStorage,
 		jobDefStorage:  jobDefStorage,
-		jobExecutor:    jobExecutor,
+		jobExecutor:    jobExecutor, // Temporarily accepts nil during queue refactor
 		cron:           cron.New(),
 		logger:         logger,
 		db:             db,
@@ -129,7 +131,6 @@ func (s *Service) Start(cronExpr string) error {
 
 	// Execute auto-start jobs in background
 	go s.executeAutoStartJobs()
-
 	return nil
 }
 
@@ -867,10 +868,14 @@ func (s *Service) LoadJobDefinitions() error {
 		// Create handler closure that captures the job definition
 		handler := func() error {
 			execCtx := context.Background()
+			// TODO Phase 8-11: Re-enable when job executor is re-integrated
 			// For scheduled jobs, we don't need status or post-job callbacks since they're not parent jobs
 			// Pass nil callbacks - job-level events are still published via EventJobProgress
-			_, err := s.jobExecutor.Execute(execCtx, jd, nil, nil)
-			return err
+			// _, err := s.jobExecutor.Execute(execCtx, jd, nil, nil)
+			// return err
+			_ = execCtx // Suppress unused variable
+			s.logger.Warn().Str("job_id", jd.ID).Msg("Job executor temporarily disabled during queue refactor")
+			return fmt.Errorf("job executor not available during queue refactor")
 		}
 
 		// Register job with scheduler

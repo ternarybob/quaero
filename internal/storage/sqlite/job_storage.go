@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
@@ -709,7 +710,7 @@ func (s *JobStorage) DeleteJob(ctx context.Context, jobID string) error {
 	return nil
 }
 
-// CountJobs returns total job count
+// CountJobs returns total job count (implements interfaces.JobStorage)
 func (s *JobStorage) CountJobs(ctx context.Context) (int, error) {
 	query := "SELECT COUNT(*) FROM crawl_jobs"
 	var count int
@@ -1233,4 +1234,152 @@ func (s *JobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) 
 	}
 
 	return newlyAdded, nil
+}
+
+// CopyJob implements interfaces.JobManager - creates a copy of an existing job
+func (s *JobStorage) CopyJob(ctx context.Context, jobID string) (string, error) {
+	// Get the original job
+	jobInterface, err := s.GetJob(ctx, jobID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job for copying: %w", err)
+	}
+
+	job, ok := jobInterface.(*models.CrawlJob)
+	if !ok {
+		return "", fmt.Errorf("invalid job type")
+	}
+
+	// Create a new job with copied data
+	newJob := &models.CrawlJob{
+		ID:          uuid.New().String(),
+		Name:        job.Name + " (Copy)",
+		Description: job.Description,
+		SourceType:  job.SourceType,
+		EntityType:  job.EntityType,
+		Config:      job.Config,
+		Status:      models.JobStatusPending,
+		Progress:    models.CrawlProgress{},
+		CreatedAt:   time.Now(),
+	}
+
+	// Save the new job
+	if err := s.SaveJob(ctx, newJob); err != nil {
+		return "", fmt.Errorf("failed to save copied job: %w", err)
+	}
+
+	s.logger.Info().
+		Str("original_job_id", jobID).
+		Str("new_job_id", newJob.ID).
+		Msg("Job copied successfully")
+
+	return newJob.ID, nil
+}
+
+// CreateJob implements interfaces.JobManager - creates a new job
+func (s *JobStorage) CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error) {
+	// Convert config map to CrawlConfig
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	var crawlConfig models.CrawlConfig
+	if err := json.Unmarshal(configJSON, &crawlConfig); err != nil {
+		return "", fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	job := &models.CrawlJob{
+		ID:         uuid.New().String(),
+		SourceType: sourceType,
+		Config:     crawlConfig,
+		Status:     models.JobStatusPending,
+		Progress:   models.CrawlProgress{},
+		CreatedAt:  time.Now(),
+	}
+
+	if err := s.SaveJob(ctx, job); err != nil {
+		return "", fmt.Errorf("failed to create job: %w", err)
+	}
+
+	return job.ID, nil
+}
+
+// StopAllChildJobs implements interfaces.JobManager - cancels all running child jobs
+func (s *JobStorage) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
+	query := `
+		UPDATE crawl_jobs
+		SET status = ?
+		WHERE parent_id = ?
+		AND status IN (?, ?)
+	`
+
+	result, err := s.db.db.ExecContext(ctx, query, models.JobStatusCancelled, parentID, models.JobStatusPending, models.JobStatusRunning)
+	if err != nil {
+		return 0, fmt.Errorf("failed to stop child jobs: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	s.logger.Info().
+		Str("parent_id", parentID).
+		Int64("cancelled_count", rowsAffected).
+		Msg("Stopped child jobs")
+
+	return int(rowsAffected), nil
+}
+
+// JobManagerAdapter adapts JobStorage to implement the JobManager interface
+type JobManagerAdapter struct {
+	storage *JobStorage
+}
+
+// NewJobManagerAdapter creates a new adapter
+func NewJobManagerAdapter(storage *JobStorage) *JobManagerAdapter {
+	return &JobManagerAdapter{storage: storage}
+}
+
+// Implement JobManager methods that delegate to JobStorage
+
+func (a *JobManagerAdapter) CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error) {
+	return a.storage.CreateJob(ctx, sourceType, sourceID, config)
+}
+
+func (a *JobManagerAdapter) GetJob(ctx context.Context, jobID string) (interface{}, error) {
+	return a.storage.GetJob(ctx, jobID)
+}
+
+func (a *JobManagerAdapter) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.CrawlJob, error) {
+	return a.storage.ListJobs(ctx, opts)
+}
+
+func (a *JobManagerAdapter) CountJobs(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
+	return a.storage.CountJobsWithFilters(ctx, opts)
+}
+
+func (a *JobManagerAdapter) UpdateJob(ctx context.Context, job interface{}) error {
+	return a.storage.UpdateJob(ctx, job)
+}
+
+func (a *JobManagerAdapter) DeleteJob(ctx context.Context, jobID string) (int, error) {
+	// Delete the job
+	if err := a.storage.DeleteJob(ctx, jobID); err != nil {
+		return 0, err
+	}
+	// Count children that were cascade deleted (foreign key constraint handles this)
+	return 0, nil // Cascade delete count not tracked in current implementation
+}
+
+func (a *JobManagerAdapter) CopyJob(ctx context.Context, jobID string) (string, error) {
+	return a.storage.CopyJob(ctx, jobID)
+}
+
+func (a *JobManagerAdapter) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+	return a.storage.GetJobChildStats(ctx, parentIDs)
+}
+
+func (a *JobManagerAdapter) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
+	return a.storage.StopAllChildJobs(ctx, parentID)
 }

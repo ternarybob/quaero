@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
 
 	"maragu.dev/goqite"
 )
+
+// ErrNoMessage is returned when the queue is empty
+var ErrNoMessage = errors.New("no messages in queue")
 
 // Manager is a thin wrapper around goqite.
 // It provides ONLY queue operations, no business logic.
@@ -22,7 +27,10 @@ func NewManager(db *sql.DB, queueName string) (*Manager, error) {
 	defer cancel()
 
 	if err := goqite.Setup(ctx, db); err != nil {
-		return nil, err
+		// Ignore "already exists" errors - this is expected on subsequent startups
+		if !strings.Contains(err.Error(), "already exists") {
+			return nil, err
+		}
 	}
 
 	q := goqite.New(goqite.NewOpts{
@@ -54,14 +62,23 @@ func (m *Manager) Receive(ctx context.Context) (*Message, func() error, error) {
 		return nil, nil, err
 	}
 
+	// Handle nil message (empty queue)
+	if gMsg == nil {
+		return nil, nil, ErrNoMessage
+	}
+
 	var msg Message
 	if err := json.Unmarshal(gMsg.Body, &msg); err != nil {
 		return nil, nil, err
 	}
 
 	// Return delete function for worker to call after successful processing
+	// Use a fresh context with timeout to avoid "context deadline exceeded" errors
+	// when the original Receive context has expired
 	deleteFn := func() error {
-		return m.q.Delete(ctx, gMsg.ID)
+		deleteCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return m.q.Delete(deleteCtx, gMsg.ID)
 	}
 
 	return &msg, deleteFn, nil

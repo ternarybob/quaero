@@ -300,14 +300,19 @@ func validateJobHierarchy(ctx context.Context, storage interfaces.JobStorage, pa
 }
 
 // collectQueueMetrics gathers queue statistics
+// TODO Phase 8-11: Re-enable when queue manager API is finalized
 func collectQueueMetrics(ctx context.Context, queueMgr *queue.Manager) map[string]interface{} {
-	stats, _ := queueMgr.GetQueueStats(ctx)
+	// Temporarily disabled during queue refactor - GetQueueStats not available
+	_ = ctx      // Suppress unused variable
+	_ = queueMgr // Suppress unused variable
+
+	// Return mock data for now (function is unused but kept for future use)
 	return map[string]interface{}{
-		"queue_length":    stats["pending_messages"],
-		"in_flight":       stats["in_flight_messages"],
-		"total_messages":  stats["total_messages"],
-		"queue_name":      stats["queue_name"],
-		"concurrency":     stats["concurrency"],
+		"queue_length":   0,
+		"in_flight":      0,
+		"total_messages": 0,
+		"queue_name":     "test-queue",
+		"concurrency":    2,
 	}
 }
 

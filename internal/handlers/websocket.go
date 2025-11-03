@@ -408,6 +408,7 @@ func (h *WebSocketHandler) sendStatus(conn *websocket.Conn) {
 // StartStatusBroadcaster starts periodic status updates
 func (h *WebSocketHandler) StartStatusBroadcaster() {
 	ticker := time.NewTicker(5 * time.Second)
+
 	go func() {
 		for range ticker.C {
 			h.mu.RLock()
@@ -435,7 +436,7 @@ func (h *WebSocketHandler) StartStatusBroadcaster() {
 func (h *WebSocketHandler) SendLog(level, message string) {
 	entry := interfaces.LogEntry{
 		Timestamp: time.Now().Format("15:04:05"),
-		Level:     level,
+		Level:     strings.ToLower(level), // Normalize to lowercase for consistency
 		Message:   message,
 	}
 	h.BroadcastLog(entry)
