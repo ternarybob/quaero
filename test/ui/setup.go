@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -18,9 +19,12 @@ import (
 
 // TestConfig holds the UI test configuration
 type TestConfig struct {
+	Build struct {
+		SourceDir    string `toml:"source_dir"`
+		BinaryOutput string `toml:"binary_output"`
+		ConfigFile   string `toml:"config_file"`
+	} `toml:"build"`
 	Service struct {
-		Binary               string `toml:"binary"`
-		Config               string `toml:"config"`
 		StartupTimeoutSeconds int    `toml:"startup_timeout_seconds"`
 		Port                 int    `toml:"port"`
 		Host                 string `toml:"host"`
@@ -41,9 +45,9 @@ type TestEnvironment struct {
 	Port       int
 }
 
-// LoadTestConfig loads the test configuration from config.toml
+// LoadTestConfig loads the test configuration from setup.toml
 func LoadTestConfig() (*TestConfig, error) {
-	configPath := filepath.Join(".", "config.toml")
+	configPath := filepath.Join(".", "setup.toml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -94,7 +98,16 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		Port:       config.Service.Port,
 	}
 
-	// Step 1: Check if service is already running on configured port
+	// Step 1: Build the application
+	fmt.Fprintf(logFile, "Building application...\n")
+	if err := env.buildService(); err != nil {
+		logFile.Close()
+		testLogFile.Close()
+		return nil, fmt.Errorf("failed to build service: %w", err)
+	}
+	fmt.Fprintf(logFile, "Build completed successfully\n")
+
+	// Step 2: Check if service is already running on configured port
 	if isServiceRunning(config.Service.Host, config.Service.Port) {
 		fmt.Fprintf(logFile, "Service already running on %s:%d, attempting graceful shutdown...\n",
 			config.Service.Host, config.Service.Port)
@@ -102,6 +115,7 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		// Attempt graceful shutdown
 		if err := shutdownService(config.Service.Host, config.Service.Port, config.Service.ShutdownEndpoint); err != nil {
 			logFile.Close()
+			testLogFile.Close()
 			return nil, fmt.Errorf("failed to shutdown existing service (test cannot continue): %w", err)
 		}
 
@@ -110,17 +124,19 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		// Wait for port to be released
 		if err := waitForPortRelease(config.Service.Host, config.Service.Port, 10*time.Second); err != nil {
 			logFile.Close()
+			testLogFile.Close()
 			return nil, fmt.Errorf("port not released after shutdown: %w", err)
 		}
 	}
 
-	// Step 2: Start new service instance
+	// Step 3: Start new service instance
 	if err := env.startService(); err != nil {
 		logFile.Close()
+		testLogFile.Close()
 		return nil, fmt.Errorf("failed to start service: %w", err)
 	}
 
-	// Step 3: Wait for service to be ready
+	// Step 4: Wait for service to be ready
 	if err := env.WaitForServiceReady(); err != nil {
 		env.Cleanup()
 		return nil, fmt.Errorf("service did not become ready: %w", err)
@@ -176,15 +192,60 @@ func waitForPortRelease(host string, port int, timeout time.Duration) error {
 	return fmt.Errorf("port %d not released after %v", port, timeout)
 }
 
+// buildService builds the Quaero application using go build
+func (env *TestEnvironment) buildService() error {
+	// Resolve paths relative to test/ui directory
+	sourceDir, err := filepath.Abs(env.Config.Build.SourceDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source directory: %w", err)
+	}
+
+	binaryOutput, err := filepath.Abs(env.Config.Build.BinaryOutput)
+	if err != nil {
+		return fmt.Errorf("failed to resolve binary output path: %w", err)
+	}
+
+	// Add platform-specific extension
+	if runtime.GOOS == "windows" {
+		binaryOutput += ".exe"
+	}
+
+	// Ensure output directory exists
+	outputDir := filepath.Dir(binaryOutput)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Build command: go build -o <output> <source_dir>
+	cmd := exec.Command("go", "build", "-o", binaryOutput, sourceDir)
+	cmd.Stdout = env.LogFile
+	cmd.Stderr = env.LogFile
+
+	fmt.Fprintf(env.LogFile, "Building: go build -o %s %s\n", binaryOutput, sourceDir)
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go build failed: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Build successful: %s\n", binaryOutput)
+	return nil
+}
+
 // startService starts the Quaero service
 func (env *TestEnvironment) startService() error {
-	// Resolve binary and config paths
-	binaryPath, err := filepath.Abs(env.Config.Service.Binary)
+	// Resolve binary path (from build output)
+	binaryPath, err := filepath.Abs(env.Config.Build.BinaryOutput)
 	if err != nil {
 		return fmt.Errorf("failed to resolve binary path: %w", err)
 	}
 
-	configPath, err := filepath.Abs(env.Config.Service.Config)
+	// Add platform-specific extension
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+
+	// Resolve config path
+	configPath, err := filepath.Abs(env.Config.Build.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("failed to resolve config path: %w", err)
 	}
@@ -200,6 +261,7 @@ func (env *TestEnvironment) startService() error {
 	}
 
 	// Start the Quaero service
+	fmt.Fprintf(env.LogFile, "Starting service: %s --config %s\n", binaryPath, configPath)
 	cmd := exec.Command(binaryPath, "--config", configPath)
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile

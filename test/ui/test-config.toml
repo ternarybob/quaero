@@ -1,0 +1,42 @@
+# UI Test Configuration for Quaero Service
+# This is a minimal configuration for running UI tests in isolation
+# Port 18085 is used to avoid conflicts with development server on 8085
+
+environment = "development"
+
+[server]
+port = 18085
+host = "localhost"
+
+# Test database - application creates ./bin/data/ directory automatically
+[storage.sqlite]
+path = "./bin/data/quaero-test.db"
+reset_on_startup = true
+
+# Disable all sources for faster startup
+[sources.confluence]
+enabled = false
+
+[sources.jira]
+enabled = false
+
+[sources.github]
+enabled = false
+
+# Use mock LLM for fast tests (no model loading)
+[llm]
+mode = "offline"
+
+[llm.offline]
+mock_mode = true
+
+# Disable audit logging for tests
+[llm.audit]
+enabled = false
+
+# Disable default jobs for tests
+[jobs.crawl_and_collect]
+enabled = false
+
+[jobs.scan_and_summarize]
+enabled = false

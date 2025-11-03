@@ -171,9 +171,22 @@ test/
 ├── api/                   # API endpoint tests
 │   ├── sources_api_test.go
 │   ├── auth_api_test.go
+│   ├── job_load_test.go
+│   ├── test_fixtures.go
 │   └── ...
 └── ui/                    # Browser automation tests (ChromeDP)
-    └── ...
+    ├── config.toml        # UI test configuration
+    ├── quaero.toml        # Service configuration for tests
+    ├── setup.go           # Test infrastructure and service lifecycle
+    ├── main_test.go       # Test suite setup
+    ├── homepage_test.go   # Homepage tests
+    ├── job_deletion_modal_test.go  # Job deletion tests
+    ├── bin/               # Built test binaries & data (gitignored)
+    └── results/           # Test-specific result directories (gitignored)
+        └── {TestName}-{datetime}/
+            ├── service.log
+            ├── test.log
+            └── *.png
 ```
 
 ### API Tests (`test/api/`)
@@ -253,10 +266,139 @@ func TestMyLoadScenario(t *testing.T) {
 
 ### UI Tests (`test/ui/`)
 
-- Browser automation using ChromeDP
-- Always run in integration mode (require real service)
-- Capture screenshots for visual validation
-- Saved to timestamped result directories
+Browser automation tests using ChromeDP with full service lifecycle management.
+
+**Architecture:**
+- **Self-contained**: Everything runs within `test/ui/` directory (CI/CD friendly)
+- **Isolated**: Uses port 18085 (separate from dev server on 8085)
+- **Fresh builds**: Builds Quaero binary using `go build` for each test run
+- **No external scripts**: No dependency on `scripts/build.ps1` or shell scripts
+- Each test manages its own service instance via `SetupTestEnvironment()`
+- Configuration driven by `test/ui/setup.toml`
+- Automatic build, service startup, port checking, and graceful shutdown
+- Results saved to test-specific timestamped directories
+
+**Running UI Tests:**
+
+```powershell
+# Run all UI tests
+cd test/ui
+go test -v
+
+# Run specific test
+go test -v -run TestHomepageTitle -timeout 5m
+
+# Run with coverage
+go test -v -coverprofile=coverage.out
+```
+
+**Test Infrastructure:**
+
+Each test follows this pattern:
+
+```go
+func TestExample(t *testing.T) {
+    // Setup: Starts service, creates results directory
+    env, err := SetupTestEnvironment("TestName")
+    if err != nil {
+        t.Fatalf("Setup failed: %v", err)
+    }
+    defer env.Cleanup()
+
+    // Log to both console and test.log
+    env.LogTest(t, "Starting test...")
+
+    // Get service URL
+    url := env.GetBaseURL()
+
+    // Use ChromeDP for browser automation
+    ctx, cancel := chromedp.NewContext(context.Background())
+    defer cancel()
+
+    // Take screenshots
+    err = env.TakeScreenshot(ctx, "screenshot-name")
+
+    // Results automatically saved to env.GetResultsDir()
+}
+```
+
+**Configuration (`test/ui/config.toml`):**
+
+```toml
+[build]
+# Source directory for main.go (relative to test/ui)
+source_dir = "../../cmd/quaero"
+# Binary output path (relative to test/ui)
+binary_output = "./bin/quaero"
+# Config file for the test service (relative to test/ui)
+config_file = "./quaero.toml"
+
+[service]
+startup_timeout_seconds = 30
+# Port 18085 isolates tests from dev server on 8085
+port = 18085
+host = "localhost"
+shutdown_endpoint = "/api/shutdown"
+
+[output]
+results_base_dir = "./results"
+```
+
+**Service Configuration (`test/ui/quaero.toml`):**
+
+Minimal configuration for fast test startup:
+- Port 18085 (isolated from development)
+- Test database: `./bin/data/quaero-test.db` (created automatically)
+- Mock LLM mode (no model loading)
+- All sources and jobs disabled
+- Database reset on startup
+
+**Service Lifecycle:**
+
+1. **Application Build**: Builds binary using `go build -o ./bin/quaero ../../cmd/quaero` (CI/CD compatible)
+2. **Port Check**: Detects if service already running on port 18085
+3. **Graceful Shutdown**: Stops existing service via `/api/shutdown` endpoint
+4. **Service Start**: Launches fresh service with test configuration
+5. **Readiness Wait**: Polls until service responds to health checks
+6. **Test Execution**: Runs test with live service
+7. **Cleanup**: Stops service and closes log files
+
+**CI/CD Benefits:**
+- ✅ No external script dependencies
+- ✅ Platform-independent (uses `go build`)
+- ✅ Self-contained in `test/ui/` directory
+- ✅ Isolated port (18085) prevents conflicts
+- ✅ Fresh builds ensure tests run against latest code
+- ✅ Fast startup with minimal configuration
+
+**Test Results Structure:**
+
+Each test creates a timestamped directory:
+
+```
+test/ui/results/
+└── {TestName}-{YYYYMMDD-HHMMSS}/
+    ├── service.log       # Service startup, HTTP logs, shutdown
+    ├── test.log          # Test execution log with timestamps
+    └── *.png             # Screenshots captured during test
+```
+
+**Example Results:**
+```
+test/ui/results/HomepageTitle-20251104-081635/
+├── service.log    # Full service output (13KB)
+├── test.log       # Test execution log (385B)
+└── homepage.png   # Screenshot (92KB)
+```
+
+**Helper Methods:**
+
+- `env.GetBaseURL()` - Returns service URL
+- `env.GetResultsDir()` - Returns test results directory
+- `env.GetScreenshotPath(name)` - Returns screenshot file path
+- `env.TakeScreenshot(ctx, name)` - Captures and saves screenshot
+- `env.LogTest(t, format, args...)` - Logs to both console and test.log
+- `env.Cleanup()` - Stops service and closes resources
 
 ## Writing Tests
 
@@ -322,22 +464,6 @@ err := h.ParseJSONResponse(resp, &data)
    t.Logf("Created source with ID: %s", sourceID)
    ```
 
-## Test Results
-
-Results are saved to timestamped directories:
-
-```
-test/results/
-└── {test-name}-{datetime}/
-    ├── test.log           # Full test output
-    └── screenshots/       # UI test screenshots (if applicable)
-```
-
-**Example:**
-```
-test/results/api_tests-2025-01-20_14-30-45/test.log
-test/results/ui_tests-2025-01-20_14-35-22/screenshots/homepage.png
-```
 
 ## Troubleshooting
 
@@ -388,25 +514,110 @@ $env:TEST_MODE
 
 ### UI tests fail
 
-1. **Check ChromeDP installation:**
+1. **Build failures:**
+   ```powershell
+   # Check if Go is installed and in PATH
+   go version
+
+   # Manually test build
+   cd test/ui
+   go build -o ./bin/quaero ../../cmd/quaero
+   ```
+
+2. **Port already in use:**
+   - UI tests automatically handle existing services on port 18085
+   - Check test results in `test/ui/results/{TestName}-{datetime}/service.log`
+   - Look for "Service already running" or "failed to shutdown" messages
+
+3. **Service won't start:**
+   - Check `service.log` for startup errors
+   - Verify config exists: `test/ui/quaero.toml`
+   - Ensure bin directory is writable (data directory created automatically)
+   - Check binary was built: `ls test/ui/bin/quaero*`
+
+4. **Check ChromeDP installation:**
    - Chrome/Chromium must be installed
    - ChromeDP downloads headless chrome automatically
 
-2. **Review screenshots** in test results directory for visual debugging
+5. **Review test results:**
+   ```powershell
+   # Navigate to latest test results
+   cd test/ui/results
+   ls -la
 
-3. **Increase timeouts** if tests are timing out:
-   ```go
-   h := test.NewHTTPTestHelperWithTimeout(t, baseURL, 120*time.Second)
+   # View service log
+   cat {TestName}-{datetime}/service.log
+
+   # View test log
+   cat {TestName}-{datetime}/test.log
+
+   # View screenshots
+   ls {TestName}-{datetime}/*.png
+   ```
+
+6. **Increase timeouts** if tests are timing out:
+   - Edit `test/ui/setup.toml`:
+     ```toml
+     [service]
+     startup_timeout_seconds = 60  # Increase from 30
+     ```
+
+7. **Clean up stale services:**
+   ```powershell
+   # Check for running Quaero processes
+   Get-Process quaero -ErrorAction SilentlyContinue
+
+   # Kill if needed
+   Stop-Process -Name quaero -Force
    ```
 
 ## CI/CD Recommendations
 
+### GitHub Actions Example
+
+```yaml
+name: UI Tests
+
+on: [push, pull_request]
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+          echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
+          apt-get update && apt-get install -y google-chrome-stable
+
+      - name: Run UI Tests
+        working-directory: test/ui
+        run: go test -v -timeout 10m
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ui-test-results
+          path: test/ui/results/
+```
+
 ### Fast Feedback Loop (PR Checks)
 
 ```yaml
-# Use mock mode for fast feedback
+# Use mock mode for API tests (fast)
 test_mode: mock
 timeout: 5m
+
+# UI tests always use real service
+# But run on isolated port (18085)
 ```
 
 ### Comprehensive Validation (Nightly/Pre-Release)
@@ -415,19 +626,18 @@ timeout: 5m
 # Use integration mode for full validation
 test_mode: integration
 timeout: 30m
+
+# UI tests included in full validation
+# Fresh builds ensure latest code
 ```
 
-### Multi-Stage Pipeline
+### Key CI/CD Features
 
-```yaml
-stages:
-  - name: "Fast Tests"
-    test_mode: mock
-
-  - name: "Full Integration"
-    test_mode: integration
-    depends_on: ["Fast Tests"]
-```
+- ✅ **No Docker required**: Tests build and run natively
+- ✅ **Parallel execution**: Tests isolated by port (18085)
+- ✅ **Artifact collection**: Screenshots and logs automatically saved
+- ✅ **Fast startup**: Minimal config, mock LLM, no source loading
+- ✅ **Cross-platform**: Works on Linux, macOS, Windows
 
 ## Mock Server Capabilities
 
