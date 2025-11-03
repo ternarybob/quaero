@@ -8,20 +8,30 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestHomepageTitle(t *testing.T) {
+	// Setup test environment with test name
+	env, err := SetupTestEnvironment("HomepageTitle")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL()
+	url := env.GetBaseURL()
 	var title string
 
-	err := chromedp.Run(ctx,
+	env.LogTest(t, "Navigating to homepage: %s", url)
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -29,28 +39,46 @@ func TestHomepageTitle(t *testing.T) {
 	)
 
 	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load homepage: %v", err)
 		t.Fatalf("Failed to load homepage: %v", err)
 	}
 
+	env.LogTest(t, "Page loaded successfully, title: %s", title)
+
 	// Take screenshot of homepage
-	if err := TakeScreenshot(ctx, "homepage"); err != nil {
-		t.Logf("Warning: Failed to take screenshot: %v", err)
+	if err := env.TakeScreenshot(ctx, "homepage"); err != nil {
+		env.LogTest(t, "ERROR: Failed to take screenshot: %v", err)
+		t.Fatalf("Failed to take screenshot: %v", err)
 	}
+	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("homepage"))
 
 	expectedTitle := "Quaero - Home"
 	if title != expectedTitle {
+		env.LogTest(t, "ERROR: Title mismatch - expected '%s', got '%s'", expectedTitle, title)
 		t.Errorf("Expected title '%s', got '%s'", expectedTitle, title)
+	} else {
+		env.LogTest(t, "✓ Title verified: %s", title)
 	}
 }
 
 func TestHomepageElements(t *testing.T) {
+	// Setup test environment with test name
+	env, err := SetupTestEnvironment("HomepageElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	t.Logf("Test environment ready, service running at: %s", env.GetBaseURL())
+	t.Logf("Results directory: %s", env.GetResultsDir())
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL()
+	url := env.GetBaseURL()
 
 	// Check for presence of key elements
 	tests := []struct {
@@ -82,16 +110,32 @@ func TestHomepageElements(t *testing.T) {
 			}
 		})
 	}
+
+	// Take screenshot after checking all elements
+	if err := env.TakeScreenshot(ctx, "homepage-elements"); err != nil {
+		t.Fatalf("Failed to take screenshot: %v", err)
+	}
+	t.Logf("Screenshot saved: %s", env.GetScreenshotPath("homepage-elements"))
 }
 
 func TestNavigation(t *testing.T) {
+	// Setup test environment with test name
+	env, err := SetupTestEnvironment("Navigation")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	t.Logf("Test environment ready, service running at: %s", env.GetBaseURL())
+	t.Logf("Results directory: %s", env.GetResultsDir())
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL()
+	url := env.GetBaseURL()
 
 	tests := []struct {
 		linkText      string
@@ -123,9 +167,10 @@ func TestNavigation(t *testing.T) {
 
 			// Take screenshot of the navigated page
 			screenshotName := fmt.Sprintf("navigation-%s", strings.ToLower(tt.linkText))
-			if err := TakeScreenshot(ctx, screenshotName); err != nil {
-				t.Logf("Warning: Failed to take screenshot for %s: %v", tt.linkText, err)
+			if err := env.TakeScreenshot(ctx, screenshotName); err != nil {
+				t.Fatalf("Failed to take screenshot for %s: %v", tt.linkText, err)
 			}
+			t.Logf("Screenshot saved: %s", env.GetScreenshotPath(screenshotName))
 
 			if !strings.Contains(title, tt.expectedTitle) {
 				t.Errorf("After clicking '%s', expected title to contain '%s', got '%s'",

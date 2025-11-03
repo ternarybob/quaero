@@ -14,16 +14,17 @@ import (
 
 // TestMain runs before all tests in the ui package
 // It verifies the service is accessible before running any UI tests
+// NOTE: Service connectivity check is optional - tests using SetupTestEnvironment
+//       will start their own service instance
 func TestMain(m *testing.M) {
-	// Verify service connectivity before running tests
+	// Optional: Verify service connectivity before running tests
+	// If service is not running, tests using SetupTestEnvironment will start their own
 	if err := verifyServiceConnectivity(); err != nil {
-		fmt.Fprintf(os.Stderr, "\n❌ CRITICAL: Service connectivity check FAILED\n")
-		fmt.Fprintf(os.Stderr, "   Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "   All UI tests will be skipped\n\n")
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "\n⚠ Service not pre-started (tests using SetupTestEnvironment will start their own)\n")
+		fmt.Fprintf(os.Stderr, "   Note: %v\n\n", err)
+	} else {
+		fmt.Println("✓ Service connectivity verified - proceeding with UI tests")
 	}
-
-	fmt.Println("✓ Service connectivity verified - proceeding with UI tests")
 
 	// Run all tests
 	exitCode := m.Run()

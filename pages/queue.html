@@ -716,13 +716,13 @@
                             </div>
                             <div style="margin-bottom: 0.5rem;" x-show="job && job.name">
                                 <strong>Name:</strong>
-                                <span x-text="job.name"></span>
+                                <span x-text="job ? job.name : ''"></span>
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div style="margin-bottom: 0.5rem;" x-show="job">
                                 <strong>Status:</strong>
-                                <span x-show="job">
-                                    <span class="label" :class="getStatusBadgeClass(job.status)">
-                                        <span x-text="getStatusDisplayText(job.status)"></span>
+                                <span>
+                                    <span class="label" :class="job ? getStatusBadgeClass(job.status) : ''">
+                                        <span x-text="job ? getStatusDisplayText(job.status) : ''"></span>
                                     </span>
                                 </span>
                             </div>
@@ -2301,6 +2301,7 @@
                 },
 
                 getJobURL(job) {
+                    if (!job) return null;
                     // Priority: seed_urls > current_url
                     if (job.seed_urls && job.seed_urls.length > 0) {
                         return job.seed_urls[0];
@@ -2496,11 +2497,7 @@
                         return;
                     }
 
-                    // Set deletion in progress flag
-                    this.isDeletingJobs = true;
-                    this.deletionProgress = { current: 0, total: this.selectedJobIds.size };
-
-                    // Get job details for confirmation
+                    // Get job details for confirmation (BEFORE setting deletion flag)
                     const jobDetails = [];
                     const jobIdsArray = Array.from(this.selectedJobIds);
                     let totalChildren = 0;
@@ -2519,14 +2516,17 @@
                         }
                     }
 
-                    // Show custom confirmation modal using event-based API
-                    const confirmed = await openDeleteConfirmModal(jobIdsArray);
+                    // Show custom confirmation modal using event-based API (pass pre-built job details)
+                    const confirmed = await openDeleteConfirmModal(jobDetails, totalChildren);
 
                     if (!confirmed) {
-                        this.isDeletingJobs = false;
-                        this.deletionProgress = { current: 0, total: 0 };
+                        // User cancelled - no need to clear flag since it wasn't set yet
                         return;
                     }
+
+                    // NOW set the deletion in progress flag (after user confirmed)
+                    this.isDeletingJobs = true;
+                    this.deletionProgress = { current: 0, total: this.selectedJobIds.size };
 
                     const deleteButton = document.getElementById('delete-selected-btn');
                     const buttonSpan = deleteButton.querySelector('span');
@@ -3278,37 +3278,15 @@
                 init() {
                     // Listen for deleteConfirmModal:open events
                     window.addEventListener('deleteConfirmModal:open', async (e) => {
-                        const { jobIds, resolverId } = e.detail;
-                        await this.open(jobIds, resolverId);
+                        const { jobDetails, totalChildren, resolverId } = e.detail;
+                        await this.open(jobDetails, totalChildren, resolverId);
                     });
                 },
 
-                async open(jobIds, resolverId = null) {
-                    // Prepare job details
-                    this.jobs = [];
-                    this.totalChildren = 0;
-
-                    for (const jobId of jobIds) {
-                        // Try to get job from Alpine's jobList component
-                        const jobListComponent = document.querySelector('[x-data="jobList"]').__x;
-                        let job = null;
-
-                        if (jobListComponent) {
-                            const alpineData = jobListComponent.$data;
-                            job = alpineData.allJobs.find(j => j.id === jobId);
-                        }
-
-                        if (job) {
-                            const childCount = job.child_count || 0;
-                            this.totalChildren += childCount;
-                            this.jobs.push({
-                                id: jobId,
-                                name: job.name || `Job ${jobId.substring(0, 8)}`,
-                                status: job.status,
-                                childCount: childCount
-                            });
-                        }
-                    }
+                async open(jobDetails, totalChildren, resolverId = null) {
+                    // Use the pre-built job details passed from caller
+                    this.jobs = jobDetails || [];
+                    this.totalChildren = totalChildren || 0;
 
                     // Show modal
                     const modal = document.getElementById('delete-confirm-modal');
@@ -3330,10 +3308,7 @@
                     const modal = document.getElementById('delete-confirm-modal');
                     modal.classList.remove('active');
                     document.body.classList.remove('modal-open');
-                    this.checkboxChecked = false;
-                    this.jobs = [];
-                    this.totalChildren = 0;
-
+                    
                     if (this.resolvePromise) {
                         this.resolvePromise(false);
                         this.resolvePromise = null;
@@ -3343,16 +3318,18 @@
                         window.deleteModalResolvers.delete(this.currentResolverId);
                         this.currentResolverId = null;
                     }
+                    
+                    // Clear data after resolving to prevent race condition with modal message
+                    this.checkboxChecked = false;
+                    this.jobs = [];
+                    this.totalChildren = 0;
                 },
 
                 confirm() {
                     const modal = document.getElementById('delete-confirm-modal');
                     modal.classList.remove('active');
                     document.body.classList.remove('modal-open');
-                    this.checkboxChecked = false;
-                    this.jobs = [];
-                    this.totalChildren = 0;
-
+                    
                     if (this.resolvePromise) {
                         this.resolvePromise(true);
                         this.resolvePromise = null;
@@ -3362,6 +3339,11 @@
                         window.deleteModalResolvers.delete(this.currentResolverId);
                         this.currentResolverId = null;
                     }
+                    
+                    // Clear data after resolving to prevent race condition with modal message
+                    this.checkboxChecked = false;
+                    this.jobs = [];
+                    this.totalChildren = 0;
                 },
 
                 getStatusDisplayText(status) {
@@ -3436,6 +3418,7 @@
                 },
 
                 getJobURL(job) {
+                    if (!job) return null;
                     // Priority: seed_urls > current_url
                     if (job.seed_urls && job.seed_urls.length > 0) {
                         return job.seed_urls[0];
@@ -3454,12 +3437,12 @@
         }
 
         // Global function to open delete confirmation modal using event-based API
-        async function openDeleteConfirmModal(jobIds) {
+        async function openDeleteConfirmModal(jobDetails, totalChildren) {
             const resolverId = 'delete-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             return new Promise((resolve) => {
                 window.deleteModalResolvers.set(resolverId, resolve);
                 window.dispatchEvent(new CustomEvent('deleteConfirmModal:open', {
-                    detail: { jobIds: jobIds, resolverId: resolverId }
+                    detail: { jobDetails: jobDetails, totalChildren: totalChildren, resolverId: resolverId }
                 }));
             });
         }
