@@ -22,9 +22,9 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 
+	arbor "github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	arbor "github.com/ternarybob/arbor"
 	_ "modernc.org/sqlite"
 )
 
@@ -46,13 +46,13 @@ func LoadTestConfig(t *testing.T) (*common.Config, func()) {
 		Storage: common.StorageConfig{
 			Type: "sqlite",
 			SQLite: common.SQLiteConfig{
-				Path:          dbPath,
-				EnableFTS5:    true,
-				EnableVector:  true,
+				Path:               dbPath,
+				EnableFTS5:         true,
+				EnableVector:       true,
 				EmbeddingDimension: 768,
-				CacheSizeMB:   64,
-				WALMode:       true,
-				BusyTimeoutMS: 10000,
+				CacheSizeMB:        64,
+				WALMode:            true,
+				BusyTimeoutMS:      10000,
 			},
 		},
 		LLM: common.LLMConfig{
@@ -120,19 +120,19 @@ func createLoadTestJobDefinition(id, sourceID string, childCount int) *models.Jo
 		Sources:     []string{sourceID},
 		Steps: []models.JobStep{
 			{
-				Name:    "crawl",
-				Action:  "crawl",
+				Name:   "crawl",
+				Action: "crawl",
 				Config: map[string]interface{}{
-					"max_depth":      2,
-					"follow_links":   true,
-					"concurrency":    2,
+					"max_depth":    2,
+					"follow_links": true,
+					"concurrency":  2,
 				},
 				OnError: models.ErrorStrategyContinue,
 			},
 		},
-		Schedule: "",
-		Timeout:  "10m",
-		Enabled:  true,
+		Schedule:  "",
+		Timeout:   "10m",
+		Enabled:   true,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -322,10 +322,10 @@ func createLoadTestSource(id, baseURL string) map[string]interface{} {
 		"id":   id,
 		"type": "test",
 		"config": map[string]interface{}{
-			"base_url":      baseURL,
-			"max_depth":     2,
-			"concurrency":   2,
-			"follow_links":  true,
+			"base_url":       baseURL,
+			"max_depth":      2,
+			"concurrency":    2,
+			"follow_links":   true,
 			"respect_robots": false,
 		},
 	}

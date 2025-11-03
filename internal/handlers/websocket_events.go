@@ -219,11 +219,11 @@ func (s *EventSubscriber) handleJobStarted(ctx context.Context, event interfaces
 	}
 
 	update := JobStatusUpdate{
-		JobID:           getStringWithFallback(payload, "job_id", "jobId"),
-		Status:          getString(payload, "status"),
-		SourceType:      getStringWithFallback(payload, "source_type", "sourceType"),
-		EntityType:      getStringWithFallback(payload, "entity_type", "entityType"),
-		Timestamp:       getTimestamp(payload),
+		JobID:      getStringWithFallback(payload, "job_id", "jobId"),
+		Status:     getString(payload, "status"),
+		SourceType: getStringWithFallback(payload, "source_type", "sourceType"),
+		EntityType: getStringWithFallback(payload, "entity_type", "entityType"),
+		Timestamp:  getTimestamp(payload),
 		// Extract status_report fields from payload
 		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),
 		Errors:          getStringSlice(payload, "errors"),

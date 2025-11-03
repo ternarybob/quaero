@@ -5,8 +5,8 @@
 source_dir = "../../cmd/quaero"
 # Binary output path (relative to test/ui) - platform extension added automatically
 binary_output = "./bin/quaero"
-# Config file for the test service (relative to test/ui)
-config_file = "./test-config.toml"
+# Config file for the test service (relative to test/ui) - copied from test-config.toml during build
+config_file = "./bin/quaero.toml"
 
 [service]
 # Startup timeout in seconds

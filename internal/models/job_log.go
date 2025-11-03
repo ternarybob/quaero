@@ -36,9 +36,9 @@ package models
 //	    logger.Warn().Err(err).Msg("Failed to append log")
 //	}
 type JobLogEntry struct {
-	Timestamp      string `json:"timestamp"`       // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
-	FullTimestamp  string `json:"full_timestamp"` // RFC3339 format for accurate sorting, e.g., "2025-11-01T14:23:45Z"
-	Level          string `json:"level"`          // Log level: "info", "warn", "error", "debug"
-	Message        string `json:"message"`        // Human-readable log message with structured data
-	AssociatedJobID string `json:"job_id"`       // ID of the job that generated this log (populated during aggregation)
+	Timestamp       string `json:"timestamp"`      // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
+	FullTimestamp   string `json:"full_timestamp"` // RFC3339 format for accurate sorting, e.g., "2025-11-01T14:23:45Z"
+	Level           string `json:"level"`          // Log level: "info", "warn", "error", "debug"
+	Message         string `json:"message"`        // Human-readable log message with structured data
+	AssociatedJobID string `json:"job_id"`         // ID of the job that generated this log (populated during aggregation)
 }

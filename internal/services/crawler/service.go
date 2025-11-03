@@ -600,7 +600,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		// This ensures child job exists in database when worker picks up the message
 		childJob := &CrawlJob{
 			ID:         childID, // Match message ID for GetJob() lookups during execution
-			ParentID:   jobID,  // Link to parent job for hierarchy
+			ParentID:   jobID,   // Link to parent job for hierarchy
 			JobType:    models.JobTypeCrawlerURL,
 			Name:       fmt.Sprintf("URL: %s", seedURL),
 			SourceType: sourceType,

@@ -6,9 +6,9 @@ import (
 
 	"maragu.dev/goqite"
 
+	arbormodels "github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	arbormodels "github.com/ternarybob/arbor/models"
 )
 
 // QueueManager manages the persistent message queue

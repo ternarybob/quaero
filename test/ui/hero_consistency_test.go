@@ -9,13 +9,19 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestHeroSectionConsistency verifies that navbar, hero sections, and footer
 // are in the same location across all pages
 func TestHeroSectionConsistency(t *testing.T) {
-	serverURL := test.MustGetTestServerURL()
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestHeroSectionConsistency")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	serverURL := env.GetBaseURL()
 
 	// Create browser context
 	ctx, cancel := chromedp.NewContext(context.Background())
@@ -78,7 +84,7 @@ func TestHeroSectionConsistency(t *testing.T) {
 
 			// Get navbar measurements
 			var navbarMeasurements map[string]interface{}
-			err := chromedp.Run(ctx,
+			err = chromedp.Run(ctx,
 				chromedp.Evaluate(`(() => {
 					const navbar = document.querySelector('nav.navbar');
 					if (!navbar) return { x: 0, width: 0 };

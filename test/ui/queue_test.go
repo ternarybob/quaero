@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 // =============================================================================
@@ -163,15 +162,22 @@ func getJobCardStatus(ctx context.Context, jobID string) (string, error) {
 // TestQueuePageWebSocketConnection verifies WebSocket connection is established
 // and that no polling occurs after connection is established
 func TestQueuePageWebSocketConnection(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueuePageWebSocketConnection")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -244,15 +250,22 @@ func TestQueuePageWebSocketConnection(t *testing.T) {
 // TestQueuePageJobStatusUpdate verifies real-time job status updates via WebSocket
 // This test simulates or monitors for job status changes and verifies the UI updates
 func TestQueuePageJobStatusUpdate(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueuePageJobStatusUpdate")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -386,15 +399,22 @@ func TestQueuePageJobStatusUpdate(t *testing.T) {
 // TestQueuePageWebSocketReconnection verifies exponential backoff reconnection
 // when WebSocket connection is lost
 func TestQueuePageWebSocketReconnection(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueuePageWebSocketReconnection")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -509,15 +529,22 @@ func TestQueuePageWebSocketReconnection(t *testing.T) {
 // TestQueuePageManualRefresh verifies manual refresh fallback works correctly
 // This test ensures users can manually refresh the page to get latest data
 func TestQueuePageManualRefresh(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueuePageManualRefresh")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -596,15 +623,22 @@ func TestQueuePageManualRefresh(t *testing.T) {
 // TestServiceLogsNoClientFiltering verifies that client-side log filtering is absent
 // and that all log filtering is done server-side before broadcasting
 func TestServiceLogsNoClientFiltering(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestServiceLogsNoClientFiltering")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),

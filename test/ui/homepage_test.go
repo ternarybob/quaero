@@ -18,6 +18,17 @@ func TestHomepageTitle(t *testing.T) {
 	}
 	defer env.Cleanup()
 
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestHomepageTitle")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestHomepageTitle (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestHomepageTitle (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
 	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
 	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
 
@@ -69,8 +80,19 @@ func TestHomepageElements(t *testing.T) {
 	}
 	defer env.Cleanup()
 
-	t.Logf("Test environment ready, service running at: %s", env.GetBaseURL())
-	t.Logf("Results directory: %s", env.GetResultsDir())
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestHomepageElements")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestHomepageElements (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestHomepageElements (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
 
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
@@ -85,10 +107,10 @@ func TestHomepageElements(t *testing.T) {
 		name     string
 		selector string
 	}{
-		{"Navbar", "nav.navbar"},
-		{"Hero section", "section.hero"},
-		{"Title", ".title"},
-		{"Quick Actions card", ".card"},
+		{"Header", "header.app-header"},
+		{"Navigation", "nav.app-header-nav"},
+		{"Page title heading", "h1"},
+		{"Service status card", ".card"},
 	}
 
 	for _, tt := range tests {

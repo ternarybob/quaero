@@ -12,20 +12,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestAuthPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("AuthPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/auth"
+	url := env.GetBaseURL() + "/auth"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -37,7 +43,7 @@ func TestAuthPageLoad(t *testing.T) {
 	}
 
 	// Take screenshot
-	if err := TakeScreenshot(ctx, "auth-page"); err != nil {
+	if err := env.TakeScreenshot(ctx, "auth-page"); err != nil {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
@@ -50,13 +56,20 @@ func TestAuthPageLoad(t *testing.T) {
 }
 
 func TestAuthPageElements(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("AuthPageElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/auth"
+	url := env.GetBaseURL() + "/auth"
 
 	// Check for presence of key elements
 	tests := []struct {
@@ -91,18 +104,25 @@ func TestAuthPageElements(t *testing.T) {
 }
 
 func TestAuthNavbar(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("AuthNavbar")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/auth"
+	url := env.GetBaseURL() + "/auth"
 
 	var navbarVisible bool
 	var menuItems []string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`nav.navbar`, chromedp.ByQuery),
@@ -149,17 +169,24 @@ func TestAuthNavbar(t *testing.T) {
 }
 
 func TestAuthInstructions(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("AuthInstructions")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/auth"
+	url := env.GetBaseURL() + "/auth"
 
 	var instructionsText string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`.card-content ol`, chromedp.ByQuery),

@@ -576,7 +576,7 @@ func (h *JobHandler) GetAggregatedJobLogsHandler(w http.ResponseWriter, r *http.
 
 	// Normalize level aliases to match storage layer conventions
 	levelAliases := map[string]string{
-		"warning": "warn", // "warning" → "warn"
+		"warning": "warn",  // "warning" → "warn"
 		"err":     "error", // "err" → "error"
 	}
 	if normalized, exists := levelAliases[level]; exists {

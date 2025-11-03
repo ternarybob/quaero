@@ -7,20 +7,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestConfigPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -45,19 +51,26 @@ func TestConfigPageLoad(t *testing.T) {
 }
 
 func TestConfigHeroSection(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigHeroSection")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	var heroVisible bool
 	var heroTitle string
 	var heroSubtitle string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`section.hero`, chromedp.ByQuery),
@@ -86,19 +99,26 @@ func TestConfigHeroSection(t *testing.T) {
 }
 
 func TestConfigNavbar(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigNavbar")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	// Check navbar and all menu items
 	var navbarVisible bool
 	var menuItems []string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`nav.navbar`, chromedp.ByQuery),
@@ -133,13 +153,20 @@ func TestConfigNavbar(t *testing.T) {
 }
 
 func TestConfigServiceStatus(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigServiceStatus")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	// Wait for Alpine.js to initialize and load config
 	var serviceStatus string
@@ -148,7 +175,7 @@ func TestConfigServiceStatus(t *testing.T) {
 	var port string
 	var host string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`#service-status`, chromedp.ByQuery),
@@ -181,10 +208,9 @@ func TestConfigServiceStatus(t *testing.T) {
 	}
 	t.Logf("Build: %s", build)
 
-	// Check port matches expected
-	expectedPort := test.GetExpectedPort()
-	if !strings.Contains(port, "8085") && !strings.Contains(port, string(rune(expectedPort))) {
-		t.Errorf("Expected port to contain '%d', got: %s", expectedPort, port)
+	// Check port matches expected (test environment uses port 18085)
+	if !strings.Contains(port, "18085") {
+		t.Errorf("Expected port to contain '18085', got: %s", port)
 	}
 	t.Logf("Port: %s", port)
 
@@ -198,19 +224,26 @@ func TestConfigServiceStatus(t *testing.T) {
 }
 
 func TestConfigDisplay(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigDisplay")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	// Check that config is displayed
 	var configText string
 	var configVisible bool
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`#config-display`, chromedp.ByQuery),
@@ -244,18 +277,25 @@ func TestConfigDisplay(t *testing.T) {
 }
 
 func TestConfigServiceLogs(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigServiceLogs")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	var logsVisible bool
 	var logsHeaderText string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`.log-container`, chromedp.ByQuery),
@@ -280,18 +320,25 @@ func TestConfigServiceLogs(t *testing.T) {
 }
 
 func TestConfigFooter(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestConfigFooter")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/config"
+	url := env.GetBaseURL() + "/config"
 
 	var footerVisible bool
 	var footerText string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`footer.footer`, chromedp.ByQuery),

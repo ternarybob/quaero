@@ -87,22 +87,22 @@ type ErrorTolerance struct {
 
 // JobDefinition represents a configurable job definition
 type JobDefinition struct {
-	ID          string                 `json:"id"`          // Unique identifier for the job definition
-	Name        string                 `json:"name"`        // Human-readable job name
-	Type        JobDefinitionType      `json:"type"`        // Type of job definition (crawler, summarizer, custom)
-	Description string                 `json:"description"` // Job description
-	Sources     []string               `json:"sources"`     // Array of source IDs this job operates on
-	Steps       []JobStep              `json:"steps"`       // Ordered array of execution steps
-	Schedule    string                 `json:"schedule"`    // Cron expression for scheduling
-	Timeout     string                 `json:"timeout"`     // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
-	Enabled     bool                   `json:"enabled"`     // Whether the job is enabled
-	AutoStart   bool                   `json:"auto_start"`  // Whether to auto-start on scheduler initialization
-	Config          map[string]interface{} `json:"config"`           // Job-specific configuration
-	PreJobs         []string               `json:"pre_jobs"`         // Array of job definition IDs to execute before main steps (validation, pre-checks)
-	PostJobs        []string               `json:"post_jobs"`        // Array of job IDs to execute after this job completes
-	ErrorTolerance  *ErrorTolerance        `json:"error_tolerance"`  // Optional error tolerance configuration for child job failure management
-	CreatedAt       time.Time              `json:"created_at"`       // Creation timestamp
-	UpdatedAt       time.Time              `json:"updated_at"`       // Last update timestamp
+	ID             string                 `json:"id"`              // Unique identifier for the job definition
+	Name           string                 `json:"name"`            // Human-readable job name
+	Type           JobDefinitionType      `json:"type"`            // Type of job definition (crawler, summarizer, custom)
+	Description    string                 `json:"description"`     // Job description
+	Sources        []string               `json:"sources"`         // Array of source IDs this job operates on
+	Steps          []JobStep              `json:"steps"`           // Ordered array of execution steps
+	Schedule       string                 `json:"schedule"`        // Cron expression for scheduling
+	Timeout        string                 `json:"timeout"`         // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
+	Enabled        bool                   `json:"enabled"`         // Whether the job is enabled
+	AutoStart      bool                   `json:"auto_start"`      // Whether to auto-start on scheduler initialization
+	Config         map[string]interface{} `json:"config"`          // Job-specific configuration
+	PreJobs        []string               `json:"pre_jobs"`        // Array of job definition IDs to execute before main steps (validation, pre-checks)
+	PostJobs       []string               `json:"post_jobs"`       // Array of job IDs to execute after this job completes
+	ErrorTolerance *ErrorTolerance        `json:"error_tolerance"` // Optional error tolerance configuration for child job failure management
+	CreatedAt      time.Time              `json:"created_at"`      // Creation timestamp
+	UpdatedAt      time.Time              `json:"updated_at"`      // Last update timestamp
 }
 
 // Validate validates the job definition

@@ -26,13 +26,13 @@ func NewExecutor(jobMgr *jobs.Manager, logger arbor.ILogger, service *Service) *
 
 // CrawlerPayload defines the crawler job payload
 type CrawlerPayload struct {
-	URL         string            `json:"url"`
-	Depth       int               `json:"depth"`
-	MaxPages    int               `json:"max_pages"`
-	Exclusions  []string          `json:"exclusions,omitempty"`
-	SourceType  string            `json:"source_type"`
-	SourceID    string            `json:"source_id"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	URL        string            `json:"url"`
+	Depth      int               `json:"depth"`
+	MaxPages   int               `json:"max_pages"`
+	Exclusions []string          `json:"exclusions,omitempty"`
+	SourceType string            `json:"source_type"`
+	SourceID   string            `json:"source_id"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 // Execute implements the Executor interface

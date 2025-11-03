@@ -6,20 +6,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestSearchPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -43,13 +49,20 @@ func TestSearchPageLoad(t *testing.T) {
 }
 
 func TestSearchPageElements(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchPageElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Check for presence of search UI elements
 	tests := []struct {
@@ -67,7 +80,7 @@ func TestSearchPageElements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeCount int
-			err := chromedp.Run(ctx,
+			err = chromedp.Run(ctx,
 				chromedp.EmulateViewport(1920, 1080),
 				chromedp.Navigate(url),
 				chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -89,18 +102,25 @@ func TestSearchPageElements(t *testing.T) {
 }
 
 func TestSearchQueryExecution(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchQueryExecution")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Test query: "test"
 	testQuery := "test"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -146,19 +166,26 @@ func TestSearchQueryExecution(t *testing.T) {
 }
 
 func TestSearchWithResults(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchWithResults")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Use a broad query that's likely to return results
 	testQuery := "a"
 
 	var resultsVisible bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -190,16 +217,23 @@ func TestSearchWithResults(t *testing.T) {
 }
 
 func TestSearchClearButton(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchClearButton")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	var inputValue string
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -237,17 +271,24 @@ func TestSearchClearButton(t *testing.T) {
 }
 
 func TestSearchSyntaxHelp(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchSyntaxHelp")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Verify syntax help card can be toggled
 	var syntaxHelpVisible bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -277,20 +318,27 @@ func TestSearchSyntaxHelp(t *testing.T) {
 }
 
 func TestSearchResultStructure(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchResultStructure")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Use a broad query that's likely to return results
 	testQuery := "test"
 
 	var hasResults bool
 	var hasTitle, hasBrief, hasLink bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -350,19 +398,26 @@ func TestSearchResultStructure(t *testing.T) {
 }
 
 func TestSearchPagination(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchPagination")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Use a broad query that's likely to return results
 	testQuery := "a"
 
 	var paginationVisible bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -414,17 +469,24 @@ func TestSearchPagination(t *testing.T) {
 }
 
 func TestSearchNavbarActiveState(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchNavbarActiveState")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Check if Search link in navbar has active class
 	var hasActiveClass bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -453,16 +515,23 @@ func TestSearchNavbarActiveState(t *testing.T) {
 }
 
 func TestSearchEmptyQuery(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSearchEmptyQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/search"
+	url := env.GetBaseURL() + "/search"
 
 	// Try to search with empty query (should show notification)
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),

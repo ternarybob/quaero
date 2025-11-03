@@ -73,13 +73,13 @@ type StorageConfig struct {
 }
 
 type SQLiteConfig struct {
-	Path               string `toml:"path"`                  // Database file path
-	EnableFTS5         bool   `toml:"enable_fts5"`           // Enable full-text search
-	EnableVector       bool   `toml:"enable_vector"`         // Enable sqlite-vec extension
-	EmbeddingDimension int    `toml:"embedding_dimension"`   // Vector dimension for embeddings
-	CacheSizeMB        int    `toml:"cache_size_mb"`         // Cache size in MB
-	WALMode            bool   `toml:"wal_mode"`              // Enable WAL mode for better concurrency
-	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`       // Busy timeout in milliseconds
+	Path               string `toml:"path"`                // Database file path
+	EnableFTS5         bool   `toml:"enable_fts5"`         // Enable full-text search
+	EnableVector       bool   `toml:"enable_vector"`       // Enable sqlite-vec extension
+	EmbeddingDimension int    `toml:"embedding_dimension"` // Vector dimension for embeddings
+	CacheSizeMB        int    `toml:"cache_size_mb"`       // Cache size in MB
+	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
+	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
 }
 
 type RavenDBConfig struct {

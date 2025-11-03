@@ -173,25 +173,25 @@ type JobSpawnUpdate struct {
 }
 
 type JobStatusUpdate struct {
-	JobID              string    `json:"job_id"`
-	Status             string    `json:"status"`                        // "pending", "running", "completed", "failed", "cancelled"
-	SourceType         string    `json:"source_type"`                   // "jira", "confluence", "github"
-	EntityType         string    `json:"entity_type"`                   // "project", "issue", "space", "page"
-	ResultCount        int       `json:"result_count"`                  // Documents successfully processed
-	FailedCount        int       `json:"failed_count"`                  // Documents that failed
-	TotalURLs          int       `json:"total_urls"`                    // Total URLs discovered
-	CompletedURLs      int       `json:"completed_urls"`                // URLs completed
-	PendingURLs        int       `json:"pending_urls"`                  // URLs still in queue
-	Error              string    `json:"error,omitempty"`               // Error message for failed jobs
-	Duration           float64   `json:"duration,omitempty"`            // Duration in seconds for completed jobs
-	ChildCount         int       `json:"child_count,omitempty"`         // Total child jobs (for error tolerance context)
-	ChildFailureCount  int       `json:"child_failure_count,omitempty"` // Number of failed child jobs (for error tolerance)
-	ErrorTolerance     int       `json:"error_tolerance,omitempty"`     // Error tolerance threshold (0 = unlimited)
-	Timestamp          time.Time `json:"timestamp"`                     // Event timestamp
+	JobID             string    `json:"job_id"`
+	Status            string    `json:"status"`                        // "pending", "running", "completed", "failed", "cancelled"
+	SourceType        string    `json:"source_type"`                   // "jira", "confluence", "github"
+	EntityType        string    `json:"entity_type"`                   // "project", "issue", "space", "page"
+	ResultCount       int       `json:"result_count"`                  // Documents successfully processed
+	FailedCount       int       `json:"failed_count"`                  // Documents that failed
+	TotalURLs         int       `json:"total_urls"`                    // Total URLs discovered
+	CompletedURLs     int       `json:"completed_urls"`                // URLs completed
+	PendingURLs       int       `json:"pending_urls"`                  // URLs still in queue
+	Error             string    `json:"error,omitempty"`               // Error message for failed jobs
+	Duration          float64   `json:"duration,omitempty"`            // Duration in seconds for completed jobs
+	ChildCount        int       `json:"child_count,omitempty"`         // Total child jobs (for error tolerance context)
+	ChildFailureCount int       `json:"child_failure_count,omitempty"` // Number of failed child jobs (for error tolerance)
+	ErrorTolerance    int       `json:"error_tolerance,omitempty"`     // Error tolerance threshold (0 = unlimited)
+	Timestamp         time.Time `json:"timestamp"`                     // Event timestamp
 	// Status report fields from backend (GetStatusReport)
-	ProgressText    string   `json:"progress_text,omitempty"`   // Human-readable progress from backend
-	Errors          []string `json:"errors,omitempty"`          // List of error messages from status_report
-	Warnings        []string `json:"warnings,omitempty"`        // List of warning messages from status_report
+	ProgressText    string   `json:"progress_text,omitempty"`    // Human-readable progress from backend
+	Errors          []string `json:"errors,omitempty"`           // List of error messages from status_report
+	Warnings        []string `json:"warnings,omitempty"`         // List of warning messages from status_report
 	RunningChildren int      `json:"running_children,omitempty"` // Number of running child jobs
 }
 

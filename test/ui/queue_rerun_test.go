@@ -6,21 +6,27 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestQueuePageLoad verifies that the queue management page loads correctly
 func TestQueuePageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueuePageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -46,15 +52,22 @@ func TestQueuePageLoad(t *testing.T) {
 
 // TestQueueRerunButtonExists verifies that rerun buttons are present in the queue
 func TestQueueRerunButtonExists(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueueRerunButtonExists")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -104,15 +117,22 @@ func TestQueueRerunButtonExists(t *testing.T) {
 
 // TestQueueRerunButtonClick tests clicking the rerun button and verifies the behavior
 func TestQueueRerunButtonClick(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueueRerunButtonClick")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -224,15 +244,22 @@ func TestQueueRerunButtonClick(t *testing.T) {
 
 // TestQueueRerunErrorHandling verifies that rerun errors are properly displayed to the user
 func TestQueueRerunErrorHandling(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestQueueRerunErrorHandling")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/queue"
+	url := env.GetBaseURL() + "/queue"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),

@@ -7,20 +7,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestSourcesPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -45,13 +51,20 @@ func TestSourcesPageLoad(t *testing.T) {
 }
 
 func TestSourcesPageElements(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesPageElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Check for presence of key elements
 	tests := []struct {
@@ -67,7 +80,7 @@ func TestSourcesPageElements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeCount int
-			err := chromedp.Run(ctx,
+			err = chromedp.Run(ctx,
 				chromedp.EmulateViewport(1920, 1080),
 				chromedp.Navigate(url),
 				chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -86,18 +99,25 @@ func TestSourcesPageElements(t *testing.T) {
 }
 
 func TestSourcesNavbar(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesNavbar")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	var navbarVisible bool
 	var menuItems []string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`.nav-links`, chromedp.ByQuery),
@@ -144,16 +164,23 @@ func TestSourcesNavbar(t *testing.T) {
 }
 
 func TestSourcesModalWithAuthentication(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesModalWithAuthentication")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Click Add Source button to open modal
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
@@ -199,17 +226,24 @@ func TestSourcesModalWithAuthentication(t *testing.T) {
 }
 
 func TestSourcesTableWithAuthColumn(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesTableWithAuthColumn")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Check if the table has authentication column
 	var hasAuthColumn bool
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`table.table`, chromedp.ByQuery),
@@ -238,16 +272,23 @@ func TestSourcesTableWithAuthColumn(t *testing.T) {
 }
 
 func TestSourcesFilterInputFieldsVisible(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesFilterInputFieldsVisible")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Click Add Source button to open modal
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
@@ -326,16 +367,23 @@ func TestSourcesFilterInputFieldsVisible(t *testing.T) {
 }
 
 func TestSourcesCreateWithFilters(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesCreateWithFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Open the create source modal
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`button.btn.btn-sm.btn-primary`, chromedp.ByQuery),
@@ -436,16 +484,23 @@ func TestSourcesCreateWithFilters(t *testing.T) {
 }
 
 func TestSourcesEditFilters(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesEditFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// First, create a source with filters via API
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	h := env.NewHTTPTestHelper(t)
 
 	source := map[string]interface{}{
 		"name":        "Source to Edit Filters UI",
@@ -590,16 +645,23 @@ func TestSourcesEditFilters(t *testing.T) {
 }
 
 func TestSourcesClearFilters(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesClearFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Create a source with filters via API
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	h := env.NewHTTPTestHelper(t)
 
 	source := map[string]interface{}{
 		"name":        "Source to Clear Filters UI",
@@ -716,16 +778,23 @@ func TestSourcesClearFilters(t *testing.T) {
 }
 
 func TestSourcesFilterDisplayFormatting(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestSourcesFilterDisplayFormatting")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/sources"
+	url := env.GetBaseURL() + "/sources"
 
 	// Create sources with various filter combinations via API
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	h := env.NewHTTPTestHelper(t)
 
 	testSources := []struct {
 		name         string
@@ -800,7 +869,7 @@ func TestSourcesFilterDisplayFormatting(t *testing.T) {
 	}()
 
 	// Load the UI and verify filter display
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`tbody`, chromedp.ByQuery),

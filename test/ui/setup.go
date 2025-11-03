@@ -1,7 +1,14 @@
+// -----------------------------------------------------------------------
+// Last Modified: Tuesday, 4th November 2025 10:16:10 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -10,12 +17,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/pelletier/go-toml/v2"
 )
+
+// testMainOutput captures the TestMain output for later inclusion in test logs
+var testMainOutput bytes.Buffer
+
+// OutputCapture captures stdout/stderr and tees it to a file and original output
+type OutputCapture struct {
+	buffer       *bytes.Buffer
+	originalOut  *os.File
+	originalErr  *os.File
+	reader       *os.File
+	writer       *os.File
+	wg           sync.WaitGroup
+	testLog      *os.File
+	capturing    bool
+	captureMutex sync.Mutex
+}
 
 // TestConfig holds the UI test configuration
 type TestConfig struct {
@@ -26,9 +50,9 @@ type TestConfig struct {
 	} `toml:"build"`
 	Service struct {
 		StartupTimeoutSeconds int    `toml:"startup_timeout_seconds"`
-		Port                 int    `toml:"port"`
-		Host                 string `toml:"host"`
-		ShutdownEndpoint     string `toml:"shutdown_endpoint"`
+		Port                  int    `toml:"port"`
+		Host                  string `toml:"host"`
+		ShutdownEndpoint      string `toml:"shutdown_endpoint"`
 	} `toml:"service"`
 	Output struct {
 		ResultsBaseDir string `toml:"results_base_dir"`
@@ -40,9 +64,12 @@ type TestEnvironment struct {
 	Config     *TestConfig
 	Cmd        *exec.Cmd
 	ResultsDir string
-	LogFile    *os.File  // Service log output
-	TestLog    *os.File  // Test execution log
+	LogFile    *os.File // Service log output
+	TestLog    *os.File // Test execution log
 	Port       int
+
+	// Output capture for test console
+	outputCapture *OutputCapture
 }
 
 // LoadTestConfig loads the test configuration from setup.toml
@@ -96,6 +123,17 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		LogFile:    logFile,
 		TestLog:    testLogFile,
 		Port:       config.Service.Port,
+	}
+
+	// Initialize output capture
+	env.outputCapture = NewOutputCapture(testLogFile)
+	env.outputCapture.Start()
+
+	// Write TestMain output to test log
+	if testMainOutput.Len() > 0 {
+		testLogFile.WriteString("=== TEST MAIN OUTPUT ===\n")
+		testLogFile.Write(testMainOutput.Bytes())
+		testLogFile.WriteString("========================\n\n")
 	}
 
 	// Step 1: Build the application
@@ -228,6 +266,31 @@ func (env *TestEnvironment) buildService() error {
 	}
 
 	fmt.Fprintf(env.LogFile, "Build successful: %s\n", binaryOutput)
+
+	// Copy test-config.toml to bin/quaero.toml
+	testConfigPath := filepath.Join(".", "test-config.toml")
+	binConfigPath := filepath.Join(filepath.Dir(binaryOutput), "quaero.toml")
+
+	if err := env.copyFile(testConfigPath, binConfigPath); err != nil {
+		return fmt.Errorf("failed to copy config to bin directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Config copied to: %s\n", binConfigPath)
+
+	return nil
+}
+
+// copyFile copies a file from src to dst
+func (env *TestEnvironment) copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
+
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		return fmt.Errorf("failed to write destination file: %w", err)
+	}
+
 	return nil
 }
 
@@ -302,6 +365,16 @@ func (env *TestEnvironment) WaitForServiceReady() error {
 
 // Cleanup stops the service and closes resources
 func (env *TestEnvironment) Cleanup() {
+	// Write test completion marker
+	if env.TestLog != nil {
+		fmt.Fprintf(env.TestLog, "\n=== TEST COMPLETED ===\n")
+	}
+
+	// Stop output capture
+	if env.outputCapture != nil {
+		env.outputCapture.Stop()
+	}
+
 	if env.Cmd != nil && env.Cmd.Process != nil {
 		fmt.Fprintf(env.LogFile, "Stopping service (PID: %d)...\n", env.Cmd.Process.Pid)
 		env.Cmd.Process.Kill()
@@ -361,4 +434,209 @@ func (env *TestEnvironment) LogTest(t *testing.T, format string, args ...interfa
 
 	// Also log to test output (appears in console and go test output)
 	t.Log(msg)
+}
+
+// HTTPTestHelper provides helper methods for HTTP testing
+type HTTPTestHelper struct {
+	BaseURL string
+	Client  *http.Client
+	T       *testing.T
+}
+
+// NewHTTPTestHelper creates a new HTTP test helper with the env's base URL
+func (env *TestEnvironment) NewHTTPTestHelper(t *testing.T) *HTTPTestHelper {
+	return &HTTPTestHelper{
+		BaseURL: env.GetBaseURL(),
+		Client:  &http.Client{Timeout: 60 * time.Second},
+		T:       t,
+	}
+}
+
+// NewHTTPTestHelperWithTimeout creates a new HTTP test helper with custom timeout
+func (env *TestEnvironment) NewHTTPTestHelperWithTimeout(t *testing.T, timeout time.Duration) *HTTPTestHelper {
+	return &HTTPTestHelper{
+		BaseURL: env.GetBaseURL(),
+		Client:  &http.Client{Timeout: timeout},
+		T:       t,
+	}
+}
+
+// GET makes a GET request and returns the response
+func (h *HTTPTestHelper) GET(path string) (*http.Response, error) {
+	url := h.BaseURL + path
+	h.T.Logf("GET %s", url)
+	return h.Client.Get(url)
+}
+
+// POST makes a POST request with JSON body
+func (h *HTTPTestHelper) POST(path string, body interface{}) (*http.Response, error) {
+	url := h.BaseURL + path
+	h.T.Logf("POST %s", url)
+
+	var reqBody io.Reader
+	if body != nil {
+		jsonBytes, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reqBody = bytes.NewBuffer(jsonBytes)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return h.Client.Do(req)
+}
+
+// PUT makes a PUT request with JSON body
+func (h *HTTPTestHelper) PUT(path string, body interface{}) (*http.Response, error) {
+	url := h.BaseURL + path
+	h.T.Logf("PUT %s", url)
+
+	jsonBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	return h.Client.Do(req)
+}
+
+// DELETE makes a DELETE request
+func (h *HTTPTestHelper) DELETE(path string) (*http.Response, error) {
+	url := h.BaseURL + path
+	h.T.Logf("DELETE %s", url)
+
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.Client.Do(req)
+}
+
+// AssertStatusCode verifies the response status code
+func (h *HTTPTestHelper) AssertStatusCode(resp *http.Response, expected int) {
+	if resp.StatusCode != expected {
+		h.T.Errorf("Expected status code %d, got %d", expected, resp.StatusCode)
+	}
+}
+
+// ParseJSONResponse parses JSON response into target
+func (h *HTTPTestHelper) ParseJSONResponse(resp *http.Response, target interface{}) error {
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	h.T.Logf("Response body: %s", string(body))
+
+	if err := json.Unmarshal(body, target); err != nil {
+		return fmt.Errorf("failed to parse JSON response: %w", err)
+	}
+
+	return nil
+}
+
+// AssertJSONField checks if a JSON field has the expected value
+func (h *HTTPTestHelper) AssertJSONField(resp *http.Response, field string, expected interface{}) {
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := h.ParseJSONResponse(resp, &result); err != nil {
+		h.T.Fatalf("Failed to parse JSON: %v", err)
+	}
+
+	actual, ok := result[field]
+	if !ok {
+		h.T.Errorf("Field '%s' not found in response", field)
+		return
+	}
+
+	if actual != expected {
+		h.T.Errorf("Field '%s': expected %v, got %v", field, expected, actual)
+	}
+}
+
+// NewOutputCapture creates a new output capturer
+func NewOutputCapture(testLog *os.File) *OutputCapture {
+	return &OutputCapture{
+		buffer:      &bytes.Buffer{},
+		originalOut: os.Stdout,
+		originalErr: os.Stderr,
+		testLog:     testLog,
+		capturing:   false,
+	}
+}
+
+// Start begins capturing stdout/stderr
+func (oc *OutputCapture) Start() {
+	oc.captureMutex.Lock()
+	defer oc.captureMutex.Unlock()
+
+	if oc.capturing {
+		return
+	}
+
+	// Create pipe for capturing output
+	r, w, err := os.Pipe()
+	if err != nil {
+		return // Silently fail if pipe creation fails
+	}
+
+	oc.reader = r
+	oc.writer = w
+	oc.capturing = true
+
+	// Start copying in background
+	oc.wg.Add(1)
+	go func() {
+		defer oc.wg.Done()
+		// Tee to buffer, original output, and test log
+		mw := io.MultiWriter(oc.buffer, oc.originalOut, oc.testLog)
+		io.Copy(mw, oc.reader)
+	}()
+
+	// Redirect stdout/stderr to our pipe
+	os.Stdout = oc.writer
+	os.Stderr = oc.writer
+}
+
+// Stop restores stdout/stderr and returns captured output
+func (oc *OutputCapture) Stop() string {
+	oc.captureMutex.Lock()
+	defer oc.captureMutex.Unlock()
+
+	if !oc.capturing {
+		return oc.buffer.String()
+	}
+
+	// Restore original stdout/stderr
+	os.Stdout = oc.originalOut
+	os.Stderr = oc.originalErr
+
+	// Close writer to signal end of capture
+	if oc.writer != nil {
+		oc.writer.Close()
+	}
+
+	// Wait for copying to finish
+	oc.wg.Wait()
+
+	oc.capturing = false
+	return oc.buffer.String()
 }

@@ -1,8 +1,14 @@
+// -----------------------------------------------------------------------
+// Last Modified: Tuesday, 4th November 2025 10:16:28 am
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"testing"
@@ -15,15 +21,19 @@ import (
 // TestMain runs before all tests in the ui package
 // It verifies the service is accessible before running any UI tests
 // NOTE: Service connectivity check is optional - tests using SetupTestEnvironment
-//       will start their own service instance
+//
+//	will start their own service instance
 func TestMain(m *testing.M) {
+	// Capture TestMain output for inclusion in test logs
+	mw := io.MultiWriter(&testMainOutput, os.Stderr)
+
 	// Optional: Verify service connectivity before running tests
 	// If service is not running, tests using SetupTestEnvironment will start their own
 	if err := verifyServiceConnectivity(); err != nil {
-		fmt.Fprintf(os.Stderr, "\n⚠ Service not pre-started (tests using SetupTestEnvironment will start their own)\n")
-		fmt.Fprintf(os.Stderr, "   Note: %v\n\n", err)
+		fmt.Fprintf(mw, "\n⚠ Service not pre-started (tests using SetupTestEnvironment will start their own)\n")
+		fmt.Fprintf(mw, "   Note: %v\n\n", err)
 	} else {
-		fmt.Println("✓ Service connectivity verified - proceeding with UI tests")
+		fmt.Fprintln(mw, "✓ Service connectivity verified - proceeding with UI tests")
 	}
 
 	// Run all tests

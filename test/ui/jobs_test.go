@@ -7,20 +7,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestJobsPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -45,13 +51,20 @@ func TestJobsPageLoad(t *testing.T) {
 }
 
 func TestJobsPageElements(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsPageElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	// Check for presence of key elements
 	tests := []struct {
@@ -69,7 +82,7 @@ func TestJobsPageElements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeCount int
-			err := chromedp.Run(ctx,
+			err = chromedp.Run(ctx,
 				chromedp.EmulateViewport(1920, 1080),
 				chromedp.Navigate(url),
 				chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -89,18 +102,25 @@ func TestJobsPageElements(t *testing.T) {
 }
 
 func TestJobsNavbar(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsNavbar")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	var navbarVisible bool
 	var menuItems []string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`nav.navbar`, chromedp.ByQuery),
@@ -147,16 +167,23 @@ func TestJobsNavbar(t *testing.T) {
 }
 
 func TestJobsStatistics(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsStatistics")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	// Wait for statistics to load
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -202,16 +229,23 @@ func TestJobsStatistics(t *testing.T) {
 }
 
 func TestJobsTable(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsTable")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	// Check if the table has expected columns
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`table.table`, chromedp.ByQuery),
@@ -254,16 +288,23 @@ func TestJobsTable(t *testing.T) {
 }
 
 func TestJobsCreateModal(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsCreateModal")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	// Click Create Job button to open modal
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`button.btn-info`, chromedp.ByQuery),
@@ -328,15 +369,22 @@ func TestJobsCreateModal(t *testing.T) {
 }
 
 func TestJobsFilterControls(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsFilterControls")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
@@ -377,16 +425,23 @@ func TestJobsFilterControls(t *testing.T) {
 }
 
 func TestJobsQueueIntegration(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobsQueueIntegration")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/jobs"
+	url := env.GetBaseURL() + "/jobs"
 
 	// Load page and wait for queue data
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),

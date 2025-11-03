@@ -594,15 +594,15 @@ func (m *Manager) GetJobLogs(ctx context.Context, jobID string, limit int) ([]Jo
 
 // JobTreeStatus represents aggregated status for a job tree (parent + children)
 type JobTreeStatus struct {
-	ParentJob       *Job      `json:"parent_job"`
-	TotalChildren   int       `json:"total_children"`
-	CompletedCount  int       `json:"completed_count"`
-	FailedCount     int       `json:"failed_count"`
-	RunningCount    int       `json:"running_count"`
-	PendingCount    int       `json:"pending_count"`
-	CancelledCount  int       `json:"cancelled_count"`
-	OverallProgress float64   `json:"overall_progress"` // 0.0 to 1.0
-	EstimatedTime   *int64    `json:"estimated_time_ms,omitempty"` // Estimated milliseconds to completion
+	ParentJob       *Job    `json:"parent_job"`
+	TotalChildren   int     `json:"total_children"`
+	CompletedCount  int     `json:"completed_count"`
+	FailedCount     int     `json:"failed_count"`
+	RunningCount    int     `json:"running_count"`
+	PendingCount    int     `json:"pending_count"`
+	CancelledCount  int     `json:"cancelled_count"`
+	OverallProgress float64 `json:"overall_progress"`            // 0.0 to 1.0
+	EstimatedTime   *int64  `json:"estimated_time_ms,omitempty"` // Estimated milliseconds to completion
 }
 
 // GetJobTreeStatus retrieves aggregated status for a parent job and all its children

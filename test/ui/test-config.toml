@@ -8,10 +8,9 @@ environment = "development"
 port = 18085
 host = "localhost"
 
-# Test database - application creates ./bin/data/ directory automatically
+# Database path configured to bin/data/ directory
 [storage.sqlite]
-path = "./bin/data/quaero-test.db"
-reset_on_startup = true
+path = "./bin/data/quaero.db"
 
 # Disable all sources for faster startup
 [sources.confluence]

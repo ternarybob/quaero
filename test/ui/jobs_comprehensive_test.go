@@ -8,13 +8,19 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestJobCreationFlow tests the complete job creation flow with API and UI
 func TestJobCreationFlow(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobCreationFlow")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	baseURL := env.GetBaseURL()
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create test source via API
 	source := map[string]interface{}{
@@ -133,8 +139,15 @@ func TestJobCreationFlow(t *testing.T) {
 
 // TestJobRerunAction tests the rerun job functionality
 func TestJobRerunAction(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobRerunAction")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	baseURL := env.GetBaseURL()
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -280,8 +293,14 @@ func TestJobRerunAction(t *testing.T) {
 
 // TestJobCancelAction tests the cancel job functionality
 func TestJobCancelAction(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobCancelAction")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -371,8 +390,15 @@ func TestJobCancelAction(t *testing.T) {
 
 // TestJobDeleteAction tests the delete job functionality
 func TestJobDeleteAction(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobDeleteAction")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	baseURL := env.GetBaseURL()
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -479,8 +505,14 @@ func TestJobDeleteAction(t *testing.T) {
 
 // TestJobQueueVisibility tests that queue endpoint returns correct structure
 func TestJobQueueVisibility(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobQueueVisibility")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -606,8 +638,14 @@ func TestJobQueueVisibility(t *testing.T) {
 
 // TestJobFiltering tests entity type filtering with plural values
 func TestJobFiltering(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
-	h := test.NewHTTPTestHelper(t, baseURL)
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestJobFiltering")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create Jira source
 	jiraSource := map[string]interface{}{

@@ -75,8 +75,8 @@ type ListOptions struct {
 	SourceType    string
 	Limit         int
 	Offset        int
-	OrderBy       string // created_at, updated_at, title
-	OrderDir      string // asc, desc
+	OrderBy       string  // created_at, updated_at, title
+	OrderDir      string  // asc, desc
 	CreatedAfter  *string // RFC3339 timestamp for filtering documents created after this time
 	CreatedBefore *string // RFC3339 timestamp for filtering documents created before this time
 }

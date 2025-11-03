@@ -43,12 +43,12 @@ import (
 
 // App holds all application components and dependencies
 type App struct {
-	Config          *common.Config // Deprecated: Use ConfigService instead
-	ConfigService   interfaces.ConfigService
-	Logger          arbor.ILogger
-	ctx             context.Context
-	cancelCtx       context.CancelFunc
-	StorageManager  interfaces.StorageManager
+	Config         *common.Config // Deprecated: Use ConfigService instead
+	ConfigService  interfaces.ConfigService
+	Logger         arbor.ILogger
+	ctx            context.Context
+	cancelCtx      context.CancelFunc
+	StorageManager interfaces.StorageManager
 
 	// Document services
 	LLMService        interfaces.LLMService

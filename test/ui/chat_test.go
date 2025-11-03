@@ -6,20 +6,26 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestChatPageLoad(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestChatPageLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/chat"
+	url := env.GetBaseURL() + "/chat"
 	var title string
 
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
 		chromedp.Title(&title),
@@ -40,13 +46,20 @@ func TestChatPageLoad(t *testing.T) {
 }
 
 func TestChatElements(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestChatElements")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/chat"
+	url := env.GetBaseURL() + "/chat"
 
 	// Check for presence of chat UI elements
 	tests := []struct {
@@ -63,7 +76,7 @@ func TestChatElements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var visible bool
-			err := chromedp.Run(ctx,
+			err = chromedp.Run(ctx,
 				chromedp.Navigate(url),
 				chromedp.WaitVisible(`body`, chromedp.ByQuery),
 				chromedp.Sleep(500*time.Millisecond),
@@ -82,16 +95,23 @@ func TestChatElements(t *testing.T) {
 }
 
 func TestChatHealthCheck(t *testing.T) {
+	// Setup test environment
+	env, err := SetupTestEnvironment("TestChatHealthCheck")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := test.MustGetTestServerURL() + "/chat"
+	url := env.GetBaseURL() + "/chat"
 
 	var statusText string
-	err := chromedp.Run(ctx,
+	err = chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`#live-status`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Wait for health check to complete

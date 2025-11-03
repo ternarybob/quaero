@@ -85,12 +85,12 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		string(source.Type),
 		entityType,
 		seedURLs,
-		crawlConfig,     // Pass CrawlConfig struct
-		source.ID,       // sourceID
-		false,           // refreshSource
-		nil,             // sourceConfigSnapshot
-		nil,             // authSnapshot
-		parentJobID,     // jobDefinitionID - link to parent
+		crawlConfig, // Pass CrawlConfig struct
+		source.ID,   // sourceID
+		false,       // refreshSource
+		nil,         // sourceConfigSnapshot
+		nil,         // authSnapshot
+		parentJobID, // jobDefinitionID - link to parent
 	)
 
 	if err != nil {

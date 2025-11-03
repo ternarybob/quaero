@@ -635,8 +635,8 @@ func TestJobLogsAggregated_LevelFiltering(t *testing.T) {
 	h.AssertStatusCode(allResp, http.StatusOK)
 
 	var allResult struct {
-		Level string                   `json:"level"`
-		Count int                      `json:"count"`
+		Level string `json:"level"`
+		Count int    `json:"count"`
 	}
 	if err := h.ParseJSONResponse(allResp, &allResult); err != nil {
 		t.Fatalf("Failed to parse all logs response: %v", err)

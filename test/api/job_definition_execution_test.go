@@ -386,9 +386,9 @@ func TestJobDefinitionExecution_ErrorHandling(t *testing.T) {
 		"sources":     []string{sourceID},
 		"steps": []map[string]interface{}{
 			{
-				"name":   "invalid-step",
-				"action": "invalid_action", // This action doesn't exist
-				"config": map[string]interface{}{},
+				"name":     "invalid-step",
+				"action":   "invalid_action", // This action doesn't exist
+				"config":   map[string]interface{}{},
 				"on_error": "fail",
 			},
 		},

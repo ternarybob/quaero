@@ -23,10 +23,10 @@ const (
 type JobType string
 
 const (
-	JobTypeParent         JobType = "parent"          // Parent job that spawns child jobs
-	JobTypePreValidation  JobType = "pre_validation"  // Pre-flight validation job
-	JobTypeCrawlerURL     JobType = "crawler_url"     // Individual URL crawling job
-	JobTypePostSummary    JobType = "post_summary"    // Post-processing summarization job
+	JobTypeParent        JobType = "parent"         // Parent job that spawns child jobs
+	JobTypePreValidation JobType = "pre_validation" // Pre-flight validation job
+	JobTypeCrawlerURL    JobType = "crawler_url"    // Individual URL crawling job
+	JobTypePostSummary   JobType = "post_summary"   // Post-processing summarization job
 )
 
 // Content type and output format constants for Firecrawl-style scraping
@@ -66,40 +66,42 @@ const (
 //   - Isolating jobs from config changes
 //
 // Usage Example - Creating a Parent Job:
-//   job := &CrawlJob{
-//       ID:         uuid.New().String(),
-//       ParentID:   "", // Empty for parent jobs
-//       JobType:    JobTypeParent,
-//       Name:       "Crawl Jira Issues",
-//       SourceType: "jira",
-//       EntityType: "issues",
-//       Config: CrawlConfig{
-//           MaxDepth:    3,
-//           MaxPages:    100,
-//           Concurrency: 4,
-//           FollowLinks: true,
-//       },
-//       Status:    JobStatusPending,
-//       SeedURLs:  []string{"https://jira.example.com/browse/PROJ-1"},
-//   }
-//   jobStorage.SaveJob(ctx, job)
+//
+//	job := &CrawlJob{
+//	    ID:         uuid.New().String(),
+//	    ParentID:   "", // Empty for parent jobs
+//	    JobType:    JobTypeParent,
+//	    Name:       "Crawl Jira Issues",
+//	    SourceType: "jira",
+//	    EntityType: "issues",
+//	    Config: CrawlConfig{
+//	        MaxDepth:    3,
+//	        MaxPages:    100,
+//	        Concurrency: 4,
+//	        FollowLinks: true,
+//	    },
+//	    Status:    JobStatusPending,
+//	    SeedURLs:  []string{"https://jira.example.com/browse/PROJ-1"},
+//	}
+//	jobStorage.SaveJob(ctx, job)
 //
 // Usage Example - Creating a Child Job:
-//   childJob := &CrawlJob{
-//       ID:         uuid.New().String(),
-//       ParentID:   "parent-job-id", // Reference root parent
-//       JobType:    JobTypeCrawlerURL,
-//       Name:       "URL: https://example.com/page1",
-//       SourceType: "jira",
-//       EntityType: "issues",
-//       Config:     parentJob.Config, // Inherit parent config
-//       Status:     JobStatusPending,
-//       Progress: CrawlProgress{
-//           TotalURLs:   1,
-//           PendingURLs: 1,
-//       },
-//   }
-//   jobStorage.SaveJob(ctx, childJob)
+//
+//	childJob := &CrawlJob{
+//	    ID:         uuid.New().String(),
+//	    ParentID:   "parent-job-id", // Reference root parent
+//	    JobType:    JobTypeCrawlerURL,
+//	    Name:       "URL: https://example.com/page1",
+//	    SourceType: "jira",
+//	    EntityType: "issues",
+//	    Config:     parentJob.Config, // Inherit parent config
+//	    Status:     JobStatusPending,
+//	    Progress: CrawlProgress{
+//	        TotalURLs:   1,
+//	        PendingURLs: 1,
+//	    },
+//	}
+//	jobStorage.SaveJob(ctx, childJob)
 type CrawlJob struct {
 	ID string `json:"id"`
 	// ParentID is the parent job ID for child jobs (empty for parent jobs)
@@ -133,16 +135,16 @@ type CrawlJob struct {
 	// FailedCount is a snapshot of Progress.FailedURLs at job completion
 	// Synced when job reaches terminal status (completed/failed/cancelled)
 	// Used for historical tracking and validation
-	FailedCount    int                    `json:"failed_count"`
-	DocumentsSaved int                    `json:"documents_saved"`     // Number of documents successfully saved to storage
-	SeedURLs       []string               `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
+	FailedCount    int      `json:"failed_count"`
+	DocumentsSaved int      `json:"documents_saved"`     // Number of documents successfully saved to storage
+	SeedURLs       []string `json:"seed_urls,omitempty"` // Initial URLs used to start the crawl (for rerun capability)
 	// SeenURLs is an in-memory cache of URLs that have been enqueued to prevent duplicates.
 	// NOTE: This field is NOT persisted to the database (omitempty tag).
 	// Persistent URL deduplication is handled by the job_seen_urls table via JobStorage.MarkURLSeen().
 	// This in-memory map is used for fast lookups during job execution to avoid database queries.
 	// The map is populated from the database when the job is loaded.
 	// See JobStorage.MarkURLSeen() for the authoritative deduplication mechanism.
-	SeenURLs       map[string]bool        `json:"seen_urls,omitempty"`
+	SeenURLs map[string]bool `json:"seen_urls,omitempty"`
 	// Metadata stores custom key-value data for the job.
 	// Common use cases:
 	//   - corpus_summary: Generated summary of all documents in the job
@@ -151,7 +153,7 @@ type CrawlJob struct {
 	//   - execution_context: Additional context for job execution
 	// NOTE: This field is NOT indexed. Use for small amounts of metadata only.
 	// For large data, store in separate tables and reference by job ID.
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // CrawlConfig defines crawl behavior

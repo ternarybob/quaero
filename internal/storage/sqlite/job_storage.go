@@ -245,7 +245,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 			)
 			return dbErr
 		},
-		5,   // max attempts
+		5,                    // max attempts
 		100*time.Millisecond, // initial delay
 		s.logger,
 	)
