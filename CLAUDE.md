@@ -17,46 +17,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Instructions
 
-**CRITICAL: The test runner handles EVERYTHING automatically - do NOT run build scripts or start the service manually!**
+Tests are organized in the `test/` directory and use Go's native test infrastructure with automatic service lifecycle management.
 
-**Test Runner** (`cmd/quaero-test-runner/`):
-- Builds the application using `scripts/build.ps1`
-- Starts a test server on port 3333 for browser validation
-- Starts the Quaero service in a visible window
-- Waits for service readiness
-- Runs all test suites (API + UI)
-- Captures screenshots for UI tests
-- Saves results to timestamped directories
-- Stops the service and cleans up
+**Test Organization:**
+- `test/api/` - API integration tests (database interactions)
+- `test/ui/` - Browser automation tests (ChromeDP)
 
 **How to Run Tests:**
 
 ```powershell
-# Option 1: Use pre-built test runner (recommended)
-.\scripts\build.ps1           # Builds test runner automatically
-cd bin
-.\quaero-test-runner.exe
+# Run all tests in a specific directory
+cd test/api
+go test -v ./...
 
-# Option 2: Run from source
-cd cmd/quaero-test-runner
-go run .
+cd test/ui
+go test -v ./...
+
+# Run specific test
+cd test/ui
+go test -v -run TestSourcesClearFilters
+
+# Run with timeout for longer test suites
+cd test/ui
+go test -timeout 20m -v ./...
 ```
 
-**For Development/Debugging Only:**
-```powershell
-# Run tests directly (requires manual service start)
-.\scripts\build.ps1 -Run      # Start service in separate window first
-cd test
-go test -v ./api              # API tests
-go test -v ./ui               # UI tests
-```
-
-**See:** `cmd/quaero-test-runner/README.md` for detailed documentation, configuration, and troubleshooting.
+**Test Infrastructure:**
+- Tests use `SetupTestEnvironment()` helper that automatically:
+  - Builds the application using `scripts/build.ps1`
+  - Starts a test server on port 18085 (separate from dev server on 8085)
+  - Waits for service readiness
+  - Captures screenshots for UI tests
+  - Saves results to `test/results/{suite}-{timestamp}/`
+  - Stops the service and cleans up after test completion
 
 **IMPORTANT:**
-- ❌ DO NOT run `build.ps1` before the test runner
-- ❌ DO NOT manually start the service before the test runner
-- ✅ Let the test runner control the service lifecycle
+- ❌ DO NOT manually start the service before running tests
+- ✅ Let `SetupTestEnvironment()` control the service lifecycle
+- ✅ Each test suite gets its own timestamped result directory
 
 ## Build & Development Commands
 

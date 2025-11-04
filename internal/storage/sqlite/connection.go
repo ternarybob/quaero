@@ -36,6 +36,11 @@ func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, 
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Configure connection pool to prevent SQLITE_BUSY errors
+	// SQLite doesn't handle concurrent writes well, so limit to 1 connection
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	s := &SQLiteDB{
 		db:     db,
 		logger: logger,

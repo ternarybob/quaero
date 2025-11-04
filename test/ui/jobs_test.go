@@ -38,7 +38,7 @@ func TestJobsPageLoad(t *testing.T) {
 	}
 
 	// Take screenshot
-	if err := TakeScreenshot(ctx, "jobs-page"); err != nil {
+	if err := env.TakeScreenshot(ctx, "jobs-page"); err != nil {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
@@ -98,6 +98,11 @@ func TestJobsPageElements(t *testing.T) {
 				t.Errorf("Element '%s' (selector: %s) not found on page", tt.name, tt.selector)
 			}
 		})
+	}
+
+	// Take screenshot after checking all elements
+	if err := env.TakeScreenshot(ctx, "jobs-page-elements"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 }
 
@@ -163,6 +168,11 @@ func TestJobsNavbar(t *testing.T) {
 		t.Error("JOBS menu item should be active on jobs page")
 	}
 
+	// Take screenshot of navbar
+	if err := env.TakeScreenshot(ctx, "jobs-navbar"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
+	}
+
 	t.Log("✓ Navbar displays correctly with JOBS item")
 }
 
@@ -195,7 +205,7 @@ func TestJobsStatistics(t *testing.T) {
 	}
 
 	// Take screenshot of statistics
-	if err := TakeScreenshot(ctx, "jobs-statistics"); err != nil {
+	if err := env.TakeScreenshot(ctx, "jobs-statistics"); err != nil {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
@@ -284,6 +294,11 @@ func TestJobsTable(t *testing.T) {
 		t.Errorf("Expected 7 columns in table, got %d", columnCount)
 	}
 
+	// Take screenshot of jobs table
+	if err := env.TakeScreenshot(ctx, "jobs-table"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
+	}
+
 	t.Log("✓ Jobs table displays correctly with all columns")
 }
 
@@ -333,7 +348,7 @@ func TestJobsCreateModal(t *testing.T) {
 	}
 
 	// Take screenshot of modal
-	if err := TakeScreenshot(ctx, "jobs-create-modal"); err != nil {
+	if err := env.TakeScreenshot(ctx, "jobs-create-modal"); err != nil {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
@@ -421,6 +436,11 @@ func TestJobsFilterControls(t *testing.T) {
 		}
 	}
 
+	// Take screenshot of filter controls
+	if err := env.TakeScreenshot(ctx, "jobs-filter-controls"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
+	}
+
 	t.Log("✓ Job filter controls display correctly")
 }
 
@@ -480,6 +500,11 @@ func TestJobsQueueIntegration(t *testing.T) {
 	// Stats should not be "-" after queue loads
 	if pendingStat == "-" || runningStat == "-" {
 		t.Logf("Queue stats still loading (pending: %s, running: %s)", pendingStat, runningStat)
+	}
+
+	// Take screenshot of queue integration
+	if err := env.TakeScreenshot(ctx, "jobs-queue-integration"); err != nil {
+		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
 	t.Log("✓ Job queue integration working (loadJobQueue called on page load)")

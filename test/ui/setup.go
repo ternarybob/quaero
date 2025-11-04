@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,11 @@ import (
 
 // testMainOutput captures the TestMain output for later inclusion in test logs
 var testMainOutput bytes.Buffer
+
+// suiteDirectories tracks parent directories for test suites
+// Maps suite name (e.g., "TestSources") to parent directory path
+var suiteDirectories = make(map[string]string)
+var suiteDirectoriesMutex sync.Mutex
 
 // OutputCapture captures stdout/stderr and tees it to a file and original output
 type OutputCapture struct {
@@ -72,6 +78,63 @@ type TestEnvironment struct {
 	outputCapture *OutputCapture
 }
 
+// extractSuiteName extracts the test suite name from a test name
+// Example: "TestSourcesPageLoad" -> "TestSources"
+//          "TestJobsCreateModal" -> "TestJobs"
+//          "TestAuthPageLoad" -> "TestAuth"
+func extractSuiteName(testName string) string {
+	// Find all capital letter positions after "Test"
+	if !strings.HasPrefix(testName, "Test") {
+		return testName
+	}
+
+	// Remove "Test" prefix
+	remainder := testName[4:]
+
+	// Find all capital letter positions
+	var capitals []int
+	for i := 0; i < len(remainder); i++ {
+		if remainder[i] >= 'A' && remainder[i] <= 'Z' {
+			capitals = append(capitals, i)
+		}
+	}
+
+	// If we have at least 2 capitals, take everything up to the second one
+	// Example: "SourcesPageLoad" has capitals at [0, 7, 11]
+	//          We want "Sources" (up to index 7)
+	if len(capitals) >= 2 {
+		return "Test" + remainder[:capitals[1]]
+	}
+
+	// If only one capital or none, return the whole name
+	return testName
+}
+
+// getOrCreateSuiteDirectory gets or creates a parent directory for a test suite
+// Returns the suite parent directory path
+func getOrCreateSuiteDirectory(suiteName string, baseDir string) (string, error) {
+	suiteDirectoriesMutex.Lock()
+	defer suiteDirectoriesMutex.Unlock()
+
+	// Check if we already have a directory for this suite
+	if existingDir, ok := suiteDirectories[suiteName]; ok {
+		return existingDir, nil
+	}
+
+	// Create new parent directory for this suite
+	timestamp := time.Now().Format("20060102-150405")
+	suiteDir := filepath.Join(baseDir, fmt.Sprintf("%s-%s", suiteName, timestamp))
+
+	if err := os.MkdirAll(suiteDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create suite directory: %w", err)
+	}
+
+	// Store for future tests in this suite
+	suiteDirectories[suiteName] = suiteDir
+
+	return suiteDir, nil
+}
+
 // LoadTestConfig loads the test configuration from setup.toml
 func LoadTestConfig() (*TestConfig, error) {
 	configPath := filepath.Join(".", "setup.toml")
@@ -95,11 +158,19 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		return nil, fmt.Errorf("failed to load test config: %w", err)
 	}
 
-	// Create test-specific results directory: {test-name}-{datetime}
-	timestamp := time.Now().Format("20060102-150405")
-	resultsDir := filepath.Join(config.Output.ResultsBaseDir, fmt.Sprintf("%s-%s", testName, timestamp))
+	// Extract suite name (e.g., "TestSources" from "TestSourcesPageLoad")
+	suiteName := extractSuiteName(testName)
+
+	// Get or create suite parent directory: {suite-name}-{datetime}
+	suiteDir, err := getOrCreateSuiteDirectory(suiteName, config.Output.ResultsBaseDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create suite directory: %w", err)
+	}
+
+	// Create test-specific subdirectory under suite directory
+	resultsDir := filepath.Join(suiteDir, testName)
 	if err := os.MkdirAll(resultsDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create results directory: %w", err)
+		return nil, fmt.Errorf("failed to create test directory: %w", err)
 	}
 
 	// Create service log file for this test run
