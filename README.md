@@ -809,7 +809,56 @@ This architecture provides several key benefits:
 - **Real-Time Updates**: WebSocket integration delivers live progress updates to the UI
 - **Scalable Processing**: Configurable worker pool enables concurrent job processing with proper resource management
 
-The parent-child job hierarchy allows for sophisticated workflows where a single JobDefinition can spawn multiple child jobs (e.g., URL discovery creating individual crawler jobs), with all progress and status information properly tracked and aggregated. For detailed technical documentation, see `docs/architecture/QUEUE_ARCHITECTURE.md` and `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`.
+The parent-child job hierarchy allows for sophisticated workflows where a single JobDefinition can spawn multiple child jobs (e.g., URL discovery creating individual crawler jobs), with all progress and status information properly tracked and aggregated.
+
+#### Step Executors
+
+The JobExecutor system supports multiple step types through registered executors:
+
+| Action | Executor | Purpose |
+|--------|----------|---------|
+| `crawl` | CrawlerStepExecutor | Start crawling jobs for URL discovery and content extraction |
+| `transform` | TransformStepExecutor | Data transformation and processing |
+| `reindex` | ReindexStepExecutor | Rebuild FTS5 search index for optimal performance |
+
+#### Configuration
+
+```toml
+# Job Definition Configuration
+[jobs]
+enabled = true
+max_concurrent_jobs = 5
+job_timeout = "30m"
+cleanup_interval = "24h"
+max_job_history = 1000
+
+# Queue Configuration
+[queue]
+queue_name = "quaero-jobs"
+concurrency = 4
+poll_interval = "1s"
+visibility_timeout = "5m"
+max_receive = 3
+```
+
+#### Key API Endpoints
+
+```http
+# Job Definition Management
+POST   /api/job-definitions/{id}/execute  # Execute job definition
+GET    /api/job-definitions              # List all job definitions
+
+# Job Monitoring
+GET    /api/jobs                         # List job execution records
+GET    /api/jobs/{id}                    # Get job details and logs
+POST   /api/jobs/{id}/cancel             # Cancel running job
+
+# Queue Management
+GET    /api/queue/stats                  # Queue statistics and health
+GET    /api/queue/jobs                   # List queued jobs
+```
+
+For comprehensive technical documentation including database schemas, error handling strategies, lifecycle states, and troubleshooting guides, see `docs/JOB_QUEUE_MANAGEMENT.md`, `docs/architecture/QUEUE_ARCHITECTURE.md` and `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`.
 
 ### Authentication Flow
 
