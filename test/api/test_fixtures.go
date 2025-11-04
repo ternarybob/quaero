@@ -28,9 +28,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// LoadTestConfig loads test configuration with cleanup function
+// CreateInMemoryTestConfig creates test configuration with cleanup function
 // Creates a temporary database file for test isolation
-func LoadTestConfig(t *testing.T) (*common.Config, func()) {
+// This is for unit tests, not for the full service lifecycle tests (use SetupTestEnvironment for that)
+func CreateInMemoryTestConfig(t *testing.T) (*common.Config, func()) {
 	t.Helper()
 
 	// Create temporary database file

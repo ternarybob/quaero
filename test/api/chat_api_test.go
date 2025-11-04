@@ -3,13 +3,16 @@ package api
 import (
 	"net/http"
 	"testing"
-	"time"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestChatHealth(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestChatHealth")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.GET("/api/chat/health")
 	if err != nil {
@@ -39,8 +42,15 @@ func TestChatHealth(t *testing.T) {
 }
 
 func TestChatMessage(t *testing.T) {
-	// Use longer timeout for chat tests (LLM responses can be slow)
-	h := test.NewHTTPTestHelperWithTimeout(t, test.MustGetTestServerURL(), 120*time.Second)
+	env, err := SetupTestEnvironment("TestChatMessage")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	// Note: HTTP client in setup uses 30 second timeout
+	// May need to increase if chat responses take longer
+	h := env.NewHTTPTestHelper(t)
 
 	// Send a simple message
 	message := map[string]interface{}{
@@ -76,8 +86,15 @@ func TestChatMessage(t *testing.T) {
 }
 
 func TestChatWithHistory(t *testing.T) {
-	// Use longer timeout for chat tests (LLM responses can be slow)
-	h := test.NewHTTPTestHelperWithTimeout(t, test.MustGetTestServerURL(), 120*time.Second)
+	env, err := SetupTestEnvironment("TestChatWithHistory")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	// Note: HTTP client in setup uses 30 second timeout
+	// May need to increase if chat responses take longer
+	h := env.NewHTTPTestHelper(t)
 
 	// First message
 	message1 := map[string]interface{}{
@@ -130,7 +147,13 @@ func TestChatWithHistory(t *testing.T) {
 }
 
 func TestChatEmptyMessage(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestChatEmptyMessage")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Send empty message (should fail validation)
 	message := map[string]interface{}{

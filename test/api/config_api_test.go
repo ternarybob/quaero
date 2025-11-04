@@ -5,12 +5,16 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestConfigEndpoint(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestConfigEndpoint")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.GET("/api/config")
 	if err != nil {
@@ -54,8 +58,8 @@ func TestConfigEndpoint(t *testing.T) {
 		t.Error("Config response missing 'port' field")
 	}
 
-	// Port should match the service port (8085 by default, or from config)
-	expectedPort := test.GetExpectedPort()
+	// Port should match the service port (19085 for API tests)
+	expectedPort := 19085
 	if int(port) != expectedPort {
 		t.Errorf("Expected port %d, got %d", expectedPort, int(port))
 	}

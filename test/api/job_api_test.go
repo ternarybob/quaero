@@ -3,8 +3,6 @@ package api
 import (
 	"net/http"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // NOTE: Direct job creation endpoints (/api/jobs/create) have been deprecated.
@@ -27,7 +25,13 @@ import (
 // TestCreateJobValidationFailure tests source creation validation
 // Note: Job validation now occurs at job definition level
 func TestCreateJobValidationFailure(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestCreateJobValidationFailure")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source with invalid configuration (negative concurrency)
 	source := map[string]interface{}{

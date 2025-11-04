@@ -1,10 +1,4 @@
 // Package api contains API integration tests.
-//
-// These tests can run in two modes:
-// - Mock mode (TEST_MODE=mock): Uses in-memory mock server, fast, isolated
-// - Integration mode (TEST_MODE=integration): Uses real Quaero service, full stack
-//
-// Set TEST_MODE environment variable to control behavior.
 package api
 
 import (
@@ -12,12 +6,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 func TestListSources(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestListSources")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.GET("/api/sources")
 	if err != nil {
@@ -32,7 +30,13 @@ func TestListSources(t *testing.T) {
 }
 
 func TestCreateSource(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestCreateSource")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a test source
 	source := map[string]interface{}{
@@ -86,7 +90,13 @@ func TestCreateSource(t *testing.T) {
 }
 
 func TestGetSource(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestGetSource")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// First create a source
 	source := map[string]interface{}{
@@ -140,7 +150,13 @@ func TestGetSource(t *testing.T) {
 }
 
 func TestUpdateSource(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestUpdateSource")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a source
 	source := map[string]interface{}{
@@ -214,7 +230,13 @@ func TestUpdateSource(t *testing.T) {
 }
 
 func TestDeleteSource(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestDeleteSource")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a source
 	source := map[string]interface{}{
@@ -266,7 +288,13 @@ func TestDeleteSource(t *testing.T) {
 
 // TestCreateSourcesWithAuthentication creates test Jira and Confluence sources with authentication
 func TestCreateSourcesWithAuthentication(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
+	env, err := SetupTestEnvironment("TestCreateSourcesWithAuthentication")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	baseURL := env.GetBaseURL()
 
 	// First, create test authentication for bobmcallan.atlassian.net
 	authData := map[string]interface{}{
@@ -331,7 +359,7 @@ func TestCreateSourcesWithAuthentication(t *testing.T) {
 	t.Logf("Created authentication with ID: %s", authID)
 
 	// Now create Jira source with authentication
-	h := test.NewHTTPTestHelper(t, baseURL)
+	h := env.NewHTTPTestHelper(t)
 
 	jiraSource := map[string]interface{}{
 		"name":     "Test Jira with Auth",
@@ -463,7 +491,13 @@ func TestCreateSourcesWithAuthentication(t *testing.T) {
 
 // TestSourceWithoutAuthentication verifies that sources can be created without authentication
 func TestSourceWithoutAuthentication(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSourceWithoutAuthentication")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source without auth_id (empty string)
 	source := map[string]interface{}{
@@ -504,7 +538,13 @@ func TestSourceWithoutAuthentication(t *testing.T) {
 
 // TestCreateSourceWithFilters verifies that sources can be created with filter patterns
 func TestCreateSourceWithFilters(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestCreateSourceWithFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source with include and exclude filters
 	source := map[string]interface{}{
@@ -588,7 +628,13 @@ func TestCreateSourceWithFilters(t *testing.T) {
 
 // TestCreateSourceWithoutFilters verifies that sources can be created without filters
 func TestCreateSourceWithoutFilters(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestCreateSourceWithoutFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source without filters field
 	source := map[string]interface{}{
@@ -642,7 +688,13 @@ func TestCreateSourceWithoutFilters(t *testing.T) {
 
 // TestUpdateSourceFilters verifies that source filters can be updated
 func TestUpdateSourceFilters(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestUpdateSourceFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source with initial filters
 	source := map[string]interface{}{
@@ -730,7 +782,13 @@ func TestUpdateSourceFilters(t *testing.T) {
 
 // TestFilterSanitization verifies that filter patterns are properly sanitized
 func TestFilterSanitization(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestFilterSanitization")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source with messy filter input (extra whitespace, empty tokens)
 	source := map[string]interface{}{
@@ -786,7 +844,13 @@ func TestFilterSanitization(t *testing.T) {
 
 // TestFilterSanitizationAllWhitespace verifies handling of all-whitespace patterns
 func TestFilterSanitizationAllWhitespace(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestFilterSanitizationAllWhitespace")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create source with only whitespace in filters
 	source := map[string]interface{}{
@@ -840,7 +904,13 @@ func TestFilterSanitizationAllWhitespace(t *testing.T) {
 
 // TestListSourcesIncludesFilters verifies that listing sources includes their filters
 func TestListSourcesIncludesFilters(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestListSourcesIncludesFilters")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create multiple sources with different filter configurations
 	sources := []map[string]interface{}{

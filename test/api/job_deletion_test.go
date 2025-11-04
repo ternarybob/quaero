@@ -8,13 +8,17 @@ package api
 import (
 	"net/http"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestJobDeletion_SingleJob tests deleting a single job via HTTP API
 func TestJobDeletion_SingleJob(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDeletion_SingleJob")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a source first
 	resp, err := h.POST("/api/sources", map[string]interface{}{
@@ -96,7 +100,13 @@ func TestJobDeletion_SingleJob(t *testing.T) {
 
 // TestJobDeletion_NonExistentJob tests deleting a job that doesn't exist
 func TestJobDeletion_NonExistentJob(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDeletion_NonExistentJob")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	nonExistentID := "job-does-not-exist-12345"
 	deleteResp, err := h.DELETE("/api/jobs/" + nonExistentID)
@@ -122,7 +132,13 @@ func TestJobDeletion_NonExistentJob(t *testing.T) {
 
 // TestJobDeletion_IdempotentDelete tests that deleting the same job multiple times is safe
 func TestJobDeletion_IdempotentDelete(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDeletion_IdempotentDelete")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.POST("/api/sources", map[string]interface{}{
 		"name": "Idempotent Deletion Test",
@@ -188,7 +204,13 @@ func TestJobDeletion_IdempotentDelete(t *testing.T) {
 
 // TestJobDeletion_ResponseFormat verifies the structure of the deletion response
 func TestJobDeletion_ResponseFormat(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDeletion_ResponseFormat")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.POST("/api/sources", map[string]interface{}{
 		"name": "Response Format Test",
@@ -257,7 +279,13 @@ func TestJobDeletion_ResponseFormat(t *testing.T) {
 
 // TestJobDeletion_ErrorResponseFormat verifies error response structure
 func TestJobDeletion_ErrorResponseFormat(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDeletion_ErrorResponseFormat")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	nonExistentID := "job-error-format-test"
 	deleteResp, err := h.DELETE("/api/jobs/" + nonExistentID)

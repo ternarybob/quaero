@@ -1,49 +1,49 @@
 // Package api contains API integration tests.
-//
-// These tests can run in two modes:
-// - Mock mode (TEST_MODE=mock): Uses in-memory mock server, fast, isolated
-// - Integration mode (TEST_MODE=integration): Uses real Quaero service, full stack
-//
-// Set TEST_MODE environment variable to control behavior.
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestAuthListEndpoint tests the GET /api/auth/list endpoint
 func TestAuthListEndpoint(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
+	env, err := SetupTestEnvironment("TestAuthListEndpoint")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Test listing authentications
-	resp, err := http.Get(baseURL + "/api/auth/list")
+	resp, err := h.GET("/api/auth/list")
 	if err != nil {
 		t.Fatalf("Failed to get auth list: %v", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
+	h.AssertStatusCode(resp, http.StatusOK)
 
 	// Parse response
 	var auths []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&auths); err != nil {
+	if err := h.ParseJSONResponse(resp, &auths); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
 	// Should be an array (possibly empty)
-	t.Logf("Found %d authentication credentials", len(auths))
+	env.LogTest(t, "Found %d authentication credentials", len(auths))
 }
 
 // TestAuthCaptureEndpoint tests capturing auth from Chrome extension
 func TestAuthCaptureEndpoint(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
+	env, err := SetupTestEnvironment("TestAuthCaptureEndpoint")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create test auth data (simulating Chrome extension)
 	authData := map[string]interface{}{
@@ -65,25 +65,17 @@ func TestAuthCaptureEndpoint(t *testing.T) {
 		},
 	}
 
-	jsonData, err := json.Marshal(authData)
-	if err != nil {
-		t.Fatalf("Failed to marshal auth data: %v", err)
-	}
-
 	// Send POST request
-	resp, err := http.Post(baseURL+"/api/auth", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := h.POST("/api/auth", authData)
 	if err != nil {
 		t.Fatalf("Failed to post auth data: %v", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
+	h.AssertStatusCode(resp, http.StatusOK)
 
 	// Verify response
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := h.ParseJSONResponse(resp, &result); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
@@ -91,33 +83,37 @@ func TestAuthCaptureEndpoint(t *testing.T) {
 		t.Errorf("Expected success status, got %v", result["status"])
 	}
 
-	t.Log("✓ Authentication capture endpoint works")
+	env.LogTest(t, "Authentication capture endpoint works")
 }
 
 // TestAuthStatusEndpoint tests the GET /api/auth/status endpoint
 func TestAuthStatusEndpoint(t *testing.T) {
-	baseURL := test.MustGetTestServerURL()
+	env, err := SetupTestEnvironment("TestAuthStatusEndpoint")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
 
-	resp, err := http.Get(baseURL + "/api/auth/status")
+	h := env.NewHTTPTestHelper(t)
+
+	resp, err := h.GET("/api/auth/status")
 	if err != nil {
 		t.Fatalf("Failed to get auth status: %v", err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
+	h.AssertStatusCode(resp, http.StatusOK)
 
 	// Parse response
 	var status map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
+	resp.Body.Close()
 
 	// Should have authenticated field
 	if _, ok := status["authenticated"]; !ok {
 		t.Error("Response missing 'authenticated' field")
 	}
 
-	t.Logf("✓ Auth status: authenticated=%v", status["authenticated"])
+	env.LogTest(t, "Auth status: authenticated=%v", status["authenticated"])
 }

@@ -7,13 +7,17 @@ package api
 import (
 	"net/http"
 	"testing"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestSearchBasicQuery tests basic search with single term
 func TestSearchBasicQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchBasicQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Test basic search query
 	resp, err := h.GET("/api/search?q=authentication&limit=10")
@@ -54,7 +58,13 @@ func TestSearchBasicQuery(t *testing.T) {
 
 // TestSearchORQuery tests OR search (default behavior)
 func TestSearchORQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchORQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// OR search: documents containing "authentication" OR "security"
 	resp, err := h.GET("/api/search?q=authentication security&limit=10")
@@ -85,7 +95,13 @@ func TestSearchORQuery(t *testing.T) {
 
 // TestSearchANDQuery tests AND search with + prefix
 func TestSearchANDQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchANDQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// AND search: documents containing "authentication" AND "security"
 	resp, err := h.GET("/api/search?q=%2Bauthentication %2Bsecurity&limit=10")
@@ -115,7 +131,13 @@ func TestSearchANDQuery(t *testing.T) {
 
 // TestSearchPhraseQuery tests phrase search with quotes
 func TestSearchPhraseQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchPhraseQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Phrase search: exact phrase "security audit"
 	resp, err := h.GET("/api/search?q=\"security audit\"&limit=10")
@@ -145,7 +167,13 @@ func TestSearchPhraseQuery(t *testing.T) {
 
 // TestSearchDocumentTypeQualifier tests document_type qualifier
 func TestSearchDocumentTypeQualifier(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchDocumentTypeQualifier")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Search with document_type qualifier
 	resp, err := h.GET("/api/search?q=authentication document_type:jira&limit=10")
@@ -187,7 +215,13 @@ func TestSearchDocumentTypeQualifier(t *testing.T) {
 
 // TestSearchCaseQualifier tests case:match qualifier
 func TestSearchCaseQualifier(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchCaseQualifier")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Search with case:match qualifier (case-sensitive)
 	resp, err := h.GET("/api/search?q=Authentication case:match&limit=10")
@@ -217,7 +251,13 @@ func TestSearchCaseQualifier(t *testing.T) {
 
 // TestSearchMixedQuery tests complex query with multiple features
 func TestSearchMixedQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchMixedQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Mixed query: +AND, phrase, qualifier
 	resp, err := h.GET("/api/search?q=%2Bauthentication \"security audit\" document_type:jira&limit=10")
@@ -247,7 +287,13 @@ func TestSearchMixedQuery(t *testing.T) {
 
 // TestSearchEmptyQuery tests empty query handling
 func TestSearchEmptyQuery(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchEmptyQuery")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Empty query should return empty results (not error)
 	resp, err := h.GET("/api/search?q=&limit=10")
@@ -277,7 +323,13 @@ func TestSearchEmptyQuery(t *testing.T) {
 
 // TestSearchPagination tests pagination parameters
 func TestSearchPagination(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchPagination")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Test with custom limit and offset
 	resp, err := h.GET("/api/search?q=test&limit=5&offset=10")
@@ -306,7 +358,13 @@ func TestSearchPagination(t *testing.T) {
 
 // TestSearchDefaultPagination tests default pagination values
 func TestSearchDefaultPagination(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchDefaultPagination")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Test without pagination params (should use defaults)
 	resp, err := h.GET("/api/search?q=test")
@@ -335,7 +393,13 @@ func TestSearchDefaultPagination(t *testing.T) {
 
 // TestSearchMaxLimitEnforcement tests that limit is capped at 100
 func TestSearchMaxLimitEnforcement(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchMaxLimitEnforcement")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Request limit > 100 (should be capped at 100)
 	resp, err := h.GET("/api/search?q=test&limit=500")
@@ -360,7 +424,13 @@ func TestSearchMaxLimitEnforcement(t *testing.T) {
 
 // TestSearchNegativeOffset tests negative offset handling
 func TestSearchNegativeOffset(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchNegativeOffset")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Negative offset should be clamped to 0
 	resp, err := h.GET("/api/search?q=test&offset=-10")
@@ -385,7 +455,13 @@ func TestSearchNegativeOffset(t *testing.T) {
 
 // TestSearchResultStructure tests that results have correct structure
 func TestSearchResultStructure(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchResultStructure")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	resp, err := h.GET("/api/search?q=test&limit=1")
 	if err != nil {
@@ -432,7 +508,13 @@ func TestSearchResultStructure(t *testing.T) {
 
 // TestSearchMethodNotAllowed tests that non-GET methods are rejected
 func TestSearchMethodNotAllowed(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestSearchMethodNotAllowed")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// POST should be rejected
 	resp, err := h.POST("/api/search", map[string]interface{}{"q": "test"})

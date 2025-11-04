@@ -3,11 +3,11 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/test"
 )
 
 // NOTE: These tests are for the old completion probe system and may not be relevant
@@ -17,7 +17,13 @@ import (
 // TestJobCompletionDelayed verifies that job completion is delayed by ~5s grace period after PendingURLs reaches 0
 // This ensures in-flight URL processing can complete before marking the job as done
 func TestJobCompletionDelayed(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobCompletionDelayed")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create a source with minimal URLs to ensure quick completion
 	source := map[string]interface{}{
@@ -194,17 +200,37 @@ func TestJobCompletionDelayed(t *testing.T) {
 // TestJobCompletionOnlyAfterAllChildURLs verifies completion only occurs after all child URLs are processed
 // This prevents premature completion when new URLs are discovered during crawling
 func TestJobCompletionOnlyAfterAllChildURLs(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
-
-	// Start mock HTML server on port 13333 (different from main test server)
-	mockServer := test.NewMockServer(13333)
-	if err := mockServer.Start(); err != nil {
-		t.Fatalf("Failed to start mock server: %v", err)
+	env, err := SetupTestEnvironment("TestJobCompletionOnlyAfterAllChildURLs")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
 	}
-	defer mockServer.Stop()
+	defer env.Cleanup()
 
-	// Wait for mock server to be ready
-	time.Sleep(200 * time.Millisecond)
+	h := env.NewHTTPTestHelper(t)
+
+	// Create inline mock HTML server to serve parent and child pages
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/test/parent":
+			// Parent page with 5 child links
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<html><body>
+				<h1>Parent Page</h1>
+				<a href="/test/child1">Child 1</a>
+				<a href="/test/child2">Child 2</a>
+				<a href="/test/child3">Child 3</a>
+				<a href="/test/child4">Child 4</a>
+				<a href="/test/child5">Child 5</a>
+			</body></html>`))
+		case "/test/child1", "/test/child2", "/test/child3", "/test/child4", "/test/child5":
+			// Child pages
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(fmt.Sprintf(`<html><body><h1>%s</h1><p>Content</p></body></html>`, r.URL.Path)))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockServer.Close()
 
 	// Create a jira source pointing to the mock server (only jira/confluence/github are valid types)
 	source := map[string]interface{}{
@@ -451,7 +477,13 @@ func TestCompletionProbeRetryOnRecentActivity(t *testing.T) {
 // TestCompletionProbeSkipsCompletedJobs verifies idempotency of completion probes
 // This prevents double-completion or errors when multiple probes are enqueued
 func TestCompletionProbeSkipsCompletedJobs(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestCompletionProbeSkipsCompletedJobs")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create a source
 	source := map[string]interface{}{
@@ -568,7 +600,7 @@ func TestCompletionProbeSkipsCompletedJobs(t *testing.T) {
 
 // waitForJobCreation polls for a job with the specified source type to be created
 // Returns the most recently created job with the given source type
-func waitForJobCreation(t *testing.T, h *test.HTTPTestHelper, sourceType string, timeout time.Duration) map[string]interface{} {
+func waitForJobCreation(t *testing.T, h *HTTPTestHelper, sourceType string, timeout time.Duration) map[string]interface{} {
 	t.Helper()
 
 	startTime := time.Now()
@@ -622,7 +654,7 @@ func waitForJobCreation(t *testing.T, h *test.HTTPTestHelper, sourceType string,
 }
 
 // waitForJobStatus polls until the job reaches the specified status or times out
-func waitForJobStatus(t *testing.T, h *test.HTTPTestHelper, jobID string, status string, timeout time.Duration) map[string]interface{} {
+func waitForJobStatus(t *testing.T, h *HTTPTestHelper, jobID string, status string, timeout time.Duration) map[string]interface{} {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)
@@ -686,7 +718,7 @@ func assertJobProgress(t *testing.T, job map[string]interface{}, expectedComplet
 }
 
 // assertJobStatusTransition verifies job transitions through expected states
-func assertJobStatusTransition(t *testing.T, h *test.HTTPTestHelper, jobID string, expectedStates []models.JobStatus, timeout time.Duration) {
+func assertJobStatusTransition(t *testing.T, h *HTTPTestHelper, jobID string, expectedStates []models.JobStatus, timeout time.Duration) {
 	t.Helper()
 
 	seenStates := make(map[string]bool)
@@ -735,7 +767,7 @@ func assertJobStatusTransition(t *testing.T, h *test.HTTPTestHelper, jobID strin
 }
 
 // measureCompletionDelay measures the time between running and completed states
-func measureCompletionDelay(t *testing.T, h *test.HTTPTestHelper, jobID string, timeout time.Duration) time.Duration {
+func measureCompletionDelay(t *testing.T, h *HTTPTestHelper, jobID string, timeout time.Duration) time.Duration {
 	t.Helper()
 
 	var runningTime time.Time
@@ -783,7 +815,7 @@ func measureCompletionDelay(t *testing.T, h *test.HTTPTestHelper, jobID string, 
 }
 
 // verifyLastHeartbeat checks that the LastHeartbeat field is properly set
-func verifyLastHeartbeat(t *testing.T, h *test.HTTPTestHelper, jobID string) {
+func verifyLastHeartbeat(t *testing.T, h *HTTPTestHelper, jobID string) {
 	t.Helper()
 
 	jobResp, err := h.GET("/api/jobs/" + jobID)
@@ -810,7 +842,7 @@ func verifyLastHeartbeat(t *testing.T, h *test.HTTPTestHelper, jobID string) {
 }
 
 // createTestJobDefinition creates a standard test job definition
-func createTestJobDefinition(t *testing.T, h *test.HTTPTestHelper, sourceID string, name string) (string, func()) {
+func createTestJobDefinition(t *testing.T, h *HTTPTestHelper, sourceID string, name string) (string, func()) {
 	t.Helper()
 
 	jobDef := map[string]interface{}{

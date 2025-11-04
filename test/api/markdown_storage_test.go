@@ -5,14 +5,18 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestMarkdownStoragePipeline verifies the end-to-end markdown storage pipeline:
 // HTML scraping → markdown conversion → metadata storage → document transformation → database persistence
 func TestMarkdownStoragePipeline(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestMarkdownStoragePipeline")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Setup: Create test source with base URL
 	source := map[string]interface{}{
@@ -232,7 +236,13 @@ func TestMarkdownStoragePipeline(t *testing.T) {
 
 // TestMarkdownConversionQuality verifies that markdown conversion produces clean output
 func TestMarkdownConversionQuality(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestMarkdownConversionQuality")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Query existing documents to check markdown quality
 	resp, err := h.GET("/api/documents?limit=10")
@@ -294,7 +304,13 @@ func TestMarkdownConversionQuality(t *testing.T) {
 
 // TestMarkdownMetadataStorage verifies that markdown is stored in CrawlResult metadata
 func TestMarkdownMetadataStorage(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestMarkdownMetadataStorage")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Query crawl jobs to check for metadata
 	resp, err := h.GET("/api/jobs?limit=10")

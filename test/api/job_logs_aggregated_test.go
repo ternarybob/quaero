@@ -10,13 +10,17 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestJobLogsAggregated_ParentOnly tests the aggregated logs endpoint for a parent job without children
 func TestJobLogsAggregated_ParentOnly(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_ParentOnly")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create a source and job definition
 	source := map[string]interface{}{
@@ -234,7 +238,13 @@ func TestJobLogsAggregated_ParentOnly(t *testing.T) {
 
 // TestJobLogsAggregated_WithChildren tests the aggregated logs endpoint for a parent job with child jobs
 func TestJobLogsAggregated_WithChildren(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_WithChildren")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create a source and job definition that will create child jobs
 	source := map[string]interface{}{
@@ -470,7 +480,13 @@ func TestJobLogsAggregated_WithChildren(t *testing.T) {
 
 // TestJobLogsAggregated_LevelFiltering tests level filtering in aggregated logs
 func TestJobLogsAggregated_LevelFiltering(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_LevelFiltering")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a simple source and job
 	source := map[string]interface{}{
@@ -653,7 +669,13 @@ func TestJobLogsAggregated_LevelFiltering(t *testing.T) {
 
 // TestJobLogsAggregated_Order tests ordering parameter (asc/desc)
 func TestJobLogsAggregated_Order(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_Order")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a simple source and job
 	source := map[string]interface{}{
@@ -860,7 +882,13 @@ func TestJobLogsAggregated_Order(t *testing.T) {
 
 // TestJobLogsAggregated_Limit tests the limit parameter
 func TestJobLogsAggregated_Limit(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_Limit")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Create a simple source and job
 	source := map[string]interface{}{
@@ -1025,7 +1053,13 @@ func TestJobLogsAggregated_Limit(t *testing.T) {
 
 // TestJobLogsAggregated_NonExistentJob tests error handling for non-existent job
 func TestJobLogsAggregated_NonExistentJob(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobLogsAggregated_NonExistentJob")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Attempt to get aggregated logs for a non-existent job
 	aggregatedResp, err := h.GET("/api/jobs/non-existent-job-12345/logs/aggregated")

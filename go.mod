@@ -1,6 +1,6 @@
 module github.com/ternarybob/quaero
 
-go 1.25.0
+go 1.25.3
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
@@ -17,7 +17,7 @@ require (
 	github.com/ternarybob/banner v0.0.5
 	golang.org/x/time v0.14.0
 	maragu.dev/goqite v0.3.1
-	modernc.org/sqlite v1.39.1
+	modernc.org/sqlite v1.40.0
 )
 
 require (

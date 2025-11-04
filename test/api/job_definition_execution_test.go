@@ -4,14 +4,18 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestJobDefinitionExecution_ParentJobCreation verifies that executing a job definition
 // creates a parent job record with proper initialization
 func TestJobDefinitionExecution_ParentJobCreation(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDefinitionExecution_ParentJobCreation")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -154,7 +158,13 @@ func TestJobDefinitionExecution_ParentJobCreation(t *testing.T) {
 // TestJobDefinitionExecution_ProgressTracking verifies that parent job progress
 // updates as steps complete
 func TestJobDefinitionExecution_ProgressTracking(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDefinitionExecution_ProgressTracking")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -347,7 +357,13 @@ func TestJobDefinitionExecution_ProgressTracking(t *testing.T) {
 
 // TestJobDefinitionExecution_ErrorHandling verifies parent job error handling
 func TestJobDefinitionExecution_ErrorHandling(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDefinitionExecution_ErrorHandling")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -479,7 +495,13 @@ func TestJobDefinitionExecution_ErrorHandling(t *testing.T) {
 
 // TestJobDefinitionExecution_ChildJobLinking verifies child jobs link to parent
 func TestJobDefinitionExecution_ChildJobLinking(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDefinitionExecution_ChildJobLinking")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{
@@ -630,7 +652,13 @@ func TestJobDefinitionExecution_ChildJobLinking(t *testing.T) {
 
 // TestJobDefinitionExecution_StatusTransitions verifies job status transitions
 func TestJobDefinitionExecution_StatusTransitions(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobDefinitionExecution_StatusTransitions")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create source
 	source := map[string]interface{}{

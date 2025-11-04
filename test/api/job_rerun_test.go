@@ -10,15 +10,19 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/ternarybob/quaero/test"
 )
 
 // TestJobRerun verifies the core rerun requirement:
 // When a user clicks "rerun" on a completed/failed job in the queue,
 // the system should create a new job with the same configuration and add it to the queue.
 func TestJobRerun(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobRerun")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// 1. Create a source and job definition (simulates what the UI does)
 	source := map[string]interface{}{
@@ -230,7 +234,13 @@ func TestJobRerun(t *testing.T) {
 
 // TestJobRerunNonExistent tests rerun of a non-existent job
 func TestJobRerunNonExistent(t *testing.T) {
-	h := test.NewHTTPTestHelper(t, test.MustGetTestServerURL())
+	env, err := SetupTestEnvironment("TestJobRerunNonExistent")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
 
 	// Attempt to rerun a non-existent job
 	rerunResp, err := h.POST("/api/jobs/non-existent-job-id-12345/rerun", nil)
