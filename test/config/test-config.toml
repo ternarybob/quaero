@@ -8,9 +8,11 @@ environment = "development"
 port = 18085
 host = "localhost"
 
-# Database path configured to bin/data/ directory
+# Database storage configuration
+# Path is relative to the binary's working directory (test/bin/)
+# Default path: ./data/quaero.db resolves to test/bin/data/quaero.db
 [storage.sqlite]
-path = "./bin/data/quaero.db"
+# path = "./data/quaero.db"  # Uncomment to override default
 
 # Disable all sources for faster startup
 [sources.confluence]

@@ -8,6 +8,8 @@ source_dir = "../../cmd/quaero"
 binary_output = "../bin/quaero"
 # Config file for the test service - copied from test-config.toml during build
 config_file = "../bin/quaero.toml"
+# Version file path (relative to test/ui or test/api)
+version_file = "../../.version"
 
 [service]
 # Startup timeout in seconds
@@ -21,8 +23,9 @@ host = "localhost"
 shutdown_endpoint = "/api/shutdown"
 
 [output]
-# Base directory for test results
+# Base directory for test results (relative to project root)
 # Structure: results/{ui|api}/{suite-name}-{datetime}/{test-name}/
-# Example UI: ../results/ui/TestSources-20251104-161234/TestSourcesPageLoad/
-# Example API: ../results/api/TestJob-20251104-161234/TestJobDefaultDefinitionsAPI/
+# Example UI: ../../results/ui/homepage-20251104-161234/TestHomepageLoad/
+# Example API: ../../results/api/job-20251104-161234/TestJobAPI/
+# Suite names are lowercase, derived from test file names (e.g., homepage_test.go -> homepage)
 results_base_dir = "../results"

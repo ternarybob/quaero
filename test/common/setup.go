@@ -54,6 +54,7 @@ type TestConfig struct {
 		SourceDir    string `toml:"source_dir"`
 		BinaryOutput string `toml:"binary_output"`
 		ConfigFile   string `toml:"config_file"`
+		VersionFile  string `toml:"version_file"`
 	} `toml:"build"`
 	Service struct {
 		StartupTimeoutSeconds int    `toml:"startup_timeout_seconds"`
@@ -80,17 +81,17 @@ type TestEnvironment struct {
 }
 
 // extractSuiteName extracts the test suite name from a test name
-// Example: "TestSourcesPageLoad" -> "TestSources"
-//          "TestJobsCreateModal" -> "TestJobs"
-//          "TestAuthPageLoad" -> "TestAuth"
+// Derives lowercase suite name matching test file naming convention
+// Example: "TestHomepageLoad" -> "homepage" (from homepage_test.go)
+//          "HomepageTitle" -> "homepage" (from homepage_test.go)
+//          "TestSourcesPageLoad" -> "sources" (from sources_test.go)
+//          "TestJobsCreateModal" -> "jobs" (from jobs_test.go)
 func extractSuiteName(testName string) string {
-	// Find all capital letter positions after "Test"
-	if !strings.HasPrefix(testName, "Test") {
-		return testName
+	// Remove "Test" prefix if present
+	remainder := testName
+	if strings.HasPrefix(testName, "Test") {
+		remainder = testName[4:]
 	}
-
-	// Remove "Test" prefix
-	remainder := testName[4:]
 
 	// Find all capital letter positions
 	var capitals []int
@@ -101,14 +102,16 @@ func extractSuiteName(testName string) string {
 	}
 
 	// If we have at least 2 capitals, take everything up to the second one
+	// Example: "HomepageTitle" has capitals at [0, 8]
+	//          We want "homepage" (lowercase, up to index 8)
 	// Example: "SourcesPageLoad" has capitals at [0, 7, 11]
-	//          We want "Sources" (up to index 7)
+	//          We want "sources" (lowercase, up to index 7)
 	if len(capitals) >= 2 {
-		return "Test" + remainder[:capitals[1]]
+		return strings.ToLower(remainder[:capitals[1]])
 	}
 
-	// If only one capital or none, return the whole name
-	return testName
+	// If only one capital or none, return the lowercase name
+	return strings.ToLower(remainder)
 }
 
 // getOrCreateSuiteDirectory gets or creates a parent directory for a test suite
@@ -189,13 +192,13 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		testType = "api"
 	}
 
-	// Create results base directory with test type: ../results/{ui|api}/
+	// Create results base directory with test type: ../../results/{ui|api}/
 	resultsBaseDir := filepath.Join(config.Output.ResultsBaseDir, testType)
 
-	// Extract suite name (e.g., "TestSources" from "TestSourcesPageLoad")
+	// Extract suite name (e.g., "homepage" from "TestHomepageLoad")
 	suiteName := extractSuiteName(testName)
 
-	// Get or create suite parent directory: ../results/{ui|api}/{suite-name}-{datetime}
+	// Get or create suite parent directory: ../../results/{ui|api}/{suite-name}-{datetime}
 	suiteDir, err := getOrCreateSuiteDirectory(suiteName, resultsBaseDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create suite directory: %w", err)
@@ -375,12 +378,46 @@ func (env *TestEnvironment) buildService() error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Build command: go build -o <output> <source_dir>
-	cmd := exec.Command("go", "build", "-o", binaryOutput, sourceDir)
+	// Read version information from .version file
+	versionFile, err := filepath.Abs(env.Config.Build.VersionFile)
+	if err != nil {
+		return fmt.Errorf("failed to resolve version file path: %w", err)
+	}
+
+	versionInfo := map[string]string{
+		"Version": "unknown",
+		"Build":   "unknown",
+	}
+
+	if data, err := os.ReadFile(versionFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "version:") {
+				versionInfo["Version"] = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
+			} else if strings.HasPrefix(line, "build:") {
+				versionInfo["Build"] = strings.TrimSpace(strings.TrimPrefix(line, "build:"))
+			}
+		}
+		fmt.Fprintf(env.LogFile, "Version info: %s (build: %s)\n", versionInfo["Version"], versionInfo["Build"])
+	} else {
+		fmt.Fprintf(env.LogFile, "Warning: Could not read version file, using defaults: %v\n", err)
+	}
+
+	// Build ldflags to inject version information
+	module := "github.com/ternarybob/quaero/internal/common"
+	ldflags := fmt.Sprintf("-X %s.Version=%s -X %s.Build=%s -X %s.GitCommit=test",
+		module, versionInfo["Version"],
+		module, versionInfo["Build"],
+		module)
+
+	// Build command: go build -ldflags="..." -o <output> <source_dir>
+	cmd := exec.Command("go", "build", "-ldflags="+ldflags, "-o", binaryOutput, sourceDir)
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0") // Disable CGO like production build
 
-	fmt.Fprintf(env.LogFile, "Building: go build -o %s %s\n", binaryOutput, sourceDir)
+	fmt.Fprintf(env.LogFile, "Building: go build -ldflags=\"%s\" -o %s %s\n", ldflags, binaryOutput, sourceDir)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go build failed: %w", err)
@@ -444,12 +481,18 @@ func (env *TestEnvironment) startService() error {
 		return fmt.Errorf("service config does not exist: %s", configPath)
 	}
 
+	// Get the bin directory (where binary and config are located)
+	binDir := filepath.Dir(binaryPath)
+
 	// Start the Quaero service
 	fmt.Fprintf(env.LogFile, "Executing command: %s --config %s\n", binaryPath, configPath)
+	fmt.Fprintf(env.LogFile, "Working directory: %s\n", binDir)
 	fmt.Fprintf(env.LogFile, "Service will listen on: http://%s:%d\n",
 		env.Config.Service.Host, env.Config.Service.Port)
+	fmt.Fprintf(env.LogFile, "Data directory will be: %s\n", filepath.Join(binDir, "data"))
 
 	cmd := exec.Command(binaryPath, "--config", configPath)
+	cmd.Dir = binDir // Set working directory to bin/ so data path resolves to bin/data/
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile
 
@@ -502,6 +545,35 @@ func (env *TestEnvironment) WaitForServiceReady() error {
 	}
 
 	return fmt.Errorf("service did not respond within %v (after %d attempts)", timeout, attemptCount)
+}
+
+// WaitForWebSocketConnection waits for the WebSocket to connect and status to show ONLINE
+// This should be called after navigating to a page that includes the navbar
+func (env *TestEnvironment) WaitForWebSocketConnection(ctx context.Context, timeoutSeconds int) error {
+	timeout := time.Duration(timeoutSeconds) * time.Second
+	startTime := time.Now()
+
+	fmt.Fprintf(env.LogFile, "Waiting for WebSocket connection (status: ONLINE)...\n")
+
+	// Wait for the status indicator to show "ONLINE"
+	err := chromedp.Run(ctx,
+		chromedp.WaitVisible(`.status-text`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('.status-text')?.textContent === 'ONLINE'`,
+			nil,
+			chromedp.WithPollingTimeout(timeout),
+			chromedp.WithPollingInterval(100*time.Millisecond),
+		),
+	)
+
+	if err != nil {
+		elapsed := time.Since(startTime).Seconds()
+		fmt.Fprintf(env.LogFile, "✗ WebSocket did not connect within %.1fs: %v\n", elapsed, err)
+		return fmt.Errorf("WebSocket connection timeout after %.1fs: %w", elapsed, err)
+	}
+
+	elapsed := time.Since(startTime).Seconds()
+	fmt.Fprintf(env.LogFile, "✓ WebSocket connected (status: ONLINE) in %.1fs\n", elapsed)
+	return nil
 }
 
 // Cleanup stops the service and closes resources

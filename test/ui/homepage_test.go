@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Tuesday, 4th November 2025 5:08:20 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
@@ -57,6 +62,14 @@ func TestHomepageTitle(t *testing.T) {
 
 	env.LogTest(t, "Page loaded successfully, title: %s", title)
 
+	// Wait for WebSocket connection (status indicator to show ONLINE)
+	env.LogTest(t, "Waiting for WebSocket connection...")
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+	env.LogTest(t, "✓ WebSocket connected (status: ONLINE)")
+
 	// Take screenshot of homepage
 	if err := env.TakeScreenshot(ctx, "homepage"); err != nil {
 		env.LogTest(t, "ERROR: Failed to take screenshot: %v", err)
@@ -103,6 +116,27 @@ func TestHomepageElements(t *testing.T) {
 
 	url := env.GetBaseURL()
 
+	// Navigate to homepage and wait for WebSocket first
+	env.LogTest(t, "Navigating to homepage: %s", url)
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(url),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load homepage: %v", err)
+		t.Fatalf("Failed to load homepage: %v", err)
+	}
+
+	// Wait for WebSocket connection (status indicator to show ONLINE)
+	env.LogTest(t, "Waiting for WebSocket connection...")
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+	env.LogTest(t, "✓ WebSocket connected (status: ONLINE)")
+
 	// Check for presence of key elements
 	tests := []struct {
 		name     string
@@ -118,9 +152,6 @@ func TestHomepageElements(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var nodeCount int
 			err := chromedp.Run(ctx,
-				chromedp.EmulateViewport(1920, 1080),
-				chromedp.Navigate(url),
-				chromedp.WaitVisible(`body`, chromedp.ByQuery),
 				chromedp.Evaluate(`document.querySelectorAll("`+tt.selector+`").length`, &nodeCount),
 			)
 
@@ -135,10 +166,12 @@ func TestHomepageElements(t *testing.T) {
 	}
 
 	// Take screenshot after checking all elements
+	env.LogTest(t, "Taking screenshot of homepage elements...")
 	if err := env.TakeScreenshot(ctx, "homepage-elements"); err != nil {
+		env.LogTest(t, "ERROR: Failed to take screenshot: %v", err)
 		t.Fatalf("Failed to take screenshot: %v", err)
 	}
-	t.Logf("Screenshot saved: %s", env.GetScreenshotPath("homepage-elements"))
+	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("homepage-elements"))
 }
 
 func TestNavigation(t *testing.T) {
