@@ -370,6 +370,10 @@ func (a *App) initServices() error {
 	a.JobExecutor.RegisterStepExecutor(transformStepExecutor)
 	a.Logger.Info().Msg("Transform step executor registered")
 
+	reindexStepExecutor := executor.NewReindexStepExecutor(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(reindexStepExecutor)
+	a.Logger.Info().Msg("Reindex step executor registered")
+
 	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock

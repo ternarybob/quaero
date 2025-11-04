@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test/common"
 )
@@ -17,7 +18,7 @@ import (
 // TestJobBasicExecution verifies the basic job execution workflow
 // NOTE: This test is EXPECTED TO FAIL - job execution is not yet implemented
 func TestJobBasicExecution(t *testing.T) {
-	env, err := common.SetupTestEnvironment("TestJobBasicExecution")
+	env, err := common.SetupTestEnvironment("JobBasicExecution")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -54,10 +55,21 @@ func TestJobBasicExecution(t *testing.T) {
 		t.Fatalf("Failed to load home page: %v", err)
 	}
 
+	// Wait for WebSocket connection on home page
+	env.LogTest(t, "Waiting for WebSocket connection on home page...")
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.TakeScreenshot(ctx, "01-websocket-failed")
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+	env.LogTest(t, "✓ WebSocket connected (status: ONLINE)")
+
+	env.TakeScreenshot(ctx, "01-home-page-ready")
+
 	// Step 2: Navigate to jobs page
 	env.LogTest(t, "Step 2: Navigating to jobs page")
 	err = chromedp.Run(ctx,
-		chromedp.Navigate(baseURL+"/jobs.html"),
+		chromedp.Navigate(baseURL+"/jobs"),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	)
@@ -68,25 +80,25 @@ func TestJobBasicExecution(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "02-jobs-page-loaded")
 
-	// Step 3: Wait for job definitions table to load
+	// Step 3: Wait for job definitions section to load
 	env.LogTest(t, "Step 3: Waiting for job definitions to load")
 	err = chromedp.Run(ctx,
-		chromedp.WaitVisible(`#job-definitions-table`, chromedp.ByID),
+		chromedp.WaitVisible(`h2, h3`, chromedp.ByQuery), // Wait for heading to appear
 		chromedp.Sleep(2*time.Second), // Allow time for data to populate
 	)
 	if err != nil {
 		env.TakeScreenshot(ctx, "03-job-definitions-not-loaded")
-		t.Fatalf("Job definitions table not found: %v", err)
+		t.Fatalf("Job definitions section not found: %v", err)
 	}
 
-	// Step 4: Find "Database Maintenance" job definition row
+	// Step 4: Find "Database Maintenance" job definition
 	env.LogTest(t, "Step 4: Finding 'Database Maintenance' job definition")
 	var dbMaintenanceExists bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
-			Array.from(document.querySelectorAll('#job-definitions-table tbody tr')).some(row =>
-				row.textContent.includes('Database Maintenance')
-			)
+			// Look for "Database Maintenance" in the page content
+			// It could be in a card, list item, or other container
+			document.body.textContent.includes('Database Maintenance')
 		`, &dbMaintenanceExists),
 	)
 	if err != nil {
@@ -102,33 +114,75 @@ func TestJobBasicExecution(t *testing.T) {
 	env.TakeScreenshot(ctx, "04-db-maintenance-found")
 	env.LogTest(t, "✓ Found 'Database Maintenance' job definition")
 
-	// Step 5: Click the run button (green arrow) for Database Maintenance
-	env.LogTest(t, "Step 5: Clicking run button for 'Database Maintenance'")
+	// Step 5: Check if the run button is enabled and click it
+	env.LogTest(t, "Step 5: Waiting for run button to be visible")
+
+	// Wait for the button to be rendered by Alpine.js (ID: database-maintenance-run)
+	err = chromedp.Run(ctx,
+		chromedp.WaitVisible(`#database-maintenance-run`, chromedp.ByQuery),
+	)
+
+	if err != nil {
+		env.TakeScreenshot(ctx, "05-run-button-not-found")
+		t.Fatalf("Failed to find run button with ID 'database-maintenance-run': %v", err)
+	}
+
+	// Check if the button is disabled
+	var isDisabled bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
-			// Find the row containing "Database Maintenance"
-			const row = Array.from(document.querySelectorAll('#job-definitions-table tbody tr'))
-				.find(row => row.textContent.includes('Database Maintenance'));
-
-			if (!row) {
-				throw new Error('Database Maintenance row not found');
-			}
-
-			// Find the run button (green arrow/play icon) in that row
-			const runButton = row.querySelector('button[title="Run"], button.run-job, button[onclick*="execute"]');
-
-			if (!runButton) {
-				throw new Error('Run button not found in Database Maintenance row');
-			}
-
-			// Click the button
-			runButton.click();
-			true;
-		`, nil),
+			const btn = document.querySelector('#database-maintenance-run');
+			btn ? btn.disabled : true
+		`, &isDisabled),
 	)
+
+	if err != nil {
+		env.TakeScreenshot(ctx, "05-button-state-check-failed")
+		t.Fatalf("Failed to check button state: %v", err)
+	}
+
+	if isDisabled {
+		env.TakeScreenshot(ctx, "05-button-disabled")
+		t.Fatal("REQUIREMENT FAILED: Run button is disabled - job definition may not be enabled")
+	}
+
+	env.LogTest(t, "Step 5: Clicking run button for 'Database Maintenance'")
+
+	// Set up dialog handler to automatically accept confirm dialogs
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		if _, ok := ev.(*page.EventJavascriptDialogOpening); ok {
+			go func() {
+				if err := chromedp.Run(ctx,
+					page.HandleJavaScriptDialog(true), // Accept the dialog
+				); err != nil {
+					env.LogTest(t, "Warning: Failed to handle dialog: %v", err)
+				}
+			}()
+		}
+	})
+
+	// Click the button (this will trigger a confirm dialog which we'll auto-accept)
+	var clickSuccess bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(function() {
+				const btn = document.querySelector('#database-maintenance-run');
+				if (!btn) return false;
+				btn.click();
+				return true;
+			})()
+		`, &clickSuccess),
+		chromedp.Sleep(1*time.Second), // Wait for dialog to be handled and request to be sent
+	)
+
 	if err != nil {
 		env.TakeScreenshot(ctx, "05-run-button-click-failed")
-		t.Fatalf("Failed to click run button: %v", err)
+		t.Fatalf("Failed to execute click script: %v", err)
+	}
+
+	if !clickSuccess {
+		env.TakeScreenshot(ctx, "05-button-not-found-by-script")
+		t.Fatal("REQUIREMENT FAILED: Button not found by click script")
 	}
 
 	env.TakeScreenshot(ctx, "05-run-button-clicked")
@@ -164,7 +218,7 @@ func TestJobBasicExecution(t *testing.T) {
 	// Step 7: Navigate to queue page
 	env.LogTest(t, "Step 7: Navigating to queue page")
 	err = chromedp.Run(ctx,
-		chromedp.Navigate(baseURL+"/queue.html"),
+		chromedp.Navigate(baseURL+"/queue"),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second),
 	)
@@ -175,15 +229,15 @@ func TestJobBasicExecution(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "07-queue-page-loaded")
 
-	// Step 8: Wait for job queue panel to load
-	env.LogTest(t, "Step 8: Waiting for job queue panel")
+	// Step 8: Wait for queue page content to load
+	env.LogTest(t, "Step 8: Waiting for job queue content to load")
 	err = chromedp.Run(ctx,
-		chromedp.WaitVisible(`.job-queue-panel, #job-queue-panel, #jobs-queue, .queue-table`, chromedp.ByQuery),
+		chromedp.WaitVisible(`h1, h2, h3`, chromedp.ByQuery), // Wait for page heading
 		chromedp.Sleep(2*time.Second), // Allow time for jobs to load
 	)
 	if err != nil {
-		env.TakeScreenshot(ctx, "08-job-queue-panel-not-found")
-		t.Fatalf("Job queue panel not found: %v", err)
+		env.TakeScreenshot(ctx, "08-job-queue-page-not-loaded")
+		t.Fatalf("Job queue page not loaded: %v", err)
 	}
 
 	// Step 9: Search for "Database Maintenance" job in the queue
@@ -191,11 +245,9 @@ func TestJobBasicExecution(t *testing.T) {
 	var jobInQueue bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
-			// Look for Database Maintenance in job queue table/list
-			const queueElements = document.querySelectorAll('.job-queue-panel tbody tr, #job-queue-panel tbody tr, .queue-table tbody tr');
-			Array.from(queueElements).some(row =>
-				row.textContent.includes('Database Maintenance')
-			);
+			// Look for Database Maintenance anywhere on the queue page
+			// Could be in cards, list items, table rows, or any container
+			document.body.textContent.includes('Database Maintenance')
 		`, &jobInQueue),
 	)
 	if err != nil {

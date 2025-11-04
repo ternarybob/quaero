@@ -33,44 +33,9 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 
 **CRITICAL: The test runner handles EVERYTHING automatically - do NOT run build scripts or start the service manually!**
 
-**Test Runner** (`cmd/quaero-test-runner/`):
-- Builds the application using `scripts/build.ps1`
-- Starts a test server on port 3333 for browser validation
-- Starts the Quaero service in a visible window
-- Waits for service readiness
-- Runs all test suites (API + UI)
-- Captures screenshots for UI tests
-- Saves results to timestamped directories
-- Stops the service and cleans up
-
-**How to Run Tests:**
-
-```powershell
-# Option 1: Use pre-built test runner (recommended)
-.\scripts\build.ps1           # Builds test runner automatically
-cd bin
-.\quaero-test-runner.exe
-
-# Option 2: Run from source
-cd cmd/quaero-test-runner
-go run .
-```
-
-**For Development/Debugging Only:**
-```powershell
-# Run tests directly (requires manual service start)
-.\scripts\build.ps1 -Run      # Start service in separate window first
-cd test
-go test -v ./api              # API tests
-go test -v ./ui               # UI tests
-```
-
-**See:** `cmd/quaero-test-runner/README.md` for detailed documentation, configuration, and troubleshooting.
-
-**IMPORTANT:**
-- ❌ DO NOT run `build.ps1` before the test runner
-- ❌ DO NOT manually start the service before the test runner
-- ✅ Let the test runner control the service lifecycle
+**IMPORTANT: Do NOT create temporary files for testing or building (e.g., run_test.ps1, test_compile.go, etc.). Always use the official build and test commands:**
+- **Build**: `.\scripts\build.ps1`
+- **Test**: `go test` commands directly
 
 ## Project Overview
 

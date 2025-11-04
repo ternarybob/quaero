@@ -254,55 +254,71 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 	fmt.Fprintf(logFile, "Build completed successfully\n")
 
 	// Step 2: Check if service is already running on configured port
+	fmt.Fprintf(logFile, "\n=== SERVICE PORT CHECK ===\n")
 	fmt.Fprintf(logFile, "Checking if service is already running on %s:%d...\n",
 		config.Service.Host, config.Service.Port)
 
 	if isServiceRunning(config.Service.Host, config.Service.Port) {
-		fmt.Fprintf(logFile, "⚠ Service detected running on %s:%d, attempting graceful shutdown...\n",
+		fmt.Fprintf(logFile, "⚠️  EXISTING SERVICE DETECTED on %s:%d\n",
 			config.Service.Host, config.Service.Port)
+		fmt.Fprintf(logFile, "Attempting graceful shutdown via %s...\n",
+			config.Service.ShutdownEndpoint)
 
 		// Attempt graceful shutdown
 		if err := shutdownService(config.Service.Host, config.Service.Port, config.Service.ShutdownEndpoint); err != nil {
+			fmt.Fprintf(logFile, "❌ Failed to shutdown existing service: %v\n", err)
+			fmt.Fprintf(logFile, "Test cannot continue with port in use\n")
 			logFile.Close()
 			testLogFile.Close()
 			return nil, fmt.Errorf("failed to shutdown existing service (test cannot continue): %w", err)
 		}
 
-		fmt.Fprintf(logFile, "✓ Successfully shutdown existing service\n")
+		fmt.Fprintf(logFile, "✓ Shutdown request sent successfully\n")
 
 		// Wait for port to be released
-		fmt.Fprintf(logFile, "Waiting for port %d to be released...\n", config.Service.Port)
+		fmt.Fprintf(logFile, "Waiting for port %d to be released (timeout: 10s)...\n", config.Service.Port)
 		if err := waitForPortRelease(config.Service.Host, config.Service.Port, 10*time.Second); err != nil {
+			fmt.Fprintf(logFile, "❌ Port %d not released after shutdown: %v\n", config.Service.Port, err)
 			logFile.Close()
 			testLogFile.Close()
 			return nil, fmt.Errorf("port not released after shutdown: %w", err)
 		}
-		fmt.Fprintf(logFile, "✓ Port %d released and available\n", config.Service.Port)
+		fmt.Fprintf(logFile, "✓ Port %d released and available for test service\n", config.Service.Port)
 	} else {
-		fmt.Fprintf(logFile, "✓ Service not running, port %d is available\n", config.Service.Port)
+		fmt.Fprintf(logFile, "✓ Port %d is available (no existing service detected)\n", config.Service.Port)
 	}
 
 	// Step 3: Start new service instance
-	fmt.Fprintf(logFile, "Starting new service instance on %s:%d...\n",
-		config.Service.Host, config.Service.Port)
+	fmt.Fprintf(logFile, "\n=== STARTING TEST SERVICE ===\n")
+	fmt.Fprintf(logFile, "Starting new test service instance...\n")
+	fmt.Fprintf(logFile, "  Host: %s\n", config.Service.Host)
+	fmt.Fprintf(logFile, "  Port: %d\n", config.Service.Port)
+	fmt.Fprintf(logFile, "  URL:  http://%s:%d\n", config.Service.Host, config.Service.Port)
 
 	if err := env.startService(); err != nil {
+		fmt.Fprintf(logFile, "❌ Failed to start test service: %v\n", err)
 		logFile.Close()
 		testLogFile.Close()
 		return nil, fmt.Errorf("failed to start service: %w", err)
 	}
 
+	fmt.Fprintf(logFile, "✓ Test service process started (PID: %d)\n", env.Cmd.Process.Pid)
+
 	// Step 4: Wait for service to be ready
-	fmt.Fprintf(logFile, "Waiting for service to become ready (timeout: %ds)...\n",
+	fmt.Fprintf(logFile, "\n=== WAITING FOR SERVICE READY ===\n")
+	fmt.Fprintf(logFile, "Polling service health endpoint (timeout: %ds)...\n",
 		config.Service.StartupTimeoutSeconds)
 
 	if err := env.WaitForServiceReady(); err != nil {
+		fmt.Fprintf(logFile, "❌ Service did not become ready: %v\n", err)
 		env.Cleanup()
 		return nil, fmt.Errorf("service did not become ready: %w", err)
 	}
 
-	fmt.Fprintf(logFile, "✓ Service is ready and accepting connections on %s:%d\n",
-		config.Service.Host, config.Service.Port)
+	fmt.Fprintf(logFile, "\n=== SERVICE READY ===\n")
+	fmt.Fprintf(logFile, "✓ Service is ready and accepting connections\n")
+	fmt.Fprintf(logFile, "✓ Service URL: http://%s:%d\n", config.Service.Host, config.Service.Port)
+	fmt.Fprintf(logFile, "✓ Test can proceed\n\n")
 
 	return env, nil
 }
@@ -435,6 +451,29 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Config copied from %s to: %s\n", testConfigPath, binConfigPath)
 
+	// Copy pages directory to bin/pages
+	pagesSourcePath, err := filepath.Abs("../../pages")
+	if err != nil {
+		return fmt.Errorf("failed to resolve pages source path: %w", err)
+	}
+
+	binDir := filepath.Dir(binaryOutput)
+	pagesDestPath := filepath.Join(binDir, "pages")
+
+	// Remove existing pages directory if it exists
+	if _, err := os.Stat(pagesDestPath); err == nil {
+		if err := os.RemoveAll(pagesDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing pages directory: %w", err)
+		}
+	}
+
+	// Copy pages directory
+	if err := env.copyDir(pagesSourcePath, pagesDestPath); err != nil {
+		return fmt.Errorf("failed to copy pages directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Pages copied from %s to: %s\n", pagesSourcePath, pagesDestPath)
+
 	return nil
 }
 
@@ -447,6 +486,46 @@ func (env *TestEnvironment) copyFile(src, dst string) error {
 
 	if err := os.WriteFile(dst, data, 0644); err != nil {
 		return fmt.Errorf("failed to write destination file: %w", err)
+	}
+
+	return nil
+}
+
+// copyDir recursively copies a directory from src to dst
+func (env *TestEnvironment) copyDir(src, dst string) error {
+	// Get source directory info
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source directory: %w", err)
+	}
+
+	// Create destination directory
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	// Read source directory entries
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("failed to read source directory: %w", err)
+	}
+
+	// Copy each entry
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			// Recursively copy subdirectory
+			if err := env.copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			// Copy file
+			if err := env.copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -485,25 +564,30 @@ func (env *TestEnvironment) startService() error {
 	binDir := filepath.Dir(binaryPath)
 
 	// Start the Quaero service
-	fmt.Fprintf(env.LogFile, "Executing command: %s --config %s\n", binaryPath, configPath)
-	fmt.Fprintf(env.LogFile, "Working directory: %s\n", binDir)
-	fmt.Fprintf(env.LogFile, "Service will listen on: http://%s:%d\n",
+	fmt.Fprintf(env.LogFile, "\n--- Service Startup Details ---\n")
+	fmt.Fprintf(env.LogFile, "Command:     %s --config %s\n", binaryPath, configPath)
+	fmt.Fprintf(env.LogFile, "Working Dir: %s\n", binDir)
+	fmt.Fprintf(env.LogFile, "Listen URL:  http://%s:%d\n",
 		env.Config.Service.Host, env.Config.Service.Port)
-	fmt.Fprintf(env.LogFile, "Data directory will be: %s\n", filepath.Join(binDir, "data"))
+	fmt.Fprintf(env.LogFile, "Data Path:   %s\n", filepath.Join(binDir, "data"))
+	fmt.Fprintf(env.LogFile, "-------------------------------\n\n")
 
 	cmd := exec.Command(binaryPath, "--config", configPath)
 	cmd.Dir = binDir // Set working directory to bin/ so data path resolves to bin/data/
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile
 
+	fmt.Fprintf(env.LogFile, "Starting service process...\n")
 	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(env.LogFile, "❌ Failed to start process: %v\n", err)
 		return fmt.Errorf("failed to start service process: %w", err)
 	}
 
 	env.Cmd = cmd
-	fmt.Fprintf(env.LogFile, "✓ Service process started successfully (PID: %d)\n", cmd.Process.Pid)
-	fmt.Fprintf(env.LogFile, "Service output will appear below:\n")
-	fmt.Fprintf(env.LogFile, "----------------------------------------\n")
+	fmt.Fprintf(env.LogFile, "✓ Service process started successfully\n")
+	fmt.Fprintf(env.LogFile, "  PID: %d\n", cmd.Process.Pid)
+	fmt.Fprintf(env.LogFile, "  Port: %d\n", env.Config.Service.Port)
+	fmt.Fprintf(env.LogFile, "\n--- Service Output Begins Below ---\n")
 
 	return nil
 }
