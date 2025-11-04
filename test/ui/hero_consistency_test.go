@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
 	"os"
@@ -15,7 +16,7 @@ import (
 // are in the same location across all pages
 func TestHeroSectionConsistency(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestHeroSectionConsistency")
+	env, err := common.SetupTestEnvironment("TestHeroSectionConsistency")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

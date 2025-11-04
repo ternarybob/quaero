@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"net/http"
 	"testing"
@@ -13,7 +14,7 @@ import (
 // All other UI tests depend on this passing
 func TestServiceConnectivity(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestServiceConnectivity")
+	env, err := common.SetupTestEnvironment("TestServiceConnectivity")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

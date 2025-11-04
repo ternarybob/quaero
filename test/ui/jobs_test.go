@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func TestJobsPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsPageLoad")
+	env, err := common.SetupTestEnvironment("TestJobsPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestJobsPageLoad(t *testing.T) {
 
 func TestJobsPageElements(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsPageElements")
+	env, err := common.SetupTestEnvironment("TestJobsPageElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestJobsPageElements(t *testing.T) {
 
 func TestJobsNavbar(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsNavbar")
+	env, err := common.SetupTestEnvironment("TestJobsNavbar")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestJobsNavbar(t *testing.T) {
 
 func TestJobsStatistics(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsStatistics")
+	env, err := common.SetupTestEnvironment("TestJobsStatistics")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -240,7 +241,7 @@ func TestJobsStatistics(t *testing.T) {
 
 func TestJobsTable(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsTable")
+	env, err := common.SetupTestEnvironment("TestJobsTable")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestJobsTable(t *testing.T) {
 
 func TestJobsCreateModal(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsCreateModal")
+	env, err := common.SetupTestEnvironment("TestJobsCreateModal")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -385,7 +386,7 @@ func TestJobsCreateModal(t *testing.T) {
 
 func TestJobsFilterControls(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsFilterControls")
+	env, err := common.SetupTestEnvironment("TestJobsFilterControls")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestJobsFilterControls(t *testing.T) {
 
 func TestJobsQueueIntegration(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobsQueueIntegration")
+	env, err := common.SetupTestEnvironment("TestJobsQueueIntegration")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

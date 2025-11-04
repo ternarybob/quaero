@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 
 func TestSearchPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchPageLoad")
+	env, err := common.SetupTestEnvironment("TestSearchPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestSearchPageLoad(t *testing.T) {
 
 func TestSearchPageElements(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchPageElements")
+	env, err := common.SetupTestEnvironment("TestSearchPageElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestSearchPageElements(t *testing.T) {
 
 func TestSearchQueryExecution(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchQueryExecution")
+	env, err := common.SetupTestEnvironment("TestSearchQueryExecution")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestSearchQueryExecution(t *testing.T) {
 
 func TestSearchWithResults(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchWithResults")
+	env, err := common.SetupTestEnvironment("TestSearchWithResults")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestSearchWithResults(t *testing.T) {
 
 func TestSearchClearButton(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchClearButton")
+	env, err := common.SetupTestEnvironment("TestSearchClearButton")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestSearchClearButton(t *testing.T) {
 
 func TestSearchSyntaxHelp(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchSyntaxHelp")
+	env, err := common.SetupTestEnvironment("TestSearchSyntaxHelp")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestSearchSyntaxHelp(t *testing.T) {
 
 func TestSearchResultStructure(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchResultStructure")
+	env, err := common.SetupTestEnvironment("TestSearchResultStructure")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -399,7 +400,7 @@ func TestSearchResultStructure(t *testing.T) {
 
 func TestSearchPagination(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchPagination")
+	env, err := common.SetupTestEnvironment("TestSearchPagination")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -470,7 +471,7 @@ func TestSearchPagination(t *testing.T) {
 
 func TestSearchNavbarActiveState(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchNavbarActiveState")
+	env, err := common.SetupTestEnvironment("TestSearchNavbarActiveState")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -516,7 +517,7 @@ func TestSearchNavbarActiveState(t *testing.T) {
 
 func TestSearchEmptyQuery(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSearchEmptyQuery")
+	env, err := common.SetupTestEnvironment("TestSearchEmptyQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

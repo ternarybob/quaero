@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Tuesday, 4th November 2025 10:16:28 am
+// Last Modified: Tuesday, 4th November 2025 4:23:28 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -16,6 +16,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test"
+	"github.com/ternarybob/quaero/test/common"
 )
 
 // TestMain runs before all tests in the ui package
@@ -25,7 +26,7 @@ import (
 //	will start their own service instance
 func TestMain(m *testing.M) {
 	// Capture TestMain output for inclusion in test logs
-	mw := io.MultiWriter(&testMainOutput, os.Stderr)
+	mw := io.MultiWriter(&common.TestMainOutput, os.Stderr)
 
 	// Optional: Verify service connectivity before running tests
 	// If service is not running, tests using SetupTestEnvironment will start their own

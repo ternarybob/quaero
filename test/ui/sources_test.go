@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func TestSourcesPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesPageLoad")
+	env, err := common.SetupTestEnvironment("TestSourcesPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestSourcesPageLoad(t *testing.T) {
 
 func TestSourcesPageElements(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesPageElements")
+	env, err := common.SetupTestEnvironment("TestSourcesPageElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestSourcesPageElements(t *testing.T) {
 
 func TestSourcesNavbar(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesNavbar")
+	env, err := common.SetupTestEnvironment("TestSourcesNavbar")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -166,7 +167,7 @@ func TestSourcesNavbar(t *testing.T) {
 
 func TestSourcesModalWithAuthentication(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesModalWithAuthentication")
+	env, err := common.SetupTestEnvironment("TestSourcesModalWithAuthentication")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -228,7 +229,7 @@ func TestSourcesModalWithAuthentication(t *testing.T) {
 
 func TestSourcesCardsWithAuthDisplay(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesCardsWithAuthDisplay")
+	env, err := common.SetupTestEnvironment("TestSourcesCardsWithAuthDisplay")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -265,7 +266,7 @@ func TestSourcesCardsWithAuthDisplay(t *testing.T) {
 
 func TestSourcesFilterInputFieldsVisible(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesFilterInputFieldsVisible")
+	env, err := common.SetupTestEnvironment("TestSourcesFilterInputFieldsVisible")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -360,7 +361,7 @@ func TestSourcesFilterInputFieldsVisible(t *testing.T) {
 
 func TestSourcesCreateWithFilters(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesCreateWithFilters")
+	env, err := common.SetupTestEnvironment("TestSourcesCreateWithFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -505,7 +506,7 @@ func TestSourcesCreateWithFilters(t *testing.T) {
 
 func TestSourcesEditFilters(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesEditFilters")
+	env, err := common.SetupTestEnvironment("TestSourcesEditFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -705,7 +706,7 @@ func TestSourcesEditFilters(t *testing.T) {
 
 func TestSourcesClearFilters(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesClearFilters")
+	env, err := common.SetupTestEnvironment("TestSourcesClearFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -898,7 +899,7 @@ func TestSourcesClearFilters(t *testing.T) {
 
 func TestSourcesFilterDisplayFormatting(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestSourcesFilterDisplayFormatting")
+	env, err := common.SetupTestEnvironment("TestSourcesFilterDisplayFormatting")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

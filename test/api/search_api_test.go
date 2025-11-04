@@ -5,13 +5,14 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
 )
 
 // TestSearchBasicQuery tests basic search with single term
 func TestSearchBasicQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchBasicQuery")
+	env, err := common.SetupTestEnvironment("TestSearchBasicQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestSearchBasicQuery(t *testing.T) {
 
 // TestSearchORQuery tests OR search (default behavior)
 func TestSearchORQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchORQuery")
+	env, err := common.SetupTestEnvironment("TestSearchORQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestSearchORQuery(t *testing.T) {
 
 // TestSearchANDQuery tests AND search with + prefix
 func TestSearchANDQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchANDQuery")
+	env, err := common.SetupTestEnvironment("TestSearchANDQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestSearchANDQuery(t *testing.T) {
 
 // TestSearchPhraseQuery tests phrase search with quotes
 func TestSearchPhraseQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchPhraseQuery")
+	env, err := common.SetupTestEnvironment("TestSearchPhraseQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestSearchPhraseQuery(t *testing.T) {
 
 // TestSearchDocumentTypeQualifier tests document_type qualifier
 func TestSearchDocumentTypeQualifier(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchDocumentTypeQualifier")
+	env, err := common.SetupTestEnvironment("TestSearchDocumentTypeQualifier")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestSearchDocumentTypeQualifier(t *testing.T) {
 
 // TestSearchCaseQualifier tests case:match qualifier
 func TestSearchCaseQualifier(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchCaseQualifier")
+	env, err := common.SetupTestEnvironment("TestSearchCaseQualifier")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -251,7 +252,7 @@ func TestSearchCaseQualifier(t *testing.T) {
 
 // TestSearchMixedQuery tests complex query with multiple features
 func TestSearchMixedQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchMixedQuery")
+	env, err := common.SetupTestEnvironment("TestSearchMixedQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -287,7 +288,7 @@ func TestSearchMixedQuery(t *testing.T) {
 
 // TestSearchEmptyQuery tests empty query handling
 func TestSearchEmptyQuery(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchEmptyQuery")
+	env, err := common.SetupTestEnvironment("TestSearchEmptyQuery")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -323,7 +324,7 @@ func TestSearchEmptyQuery(t *testing.T) {
 
 // TestSearchPagination tests pagination parameters
 func TestSearchPagination(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchPagination")
+	env, err := common.SetupTestEnvironment("TestSearchPagination")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -358,7 +359,7 @@ func TestSearchPagination(t *testing.T) {
 
 // TestSearchDefaultPagination tests default pagination values
 func TestSearchDefaultPagination(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchDefaultPagination")
+	env, err := common.SetupTestEnvironment("TestSearchDefaultPagination")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -393,7 +394,7 @@ func TestSearchDefaultPagination(t *testing.T) {
 
 // TestSearchMaxLimitEnforcement tests that limit is capped at 100
 func TestSearchMaxLimitEnforcement(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchMaxLimitEnforcement")
+	env, err := common.SetupTestEnvironment("TestSearchMaxLimitEnforcement")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -424,7 +425,7 @@ func TestSearchMaxLimitEnforcement(t *testing.T) {
 
 // TestSearchNegativeOffset tests negative offset handling
 func TestSearchNegativeOffset(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchNegativeOffset")
+	env, err := common.SetupTestEnvironment("TestSearchNegativeOffset")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -455,7 +456,7 @@ func TestSearchNegativeOffset(t *testing.T) {
 
 // TestSearchResultStructure tests that results have correct structure
 func TestSearchResultStructure(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchResultStructure")
+	env, err := common.SetupTestEnvironment("TestSearchResultStructure")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -508,7 +509,7 @@ func TestSearchResultStructure(t *testing.T) {
 
 // TestSearchMethodNotAllowed tests that non-GET methods are rejected
 func TestSearchMethodNotAllowed(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSearchMethodNotAllowed")
+	env, err := common.SetupTestEnvironment("TestSearchMethodNotAllowed")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

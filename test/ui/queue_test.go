@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
 	"strings"
@@ -163,7 +164,7 @@ func getJobCardStatus(ctx context.Context, jobID string) (string, error) {
 // and that no polling occurs after connection is established
 func TestQueuePageWebSocketConnection(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueuePageWebSocketConnection")
+	env, err := common.SetupTestEnvironment("TestQueuePageWebSocketConnection")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -251,7 +252,7 @@ func TestQueuePageWebSocketConnection(t *testing.T) {
 // This test simulates or monitors for job status changes and verifies the UI updates
 func TestQueuePageJobStatusUpdate(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueuePageJobStatusUpdate")
+	env, err := common.SetupTestEnvironment("TestQueuePageJobStatusUpdate")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -400,7 +401,7 @@ func TestQueuePageJobStatusUpdate(t *testing.T) {
 // when WebSocket connection is lost
 func TestQueuePageWebSocketReconnection(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueuePageWebSocketReconnection")
+	env, err := common.SetupTestEnvironment("TestQueuePageWebSocketReconnection")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -530,7 +531,7 @@ func TestQueuePageWebSocketReconnection(t *testing.T) {
 // This test ensures users can manually refresh the page to get latest data
 func TestQueuePageManualRefresh(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueuePageManualRefresh")
+	env, err := common.SetupTestEnvironment("TestQueuePageManualRefresh")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -624,7 +625,7 @@ func TestQueuePageManualRefresh(t *testing.T) {
 // and that all log filtering is done server-side before broadcasting
 func TestServiceLogsNoClientFiltering(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestServiceLogsNoClientFiltering")
+	env, err := common.SetupTestEnvironment("TestServiceLogsNoClientFiltering")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

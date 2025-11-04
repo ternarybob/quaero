@@ -1,9 +1,10 @@
 // -----------------------------------------------------------------------
-// Last Modified: Tuesday, 4th November 2025 10:16:10 am
+// Shared test framework for both UI and API tests
+// Last Modified: Tuesday, 4th November 2025 4:30:00 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
-package ui
+package common
 
 import (
 	"bytes"
@@ -26,8 +27,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// testMainOutput captures the TestMain output for later inclusion in test logs
-var testMainOutput bytes.Buffer
+// TestMainOutput captures the TestMain output for later inclusion in test logs
+var TestMainOutput bytes.Buffer
 
 // suiteDirectories tracks parent directories for test suites
 // Maps suite name (e.g., "TestSources") to parent directory path
@@ -135,18 +136,39 @@ func getOrCreateSuiteDirectory(suiteName string, baseDir string) (string, error)
 	return suiteDir, nil
 }
 
-// LoadTestConfig loads the test configuration from setup.toml
+// LoadTestConfig loads the test configuration from test/config/setup.toml
+// Automatically overrides port based on current directory (18085 for UI, 19085 for API)
 func LoadTestConfig() (*TestConfig, error) {
-	configPath := filepath.Join(".", "setup.toml")
-	data, err := os.ReadFile(configPath)
+	// Determine test type based on working directory
+	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	isUITest := strings.Contains(cwd, "test\\ui") || strings.Contains(cwd, "test/ui")
+	isAPITest := strings.Contains(cwd, "test\\api") || strings.Contains(cwd, "test/api")
+
+	if !isUITest && !isAPITest {
+		return nil, fmt.Errorf("LoadTestConfig must be called from test/ui or test/api directory, current: %s", cwd)
+	}
+
+	// Load shared config file
+	configFile := "../config/setup.toml"
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %w", configFile, err)
 	}
 
 	var config TestConfig
 	if err := toml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
+
+	// Override port based on test type
+	if isAPITest {
+		config.Service.Port = 19085 // API tests use port 19085
+	}
+	// UI tests use default port from config (18085)
 
 	return &config, nil
 }
@@ -158,11 +180,23 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		return nil, fmt.Errorf("failed to load test config: %w", err)
 	}
 
+	// Determine test type (ui or api) for results directory organization
+	cwd, _ := os.Getwd()
+	var testType string
+	if strings.Contains(cwd, "test\\ui") || strings.Contains(cwd, "test/ui") {
+		testType = "ui"
+	} else {
+		testType = "api"
+	}
+
+	// Create results base directory with test type: ../results/{ui|api}/
+	resultsBaseDir := filepath.Join(config.Output.ResultsBaseDir, testType)
+
 	// Extract suite name (e.g., "TestSources" from "TestSourcesPageLoad")
 	suiteName := extractSuiteName(testName)
 
-	// Get or create suite parent directory: {suite-name}-{datetime}
-	suiteDir, err := getOrCreateSuiteDirectory(suiteName, config.Output.ResultsBaseDir)
+	// Get or create suite parent directory: ../results/{ui|api}/{suite-name}-{datetime}
+	suiteDir, err := getOrCreateSuiteDirectory(suiteName, resultsBaseDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create suite directory: %w", err)
 	}
@@ -201,9 +235,9 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 	env.outputCapture.Start()
 
 	// Write TestMain output to test log
-	if testMainOutput.Len() > 0 {
+	if TestMainOutput.Len() > 0 {
 		testLogFile.WriteString("=== TEST MAIN OUTPUT ===\n")
-		testLogFile.Write(testMainOutput.Bytes())
+		testLogFile.Write(TestMainOutput.Bytes())
 		testLogFile.WriteString("========================\n\n")
 	}
 
@@ -217,8 +251,11 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 	fmt.Fprintf(logFile, "Build completed successfully\n")
 
 	// Step 2: Check if service is already running on configured port
+	fmt.Fprintf(logFile, "Checking if service is already running on %s:%d...\n",
+		config.Service.Host, config.Service.Port)
+
 	if isServiceRunning(config.Service.Host, config.Service.Port) {
-		fmt.Fprintf(logFile, "Service already running on %s:%d, attempting graceful shutdown...\n",
+		fmt.Fprintf(logFile, "⚠ Service detected running on %s:%d, attempting graceful shutdown...\n",
 			config.Service.Host, config.Service.Port)
 
 		// Attempt graceful shutdown
@@ -228,17 +265,24 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 			return nil, fmt.Errorf("failed to shutdown existing service (test cannot continue): %w", err)
 		}
 
-		fmt.Fprintf(logFile, "Successfully shutdown existing service\n")
+		fmt.Fprintf(logFile, "✓ Successfully shutdown existing service\n")
 
 		// Wait for port to be released
+		fmt.Fprintf(logFile, "Waiting for port %d to be released...\n", config.Service.Port)
 		if err := waitForPortRelease(config.Service.Host, config.Service.Port, 10*time.Second); err != nil {
 			logFile.Close()
 			testLogFile.Close()
 			return nil, fmt.Errorf("port not released after shutdown: %w", err)
 		}
+		fmt.Fprintf(logFile, "✓ Port %d released and available\n", config.Service.Port)
+	} else {
+		fmt.Fprintf(logFile, "✓ Service not running, port %d is available\n", config.Service.Port)
 	}
 
 	// Step 3: Start new service instance
+	fmt.Fprintf(logFile, "Starting new service instance on %s:%d...\n",
+		config.Service.Host, config.Service.Port)
+
 	if err := env.startService(); err != nil {
 		logFile.Close()
 		testLogFile.Close()
@@ -246,17 +290,23 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 	}
 
 	// Step 4: Wait for service to be ready
+	fmt.Fprintf(logFile, "Waiting for service to become ready (timeout: %ds)...\n",
+		config.Service.StartupTimeoutSeconds)
+
 	if err := env.WaitForServiceReady(); err != nil {
 		env.Cleanup()
 		return nil, fmt.Errorf("service did not become ready: %w", err)
 	}
+
+	fmt.Fprintf(logFile, "✓ Service is ready and accepting connections on %s:%d\n",
+		config.Service.Host, config.Service.Port)
 
 	return env, nil
 }
 
 // isServiceRunning checks if a service is running on the specified host:port
 func isServiceRunning(host string, port int) bool {
-	address := fmt.Sprintf("%s:%d", host, port)
+	address := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
 	if err != nil {
 		return false
@@ -339,14 +389,14 @@ func (env *TestEnvironment) buildService() error {
 	fmt.Fprintf(env.LogFile, "Build successful: %s\n", binaryOutput)
 
 	// Copy test-config.toml to bin/quaero.toml
-	testConfigPath := filepath.Join(".", "test-config.toml")
+	testConfigPath := "../config/test-config.toml"
 	binConfigPath := filepath.Join(filepath.Dir(binaryOutput), "quaero.toml")
 
 	if err := env.copyFile(testConfigPath, binConfigPath); err != nil {
 		return fmt.Errorf("failed to copy config to bin directory: %w", err)
 	}
 
-	fmt.Fprintf(env.LogFile, "Config copied to: %s\n", binConfigPath)
+	fmt.Fprintf(env.LogFile, "Config copied from %s to: %s\n", testConfigPath, binConfigPath)
 
 	return nil
 }
@@ -395,17 +445,22 @@ func (env *TestEnvironment) startService() error {
 	}
 
 	// Start the Quaero service
-	fmt.Fprintf(env.LogFile, "Starting service: %s --config %s\n", binaryPath, configPath)
+	fmt.Fprintf(env.LogFile, "Executing command: %s --config %s\n", binaryPath, configPath)
+	fmt.Fprintf(env.LogFile, "Service will listen on: http://%s:%d\n",
+		env.Config.Service.Host, env.Config.Service.Port)
+
 	cmd := exec.Command(binaryPath, "--config", configPath)
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start service: %w", err)
+		return fmt.Errorf("failed to start service process: %w", err)
 	}
 
 	env.Cmd = cmd
-	fmt.Fprintf(env.LogFile, "Service started with PID: %d\n", cmd.Process.Pid)
+	fmt.Fprintf(env.LogFile, "✓ Service process started successfully (PID: %d)\n", cmd.Process.Pid)
+	fmt.Fprintf(env.LogFile, "Service output will appear below:\n")
+	fmt.Fprintf(env.LogFile, "----------------------------------------\n")
 
 	return nil
 }
@@ -418,11 +473,26 @@ func (env *TestEnvironment) WaitForServiceReady() error {
 
 	baseURL := fmt.Sprintf("http://%s:%d", env.Config.Service.Host, env.Config.Service.Port)
 
+	attemptCount := 0
+	lastLogTime := time.Now()
+
 	for time.Now().Before(deadline) {
+		attemptCount++
 		resp, err := client.Get(baseURL + "/")
+
+		// Log progress every 5 seconds
+		if time.Since(lastLogTime) >= 5*time.Second {
+			elapsed := time.Since(deadline.Add(-timeout)).Seconds()
+			fmt.Fprintf(env.LogFile, "  Still waiting... (attempt %d, elapsed: %.1fs)\n",
+				attemptCount, elapsed)
+			lastLogTime = time.Now()
+		}
+
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resp.Body.Close()
-			fmt.Fprintf(env.LogFile, "Service ready and responding\n")
+			elapsed := time.Since(deadline.Add(-timeout)).Seconds()
+			fmt.Fprintf(env.LogFile, "✓ Service ready and responding (took %.1fs, %d attempts)\n",
+				elapsed, attemptCount)
 			return nil
 		}
 		if resp != nil {
@@ -431,7 +501,7 @@ func (env *TestEnvironment) WaitForServiceReady() error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	return fmt.Errorf("service did not respond within %v", timeout)
+	return fmt.Errorf("service did not respond within %v (after %d attempts)", timeout, attemptCount)
 }
 
 // Cleanup stops the service and closes resources

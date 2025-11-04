@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -13,7 +14,7 @@ import (
 // TestJobCreationFlow tests the complete job creation flow with API and UI
 func TestJobCreationFlow(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobCreationFlow")
+	env, err := common.SetupTestEnvironment("TestJobCreationFlow")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestJobCreationFlow(t *testing.T) {
 // TestJobRerunAction tests the rerun job functionality
 func TestJobRerunAction(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobRerunAction")
+	env, err := common.SetupTestEnvironment("TestJobRerunAction")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestJobRerunAction(t *testing.T) {
 // TestJobCancelAction tests the cancel job functionality
 func TestJobCancelAction(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobCancelAction")
+	env, err := common.SetupTestEnvironment("TestJobCancelAction")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -391,7 +392,7 @@ func TestJobCancelAction(t *testing.T) {
 // TestJobDeleteAction tests the delete job functionality
 func TestJobDeleteAction(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobDeleteAction")
+	env, err := common.SetupTestEnvironment("TestJobDeleteAction")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -506,7 +507,7 @@ func TestJobDeleteAction(t *testing.T) {
 // TestJobQueueVisibility tests that queue endpoint returns correct structure
 func TestJobQueueVisibility(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobQueueVisibility")
+	env, err := common.SetupTestEnvironment("TestJobQueueVisibility")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -639,7 +640,7 @@ func TestJobQueueVisibility(t *testing.T) {
 // TestJobFiltering tests entity type filtering with plural values
 func TestJobFiltering(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestJobFiltering")
+	env, err := common.SetupTestEnvironment("TestJobFiltering")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

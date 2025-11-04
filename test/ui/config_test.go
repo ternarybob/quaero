@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func TestConfigPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigPageLoad")
+	env, err := common.SetupTestEnvironment("TestConfigPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestConfigPageLoad(t *testing.T) {
 
 func TestConfigHeroSection(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigHeroSection")
+	env, err := common.SetupTestEnvironment("TestConfigHeroSection")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestConfigHeroSection(t *testing.T) {
 
 func TestConfigNavbar(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigNavbar")
+	env, err := common.SetupTestEnvironment("TestConfigNavbar")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -154,7 +155,7 @@ func TestConfigNavbar(t *testing.T) {
 
 func TestConfigServiceStatus(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigServiceStatus")
+	env, err := common.SetupTestEnvironment("TestConfigServiceStatus")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestConfigServiceStatus(t *testing.T) {
 
 func TestConfigDisplay(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigDisplay")
+	env, err := common.SetupTestEnvironment("TestConfigDisplay")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -278,7 +279,7 @@ func TestConfigDisplay(t *testing.T) {
 
 func TestConfigServiceLogs(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigServiceLogs")
+	env, err := common.SetupTestEnvironment("TestConfigServiceLogs")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestConfigServiceLogs(t *testing.T) {
 
 func TestConfigFooter(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestConfigFooter")
+	env, err := common.SetupTestEnvironment("TestConfigFooter")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

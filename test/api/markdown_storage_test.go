@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 // TestMarkdownStoragePipeline verifies the end-to-end markdown storage pipeline:
 // HTML scraping → markdown conversion → metadata storage → document transformation → database persistence
 func TestMarkdownStoragePipeline(t *testing.T) {
-	env, err := SetupTestEnvironment("TestMarkdownStoragePipeline")
+	env, err := common.SetupTestEnvironment("TestMarkdownStoragePipeline")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestMarkdownStoragePipeline(t *testing.T) {
 
 // TestMarkdownConversionQuality verifies that markdown conversion produces clean output
 func TestMarkdownConversionQuality(t *testing.T) {
-	env, err := SetupTestEnvironment("TestMarkdownConversionQuality")
+	env, err := common.SetupTestEnvironment("TestMarkdownConversionQuality")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestMarkdownConversionQuality(t *testing.T) {
 
 // TestMarkdownMetadataStorage verifies that markdown is stored in CrawlResult metadata
 func TestMarkdownMetadataStorage(t *testing.T) {
-	env, err := SetupTestEnvironment("TestMarkdownMetadataStorage")
+	env, err := common.SetupTestEnvironment("TestMarkdownMetadataStorage")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

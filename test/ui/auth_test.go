@@ -16,11 +16,12 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/ternarybob/quaero/test/common"
 )
 
 func TestAuthPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("AuthPageLoad")
+	env, err := common.SetupTestEnvironment("AuthPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestAuthPageLoad(t *testing.T) {
 
 func TestAuthPageElements(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("AuthPageElements")
+	env, err := common.SetupTestEnvironment("AuthPageElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestAuthPageElements(t *testing.T) {
 
 func TestAuthNavbar(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("AuthNavbar")
+	env, err := common.SetupTestEnvironment("AuthNavbar")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestAuthNavbar(t *testing.T) {
 
 func TestAuthCookieInjection(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("AuthCookieInjection")
+	env, err := common.SetupTestEnvironment("AuthCookieInjection")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

@@ -1,11 +1,12 @@
 // -----------------------------------------------------------------------
 // Example API test using the new self-contained setup
-// Demonstrates proper usage of SetupTestEnvironment
+// Demonstrates proper usage of common.SetupTestEnvironment
 // -----------------------------------------------------------------------
 
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
 )
@@ -13,7 +14,7 @@ import (
 // TestExampleListSources demonstrates the new test setup pattern
 func TestExampleListSources(t *testing.T) {
 	// Setup test environment (builds & starts service automatically)
-	env, err := SetupTestEnvironment("TestExampleListSources")
+	env, err := common.SetupTestEnvironment("TestExampleListSources")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestExampleListSources(t *testing.T) {
 // TestExampleCreateSource demonstrates creating a resource with cleanup
 func TestExampleCreateSource(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestExampleCreateSource")
+	env, err := common.SetupTestEnvironment("TestExampleCreateSource")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

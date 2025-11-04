@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 // TestQueuePageLoad verifies that the queue management page loads correctly
 func TestQueuePageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueuePageLoad")
+	env, err := common.SetupTestEnvironment("TestQueuePageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestQueuePageLoad(t *testing.T) {
 // TestQueueRerunButtonExists verifies that rerun buttons are present in the queue
 func TestQueueRerunButtonExists(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueueRerunButtonExists")
+	env, err := common.SetupTestEnvironment("TestQueueRerunButtonExists")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestQueueRerunButtonExists(t *testing.T) {
 // TestQueueRerunButtonClick tests clicking the rerun button and verifies the behavior
 func TestQueueRerunButtonClick(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueueRerunButtonClick")
+	env, err := common.SetupTestEnvironment("TestQueueRerunButtonClick")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestQueueRerunButtonClick(t *testing.T) {
 // TestQueueRerunErrorHandling verifies that rerun errors are properly displayed to the user
 func TestQueueRerunErrorHandling(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestQueueRerunErrorHandling")
+	env, err := common.SetupTestEnvironment("TestQueueRerunErrorHandling")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

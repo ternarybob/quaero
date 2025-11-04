@@ -2,6 +2,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestListSources(t *testing.T) {
-	env, err := SetupTestEnvironment("TestListSources")
+	env, err := common.SetupTestEnvironment("TestListSources")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -30,7 +31,7 @@ func TestListSources(t *testing.T) {
 }
 
 func TestCreateSource(t *testing.T) {
-	env, err := SetupTestEnvironment("TestCreateSource")
+	env, err := common.SetupTestEnvironment("TestCreateSource")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestCreateSource(t *testing.T) {
 }
 
 func TestGetSource(t *testing.T) {
-	env, err := SetupTestEnvironment("TestGetSource")
+	env, err := common.SetupTestEnvironment("TestGetSource")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestGetSource(t *testing.T) {
 }
 
 func TestUpdateSource(t *testing.T) {
-	env, err := SetupTestEnvironment("TestUpdateSource")
+	env, err := common.SetupTestEnvironment("TestUpdateSource")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -230,7 +231,7 @@ func TestUpdateSource(t *testing.T) {
 }
 
 func TestDeleteSource(t *testing.T) {
-	env, err := SetupTestEnvironment("TestDeleteSource")
+	env, err := common.SetupTestEnvironment("TestDeleteSource")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestDeleteSource(t *testing.T) {
 
 // TestCreateSourcesWithAuthentication creates test Jira and Confluence sources with authentication
 func TestCreateSourcesWithAuthentication(t *testing.T) {
-	env, err := SetupTestEnvironment("TestCreateSourcesWithAuthentication")
+	env, err := common.SetupTestEnvironment("TestCreateSourcesWithAuthentication")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -491,7 +492,7 @@ func TestCreateSourcesWithAuthentication(t *testing.T) {
 
 // TestSourceWithoutAuthentication verifies that sources can be created without authentication
 func TestSourceWithoutAuthentication(t *testing.T) {
-	env, err := SetupTestEnvironment("TestSourceWithoutAuthentication")
+	env, err := common.SetupTestEnvironment("TestSourceWithoutAuthentication")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -538,7 +539,7 @@ func TestSourceWithoutAuthentication(t *testing.T) {
 
 // TestCreateSourceWithFilters verifies that sources can be created with filter patterns
 func TestCreateSourceWithFilters(t *testing.T) {
-	env, err := SetupTestEnvironment("TestCreateSourceWithFilters")
+	env, err := common.SetupTestEnvironment("TestCreateSourceWithFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -628,7 +629,7 @@ func TestCreateSourceWithFilters(t *testing.T) {
 
 // TestCreateSourceWithoutFilters verifies that sources can be created without filters
 func TestCreateSourceWithoutFilters(t *testing.T) {
-	env, err := SetupTestEnvironment("TestCreateSourceWithoutFilters")
+	env, err := common.SetupTestEnvironment("TestCreateSourceWithoutFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -688,7 +689,7 @@ func TestCreateSourceWithoutFilters(t *testing.T) {
 
 // TestUpdateSourceFilters verifies that source filters can be updated
 func TestUpdateSourceFilters(t *testing.T) {
-	env, err := SetupTestEnvironment("TestUpdateSourceFilters")
+	env, err := common.SetupTestEnvironment("TestUpdateSourceFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -782,7 +783,7 @@ func TestUpdateSourceFilters(t *testing.T) {
 
 // TestFilterSanitization verifies that filter patterns are properly sanitized
 func TestFilterSanitization(t *testing.T) {
-	env, err := SetupTestEnvironment("TestFilterSanitization")
+	env, err := common.SetupTestEnvironment("TestFilterSanitization")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -844,7 +845,7 @@ func TestFilterSanitization(t *testing.T) {
 
 // TestFilterSanitizationAllWhitespace verifies handling of all-whitespace patterns
 func TestFilterSanitizationAllWhitespace(t *testing.T) {
-	env, err := SetupTestEnvironment("TestFilterSanitizationAllWhitespace")
+	env, err := common.SetupTestEnvironment("TestFilterSanitizationAllWhitespace")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -904,7 +905,7 @@ func TestFilterSanitizationAllWhitespace(t *testing.T) {
 
 // TestListSourcesIncludesFilters verifies that listing sources includes their filters
 func TestListSourcesIncludesFilters(t *testing.T) {
-	env, err := SetupTestEnvironment("TestListSourcesIncludesFilters")
+	env, err := common.SetupTestEnvironment("TestListSourcesIncludesFilters")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

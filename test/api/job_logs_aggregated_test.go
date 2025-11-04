@@ -6,6 +6,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"io"
 	"net/http"
 	"testing"
@@ -14,7 +15,7 @@ import (
 
 // TestJobLogsAggregated_ParentOnly tests the aggregated logs endpoint for a parent job without children
 func TestJobLogsAggregated_ParentOnly(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_ParentOnly")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_ParentOnly")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestJobLogsAggregated_ParentOnly(t *testing.T) {
 
 // TestJobLogsAggregated_WithChildren tests the aggregated logs endpoint for a parent job with child jobs
 func TestJobLogsAggregated_WithChildren(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_WithChildren")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_WithChildren")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -480,7 +481,7 @@ func TestJobLogsAggregated_WithChildren(t *testing.T) {
 
 // TestJobLogsAggregated_LevelFiltering tests level filtering in aggregated logs
 func TestJobLogsAggregated_LevelFiltering(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_LevelFiltering")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_LevelFiltering")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -669,7 +670,7 @@ func TestJobLogsAggregated_LevelFiltering(t *testing.T) {
 
 // TestJobLogsAggregated_Order tests ordering parameter (asc/desc)
 func TestJobLogsAggregated_Order(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_Order")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_Order")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -882,7 +883,7 @@ func TestJobLogsAggregated_Order(t *testing.T) {
 
 // TestJobLogsAggregated_Limit tests the limit parameter
 func TestJobLogsAggregated_Limit(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_Limit")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_Limit")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -1053,7 +1054,7 @@ func TestJobLogsAggregated_Limit(t *testing.T) {
 
 // TestJobLogsAggregated_NonExistentJob tests error handling for non-existent job
 func TestJobLogsAggregated_NonExistentJob(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobLogsAggregated_NonExistentJob")
+	env, err := common.SetupTestEnvironment("TestJobLogsAggregated_NonExistentJob")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

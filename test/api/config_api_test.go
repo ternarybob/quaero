@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"os"
 	"strings"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestConfigEndpoint(t *testing.T) {
-	env, err := SetupTestEnvironment("TestConfigEndpoint")
+	env, err := common.SetupTestEnvironment("TestConfigEndpoint")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

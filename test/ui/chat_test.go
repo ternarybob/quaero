@@ -1,3 +1,8 @@
+// -----------------------------------------------------------------------
+// Last Modified: Tuesday, 4th November 2025 4:39:10 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
 package ui
 
 import (
@@ -6,11 +11,12 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/ternarybob/quaero/test/common"
 )
 
 func TestChatPageLoad(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestChatPageLoad")
+	env, err := common.SetupTestEnvironment("TestChatPageLoad")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -47,7 +53,7 @@ func TestChatPageLoad(t *testing.T) {
 
 func TestChatElements(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestChatElements")
+	env, err := common.SetupTestEnvironment("TestChatElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -96,7 +102,7 @@ func TestChatElements(t *testing.T) {
 
 func TestChatHealthCheck(t *testing.T) {
 	// Setup test environment
-	env, err := SetupTestEnvironment("TestChatHealthCheck")
+	env, err := common.SetupTestEnvironment("TestChatHealthCheck")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

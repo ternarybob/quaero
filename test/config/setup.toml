@@ -1,0 +1,28 @@
+# Shared Test Configuration for UI and API tests
+
+[build]
+# Source directory for main.go (relative to test/ui or test/api)
+source_dir = "../../cmd/quaero"
+# Binary output path - platform extension added automatically
+# Outputs to shared test/bin/ directory
+binary_output = "../bin/quaero"
+# Config file for the test service - copied from test-config.toml during build
+config_file = "../bin/quaero.toml"
+
+[service]
+# Startup timeout in seconds
+startup_timeout_seconds = 30
+# Server port - will be overridden by code (18085 for UI, 19085 for API)
+# Default port for UI tests (isolated from dev server on 8085)
+port = 18085
+# Server host
+host = "localhost"
+# Shutdown endpoint
+shutdown_endpoint = "/api/shutdown"
+
+[output]
+# Base directory for test results
+# Structure: results/{ui|api}/{suite-name}-{datetime}/{test-name}/
+# Example UI: ../results/ui/TestSources-20251104-161234/TestSourcesPageLoad/
+# Example API: ../results/api/TestJob-20251104-161234/TestJobDefaultDefinitionsAPI/
+results_base_dir = "../results"

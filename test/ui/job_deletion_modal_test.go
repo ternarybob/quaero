@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"database/sql"
 	"fmt"
@@ -11,14 +12,14 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/ternarybob/quaero/internal/common"
+	appcommon "github.com/ternarybob/quaero/internal/common"
 	_ "modernc.org/sqlite"
 )
 
 // TestJobDeletion_BulkDeletion tests bulk deletion of jobs via the "Delete Selected" modal
 func TestJobDeletion_BulkDeletion(t *testing.T) {
 	// Setup test environment with test name
-	env, err := SetupTestEnvironment("BulkDeletion")
+	env, err := common.SetupTestEnvironment("BulkDeletion")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -221,7 +222,7 @@ func TestJobDeletion_BulkDeletion(t *testing.T) {
 // TestJobDeletion_IndividualDeletion tests deleting a single job directly from the list
 func TestJobDeletion_IndividualDeletion(t *testing.T) {
 	// Setup test environment with test name
-	env, err := SetupTestEnvironment("IndividualDeletion")
+	env, err := common.SetupTestEnvironment("IndividualDeletion")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -419,7 +420,7 @@ func getDatabasePath() (string, error) {
 		return "", fmt.Errorf("failed to read config file (tried %v): %w", configPaths, err)
 	}
 
-	var config common.Config
+	var config appcommon.Config
 	if err := toml.Unmarshal(data, &config); err != nil {
 		return "", fmt.Errorf("failed to parse config: %w", err)
 	}

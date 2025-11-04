@@ -6,6 +6,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"io"
 	"net/http"
 	"testing"
@@ -16,7 +17,7 @@ import (
 // When a user clicks "rerun" on a completed/failed job in the queue,
 // the system should create a new job with the same configuration and add it to the queue.
 func TestJobRerun(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobRerun")
+	env, err := common.SetupTestEnvironment("TestJobRerun")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -234,7 +235,7 @@ func TestJobRerun(t *testing.T) {
 
 // TestJobRerunNonExistent tests rerun of a non-existent job
 func TestJobRerunNonExistent(t *testing.T) {
-	env, err := SetupTestEnvironment("TestJobRerunNonExistent")
+	env, err := common.SetupTestEnvironment("TestJobRerunNonExistent")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

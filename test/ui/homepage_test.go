@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func TestHomepageTitle(t *testing.T) {
 	// Setup test environment with test name
-	env, err := SetupTestEnvironment("HomepageTitle")
+	env, err := common.SetupTestEnvironment("HomepageTitle")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -74,7 +75,7 @@ func TestHomepageTitle(t *testing.T) {
 
 func TestHomepageElements(t *testing.T) {
 	// Setup test environment with test name
-	env, err := SetupTestEnvironment("HomepageElements")
+	env, err := common.SetupTestEnvironment("HomepageElements")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestHomepageElements(t *testing.T) {
 
 func TestNavigation(t *testing.T) {
 	// Setup test environment with test name
-	env, err := SetupTestEnvironment("Navigation")
+	env, err := common.SetupTestEnvironment("Navigation")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

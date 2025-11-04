@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
 )
@@ -25,7 +26,7 @@ import (
 // TestCreateJobValidationFailure tests source creation validation
 // Note: Job validation now occurs at job definition level
 func TestCreateJobValidationFailure(t *testing.T) {
-	env, err := SetupTestEnvironment("TestCreateJobValidationFailure")
+	env, err := common.SetupTestEnvironment("TestCreateJobValidationFailure")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

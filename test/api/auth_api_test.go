@@ -2,6 +2,7 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 // TestAuthListEndpoint tests the GET /api/auth/list endpoint
 func TestAuthListEndpoint(t *testing.T) {
-	env, err := SetupTestEnvironment("TestAuthListEndpoint")
+	env, err := common.SetupTestEnvironment("TestAuthListEndpoint")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestAuthListEndpoint(t *testing.T) {
 
 // TestAuthCaptureEndpoint tests capturing auth from Chrome extension
 func TestAuthCaptureEndpoint(t *testing.T) {
-	env, err := SetupTestEnvironment("TestAuthCaptureEndpoint")
+	env, err := common.SetupTestEnvironment("TestAuthCaptureEndpoint")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestAuthCaptureEndpoint(t *testing.T) {
 
 // TestAuthStatusEndpoint tests the GET /api/auth/status endpoint
 func TestAuthStatusEndpoint(t *testing.T) {
-	env, err := SetupTestEnvironment("TestAuthStatusEndpoint")
+	env, err := common.SetupTestEnvironment("TestAuthStatusEndpoint")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

@@ -1,12 +1,13 @@
 package api
 
 import (
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
 )
 
 func TestChatHealth(t *testing.T) {
-	env, err := SetupTestEnvironment("TestChatHealth")
+	env, err := common.SetupTestEnvironment("TestChatHealth")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestChatHealth(t *testing.T) {
 }
 
 func TestChatMessage(t *testing.T) {
-	env, err := SetupTestEnvironment("TestChatMessage")
+	env, err := common.SetupTestEnvironment("TestChatMessage")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestChatMessage(t *testing.T) {
 }
 
 func TestChatWithHistory(t *testing.T) {
-	env, err := SetupTestEnvironment("TestChatWithHistory")
+	env, err := common.SetupTestEnvironment("TestChatWithHistory")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestChatWithHistory(t *testing.T) {
 }
 
 func TestChatEmptyMessage(t *testing.T) {
-	env, err := SetupTestEnvironment("TestChatEmptyMessage")
+	env, err := common.SetupTestEnvironment("TestChatEmptyMessage")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
