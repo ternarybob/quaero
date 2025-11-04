@@ -726,6 +726,91 @@ Model Context Protocol integration (internal for Claude Code only):
 - Query interface for agent tools only
 - Not intended for external MCP clients
 
+### Job Queue and Executor Architecture
+
+Quaero has two complementary job execution systems that work together to provide robust, scalable job processing:
+
+- **Queue System** (`internal/queue/`, `internal/jobs/`, `internal/services/workers/`) - Handles persistent job execution with goqite (SQLite-backed queue), QueueManager, JobManager, and WorkerPool for reliable background processing
+- **Job Executor** (`internal/jobs/executor/`) - Orchestrates multi-step workflows from JobDefinitions with sequential step execution and proper error handling
+
+These systems work together seamlessly: JobExecutor creates parent jobs and executes JobDefinition steps sequentially, which may create child jobs that are processed by the queue-based system. This architecture enables complex workflows while maintaining reliability and observability.
+
+```mermaid
+sequenceDiagram
+    participant UI as User/UI
+    participant JDH as JobDefinitionHandler
+    participant JE as JobExecutor
+    participant SE as StepExecutor
+    participant JM as JobManager
+    participant QM as QueueManager
+    participant DB as SQLite<br/>(goqite + jobs)
+    participant WP as WorkerPool
+    participant EX as Executor
+    participant WS as WebSocketHandler
+
+    Note over UI,WS: JobDefinition Execution Flow
+    UI->>JDH: POST /api/job-definitions/{id}/execute
+    JDH->>JE: Execute(jobDefinition)
+    JE->>JM: CreateParentJob(type, payload)
+    JM->>DB: INSERT INTO jobs (parent job)
+
+    Note over JE,SE: Sequential Step Execution
+    loop For each step in JobDefinition.Steps
+        JE->>SE: ExecuteStep(step, phase, payload)
+        SE->>JM: CreateChildJob(type, payload)
+        JM->>DB: INSERT INTO jobs (child job)
+        JM->>QM: Enqueue(Message{JobID, Type, Payload})
+        QM->>DB: INSERT INTO goqite_messages
+        SE-->>JE: childJobID
+    end
+
+    JE-->>JDH: parentJobID
+    JDH-->>UI: 200 OK {jobID}
+
+    Note over WP,EX: Queue-Based Job Processing
+    WP->>QM: Receive(ctx) [blocking poll]
+    QM->>DB: SELECT from goqite_messages
+    DB-->>QM: Message (with visibility timeout)
+    QM-->>WP: Message{JobID, Type, Payload}
+
+    WP->>JM: UpdateJobStatus(jobID, "running")
+    JM->>DB: UPDATE jobs SET status='running'
+    WP->>WS: SendLog(jobID, "info", "Job started")
+    WS-->>UI: WebSocket: job_status update
+
+    WP->>EX: Execute(ctx, jobID, payload)
+
+    alt Success
+        EX-->>WP: nil (success)
+        WP->>JM: UpdateJobStatus(jobID, "completed")
+        WP->>JM: SetJobResult(jobID, result)
+        JM->>DB: UPDATE jobs SET status='completed'
+        WP->>WS: SendLog(jobID, "info", "Job completed")
+    else Failure
+        EX-->>WP: error
+        WP->>JM: UpdateJobStatus(jobID, "failed")
+        WP->>JM: SetJobError(jobID, error)
+        JM->>DB: UPDATE jobs SET status='failed'
+        WP->>WS: SendLog(jobID, "error", error message)
+    end
+
+    WS-->>UI: WebSocket: job_status update
+    WP->>QM: deleteFn() [remove from queue]
+    QM->>DB: DELETE from goqite_messages
+
+    Note over UI,WS: Parent-child hierarchy tracked via parent_id<br/>goqite provides persistence and visibility timeout<br/>Worker pool processes jobs concurrently<br/>WebSocket provides real-time updates
+```
+
+This architecture provides several key benefits:
+
+- **Separation of Concerns**: JobExecutor handles workflow orchestration while the Queue System manages reliable execution
+- **Parent-Child Hierarchy**: Enables comprehensive progress tracking and status aggregation across complex job trees
+- **Persistent Queuing**: goqite provides SQLite-backed persistence with visibility timeouts for fault tolerance
+- **Real-Time Updates**: WebSocket integration delivers live progress updates to the UI
+- **Scalable Processing**: Configurable worker pool enables concurrent job processing with proper resource management
+
+The parent-child job hierarchy allows for sophisticated workflows where a single JobDefinition can spawn multiple child jobs (e.g., URL discovery creating individual crawler jobs), with all progress and status information properly tracked and aggregated. For detailed technical documentation, see `docs/architecture/QUEUE_ARCHITECTURE.md` and `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`.
+
 ### Authentication Flow
 
 ```
