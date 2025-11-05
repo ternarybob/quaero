@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 20th October 2025 5:35:00 pm
-// Modified By: Claude Code
+// Last Modified: Wednesday, 5th November 2025 11:27:50 am
+// Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
 package sqlite
@@ -419,115 +419,9 @@ func (s *JobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, er
 // This method is idempotent and safe to call multiple times - it will only create
 // missing job definitions using ON CONFLICT DO NOTHING to preserve user customizations.
 func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) error {
-	// Database Maintenance Job - Rebuilds FTS5 index weekly
-	dbMaintenanceJob := &models.JobDefinition{
-		ID:          "default-database-maintenance",
-		Name:        "Database Maintenance",
-		Type:        models.JobDefinitionTypeCustom,
-		Description: "Rebuilds the FTS5 full-text search index to ensure optimal search performance. Runs weekly to keep the search index synchronized with document changes.",
-		Sources:     []string{}, // This job doesn't operate on specific sources
-		Steps: []models.JobStep{
-			{
-				Name:   "reindex",
-				Action: "reindex",
-				Config: map[string]interface{}{
-					"dry_run": false,
-				},
-				OnError: models.ErrorStrategyFail,
-			},
-		},
-		Schedule:  "0 2 * * 0", // Sunday at 2:00 AM (weekly)
-		Timeout:   "30m",       // 30 minutes should be sufficient
-		Enabled:   true,        // Enable by default
-		AutoStart: false,       // Don't auto-start on scheduler initialization, only run on schedule
-		Config:    make(map[string]interface{}),
-		PostJobs:  []string{}, // No post jobs for maintenance job
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	// Serialize job definition fields to JSON
-	sourcesJSON, err := dbMaintenanceJob.MarshalSources()
-	if err != nil {
-		return fmt.Errorf("failed to marshal sources: %w", err)
-	}
-
-	stepsJSON, err := dbMaintenanceJob.MarshalSteps()
-	if err != nil {
-		return fmt.Errorf("failed to marshal steps: %w", err)
-	}
-
-	configJSON, err := dbMaintenanceJob.MarshalConfig()
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	preJobsJSON, err := dbMaintenanceJob.MarshalPreJobs()
-	if err != nil {
-		return fmt.Errorf("failed to marshal pre_jobs: %w", err)
-	}
-
-	postJobsJSON, err := dbMaintenanceJob.MarshalPostJobs()
-	if err != nil {
-		return fmt.Errorf("failed to marshal post_jobs: %w", err)
-	}
-
-	// Convert bools to integers
-	enabled := 0
-	if dbMaintenanceJob.Enabled {
-		enabled = 1
-	}
-	autoStart := 0
-	if dbMaintenanceJob.AutoStart {
-		autoStart = 1
-	}
-
-	// Convert timestamps to Unix integers
-	createdAt := dbMaintenanceJob.CreatedAt.Unix()
-	updatedAt := dbMaintenanceJob.UpdatedAt.Unix()
-
-	// Serialize ErrorTolerance to JSON using model helper
-	errorToleranceJSON, err := dbMaintenanceJob.MarshalErrorTolerance()
-	if err != nil {
-		return fmt.Errorf("failed to marshal error_tolerance: %w", err)
-	}
-
-	// Insert job definition using ON CONFLICT DO NOTHING to preserve user customizations
-	query := `
-		INSERT INTO job_definitions (
-			id, name, type, description, sources, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO NOTHING
-	`
-
-	result, err := s.db.DB().ExecContext(ctx, query,
-		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), dbMaintenanceJob.Description,
-		sourcesJSON, stepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, createdAt, updatedAt,
-	)
-	if err != nil {
-		s.logger.Error().
-			Err(err).
-			Str("job_def_id", dbMaintenanceJob.ID).
-			Msg("Failed to create default database maintenance job")
-		return fmt.Errorf("failed to create default database maintenance job: %w", err)
-	}
-
-	// Check if a row was actually inserted
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to get rows affected for default job creation")
-	} else if rowsAffected > 0 {
-		s.logger.Info().
-			Str("job_def_id", dbMaintenanceJob.ID).
-			Str("job_def_name", dbMaintenanceJob.Name).
-			Msg("Default job definition created")
-	} else {
-		s.logger.Debug().
-			Str("job_def_id", dbMaintenanceJob.ID).
-			Msg("Default job definition already exists, preserving user customizations")
-	}
+	// NOTE: Database Maintenance job is now created in seed_job_definitions.go
+	// with ID "database-maintenance" and action "database_maintenance"
+	// The old "default-database-maintenance" with action "reindex" is deprecated
 
 	// Corpus Summary Job - Generates corpus statistics hourly
 	corpusSummaryJob := &models.JobDefinition{

@@ -7,21 +7,18 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// Executor interface for job execution
-type Executor interface {
-	Execute(ctx context.Context, jobID string, payload []byte) error
-}
-
-// JobProcessor is a simplified job processor that uses goqite directly.
-// It replaces the complex WorkerPool with a simpler polling-based approach.
+// JobProcessor is a job-agnostic processor that uses goqite for queue management.
+// It routes jobs to registered executors based on job type.
 type JobProcessor struct {
 	queueMgr  *queue.Manager
 	jobMgr    *jobs.Manager
-	executors map[string]Executor
+	executors map[string]interfaces.JobExecutor
 	logger    arbor.ILogger
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -37,7 +34,7 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 	return &JobProcessor{
 		queueMgr:  queueMgr,
 		jobMgr:    jobMgr,
-		executors: make(map[string]Executor),
+		executors: make(map[string]interfaces.JobExecutor),
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -45,12 +42,14 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 	}
 }
 
-// RegisterExecutor registers an executor for a job type.
-func (jp *JobProcessor) RegisterExecutor(jobType string, executor Executor) {
+// RegisterExecutor registers a job executor for a job type.
+// The executor must implement the JobExecutor interface.
+func (jp *JobProcessor) RegisterExecutor(executor interfaces.JobExecutor) {
+	jobType := executor.GetJobType()
 	jp.executors[jobType] = executor
 	jp.logger.Info().
 		Str("job_type", jobType).
-		Msg("Executor registered")
+		Msg("Job executor registered")
 }
 
 // Start starts the job processor.
@@ -120,18 +119,35 @@ func (jp *JobProcessor) processNextJob() {
 	jp.logger.Info().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
-		Msg("Processing job")
+		Msg("Processing job from queue")
 
-	// Update job status to running
-	if err := jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "running"); err != nil {
+	// Deserialize job model from payload
+	jobModel, err := models.FromJSON(msg.Payload)
+	if err != nil {
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
-			Msg("Failed to update job status to running")
+			Msg("Failed to deserialize job model")
+
+		// Delete malformed message from queue
+		if err := deleteFn(); err != nil {
+			jp.logger.Error().Err(err).Msg("Failed to delete malformed message")
+		}
+		return
 	}
 
-	if err := jp.jobMgr.AddJobLog(jp.ctx, msg.JobID, "info", "Job started"); err != nil {
-		jp.logger.Warn().Err(err).Msg("Failed to add job log")
+	// Validate job model
+	if err := jobModel.Validate(); err != nil {
+		jp.logger.Error().
+			Err(err).
+			Str("job_id", msg.JobID).
+			Msg("Invalid job model")
+
+		// Delete invalid message from queue
+		if err := deleteFn(); err != nil {
+			jp.logger.Error().Err(err).Msg("Failed to delete invalid message")
+		}
+		return
 	}
 
 	// Get executor for job type
@@ -143,8 +159,9 @@ func (jp *JobProcessor) processNextJob() {
 			Str("job_id", msg.JobID).
 			Msg(errMsg)
 
+		// Update job status to failed
 		jp.jobMgr.SetJobError(jp.ctx, msg.JobID, errMsg)
-		jp.jobMgr.AddJobLog(jp.ctx, msg.JobID, "error", errMsg)
+		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
 
 		// Delete message from queue
 		if err := deleteFn(); err != nil {
@@ -153,26 +170,47 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Execute the job
-	err = executor.Execute(jp.ctx, msg.JobID, msg.Payload)
+	// Validate job model with executor
+	if err := executor.Validate(jobModel); err != nil {
+		jp.logger.Error().
+			Err(err).
+			Str("job_id", msg.JobID).
+			Str("job_type", msg.Type).
+			Msg("Job model validation failed")
+
+		// Update job status to failed
+		jp.jobMgr.SetJobError(jp.ctx, msg.JobID, err.Error())
+		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
+
+		// Delete message from queue
+		if err := deleteFn(); err != nil {
+			jp.logger.Error().Err(err).Msg("Failed to delete message")
+		}
+		return
+	}
+
+	// Execute the job using the executor
+	err = executor.Execute(jp.ctx, jobModel)
 
 	if err != nil {
 		// Job failed
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
-			Msg("Job failed")
+			Str("job_type", msg.Type).
+			Msg("Job execution failed")
 
-		jp.jobMgr.SetJobError(jp.ctx, msg.JobID, err.Error())
-		jp.jobMgr.AddJobLog(jp.ctx, msg.JobID, "error", err.Error())
+		// Error is already set by executor, just ensure status is updated
+		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
 	} else {
 		// Job succeeded
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
+			Str("job_type", msg.Type).
 			Msg("Job completed successfully")
 
+		// Status is already set by executor, but ensure it's completed
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "completed")
-		jp.jobMgr.AddJobLog(jp.ctx, msg.JobID, "info", "Job completed successfully")
 	}
 
 	// Remove message from queue

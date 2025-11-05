@@ -32,6 +32,7 @@ type Job struct {
 	ID              string     `json:"id"`
 	ParentID        *string    `json:"parent_id,omitempty"`
 	Type            string     `json:"job_type"`
+	Name            string     `json:"name"` // Human-readable job name
 	Phase           string     `json:"phase"`
 	Status          string     `json:"status"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -166,7 +167,7 @@ func (m *Manager) CreateJob(ctx context.Context, job *Job) error {
 				created_at, refresh_source, result_count, failed_count
 			)
 			VALUES (?, ?, ?, ?, ?, 'job_definition', 'job', ?, ?, ?, ?, ?, 0, 0, 0)
-		`, job.ID, job.ParentID, job.Type, job.Type, job.Type,
+		`, job.ID, job.ParentID, job.Type, job.Name, job.Name,
 			string(configJSONBytes), job.Status, string(progressJSONBytes), string(metadataJSON), timeToUnix(job.CreatedAt))
 		return err
 	})

@@ -13,6 +13,7 @@ host = "localhost"
 # Default path: ./data/quaero.db resolves to test/bin/data/quaero.db
 [storage.sqlite]
 # path = "./data/quaero.db"  # Uncomment to override default
+reset_on_startup = true # Delete database on startup for clean test runs
 
 # Disable all sources for faster startup
 [sources.confluence]

@@ -54,6 +54,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		ID:              parentJobID,
 		ParentID:        nil, // This is a root job
 		Type:            string(jobDef.Type),
+		Name:            jobDef.Name, // Use job definition name
 		Phase:           "execution",
 		Status:          "pending",
 		ProgressCurrent: 0,

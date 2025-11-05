@@ -19,8 +19,8 @@ type Manager struct {
 }
 
 // NewManager creates a new SQLite storage manager
-func NewManager(logger arbor.ILogger, config *common.SQLiteConfig) (interfaces.StorageManager, error) {
-	db, err := NewSQLiteDB(logger, config)
+func NewManager(logger arbor.ILogger, config *common.SQLiteConfig, environment string) (interfaces.StorageManager, error) {
+	db, err := NewSQLiteDB(logger, config, environment)
 	if err != nil {
 		return nil, err
 	}

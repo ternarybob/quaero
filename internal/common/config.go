@@ -80,6 +80,7 @@ type SQLiteConfig struct {
 	CacheSizeMB        int    `toml:"cache_size_mb"`       // Cache size in MB
 	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
 	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
+	ResetOnStartup     bool   `toml:"reset_on_startup"`    // Delete database on startup (development only)
 }
 
 type RavenDBConfig struct {

@@ -44,6 +44,7 @@ func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		ID:       jobID,
 		ParentID: &parentJobID,
 		Type:     "reindex",
+		Name:     step.Name, // Use step name as job name
 		Phase:    "core",
 		Status:   "running",
 	}
@@ -68,7 +69,7 @@ func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		e.logger.Info().
 			Str("job_id", jobID).
 			Msg("Dry run mode - skipping actual index rebuild")
-		
+
 		// Mark job as completed
 		if err := e.jobManager.UpdateJobStatus(ctx, jobID, "completed"); err != nil {
 			e.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to update job status to completed")

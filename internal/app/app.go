@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 3rd November 2025 8:10:38 am
+// Last Modified: Wednesday, 5th November 2025 11:32:21 am
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -29,6 +29,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
+	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -69,6 +70,7 @@ type App struct {
 	JobManager   *jobs.Manager
 	JobProcessor *processor.JobProcessor
 	JobExecutor  *executor.JobExecutor
+	JobService   *jobsvc.Service
 
 	// Specialized transformers
 	JiraTransformer       *atlassian.JiraTransformer
@@ -203,6 +205,14 @@ func (a *App) initDatabase() error {
 		Str("vector_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableVector)).
 		Msg("Storage layer initialized")
 
+	// Seed default job definitions
+	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
+		ctx := context.Background()
+		if err := sqliteMgr.SeedJobDefinitions(ctx); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to seed job definitions")
+		}
+	}
+
 	return nil
 }
 
@@ -311,6 +321,10 @@ func (a *App) initServices() error {
 	a.JobProcessor = jobProcessor
 	a.Logger.Info().Msg("Job processor initialized")
 
+	// 5.10. Initialize job service for high-level job operations
+	a.JobService = jobsvc.NewService(jobMgr, queueMgr, a.Logger)
+	a.Logger.Info().Msg("Job service initialized")
+
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -350,9 +364,22 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
 
 	// 6.7. Register job executors with job processor
-	crawlerExecutor := processor.NewCrawlerExecutor(a.CrawlerService, a.JobManager, a.StorageManager.JobStorage(), a.Config, a.Logger)
-	jobProcessor.RegisterExecutor("crawler_url", crawlerExecutor)
-	a.Logger.Info().Msg("Crawler executor registered for job type: crawler_url")
+	// NOTE: Old CrawlerExecutor uses legacy interface - needs migration to new JobExecutor interface
+	// crawlerExecutor := processor.NewCrawlerExecutor(a.CrawlerService, a.JobManager, a.StorageManager.JobStorage(), a.Config, a.Logger)
+	// jobProcessor.RegisterExecutor(crawlerExecutor)
+	// a.Logger.Info().Msg("Crawler executor registered for job type: crawler_url")
+
+	// Register database maintenance executor (new interface)
+	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(
+		a.StorageManager.DB().(*sql.DB),
+		jobMgr,
+		queueMgr,
+		a.Logger,
+		a.LogService,
+		a.WSHandler,
+	)
+	jobProcessor.RegisterExecutor(dbMaintenanceExecutor)
+	a.Logger.Info().Msg("Database maintenance executor registered")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -373,6 +400,10 @@ func (a *App) initServices() error {
 	reindexStepExecutor := executor.NewReindexStepExecutor(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(reindexStepExecutor)
 	a.Logger.Info().Msg("Reindex step executor registered")
+
+	dbMaintenanceStepExecutor := executor.NewDatabaseMaintenanceStepExecutor(a.JobManager, queueMgr, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(dbMaintenanceStepExecutor)
+	a.Logger.Info().Msg("Database maintenance step executor registered")
 
 	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
 
