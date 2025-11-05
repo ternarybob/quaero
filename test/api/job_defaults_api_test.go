@@ -6,9 +6,10 @@
 package api
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
+
+	"github.com/ternarybob/quaero/test/common"
 )
 
 // TestJobDefaultDefinitionsAPI verifies that 2 default job definitions are returned by the API
@@ -31,10 +32,31 @@ func TestJobDefaultDefinitionsAPI(t *testing.T) {
 	// Verify response status
 	h.AssertStatusCode(resp, http.StatusOK)
 
-	// Parse response
-	var jobDefs []map[string]interface{}
-	if err := h.ParseJSONResponse(resp, &jobDefs); err != nil {
+	// Parse response - API now returns object with job_definitions array
+	var response map[string]interface{}
+	if err := h.ParseJSONResponse(resp, &response); err != nil {
 		t.Fatalf("Failed to parse job definitions response: %v", err)
+	}
+
+	// Extract job_definitions array from response
+	jobDefsInterface, ok := response["job_definitions"]
+	if !ok {
+		t.Fatalf("Response missing 'job_definitions' field")
+	}
+
+	jobDefsArray, ok := jobDefsInterface.([]interface{})
+	if !ok {
+		t.Fatalf("'job_definitions' is not an array")
+	}
+
+	// Convert to []map[string]interface{}
+	jobDefs := make([]map[string]interface{}, len(jobDefsArray))
+	for i, item := range jobDefsArray {
+		jobDef, ok := item.(map[string]interface{})
+		if !ok {
+			t.Fatalf("Job definition at index %d is not an object", i)
+		}
+		jobDefs[i] = jobDef
 	}
 
 	env.LogTest(t, "Found %d job definitions", len(jobDefs))
@@ -46,7 +68,7 @@ func TestJobDefaultDefinitionsAPI(t *testing.T) {
 
 	// Verify job definition names
 	var foundDbMaintenance bool
-	var foundSystemHealth bool
+	var foundCorpusSummary bool
 
 	for _, jobDef := range jobDefs {
 		name, ok := jobDef["name"].(string)
@@ -61,9 +83,9 @@ func TestJobDefaultDefinitionsAPI(t *testing.T) {
 		case "Database Maintenance":
 			foundDbMaintenance = true
 			env.LogTest(t, "✓ Found 'Database Maintenance' job definition")
-		case "System Health Check":
-			foundSystemHealth = true
-			env.LogTest(t, "✓ Found 'System Health Check' job definition")
+		case "Corpus Summary Generation":
+			foundCorpusSummary = true
+			env.LogTest(t, "✓ Found 'Corpus Summary Generation' job definition")
 		}
 	}
 
@@ -72,11 +94,11 @@ func TestJobDefaultDefinitionsAPI(t *testing.T) {
 		t.Error("REQUIREMENT FAILED: 'Database Maintenance' job definition not found")
 	}
 
-	if !foundSystemHealth {
-		t.Error("REQUIREMENT FAILED: 'System Health Check' job definition not found")
+	if !foundCorpusSummary {
+		t.Error("REQUIREMENT FAILED: 'Corpus Summary Generation' job definition not found")
 	}
 
-	if !foundDbMaintenance || !foundSystemHealth {
+	if !foundDbMaintenance || !foundCorpusSummary {
 		t.Fatal("REQUIREMENT FAILED: Not all default job definitions are present")
 	}
 
@@ -101,17 +123,33 @@ func TestJobDefinitionsResponseFormat(t *testing.T) {
 
 	h.AssertStatusCode(resp, http.StatusOK)
 
-	var jobDefs []map[string]interface{}
-	if err := h.ParseJSONResponse(resp, &jobDefs); err != nil {
+	// Parse response - API now returns object with job_definitions array
+	var response map[string]interface{}
+	if err := h.ParseJSONResponse(resp, &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
 
-	if len(jobDefs) == 0 {
+	// Extract job_definitions array from response
+	jobDefsInterface, ok := response["job_definitions"]
+	if !ok {
+		t.Fatalf("Response missing 'job_definitions' field")
+	}
+
+	jobDefsArray, ok := jobDefsInterface.([]interface{})
+	if !ok {
+		t.Fatalf("'job_definitions' is not an array")
+	}
+
+	if len(jobDefsArray) == 0 {
 		t.Fatal("No job definitions returned")
 	}
 
 	// Verify first job definition has required fields
-	jobDef := jobDefs[0]
+	jobDefInterface := jobDefsArray[0]
+	jobDef, ok := jobDefInterface.(map[string]interface{})
+	if !ok {
+		t.Fatalf("First job definition is not an object")
+	}
 	requiredFields := []string{"id", "name", "type", "enabled", "created_at"}
 
 	for _, field := range requiredFields {

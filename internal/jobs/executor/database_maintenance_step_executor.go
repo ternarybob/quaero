@@ -92,7 +92,7 @@ func (e *DatabaseMaintenanceStepExecutor) ExecuteStep(ctx context.Context, step 
 		Status:   "pending",
 	}
 
-	if err := e.jobManager.CreateJob(ctx, dbJob); err != nil {
+	if err := e.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
 		return "", fmt.Errorf("failed to create job record: %w", err)
 	}
 

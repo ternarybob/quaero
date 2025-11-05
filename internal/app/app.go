@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Wednesday, 5th November 2025 11:32:21 am
+// Last Modified: Wednesday, 5th November 2025 8:17:54 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -131,6 +131,8 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Initialize log service BEFORE initServices to ensure context channel is set
 	// This allows all derived loggers (via WithCorrelationId) to inherit the configured context channel
+	// IMPORTANT: LogService's logger must NOT have the context channel configured to avoid deadlock
+	// (the consumer goroutine would try to send logs to its own channel)
 	logService := logs.NewService(app.StorageManager.JobLogStorage(), app.StorageManager.JobStorage(), app.WSHandler, app.Logger)
 	if err := logService.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start log service: %w", err)
@@ -140,9 +142,12 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Configure Arbor with context channel BEFORE any services create loggers
 	// This ensures all derived loggers (via WithCorrelationId) inherit the configured context channel
 	logBatchChannel := logService.GetChannel()
-	app.Logger.SetContextChannel(logBatchChannel)
+	app.Logger.SetChannel("context", logBatchChannel)
 
-	app.Logger.Info().Msg("Log service initialized with Arbor context channel")
+	app.Logger.Info().
+		Int("channel_capacity", cap(logBatchChannel)).
+		Int("channel_length", len(logBatchChannel)).
+		Msg("Log service initialized with Arbor context channel")
 
 	// Initialize services (AFTER LogService is configured)
 	if err := app.initServices(); err != nil {
@@ -364,10 +369,17 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
 
 	// 6.7. Register job executors with job processor
-	// NOTE: Old CrawlerExecutor uses legacy interface - needs migration to new JobExecutor interface
-	// crawlerExecutor := processor.NewCrawlerExecutor(a.CrawlerService, a.JobManager, a.StorageManager.JobStorage(), a.Config, a.Logger)
-	// jobProcessor.RegisterExecutor(crawlerExecutor)
-	// a.Logger.Info().Msg("Crawler executor registered for job type: crawler_url")
+
+	// Register crawler_url executor (new interface)
+	crawlerURLExecutor := processor.NewCrawlerURLExecutor(
+		a.CrawlerService,
+		jobMgr,
+		queueMgr,
+		a.StorageManager.JobStorage(),
+		a.Logger,
+	)
+	jobProcessor.RegisterExecutor(crawlerURLExecutor)
+	a.Logger.Info().Msg("Crawler URL executor registered for job type: crawler_url")
 
 	// Register database maintenance executor (new interface)
 	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(
@@ -535,9 +547,8 @@ func (a *App) initHandlers() error {
 	)
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
-	// Initialize job handler (using JobManagerAdapter to adapt JobStorage to JobManager interface)
-	jobManagerAdapter := sqlite.NewJobManagerAdapter(a.StorageManager.JobStorage().(*sqlite.JobStorage))
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, jobManagerAdapter, a.Config, a.Logger)
+	// Initialize job handler with JobManager
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
 
 	// Initialize sources handler
 	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
@@ -602,15 +613,16 @@ func (a *App) initHandlers() error {
 						} else {
 							// Log with job context for better debugging
 							var url string
-							if job.SeedURLs != nil && len(job.SeedURLs) > 0 {
-								url = job.SeedURLs[0]
+							if seedURLs, ok := job.Config["seed_urls"].([]interface{}); ok && len(seedURLs) > 0 {
+								if urlStr, ok := seedURLs[0].(string); ok {
+									url = urlStr
+								}
 							}
 							a.Logger.Info().
 								Str("job_id", job.ID).
 								Str("job_name", job.Name).
-								Str("job_type", string(job.JobType)).
+								Str("job_type", job.Type).
 								Str("url", url).
-								Str("last_heartbeat", job.LastHeartbeat.Format(time.RFC3339)).
 								Msg("Marked stale job as failed")
 						}
 					}

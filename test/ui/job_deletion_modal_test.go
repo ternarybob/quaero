@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"database/sql"
 	"fmt"
@@ -9,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/ternarybob/quaero/test/common"
 
 	"github.com/chromedp/chromedp"
 	"github.com/pelletier/go-toml/v2"
@@ -441,10 +442,10 @@ func getDatabasePath() (string, error) {
 	return dbPath, nil
 }
 
-// getJobCount returns the total count of jobs in the crawl_jobs table
+// getJobCount returns the total count of jobs in the jobs table
 func getJobCount(db *sql.DB) (int, error) {
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM crawl_jobs").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM jobs").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query job count: %w", err)
 	}

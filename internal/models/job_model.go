@@ -163,7 +163,7 @@ func (j *JobModel) GetConfigInt(key string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	
+
 	// Handle both int and float64 (JSON unmarshaling converts numbers to float64)
 	switch v := val.(type) {
 	case int:
@@ -191,7 +191,7 @@ func (j *JobModel) GetConfigStringSlice(key string) ([]string, bool) {
 	if !ok {
 		return nil, false
 	}
-	
+
 	// Handle []interface{} from JSON unmarshaling
 	switch v := val.(type) {
 	case []string:
@@ -229,3 +229,115 @@ func (j *JobModel) SetMetadata(key string, value interface{}) {
 	j.Metadata[key] = value
 }
 
+// -----------------------------------------------------------------------
+// Job - Runtime job state (combines JobModel with execution state)
+// -----------------------------------------------------------------------
+
+// JobProgress tracks job execution progress
+type JobProgress struct {
+	TotalURLs     int     `json:"total_urls"`
+	CompletedURLs int     `json:"completed_urls"`
+	FailedURLs    int     `json:"failed_urls"`
+	PendingURLs   int     `json:"pending_urls"`
+	CurrentURL    string  `json:"current_url,omitempty"`
+	Percentage    float64 `json:"percentage"`
+}
+
+// Job represents a job with runtime execution state
+// This combines the immutable JobModel with mutable runtime state
+type Job struct {
+	// Immutable job definition
+	*JobModel
+
+	// Mutable runtime state
+	Status        JobStatus    `json:"status"`
+	Progress      *JobProgress `json:"progress,omitempty"`
+	StartedAt     *time.Time   `json:"started_at,omitempty"`
+	CompletedAt   *time.Time   `json:"completed_at,omitempty"`
+	FinishedAt    *time.Time   `json:"finished_at,omitempty"`
+	LastHeartbeat *time.Time   `json:"last_heartbeat,omitempty"`
+	Error         string       `json:"error,omitempty"`
+	ResultCount   int          `json:"result_count"`
+	FailedCount   int          `json:"failed_count"`
+}
+
+// NewJob creates a new job from a JobModel
+func NewJob(model *JobModel) *Job {
+	return &Job{
+		JobModel:    model,
+		Status:      JobStatusPending,
+		Progress:    &JobProgress{},
+		ResultCount: 0,
+		FailedCount: 0,
+	}
+}
+
+// ToJobModel extracts the immutable JobModel from a Job
+func (j *Job) ToJobModel() *JobModel {
+	return j.JobModel
+}
+
+// UpdateProgress updates the job progress and percentage
+func (j *Job) UpdateProgress(completed, failed, pending, total int) {
+	if j.Progress == nil {
+		j.Progress = &JobProgress{}
+	}
+	j.Progress.CompletedURLs = completed
+	j.Progress.FailedURLs = failed
+	j.Progress.PendingURLs = pending
+	j.Progress.TotalURLs = total
+
+	if total > 0 {
+		j.Progress.Percentage = float64(completed+failed) / float64(total) * 100
+	}
+}
+
+// MarkStarted marks the job as started
+func (j *Job) MarkStarted() {
+	j.Status = JobStatusRunning
+	now := time.Now()
+	j.StartedAt = &now
+}
+
+// MarkCompleted marks the job as completed
+func (j *Job) MarkCompleted() {
+	j.Status = JobStatusCompleted
+	now := time.Now()
+	j.CompletedAt = &now
+	if j.Progress != nil {
+		j.ResultCount = j.Progress.CompletedURLs
+		j.FailedCount = j.Progress.FailedURLs
+	}
+}
+
+// MarkFailed marks the job as failed with an error message
+func (j *Job) MarkFailed(errorMsg string) {
+	j.Status = JobStatusFailed
+	j.Error = errorMsg
+	now := time.Now()
+	j.CompletedAt = &now
+	if j.Progress != nil {
+		j.ResultCount = j.Progress.CompletedURLs
+		j.FailedCount = j.Progress.FailedURLs
+	}
+}
+
+// MarkCancelled marks the job as cancelled
+func (j *Job) MarkCancelled() {
+	j.Status = JobStatusCancelled
+	now := time.Now()
+	j.CompletedAt = &now
+}
+
+// UpdateHeartbeat updates the last heartbeat timestamp
+func (j *Job) UpdateHeartbeat() {
+	now := time.Now()
+	j.LastHeartbeat = &now
+}
+
+// IsTerminal returns true if the job is in a terminal state
+func (j *Job) IsTerminal() bool {
+	return j.Status == JobStatusCompleted ||
+		j.Status == JobStatusFailed ||
+		j.Status == JobStatusCancelled
+}

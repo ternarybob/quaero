@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Monday, 3rd November 2025 8:09:58 am
+// Last Modified: Wednesday, 5th November 2025 6:44:16 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -7,6 +7,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 )
 
@@ -106,42 +107,37 @@ CREATE TABLE IF NOT EXISTS llm_audit_log (
 	query_text TEXT
 );
 
--- Crawler job history with configuration snapshots for re-runnable jobs
--- Inspired by Firecrawl's async job model
--- Used by both JobExecutor (for JobDefinition jobs) and queue-based jobs
--- The 'logs' column was removed in MIGRATION 13 (logs now in job_logs table)
--- The 'metadata' column was added in MIGRATION 21 to store job_definition_id and other metadata
-CREATE TABLE IF NOT EXISTS crawl_jobs (
+-- Unified jobs table - executor-agnostic job model
+-- Stores all job types with flexible configuration as key-value pairs
+-- Replaces the old crawl_jobs table with a simpler, more flexible structure
+-- Configuration is stored as JSON map[string]interface{} for executor-agnostic design
+CREATE TABLE IF NOT EXISTS jobs (
 	id TEXT PRIMARY KEY,
 	parent_id TEXT,
-	job_type TEXT DEFAULT 'parent',
-	name TEXT DEFAULT '',
+	job_type TEXT NOT NULL,
+	name TEXT NOT NULL,
 	description TEXT DEFAULT '',
-	source_type TEXT NOT NULL,
-	entity_type TEXT NOT NULL,
 	config_json TEXT NOT NULL,
-	source_config_snapshot TEXT,
-	auth_snapshot TEXT,
-	refresh_source INTEGER DEFAULT 0,
-	seed_urls TEXT,
+	metadata_json TEXT,
 	status TEXT NOT NULL,
 	progress_json TEXT,
-	metadata TEXT,
 	created_at INTEGER NOT NULL,
 	started_at INTEGER,
 	completed_at INTEGER,
+	finished_at INTEGER,
 	last_heartbeat INTEGER,
 	error TEXT,
 	result_count INTEGER DEFAULT 0,
-	failed_count INTEGER DEFAULT 0
+	failed_count INTEGER DEFAULT 0,
+	depth INTEGER DEFAULT 0,
+	FOREIGN KEY (parent_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
 
--- Crawler job indexes
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON crawl_jobs(status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_source ON crawl_jobs(source_type, entity_type, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_created ON crawl_jobs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_crawl_jobs_parent_id ON crawl_jobs(parent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_crawl_jobs_type_status ON crawl_jobs(job_type, status, created_at DESC);
+-- Job indexes
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_type_status ON jobs(job_type, status, created_at DESC);
 
 -- Job seen URLs table for concurrency-safe URL deduplication (VERIFICATION COMMENT 1)
 -- Tracks URLs that have been enqueued for each job to prevent duplicate processing
@@ -151,13 +147,13 @@ CREATE TABLE IF NOT EXISTS job_seen_urls (
 	url TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
 	PRIMARY KEY (job_id, url),
-	FOREIGN KEY (job_id) REFERENCES crawl_jobs(id) ON DELETE CASCADE
+	FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
 
 -- Index for efficient cleanup when jobs are deleted
 CREATE INDEX IF NOT EXISTS idx_job_seen_urls_job_id ON job_seen_urls(job_id);
 
--- Job logs table for structured log storage (replaces crawl_jobs.logs JSON column)
+-- Job logs table for structured log storage
 -- Provides unlimited log history with indexed queries and automatic CASCADE DELETE
 CREATE TABLE IF NOT EXISTS job_logs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,7 +162,7 @@ CREATE TABLE IF NOT EXISTS job_logs (
 	level TEXT NOT NULL,
 	message TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
-	FOREIGN KEY (job_id) REFERENCES crawl_jobs(id) ON DELETE CASCADE
+	FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id, created_at DESC);
@@ -412,6 +408,19 @@ func (s *SQLiteDB) runMigrations() error {
 		return err
 	}
 
+	// MIGRATION 24: Add finished_at column to crawl_jobs table
+	// Tracks when job AND all spawned children complete or timeout
+	if err := s.migrateAddFinishedAtColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 25: Migrate from crawl_jobs to unified jobs table
+	// This is a BREAKING CHANGE that consolidates the schema to use executor-agnostic JobModel
+	// Removes crawler-specific columns and uses flexible config_json for all job types
+	if err := s.migrateCrawlJobsToUnifiedJobs(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -461,7 +470,18 @@ func (s *SQLiteDB) migrateAddJobDefinitionsTimeoutColumn() error {
 }
 
 // migrateCrawlJobsColumns adds missing columns to crawl_jobs table
+// NOTE: This migration is deprecated - crawl_jobs table has been replaced by jobs table
+// Kept for backward compatibility with existing databases
 func (s *SQLiteDB) migrateCrawlJobsColumns() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		// Table doesn't exist - skip migration (new unified jobs table is used instead)
+		s.logger.Debug().Msg("Skipping crawl_jobs migration - table does not exist (using unified jobs table)")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -722,7 +742,18 @@ func (s *SQLiteDB) migrateToMarkdownOnly() error {
 }
 
 // migrateAddHeartbeatColumn adds last_heartbeat column to crawl_jobs table
+// NOTE: This migration is deprecated - crawl_jobs table has been replaced by jobs table
+// Kept for backward compatibility with existing databases
 func (s *SQLiteDB) migrateAddHeartbeatColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		// Table doesn't exist - skip migration (new unified jobs table is used instead)
+		s.logger.Debug().Msg("Skipping heartbeat migration - crawl_jobs table does not exist (using unified jobs table)")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -816,7 +847,16 @@ func (s *SQLiteDB) migrateAddJobLogsColumn() error {
 }
 
 // migrateAddJobNameDescriptionColumns adds name and description columns to crawl_jobs table
+// NOTE: This migration is deprecated - crawl_jobs table has been replaced by jobs table
 func (s *SQLiteDB) migrateAddJobNameDescriptionColumns() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping job name/description migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -1163,7 +1203,16 @@ func (s *SQLiteDB) migrateAddBackSourcesFiltersColumn() error {
 // - Better query performance with indexes
 // - Automatic CASCADE DELETE when jobs are deleted
 // - Batched writes via LogService for efficiency
+// NOTE: This migration is deprecated - crawl_jobs table has been replaced by jobs table
 func (s *SQLiteDB) migrateRemoveLogsColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping logs column removal migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	// Check if logs column exists
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
@@ -1390,6 +1439,14 @@ func (s *SQLiteDB) migrateAddPostJobsColumn() error {
 
 // migrateAddParentIdColumn adds parent_id column to crawl_jobs table
 func (s *SQLiteDB) migrateAddParentIdColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping parent_id migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -1435,6 +1492,14 @@ func (s *SQLiteDB) migrateAddParentIdColumn() error {
 // migrateEnableForeignKeysAndAddParentConstraint enables foreign key enforcement
 // and adds CASCADE constraint to parent_id column in crawl_jobs table
 func (s *SQLiteDB) migrateEnableForeignKeysAndAddParentConstraint() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping foreign key migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	// Check if foreign key constraint already exists on parent_id
 	fkQuery := `PRAGMA foreign_key_list(crawl_jobs)`
 	rows, err := s.db.Query(fkQuery)
@@ -1664,6 +1729,14 @@ func (s *SQLiteDB) migrateAddPreJobsColumn() error {
 
 // migrateAddJobTypeColumn adds job_type column to crawl_jobs table
 func (s *SQLiteDB) migrateAddJobTypeColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping job_type migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -1714,10 +1787,18 @@ func (s *SQLiteDB) migrateAddJobTypeColumn() error {
 
 // migrateRenameParentIdIndex renames idx_jobs_parent_id to idx_crawl_jobs_parent_id
 func (s *SQLiteDB) migrateRenameParentIdIndex() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping index rename migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	// Check if old index exists
 	indexQuery := `SELECT name FROM sqlite_master WHERE type='index' AND name='idx_jobs_parent_id'`
 	var indexName string
-	err := s.db.QueryRow(indexQuery).Scan(&indexName)
+	err = s.db.QueryRow(indexQuery).Scan(&indexName)
 	if err != nil {
 		// Index doesn't exist, migration already completed or not needed
 		return nil
@@ -1780,6 +1861,14 @@ func (s *SQLiteDB) migrateAddErrorToleranceColumn() error {
 
 // migrateAddMetadataColumn adds metadata column to crawl_jobs table if it doesn't exist
 func (s *SQLiteDB) migrateAddMetadataColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping metadata migration - crawl_jobs table does not exist")
+		return nil
+	}
+
 	columnsQuery := `PRAGMA table_info(crawl_jobs)`
 	rows, err := s.db.Query(columnsQuery)
 	if err != nil {
@@ -1824,6 +1913,14 @@ func (s *SQLiteDB) migrateAddMetadataColumn() error {
 // so any remaining orchestration wrapper jobs can be safely cleaned up.
 // This migration uses narrow criteria to avoid deleting legitimate jobs.
 func (s *SQLiteDB) migrateCleanupOrphanedOrchestrationJobs() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping orphaned jobs cleanup - crawl_jobs table does not exist")
+		return nil
+	}
+
 	s.logger.Info().Msg("Running migration: Cleaning up orphaned orchestration jobs")
 
 	// First, verify required columns exist before attempting deletion
@@ -1984,5 +2081,180 @@ func (s *SQLiteDB) migrateCleanupOrphanedJobSettings() error {
 		s.logger.Info().Msg("Migration: No orphaned job_settings entries found")
 	}
 
+	return nil
+}
+
+// migrateAddFinishedAtColumn adds finished_at column to crawl_jobs table
+// This column tracks when a job AND all its spawned children complete or timeout
+func (s *SQLiteDB) migrateAddFinishedAtColumn() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err != nil {
+		s.logger.Debug().Msg("Skipping finished_at migration - crawl_jobs table does not exist")
+		return nil
+	}
+
+	// Check if column already exists
+	columnsQuery := `PRAGMA table_info(crawl_jobs)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return fmt.Errorf("failed to query crawl_jobs columns: %w", err)
+	}
+	defer rows.Close()
+
+	hasFinishedAt := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return fmt.Errorf("failed to scan column info: %w", err)
+		}
+		if name == "finished_at" {
+			hasFinishedAt = true
+			break
+		}
+	}
+
+	if hasFinishedAt {
+		s.logger.Debug().Msg("Migration: finished_at column already exists in crawl_jobs")
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Adding finished_at column to crawl_jobs table")
+
+	// Add the column
+	_, err = s.db.Exec(`ALTER TABLE crawl_jobs ADD COLUMN finished_at INTEGER`)
+	if err != nil {
+		return fmt.Errorf("failed to add finished_at column: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: Successfully added finished_at column to crawl_jobs")
+	return nil
+}
+
+// migrateCrawlJobsToUnifiedJobs migrates from crawl_jobs table to unified jobs table
+// This is a BREAKING CHANGE that consolidates the schema to use executor-agnostic JobModel
+// Removes crawler-specific columns (source_type, entity_type, source_config_snapshot, auth_snapshot, refresh_source, seed_urls)
+// and uses flexible config_json and metadata_json for all job types
+func (s *SQLiteDB) migrateCrawlJobsToUnifiedJobs() error {
+	// Check if crawl_jobs table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='crawl_jobs'`).Scan(&tableName)
+	if err == sql.ErrNoRows {
+		// crawl_jobs doesn't exist, check if jobs table exists
+		err = s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'`).Scan(&tableName)
+		if err == sql.ErrNoRows {
+			// Neither table exists, this is a fresh install - skip migration
+			s.logger.Debug().Msg("Migration: Neither crawl_jobs nor jobs table exists (fresh install)")
+			return nil
+		}
+		// jobs table exists, migration already complete
+		s.logger.Debug().Msg("Migration: jobs table already exists, crawl_jobs migration complete")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check for crawl_jobs table: %w", err)
+	}
+
+	s.logger.Info().Msg("Running migration: Migrating from crawl_jobs to unified jobs table")
+
+	// Begin transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Step 1: Create new jobs table with unified schema
+	s.logger.Info().Msg("Step 1: Creating new jobs table with unified schema")
+	_, err = tx.Exec(`
+		CREATE TABLE jobs (
+			id TEXT PRIMARY KEY,
+			parent_id TEXT,
+			job_type TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			config_json TEXT NOT NULL,
+			metadata_json TEXT,
+			status TEXT NOT NULL,
+			progress_json TEXT,
+			created_at INTEGER NOT NULL,
+			started_at INTEGER,
+			completed_at INTEGER,
+			finished_at INTEGER,
+			last_heartbeat INTEGER,
+			error TEXT,
+			result_count INTEGER DEFAULT 0,
+			failed_count INTEGER DEFAULT 0,
+			depth INTEGER DEFAULT 0,
+			FOREIGN KEY (parent_id) REFERENCES jobs(id) ON DELETE CASCADE
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create jobs table: %w", err)
+	}
+
+	// Step 2: Migrate data from crawl_jobs to jobs
+	// Note: source_type, entity_type, source_config_snapshot, auth_snapshot, refresh_source, seed_urls are dropped
+	// These crawler-specific fields should be moved into config_json or metadata_json if needed
+	s.logger.Info().Msg("Step 2: Migrating data from crawl_jobs to jobs")
+	_, err = tx.Exec(`
+		INSERT INTO jobs (
+			id, parent_id, job_type, name, description, config_json, metadata_json,
+			status, progress_json, created_at, started_at, completed_at, finished_at,
+			last_heartbeat, error, result_count, failed_count, depth
+		)
+		SELECT
+			id, parent_id, job_type, name, description, config_json, metadata,
+			status, progress_json, created_at, started_at, completed_at, finished_at,
+			last_heartbeat, error, result_count, failed_count, 0
+		FROM crawl_jobs
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to migrate data from crawl_jobs to jobs: %w", err)
+	}
+
+	// Step 3: Drop old crawl_jobs table
+	s.logger.Info().Msg("Step 3: Dropping old crawl_jobs table")
+	_, err = tx.Exec(`DROP TABLE crawl_jobs`)
+	if err != nil {
+		return fmt.Errorf("failed to drop crawl_jobs table: %w", err)
+	}
+
+	// Step 4: Create indexes on jobs table
+	s.logger.Info().Msg("Step 4: Creating indexes on jobs table")
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_status: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_created: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_parent_id ON jobs(parent_id, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_parent_id: %w", err)
+	}
+
+	_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_jobs_type_status ON jobs(job_type, status, created_at DESC)`)
+	if err != nil {
+		return fmt.Errorf("failed to create idx_jobs_type_status: %w", err)
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: Successfully migrated from crawl_jobs to unified jobs table")
 	return nil
 }

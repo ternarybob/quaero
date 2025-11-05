@@ -66,7 +66,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.JobModel)
 	dbJob.Payload = string(payloadBytes)
 
 	// Create job record
-	if err := s.jobManager.CreateJob(ctx, dbJob); err != nil {
+	if err := s.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
 		return fmt.Errorf("failed to create job record: %w", err)
 	}
 
@@ -147,7 +147,8 @@ func (s *Service) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 
 // GetJobStatus retrieves the current status of a job
 func (s *Service) GetJobStatus(ctx context.Context, jobID string) (*jobs.Job, error) {
-	return s.jobManager.GetJob(ctx, jobID)
+	// Use GetJobInternal to get the internal jobs.Job type directly
+	return s.jobManager.GetJobInternal(ctx, jobID)
 }
 
 // GetJobLogs retrieves logs for a job

@@ -202,6 +202,11 @@ func (jp *JobProcessor) processNextJob() {
 
 		// Error is already set by executor, just ensure status is updated
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
+
+		// Set finished_at timestamp for failed jobs
+		if finishErr := jp.jobMgr.SetJobFinished(jp.ctx, msg.JobID); finishErr != nil {
+			jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")
+		}
 	} else {
 		// Job succeeded
 		jp.logger.Info().
@@ -211,6 +216,11 @@ func (jp *JobProcessor) processNextJob() {
 
 		// Status is already set by executor, but ensure it's completed
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "completed")
+
+		// Set finished_at timestamp for completed jobs
+		if finishErr := jp.jobMgr.SetJobFinished(jp.ctx, msg.JobID); finishErr != nil {
+			jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")
+		}
 	}
 
 	// Remove message from queue

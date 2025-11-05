@@ -3,7 +3,7 @@
 
 <head>
     {{template "head.html" .}}
-    <title>Job Detail - Quaero</title>
+    <title>Job Details - Quaero</title>
 </head>
 
 <body>
@@ -13,60 +13,108 @@
     <main class="page-container" x-data="jobDetailPage">
 
         <!-- Breadcrumb Navigation -->
-        <nav style="margin-bottom: 1rem; font-size: 0.875rem;">
-            <a href="/queue" style="color: var(--color-primary); text-decoration: none;"><i class="fas fa-arrow-left"></i> Back to Queue</a>
+        <nav class="breadcrumb">
+            <a href="/queue" class="breadcrumb-link">
+                <i class="fas fa-arrow-left"></i> Back to Jobs
+            </a>
+            <span class="breadcrumb-separator">›</span>
+            <span class="breadcrumb-current" x-text="job.name || 'Job Details'"></span>
         </nav>
 
         <!-- Job Header -->
-        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color);">
-            <div style="font-size: 2rem;" :class="'text-' + job.status">
-                <i :class="getStatusIcon(job.status)"></i>
-            </div>
-            <div style="flex: 1;">
-                <h2 style="margin: 0; font-size: 1.5rem;" x-text="job.name || 'Job ' + (job.id ? job.id.substring(0, 8) : 'Unknown')"></h2>
-                <div class="text-secondary" style="margin-top: 0.25rem; font-size: 0.875rem;">
-                    <span x-text="getStatusText(job.status)"></span>
-                    <template x-if="job.created_at">
-                        · <span x-text="formatRelativeTime(job.created_at)"></span>
-                    </template>
-                    <template x-if="job.duration">
-                        · Duration: <span x-text="formatDuration(job.duration)"></span>
-                    </template>
+        <div class="job-header">
+            <div class="job-header-info">
+                <h1 x-text="job.name || 'Job Details'"></h1>
+                <div class="job-header-status">
+                    <span class="label" :class="getStatusBadgeClass(job.status)" x-text="getStatusText(job.status)"></span>
                 </div>
             </div>
-            <div>
+            <div class="job-header-actions">
                 <button class="btn btn-sm" @click="refreshJob()" title="Refresh">
                     <i class="fa-solid fa-rotate-right"></i>
                 </button>
             </div>
         </div>
 
-        <!-- Job Actions and Info -->
-        <section class="card" style="margin-bottom: 1.5rem;">
-            <div class="card-body">
-                <div class="columns">
-                    <div class="column col-3">
-                        <p class="text-small text-gray">Job ID</p>
-                        <p class="text-small" style="font-family: monospace;" x-text="job.id || 'N/A'"></p>
+        <!-- Tabs -->
+        <div class="tabs mb-4">
+            <button class="tab" :class="{'active': activeTab === 'details'}" @click="activeTab = 'details'">
+                Details
+            </button>
+            <button class="tab" :class="{'active': activeTab === 'output'}" @click="activeTab = 'output'">
+                Output
+            </button>
+        </div>
+
+        <!-- Details Tab -->
+        <div x-show="activeTab === 'details'" x-cloak>
+
+            <!-- Job Details Section -->
+            <section class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h3>Job Details</h3>
+                </div>
+                <div class="card-body">
+                    <div class="columns">
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Status</p>
+                            <p class="text-small" x-text="getStatusText(job.status) || 'N/A'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Job ID</p>
+                            <p class="text-small" style="font-family: monospace;" x-text="job.id || 'N/A'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Job Type</p>
+                            <p class="text-small" x-text="job.job_type || 'Unknown Type'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Created</p>
+                            <p class="text-small" x-text="formatTimestamp(job.created_at) || 'N/A'"></p>
+                        </div>
                     </div>
-                    <div class="column col-3">
-                        <p class="text-small text-gray">Source Type</p>
-                        <p class="text-small" x-text="job.source_type || 'N/A'"></p>
+                    <div class="columns" style="margin-top: 1rem;">
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Started</p>
+                            <p class="text-small" x-text="formatTimestamp(job.started_at) || 'N/A'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Finished</p>
+                            <p class="text-small" x-text="formatTimestamp(job.finished_at) || 'N/A'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Source</p>
+                            <p class="text-small" x-text="job.source_type || 'job_definition'"></p>
+                        </div>
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Parent</p>
+                            <p class="text-small" x-text="job.parent_id || 'None'"></p>
+                        </div>
                     </div>
-                    <div class="column col-3">
-                        <p class="text-small text-gray">Documents Processed</p>
-                        <p class="text-small" x-text="getDocumentCount()"></p>
-                    </div>
-                    <div class="column col-3" x-show="spawnedChildren.length > 0" x-cloak>
-                        <p class="text-small text-gray">No. of Child Jobs</p>
-                        <p class="text-small" x-text="spawnedChildren.length"></p>
+                    <div class="columns" style="margin-top: 1rem;">
+                        <div class="column col-3">
+                            <p class="text-small text-gray">Documents Created</p>
+                            <p class="text-small" x-text="job.result_count || '0'"></p>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- Job Logs -->
-        <section>
+            <!-- Configuration Section -->
+            <section class="card" style="margin-bottom: 1.5rem;" x-show="job.config">
+                <div class="card-header">
+                    <h3>Configuration</h3>
+                </div>
+                <div class="card-body">
+                    <pre class="code" data-lang="JSON"><code x-text="formatJSON(job.config)"></code></pre>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Output Tab -->
+        <div x-show="activeTab === 'output'" x-cloak>
+
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
@@ -74,20 +122,19 @@
                             <h3>Job Logs</h3>
                         </section>
                         <section class="navbar-section">
-                            <select class="form-select select-sm log-level-filter" x-model="selectedLogLevel" title="Filter by log level">
+                            <!-- Log Level Filter -->
+                            <select class="form-select select-sm" x-model="selectedLogLevel" title="Filter by log level" style="margin-right: 0.5rem;">
                                 <option value="all">All Levels</option>
                                 <option value="error">Error</option>
                                 <option value="warning">Warning</option>
                                 <option value="info">Info</option>
                                 <option value="debug">Debug</option>
                             </select>
-                            <button class="btn btn-sm" :class="selectedLogLevel === 'error' ? 'btn-error' : ''" @click="toggleErrorsOnly()" title="Toggle error logs only">
-                                <i class="fas fa-exclamation-triangle"></i> Errors Only
-                            </button>
+
                             <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
                                 <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                             </button>
-                            <button class="btn btn-sm" @click="refreshJob()" title="Refresh Logs">
+                            <button class="btn btn-sm" @click="refreshLogs()" title="Refresh Logs">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                         </section>
@@ -117,10 +164,8 @@
                     </div>
                 </div>
             </div>
-        </section>
 
-        <!-- Service Logs -->
-        {{template "service-logs.html" .}}
+        </div>
 
     </main>
 
@@ -132,11 +177,11 @@
             Alpine.data('jobDetailPage', () => ({
                 job: {},
                 logs: [],
-                spawnedChildren: [],
                 loading: true,
                 selectedLogLevel: 'all',
                 autoScroll: true,
                 jobId: null,
+                activeTab: 'details',
 
                 init() {
                     // Get job ID from URL query parameter
@@ -153,14 +198,17 @@
 
                     this.loadJob();
                     this.loadJobLogs();
-                    this.loadSpawnedChildren();
-                    this.subscribeToJobSpawns();
 
                     // Start auto-refresh for running jobs
                     this.startAutoRefresh();
 
                     // Watch selectedLogLevel and reload logs when it changes
                     this.$watch('selectedLogLevel', () => {
+                        this.loadJobLogs();
+                    });
+
+                    // Watch selectedLogType and reload logs when it changes
+                    this.$watch('selectedLogType', () => {
                         this.loadJobLogs();
                     });
                 },
@@ -239,181 +287,107 @@
                     }
                 },
 
-                _parseLogEntry(logData) {
-                    const timestamp = logData.timestamp || logData.time || new Date().toISOString();
-                    const level = (logData.level || 'INFO').toUpperCase();
-                    const message = logData.message || logData.msg || '';
-
+                _parseLogEntry(log) {
                     return {
-                        timestamp: this._formatLogTime(timestamp),
-                        level: level,
-                        levelClass: this._getLevelClass(level),
-                        message: message
+                        timestamp: this.formatLogTimestamp(log.timestamp),
+                        level: log.level || 'info',
+                        levelClass: this.getLevelClass(log.level || 'info'),
+                        message: log.message || ''
                     };
                 },
 
-                _formatLogTime(timestamp) {
-                    // If timestamp is already formatted as HH:MM:SS, return as-is
-                    if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
-                        return timestamp;
-                    }
-
-                    // Otherwise try to parse as date
-                    const date = new Date(timestamp);
-                    if (isNaN(date.getTime())) {
-                        return timestamp; // Return original if can't parse
-                    }
-
-                    return date.toLocaleTimeString('en-US', {
-                        hour12: false,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                    });
+                formatLogTimestamp(timestamp) {
+                    if (!timestamp) return '';
+                    // Handle both ISO 8601 strings and Unix timestamps
+                    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
+                    return date.toLocaleTimeString();
                 },
 
-                _getLevelClass(level) {
-                    const levelMap = {
-                        'ERROR': 'terminal-error',
-                        'WARN': 'terminal-warning',
-                        'WARNING': 'terminal-warning',
-                        'INFO': 'terminal-info',
-                        'DEBUG': 'terminal-time'
-                    };
-                    return levelMap[level] || 'terminal-info';
+                getLevelClass(level) {
+                    const levelUpper = level.toUpperCase();
+                    if (levelUpper === 'ERROR' || levelUpper === 'ERR') return 'terminal-error';
+                    if (levelUpper === 'WARNING' || levelUpper === 'WARN') return 'terminal-warning';
+                    if (levelUpper === 'INFO') return 'terminal-info';
+                    if (levelUpper === 'DEBUG') return 'terminal-debug';
+                    return 'terminal-info';
                 },
 
-                async loadSpawnedChildren() {
-                    try {
-                        // Fetch spawned children from job spawn events
-                        const response = await fetch(`/api/jobs?parent_id=${this.jobId}`);
-                        if (response.ok) {
-                            const data = await response.json();
-                            this.spawnedChildren = data.jobs || [];
-                        }
-                    } catch (error) {
-                        console.error('Error loading spawned children:', error);
-                        this.spawnedChildren = [];
-                    }
+                async refreshJob() {
+                    await this.loadJob();
+                    window.showNotification('Job details refreshed', 'success');
                 },
 
-                subscribeToJobSpawns() {
-                    // Subscribe to WebSocket job_spawn events for real-time child job count
-                    if (typeof WebSocketManager !== 'undefined') {
-                        WebSocketManager.subscribe('job_spawn', (data) => {
-                            // Only count spawns for this job as parent
-                            if (data.parent_job_id === this.jobId) {
-                                // Check if this child is already tracked
-                                const exists = this.spawnedChildren.some(
-                                    child => child.child_job_id === data.child_job_id
-                                );
-
-                                if (!exists) {
-                                    this.spawnedChildren.push({
-                                        child_job_id: data.child_job_id,
-                                        job_type: data.job_type || 'unknown',
-                                        url: data.url || '',
-                                        depth: data.depth || 0,
-                                        status: 'pending'
-                                    });
-                                }
-                            }
-                        });
-                    }
+                async refreshLogs() {
+                    await this.loadJobLogs();
+                    window.showNotification('Logs refreshed', 'success');
                 },
 
                 toggleAutoScroll() {
                     this.autoScroll = !this.autoScroll;
                     if (this.autoScroll) {
-                        // When re-enabling auto-scroll, scroll to latest logs immediately
                         this.$nextTick(() => {
                             const container = this.$refs.logContainer;
-                            if (container) container.scrollTop = container.scrollHeight;
+                            if (container) {
+                                container.scrollTop = container.scrollHeight;
+                            }
                         });
                     }
                 },
 
-                refreshJob() {
-                    this.loadJob();
-                    this.loadJobLogs();
-                    this.loadSpawnedChildren();
-                },
-
                 startAutoRefresh() {
-                    // Auto-refresh every 5 seconds if job is running
-                    setInterval(() => {
-                        if (this.job.status === 'running') {
-                            this.refreshJob();
+                    // Auto-refresh every 5 seconds for running jobs
+                    setInterval(async () => {
+                        if (this.job.status === 'running' || this.job.status === 'pending') {
+                            await this.loadJob();
+                            if (this.activeTab === 'output') {
+                                await this.loadJobLogs();
+                            }
                         }
                     }, 5000);
                 },
 
-                getStatusIcon(status) {
-                    const icons = {
-                        'completed': 'fas fa-check-circle',
-                        'failed': 'fas fa-times-circle',
-                        'running': 'fas fa-spinner fa-pulse',
-                        'pending': 'fas fa-clock',
-                        'cancelled': 'fas fa-ban'
-                    };
-                    return icons[status] || 'fas fa-question-circle';
-                },
-
                 getStatusText(status) {
-                    const texts = {
-                        'completed': 'succeeded',
-                        'failed': 'failed',
-                        'running': 'running',
-                        'pending': 'pending',
-                        'cancelled': 'cancelled'
-                    };
-                    return texts[status] || 'unknown';
+                    if (!status) return 'Unknown';
+                    return status.charAt(0).toUpperCase() + status.slice(1);
                 },
 
-                getDocumentCount() {
-                    if (!this.job.progress) return 'N/A';
+                getStatusBadgeClass(status) {
+                    if (!status) return 'label-secondary';
+                    switch (status.toLowerCase()) {
+                        case 'completed':
+                        case 'success':
+                            return 'label-success';
+                        case 'running':
+                        case 'pending':
+                            return 'label-primary';
+                        case 'failed':
+                        case 'error':
+                            return 'label-error';
+                        case 'cancelled':
+                            return 'label-warning';
+                        default:
+                            return 'label-secondary';
+                    }
+                },
 
-                    try {
-                        const progress = typeof this.job.progress === 'string' ?
-                            JSON.parse(this.job.progress) : this.job.progress;
+                formatTimestamp(timestamp) {
+                    if (!timestamp) return 'N/A';
+                    // Handle both ISO 8601 strings and Unix timestamps
+                    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
+                    if (isNaN(date.getTime())) return 'Invalid Date';
+                    return date.toLocaleString();
+                },
 
-                        if (progress && progress.completed_urls !== undefined) {
-                            return progress.completed_urls;
+                formatJSON(obj) {
+                    if (!obj) return '';
+                    if (typeof obj === 'string') {
+                        try {
+                            obj = JSON.parse(obj);
+                        } catch (e) {
+                            return obj;
                         }
-                    } catch (error) {
-                        console.warn('Failed to parse job progress:', error);
                     }
-
-                    return 'N/A';
-                },
-
-                formatRelativeTime(timestamp) {
-                    const now = new Date();
-                    const then = new Date(timestamp);
-                    const diffMs = now - then;
-                    const diffSecs = Math.floor(diffMs / 1000);
-                    const diffMins = Math.floor(diffSecs / 60);
-                    const diffHours = Math.floor(diffMins / 60);
-                    const diffDays = Math.floor(diffHours / 24);
-
-                    if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-                    if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-                    if (diffMins > 0) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
-                    return `${diffSecs} second${diffSecs !== 1 ? 's' : ''} ago`;
-                },
-
-                formatDuration(seconds) {
-                    if (!seconds) return 'N/A';
-                    const mins = Math.floor(seconds / 60);
-                    const secs = seconds % 60;
-                    if (mins > 0) {
-                        return `${mins}m ${secs}s`;
-                    }
-                    return `${secs}s`;
-                },
-
-                toggleErrorsOnly() {
-                    this.selectedLogLevel = this.selectedLogLevel === 'error' ? 'all' : 'error';
+                    return JSON.stringify(obj, null, 2);
                 }
             }));
         });

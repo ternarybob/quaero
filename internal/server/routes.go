@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 23rd October 2025 8:11:51 am
+// Last Modified: Wednesday, 5th November 2025 3:49:44 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -20,6 +20,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("jobs.html", "sources")) // Jobs page (sources section)
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Jobs page
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
+	mux.HandleFunc("/job", s.app.PageHandler.ServePage("job.html", "job")) // Job details page (uses ?id= query param)
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
 	mux.HandleFunc("/search", s.app.PageHandler.ServePage("search.html", "search"))
 	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))

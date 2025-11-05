@@ -162,22 +162,22 @@
 
                                 <!-- Job card -->
                                 <template x-if="item.type !== 'loading'">
-                                    <div class="card" :class="{
+                                    <div class="card job-card-clickable" :class="{
                                             'bg-gray': selectedJob && selectedJob.id === item.job.id,
                                             'job-card-parent': item.type === 'parent',
                                             'job-card-child': item.type === 'child',
                                             'job-card-flat': item.type === 'flat'
-                                        }" style="margin-bottom: 0.8rem;">
+                                        }" style="margin-bottom: 0.8rem; cursor: pointer;" :data-job-id="item.job.id" @click="navigateToJobDetails(item.job.id)">
                                         <div class="card-body">
-                                            <div class="columns">
+                                            <div class="columns" style="gap: 0.5rem;">
                                                 <!-- Left side: Checkbox and Content -->
-                                                <div class="column col-1" @click.stop>
-                                                    <label class="form-checkbox">
+                                                <div class="column col-auto" @click.stop style="padding-right: 0;">
+                                                    <label class="form-checkbox" style="margin: 0;">
                                                         <input type="checkbox" class="job-checkbox" :data-job-id="item.job.id" @change="toggleJobSelection(item.job.id)" :checked="selectedJobIds.has(item.job.id)">
                                                         <i class="form-icon"></i>
                                                     </label>
                                                 </div>
-                                                <div class="column col-9">
+                                                <div class="column col-9" style="padding-left: 0;">
                                                     <div class="card-title h5" :title="'Job ID: ' + (item.job.id || 'N/A')">
                                                         <i class="fas" :class="{
                                                     'fa-file job-type-icon child-icon': item.type === 'child',
@@ -202,7 +202,7 @@
                                                     <template x-if="item.job.seed_urls && item.job.seed_urls.length > 0">
                                                         <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
                                                             <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                                            <a :href="item.job.seed_urls[0]" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;">
+                                                            <a :href="item.job.seed_urls[0]" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;" @click.stop>
                                                                 <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;" :title="item.job.seed_urls[0]" x-text="item.job.seed_urls[0]"></span>
                                                                 <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                                             </a>
@@ -214,7 +214,7 @@
                                                     <template x-if="(!item.job.seed_urls || item.job.seed_urls.length === 0) && item.job.progress && item.job.progress.current_url">
                                                         <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
                                                             <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                                            <a :href="item.job.progress.current_url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;">
+                                                            <a :href="item.job.progress.current_url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;" @click.stop>
                                                                 <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;" :title="item.job.progress.current_url" x-text="item.job.progress.current_url"></span>
                                                                 <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                                             </a>
@@ -244,16 +244,23 @@
                                                             <i class="fas fa-file-alt"></i>
                                                             <span x-text="(() => { const count = getDocumentsCount(item.job); return (typeof count === 'number' ? count : 'N/A') + ' Documents'; })()"></span>
                                                         </div>
-                                                        <!-- Created Date -->
+                                                        <!-- Created Time -->
                                                         <div>
                                                             <i class="fas fa-calendar"></i>
-                                                            <span x-text="getCreatedDate(item.job)"></span>
+                                                            <span x-text="'created: ' + getCreatedDate(item.job)"></span>
                                                         </div>
-                                                        <!-- Start Time -->
+                                                        <!-- Started Time -->
                                                         <template x-if="item.job.started_at">
                                                             <div>
                                                                 <i class="fas fa-clock"></i>
-                                                                <span x-text="'Started: ' + getStartedDate(item.job)"></span>
+                                                                <span x-text="'started: ' + getStartedDate(item.job)"></span>
+                                                            </div>
+                                                        </template>
+                                                        <!-- Finished Time -->
+                                                        <template x-if="item.job.finished_at">
+                                                            <div>
+                                                                <i class="fas fa-check-circle"></i>
+                                                                <span x-text="'finished: ' + getFinishedDate(item.job)"></span>
                                                             </div>
                                                         </template>
                                                         <!-- Toggle JSON -->
@@ -2262,6 +2269,16 @@
                     }
                 },
 
+                getFinishedDate(job) {
+                    if (!job.finished_at) return null;
+                    try {
+                        return new Date(job.finished_at).toLocaleString();
+                    } catch (error) {
+                        console.warn('[Queue] Failed to parse finished_at:', error);
+                        return 'Invalid Date';
+                    }
+                },
+
                 getJobURL(job) {
                     if (!job) return null;
                     // Priority: seed_urls > current_url
@@ -2848,6 +2865,13 @@
                     window.dispatchEvent(new CustomEvent('errorDetailsModal:open', {
                         detail: { job: job }
                     }));
+                },
+
+                // Navigate to job details page
+                navigateToJobDetails(jobId) {
+                    if (jobId) {
+                        window.location.href = `/job?id=${jobId}`;
+                    }
                 }
             }));
 

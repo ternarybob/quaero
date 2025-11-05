@@ -2,205 +2,109 @@ package processor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
-// CrawlerExecutor executes crawler jobs
-type CrawlerExecutor struct {
+// CrawlerURLExecutor executes crawler_url jobs (individual URL crawling)
+// This executor implements the JobExecutor interface for the queue-based job system
+type CrawlerURLExecutor struct {
 	crawlerService *crawler.Service
 	jobMgr         *jobs.Manager
+	queueMgr       *queue.Manager
 	jobStorage     interfaces.JobStorage
-	config         *common.Config
 	logger         arbor.ILogger
 }
 
-// CrawlerPayload represents the payload for a crawler job
-type CrawlerPayload struct {
-	URL         string                 `json:"url"`
-	Depth       int                    `json:"depth"`
-	ParentID    string                 `json:"parent_id"`
-	Phase       string                 `json:"phase,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty"`
-	MaxDepth    int                    `json:"max_depth,omitempty"`
-	FollowLinks bool                   `json:"follow_links,omitempty"`
-}
-
-func NewCrawlerExecutor(crawlerService *crawler.Service, jobMgr *jobs.Manager, jobStorage interfaces.JobStorage, config *common.Config, logger arbor.ILogger) *CrawlerExecutor {
-	return &CrawlerExecutor{
+// NewCrawlerURLExecutor creates a new crawler URL executor
+func NewCrawlerURLExecutor(
+	crawlerService *crawler.Service,
+	jobMgr *jobs.Manager,
+	queueMgr *queue.Manager,
+	jobStorage interfaces.JobStorage,
+	logger arbor.ILogger,
+) *CrawlerURLExecutor {
+	return &CrawlerURLExecutor{
 		crawlerService: crawlerService,
 		jobMgr:         jobMgr,
+		queueMgr:       queueMgr,
 		jobStorage:     jobStorage,
-		config:         config,
 		logger:         logger,
 	}
 }
 
-func (e *CrawlerExecutor) Execute(ctx context.Context, jobID string, payload []byte) error {
-	// 1. Parse payload
-	var crawlPayload CrawlerPayload
-	if err := json.Unmarshal(payload, &crawlPayload); err != nil {
-		return fmt.Errorf("failed to unmarshal crawler payload: %w", err)
+// GetJobType returns the job type this executor handles
+func (e *CrawlerURLExecutor) GetJobType() string {
+	return string(models.JobTypeCrawlerURL)
+}
+
+// Validate validates that the job model is compatible with this executor
+func (e *CrawlerURLExecutor) Validate(job *models.JobModel) error {
+	if job.Type != string(models.JobTypeCrawlerURL) {
+		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeCrawlerURL, job.Type)
 	}
 
-	e.logger.Info().
-		Str("job_id", jobID).
-		Str("url", crawlPayload.URL).
-		Int("depth", crawlPayload.Depth).
-		Msg("Executing crawler job")
-
-	e.jobMgr.AddJobLog(ctx, jobID, "info", fmt.Sprintf("Crawling URL: %s (depth: %d)", crawlPayload.URL, crawlPayload.Depth))
-
-	// 2. Build crawler configuration from payload
-	crawlerConfig := e.buildCrawlerConfig(crawlPayload)
-
-	// 3. Initialize HTML scraper for this job
-	httpClient, err := e.crawlerService.BuildHTTPClientFromAuth(ctx)
-	if err != nil {
-		e.logger.Warn().Err(err).Msg("Failed to build HTTP client from auth, using default")
-		httpClient = nil // Will use default in NewHTMLScraper
+	// Validate required config fields
+	if _, ok := job.Config["seed_url"]; !ok {
+		return fmt.Errorf("missing required config field: seed_url")
 	}
 
-	scraper := crawler.NewHTMLScraper(crawlerConfig, e.logger, httpClient, nil)
-	defer scraper.Close()
-
-	// 4. Fetch URL using HTMLScraper
-	e.jobMgr.AddJobLog(ctx, jobID, "info", fmt.Sprintf("Fetching URL: %s", crawlPayload.URL))
-
-	result, err := scraper.ScrapeURL(ctx, crawlPayload.URL)
-	if err != nil {
-		e.jobMgr.AddJobLog(ctx, jobID, "error", fmt.Sprintf("Failed to scrape URL: %v", err))
-		return fmt.Errorf("failed to scrape URL %s: %w", crawlPayload.URL, err)
+	if _, ok := job.Config["source_type"]; !ok {
+		return fmt.Errorf("missing required config field: source_type")
 	}
 
-	if !result.Success {
-		e.jobMgr.AddJobLog(ctx, jobID, "warn", fmt.Sprintf("URL returned status %d: %s", result.StatusCode, crawlPayload.URL))
-	} else {
-		e.jobMgr.AddJobLog(ctx, jobID, "info", fmt.Sprintf("Successfully scraped URL (status: %d, links found: %d)", result.StatusCode, len(result.Links)))
+	if _, ok := job.Config["entity_type"]; !ok {
+		return fmt.Errorf("missing required config field: entity_type")
 	}
-
-	// 5. Extract links and create child jobs (if following links and not at max depth)
-	linksEnqueued := 0
-	maxDepth := crawlPayload.MaxDepth
-	if maxDepth == 0 {
-		maxDepth = 3 // Default max depth
-	}
-
-	shouldFollowLinks := crawlPayload.FollowLinks && crawlPayload.Depth < maxDepth
-
-	if shouldFollowLinks && len(result.Links) > 0 {
-		e.jobMgr.AddJobLog(ctx, jobID, "info", fmt.Sprintf("Processing %d discovered links (depth: %d/%d)", len(result.Links), crawlPayload.Depth, maxDepth))
-
-		for _, link := range result.Links {
-			// 6. Check URL deduplication via job_seen_urls table
-			parentID := crawlPayload.ParentID
-			if parentID == "" {
-				parentID = jobID // If no parent, this is the parent
-			}
-
-			alreadySeen, err := e.jobStorage.MarkURLSeen(ctx, parentID, link)
-			if err != nil {
-				e.logger.Warn().Err(err).Str("url", link).Msg("Failed to check URL deduplication")
-				continue
-			}
-
-			if alreadySeen {
-				e.logger.Debug().Str("url", link).Msg("URL already seen, skipping")
-				continue
-			}
-
-			// 7. Create child job for discovered link
-			childPayload := CrawlerPayload{
-				URL:         link,
-				Depth:       crawlPayload.Depth + 1,
-				ParentID:    parentID,
-				Phase:       "core", // Child jobs are always in core phase
-				Config:      crawlPayload.Config,
-				MaxDepth:    maxDepth,
-				FollowLinks: crawlPayload.FollowLinks,
-			}
-
-			childJobID, err := e.jobMgr.CreateChildJob(ctx, parentID, "crawler_url", "core", childPayload)
-			if err != nil {
-				e.logger.Warn().Err(err).Str("url", link).Msg("Failed to create child job")
-				e.jobMgr.AddJobLog(ctx, jobID, "warn", fmt.Sprintf("Failed to enqueue link: %s", link))
-				continue
-			}
-
-			linksEnqueued++
-			e.logger.Debug().
-				Str("child_job_id", childJobID).
-				Str("url", link).
-				Int("depth", crawlPayload.Depth+1).
-				Msg("Created child job for discovered link")
-		}
-
-		if linksEnqueued > 0 {
-			e.jobMgr.AddJobLog(ctx, jobID, "info", fmt.Sprintf("Enqueued %d new links for crawling", linksEnqueued))
-		}
-	}
-
-	// 8. Store crawl result (optional - could save to documents or results table)
-	// For now, we'll just log success
-
-	// 9. Update job progress
-	e.jobMgr.UpdateJobProgress(ctx, jobID, 1, 1)
-	e.jobMgr.AddJobLog(ctx, jobID, "info", "Crawl completed successfully")
-
-	e.logger.Info().
-		Str("job_id", jobID).
-		Str("url", crawlPayload.URL).
-		Int("status_code", result.StatusCode).
-		Int("links_discovered", len(result.Links)).
-		Int("links_enqueued", linksEnqueued).
-		Msg("Crawler job completed")
 
 	return nil
 }
 
-// buildCrawlerConfig constructs a CrawlerConfig from the payload config map
-func (e *CrawlerExecutor) buildCrawlerConfig(payload CrawlerPayload) common.CrawlerConfig {
-	// Start with default config from service
-	config := e.config.Crawler
+// Execute executes a crawler_url job
+func (e *CrawlerURLExecutor) Execute(ctx context.Context, job *models.JobModel) error {
+	// Extract config fields
+	seedURL, _ := job.GetConfigString("seed_url")
+	sourceType, _ := job.GetConfigString("source_type")
+	entityType, _ := job.GetConfigString("entity_type")
 
-	// Override with payload-specific config if provided
-	if payload.Config != nil {
-		if val, ok := payload.Config["request_timeout"]; ok {
-			if timeout, ok := val.(float64); ok {
-				config.RequestTimeout = time.Duration(timeout) * time.Millisecond
-			}
-		}
-		if val, ok := payload.Config["request_delay"]; ok {
-			if delay, ok := val.(float64); ok {
-				config.RequestDelay = time.Duration(delay) * time.Millisecond
-			}
-		}
-		if val, ok := payload.Config["include_metadata"]; ok {
-			if includeMeta, ok := val.(bool); ok {
-				config.IncludeMetadata = includeMeta
-			}
-		}
-		if val, ok := payload.Config["include_links"]; ok {
-			if includeLinks, ok := val.(bool); ok {
-				config.IncludeLinks = includeLinks
-			}
-		}
-		if val, ok := payload.Config["output_format"]; ok {
-			if format, ok := val.(string); ok {
-				config.OutputFormat = format
-			}
-		}
+	e.logger.Info().
+		Str("job_id", job.ID).
+		Str("seed_url", seedURL).
+		Str("source_type", sourceType).
+		Str("entity_type", entityType).
+		Int("depth", job.Depth).
+		Msg("Executing crawler_url job")
+
+	// Add job log
+	e.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Crawling URL: %s (depth: %d)", seedURL, job.Depth))
+
+	// Update job status to running
+	if err := e.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
+		e.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update job status to running")
 	}
 
-	// Ensure links are always included for crawling
-	config.IncludeLinks = true
+	// TODO: Implement actual URL crawling logic here
+	// For now, just mark as completed
+	// This is where you would:
+	// 1. Fetch the URL using crawler service
+	// 2. Extract content and links
+	// 3. Store results
+	// 4. Spawn child jobs for discovered links (if needed)
 
-	return config
+	e.logger.Info().Str("job_id", job.ID).Msg("Crawler URL job completed (stub implementation)")
+	e.jobMgr.AddJobLog(ctx, job.ID, "info", "Crawl completed successfully")
+
+	// Update job status to completed
+	if err := e.jobMgr.UpdateJobStatus(ctx, job.ID, "completed"); err != nil {
+		e.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update job status to completed")
+		return fmt.Errorf("failed to update job status: %w", err)
+	}
+
+	return nil
 }

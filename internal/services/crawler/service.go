@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 23rd October 2025 8:18:25 am
+// Last Modified: Wednesday, 5th November 2025 9:02:58 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -120,7 +120,7 @@ type Service struct {
 	browserPoolMu    sync.Mutex
 	browserPoolSize  int
 
-	activeJobs map[string]*CrawlJob
+	activeJobs map[string]*models.Job
 	jobResults map[string][]*CrawlResult
 	jobClients map[string]*http.Client // Per-job HTTP clients built from auth snapshots
 	jobsMu     sync.RWMutex
@@ -144,7 +144,7 @@ func NewService(authService interfaces.AuthService, sourceService *sources.Servi
 		queueManager:    queueManager,
 		logger:          logger,
 		config:          config,
-		activeJobs:      make(map[string]*CrawlJob),
+		activeJobs:      make(map[string]*models.Job),
 		jobResults:      make(map[string][]*CrawlResult),
 		jobClients:      make(map[string]*http.Client),
 		ctx:             ctx,
@@ -312,34 +312,48 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		return "", err
 	}
 
-	job := &CrawlJob{
-		ID:            jobID,
-		JobType:       models.JobTypeParent, // Explicitly mark as parent job for hierarchy
-		SourceType:    sourceType,
-		EntityType:    entityType,
-		Config:        config,
-		RefreshSource: refreshSource,
-		SeedURLs:      seedURLs, // Store seed URLs for rerun capability
-		Status:        JobStatusPending,
-		Progress: CrawlProgress{
+	// Build config map for new Job model
+	jobConfig := make(map[string]interface{})
+	jobConfig["crawl_config"] = config
+	jobConfig["source_type"] = sourceType
+	jobConfig["entity_type"] = entityType
+	jobConfig["refresh_source"] = refreshSource
+	jobConfig["seed_urls"] = seedURLs
+
+	// Build metadata map
+	metadata := make(map[string]interface{})
+	if jobDefinitionID != "" {
+		metadata["job_definition_id"] = jobDefinitionID
+		contextLogger.Debug().
+			Str("job_definition_id", jobDefinitionID).
+			Msg("Job definition ID stored in job metadata")
+	}
+
+	// Create JobModel
+	jobModel := &models.JobModel{
+		ID:        jobID,
+		ParentID:  nil, // Parent jobs have no parent
+		Type:      string(models.JobTypeParent),
+		Name:      fmt.Sprintf("Crawl %s %s", sourceType, entityType),
+		Config:    jobConfig,
+		Metadata:  metadata,
+		CreatedAt: time.Now(),
+		Depth:     0,
+	}
+
+	// Create Job with runtime state
+	job := &models.Job{
+		JobModel: jobModel,
+		Status:   JobStatusPending,
+		Progress: &models.JobProgress{
 			TotalURLs:     len(seedURLs),
 			CompletedURLs: 0,
 			FailedURLs:    0,
 			PendingURLs:   len(seedURLs),
-			StartTime:     time.Now(),
+			Percentage:    0,
 		},
-		CreatedAt: time.Now(),
-	}
-
-	// Store JobDefinitionID in metadata if provided
-	if jobDefinitionID != "" {
-		if job.Metadata == nil {
-			job.Metadata = make(map[string]interface{})
-		}
-		job.Metadata["job_definition_id"] = jobDefinitionID
-		contextLogger.Debug().
-			Str("job_definition_id", jobDefinitionID).
-			Msg("Job definition ID stored in job metadata")
+		ResultCount: 0,
+		FailedCount: 0,
 	}
 
 	// Log the source type being used for audit trail and debugging
@@ -466,12 +480,14 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			return "", fmt.Errorf("source configuration validation failed: %w", err)
 		}
 
-		// Store snapshot in job
-		if err := job.SetSourceConfigSnapshot(sourceConfigSnapshot); err != nil {
+		// Store snapshot in job config
+		sourceConfigJSON, err := json.Marshal(sourceConfigSnapshot)
+		if err != nil {
 			// Log snapshot serialization failure
 			contextLogger.Error().Err(err).Msg("Failed to serialize source config snapshot")
-			return "", fmt.Errorf("failed to set source config snapshot: %w", err)
+			return "", fmt.Errorf("failed to serialize source config snapshot: %w", err)
 		}
+		job.Config["source_config_snapshot"] = string(sourceConfigJSON)
 
 		// Log validation success with base URL
 		baseURLInfo := "unknown"
@@ -487,11 +503,14 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Store auth snapshot if provided
 	var httpClientType string
 	if authSnapshot != nil {
-		if err := job.SetAuthSnapshot(authSnapshot); err != nil {
+		// Store auth snapshot in job config
+		authJSON, err := json.Marshal(authSnapshot)
+		if err != nil {
 			// Log auth snapshot serialization failure
 			contextLogger.Error().Err(err).Msg("Failed to serialize auth snapshot")
-			return "", fmt.Errorf("failed to set auth snapshot: %w", err)
+			return "", fmt.Errorf("failed to serialize auth snapshot: %w", err)
 		}
+		job.Config["auth_snapshot"] = string(authJSON)
 
 		// Log auth snapshot presence
 		cookieCount := 0
@@ -570,7 +589,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 	// Seed queue with job messages for crawler workers
 	// Build config map for job messages
-	jobConfig := map[string]interface{}{
+	messageConfig := map[string]interface{}{
 		"max_depth":      config.MaxDepth,
 		"max_pages":      config.MaxPages,
 		"follow_links":   config.FollowLinks,
@@ -584,10 +603,10 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 	// Add include/exclude patterns from config to job message
 	if len(config.IncludePatterns) > 0 {
-		jobConfig["include_patterns"] = config.IncludePatterns
+		messageConfig["include_patterns"] = config.IncludePatterns
 	}
 	if len(config.ExcludePatterns) > 0 {
-		jobConfig["exclude_patterns"] = config.ExcludePatterns
+		messageConfig["exclude_patterns"] = config.ExcludePatterns
 	}
 
 	// Enqueue seed URLs as job messages
@@ -596,25 +615,41 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		// Generate child job ID
 		childID := fmt.Sprintf("%s-seed-%d", jobID, i)
 
-		// Persist seed URL as child CrawlJob record before enqueueing
+		// Persist seed URL as child Job record before enqueueing
 		// This ensures child job exists in database when worker picks up the message
-		childJob := &CrawlJob{
-			ID:         childID, // Match message ID for GetJob() lookups during execution
-			ParentID:   jobID,   // Link to parent job for hierarchy
-			JobType:    models.JobTypeCrawlerURL,
-			Name:       fmt.Sprintf("URL: %s", seedURL),
-			SourceType: sourceType,
-			EntityType: entityType,
-			Config:     config, // Inherit crawler config from parent
-			Status:     JobStatusPending,
-			Progress: CrawlProgress{
+
+		// Build child job config
+		childConfig := make(map[string]interface{})
+		childConfig["crawl_config"] = config
+		childConfig["source_type"] = sourceType
+		childConfig["entity_type"] = entityType
+		childConfig["seed_url"] = seedURL
+
+		// Create child JobModel
+		childJobModel := &models.JobModel{
+			ID:        childID,
+			ParentID:  &jobID,
+			Type:      string(models.JobTypeCrawlerURL),
+			Name:      fmt.Sprintf("URL: %s", seedURL),
+			Config:    childConfig,
+			Metadata:  make(map[string]interface{}),
+			CreatedAt: time.Now(),
+			Depth:     1,
+		}
+
+		// Create child Job with runtime state
+		childJob := &models.Job{
+			JobModel: childJobModel,
+			Status:   JobStatusPending,
+			Progress: &models.JobProgress{
 				TotalURLs:     1,
 				PendingURLs:   1,
 				CompletedURLs: 0,
 				FailedURLs:    0,
-				StartTime:     time.Now(),
+				Percentage:    0,
 			},
-			CreatedAt: time.Now(),
+			ResultCount: 0,
+			FailedCount: 0,
 		}
 
 		// Save child job to database
@@ -637,26 +672,20 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 		// Enqueue message to queue for processing
 		if s.queueManager != nil {
-			msgPayload := map[string]interface{}{
-				"url":               seedURL,
-				"depth":             0,
-				"parent_id":         jobID,
-				"job_definition_id": jobDefinitionID,
-				"config":            jobConfig,
-			}
-
-			payloadJSON, err := json.Marshal(msgPayload)
+			// Serialize the child JobModel to JSON for queue payload
+			payloadJSON, err := childJob.JobModel.ToJSON()
 			if err != nil {
 				contextLogger.Warn().
 					Err(err).
 					Str("seed_url", seedURL).
-					Msg("Failed to marshal payload")
+					Str("child_id", childID).
+					Msg("Failed to serialize child job model")
 				continue
 			}
 
 			msg := queue.Message{
 				JobID:   childID,
-				Type:    "crawler_url",
+				Type:    string(models.JobTypeCrawlerURL),
 				Payload: payloadJSON,
 			}
 
@@ -759,11 +788,18 @@ func (s *Service) CancelJob(jobID string) error {
 	}
 
 	job.Status = JobStatusCancelled
-	job.CompletedAt = time.Now()
+	now := time.Now()
+	job.CompletedAt = &now
 
 	// Sync result counts with progress counters before terminating
-	job.ResultCount = job.Progress.CompletedURLs
-	job.FailedCount = job.Progress.FailedURLs
+	if job.Progress != nil {
+		job.ResultCount = job.Progress.CompletedURLs
+		job.FailedCount = job.Progress.FailedURLs
+	}
+
+	// Extract source_type and entity_type from config
+	sourceType, _ := job.Config["source_type"].(string)
+	entityType, _ := job.Config["entity_type"].(string)
 
 	s.jobsMu.Unlock()
 
@@ -775,17 +811,24 @@ func (s *Service) CancelJob(jobID string) error {
 
 		// Publish EventJobCancelled after successful job cancellation
 		if s.eventService != nil {
+			completedURLs := 0
+			pendingURLs := 0
+			if job.Progress != nil {
+				completedURLs = job.Progress.CompletedURLs
+				pendingURLs = job.Progress.PendingURLs
+			}
+
 			cancelledEvent := interfaces.Event{
 				Type: interfaces.EventJobCancelled,
 				Payload: map[string]interface{}{
 					"job_id":         jobID,
 					"status":         "cancelled",
-					"source_type":    job.SourceType,
-					"entity_type":    job.EntityType,
+					"source_type":    sourceType,
+					"entity_type":    entityType,
 					"result_count":   job.ResultCount,
 					"failed_count":   job.FailedCount,
-					"completed_urls": job.Progress.CompletedURLs,
-					"pending_urls":   job.Progress.PendingURLs,
+					"completed_urls": completedURLs,
+					"pending_urls":   pendingURLs,
 					"timestamp":      time.Now(),
 				},
 			}
@@ -831,12 +874,19 @@ func (s *Service) FailJob(jobID string, reason string) error {
 
 	// Set job status to failed
 	job.Status = JobStatusFailed
-	job.CompletedAt = time.Now()
+	now := time.Now()
+	job.CompletedAt = &now
 	job.Error = reason
 
 	// Sync result counts with progress counters before terminating
-	job.ResultCount = job.Progress.CompletedURLs
-	job.FailedCount = job.Progress.FailedURLs
+	if job.Progress != nil {
+		job.ResultCount = job.Progress.CompletedURLs
+		job.FailedCount = job.Progress.FailedURLs
+	}
+
+	// Extract source_type and entity_type from config
+	sourceType, _ := job.Config["source_type"].(string)
+	entityType, _ := job.Config["entity_type"].(string)
 
 	s.jobsMu.Unlock()
 
@@ -848,18 +898,25 @@ func (s *Service) FailJob(jobID string, reason string) error {
 
 		// Publish EventJobFailed after successful job failure persistence
 		if s.eventService != nil {
+			completedURLs := 0
+			pendingURLs := 0
+			if job.Progress != nil {
+				completedURLs = job.Progress.CompletedURLs
+				pendingURLs = job.Progress.PendingURLs
+			}
+
 			failedEvent := interfaces.Event{
 				Type: interfaces.EventJobFailed,
 				Payload: map[string]interface{}{
 					"job_id":         jobID,
 					"status":         "failed",
-					"source_type":    job.SourceType,
-					"entity_type":    job.EntityType,
+					"source_type":    sourceType,
+					"entity_type":    entityType,
 					"result_count":   job.ResultCount,
 					"failed_count":   job.FailedCount,
 					"error":          reason,
-					"completed_urls": job.Progress.CompletedURLs,
-					"pending_urls":   job.Progress.PendingURLs,
+					"completed_urls": completedURLs,
+					"pending_urls":   pendingURLs,
 					"timestamp":      time.Now(),
 				},
 			}
@@ -970,7 +1027,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 		return "", fmt.Errorf("failed to get job: %w", err)
 	}
 
-	originalJob, ok := jobInterface.(*CrawlJob)
+	originalJob, ok := jobInterface.(*models.Job)
 	if !ok || originalJob == nil {
 		return "", fmt.Errorf("invalid job type or nil job")
 	}
@@ -979,55 +1036,70 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 	newJobID := uuid.New().String()
 	now := time.Now()
 
-	// Build fresh job copying only essential fields from original
-	// This avoids any potential issues with struct copying or nil pointers
-	newJob := &CrawlJob{
-		ID:                   newJobID,
-		Name:                 originalJob.Name,
-		Description:          originalJob.Description,
-		SourceType:           originalJob.SourceType,
-		EntityType:           originalJob.EntityType,
-		Config:               originalJob.Config,
-		SourceConfigSnapshot: originalJob.SourceConfigSnapshot,
-		AuthSnapshot:         originalJob.AuthSnapshot,
-		RefreshSource:        originalJob.RefreshSource,
-		SeedURLs:             originalJob.SeedURLs,
-
-		// Reset to fresh state
-		Status:         JobStatusPending,
-		CreatedAt:      now,
-		StartedAt:      time.Time{},
-		CompletedAt:    time.Time{},
-		Error:          "",
-		ResultCount:    0,
-		FailedCount:    0,
-		DocumentsSaved: 0,
-
-		// Fresh progress
-		Progress: CrawlProgress{
-			TotalURLs:     len(originalJob.SeedURLs),
-			CompletedURLs: 0,
-			FailedURLs:    0,
-			PendingURLs:   len(originalJob.SeedURLs),
-			StartTime:     now,
-		},
+	// Extract seed URLs from original job config
+	var seedURLs []string
+	if seedURLsRaw, ok := originalJob.Config["seed_urls"]; ok {
+		if seedURLsSlice, ok := seedURLsRaw.([]interface{}); ok {
+			for _, url := range seedURLsSlice {
+				if urlStr, ok := url.(string); ok {
+					seedURLs = append(seedURLs, urlStr)
+				}
+			}
+		} else if seedURLsStrSlice, ok := seedURLsRaw.([]string); ok {
+			seedURLs = seedURLsStrSlice
+		}
 	}
 
-	// Preserve job_definition_id from original job's metadata (if present)
-	if originalJob.Metadata != nil {
-		if jobDefID, ok := originalJob.Metadata["job_definition_id"]; ok && jobDefID != nil {
-			if newJob.Metadata == nil {
-				newJob.Metadata = make(map[string]interface{})
-			}
-			newJob.Metadata["job_definition_id"] = jobDefID
-		}
+	// Copy config map from original job
+	newConfig := make(map[string]interface{})
+	for k, v := range originalJob.Config {
+		newConfig[k] = v
 	}
 
 	// Apply config update if provided
 	if updateConfig != nil {
 		if crawlConfig, ok := updateConfig.(*CrawlConfig); ok && crawlConfig != nil {
-			newJob.Config = *crawlConfig
+			newConfig["crawl_config"] = *crawlConfig
 		}
+	}
+
+	// Copy metadata from original job
+	newMetadata := make(map[string]interface{})
+	if originalJob.Metadata != nil {
+		for k, v := range originalJob.Metadata {
+			newMetadata[k] = v
+		}
+	}
+
+	// Create new JobModel
+	newJobModel := &models.JobModel{
+		ID:        newJobID,
+		ParentID:  originalJob.ParentID, // Preserve parent relationship
+		Type:      originalJob.Type,
+		Name:      originalJob.Name,
+		Config:    newConfig,
+		Metadata:  newMetadata,
+		CreatedAt: now,
+		Depth:     originalJob.Depth,
+	}
+
+	// Create new Job with fresh runtime state
+	newJob := &models.Job{
+		JobModel: newJobModel,
+		Status:   JobStatusPending,
+		Progress: &models.JobProgress{
+			TotalURLs:     len(seedURLs),
+			CompletedURLs: 0,
+			FailedURLs:    0,
+			PendingURLs:   len(seedURLs),
+			Percentage:    0,
+		},
+		StartedAt:   nil,
+		CompletedAt: nil,
+		FinishedAt:  nil,
+		Error:       "",
+		ResultCount: 0,
+		FailedCount: 0,
 	}
 
 	// Save the new job

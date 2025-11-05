@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
@@ -38,6 +40,7 @@ type Job struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"` // Set when job AND all children complete or timeout
 	Payload         string     `json:"payload,omitempty"`
 	Result          string     `json:"result,omitempty"`
 	Error           *string    `json:"error,omitempty"`
@@ -129,8 +132,8 @@ func unixToTimePtr(unix sql.NullInt64) *time.Time {
 	return &t
 }
 
-// CreateJob creates a new job record without enqueueing (for tracking only)
-func (m *Manager) CreateJob(ctx context.Context, job *Job) error {
+// CreateJobRecord creates a new job record without enqueueing (for tracking only)
+func (m *Manager) CreateJobRecord(ctx context.Context, job *Job) error {
 	// Create metadata JSON with phase
 	metadata := metadataJSON{Phase: job.Phase}
 	metadataJSON, err := json.Marshal(metadata)
@@ -157,18 +160,19 @@ func (m *Manager) CreateJob(ctx context.Context, job *Job) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	// Create job record in crawl_jobs table with retry on SQLITE_BUSY
+	// Create job record in jobs table with retry on SQLITE_BUSY
 	err = retryOnBusy(ctx, func() error {
 		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO crawl_jobs (
+			INSERT INTO jobs (
 				id, parent_id, job_type, name, description,
-				source_type, entity_type, config_json,
-				status, progress_json, metadata,
-				created_at, refresh_source, result_count, failed_count
+				config_json, metadata_json,
+				status, progress_json,
+				created_at, result_count, failed_count
 			)
-			VALUES (?, ?, ?, ?, ?, 'job_definition', 'job', ?, ?, ?, ?, ?, 0, 0, 0)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
 		`, job.ID, job.ParentID, job.Type, job.Name, job.Name,
-			string(configJSONBytes), job.Status, string(progressJSONBytes), string(metadataJSON), timeToUnix(job.CreatedAt))
+			string(configJSONBytes), string(metadataJSON),
+			job.Status, string(progressJSONBytes), timeToUnix(job.CreatedAt))
 		return err
 	})
 
@@ -204,17 +208,17 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 
 	now := time.Now()
 
-	// Create job record in crawl_jobs table with retry on SQLITE_BUSY
+	// Create job record in jobs table with retry on SQLITE_BUSY
 	err = retryOnBusy(ctx, func() error {
 		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO crawl_jobs (
+			INSERT INTO jobs (
 				id, parent_id, job_type, name, description,
-				source_type, entity_type, config_json,
-				status, progress_json, metadata,
-				created_at, refresh_source, result_count, failed_count
+				config_json, metadata_json,
+				status, progress_json,
+				created_at, result_count, failed_count
 			)
-			VALUES (?, NULL, ?, '', '', 'queue', 'job', ?, 'pending', ?, ?, ?, 0, 0, 0)
-		`, jobID, jobType, string(payloadJSON), string(progressJSONBytes), string(metadataJSON), timeToUnix(now))
+			VALUES (?, NULL, ?, '', '', ?, ?, 'pending', ?, ?, 0, 0)
+		`, jobID, jobType, string(payloadJSON), string(metadataJSON), string(progressJSONBytes), timeToUnix(now))
 		return err
 	})
 
@@ -259,17 +263,17 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 
 	now := time.Now()
 
-	// Create job record in crawl_jobs table with retry on SQLITE_BUSY
+	// Create job record in jobs table with retry on SQLITE_BUSY
 	err = retryOnBusy(ctx, func() error {
 		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO crawl_jobs (
+			INSERT INTO jobs (
 				id, parent_id, job_type, name, description,
-				source_type, entity_type, config_json,
-				status, progress_json, metadata,
-				created_at, refresh_source, result_count, failed_count
+				config_json, metadata_json,
+				status, progress_json,
+				created_at, result_count, failed_count
 			)
-			VALUES (?, ?, ?, '', '', 'queue', 'job', ?, 'pending', ?, ?, ?, 0, 0, 0)
-		`, jobID, parentID, jobType, string(payloadJSON), string(progressJSONBytes), string(metadataJSON), timeToUnix(now))
+			VALUES (?, ?, ?, '', '', ?, ?, 'pending', ?, ?, 0, 0)
+		`, jobID, parentID, jobType, string(payloadJSON), string(metadataJSON), string(progressJSONBytes), timeToUnix(now))
 		return err
 	})
 
@@ -289,25 +293,25 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 	return jobID, nil
 }
 
-// GetJob retrieves a job by ID
-func (m *Manager) GetJob(ctx context.Context, jobID string) (*Job, error) {
+// GetJobInternal retrieves a job by ID (internal jobs.Job type)
+func (m *Manager) GetJobInternal(ctx context.Context, jobID string) (*Job, error) {
 	var job Job
 	var parentID sql.NullString
-	var startedAt, completedAt sql.NullInt64
+	var startedAt, completedAt, finishedAt sql.NullInt64
 	var errMsg sql.NullString
 	var createdAtUnix int64
 	var configJSON, metadataStr, progressStr string
 
 	row := m.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, job_type, status, created_at, started_at,
-		       completed_at, config_json, metadata, error, progress_json
-		FROM crawl_jobs
+		       completed_at, finished_at, config_json, metadata_json, error, progress_json
+		FROM jobs
 		WHERE id = ?
 	`, jobID)
 
 	if err := row.Scan(
 		&job.ID, &parentID, &job.Type, &job.Status,
-		&createdAtUnix, &startedAt, &completedAt,
+		&createdAtUnix, &startedAt, &completedAt, &finishedAt,
 		&configJSON, &metadataStr, &errMsg, &progressStr,
 	); err != nil {
 		return nil, err
@@ -320,6 +324,7 @@ func (m *Manager) GetJob(ctx context.Context, jobID string) (*Job, error) {
 	job.CreatedAt = unixToTime(createdAtUnix)
 	job.StartedAt = unixToTimePtr(startedAt)
 	job.CompletedAt = unixToTimePtr(completedAt)
+	job.FinishedAt = unixToTimePtr(finishedAt)
 	job.Payload = configJSON
 	if errMsg.Valid {
 		job.Error = &errMsg.String
@@ -345,9 +350,9 @@ func (m *Manager) GetJob(ctx context.Context, jobID string) (*Job, error) {
 // ListParentJobs returns all parent jobs (parent_id IS NULL)
 func (m *Manager) ListParentJobs(ctx context.Context, limit, offset int) ([]Job, error) {
 	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, job_type, status, created_at, started_at, completed_at,
-		       metadata, progress_json, error
-		FROM crawl_jobs
+		SELECT id, job_type, status, created_at, started_at, completed_at, finished_at,
+		       metadata_json, progress_json, error
+		FROM jobs
 		WHERE parent_id IS NULL
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -361,14 +366,14 @@ func (m *Manager) ListParentJobs(ctx context.Context, limit, offset int) ([]Job,
 	var jobs []Job
 	for rows.Next() {
 		var job Job
-		var startedAt, completedAt sql.NullInt64
+		var startedAt, completedAt, finishedAt sql.NullInt64
 		var errorMsg sql.NullString
 		var createdAtUnix int64
 		var metadataStr, progressStr string
 
 		if err := rows.Scan(
 			&job.ID, &job.Type, &job.Status,
-			&createdAtUnix, &startedAt, &completedAt,
+			&createdAtUnix, &startedAt, &completedAt, &finishedAt,
 			&metadataStr, &progressStr, &errorMsg,
 		); err != nil {
 			return nil, err
@@ -377,6 +382,7 @@ func (m *Manager) ListParentJobs(ctx context.Context, limit, offset int) ([]Job,
 		job.CreatedAt = unixToTime(createdAtUnix)
 		job.StartedAt = unixToTimePtr(startedAt)
 		job.CompletedAt = unixToTimePtr(completedAt)
+		job.FinishedAt = unixToTimePtr(finishedAt)
 		if errorMsg.Valid {
 			job.Error = &errorMsg.String
 		}
@@ -404,8 +410,8 @@ func (m *Manager) ListParentJobs(ctx context.Context, limit, offset int) ([]Job,
 func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, error) {
 	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, parent_id, job_type, status, created_at, started_at,
-		       completed_at, metadata, progress_json, error
-		FROM crawl_jobs
+		       completed_at, finished_at, metadata_json, progress_json, error
+		FROM jobs
 		WHERE parent_id = ?
 		ORDER BY created_at ASC
 	`, parentID)
@@ -419,14 +425,14 @@ func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, er
 	for rows.Next() {
 		var job Job
 		var parentIDStr sql.NullString
-		var startedAt, completedAt sql.NullInt64
+		var startedAt, completedAt, finishedAt sql.NullInt64
 		var errorMsg sql.NullString
 		var createdAtUnix int64
 		var metadataStr, progressStr string
 
 		if err := rows.Scan(
 			&job.ID, &parentIDStr, &job.Type, &job.Status,
-			&createdAtUnix, &startedAt, &completedAt,
+			&createdAtUnix, &startedAt, &completedAt, &finishedAt,
 			&metadataStr, &progressStr, &errorMsg,
 		); err != nil {
 			return nil, err
@@ -438,6 +444,7 @@ func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, er
 		job.CreatedAt = unixToTime(createdAtUnix)
 		job.StartedAt = unixToTimePtr(startedAt)
 		job.CompletedAt = unixToTimePtr(completedAt)
+		job.FinishedAt = unixToTimePtr(finishedAt)
 		if errorMsg.Valid {
 			job.Error = &errorMsg.String
 		}
@@ -466,7 +473,7 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 	now := time.Now()
 	nowUnix := timeToUnix(now)
 
-	query := "UPDATE crawl_jobs SET status = ?, last_heartbeat = ?"
+	query := "UPDATE jobs SET status = ?, last_heartbeat = ?"
 	args := []interface{}{status, nowUnix}
 
 	if status == "running" {
@@ -496,7 +503,7 @@ func (m *Manager) UpdateJobProgress(ctx context.Context, jobID string, current, 
 	}
 
 	_, err = m.db.ExecContext(ctx, `
-		UPDATE crawl_jobs SET progress_json = ?
+		UPDATE jobs SET progress_json = ?
 		WHERE id = ?
 	`, string(progressJSONBytes), jobID)
 	return err
@@ -506,7 +513,7 @@ func (m *Manager) UpdateJobProgress(ctx context.Context, jobID string, current, 
 func (m *Manager) SetJobError(ctx context.Context, jobID string, errorMsg string) error {
 	now := time.Now()
 	_, err := m.db.ExecContext(ctx, `
-		UPDATE crawl_jobs SET status = 'failed', error = ?, completed_at = ?
+		UPDATE jobs SET status = 'failed', error = ?, completed_at = ?
 		WHERE id = ?
 	`, errorMsg, timeToUnix(now), jobID)
 	return err
@@ -522,7 +529,7 @@ func (m *Manager) SetJobResult(ctx context.Context, jobID string, result interfa
 	// Read existing metadata to preserve phase
 	var existingMetadata string
 	err = m.db.QueryRowContext(context.Background(), `
-		SELECT metadata FROM crawl_jobs WHERE id = ?
+		SELECT metadata_json FROM jobs WHERE id = ?
 	`, jobID).Scan(&existingMetadata)
 	if err != nil {
 		return fmt.Errorf("read existing metadata: %w", err)
@@ -544,8 +551,19 @@ func (m *Manager) SetJobResult(ctx context.Context, jobID string, result interfa
 	}
 
 	_, err = m.db.ExecContext(context.Background(), `
-		UPDATE crawl_jobs SET metadata = ? WHERE id = ?
+		UPDATE jobs SET metadata_json = ? WHERE id = ?
 	`, string(updatedMetadata), jobID)
+	return err
+}
+
+// SetJobFinished sets the finished_at timestamp for a job
+// This should be called when a job AND all its spawned children complete or timeout
+func (m *Manager) SetJobFinished(ctx context.Context, jobID string) error {
+	now := time.Now()
+	_, err := m.db.ExecContext(ctx, `
+		UPDATE jobs SET finished_at = ?
+		WHERE id = ?
+	`, timeToUnix(now), jobID)
 	return err
 }
 
@@ -609,8 +627,8 @@ type JobTreeStatus struct {
 // GetJobTreeStatus retrieves aggregated status for a parent job and all its children
 // This provides efficient status reporting for hierarchical job execution
 func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*JobTreeStatus, error) {
-	// Get parent job
-	parentJob, err := m.GetJob(ctx, parentJobID)
+	// Get parent job using internal method
+	parentJobInternal, err := m.GetJobInternal(ctx, parentJobID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get parent job: %w", err)
 	}
@@ -626,7 +644,7 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
 			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
-		FROM crawl_jobs
+		FROM jobs
 		WHERE parent_id = ?
 	`, parentJobID)
 
@@ -642,15 +660,15 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 		overallProgress = float64(terminalCount) / float64(totalChildren)
 	} else {
 		// No children yet, use parent job progress if available
-		if parentJob.ProgressTotal > 0 {
-			overallProgress = float64(parentJob.ProgressCurrent) / float64(parentJob.ProgressTotal)
+		if parentJobInternal.ProgressTotal > 0 {
+			overallProgress = float64(parentJobInternal.ProgressCurrent) / float64(parentJobInternal.ProgressTotal)
 		}
 	}
 
 	// Estimate time to completion (simple linear extrapolation)
 	var estimatedTime *int64
-	if runningCount > 0 && parentJob.StartedAt != nil {
-		elapsed := time.Since(*parentJob.StartedAt)
+	if runningCount > 0 && parentJobInternal.StartedAt != nil {
+		elapsed := time.Since(*parentJobInternal.StartedAt)
 		if overallProgress > 0 && overallProgress < 1.0 {
 			totalEstimated := float64(elapsed) / overallProgress
 			remaining := totalEstimated - float64(elapsed)
@@ -660,7 +678,7 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 	}
 
 	status := &JobTreeStatus{
-		ParentJob:       parentJob,
+		ParentJob:       parentJobInternal,
 		TotalChildren:   totalChildren,
 		CompletedCount:  completedCount,
 		FailedCount:     failedCount,
@@ -679,7 +697,7 @@ func (m *Manager) GetFailedChildCount(ctx context.Context, parentJobID string) (
 	var failedCount int
 	err := m.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM crawl_jobs
+		FROM jobs
 		WHERE parent_id = ? AND status = 'failed'
 	`, parentJobID).Scan(&failedCount)
 
@@ -688,4 +706,498 @@ func (m *Manager) GetFailedChildCount(ctx context.Context, parentJobID string) (
 	}
 
 	return failedCount, nil
+}
+
+// ============================================================================
+// Interface Adapter Methods (interfaces.JobManager)
+// ============================================================================
+
+// CreateJob implements interfaces.JobManager.CreateJob
+// Creates a new job with the given source type, source ID, and configuration
+func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error) {
+	// Create job model
+	jobType := sourceType // Use source type as job type
+	name := fmt.Sprintf("%s job for %s", sourceType, sourceID)
+
+	metadata := map[string]interface{}{
+		"source_id": sourceID,
+	}
+
+	jobModel := models.NewJobModel(jobType, name, config, metadata)
+
+	// Serialize config to JSON
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Serialize metadata
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Serialize progress
+	progress := &models.JobProgress{
+		TotalURLs:     0,
+		CompletedURLs: 0,
+		FailedURLs:    0,
+		PendingURLs:   0,
+		Percentage:    0.0,
+	}
+	progressJSON, err := json.Marshal(progress)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal progress: %w", err)
+	}
+
+	now := time.Now()
+
+	// Create job record in jobs table
+	err = retryOnBusy(ctx, func() error {
+		_, err := m.db.ExecContext(ctx, `
+			INSERT INTO jobs (
+				id, parent_id, job_type, name, description,
+				config_json, metadata_json,
+				status, progress_json,
+				created_at, result_count, failed_count
+			)
+			VALUES (?, NULL, ?, ?, '', ?, ?, 'pending', ?, ?, 0, 0)
+		`, jobModel.ID, jobType, name, string(configJSON), string(metadataJSON), string(progressJSON), timeToUnix(now))
+		return err
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("create job record: %w", err)
+	}
+
+	// Enqueue the job
+	if err := m.queue.Enqueue(ctx, queue.Message{
+		JobID:   jobModel.ID,
+		Type:    jobType,
+		Payload: configJSON,
+	}); err != nil {
+		return "", fmt.Errorf("enqueue job: %w", err)
+	}
+
+	return jobModel.ID, nil
+}
+
+// GetJob implements interfaces.JobManager.GetJob
+// Returns interface{} to match the interface, but the actual type is *models.Job
+func (m *Manager) GetJob(ctx context.Context, jobID string) (interface{}, error) {
+	// Query the jobs table
+	var job models.Job
+	var jobModel models.JobModel
+	var parentID, errorMsg sql.NullString
+	var startedAt, completedAt, finishedAt, lastHeartbeat sql.NullInt64
+	var configJSON, metadataJSON, progressJSON string
+	var createdAtUnix int64
+	var depth sql.NullInt64
+
+	row := m.db.QueryRowContext(ctx, `
+		SELECT id, parent_id, job_type, name, description, config_json, metadata_json,
+		       status, progress_json, created_at, started_at, completed_at, finished_at,
+		       last_heartbeat, error, result_count, failed_count, depth
+		FROM jobs
+		WHERE id = ?
+	`, jobID)
+
+	err := row.Scan(
+		&jobModel.ID, &parentID, &jobModel.Type, &jobModel.Name, &sql.NullString{}, // description not in JobModel
+		&configJSON, &metadataJSON,
+		&job.Status, &progressJSON,
+		&createdAtUnix, &startedAt, &completedAt, &finishedAt,
+		&lastHeartbeat, &errorMsg, &job.ResultCount, &job.FailedCount, &depth,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("job not found: %s", jobID)
+		}
+		return nil, fmt.Errorf("failed to get job: %w", err)
+	}
+
+	// Map fields
+	if parentID.Valid {
+		jobModel.ParentID = &parentID.String
+	}
+	jobModel.CreatedAt = unixToTime(createdAtUnix)
+	if depth.Valid {
+		jobModel.Depth = int(depth.Int64)
+	}
+
+	// Parse config JSON
+	if err := json.Unmarshal([]byte(configJSON), &jobModel.Config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Parse metadata JSON
+	if err := json.Unmarshal([]byte(metadataJSON), &jobModel.Metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	// Parse progress JSON
+	var progress models.JobProgress
+	if err := json.Unmarshal([]byte(progressJSON), &progress); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal progress: %w", err)
+	}
+	job.Progress = &progress
+
+	// Map timestamps
+	job.StartedAt = unixToTimePtr(startedAt)
+	job.CompletedAt = unixToTimePtr(completedAt)
+	job.FinishedAt = unixToTimePtr(finishedAt)
+	job.LastHeartbeat = unixToTimePtr(lastHeartbeat)
+
+	if errorMsg.Valid {
+		job.Error = errorMsg.String
+	}
+
+	// Embed JobModel into Job
+	job.JobModel = &jobModel
+
+	return &job, nil
+}
+
+// ListJobs implements interfaces.JobManager.ListJobs
+// Converts internal Job type to models.Job for compatibility
+func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.Job, error) {
+	// Build query based on options
+	query := `
+		SELECT id, parent_id, job_type, name, description, config_json, metadata_json,
+		       status, progress_json, created_at, started_at, completed_at, finished_at,
+		       last_heartbeat, error, result_count, failed_count, depth
+		FROM jobs
+		WHERE 1=1
+	`
+	args := []interface{}{}
+
+	if opts != nil {
+		if opts.Status != "" {
+			query += " AND status = ?"
+			args = append(args, opts.Status)
+		}
+		if opts.ParentID != "" {
+			if opts.ParentID == "root" {
+				query += " AND parent_id IS NULL"
+			} else {
+				query += " AND parent_id = ?"
+				args = append(args, opts.ParentID)
+			}
+		}
+
+		// Ordering
+		orderBy := "created_at"
+		if opts.OrderBy != "" {
+			orderBy = opts.OrderBy
+		}
+		orderDir := "DESC"
+		if opts.OrderDir != "" {
+			orderDir = opts.OrderDir
+		}
+		query += fmt.Sprintf(" ORDER BY %s %s", orderBy, orderDir)
+
+		// Pagination
+		if opts.Limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, opts.Limit)
+			if opts.Offset > 0 {
+				query += " OFFSET ?"
+				args = append(args, opts.Offset)
+			}
+		}
+	} else {
+		query += " ORDER BY created_at DESC"
+	}
+
+	rows, err := m.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := []*models.Job{}
+	for rows.Next() {
+		var job models.Job
+		var jobModel models.JobModel
+		var parentID, errorMsg sql.NullString
+		var startedAt, completedAt, finishedAt, lastHeartbeat sql.NullInt64
+		var configJSON, metadataJSON, progressJSON string
+		var createdAtUnix int64
+		var depth sql.NullInt64
+
+		var description sql.NullString
+		if err := rows.Scan(
+			&jobModel.ID, &parentID, &jobModel.Type, &jobModel.Name, &description,
+			&configJSON, &metadataJSON,
+			&job.Status, &progressJSON,
+			&createdAtUnix, &startedAt, &completedAt, &finishedAt, &lastHeartbeat,
+			&errorMsg, &job.ResultCount, &job.FailedCount, &depth,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan job: %w", err)
+		}
+
+		// Parse timestamps
+		jobModel.CreatedAt = unixToTime(createdAtUnix)
+		if startedAt.Valid {
+			t := unixToTime(startedAt.Int64)
+			job.StartedAt = &t
+		}
+		if completedAt.Valid {
+			t := unixToTime(completedAt.Int64)
+			job.CompletedAt = &t
+		}
+		if finishedAt.Valid {
+			t := unixToTime(finishedAt.Int64)
+			job.FinishedAt = &t
+		}
+		if lastHeartbeat.Valid {
+			t := unixToTime(lastHeartbeat.Int64)
+			job.LastHeartbeat = &t
+		}
+
+		// Parse JSON fields
+		if err := json.Unmarshal([]byte(configJSON), &jobModel.Config); err != nil {
+			jobModel.Config = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(metadataJSON), &jobModel.Metadata); err != nil {
+			jobModel.Metadata = make(map[string]interface{})
+		}
+		if err := json.Unmarshal([]byte(progressJSON), &job.Progress); err != nil {
+			job.Progress = &models.JobProgress{}
+		}
+
+		// Set optional fields
+		if parentID.Valid {
+			jobModel.ParentID = &parentID.String
+		}
+		if errorMsg.Valid {
+			job.Error = errorMsg.String
+		}
+
+		// Embed JobModel into Job
+		job.JobModel = &jobModel
+		jobs = append(jobs, &job)
+	}
+
+	return jobs, rows.Err()
+}
+
+// CountJobs implements interfaces.JobManager.CountJobs
+func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
+	query := "SELECT COUNT(*) FROM jobs WHERE 1=1"
+	args := []interface{}{}
+
+	if opts != nil {
+		if opts.Status != "" {
+			query += " AND status = ?"
+			args = append(args, opts.Status)
+		}
+		if opts.ParentID != "" {
+			if opts.ParentID == "root" {
+				query += " AND parent_id IS NULL"
+			} else {
+				query += " AND parent_id = ?"
+				args = append(args, opts.ParentID)
+			}
+		}
+	}
+
+	var count int
+	err := m.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count jobs: %w", err)
+	}
+
+	return count, nil
+}
+
+// UpdateJob implements interfaces.JobManager.UpdateJob
+func (m *Manager) UpdateJob(ctx context.Context, job interface{}) error {
+	// Type assert to *models.Job
+	modelJob, ok := job.(*models.Job)
+	if !ok {
+		return fmt.Errorf("invalid job type: expected *models.Job, got %T", job)
+	}
+
+	// Serialize JSON fields
+	configJSON, err := json.Marshal(modelJob.Config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	metadataJSON, err := json.Marshal(modelJob.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	progressJSON, err := json.Marshal(modelJob.Progress)
+	if err != nil {
+		return fmt.Errorf("failed to marshal progress: %w", err)
+	}
+
+	// Build update query
+	query := `
+		UPDATE jobs SET
+			name = ?, config_json = ?, metadata_json = ?,
+			status = ?, progress_json = ?, error = ?,
+			result_count = ?, failed_count = ?
+		WHERE id = ?
+	`
+
+	_, err = m.db.ExecContext(ctx, query,
+		modelJob.Name, string(configJSON), string(metadataJSON),
+		modelJob.Status, string(progressJSON), modelJob.Error,
+		modelJob.ResultCount, modelJob.FailedCount,
+		modelJob.ID,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update job: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteJob implements interfaces.JobManager.DeleteJob
+func (m *Manager) DeleteJob(ctx context.Context, jobID string) (int, error) {
+	// Count children before deletion (CASCADE will delete them)
+	var childCount int
+	err := m.db.QueryRowContext(ctx, `
+		WITH RECURSIVE job_tree AS (
+			SELECT id FROM jobs WHERE id = ?
+			UNION ALL
+			SELECT j.id FROM jobs j
+			INNER JOIN job_tree jt ON j.parent_id = jt.id
+		)
+		SELECT COUNT(*) - 1 FROM job_tree
+	`, jobID).Scan(&childCount)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to count child jobs: %w", err)
+	}
+
+	// Delete job (CASCADE will delete children and related records)
+	result, err := m.db.ExecContext(ctx, "DELETE FROM jobs WHERE id = ?", jobID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete job: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return childCount, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return 0, fmt.Errorf("job not found: %s", jobID)
+	}
+
+	return childCount, nil
+}
+
+// CopyJob implements interfaces.JobManager.CopyJob
+func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
+	// Get original job
+	var jobType, name, description, configJSON, metadataJSON string
+	var parentID sql.NullString
+
+	err := m.db.QueryRowContext(ctx, `
+		SELECT parent_id, job_type, name, description, config_json, metadata_json
+		FROM jobs WHERE id = ?
+	`, jobID).Scan(&parentID, &jobType, &name, &description, &configJSON, &metadataJSON)
+
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("job not found: %s", jobID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get job: %w", err)
+	}
+
+	// Create new job with same configuration
+	newJobID := uuid.New().String()
+	now := timeToUnix(time.Now())
+
+	// Default progress JSON
+	progressJSON := `{"current":0,"total":0,"message":""}`
+
+	_, err = m.db.ExecContext(ctx, `
+		INSERT INTO jobs (
+			id, parent_id, job_type, name, description,
+			config_json, metadata_json,
+			status, progress_json,
+			created_at, result_count, failed_count
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0, 0)
+	`, newJobID, parentID, jobType, name+" (Copy)", description,
+		configJSON, metadataJSON, progressJSON, now)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to create job copy: %w", err)
+	}
+
+	return newJobID, nil
+}
+
+// GetJobChildStats implements interfaces.JobManager.GetJobChildStats
+func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+	if len(parentIDs) == 0 {
+		return make(map[string]*interfaces.JobChildStats), nil
+	}
+
+	// Build IN clause
+	placeholders := make([]string, len(parentIDs))
+	args := make([]interface{}, len(parentIDs))
+	for i, id := range parentIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT parent_id,
+		       COUNT(*) as child_count,
+		       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
+		       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children
+		FROM jobs
+		WHERE parent_id IN (%s)
+		GROUP BY parent_id
+	`, strings.Join(placeholders, ","))
+
+	rows, err := m.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query child stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]*interfaces.JobChildStats)
+	for rows.Next() {
+		var parentID string
+		var stat interfaces.JobChildStats
+
+		if err := rows.Scan(&parentID, &stat.ChildCount, &stat.CompletedChildren, &stat.FailedChildren); err != nil {
+			return nil, fmt.Errorf("failed to scan child stats: %w", err)
+		}
+
+		stats[parentID] = &stat
+	}
+
+	return stats, rows.Err()
+}
+
+// StopAllChildJobs implements interfaces.JobManager.StopAllChildJobs
+func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
+	// Update all running/pending child jobs to cancelled
+	result, err := m.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = 'cancelled', completed_at = ?
+		WHERE parent_id = ? AND status IN ('running', 'pending')
+	`, timeToUnix(time.Now()), parentID)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to stop child jobs: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(rowsAffected), nil
 }

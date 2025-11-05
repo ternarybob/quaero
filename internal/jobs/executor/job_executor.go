@@ -41,7 +41,11 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 	// Generate parent job ID
 	parentJobID := uuid.New().String()
 
-	e.logger.Info().
+	// Create a logger with correlation ID set to parent job ID
+	// This ensures all parent job logs are associated with the parent job ID
+	parentLogger := e.logger.WithCorrelationId(parentJobID)
+
+	parentLogger.Info().
 		Str("job_def_id", jobDef.ID).
 		Str("parent_job_id", parentJobID).
 		Str("job_name", jobDef.Name).
@@ -61,15 +65,15 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		ProgressTotal:   len(jobDef.Steps),
 	}
 
-	if err := e.jobManager.CreateJob(ctx, parentJob); err != nil {
-		e.logger.Error().Err(err).
+	if err := e.jobManager.CreateJobRecord(ctx, parentJob); err != nil {
+		parentLogger.Error().Err(err).
 			Str("parent_job_id", parentJobID).
 			Str("job_def_id", jobDef.ID).
 			Msg("Failed to create parent job record")
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
 
-	e.logger.Info().
+	parentLogger.Info().
 		Str("parent_job_id", parentJobID).
 		Str("job_def_id", jobDef.ID).
 		Int("total_steps", len(jobDef.Steps)).
@@ -77,12 +81,12 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 	// Mark parent job as running
 	if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
-		e.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job status to running")
+		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job status to running")
 	}
 
 	// Execute pre-jobs if any
 	if len(jobDef.PreJobs) > 0 {
-		e.logger.Info().
+		parentLogger.Info().
 			Int("pre_job_count", len(jobDef.PreJobs)).
 			Msg("Executing pre-jobs (not yet implemented)")
 		// TODO: Load and execute pre-job definitions
@@ -90,7 +94,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
-		e.logger.Info().
+		parentLogger.Info().
 			Str("step_name", step.Name).
 			Str("action", step.Action).
 			Int("step_index", i).
@@ -101,7 +105,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		executor, exists := e.stepExecutors[step.Action]
 		if !exists {
 			err := fmt.Errorf("no executor registered for action: %s", step.Action)
-			e.logger.Error().
+			parentLogger.Error().
 				Err(err).
 				Str("action", step.Action).
 				Str("step_name", step.Name).
@@ -109,7 +113,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 			// Set parent job error
 			if setErr := e.jobManager.SetJobError(ctx, parentJobID, err.Error()); setErr != nil {
-				e.logger.Error().Err(setErr).Str("parent_job_id", parentJobID).Msg("Failed to set parent job error")
+				parentLogger.Error().Err(setErr).Str("parent_job_id", parentJobID).Msg("Failed to set parent job error")
 			}
 
 			// Handle based on error strategy
@@ -117,7 +121,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 				return parentJobID, err
 			}
 			// Log and continue for "continue" strategy
-			e.logger.Warn().
+			parentLogger.Warn().
 				Str("step_name", step.Name).
 				Msg("Continuing despite missing executor")
 
@@ -125,14 +129,14 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			if jobDef.ErrorTolerance != nil {
 				shouldStop, tolErr := e.checkErrorTolerance(ctx, parentJobID, jobDef.ErrorTolerance)
 				if tolErr != nil {
-					e.logger.Error().Err(tolErr).Msg("Failed to check error tolerance")
+					parentLogger.Error().Err(tolErr).Msg("Failed to check error tolerance")
 				}
 				if shouldStop {
-					e.logger.Error().
+					parentLogger.Error().
 						Str("parent_job_id", parentJobID).
 						Msg("Stopping execution due to error tolerance threshold")
 					if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "failed"); err != nil {
-						e.logger.Warn().Err(err).Msg("Failed to update parent job status")
+						parentLogger.Warn().Err(err).Msg("Failed to update parent job status")
 					}
 					return parentJobID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
 				}
@@ -143,7 +147,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		// Execute step
 		childJobID, err := executor.ExecuteStep(ctx, step, jobDef.Sources, parentJobID)
 		if err != nil {
-			e.logger.Error().
+			parentLogger.Error().
 				Err(err).
 				Str("step_name", step.Name).
 				Str("action", step.Action).
@@ -151,7 +155,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 			// Set parent job error
 			if setErr := e.jobManager.SetJobError(ctx, parentJobID, err.Error()); setErr != nil {
-				e.logger.Error().Err(setErr).Str("parent_job_id", parentJobID).Msg("Failed to set parent job error")
+				parentLogger.Error().Err(setErr).Str("parent_job_id", parentJobID).Msg("Failed to set parent job error")
 			}
 
 			// Handle based on error strategy
@@ -159,7 +163,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 				return parentJobID, fmt.Errorf("step %s failed: %w", step.Name, err)
 			}
 			// Log and continue for "continue" strategy
-			e.logger.Warn().
+			parentLogger.Warn().
 				Str("step_name", step.Name).
 				Msg("Continuing despite step failure")
 
@@ -167,14 +171,14 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			if jobDef.ErrorTolerance != nil {
 				shouldStop, tolErr := e.checkErrorTolerance(ctx, parentJobID, jobDef.ErrorTolerance)
 				if tolErr != nil {
-					e.logger.Error().Err(tolErr).Msg("Failed to check error tolerance")
+					parentLogger.Error().Err(tolErr).Msg("Failed to check error tolerance")
 				}
 				if shouldStop {
-					e.logger.Error().
+					parentLogger.Error().
 						Str("parent_job_id", parentJobID).
 						Msg("Stopping execution due to error tolerance threshold")
 					if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "failed"); err != nil {
-						e.logger.Warn().Err(err).Msg("Failed to update parent job status")
+						parentLogger.Warn().Err(err).Msg("Failed to update parent job status")
 					}
 					return parentJobID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
 				}
@@ -182,7 +186,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			continue
 		}
 
-		e.logger.Info().
+		parentLogger.Info().
 			Str("step_name", step.Name).
 			Str("child_job_id", childJobID).
 			Str("parent_job_id", parentJobID).
@@ -190,10 +194,10 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 		// Update progress after successful step
 		if err := e.jobManager.UpdateJobProgress(ctx, parentJobID, i+1, len(jobDef.Steps)); err != nil {
-			e.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job progress")
+			parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job progress")
 		}
 
-		e.logger.Debug().
+		parentLogger.Debug().
 			Str("parent_job_id", parentJobID).
 			Int("completed_steps", i+1).
 			Int("total_steps", len(jobDef.Steps)).
@@ -202,7 +206,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 	// Execute post-jobs if any
 	if len(jobDef.PostJobs) > 0 {
-		e.logger.Info().
+		parentLogger.Info().
 			Int("post_job_count", len(jobDef.PostJobs)).
 			Msg("Executing post-jobs (not yet implemented)")
 		// TODO: Load and execute post-job definitions
@@ -210,10 +214,17 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 	// Mark parent job as completed
 	if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "completed"); err != nil {
-		e.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to mark parent job as completed")
+		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to mark parent job as completed")
 	}
 
-	e.logger.Info().
+	// Set finished_at timestamp for parent job
+	// Note: For now, we set finished_at immediately when the parent job completes
+	// TODO: In the future, this should wait for all spawned child jobs to complete
+	if err := e.jobManager.SetJobFinished(ctx, parentJobID); err != nil {
+		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to set finished_at timestamp")
+	}
+
+	parentLogger.Info().
 		Str("job_def_id", jobDef.ID).
 		Str("parent_job_id", parentJobID).
 		Int("completed_steps", len(jobDef.Steps)).

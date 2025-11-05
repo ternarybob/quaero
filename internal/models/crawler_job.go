@@ -122,6 +122,7 @@ type CrawlJob struct {
 	CreatedAt            time.Time     `json:"created_at"`
 	StartedAt            time.Time     `json:"started_at,omitempty"`
 	CompletedAt          time.Time     `json:"completed_at,omitempty"`
+	FinishedAt           time.Time     `json:"finished_at,omitempty"`    // Set when job AND all spawned children complete or timeout
 	LastHeartbeat        time.Time     `json:"last_heartbeat,omitempty"` // Timestamp of last URL processed (for idle detection)
 	// Error contains a concise, user-friendly description of why the job failed.
 	// Format: "Category: Brief description" (e.g., "HTTP 404: Not Found", "Timeout: No activity for 10m").

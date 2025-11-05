@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
 // Shared test framework for both UI and API tests
-// Last Modified: Tuesday, 4th November 2025 4:30:00 pm
+// Last Modified: Wednesday, 5th November 2025 8:09:28 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -83,9 +83,10 @@ type TestEnvironment struct {
 // extractSuiteName extracts the test suite name from a test name
 // Derives lowercase suite name matching test file naming convention
 // Example: "TestHomepageLoad" -> "homepage" (from homepage_test.go)
-//          "HomepageTitle" -> "homepage" (from homepage_test.go)
-//          "TestSourcesPageLoad" -> "sources" (from sources_test.go)
-//          "TestJobsCreateModal" -> "jobs" (from jobs_test.go)
+//
+//	"HomepageTitle" -> "homepage" (from homepage_test.go)
+//	"TestSourcesPageLoad" -> "sources" (from sources_test.go)
+//	"TestJobsCreateModal" -> "jobs" (from jobs_test.go)
 func extractSuiteName(testName string) string {
 	// Remove "Test" prefix if present
 	remainder := testName
@@ -576,6 +577,8 @@ func (env *TestEnvironment) startService() error {
 	cmd.Dir = binDir // Set working directory to bin/ so data path resolves to bin/data/
 	cmd.Stdout = env.LogFile
 	cmd.Stderr = env.LogFile
+	// Override port via environment variable (takes precedence over config file)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("QUAERO_SERVER_PORT=%d", env.Config.Service.Port))
 
 	fmt.Fprintf(env.LogFile, "Starting service process...\n")
 	if err := cmd.Start(); err != nil {

@@ -121,7 +121,8 @@ h2 {
 .card {
     border-radius: var(--border-radius);
     margin-bottom: 1.5rem;
-    transition: box-shadow 0.2s ease, max-height 0.2s ease; /* Add smooth transition */
+    transition: box-shadow 0.2s ease, max-height 0.2s ease;
+    /* Add smooth transition */
 
     .card-header {
         border-bottom: 1px solid var(--border-color);
@@ -333,6 +334,86 @@ h2 {
 .page-title p {
     margin: 0;
     color: var(--text-secondary);
+}
+
+/* Breadcrumb Navigation */
+.breadcrumb {
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+}
+
+.breadcrumb-link {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.breadcrumb-link:hover {
+    text-decoration: underline;
+}
+
+.breadcrumb-separator {
+    margin: 0 0.5rem;
+    color: var(--text-secondary);
+}
+
+.breadcrumb-current {
+    color: var(--text-secondary);
+}
+
+/* Job Header */
+.job-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.job-header-info h1 {
+    margin: 0;
+    font-size: 1.75rem;
+}
+
+.job-header-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.job-header-actions {
+    margin-left: auto;
+}
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1.5rem;
+}
+
+.tab {
+    background: none;
+    border: none;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab:hover {
+    color: var(--text-primary);
+    background-color: var(--page-bg);
+}
+
+.tab.active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
 }
 
 /* Content Sections */
@@ -1048,7 +1129,7 @@ body.modal-open {
     .job-card-child {
         margin-left: 1rem;
     }
-    
+
     .child-job-url {
         max-width: 200px;
     }
@@ -1129,23 +1210,23 @@ body.modal-open {
     flex-shrink: 0;
 }
 
-.tree-status-icon.status-pending { 
-    color: var(--text-secondary); 
+.tree-status-icon.status-pending {
+    color: var(--text-secondary);
 }
 
-.tree-status-icon.status-running { 
+.tree-status-icon.status-running {
     color: var(--color-primary);
 }
 
-.tree-status-icon.status-completed { 
-    color: var(--color-success); 
+.tree-status-icon.status-completed {
+    color: var(--color-success);
 }
 
-.tree-status-icon.status-failed { 
-    color: var(--color-danger); 
+.tree-status-icon.status-failed {
+    color: var(--color-danger);
 }
 
-.tree-status-icon.status-cancelled { 
+.tree-status-icon.status-cancelled {
     color: var(--text-secondary);
 }
 
@@ -1240,22 +1321,23 @@ body.modal-open {
 
 /* High contrast mode support */
 @media (prefers-contrast: high) {
+
     .tree-item:focus,
     .tree-item:focus-visible {
         outline: 3px solid Highlight;
         outline-offset: 2px;
     }
-    
-    .tree-status-icon.status-pending { 
-        color: #000; 
+
+    .tree-status-icon.status-pending {
+        color: #000;
     }
-    
-    .tree-status-icon.status-completed { 
-        color: #006400; 
+
+    .tree-status-icon.status-completed {
+        color: #006400;
     }
-    
-    .tree-status-icon.status-failed { 
-        color: #8B0000; 
+
+    .tree-status-icon.status-failed {
+        color: #8B0000;
     }
 }
 
@@ -1264,15 +1346,15 @@ body.modal-open {
     .tree-item {
         padding-left: calc(var(--depth, 0) * 1rem + 0.5rem);
     }
-    
+
     .tree-item::before {
         left: calc(var(--depth, 0) * 1rem);
     }
-    
+
     .tree-item::after {
         left: calc(var(--depth, 0) * 1rem - 8px);
     }
-    
+
     /* Hide connector lines on smaller screens */
     .tree-item::before,
     .tree-item::after {
@@ -1286,6 +1368,7 @@ body.modal-open {
         opacity: 0;
         transform: translateY(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -1302,6 +1385,7 @@ body.modal-open {
         opacity: 0;
         max-height: 0;
     }
+
     to {
         opacity: 1;
         max-height: 100px;
@@ -1347,11 +1431,25 @@ body.modal-open {
 }
 
 /* Status Icon Colors */
-.status-icon-pending { color: #f59e0b; }
-.status-icon-running { color: #3b82f6; }
-.status-icon-completed { color: #10b981; }
-.status-icon-failed { color: #ef4444; }
-.status-icon-cancelled { color: #6b7280; }
+.status-icon-pending {
+    color: #f59e0b;
+}
+
+.status-icon-running {
+    color: #3b82f6;
+}
+
+.status-icon-completed {
+    color: #10b981;
+}
+
+.status-icon-failed {
+    color: #ef4444;
+}
+
+.status-icon-cancelled {
+    color: #6b7280;
+}
 
 /* Enhanced Status Badge Colors */
 .label-warning {
@@ -1388,8 +1486,15 @@ body.modal-open {
 
 /* Pulse Animation for Streaming Indicator */
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
 }
 
 /* Auto-Scroll Button Active State */
@@ -1414,13 +1519,16 @@ body.modal-open {
     .job-card-parent {
         border-left-width: 3px;
     }
+
     .job-card-parent .card-title {
         font-size: 1.1rem;
     }
+
     .modal-body .btn-sm {
         font-size: 0.7rem;
         padding: 0.15rem 0.4rem;
     }
+
     .terminal-job-context {
         display: none;
     }

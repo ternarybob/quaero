@@ -54,9 +54,10 @@ func (t *JiraTransformer) handleCollectionEvent(ctx context.Context, event inter
 	}
 
 	// Filter for Jira jobs
-	var jiraJobs []*crawler.CrawlJob
+	var jiraJobs []*models.JobModel
 	for _, job := range jobsInterface {
-		if job.SourceType == "jira" {
+		// Check if source_type in metadata is "jira"
+		if sourceType, ok := job.Metadata["source_type"].(string); ok && sourceType == "jira" {
 			jiraJobs = append(jiraJobs, job)
 		}
 	}
@@ -84,22 +85,34 @@ func (t *JiraTransformer) handleCollectionEvent(ctx context.Context, event inter
 }
 
 // transformJob transforms a single Jira job's results into documents
-func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJob) error {
-	// Parse source config snapshot to get metadata
+func (t *JiraTransformer) transformJob(ctx context.Context, job *models.JobModel) error {
+	// Parse source config snapshot from metadata
 	var sourceConfig *models.SourceConfig
-	if job.SourceConfigSnapshot != "" {
-		if err := json.Unmarshal([]byte(job.SourceConfigSnapshot), &sourceConfig); err != nil {
+	if sourceConfigSnapshot, ok := job.Metadata["source_config_snapshot"].(string); ok && sourceConfigSnapshot != "" {
+		if err := json.Unmarshal([]byte(sourceConfigSnapshot), &sourceConfig); err != nil {
 			t.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to parse source config snapshot")
 		}
 	}
 
+	// Get source_type from metadata
+	sourceType, _ := job.Metadata["source_type"].(string)
+
 	// Get job results (using crawler service)
+	// Note: getJobResults needs to be updated to work with JobModel
+	// For now, we'll skip this transformation as it requires crawler service refactoring
+	t.logger.Warn().
+		Str("job_id", job.ID).
+		Str("source_type", sourceType).
+		Msg("Jira transformation temporarily disabled - requires crawler service refactoring")
+	return nil
+
+	/* TODO: Re-enable after crawler service refactoring
 	results, err := getJobResults(job, t.crawlerService, t.logger)
 	if err != nil {
 		t.logger.Warn().
 			Err(err).
 			Str("job_id", job.ID).
-			Str("source_type", job.SourceType).
+			Str("source_type", sourceType).
 			Msg("Failed to get job results - transformation cannot proceed")
 		return err
 	}
@@ -107,12 +120,13 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJo
 	if len(results) == 0 {
 		t.logger.Warn().
 			Str("job_id", job.ID).
-			Str("source_type", job.SourceType).
-			Int("result_count", job.ResultCount).
+			Str("source_type", sourceType).
 			Msg("No results available for transformation despite job completion")
 		return nil
 	}
+	*/
 
+	/* TODO: Re-enable after crawler service refactoring
 	// Transform each result
 	var transformedCount, failedRequests, emptyContent, parseFailures, saveFailures int
 	for _, result := range results {
@@ -209,6 +223,7 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *crawler.CrawlJo
 		Msg("Jira transformation success rate")
 
 	return nil
+	*/
 }
 
 // parseJiraIssue parses a Jira issue HTML page into a Document

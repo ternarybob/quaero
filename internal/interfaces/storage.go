@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Thursday, 30th October 2025 9:33:10 am
+// Last Modified: Wednesday, 5th November 2025 6:08:59 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -71,23 +71,24 @@ type DocumentStorage interface {
 // This is a type alias to jobtypes.JobChildStats for backward compatibility
 type JobChildStats = jobtypes.JobChildStats
 
-// JobStorage - interface for crawler job persistence
+// JobStorage - interface for executor-agnostic job persistence
+// Uses JobModel for flexible, executor-agnostic job storage
 type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
-	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.CrawlJob, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.JobModel, error)
 	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
 	// GetChildJobs retrieves all child jobs for a given parent job ID
 	// Returns jobs ordered by created_at DESC (newest first)
 	// Returns empty slice if parent has no children or parent doesn't exist
-	GetChildJobs(ctx context.Context, parentID string) ([]*models.CrawlJob, error)
-	GetJobsByStatus(ctx context.Context, status string) ([]*models.CrawlJob, error)
+	GetChildJobs(ctx context.Context, parentID string) ([]*models.JobModel, error)
+	GetJobsByStatus(ctx context.Context, status string) ([]*models.JobModel, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
 	UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error
 	UpdateJobHeartbeat(ctx context.Context, jobID string) error
-	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.CrawlJob, error)
+	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.JobModel, error)
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)

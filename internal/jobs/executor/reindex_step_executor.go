@@ -50,7 +50,7 @@ func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	}
 
 	// Save job record
-	if err := e.jobManager.CreateJob(ctx, job); err != nil {
+	if err := e.jobManager.CreateJobRecord(ctx, job); err != nil {
 		e.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to create reindex job record")
 		return "", fmt.Errorf("failed to create job record: %w", err)
 	}

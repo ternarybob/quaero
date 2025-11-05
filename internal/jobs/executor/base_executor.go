@@ -76,7 +76,7 @@ func (b *BaseExecutor) CreateJobRecord(ctx context.Context, job *models.JobModel
 	dbJob.Payload = string(payloadBytes)
 
 	// Create job record
-	if err := b.jobManager.CreateJob(ctx, dbJob); err != nil {
+	if err := b.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
 		return fmt.Errorf("failed to create job record: %w", err)
 	}
 
