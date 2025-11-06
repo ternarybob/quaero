@@ -131,7 +131,13 @@
                                 <div class="columns">
                                     <!-- Left side: Content -->
                                     <div class="column col-10">
-                                        <div class="card-title h5" x-text="jobDef.name"></div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <div class="card-title h5" x-text="jobDef.name"></div>
+                                            <!-- System Job Badge -->
+                                            <span x-show="jobDef.job_type === 'system'" class="label label-warning" title="System-managed job (readonly)">
+                                                <i class="fas fa-lock"></i> System
+                                            </span>
+                                        </div>
                                         <div class="card-subtitle text-gray" x-text="jobDef.description || 'No description provided'"></div>
 
                                         <!-- Metadata -->
@@ -174,14 +180,16 @@
                                             aria-label="Run Job">
                                             <i class="fas fa-play"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)" title="Edit Job Definition" aria-label="Edit Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)" :disabled="jobDef.job_type === 'system'"
+                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be edited' : 'Edit Job Definition'" aria-label="Edit Job">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'" class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)" :disabled="jobDef.type !== 'crawler'"
                                             title="Download as TOML" aria-label="Download Job" x-show="jobDef.type === 'crawler'">
                                             <i class="fas fa-download"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'" class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)" title="Delete Job Definition" aria-label="Delete Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'" class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)" :disabled="jobDef.job_type === 'system'"
+                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be deleted' : 'Delete Job Definition'" aria-label="Delete Job">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </div>

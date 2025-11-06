@@ -4,11 +4,11 @@
 <head>
     {{template "head.html" .}}
     <title>Add Job - Quaero</title>
-    
+
     <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
-    
+
     <style>
         .CodeMirror {
             height: 400px;
@@ -16,25 +16,25 @@
             border-radius: 4px;
             font-size: 14px;
         }
-        
+
         .validation-message {
             margin-top: 1rem;
             padding: 0.75rem;
             border-radius: 4px;
         }
-        
+
         .validation-message.success {
             background-color: #d4edda;
             border: 1px solid #c3e6cb;
             color: #155724;
         }
-        
+
         .validation-message.error {
             background-color: #f8d7da;
             border: 1px solid #f5c6cb;
             color: #721c24;
         }
-        
+
         .btn-group {
             display: flex;
             gap: 0.5rem;
@@ -84,17 +84,14 @@
                         <label class="form-label">TOML Content</label>
                         <textarea id="toml-editor" x-ref="tomlEditor"></textarea>
                         <p class="form-input-hint">
-                            Define your crawler job in TOML format. See 
-                            <a href="https://github.com/ternarybob/quaero/blob/main/deployments/local/job-definitions/README.md" target="_blank">documentation</a> 
+                            Define your crawler job in TOML format. See
+                            <a href="https://github.com/ternarybob/quaero/blob/main/deployments/local/job-definitions/README.md" target="_blank">documentation</a>
                             for examples.
                         </p>
                     </div>
 
                     <!-- Validation Message -->
-                    <div x-show="validationMessage" 
-                         class="validation-message" 
-                         :class="validationStatus === 'success' ? 'success' : 'error'"
-                         x-text="validationMessage">
+                    <div x-show="validationMessage" class="validation-message" :class="validationStatus === 'success' ? 'success' : 'error'" x-text="validationMessage">
                     </div>
 
                     <!-- Action Buttons -->
@@ -130,6 +127,9 @@ id = "my-crawler"              # Unique identifier
 name = "My Crawler"            # Human-readable name
 description = "Description"    # Job description
 source_type = "web"            # Source type (required for crawler jobs)
+
+# Job Type (optional, defaults to "user")
+job_type = "user"              # "user" (editable) or "system" (readonly)
 
 # Crawler Configuration
 start_urls = ["https://example.com"]
@@ -198,7 +198,7 @@ auto_start = false             # Auto-start on application startup</code></pre>
 
                 async validateJob() {
                     const tomlContent = this.editor.getValue().trim();
-                    
+
                     if (!tomlContent) {
                         this.validationMessage = 'Please enter TOML content';
                         this.validationStatus = 'error';
@@ -237,7 +237,7 @@ auto_start = false             # Auto-start on application startup</code></pre>
 
                 async createJob() {
                     const tomlContent = this.editor.getValue().trim();
-                    
+
                     if (!tomlContent) {
                         window.showNotification('Please enter TOML content', 'error');
                         return;
@@ -321,4 +321,3 @@ auto_start = false`;
 </body>
 
 </html>
-

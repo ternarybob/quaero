@@ -21,6 +21,7 @@ import (
 type CrawlerJobDefinitionFile struct {
 	ID          string   `toml:"id" json:"id"`                   // Unique identifier
 	Name        string   `toml:"name" json:"name"`               // Human-readable name
+	JobType     string   `toml:"job_type" json:"job_type"`       // Job owner type: "system" or "user" (default: "user")
 	Description string   `toml:"description" json:"description"` // Job description
 	StartURLs   []string `toml:"start_urls" json:"start_urls"`   // Initial URLs to crawl
 	Schedule    string   `toml:"schedule" json:"schedule"`       // Cron expression (empty = manual only)
@@ -39,10 +40,17 @@ type CrawlerJobDefinitionFile struct {
 
 // ToJobDefinition converts the simplified file format to a full JobDefinition model
 func (c *CrawlerJobDefinitionFile) ToJobDefinition() *models.JobDefinition {
+	// Default to 'user' if job_type is not specified
+	jobType := models.JobOwnerTypeUser
+	if c.JobType != "" {
+		jobType = models.JobOwnerType(c.JobType)
+	}
+
 	return &models.JobDefinition{
 		ID:          c.ID,
 		Name:        c.Name,
 		Type:        models.JobDefinitionTypeCrawler,
+		JobType:     jobType,
 		Description: c.Description,
 		Steps: []models.JobStep{
 			{

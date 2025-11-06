@@ -304,6 +304,28 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
+	ctx := r.Context()
+
+	// Check if job definition exists and is not a system job
+	existingJobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
+	if err != nil {
+		if err == sqlite.ErrJobDefinitionNotFound {
+			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
+			WriteError(w, http.StatusNotFound, "Job definition not found")
+			return
+		}
+		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to get job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to get job definition")
+		return
+	}
+
+	// Prevent editing system jobs
+	if existingJobDef.IsSystemJob() {
+		h.logger.Warn().Str("job_def_id", id).Msg("Cannot edit system job")
+		WriteError(w, http.StatusForbidden, "Cannot edit system-managed jobs")
+		return
+	}
+
 	var jobDef models.JobDefinition
 	if err := json.NewDecoder(r.Body).Decode(&jobDef); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to decode job definition")
@@ -320,8 +342,6 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid job definition: %v", err))
 		return
 	}
-
-	ctx := r.Context()
 
 	// Validate step actions are registered
 	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
@@ -359,8 +379,29 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 	}
 
 	ctx := r.Context()
+
+	// Check if job definition exists and is not a system job
+	existingJobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
+	if err != nil {
+		if err == sqlite.ErrJobDefinitionNotFound {
+			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
+			WriteError(w, http.StatusNotFound, "Job definition not found")
+			return
+		}
+		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to get job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to get job definition")
+		return
+	}
+
+	// Prevent deleting system jobs
+	if existingJobDef.IsSystemJob() {
+		h.logger.Warn().Str("job_def_id", id).Msg("Cannot delete system job")
+		WriteError(w, http.StatusForbidden, "Cannot delete system-managed jobs")
+		return
+	}
+
 	if err := h.jobDefStorage.DeleteJobDefinition(ctx, id); err != nil {
-		if err == ErrJobDefinitionNotFound {
+		if err == sqlite.ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
 			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return

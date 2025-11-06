@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
 	type TEXT NOT NULL,
+	job_type TEXT NOT NULL DEFAULT 'user',
 	description TEXT,
 	source_type TEXT,
 	base_url TEXT,
@@ -199,7 +200,8 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	error_tolerance TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
+	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL,
+	CHECK (job_type IN ('system', 'user'))
 );
 
 -- Job definitions indexes
@@ -411,6 +413,11 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 26: Remove sources table and migrate to job_definitions
 	if err := s.migrateRemoveSourcesTable(); err != nil {
+		return err
+	}
+
+	// MIGRATION 27: Add job_type column to job_definitions table
+	if err := s.migrateAddJobDefinitionTypeColumn(); err != nil {
 		return err
 	}
 
@@ -2418,5 +2425,38 @@ func (s *SQLiteDB) migrateRemoveSourcesTable() error {
 	}
 
 	s.logger.Info().Msg("Migration: sources table removed and job_definitions updated successfully")
+	return nil
+}
+
+// migrateAddJobDefinitionTypeColumn adds the job_type column to job_definitions table
+func (s *SQLiteDB) migrateAddJobDefinitionTypeColumn() error {
+	s.logger.Info().Msg("Running migration: Adding job_type column to job_definitions table")
+
+	// Check if column already exists
+	var columnExists bool
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('job_definitions')
+		WHERE name = 'job_type'
+	`).Scan(&columnExists)
+	if err != nil {
+		return fmt.Errorf("failed to check if job_type column exists: %w", err)
+	}
+
+	if columnExists {
+		s.logger.Info().Msg("job_type column already exists, skipping migration")
+		return nil
+	}
+
+	// Add job_type column with default value 'user'
+	_, err = s.db.Exec(`
+		ALTER TABLE job_definitions
+		ADD COLUMN job_type TEXT NOT NULL DEFAULT 'user'
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add job_type column: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: job_type column added to job_definitions successfully")
 	return nil
 }

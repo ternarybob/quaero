@@ -24,6 +24,15 @@ const (
 	JobDefinitionTypeCustom     JobDefinitionType = "custom"
 )
 
+// JobOwnerType represents whether a job is system-managed or user-created
+type JobOwnerType string
+
+// JobOwnerType constants
+const (
+	JobOwnerTypeSystem JobOwnerType = "system" // System-managed jobs (readonly, cannot be edited/deleted)
+	JobOwnerTypeUser   JobOwnerType = "user"   // User-created jobs (can be edited/deleted)
+)
+
 // IsValidJobDefinitionType checks if a given JobDefinitionType is one of the valid constants
 func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	switch jobType {
@@ -90,6 +99,7 @@ type JobDefinition struct {
 	ID             string                 `json:"id"`              // Unique identifier for the job definition
 	Name           string                 `json:"name"`            // Human-readable job name
 	Type           JobDefinitionType      `json:"type"`            // Type of job definition (crawler, summarizer, custom)
+	JobType        JobOwnerType           `json:"job_type"`        // Job owner type (system or user)
 	Description    string                 `json:"description"`     // Job description
 	SourceType     string                 `json:"source_type"`     // Source type: "jira", "confluence", "github"
 	BaseURL        string                 `json:"base_url"`        // Base URL for the source (e.g., "https://company.atlassian.net")
@@ -124,6 +134,14 @@ func (j *JobDefinition) Validate() error {
 	// Validate JobDefinitionType is one of the allowed constants
 	if !IsValidJobDefinitionType(j.Type) {
 		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom)", j.Type)
+	}
+
+	// Validate JobOwnerType (default to 'user' if empty)
+	if j.JobType == "" {
+		j.JobType = JobOwnerTypeUser
+	}
+	if j.JobType != JobOwnerTypeSystem && j.JobType != JobOwnerTypeUser {
+		return fmt.Errorf("invalid job_type: %s (must be one of: system, user)", j.JobType)
 	}
 
 	// Validate source fields for crawler jobs
@@ -319,4 +337,14 @@ func (j *JobDefinition) UnmarshalErrorTolerance(data string) error {
 	}
 	j.ErrorTolerance = &et
 	return nil
+}
+
+// IsSystemJob returns true if the job is a system-managed job (readonly)
+func (j *JobDefinition) IsSystemJob() bool {
+	return j.JobType == JobOwnerTypeSystem
+}
+
+// IsUserJob returns true if the job is a user-created job (editable)
+func (j *JobDefinition) IsUserJob() bool {
+	return j.JobType == JobOwnerTypeUser || j.JobType == ""
 }
