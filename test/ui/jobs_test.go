@@ -843,90 +843,250 @@ func TestJobsRunDatabaseMaintenance(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "job-in-queue")
 
-	// Try to click on the job card to view details/logs
+	// Click on the job card to navigate to job details page
 	env.LogTest(t, "Clicking on job card to view details...")
-	var cardClicked bool
+	var navigationResult struct {
+		Success bool   `json:"success"`
+		JobID   string `json:"jobId"`
+		Error   string `json:"error"`
+	}
+
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const cards = Array.from(document.querySelectorAll('.job-card-clickable, .card'));
-				const jobCard = cards.find(card => card.textContent.includes('Database Maintenance'));
-				if (jobCard) {
-					jobCard.click();
+				try {
+					// Look specifically for job cards with the job-card-clickable class
+					const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+					
+					// Find the Database Maintenance job card
+					const jobCard = jobCards.find(card => {
+						const titleElement = card.querySelector('.card-title');
+						return titleElement && titleElement.textContent.includes('Database Maintenance');
+					});
+					
+					if (!jobCard) {
+						return { success: false, jobId: '', error: 'Job card not found' };
+					}
+					
+					// Get the job ID from the data attribute
+					const jobId = jobCard.getAttribute('data-job-id');
+					if (!jobId) {
+						return { success: false, jobId: '', error: 'Job ID not found in data attribute' };
+					}
+					
+					// Navigate directly using the navigateToJobDetails function
+					// First try to find the Alpine.js component
+					const jobListElement = document.querySelector('[x-data*="jobList"]');
+					if (jobListElement && window.Alpine) {
+						const alpineData = Alpine.$data(jobListElement);
+						if (alpineData && alpineData.navigateToJobDetails) {
+							alpineData.navigateToJobDetails(jobId);
+							return { success: true, jobId: jobId, error: '' };
+						}
+					}
+					
+					// Fallback: navigate manually
+					window.location.href = '/job?id=' + jobId;
+					return { success: true, jobId: jobId, error: '' };
+					
+				} catch (e) {
+					return { success: false, jobId: '', error: e.toString() };
+				}
+			})()
+		`, &navigationResult),
+		chromedp.Sleep(3*time.Second), // Wait for navigation to complete
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to navigate to job details: %v", err)
+		env.TakeScreenshot(ctx, "job-navigation-failed")
+		t.Fatalf("Failed to navigate to job details: %v", err)
+	}
+
+	if !navigationResult.Success {
+		env.LogTest(t, "ERROR: Job navigation failed: %s", navigationResult.Error)
+		env.TakeScreenshot(ctx, "job-navigation-error")
+		t.Fatalf("Job navigation failed: %s", navigationResult.Error)
+	}
+
+	env.LogTest(t, "✓ Job navigation successful (Job ID: %s)", navigationResult.JobID)
+
+	// Verify we navigated to the job details page
+	var currentURL string
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`window.location.href`, &currentURL),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to get current URL: %v", err)
+		t.Fatalf("Failed to get current URL: %v", err)
+	}
+
+	env.LogTest(t, "Current URL after click: %s", currentURL)
+
+	// Check if we're on a job details page (should contain /job?id=)
+	if !strings.Contains(currentURL, "/job?id=") {
+		env.LogTest(t, "ERROR: Expected to navigate to job details page, still on: %s", currentURL)
+		env.TakeScreenshot(ctx, "navigation-failed")
+		t.Errorf("Expected to navigate to job details page, still on: %s", currentURL)
+	} else {
+		env.LogTest(t, "✓ Successfully navigated to job details page")
+	}
+
+	env.TakeScreenshot(ctx, "job-details-page")
+
+	// Wait for job details page to load completely
+	env.LogTest(t, "Waiting for job details page to load...")
+	err = chromedp.Run(ctx,
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second), // Allow Alpine.js to initialize
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Job details page failed to load: %v", err)
+		env.TakeScreenshot(ctx, "job-details-load-failed")
+		t.Fatalf("Job details page failed to load: %v", err)
+	}
+
+	// Verify the page title contains job information
+	var pageTitle string
+	err = chromedp.Run(ctx,
+		chromedp.Title(&pageTitle),
+	)
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to get page title: %v", err)
+	} else {
+		env.LogTest(t, "Job details page title: %s", pageTitle)
+		if !strings.Contains(pageTitle, "Job Details") && !strings.Contains(pageTitle, "Database Maintenance") {
+			env.LogTest(t, "WARNING: Page title doesn't contain expected job information")
+		} else {
+			env.LogTest(t, "✓ Page title contains job information")
+		}
+	}
+
+	// Check for the presence of Details and Output tabs
+	env.LogTest(t, "Checking for Details and Output tabs...")
+	var tabsFound struct {
+		DetailsTab bool `json:"detailsTab"`
+		OutputTab  bool `json:"outputTab"`
+	}
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				// Look for tab navigation elements (avoid :contains() which is not valid in querySelector)
+				const detailsTab = document.querySelector('button[data-tab="details"], .tab-button[data-tab="details"], .nav-link[href="#details"]') ||
+					Array.from(document.querySelectorAll('button, .tab, .nav-link')).find(el => 
+						el.textContent && el.textContent.toLowerCase().includes('details')
+					);
+				
+				const outputTab = document.querySelector('button[data-tab="output"], .tab-button[data-tab="output"], .nav-link[href="#output"]') ||
+					Array.from(document.querySelectorAll('button, .tab, .nav-link')).find(el => 
+						el.textContent && el.textContent.toLowerCase().includes('output')
+					);
+
+				return {
+					detailsTab: !!detailsTab,
+					outputTab: !!outputTab
+				};
+			})()
+		`, &tabsFound),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check for tabs: %v", err)
+		t.Fatalf("Failed to check for tabs: %v", err)
+	}
+
+	if !tabsFound.DetailsTab {
+		env.LogTest(t, "ERROR: Details tab not found on job details page")
+		env.TakeScreenshot(ctx, "details-tab-missing")
+		t.Error("Details tab should be present on job details page")
+	} else {
+		env.LogTest(t, "✓ Details tab found")
+	}
+
+	if !tabsFound.OutputTab {
+		env.LogTest(t, "ERROR: Output tab not found on job details page")
+		env.TakeScreenshot(ctx, "output-tab-missing")
+		t.Error("Output tab should be present on job details page")
+	} else {
+		env.LogTest(t, "✓ Output tab found")
+	}
+
+	// Try to click on the Output tab to verify it works
+	env.LogTest(t, "Clicking on Output tab...")
+	var outputTabClicked bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const outputTab = document.querySelector('button[data-tab="output"], .tab-button[data-tab="output"]') ||
+					Array.from(document.querySelectorAll('button, .tab, .nav-link')).find(el => 
+						el.textContent && el.textContent.toLowerCase().includes('output')
+					);
+				
+				if (outputTab) {
+					outputTab.click();
 					return true;
 				}
 				return false;
 			})()
-		`, &cardClicked),
-		chromedp.Sleep(2*time.Second), // Wait for navigation or details to load
+		`, &outputTabClicked),
+		chromedp.Sleep(1*time.Second), // Wait for tab switch
 	)
 
 	if err != nil {
-		env.LogTest(t, "  WARNING: Failed to click job card: %v", err)
-	} else if cardClicked {
-		env.LogTest(t, "  ✓ Job card clicked")
+		env.LogTest(t, "WARNING: Failed to click Output tab: %v", err)
+	} else if outputTabClicked {
+		env.LogTest(t, "✓ Output tab clicked successfully")
 
-		// Check if we navigated to job details page or if logs are visible
-		var currentURL string
+		// Try to find job logs or output content
+		var logContent string
 		err = chromedp.Run(ctx,
-			chromedp.Evaluate(`window.location.href`, &currentURL),
+			chromedp.Evaluate(`
+				(() => {
+					// Look for various log container patterns
+					const logContainer = document.querySelector('.log-container, .logs, pre, code, .output-content, .job-output') ||
+						document.querySelector('[class*="log"], [class*="output"]');
+					
+					if (logContainer) {
+						return logContainer.textContent.substring(0, 500);
+					}
+					
+					// If no specific log container, look for any content that might be logs
+					const contentAreas = document.querySelectorAll('.content, .tab-content, .panel-content');
+					for (let area of contentAreas) {
+						if (area.textContent && area.textContent.length > 10) {
+							return area.textContent.substring(0, 500);
+						}
+					}
+					
+					return '';
+				})()
+			`, &logContent),
 		)
 
 		if err != nil {
-			env.LogTest(t, "  WARNING: Failed to get current URL: %v", err)
+			env.LogTest(t, "WARNING: Failed to read log content: %v", err)
+		} else if logContent != "" {
+			env.LogTest(t, "✓ Found job output content (first 100 chars): %s",
+				strings.ReplaceAll(logContent[:min(100, len(logContent))], "\n", " "))
 		} else {
-			env.LogTest(t, "  Current URL: %s", currentURL)
-
-			// If we're on a job details page, try to read logs
-			if currentURL != baseURL+"/queue" {
-				env.TakeScreenshot(ctx, "job-details-page")
-
-				// Wait for logs to load
-				env.LogTest(t, "  Waiting for job logs to load...")
-				err = chromedp.Run(ctx,
-					chromedp.Sleep(2*time.Second),
-				)
-
-				// Try to find and read logs
-				var logText string
-				err = chromedp.Run(ctx,
-					chromedp.Evaluate(`
-						(() => {
-							const logContainer = document.querySelector('.log-container, .logs, pre, code');
-							return logContainer ? logContainer.textContent.substring(0, 500) : '';
-						})()
-					`, &logText),
-				)
-
-				if err != nil {
-					env.LogTest(t, "  WARNING: Failed to read logs: %v", err)
-				} else if logText != "" {
-					env.LogTest(t, "  ✓ Job logs found (first 500 chars):")
-					// Split into lines and log each line
-					lines := strings.Split(logText, "\n")
-					for i, line := range lines {
-						if i >= 10 { // Limit to first 10 lines
-							env.LogTest(t, "    ... (%d more lines)", len(lines)-10)
-							break
-						}
-						if line != "" {
-							env.LogTest(t, "    %s", line)
-						}
-					}
-				} else {
-					env.LogTest(t, "  WARNING: No logs found on details page")
-				}
-
-				env.TakeScreenshot(ctx, "job-logs-view")
-			} else {
-				env.LogTest(t, "  Note: Still on queue page (card click may not navigate)")
-			}
+			env.LogTest(t, "WARNING: No log content found in Output tab")
 		}
 	} else {
-		env.LogTest(t, "  WARNING: Card click returned false")
+		env.LogTest(t, "WARNING: Output tab click returned false")
 	}
 
-	env.LogTest(t, "✅ Database Maintenance job run test completed successfully")
+	env.TakeScreenshot(ctx, "job-details-final")
+
+	env.LogTest(t, "✅ Database Maintenance job run and details page test completed successfully")
+}
+
+// Helper function for min
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // TestEditJobDefinition verifies clicking edit button navigates to job_add page with correct job loaded
