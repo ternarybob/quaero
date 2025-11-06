@@ -29,14 +29,13 @@ func NewTransformStepExecutor(transformService interfaces.TransformService, jobM
 	}
 }
 
-// ExecuteStep executes a transform step for the given sources
+// ExecuteStep executes a transform step for the given job definition
 // This is a synchronous operation that directly transforms HTML to markdown
 // Returns a placeholder job ID since transforms don't create async jobs
-func (e *TransformStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, sources []string, parentJobID string) (string, error) {
+func (e *TransformStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("parent_job_id", parentJobID).
-		Int("source_count", len(sources)).
 		Msg("Executing transform step")
 
 	// Generate a job ID for tracking (even though this is synchronous)

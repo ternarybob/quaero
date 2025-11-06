@@ -29,7 +29,7 @@ func NewReindexStepExecutor(documentStorage interfaces.DocumentStorage, jobManag
 }
 
 // ExecuteStep executes a reindex step
-func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, sources []string, parentJobID string) (string, error) {
+func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).

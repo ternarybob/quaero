@@ -12,7 +12,6 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
@@ -31,9 +30,9 @@ func shouldLogDebug() bool {
 	return count%debugLogSampleRate == 0
 }
 
-// resolveDocumentURL resolves a document URL to an absolute URL using sourceConfig.BaseURL and pageURL as fallbacks
+// resolveDocumentURL resolves a document URL to an absolute URL using baseURL and pageURL as fallbacks
 // This ensures that relative links in HTML→MD conversion can be properly resolved
-func resolveDocumentURL(documentURL string, pageURL string, sourceConfig *models.SourceConfig, logger arbor.ILogger) string {
+func resolveDocumentURL(documentURL string, pageURL string, baseURLStr string, logger arbor.ILogger) string {
 	// Already absolute - return as-is
 	if strings.HasPrefix(documentURL, "http://") || strings.HasPrefix(documentURL, "https://") {
 		return documentURL
@@ -41,12 +40,12 @@ func resolveDocumentURL(documentURL string, pageURL string, sourceConfig *models
 
 	resolvedURL := documentURL
 
-	// Try to resolve using sourceConfig.BaseURL first
-	if sourceConfig != nil && sourceConfig.BaseURL != "" {
-		baseURL, err := url.Parse(sourceConfig.BaseURL)
+	// Try to resolve using baseURL first
+	if baseURLStr != "" {
+		baseURL, err := url.Parse(baseURLStr)
 		if err != nil {
 			if shouldLogDebug() {
-				logger.Debug().Err(err).Str("base_url", sourceConfig.BaseURL).Msg("Failed to parse base URL")
+				logger.Debug().Err(err).Str("base_url", baseURLStr).Msg("Failed to parse base URL")
 			}
 		} else {
 			relativeURL, err := url.Parse(documentURL)

@@ -52,12 +52,6 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	}
 	jobDef.UpdatedAt = time.Now()
 
-	// Serialize Sources array to JSON using model helper
-	sourcesJSON, err := jobDef.MarshalSources()
-	if err != nil {
-		return err
-	}
-
 	// Serialize Steps array to JSON using model helper
 	stepsJSON, err := jobDef.MarshalSteps()
 	if err != nil {
@@ -103,16 +97,26 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	updatedAt := jobDef.UpdatedAt.Unix()
 
 	// Insert or update using ON CONFLICT
+	// Convert auth_id to NULL if empty (to satisfy foreign key constraint)
+	var authID interface{}
+	if jobDef.AuthID == "" {
+		authID = nil
+	} else {
+		authID = jobDef.AuthID
+	}
+
 	query := `
 		INSERT INTO job_definitions (
-			id, name, type, description, sources, steps, schedule, timeout,
+			id, name, type, description, source_type, base_url, auth_id, steps, schedule, timeout,
 			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
 			description = excluded.description,
-			sources = excluded.sources,
+			source_type = excluded.source_type,
+			base_url = excluded.base_url,
+			auth_id = excluded.auth_id,
 			steps = excluded.steps,
 			schedule = excluded.schedule,
 			timeout = excluded.timeout,
@@ -127,7 +131,7 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.ID, jobDef.Name, string(jobDef.Type), jobDef.Description,
-		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
+		jobDef.SourceType, jobDef.BaseURL, authID, stepsJSON, jobDef.Schedule, jobDef.Timeout,
 		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, createdAt, updatedAt,
 	)
 	if err != nil {
@@ -165,12 +169,6 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 
 	// Set UpdatedAt timestamp
 	jobDef.UpdatedAt = time.Now()
-
-	// Serialize Sources array to JSON using model helper
-	sourcesJSON, err := jobDef.MarshalSources()
-	if err != nil {
-		return err
-	}
 
 	// Serialize Steps array to JSON using model helper
 	stepsJSON, err := jobDef.MarshalSteps()
@@ -215,13 +213,23 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 	// Convert timestamps to Unix integers
 	updatedAt := jobDef.UpdatedAt.Unix()
 
+	// Convert auth_id to NULL if empty (to satisfy foreign key constraint)
+	var authID interface{}
+	if jobDef.AuthID == "" {
+		authID = nil
+	} else {
+		authID = jobDef.AuthID
+	}
+
 	// Update query
 	query := `
 		UPDATE job_definitions SET
 			name = ?,
 			type = ?,
 			description = ?,
-			sources = ?,
+			source_type = ?,
+			base_url = ?,
+			auth_id = ?,
 			steps = ?,
 			schedule = ?,
 			timeout = ?,
@@ -237,7 +245,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.Name, string(jobDef.Type), jobDef.Description,
-		sourcesJSON, stepsJSON, jobDef.Schedule, jobDef.Timeout,
+		jobDef.SourceType, jobDef.BaseURL, authID, stepsJSON, jobDef.Schedule, jobDef.Timeout,
 		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, updatedAt, jobDef.ID,
 	)
 	if err != nil {
@@ -255,7 +263,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 // GetJobDefinition retrieves a job definition by ID
 func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
+		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE id = ?
@@ -276,7 +284,7 @@ func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) 
 // ListJobDefinitions lists job definitions with optional filtering and pagination
 func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
+		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE 1=1
@@ -341,7 +349,7 @@ func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *int
 // GetJobDefinitionsByType retrieves all job definitions of a specific type
 func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
+		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE type = ?
@@ -360,7 +368,7 @@ func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobT
 // GetEnabledJobDefinitions retrieves all enabled job definitions
 func (s *JobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, sources, steps, schedule, COALESCE(timeout, '') AS timeout,
+		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
 		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
 		FROM job_definitions
 		WHERE enabled = 1
@@ -419,9 +427,116 @@ func (s *JobDefinitionStorage) CountJobDefinitions(ctx context.Context) (int, er
 // This method is idempotent and safe to call multiple times - it will only create
 // missing job definitions using ON CONFLICT DO NOTHING to preserve user customizations.
 func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) error {
-	// NOTE: Database Maintenance job is now created in seed_job_definitions.go
-	// with ID "database-maintenance" and action "database_maintenance"
-	// The old "default-database-maintenance" with action "reindex" is deprecated
+	// Database Maintenance Job - Manual execution only
+	dbMaintenanceJob := &models.JobDefinition{
+		ID:          "database-maintenance",
+		Name:        "Database Maintenance",
+		Type:        models.JobDefinitionTypeCustom,
+		Description: "Performs database maintenance operations including VACUUM, ANALYZE, and REINDEX to optimize database performance and reclaim disk space.",
+		Steps: []models.JobStep{
+			{
+				Name:   "database_maintenance",
+				Action: "database_maintenance",
+				Config: map[string]interface{}{
+					"operations": []string{"vacuum", "analyze", "reindex"},
+				},
+				OnError: models.ErrorStrategyFail,
+			},
+		},
+		Schedule:  "", // Manual execution only (no automatic schedule)
+		Timeout:   "30m",
+		Enabled:   true,
+		AutoStart: false,
+		Config:    make(map[string]interface{}),
+		PostJobs:  []string{},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	dbMaintenanceStepsJSON, err := dbMaintenanceJob.MarshalSteps()
+	if err != nil {
+		return fmt.Errorf("failed to marshal database maintenance steps: %w", err)
+	}
+
+	dbMaintenanceConfigJSON, err := dbMaintenanceJob.MarshalConfig()
+	if err != nil {
+		return fmt.Errorf("failed to marshal database maintenance config: %w", err)
+	}
+
+	dbMaintenancePreJobsJSON, err := dbMaintenanceJob.MarshalPreJobs()
+	if err != nil {
+		return fmt.Errorf("failed to marshal database maintenance pre_jobs: %w", err)
+	}
+
+	dbMaintenancePostJobsJSON, err := dbMaintenanceJob.MarshalPostJobs()
+	if err != nil {
+		return fmt.Errorf("failed to marshal database maintenance post_jobs: %w", err)
+	}
+
+	// Convert bools to integers for database maintenance job
+	dbMaintenanceEnabled := 0
+	if dbMaintenanceJob.Enabled {
+		dbMaintenanceEnabled = 1
+	}
+	dbMaintenanceAutoStart := 0
+	if dbMaintenanceJob.AutoStart {
+		dbMaintenanceAutoStart = 1
+	}
+
+	// Convert timestamps to Unix integers for database maintenance job
+	dbMaintenanceCreatedAt := dbMaintenanceJob.CreatedAt.Unix()
+	dbMaintenanceUpdatedAt := dbMaintenanceJob.UpdatedAt.Unix()
+
+	// Serialize ErrorTolerance to JSON using model helper for database maintenance job
+	dbMaintenanceErrorToleranceJSON, err := dbMaintenanceJob.MarshalErrorTolerance()
+	if err != nil {
+		return fmt.Errorf("failed to marshal database maintenance error_tolerance: %w", err)
+	}
+
+	// Convert auth_id to NULL if empty (to satisfy foreign key constraint)
+	var dbMaintenanceAuthID interface{}
+	if dbMaintenanceJob.AuthID == "" {
+		dbMaintenanceAuthID = nil
+	} else {
+		dbMaintenanceAuthID = dbMaintenanceJob.AuthID
+	}
+
+	// Insert database maintenance job definition using ON CONFLICT DO NOTHING to preserve user customizations
+	dbMaintenanceQuery := `
+		INSERT INTO job_definitions (
+			id, name, type, description, source_type, base_url, auth_id, steps, schedule, timeout,
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO NOTHING
+	`
+
+	dbMaintenanceResult, err := s.db.DB().ExecContext(ctx, dbMaintenanceQuery,
+		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), dbMaintenanceJob.Description,
+		dbMaintenanceJob.SourceType, dbMaintenanceJob.BaseURL, dbMaintenanceAuthID, dbMaintenanceStepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
+		dbMaintenanceEnabled, dbMaintenanceAutoStart, dbMaintenanceConfigJSON, dbMaintenancePreJobsJSON, dbMaintenancePostJobsJSON, dbMaintenanceErrorToleranceJSON, dbMaintenanceCreatedAt, dbMaintenanceUpdatedAt,
+	)
+	if err != nil {
+		s.logger.Error().
+			Err(err).
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Msg("Failed to create default database maintenance job")
+		return fmt.Errorf("failed to create default database maintenance job: %w", err)
+	}
+
+	// Check if a row was actually inserted for database maintenance job
+	dbMaintenanceRowsAffected, err := dbMaintenanceResult.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to get rows affected for database maintenance job creation")
+	} else if dbMaintenanceRowsAffected > 0 {
+		s.logger.Info().
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Str("job_def_name", dbMaintenanceJob.Name).
+			Msg("Default job definition created")
+	} else {
+		s.logger.Debug().
+			Str("job_def_id", dbMaintenanceJob.ID).
+			Msg("Default job definition already exists, preserving user customizations")
+	}
 
 	// Corpus Summary Job - Generates corpus statistics hourly
 	corpusSummaryJob := &models.JobDefinition{
@@ -429,7 +544,6 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 		Name:        "Corpus Summary Generation",
 		Type:        models.JobDefinitionTypeCustom,
 		Description: "Generates a summary document containing statistics about the document corpus (total documents, documents by source type). This summary is searchable and enables queries like 'how many documents are in the system'. Runs hourly to keep statistics current.",
-		Sources:     []string{}, // This job operates on all documents, not specific sources
 		Steps: []models.JobStep{
 			{
 				Name:    "corpus_summary",
@@ -446,12 +560,6 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 		PostJobs:  []string{}, // No post jobs for corpus summary job
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-	}
-
-	// Serialize corpus summary job definition fields to JSON
-	corpusSourcesJSON, err := corpusSummaryJob.MarshalSources()
-	if err != nil {
-		return fmt.Errorf("failed to marshal corpus summary sources: %w", err)
 	}
 
 	corpusStepsJSON, err := corpusSummaryJob.MarshalSteps()
@@ -494,18 +602,26 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 		return fmt.Errorf("failed to marshal corpus summary error_tolerance: %w", err)
 	}
 
+	// Convert auth_id to NULL if empty (to satisfy foreign key constraint)
+	var corpusAuthID interface{}
+	if corpusSummaryJob.AuthID == "" {
+		corpusAuthID = nil
+	} else {
+		corpusAuthID = corpusSummaryJob.AuthID
+	}
+
 	// Insert corpus summary job definition using ON CONFLICT DO NOTHING to preserve user customizations
 	corpusQuery := `
 		INSERT INTO job_definitions (
-			id, name, type, description, sources, steps, schedule, timeout,
+			id, name, type, description, source_type, base_url, auth_id, steps, schedule, timeout,
 			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	corpusResult, err := s.db.DB().ExecContext(ctx, corpusQuery,
 		corpusSummaryJob.ID, corpusSummaryJob.Name, string(corpusSummaryJob.Type), corpusSummaryJob.Description,
-		corpusSourcesJSON, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
+		corpusSummaryJob.SourceType, corpusSummaryJob.BaseURL, corpusAuthID, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
 		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusErrorToleranceJSON, corpusCreatedAt, corpusUpdatedAt,
 	)
 	if err != nil {
@@ -537,13 +653,13 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
-		id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
-		enabled, autoStart                                                                                                                   int
-		createdAt, updatedAt                                                                                                                 int64
+		id, name, jobType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
+		enabled, autoStart                                                                                                                                   int
+		createdAt, updatedAt                                                                                                                                 int64
 	)
 
 	err := row.Scan(
-		&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
+		&id, &name, &jobType, &description, &sourceType, &baseURL, &authID, &stepsJSON, &schedule, &timeout,
 		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -556,21 +672,15 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 		Name:        name,
 		Type:        models.JobDefinitionType(jobType),
 		Description: description,
+		SourceType:  sourceType,
+		BaseURL:     baseURL,
+		AuthID:      authID,
 		Schedule:    schedule,
 		Timeout:     timeout,
 		Enabled:     enabled == 1,
 		AutoStart:   autoStart == 1,
 		CreatedAt:   time.Unix(createdAt, 0),
 		UpdatedAt:   time.Unix(updatedAt, 0),
-	}
-
-	// Deserialize Sources JSON using model helper
-	if err := jobDef.UnmarshalSources(sourcesJSON); err != nil {
-		s.logger.Warn().
-			Str("job_def_id", id).
-			Err(err).
-			Msg("Failed to unmarshal sources JSON")
-		jobDef.Sources = []string{}
 	}
 
 	// Deserialize Steps JSON using model helper
@@ -627,13 +737,13 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 
 	for rows.Next() {
 		var (
-			id, name, jobType, description, sourcesJSON, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
-			enabled, autoStart                                                                                                                   int
-			createdAt, updatedAt                                                                                                                 int64
+			id, name, jobType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
+			enabled, autoStart                                                                                                                                   int
+			createdAt, updatedAt                                                                                                                                 int64
 		)
 
 		err := rows.Scan(
-			&id, &name, &jobType, &description, &sourcesJSON, &stepsJSON, &schedule, &timeout,
+			&id, &name, &jobType, &description, &sourceType, &baseURL, &authID, &stepsJSON, &schedule, &timeout,
 			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
 		)
 		if err != nil {
@@ -649,21 +759,15 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 			Name:        name,
 			Type:        models.JobDefinitionType(jobType),
 			Description: description,
+			SourceType:  sourceType,
+			BaseURL:     baseURL,
+			AuthID:      authID,
 			Schedule:    schedule,
 			Timeout:     timeout,
 			Enabled:     enabled == 1,
 			AutoStart:   autoStart == 1,
 			CreatedAt:   time.Unix(createdAt, 0),
 			UpdatedAt:   time.Unix(updatedAt, 0),
-		}
-
-		// Deserialize Sources JSON using model helper
-		if err := jobDef.UnmarshalSources(sourcesJSON); err != nil {
-			s.logger.Warn().
-				Str("job_def_id", id).
-				Err(err).
-				Msg("Failed to unmarshal sources JSON")
-			jobDef.Sources = []string{}
 		}
 
 		// Deserialize Steps JSON using model helper

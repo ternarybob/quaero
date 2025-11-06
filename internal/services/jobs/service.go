@@ -101,8 +101,10 @@ func (s *Service) CreateJobFromDefinition(jobDef *models.JobDefinition) (*models
 		}
 	}
 
-	// Add sources
-	config["sources"] = jobDef.Sources
+	// Add source fields
+	config["source_type"] = jobDef.SourceType
+	config["base_url"] = jobDef.BaseURL
+	config["auth_id"] = jobDef.AuthID
 
 	// Add steps
 	config["steps"] = jobDef.Steps

@@ -17,8 +17,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
 	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("jobs.html", "auth"))       // Jobs page (auth section)
-	mux.HandleFunc("/sources", s.app.PageHandler.ServePage("jobs.html", "sources")) // Jobs page (sources section)
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Jobs page
+	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/job", s.app.PageHandler.ServePage("job.html", "job")) // Job details page (uses ?id= query param)
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
@@ -37,11 +37,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/auth/status", s.app.AuthHandler.GetAuthStatusHandler) // GET - check auth status
 	mux.HandleFunc("/api/auth/list", s.app.AuthHandler.ListAuthHandler)        // GET - list all auth credentials
 	mux.HandleFunc("/api/auth/", s.handleAuthRoutes)                           // GET/DELETE /{id}
-
-	// API routes - Source management (NEW)
-	mux.HandleFunc("/api/sources", s.handleSourcesRoute)                // GET (list), POST (create)
-	mux.HandleFunc("/api/sources/", s.handleSourceRoutes)               // GET/PUT/DELETE /{id}
-	mux.HandleFunc("/api/status", s.app.StatusHandler.GetStatusHandler) // GET - application status
+	mux.HandleFunc("/api/status", s.app.StatusHandler.GetStatusHandler)        // GET - application status
 
 	// NOTE: Old data management and collector routes removed - handlers deleted during Stage 2.4 cleanup
 
@@ -179,23 +175,6 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
-// handleSourcesRoute routes /api/sources requests (list and create)
-func (s *Server) handleSourcesRoute(w http.ResponseWriter, r *http.Request) {
-	RouteResourceCollection(w, r,
-		s.app.SourcesHandler.ListSourcesHandler,
-		s.app.SourcesHandler.CreateSourceHandler,
-	)
-}
-
-// handleSourceRoutes routes /api/sources/{id} requests
-func (s *Server) handleSourceRoutes(w http.ResponseWriter, r *http.Request) {
-	RouteResourceItem(w, r,
-		s.app.SourcesHandler.GetSourceHandler,
-		s.app.SourcesHandler.UpdateSourceHandler,
-		s.app.SourcesHandler.DeleteSourceHandler,
-	)
-}
-
 // handleAuthRoutes routes /api/auth/{id} requests
 func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
@@ -228,6 +207,18 @@ func (s *Server) handleJobDefinitionsRoute(w http.ResponseWriter, r *http.Reques
 
 // handleJobDefinitionRoutes routes /api/job-definitions/{id} requests
 func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Request) {
+	// Check for /validate suffix (TOML validation)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/validate") {
+		s.app.JobDefinitionHandler.ValidateJobDefinitionTOMLHandler(w, r)
+		return
+	}
+
+	// Check for /upload suffix (TOML upload)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/upload") {
+		s.app.JobDefinitionHandler.UploadJobDefinitionTOMLHandler(w, r)
+		return
+	}
+
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)

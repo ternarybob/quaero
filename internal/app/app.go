@@ -34,7 +34,6 @@ import (
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
-	"github.com/ternarybob/quaero/internal/services/sources"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/services/transform"
@@ -78,7 +77,6 @@ type App struct {
 
 	// Source-agnostic services
 	StatusService *status.Service
-	SourceService *sources.Service
 
 	// Authentication service (supports multiple providers)
 	AuthService *auth.Service
@@ -100,7 +98,6 @@ type App struct {
 	ChatHandler          *handlers.ChatHandler
 	MCPHandler           *handlers.MCPHandler
 	JobHandler           *handlers.JobHandler
-	SourcesHandler       *handlers.SourcesHandler
 	StatusHandler        *handlers.StatusHandler
 	ConfigHandler        *handlers.ConfigHandler
 	PageHandler          *handlers.PageHandler
@@ -210,11 +207,11 @@ func (a *App) initDatabase() error {
 		Str("vector_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableVector)).
 		Msg("Storage layer initialized")
 
-	// Seed default job definitions and load user-defined jobs from files
+	// Load user-defined job definitions from TOML/JSON files
 	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
 		ctx := context.Background()
-		if err := sqliteMgr.SeedJobDefinitions(ctx, a.Config.Jobs.DefinitionsDir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to seed job definitions")
+		if err := sqliteMgr.LoadJobDefinitionsFromFiles(ctx, a.Config.Jobs.DefinitionsDir); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load job definitions from files")
 		}
 	}
 
@@ -299,16 +296,7 @@ func (a *App) initServices() error {
 	a.StatusService.SubscribeToCrawlerEvents()
 	a.Logger.Info().Msg("Status service initialized")
 
-	// 5.6. Initialize source service
-	a.SourceService = sources.NewService(
-		a.StorageManager.SourceStorage(),
-		a.StorageManager.AuthStorage(),
-		a.EventService,
-		a.Logger,
-	)
-	a.Logger.Info().Msg("Source service initialized")
-
-	// 5.7. Initialize queue manager (goqite-backed)
+	// 5.6. Initialize queue manager (goqite-backed)
 	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), a.Config.Queue.QueueName)
 	if err != nil {
 		return fmt.Errorf("failed to initialize queue manager: %w", err)
@@ -340,7 +328,7 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service with queue manager for job enqueueing
-	a.CrawlerService = crawler.NewService(a.AuthService, a.SourceService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.Logger, a.Config)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -401,7 +389,7 @@ func (a *App) initServices() error {
 	a.JobExecutor = executor.NewJobExecutor(jobMgr, a.Logger)
 
 	// Register step executors
-	crawlerStepExecutor := executor.NewCrawlerStepExecutor(a.CrawlerService, a.SourceService, a.Logger)
+	crawlerStepExecutor := executor.NewCrawlerStepExecutor(a.CrawlerService, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(crawlerStepExecutor)
 	a.Logger.Info().Msg("Crawler step executor registered")
 
@@ -548,10 +536,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler with JobManager
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.SourceService, a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
-
-	// Initialize sources handler
-	a.SourcesHandler = handlers.NewSourcesHandler(a.SourceService, a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
 
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
@@ -568,10 +553,8 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
 		a.JobExecutor,
-		a.SourceService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Job definition handler initialized with job executor")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)

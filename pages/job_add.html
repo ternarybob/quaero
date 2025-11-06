@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    {{template "head.html" .}}
+    <title>Add Job - Quaero</title>
+    
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
+    
+    <style>
+        .CodeMirror {
+            height: 400px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .validation-message {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: 4px;
+        }
+        
+        .validation-message.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .validation-message.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    {{template "navbar.html" .}}
+
+    <main class="page-container">
+
+        <!-- Page Title -->
+        <div class="page-title">
+            <h1>Add Job Definition</h1>
+            <p>Upload a TOML file to create a new crawler job definition</p>
+        </div>
+
+        <!-- Job Add Form -->
+        <section style="margin-top: 1.5rem;" x-data="jobAddPage()">
+            <div class="card">
+                <div class="card-header">
+                    <header class="navbar">
+                        <section class="navbar-section">
+                            <h3>Job Definition (TOML)</h3>
+                        </section>
+                        <section class="navbar-section">
+                            <a href="/jobs" class="btn btn-sm">
+                                <i class="fas fa-arrow-left"></i>
+                                <span>Back to Jobs</span>
+                            </a>
+                        </section>
+                    </header>
+                </div>
+                <div class="card-body">
+                    <!-- File Upload -->
+                    <div class="form-group">
+                        <label class="form-label">Upload TOML File (Optional)</label>
+                        <input type="file" class="form-input" accept=".toml" @change="handleFileUpload($event)">
+                        <p class="form-input-hint">Upload a .toml file or paste/edit the TOML content below</p>
+                    </div>
+
+                    <!-- TOML Editor -->
+                    <div class="form-group">
+                        <label class="form-label">TOML Content</label>
+                        <textarea id="toml-editor" x-ref="tomlEditor"></textarea>
+                        <p class="form-input-hint">
+                            Define your crawler job in TOML format. See 
+                            <a href="https://github.com/ternarybob/quaero/blob/main/deployments/local/job-definitions/README.md" target="_blank">documentation</a> 
+                            for examples.
+                        </p>
+                    </div>
+
+                    <!-- Validation Message -->
+                    <div x-show="validationMessage" 
+                         class="validation-message" 
+                         :class="validationStatus === 'success' ? 'success' : 'error'"
+                         x-text="validationMessage">
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="btn-group">
+                        <button class="btn btn-primary" @click="validateJob()" :disabled="loading">
+                            <i class="fas fa-check-circle"></i>
+                            <span x-text="loading ? 'Validating...' : 'Validate'"></span>
+                        </button>
+                        <button class="btn btn-success" @click="createJob()" :disabled="loading || validationStatus !== 'success'">
+                            <i class="fas fa-save"></i>
+                            <span x-text="loading ? 'Creating...' : 'Create Job'"></span>
+                        </button>
+                        <button class="btn" @click="loadExample()">
+                            <i class="fas fa-file-code"></i>
+                            <span>Load Example</span>
+                        </button>
+                        <button class="btn" @click="clearEditor()">
+                            <i class="fas fa-eraser"></i>
+                            <span>Clear</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Help Section -->
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-header">
+                    <h3>TOML Format Reference</h3>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code># Required Fields
+id = "my-crawler"              # Unique identifier
+name = "My Crawler"            # Human-readable name
+description = "Description"    # Job description
+source_type = "web"            # Source type (required for crawler jobs)
+
+# Crawler Configuration
+start_urls = ["https://example.com"]
+include_patterns = ["^/articles/"]  # Regex patterns to include
+exclude_patterns = ["login", "admin"]  # Patterns to exclude
+max_depth = 3                  # Maximum crawl depth
+max_pages = 100                # Maximum pages to crawl
+concurrency = 5                # Concurrent workers
+follow_links = true            # Follow discovered links
+
+# Optional Fields
+schedule = "0 */6 * * *"       # Cron expression (empty = manual only)
+timeout = "30m"                # Duration: 10m, 1h, 30s
+enabled = true                 # Enable/disable job
+auto_start = false             # Auto-start on application startup</code></pre>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    {{template "footer.html" .}}
+
+    {{template "snackbar.html" .}}
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/toml/toml.min.js"></script>
+
+    <script>
+        function jobAddPage() {
+            return {
+                editor: null,
+                loading: false,
+                validationMessage: '',
+                validationStatus: '', // 'success' or 'error'
+
+                init() {
+                    // Initialize CodeMirror
+                    this.editor = CodeMirror.fromTextArea(this.$refs.tomlEditor, {
+                        mode: 'toml',
+                        theme: 'monokai',
+                        lineNumbers: true,
+                        lineWrapping: true,
+                        indentUnit: 4,
+                        tabSize: 4,
+                        indentWithTabs: false
+                    });
+
+                    // Load example by default
+                    this.loadExample();
+                },
+
+                handleFileUpload(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.editor.setValue(e.target.result);
+                        this.validationMessage = '';
+                        this.validationStatus = '';
+                    };
+                    reader.readAsText(file);
+                },
+
+                async validateJob() {
+                    const tomlContent = this.editor.getValue().trim();
+                    
+                    if (!tomlContent) {
+                        this.validationMessage = 'Please enter TOML content';
+                        this.validationStatus = 'error';
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.validationMessage = '';
+                    this.validationStatus = '';
+
+                    try {
+                        const response = await fetch('/api/job-definitions/validate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'text/plain'
+                            },
+                            body: tomlContent
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            this.validationMessage = '✓ TOML is valid and ready to create';
+                            this.validationStatus = 'success';
+                        } else {
+                            this.validationMessage = `✗ Validation failed: ${data.error || 'Unknown error'}`;
+                            this.validationStatus = 'error';
+                        }
+                    } catch (error) {
+                        this.validationMessage = `✗ Validation error: ${error.message}`;
+                        this.validationStatus = 'error';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async createJob() {
+                    const tomlContent = this.editor.getValue().trim();
+                    
+                    if (!tomlContent) {
+                        window.showNotification('Please enter TOML content', 'error');
+                        return;
+                    }
+
+                    if (this.validationStatus !== 'success') {
+                        window.showNotification('Please validate the TOML first', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+
+                    try {
+                        const response = await fetch('/api/job-definitions/upload', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'text/plain'
+                            },
+                            body: tomlContent
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            window.showNotification('Job definition created successfully', 'success');
+                            // Redirect to jobs page after 1 second
+                            setTimeout(() => {
+                                window.location.href = '/jobs';
+                            }, 1000);
+                        } else {
+                            window.showNotification(`Failed to create job: ${data.error || 'Unknown error'}`, 'error');
+                        }
+                    } catch (error) {
+                        window.showNotification(`Error creating job: ${error.message}`, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                loadExample() {
+                    const exampleTOML = `# Example Crawler Job Definition
+id = "example-crawler"
+name = "Example Web Crawler"
+description = "Example crawler job that demonstrates the TOML format"
+source_type = "web"
+
+# Initial URLs to start crawling from
+start_urls = [
+    "https://example.com/articles"
+]
+
+# URL filtering patterns (regex)
+include_patterns = ["^/articles/", "^/blog/"]
+exclude_patterns = ["login", "logout", "admin"]
+
+# Crawler settings
+max_depth = 2
+max_pages = 50
+concurrency = 3
+follow_links = true
+
+# Optional scheduling and execution settings
+schedule = ""        # Empty = manual execution only
+timeout = "15m"      # 15 minutes
+enabled = true
+auto_start = false`;
+
+                    this.editor.setValue(exampleTOML);
+                    this.validationMessage = '';
+                    this.validationStatus = '';
+                },
+
+                clearEditor() {
+                    this.editor.setValue('');
+                    this.validationMessage = '';
+                    this.validationStatus = '';
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
+

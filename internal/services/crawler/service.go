@@ -23,7 +23,13 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/services/sources"
+)
+
+// Source type constants (moved from deleted models/source.go)
+const (
+	SourceTypeJira       = "jira"
+	SourceTypeConfluence = "confluence"
+	SourceTypeGithub     = "github"
 )
 
 // ============================================================================
@@ -104,7 +110,6 @@ import (
 // Job execution is handled by queue-based job types (internal/jobs/types/crawler.go)
 type Service struct {
 	authService     interfaces.AuthService
-	sourceService   *sources.Service
 	authStorage     interfaces.AuthStorage
 	eventService    interfaces.EventService
 	jobStorage      interfaces.JobStorage
@@ -131,12 +136,11 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, sourceService *sources.Service, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, logger arbor.ILogger, config *common.Config) *Service {
+func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Service{
 		authService:     authService,
-		sourceService:   sourceService,
 		authStorage:     authStorage,
 		eventService:    eventService,
 		jobStorage:      jobStorage,
@@ -268,16 +272,6 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		return "", fmt.Errorf("invalid config type: expected CrawlConfig")
 	}
 
-	// Type assert source config snapshot (can be nil)
-	var sourceConfigSnapshot *models.SourceConfig
-	if sourceConfigSnapshotInterface != nil {
-		snapshot, ok := sourceConfigSnapshotInterface.(*models.SourceConfig)
-		if !ok {
-			return "", fmt.Errorf("invalid source config snapshot type: expected *models.SourceConfig")
-		}
-		sourceConfigSnapshot = snapshot
-	}
-
 	// Type assert auth snapshot (can be nil)
 	var authSnapshot *models.AuthCredentials
 	if authSnapshotInterface != nil {
@@ -302,9 +296,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	}
 
 	validSourceTypes := map[string]bool{
-		models.SourceTypeJira:       true,
-		models.SourceTypeConfluence: true,
-		models.SourceTypeGithub:     true,
+		SourceTypeJira:       true,
+		SourceTypeConfluence: true,
+		SourceTypeGithub:     true,
 	}
 	if !validSourceTypes[sourceType] {
 		err := fmt.Errorf("invalid source type: %s (must be one of: jira, confluence, github)", sourceType)
@@ -425,81 +419,6 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		Bool("follow_links", config.FollowLinks).
 		Msg(configMsg)
 
-	// Handle snapshot logic
-	// If sourceID is provided and snapshots are nil, fetch from services
-	if sourceID != "" && sourceConfigSnapshot == nil {
-		if s.sourceService != nil {
-			sourceConfig, err := s.sourceService.GetSource(s.ctx, sourceID)
-			if err != nil {
-				return "", fmt.Errorf("failed to fetch source config: %w", err)
-			}
-			sourceConfigSnapshot = sourceConfig
-
-			// Fetch auth if source has auth_id
-			if sourceConfig.AuthID != "" && s.authStorage != nil {
-				auth, err := s.authStorage.GetCredentialsByID(s.ctx, sourceConfig.AuthID)
-				if err != nil {
-					contextLogger.Warn().Err(err).Str("auth_id", sourceConfig.AuthID).Msg(fmt.Sprintf("Failed to fetch auth credentials: auth_id=%s", sourceConfig.AuthID))
-				} else {
-					authSnapshot = auth
-				}
-			}
-		}
-	}
-
-	// If refreshSource is true, re-fetch latest config and auth
-	if refreshSource && sourceID != "" && s.sourceService != nil {
-		latestConfig, err := s.sourceService.GetSource(s.ctx, sourceID)
-		if err != nil {
-			return "", fmt.Errorf("failed to refresh source config: %w", err)
-		}
-
-		// Validate latest config
-		if err := latestConfig.Validate(); err != nil {
-			return "", fmt.Errorf("source configuration validation failed: %w", err)
-		}
-
-		sourceConfigSnapshot = latestConfig
-
-		// Re-fetch auth if present
-		if latestConfig.AuthID != "" && s.authStorage != nil {
-			latestAuth, err := s.authStorage.GetCredentialsByID(s.ctx, latestConfig.AuthID)
-			if err != nil {
-				contextLogger.Warn().Err(err).Str("auth_id", latestConfig.AuthID).Msg(fmt.Sprintf("Failed to refresh auth credentials: auth_id=%s", latestConfig.AuthID))
-			} else {
-				authSnapshot = latestAuth
-			}
-		}
-	}
-
-	// Validate source config snapshot if provided
-	if sourceConfigSnapshot != nil {
-		if err := sourceConfigSnapshot.Validate(); err != nil {
-			// Log validation failure before returning error
-			contextLogger.Error().Err(err).Msg("Source config validation failed")
-			return "", fmt.Errorf("source configuration validation failed: %w", err)
-		}
-
-		// Store snapshot in job config
-		sourceConfigJSON, err := json.Marshal(sourceConfigSnapshot)
-		if err != nil {
-			// Log snapshot serialization failure
-			contextLogger.Error().Err(err).Msg("Failed to serialize source config snapshot")
-			return "", fmt.Errorf("failed to serialize source config snapshot: %w", err)
-		}
-		job.Config["source_config_snapshot"] = string(sourceConfigJSON)
-
-		// Log validation success with base URL
-		baseURLInfo := "unknown"
-		if sourceConfigSnapshot.BaseURL != "" {
-			baseURLInfo = sourceConfigSnapshot.BaseURL
-		}
-		contextLogger.Debug().Str("base_url", baseURLInfo).Msg(fmt.Sprintf("Source config validated and stored: base_url=%s", baseURLInfo))
-	} else {
-		// Log missing source config snapshot
-		contextLogger.Info().Msg("No source config snapshot provided")
-	}
-
 	// Store auth snapshot if provided
 	var httpClientType string
 	if authSnapshot != nil {
@@ -536,11 +455,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	} else {
 		// Log missing auth snapshot
-		if sourceConfigSnapshot == nil || sourceConfigSnapshot.AuthID == "" {
-			contextLogger.Info().Msg("No auth snapshot provided - requests will use default HTTP client")
-		} else {
-			contextLogger.Warn().Msg("No auth snapshot provided - requests will use default HTTP client")
-		}
+		contextLogger.Info().Msg("No auth snapshot provided - requests will use default HTTP client")
 		httpClientType = "default (no auth)"
 	}
 

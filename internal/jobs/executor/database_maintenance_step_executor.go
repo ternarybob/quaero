@@ -34,7 +34,7 @@ func NewDatabaseMaintenanceStepExecutor(jobManager *jobs.Manager, queueMgr *queu
 }
 
 // ExecuteStep executes a database maintenance step
-func (e *DatabaseMaintenanceStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, sources []string, parentJobID string) (string, error) {
+func (e *DatabaseMaintenanceStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).

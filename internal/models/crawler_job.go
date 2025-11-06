@@ -219,32 +219,6 @@ func FromJSONCrawlProgress(data string) (*CrawlProgress, error) {
 	return &progress, nil
 }
 
-// SetSourceConfigSnapshot marshals and stores source config as JSON
-func (j *CrawlJob) SetSourceConfigSnapshot(config *SourceConfig) error {
-	if config == nil {
-		j.SourceConfigSnapshot = ""
-		return nil
-	}
-	data, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-	j.SourceConfigSnapshot = string(data)
-	return nil
-}
-
-// GetSourceConfigSnapshot unmarshals source config from JSON
-func (j *CrawlJob) GetSourceConfigSnapshot() (*SourceConfig, error) {
-	if j.SourceConfigSnapshot == "" {
-		return nil, nil
-	}
-	var config SourceConfig
-	if err := json.Unmarshal([]byte(j.SourceConfigSnapshot), &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
 // SetAuthSnapshot marshals and stores auth credentials as JSON
 func (j *CrawlJob) SetAuthSnapshot(auth *AuthCredentials) error {
 	if auth == nil {

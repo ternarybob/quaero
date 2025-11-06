@@ -115,16 +115,6 @@ type JobStorage interface {
 	MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error)
 }
 
-// SourceStorage - interface for source configuration persistence
-type SourceStorage interface {
-	SaveSource(ctx context.Context, source *models.SourceConfig) error
-	GetSource(ctx context.Context, id string) (*models.SourceConfig, error)
-	ListSources(ctx context.Context) ([]*models.SourceConfig, error)
-	DeleteSource(ctx context.Context, id string) error
-	GetSourcesByType(ctx context.Context, sourceType string) ([]*models.SourceConfig, error)
-	GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error)
-}
-
 // JobDefinitionListOptions represents filtering and pagination options for listing job definitions
 type JobDefinitionListOptions struct {
 	Type     string // Filter by job type (crawler, summarizer, custom)
@@ -170,7 +160,6 @@ type StorageManager interface {
 	DocumentStorage() DocumentStorage
 	JobStorage() JobStorage
 	JobLogStorage() JobLogStorage
-	SourceStorage() SourceStorage
 	JobDefinitionStorage() JobDefinitionStorage
 	DB() interface{}
 	Close() error

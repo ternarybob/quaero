@@ -2,23 +2,17 @@
     <div class="app-header-content">
         <nav class="app-header-nav" x-data="{ mobileMenuOpen: false }">
             <a href="/" class="brand"><span class="text-bold">Quaero</span></a>
-            <button class="mobile-menu-toggle"
-                    @click="mobileMenuOpen = !mobileMenuOpen"
-                    :aria-expanded="mobileMenuOpen.toString()"
-                    aria-controls="nav-links"
-                    aria-label="Toggle navigation">
+            <button class="mobile-menu-toggle" @click="mobileMenuOpen = !mobileMenuOpen" :aria-expanded="mobileMenuOpen.toString()" aria-controls="nav-links" aria-label="Toggle navigation">
                 <i class="fas fa-bars"></i>
             </button>
-            <div id="nav-links" class="nav-links"
-                 :class="{ 'mobile-open': mobileMenuOpen }"
-                 :aria-hidden="(!mobileMenuOpen).toString()">
-                <a href="/" @click="mobileMenuOpen = false" {{if eq .Page "home"}}class="active"{{end}}>HOME</a>
-                <a href="/jobs" @click="mobileMenuOpen = false" {{if or (eq .Page "jobs") (eq .Page "auth") (eq .Page "sources")}}class="active"{{end}}>JOBS</a>
-                <a href="/queue" @click="mobileMenuOpen = false" {{if eq .Page "queue"}}class="active"{{end}}>QUEUE</a>
-                <a href="/documents" @click="mobileMenuOpen = false" {{if eq .Page "documents"}}class="active"{{end}}>DOCUMENTS</a>
-                <a href="/search" @click="mobileMenuOpen = false" {{if eq .Page "search"}}class="active"{{end}}>SEARCH</a>
-                <a href="/chat" @click="mobileMenuOpen = false" {{if eq .Page "chat"}}class="active"{{end}}>CHAT</a>
-                <a href="/settings" @click="mobileMenuOpen = false" {{if eq .Page "settings"}}class="active"{{end}}>SETTINGS</a>
+            <div id="nav-links" class="nav-links" :class="{ 'mobile-open': mobileMenuOpen }" :aria-hidden="(!mobileMenuOpen).toString()">
+                <a href="/" @click="mobileMenuOpen = false" {{if eq .Page "home" }}class="active" {{end}}>HOME</a>
+                <a href="/jobs" @click="mobileMenuOpen = false" {{if or (eq .Page "jobs" ) (eq .Page "auth" )}}class="active" {{end}}>JOBS</a>
+                <a href="/queue" @click="mobileMenuOpen = false" {{if eq .Page "queue" }}class="active" {{end}}>QUEUE</a>
+                <a href="/documents" @click="mobileMenuOpen = false" {{if eq .Page "documents" }}class="active" {{end}}>DOCUMENTS</a>
+                <a href="/search" @click="mobileMenuOpen = false" {{if eq .Page "search" }}class="active" {{end}}>SEARCH</a>
+                <a href="/chat" @click="mobileMenuOpen = false" {{if eq .Page "chat" }}class="active" {{end}}>CHAT</a>
+                <a href="/settings" @click="mobileMenuOpen = false" {{if eq .Page "settings" }}class="active" {{end}}>SETTINGS</a>
             </div>
         </nav>
         <span class="label label-success status-text">ONLINE</span>

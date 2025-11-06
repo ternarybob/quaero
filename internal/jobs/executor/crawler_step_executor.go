@@ -9,39 +9,33 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
-	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
 // CrawlerStepExecutor executes "crawl" action steps
 type CrawlerStepExecutor struct {
 	crawlerService interfaces.CrawlerService
-	sourceService  *sources.Service
 	logger         arbor.ILogger
 }
 
 // NewCrawlerStepExecutor creates a new crawler step executor
 func NewCrawlerStepExecutor(
 	crawlerService interfaces.CrawlerService,
-	sourceService *sources.Service,
 	logger arbor.ILogger,
 ) *CrawlerStepExecutor {
 	return &CrawlerStepExecutor{
 		crawlerService: crawlerService,
-		sourceService:  sourceService,
 		logger:         logger,
 	}
 }
 
 // ExecuteStep executes a crawl step
-func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, sources []string, parentJobID string) (string, error) {
-	if len(sources) == 0 {
-		return "", fmt.Errorf("no sources provided for crawl step")
+func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+	// Validate source fields in job definition
+	if jobDef.SourceType == "" {
+		return "", fmt.Errorf("source_type not set in job definition")
 	}
-
-	// Get source details
-	source, err := e.sourceService.GetSource(ctx, sources[0])
-	if err != nil {
-		return "", fmt.Errorf("failed to get source: %w", err)
+	if jobDef.BaseURL == "" {
+		return "", fmt.Errorf("base_url not set in job definition")
 	}
 
 	// Parse step config map into CrawlConfig struct
@@ -56,7 +50,7 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		entityType = et
 	} else {
 		// Infer from source type
-		switch source.Type {
+		switch jobDef.SourceType {
 		case "jira":
 			entityType = "issues"
 		case "confluence":
@@ -68,12 +62,12 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	crawlConfig := e.buildCrawlConfig(stepConfig)
 
 	// Build seed URLs based on source type and entity type
-	seedURLs := e.buildSeedURLs(source, entityType)
+	seedURLs := e.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
 
 	e.logger.Info().
 		Str("step_name", step.Name).
-		Str("source_id", source.ID).
-		Str("source_type", string(source.Type)).
+		Str("source_type", jobDef.SourceType).
+		Str("base_url", jobDef.BaseURL).
 		Str("entity_type", entityType).
 		Int("seed_url_count", len(seedURLs)).
 		Int("max_depth", crawlConfig.MaxDepth).
@@ -82,15 +76,15 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 
 	// Start crawl job with properly typed config
 	jobID, err := e.crawlerService.StartCrawl(
-		string(source.Type),
+		jobDef.SourceType,
 		entityType,
 		seedURLs,
-		crawlConfig, // Pass CrawlConfig struct
-		source.ID,   // sourceID
-		false,       // refreshSource
-		nil,         // sourceConfigSnapshot
-		nil,         // authSnapshot
-		parentJobID, // jobDefinitionID - link to parent
+		crawlConfig,   // Pass CrawlConfig struct
+		jobDef.AuthID, // sourceID - use auth_id as source identifier
+		false,         // refreshSource
+		nil,           // sourceConfigSnapshot
+		nil,           // authSnapshot
+		parentJobID,   // jobDefinitionID - link to parent
 	)
 
 	if err != nil {
@@ -197,27 +191,27 @@ func (e *CrawlerStepExecutor) buildCrawlConfig(configMap map[string]interface{})
 }
 
 // buildSeedURLs constructs seed URLs based on source type and entity type
-func (e *CrawlerStepExecutor) buildSeedURLs(source *models.SourceConfig, entityType string) []string {
-	switch source.Type {
+func (e *CrawlerStepExecutor) buildSeedURLs(baseURL, sourceType, entityType string) []string {
+	switch sourceType {
 	case "jira":
 		switch entityType {
 		case "projects":
-			return []string{source.BaseURL + "/rest/api/2/project"}
+			return []string{baseURL + "/rest/api/2/project"}
 		case "issues":
-			return []string{source.BaseURL + "/rest/api/2/search"}
+			return []string{baseURL + "/rest/api/2/search"}
 		default:
-			return []string{source.BaseURL + "/rest/api/2/project"}
+			return []string{baseURL + "/rest/api/2/project"}
 		}
 	case "confluence":
 		switch entityType {
 		case "spaces":
-			return []string{source.BaseURL + "/rest/api/space"}
+			return []string{baseURL + "/rest/api/space"}
 		case "pages":
-			return []string{source.BaseURL + "/rest/api/content"}
+			return []string{baseURL + "/rest/api/content"}
 		default:
-			return []string{source.BaseURL + "/rest/api/space"}
+			return []string{baseURL + "/rest/api/space"}
 		}
 	default:
-		return []string{source.BaseURL}
+		return []string{baseURL}
 	}
 }

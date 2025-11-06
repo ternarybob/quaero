@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/jobs/executor"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/services/sources"
+	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 var ErrJobDefinitionNotFound = errors.New("job definition not found")
@@ -25,7 +26,6 @@ type JobDefinitionHandler struct {
 	jobDefStorage interfaces.JobDefinitionStorage
 	jobStorage    interfaces.JobStorage
 	jobExecutor   *executor.JobExecutor
-	sourceService *sources.Service
 	logger        arbor.ILogger
 }
 
@@ -34,7 +34,6 @@ func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.JobStorage,
 	jobExecutor *executor.JobExecutor,
-	sourceService *sources.Service,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -46,9 +45,6 @@ func NewJobDefinitionHandler(
 	if jobExecutor == nil {
 		panic("jobExecutor cannot be nil")
 	}
-	if sourceService == nil {
-		panic("sourceService cannot be nil")
-	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
@@ -59,7 +55,6 @@ func NewJobDefinitionHandler(
 		jobDefStorage: jobDefStorage,
 		jobStorage:    jobStorage,
 		jobExecutor:   jobExecutor,
-		sourceService: sourceService,
 		logger:        logger,
 	}
 }
@@ -162,13 +157,7 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
-	// Validate source IDs exist
 	ctx := r.Context()
-	if err := h.validateSourceIDs(ctx, jobDef.Sources); err != nil {
-		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Source validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid source: %v", err))
-		return
-	}
 
 	// Validate step actions are registered
 	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
@@ -332,13 +321,7 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
-	// Validate source IDs exist
 	ctx := r.Context()
-	if err := h.validateSourceIDs(ctx, jobDef.Sources); err != nil {
-		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Source validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid source: %v", err))
-		return
-	}
 
 	// Validate step actions are registered
 	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
@@ -433,7 +416,6 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		Str("job_def_id", jobDef.ID).
 		Str("job_name", jobDef.Name).
 		Int("step_count", len(jobDef.Steps)).
-		Int("source_count", len(jobDef.Sources)).
 		Msg("Executing job definition")
 
 	// Launch goroutine to execute job definition asynchronously
@@ -463,16 +445,6 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
-}
-
-// validateSourceIDs validates that all source IDs exist
-func (h *JobDefinitionHandler) validateSourceIDs(ctx context.Context, sourceIDs []string) error {
-	for _, sourceID := range sourceIDs {
-		if _, err := h.sourceService.GetSource(ctx, sourceID); err != nil {
-			return fmt.Errorf("source not found: %s", sourceID)
-		}
-	}
-	return nil
 }
 
 // validateStepActions validates that all step actions are registered
@@ -658,4 +630,111 @@ func (h *JobDefinitionHandler) convertJobDefinitionToTOML(jobDef *models.JobDefi
 	}
 
 	return tomlData, nil
+}
+
+// ValidateJobDefinitionTOMLHandler handles POST /api/job-definitions/validate
+// Validates TOML content without creating the job definition
+func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseWriter, r *http.Request) {
+	// Read TOML content from request body
+	tomlContent, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to read request body")
+		WriteError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse TOML into CrawlerJobDefinitionFile
+	var crawlerJob sqlite.CrawlerJobDefinitionFile
+	if err := toml.Unmarshal(tomlContent, &crawlerJob); err != nil {
+		h.logger.Error().Err(err).Msg("Invalid TOML syntax")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid TOML syntax: %v", err))
+		return
+	}
+
+	// Validate crawler job file
+	if err := crawlerJob.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Job definition validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Validation failed: %v", err))
+		return
+	}
+
+	// Convert to full JobDefinition model
+	jobDef := crawlerJob.ToJobDefinition()
+
+	// Validate full job definition
+	if err := jobDef.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Job definition validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Validation failed: %v", err))
+		return
+	}
+
+	// Validate step actions are registered
+	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
+		h.logger.Error().Err(err).Msg("Action validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
+		return
+	}
+
+	h.logger.Info().Str("job_def_id", jobDef.ID).Msg("Job definition TOML validated successfully")
+	WriteJSON(w, http.StatusOK, map[string]string{
+		"status":  "valid",
+		"message": "Job definition is valid and ready to create",
+	})
+}
+
+// UploadJobDefinitionTOMLHandler handles POST /api/job-definitions/upload
+// Creates a job definition from TOML content
+func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWriter, r *http.Request) {
+	// Read TOML content from request body
+	tomlContent, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to read request body")
+		WriteError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse TOML into CrawlerJobDefinitionFile
+	var crawlerJob sqlite.CrawlerJobDefinitionFile
+	if err := toml.Unmarshal(tomlContent, &crawlerJob); err != nil {
+		h.logger.Error().Err(err).Msg("Invalid TOML syntax")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid TOML syntax: %v", err))
+		return
+	}
+
+	// Validate crawler job file
+	if err := crawlerJob.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Job definition validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Validation failed: %v", err))
+		return
+	}
+
+	// Convert to full JobDefinition model
+	jobDef := crawlerJob.ToJobDefinition()
+
+	// Validate full job definition
+	if err := jobDef.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Job definition validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Validation failed: %v", err))
+		return
+	}
+
+	// Validate step actions are registered
+	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
+		h.logger.Error().Err(err).Msg("Action validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
+		return
+	}
+
+	// Save job definition
+	ctx := r.Context()
+	if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
+		return
+	}
+
+	h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
+	WriteJSON(w, http.StatusCreated, jobDef)
 }

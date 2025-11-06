@@ -318,9 +318,10 @@ func (s *SQLiteDB) runMigrations() error {
 	// }
 
 	// MIGRATION 10: Remove filters and seed_urls columns from sources table
-	if err := s.migrateRemoveSourcesFilteringColumns(); err != nil {
-		return err
-	}
+	// REMOVED: Sources table no longer exists (migrated to job_definitions)
+	// if err := s.migrateRemoveSourcesFilteringColumns(); err != nil {
+	// 	return err
+	// }
 
 	// MIGRATION 11: Add timeout column to job_definitions table
 	if err := s.migrateAddJobDefinitionsTimeoutColumn(); err != nil {
@@ -328,9 +329,10 @@ func (s *SQLiteDB) runMigrations() error {
 	}
 
 	// MIGRATION 12: Add back filters column to sources table
-	if err := s.migrateAddBackSourcesFiltersColumn(); err != nil {
-		return err
-	}
+	// REMOVED: Sources table no longer exists (migrated to job_definitions)
+	// if err := s.migrateAddBackSourcesFiltersColumn(); err != nil {
+	// 	return err
+	// }
 
 	// MIGRATION 13: Remove deprecated logs column from crawl_jobs table
 	// Logs are now stored in the dedicated job_logs table with unlimited history
@@ -404,6 +406,11 @@ func (s *SQLiteDB) runMigrations() error {
 	// This is a BREAKING CHANGE that consolidates the schema to use executor-agnostic JobModel
 	// Removes crawler-specific columns and uses flexible config_json for all job types
 	if err := s.migrateCrawlJobsToUnifiedJobs(); err != nil {
+		return err
+	}
+
+	// MIGRATION 26: Remove sources table and migrate to job_definitions
+	if err := s.migrateRemoveSourcesTable(); err != nil {
 		return err
 	}
 
@@ -2242,5 +2249,174 @@ func (s *SQLiteDB) migrateCrawlJobsToUnifiedJobs() error {
 	}
 
 	s.logger.Info().Msg("Migration: Successfully migrated from crawl_jobs to unified jobs table")
+	return nil
+}
+
+// migrateRemoveSourcesTable removes the sources table and adds source fields to job_definitions
+func (s *SQLiteDB) migrateRemoveSourcesTable() error {
+	// Check if sources table exists
+	var tableName string
+	err := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='sources'`).Scan(&tableName)
+	if err != nil {
+		// Table doesn't exist, migration already complete
+		s.logger.Debug().Msg("sources table not found, skipping migration")
+		return nil
+	}
+
+	s.logger.Info().Msg("Running migration: Removing sources table and adding source fields to job_definitions")
+
+	// Check if job_definitions already has source_type column
+	columnsQuery := `PRAGMA table_info(job_definitions)`
+	rows, err := s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasSourceType := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "source_type" {
+			hasSourceType = true
+			break
+		}
+	}
+
+	// Add source fields to job_definitions if not already present
+	if !hasSourceType {
+		s.logger.Info().Msg("Adding source_type, base_url, auth_id columns to job_definitions")
+
+		if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN source_type TEXT`); err != nil {
+			return fmt.Errorf("failed to add source_type column: %w", err)
+		}
+
+		if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN base_url TEXT`); err != nil {
+			return fmt.Errorf("failed to add base_url column: %w", err)
+		}
+
+		if _, err := s.db.Exec(`ALTER TABLE job_definitions ADD COLUMN auth_id TEXT`); err != nil {
+			return fmt.Errorf("failed to add auth_id column: %w", err)
+		}
+	}
+
+	// Remove sources column from job_definitions if it exists
+	columnsQuery = `PRAGMA table_info(job_definitions)`
+	rows, err = s.db.Query(columnsQuery)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasSources := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, dfltValue, pk interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == "sources" {
+			hasSources = true
+			break
+		}
+	}
+
+	if hasSources {
+		s.logger.Info().Msg("Removing sources column from job_definitions")
+
+		// SQLite doesn't support DROP COLUMN directly, need to recreate table
+		tx, err := s.db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer func() {
+			if err != nil {
+				tx.Rollback()
+			}
+		}()
+
+		// Create new table without sources column
+		_, err = tx.Exec(`
+			CREATE TABLE job_definitions_new (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				type TEXT NOT NULL,
+				description TEXT,
+				source_type TEXT,
+				base_url TEXT,
+				auth_id TEXT,
+				steps TEXT NOT NULL,
+				schedule TEXT NOT NULL,
+				timeout TEXT,
+				enabled INTEGER DEFAULT 1,
+				auto_start INTEGER DEFAULT 0,
+				config TEXT NOT NULL,
+				pre_jobs TEXT,
+				post_jobs TEXT,
+				error_tolerance TEXT,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
+			)
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to create new job_definitions table: %w", err)
+		}
+
+		// Copy data (excluding sources column)
+		_, err = tx.Exec(`
+			INSERT INTO job_definitions_new
+			SELECT id, name, type, description, source_type, base_url, auth_id, steps, schedule, timeout, enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
+			FROM job_definitions
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to copy data: %w", err)
+		}
+
+		// Drop old table
+		_, err = tx.Exec(`DROP TABLE job_definitions`)
+		if err != nil {
+			return fmt.Errorf("failed to drop old job_definitions table: %w", err)
+		}
+
+		// Rename new table
+		_, err = tx.Exec(`ALTER TABLE job_definitions_new RENAME TO job_definitions`)
+		if err != nil {
+			return fmt.Errorf("failed to rename job_definitions_new: %w", err)
+		}
+
+		// Recreate indexes
+		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_type ON job_definitions(type, enabled)`)
+		if err != nil {
+			return fmt.Errorf("failed to create idx_job_definitions_type: %w", err)
+		}
+
+		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_enabled ON job_definitions(enabled, created_at DESC)`)
+		if err != nil {
+			return fmt.Errorf("failed to create idx_job_definitions_enabled: %w", err)
+		}
+
+		_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_job_definitions_schedule ON job_definitions(schedule)`)
+		if err != nil {
+			return fmt.Errorf("failed to create idx_job_definitions_schedule: %w", err)
+		}
+
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+	}
+
+	// Drop sources table
+	s.logger.Info().Msg("Dropping sources table")
+	if _, err := s.db.Exec(`DROP TABLE IF EXISTS sources`); err != nil {
+		return fmt.Errorf("failed to drop sources table: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: sources table removed and job_definitions updated successfully")
 	return nil
 }

@@ -484,7 +484,7 @@ quaero/
 │   └── models/                      # Data models
 │       ├── document.go              # Document model
 │       ├── job.go                   # Job models
-│       ├── source.go                # Source configuration
+│       ├── job_definition.go        # Job definition model
 │       └── config.go                # Configuration models
 ├── pages/                           # Web UI templates
 │   ├── index.html                   # Dashboard
@@ -499,7 +499,6 @@ quaero/
 │   ├── helpers.go                   # Common test utilities
 │   ├── run_tests.go                 # Go-native test runner
 │   ├── api/                         # API integration tests
-│   │   ├── sources_api_test.go
 │   │   └── chat_api_test.go
 │   ├── ui/                          # UI tests (chromedp)
 │   │   ├── homepage_test.go
@@ -974,15 +973,6 @@ For comprehensive technical documentation including database schemas, error hand
 POST /api/auth                          - Update authentication from Chrome extension
 GET  /api/auth/status                   - Check authentication status
 GET  /api/auth/list                     - List authenticated sources
-```
-
-#### Sources
-```
-GET  /api/sources                       - List all sources
-GET  /api/sources/{id}                  - Get source by ID
-POST /api/sources                       - Create new source
-PUT  /api/sources/{id}                  - Update source
-DELETE /api/sources/{id}                - Delete source
 ```
 
 #### Job Definitions

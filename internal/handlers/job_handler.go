@@ -19,7 +19,6 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/crawler"
-	"github.com/ternarybob/quaero/internal/services/sources"
 )
 
 // JobGroup represents a parent job with its children
@@ -32,7 +31,6 @@ type JobGroup struct {
 type JobHandler struct {
 	crawlerService   *crawler.Service
 	jobStorage       interfaces.JobStorage
-	sourceService    *sources.Service
 	authStorage      interfaces.AuthStorage
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
@@ -42,11 +40,10 @@ type JobHandler struct {
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, sourceService *sources.Service, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
-		sourceService:    sourceService,
 		authStorage:      authStorage,
 		schedulerService: schedulerService,
 		logService:       logService,

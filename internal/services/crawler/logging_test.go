@@ -8,6 +8,7 @@ package crawler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,7 +18,8 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/services/sources"
+	"github.com/ternarybob/quaero/internal/queue"
+	"maragu.dev/goqite"
 )
 
 var errNotFound = errors.New("not found")
@@ -39,12 +41,9 @@ func TestCrawlerServiceLogging(t *testing.T) {
 	eventService := NewMockEventService()
 	documentStorage := NewMockDocumentStorage()
 
-	// Create minimal source service
-	sourceService := sources.NewService(authStorage, authStorage, eventService, logger)
-
 	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
 	queueManager := &mockQueueManager{}
-	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
+	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {
@@ -163,12 +162,9 @@ func TestCrawlerLoggingWithFollowLinksDisabled(t *testing.T) {
 	eventService := NewMockEventService()
 	documentStorage := NewMockDocumentStorage()
 
-	// Create minimal source service
-	sourceService := sources.NewService(authStorage, authStorage, eventService, logger)
-
 	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
 	queueManager := &mockQueueManager{}
-	service := NewService(authService, sourceService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
+	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {
@@ -339,31 +335,6 @@ func (m *MockAuthStorage) GetCredentials(ctx context.Context, service string) (*
 
 func (m *MockAuthStorage) ListServices(ctx context.Context) ([]string, error) {
 	return []string{}, nil
-}
-
-// MockAuthStorage also implements SourceStorage interface for sources.Service
-func (m *MockAuthStorage) SaveSource(ctx context.Context, source *models.SourceConfig) error {
-	return nil
-}
-
-func (m *MockAuthStorage) GetSource(ctx context.Context, id string) (*models.SourceConfig, error) {
-	return nil, errNotFound
-}
-
-func (m *MockAuthStorage) ListSources(ctx context.Context) ([]*models.SourceConfig, error) {
-	return []*models.SourceConfig{}, nil
-}
-
-func (m *MockAuthStorage) DeleteSource(ctx context.Context, id string) error {
-	return nil
-}
-
-func (m *MockAuthStorage) GetSourcesByType(ctx context.Context, sourceType string) ([]*models.SourceConfig, error) {
-	return []*models.SourceConfig{}, nil
-}
-
-func (m *MockAuthStorage) GetEnabledSources(ctx context.Context) ([]*models.SourceConfig, error) {
-	return []*models.SourceConfig{}, nil
 }
 
 // MockEventService implements interfaces.EventService
@@ -708,5 +679,25 @@ func (m *MockDocumentStorage) ClearAll() error {
 
 func (m *MockDocumentStorage) RebuildFTS5Index() error {
 	// Mock implementation - no-op for testing
+	return nil
+}
+
+// mockQueueManager implements interfaces.QueueManager for testing
+type mockQueueManager struct{}
+
+func (m *mockQueueManager) Start() error   { return nil }
+func (m *mockQueueManager) Stop() error    { return nil }
+func (m *mockQueueManager) Restart() error { return nil }
+func (m *mockQueueManager) Close() error   { return nil }
+
+func (m *mockQueueManager) Enqueue(ctx context.Context, msg queue.Message) error {
+	return nil
+}
+
+func (m *mockQueueManager) Receive(ctx context.Context) (*queue.Message, func() error, error) {
+	return nil, nil, fmt.Errorf("no messages")
+}
+
+func (m *mockQueueManager) Extend(ctx context.Context, messageID goqite.ID, duration time.Duration) error {
 	return nil
 }

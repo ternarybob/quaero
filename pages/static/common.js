@@ -273,235 +273,13 @@ document.addEventListener('alpine:init', () => {
     window.getJobTypeIcon = getJobTypeIcon;
     window.getJobTypeDisplayName = getJobTypeDisplayName;
 
-    // Source Management Component
-    Alpine.data('sourceManagement', () => ({
-        sources: [],
-        authentications: [],
-        currentSource: null,
-        showCreateModal: false,
-        showEditModal: false,
-        loading: true,
-        modalTriggerElement: null,
-
-        init() {
-            window.debugLog('SourceManagement', 'Initializing component');
-            this.loadSources();
-            this.loadAuthentications();
-            this.resetCurrentSource();
-        },
-
-        async loadSources() {
-            window.debugLog('SourceManagement', 'Loading sources from /api/sources');
-            try {
-                const response = await fetch('/api/sources');
-                window.debugLog('SourceManagement', 'Response status:', response.status);
-                if (!response.ok) throw new Error('Failed to fetch sources');
-
-                const data = await response.json();
-                window.debugLog('SourceManagement', 'Sources data received:', data);
-                this.sources = Array.isArray(data) ? data : [];
-                window.debugLog('SourceManagement', 'Sources array:', this.sources, 'Count:', this.sources.length);
-                this.loading = false;
-            } catch (err) {
-                window.debugError('SourceManagement', 'Error loading sources:', err);
-                this.loading = false;
-                window.showNotification('Failed to load sources: ' + err.message, 'error');
-            }
-        },
-
-        async loadAuthentications() {
-            window.debugLog('SourceManagement', 'Loading authentications from /api/auth/list');
-            try {
-                const response = await fetch('/api/auth/list');
-                window.debugLog('SourceManagement', 'Auth response status:', response.status);
-                if (!response.ok) throw new Error('Failed to fetch authentications');
-                const data = await response.json();
-                window.debugLog('SourceManagement', 'Authentications received:', data);
-                this.authentications = Array.isArray(data) ? data : [];
-            } catch (err) {
-                window.debugError('SourceManagement', 'Error loading authentications:', err);
-                this.authentications = [];
-            }
-        },
-
-        resetCurrentSource() {
-            this.currentSource = {
-                name: '',
-                type: 'jira',
-                base_url: '',
-                auth_id: '',
-                auth_domain: '',
-                enabled: true,
-                crawl_config: {
-                    max_depth: 3,
-                    follow_links: true,
-                    concurrency: 2
-                },
-                filters: {
-                    include_patterns: '',
-                    exclude_patterns: ''
-                }
-            };
-        },
-
-        editSource(source, event) {
-            this.modalTriggerElement = event?.target || document.activeElement;
-            this.currentSource = JSON.parse(JSON.stringify(source));
-
-            // Ensure filters field exists and contains strings (not objects)
-            if (!this.currentSource.filters) {
-                this.currentSource.filters = { include_patterns: '', exclude_patterns: '' };
-            } else {
-                // Convert filter object to strings if needed
-                if (typeof this.currentSource.filters.include_patterns !== 'string') {
-                    this.currentSource.filters.include_patterns = '';
-                }
-                if (typeof this.currentSource.filters.exclude_patterns !== 'string') {
-                    this.currentSource.filters.exclude_patterns = '';
-                }
-            }
-
-            this.showEditModal = true;
-            document.body.classList.add('modal-open');
-            // Reload authentications in case they changed
-            this.loadAuthentications();
-
-            // Move focus to modal after it renders
-            this.$nextTick(() => {
-                const modal = document.querySelector('.modal.active .modal-container');
-                if (modal) {
-                    const firstFocusable = modal.querySelector('input, select, textarea, button');
-                    if (firstFocusable) firstFocusable.focus();
-                }
-            });
-        },
-
-        openCreateModal(event) {
-            this.modalTriggerElement = event?.target || document.activeElement;
-            this.resetCurrentSource();
-            this.showCreateModal = true;
-            document.body.classList.add('modal-open');
-            // Load authentications when opening modal
-            this.loadAuthentications();
-
-            // Move focus to modal after it renders
-            this.$nextTick(() => {
-                const modal = document.querySelector('.modal.active .modal-container');
-                if (modal) {
-                    const firstFocusable = modal.querySelector('input, select, textarea, button');
-                    if (firstFocusable) firstFocusable.focus();
-                }
-            });
-        },
-
-        async saveSource() {
-            window.debugLog('SourceManagement', 'Saving source:', this.currentSource);
-            try {
-                const isEdit = this.showEditModal;
-                const url = isEdit ? `/api/sources/${this.currentSource.id}` : '/api/sources';
-                const method = isEdit ? 'PUT' : 'POST';
-
-                // Process filters before sending to backend
-                const sourceToSave = JSON.parse(JSON.stringify(this.currentSource));
-
-                // Ensure filters are properly formatted (empty strings become null for backend)
-                if (sourceToSave.filters) {
-                    if (!sourceToSave.filters.include_patterns || sourceToSave.filters.include_patterns.trim() === '') {
-                        sourceToSave.filters.include_patterns = '';
-                    }
-                    if (!sourceToSave.filters.exclude_patterns || sourceToSave.filters.exclude_patterns.trim() === '') {
-                        sourceToSave.filters.exclude_patterns = '';
-                    }
-                }
-
-                window.debugLog('SourceManagement', `${method} ${url}`, 'Processed source:', sourceToSave);
-                const response = await fetch(url, {
-                    method: method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(sourceToSave)
-                });
-
-                window.debugLog('SourceManagement', 'Save response status:', response.status);
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Failed to save source');
-                }
-
-                window.showNotification(`Source ${isEdit ? 'updated' : 'created'} successfully`, 'success');
-                await this.loadSources();
-                this.closeModal();
-            } catch (err) {
-                window.debugError('SourceManagement', 'Error saving source:', err);
-                window.showNotification('Failed to save source: ' + err.message, 'error');
-            }
-        },
-
-        async deleteSource(sourceId) {
-            if (!confirm('Are you sure you want to delete this source? This will also remove all associated data.')) {
-                return;
-            }
-
-            window.debugLog('SourceManagement', 'Deleting source:', sourceId);
-            try {
-                const response = await fetch(`/api/sources/${sourceId}`, {
-                    method: 'DELETE'
-                });
-
-                window.debugLog('SourceManagement', 'Delete response status:', response.status);
-                if (!response.ok) {
-                    throw new Error('Failed to delete source');
-                }
-
-                window.showNotification('Source deleted successfully', 'success');
-                await this.loadSources();
-            } catch (err) {
-                window.debugError('SourceManagement', 'Error deleting source:', err);
-                window.showNotification('Failed to delete source: ' + err.message, 'error');
-            }
-        },
-
-        closeModal() {
-            this.showCreateModal = false;
-            this.showEditModal = false;
-            document.body.classList.remove('modal-open');
-            this.resetCurrentSource();
-
-            // Restore focus to trigger element
-            if (this.modalTriggerElement) {
-                this.$nextTick(() => {
-                    this.modalTriggerElement.focus();
-                    this.modalTriggerElement = null;
-                });
-            }
-        },
-
-        formatDate(dateStr) {
-            if (!dateStr) return 'N/A';
-            const date = new Date(dateStr);
-            return date.toLocaleString();
-        },
-
-        formatFilterDisplay(filters) {
-            if (!filters) return 'None';
-
-            const parts = [];
-            if (filters.include_patterns && filters.include_patterns.trim()) {
-                const count = filters.include_patterns.split(',').filter(p => p.trim()).length;
-                parts.push(`Include: ${count}`);
-            }
-            if (filters.exclude_patterns && filters.exclude_patterns.trim()) {
-                const count = filters.exclude_patterns.split(',').filter(p => p.trim()).length;
-                parts.push(`Exclude: ${count}`);
-            }
-
-            return parts.length > 0 ? parts.join(', ') : 'None';
-        }
-    }));
+    // Source Management Component - REMOVED (sources infrastructure removed from codebase)
+    // The sourceManagement Alpine.js component has been removed as the sources table
+    // and related infrastructure no longer exist in the codebase.
 
     // Job Definitions Management Component
     Alpine.data('jobDefinitionsManagement', () => ({
         jobDefinitions: [],
-        sources: [],
         currentJobDefinition: null,
         showCreateModal: false,
         showEditModal: false,
@@ -511,7 +289,6 @@ document.addEventListener('alpine:init', () => {
         init() {
             window.debugLog('JobDefinitionsManagement', 'Initializing component');
             this.loadJobDefinitions();
-            this.loadSources();
             this.resetCurrentJobDefinition();
         },
 
@@ -546,18 +323,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async loadSources() {
-            window.debugLog('JobDefinitionsManagement', 'Loading sources from /api/sources');
-            try {
-                const response = await fetch('/api/sources');
-                if (!response.ok) throw new Error('Failed to fetch sources');
-                const data = await response.json();
-                this.sources = Array.isArray(data) ? data : [];
-            } catch (err) {
-                window.debugError('JobDefinitionsManagement', 'Error loading sources:', err);
-                this.sources = [];
-            }
-        },
+
 
         resetCurrentJobDefinition() {
             this.currentJobDefinition = {
@@ -565,7 +331,9 @@ document.addEventListener('alpine:init', () => {
                 name: '',
                 type: 'crawler',
                 description: '',
-                sources: [],
+                source_type: '',  // Source type: "jira", "confluence", "github"
+                base_url: '',     // Base URL for the source
+                auth_id: '',      // Reference to auth_credentials.id
                 steps: this.getDefaultSteps('crawler'),
                 schedule: '',  // Optional: empty for on-demand jobs
                 timeout: '',   // Optional: duration string like "10m", "1h", "30s"
@@ -655,7 +423,6 @@ document.addEventListener('alpine:init', () => {
             this.showCreateModal = true;
             document.body.classList.add('modal-open');
             await this.loadJobDefinitions();
-            this.loadSources();
 
             this.$nextTick(() => {
                 const modal = document.querySelector('.modal.active .modal-container');
@@ -676,7 +443,6 @@ document.addEventListener('alpine:init', () => {
             this.showEditModal = true;
             document.body.classList.add('modal-open');
             await this.loadJobDefinitions();
-            this.loadSources();
 
             this.$nextTick(() => {
                 const modal = document.querySelector('.modal.active .modal-container');
@@ -906,11 +672,6 @@ document.addEventListener('alpine:init', () => {
             if (!dateStr) return 'N/A';
             const date = new Date(dateStr);
             return date.toLocaleString();
-        },
-
-        formatSourcesList(sources) {
-            if (!sources || sources.length === 0) return 'None';
-            return `${sources.length} source${sources.length !== 1 ? 's' : ''}`;
         },
 
         formatPostJobsList(postJobs) {

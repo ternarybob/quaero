@@ -50,7 +50,8 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		Str("parent_job_id", parentJobID).
 		Str("job_name", jobDef.Name).
 		Int("step_count", len(jobDef.Steps)).
-		Int("source_count", len(jobDef.Sources)).
+		Str("source_type", jobDef.SourceType).
+		Str("base_url", jobDef.BaseURL).
 		Msg("Starting job definition execution")
 
 	// Create parent job record in database to track overall progress
@@ -145,7 +146,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		}
 
 		// Execute step
-		childJobID, err := executor.ExecuteStep(ctx, step, jobDef.Sources, parentJobID)
+		childJobID, err := executor.ExecuteStep(ctx, step, jobDef, parentJobID)
 		if err != nil {
 			parentLogger.Error().
 				Err(err).

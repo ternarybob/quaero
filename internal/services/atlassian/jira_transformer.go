@@ -2,7 +2,6 @@ package atlassian
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -86,13 +85,8 @@ func (t *JiraTransformer) handleCollectionEvent(ctx context.Context, event inter
 
 // transformJob transforms a single Jira job's results into documents
 func (t *JiraTransformer) transformJob(ctx context.Context, job *models.JobModel) error {
-	// Parse source config snapshot from metadata
-	var sourceConfig *models.SourceConfig
-	if sourceConfigSnapshot, ok := job.Metadata["source_config_snapshot"].(string); ok && sourceConfigSnapshot != "" {
-		if err := json.Unmarshal([]byte(sourceConfigSnapshot), &sourceConfig); err != nil {
-			t.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to parse source config snapshot")
-		}
-	}
+	// Get source fields from metadata
+	baseURL, _ := job.Metadata["base_url"].(string)
 
 	// Get source_type from metadata
 	sourceType, _ := job.Metadata["source_type"].(string)
@@ -103,6 +97,7 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *models.JobModel
 	t.logger.Warn().
 		Str("job_id", job.ID).
 		Str("source_type", sourceType).
+		Str("base_url", baseURL).
 		Msg("Jira transformation temporarily disabled - requires crawler service refactoring")
 	return nil
 
@@ -150,8 +145,8 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *models.JobModel
 		}
 
 		// Parse and transform Jira issue
-		doc, err := t.parseJiraIssue(body, result.URL, result.Metadata, sourceConfig)
-		if err != nil {
+		doc, err := t.parseJiraIssue(body, result.URL, result.Metadata, baseURL)
+		if err != nil{
 			parseFailures++
 			t.logger.Warn().
 				Err(err).
@@ -227,7 +222,7 @@ func (t *JiraTransformer) transformJob(ctx context.Context, job *models.JobModel
 }
 
 // parseJiraIssue parses a Jira issue HTML page into a Document
-func (t *JiraTransformer) parseJiraIssue(body []byte, pageURL string, metadata map[string]interface{}, sourceConfig *models.SourceConfig) (*models.Document, error) {
+func (t *JiraTransformer) parseJiraIssue(body []byte, pageURL string, metadata map[string]interface{}, baseURL string) (*models.Document, error) {
 	// Guard against JSON content (backward compatibility check)
 	if len(body) > 0 && (body[0] == '{' || body[0] == '[') {
 		t.logger.Warn().Str("url", pageURL).Msg("Detected JSON content, which is no longer supported; skipping parse")
@@ -376,7 +371,7 @@ func (t *JiraTransformer) parseJiraIssue(body []byte, pageURL string, metadata m
 	}
 
 	// Resolve document URL early for better link resolution in HTML→MD conversion
-	docURL := resolveDocumentURL(pageURL, pageURL, sourceConfig, t.logger)
+	docURL := resolveDocumentURL(pageURL, pageURL, baseURL, t.logger)
 
 	// Convert description HTML to markdown using resolved URL as base for link resolution
 	contentMarkdown := convertHTMLToMarkdown(descriptionHTML, docURL, t.enableEmptyOutputFallback, t.logger)

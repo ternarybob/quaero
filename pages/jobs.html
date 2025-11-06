@@ -15,7 +15,7 @@
         <!-- Page Title -->
         <div class="page-title">
             <h1>Job Management</h1>
-            <p>Manage authentication, sources, and job definitions for data collection</p>
+            <p>Manage authentication and job definitions for data collection</p>
         </div>
 
         <!-- Authentication List -->
@@ -90,187 +90,6 @@
             </div>
         </section>
 
-        <!-- ============================= SOURCES PANEL ============================= -->
-
-        <!-- Sources Management Component (wrap card and modal in shared scope) -->
-        <section style="margin-top: 1.5rem;" x-data="sourceManagement">
-            <!-- Sources List -->
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3> Sources </h3>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary" @click="openCreateModal($event)">
-                                <i class="fas fa-plus"></i>
-                                <span>Add Source</span>
-                            </button>
-                            <button class="btn btn-sm" @click="loadSources()" title="Refresh Sources">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <!-- Empty State -->
-                    <template x-if="sources.length === 0">
-                        <div class="empty">
-                            <div class="empty-icon">
-                                <i class="fas fa-database fa-3x"></i>
-                            </div>
-                            <p class="empty-title h5">No sources configured</p>
-                            <p class="empty-subtitle">Click "Add Source" to get started</p>
-                        </div>
-                    </template>
-
-                    <!-- Source Cards -->
-                    <template x-for="source in sources" :key="source.id">
-                        <div class="card" style="margin-bottom: 0.8rem;">
-                            <div class="card-body">
-                                <div class="columns">
-                                    <!-- Left side: Content -->
-                                    <div class="column col-10">
-                                        <div class="card-title h5" x-text="source.name"></div>
-                                        <div class="card-subtitle text-gray" x-text="source.base_url"></div>
-
-                                        <!-- Metadata -->
-                                        <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
-                                            <!-- Type -->
-                                            <div>
-                                                <i class="fas fa-tag"></i>
-                                                <span x-text="source.type.toUpperCase()"></span>
-                                            </div>
-
-                                            <!-- Authentication -->
-                                            <div>
-                                                <i class="fas fa-key"></i>
-                                                <span x-text="source.auth_id ? 'Configured' : 'None'"></span>
-                                            </div>
-
-                                            <!-- Status -->
-                                            <div>
-                                                <i class="fas" :class="source.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
-                                                <span :class="source.enabled ? 'text-success' : 'text-gray'" x-text="source.enabled ? 'Enabled' : 'Disabled'"></span>
-                                            </div>
-
-                                            <!-- Created -->
-                                            <div>
-                                                <i class="fas fa-calendar"></i>
-                                                <span x-text="formatDate(source.created_at)"></span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- Right side: Actions -->
-                                    <div class="column col-2 text-right">
-                                        <button class="btn btn-sm" @click="editSource(source, $event)" title="Edit Source" aria-label="Edit Source">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-error" @click="deleteSource(source.id)" title="Delete Source" aria-label="Delete Source">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-            </div>
-
-            <!-- Create/Edit Source Modal -->
-            <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
-                <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
-                <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
-                    <div class="modal-header">
-                        <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
-                        <div class="modal-title h5" x-text="showEditModal ? 'Edit Source' : 'Add New Source'"></div>
-                    </div>
-                    <div class="modal-body">
-                        <div class="content">
-                            <div class="form-group">
-                                <label class="form-label">Name</label>
-                                <input class="form-input" type="text" x-model="currentSource.name" placeholder="My Jira Instance">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Type</label>
-                                <select class="form-select" x-model="currentSource.type">
-                                    <option value="jira">Jira</option>
-                                    <option value="confluence">Confluence</option>
-                                    <option value="github">GitHub</option>
-                                </select>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Base URL</label>
-                                <input class="form-input" type="url" x-model="currentSource.base_url" placeholder="https://yourcompany.atlassian.net">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Authentication</label>
-                                <select class="form-select" x-model="currentSource.auth_id">
-                                    <option value="">No Authentication</option>
-                                    <template x-for="auth in authentications" :key="auth.id">
-                                        <option :value="auth.id" x-text="`${auth.name} (${auth.site_domain})`"></option>
-                                    </template>
-                                </select>
-                                <p class="form-input-hint">Select authentication credentials for this source</p>
-                                <template x-if="authentications.length === 0">
-                                    <p class="form-input-hint text-warning">
-                                        No authentication configured. Scroll up to add authentication first.
-                                    </p>
-                                </template>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-checkbox">
-                                    <input type="checkbox" x-model="currentSource.enabled">
-                                    <i class="form-icon"></i> Enabled
-                                </label>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Crawl Configuration</label>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label class="form-label" style="font-size: 0.875rem;">Max Depth</label>
-                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.max_depth" min="1" max="10">
-                                </div>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label class="form-label" style="font-size: 0.875rem;">Concurrency</label>
-                                    <input class="form-input" type="number" x-model.number="currentSource.crawl_config.concurrency" min="1" max="10">
-                                </div>
-                                <div>
-                                    <label class="form-checkbox">
-                                        <input type="checkbox" x-model="currentSource.crawl_config.follow_links">
-                                        <i class="form-icon"></i> Follow Links
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Link Filtering</label>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label class="form-label" style="font-size: 0.875rem;">Include Patterns</label>
-                                    <input class="form-input" type="text" x-model="currentSource.filters.include_patterns" placeholder="browse,projects,issues">
-                                    <p class="form-input-hint">Comma-separated keywords. Only links matching these patterns will be followed.</p>
-                                </div>
-                                <div>
-                                    <label class="form-label" style="font-size: 0.875rem;">Exclude Patterns</label>
-                                    <input class="form-input" type="text" x-model="currentSource.filters.exclude_patterns" placeholder="admin,logout,settings">
-                                    <p class="form-input-hint">Comma-separated keywords. Links matching these patterns will be skipped.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-primary" @click="saveSource()">Save</button>
-                        <button class="btn" @click="closeModal()">Cancel</button>
-                    </div>
-                </div>
-            </div>
-        </section>
-
         <!-- ============================= JOB DEFINITIONS PANEL ============================= -->
 
         <!-- Job Definitions Management Component -->
@@ -283,10 +102,10 @@
                             <h3>Job Definitions</h3>
                         </section>
                         <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary" @click="openCreateModal($event)">
+                            <a href="/job_add" class="btn btn-sm btn-primary">
                                 <i class="fas fa-plus"></i>
-                                <span>Add Job Definition</span>
-                            </button>
+                                <span>Add Job</span>
+                            </a>
                             <button class="btn btn-sm" @click="loadJobDefinitions()" title="Refresh Job Definitions">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
@@ -301,7 +120,7 @@
                                 <i class="fas fa-briefcase fa-3x"></i>
                             </div>
                             <p class="empty-title h5">No job definitions configured</p>
-                            <p class="empty-subtitle">Click "Add Job Definition" to create one</p>
+                            <p class="empty-subtitle">Click "Add Job" to create one</p>
                         </div>
                     </template>
 
@@ -323,10 +142,10 @@
                                                 <span x-text="jobDef.type"></span>
                                             </div>
 
-                                            <!-- Sources -->
-                                            <div>
+                                            <!-- Source Type -->
+                                            <div x-show="jobDef.source_type">
                                                 <i class="fas fa-database"></i>
-                                                <span x-text="formatSourcesList(jobDef.sources)"></span>
+                                                <span x-text="jobDef.source_type || 'N/A'"></span>
                                             </div>
 
                                             <!-- Schedule -->
@@ -370,102 +189,6 @@
                             </div>
                         </div>
                     </template>
-                </div>
-            </div>
-
-            <!-- Create/Edit Job Definition Modal -->
-            <div class="modal" :class="{'active': showCreateModal || showEditModal}" @keydown.escape.window="closeModal()">
-                <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
-                <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 600px;">
-                    <div class="modal-header">
-                        <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
-                        <div class="modal-title h5" x-text="showEditModal ? 'Edit Job Definition' : 'Add New Job Definition'"></div>
-                    </div>
-                    <div class="modal-body">
-                        <div class="content">
-                            <div class="form-group">
-                                <label class="form-label">Name</label>
-                                <input class="form-input" type="text" x-model="currentJobDefinition.name" placeholder="My Crawl Job">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Type</label>
-                                <select class="form-select" x-model="currentJobDefinition.type" @change="updateJobTypeSteps(currentJobDefinition.type)">
-                                    <option value="crawler">Crawler</option>
-                                    <option value="summarizer">Summarizer</option>
-                                    <option value="custom">Custom</option>
-                                </select>
-                                <p class="form-input-hint">Job type determines the default actions that will be executed</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Description</label>
-                                <textarea class="form-input" x-model="currentJobDefinition.description" placeholder="Brief description of what this job does" rows="2"></textarea>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Sources</label>
-                                <select class="form-select" x-model="currentJobDefinition.sources" multiple size="5">
-                                    <template x-for="source in sources" :key="source.id">
-                                        <option :value="source.id" x-text="`${source.name} (${source.type})`"></option>
-                                    </template>
-                                </select>
-                                <p class="form-input-hint">Select one or more sources for this job (hold Ctrl/Cmd to select multiple). Link filtering is configured at the source level.</p>
-                                <template x-if="sources.length === 0">
-                                    <p class="form-input-hint text-warning">
-                                        No sources available. Add sources first.
-                                    </p>
-                                </template>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Post-Jobs (Optional)</label>
-                                <select class="form-select" x-model="currentJobDefinition.post_jobs" multiple size="5">
-                                    <template x-for="jobDef in availablePostJobs" :key="jobDef.id">
-                                        <option :value="jobDef.id" x-text="jobDef.name + (jobDef.enabled ? '' : ' (disabled)')"></option>
-                                    </template>
-                                </select>
-                                <p class="form-input-hint">Select job definitions to execute after this job completes successfully. Jobs run independently (no parent/child relationship). Hold Ctrl/Cmd to select multiple.</p>
-                                <template x-if="availablePostJobs.length === 0">
-                                    <p class="form-input-hint text-warning">
-                                        No other job definitions available. Create additional jobs first.
-                                    </p>
-                                </template>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Schedule (Optional)</label>
-                                <input class="form-input" type="text" x-model="currentJobDefinition.schedule" placeholder="0 */6 * * * (every 6 hours)">
-                                <p class="form-input-hint">Cron expression for scheduled execution. Leave empty for on-demand jobs (manual execution only).</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Timeout (Optional)</label>
-                                <input class="form-input" type="text" x-model="currentJobDefinition.timeout" placeholder="10m (e.g., 10m, 1h, 30s)">
-                                <p class="form-input-hint">Maximum execution time for this job. Use duration format: 10m (minutes), 1h (hours), 30s (seconds). Leave empty for no timeout.</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-checkbox">
-                                    <input type="checkbox" x-model="currentJobDefinition.enabled">
-                                    <i class="form-icon"></i> Enabled
-                                </label>
-                                <p class="form-input-hint">Only enabled jobs can be executed or scheduled</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-checkbox">
-                                    <input type="checkbox" x-model="currentJobDefinition.auto_start">
-                                    <i class="form-icon"></i> Auto Start
-                                </label>
-                                <p class="form-input-hint">Automatically start this job when the application starts</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-primary" @click="saveJobDefinition()">Save</button>
-                        <button class="btn" @click="closeModal()">Cancel</button>
-                    </div>
                 </div>
             </div>
         </section>
@@ -571,46 +294,6 @@
         // Ensure Alpine.js is fully initialized
         document.addEventListener('alpine:init', function () {
             console.log('[Jobs] Alpine.js initialized');
-        });
-
-        // Plain JavaScript ESC key handler for source modal (backup for Alpine directive)
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                const modal = document.querySelector('.modal.active');
-                if (modal) {
-                    // Trigger Alpine's closeModal method if available
-                    const sourceSection = document.querySelector('[x-data="sourceManagement"]');
-                    if (sourceSection && sourceSection.__x) {
-                        sourceSection.__x.$data.closeModal();
-                    }
-                }
-            }
-        });
-
-        // Focus trap for source modal
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Tab') {
-                const modal = document.querySelector('.modal.active .modal-container');
-                if (modal) {
-                    const focusableElements = modal.querySelectorAll(
-                        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled])'
-                    );
-                    const firstFocusable = focusableElements[0];
-                    const lastFocusable = focusableElements[focusableElements.length - 1];
-
-                    if (e.shiftKey) {
-                        if (document.activeElement === firstFocusable) {
-                            lastFocusable.focus();
-                            e.preventDefault();
-                        }
-                    } else {
-                        if (document.activeElement === lastFocusable) {
-                            firstFocusable.focus();
-                            e.preventDefault();
-                        }
-                    }
-                }
-            }
         });
     </script>
 </body>

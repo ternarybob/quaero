@@ -42,6 +42,20 @@ func TestJobsPageLoad(t *testing.T) {
 	url := env.GetBaseURL() + "/jobs"
 	var title string
 
+	// Collect console errors
+	consoleErrors := []string{}
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		if consoleEvent, ok := ev.(*runtime.EventExceptionThrown); ok {
+			if consoleEvent.ExceptionDetails != nil && consoleEvent.ExceptionDetails.Exception != nil {
+				errorMsg := consoleEvent.ExceptionDetails.Exception.Description
+				if errorMsg == "" && consoleEvent.ExceptionDetails.Text != "" {
+					errorMsg = consoleEvent.ExceptionDetails.Text
+				}
+				consoleErrors = append(consoleErrors, errorMsg)
+			}
+		}
+	})
+
 	env.LogTest(t, "Setting desktop viewport size (1920x1080)")
 	env.LogTest(t, "Navigating to jobs page: %s", url)
 
@@ -49,6 +63,7 @@ func TestJobsPageLoad(t *testing.T) {
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for Alpine.js to initialize and any async operations
 		chromedp.Title(&title),
 	)
 
@@ -69,7 +84,41 @@ func TestJobsPageLoad(t *testing.T) {
 		env.LogTest(t, "✓ Page title correct: '%s'", title)
 	}
 
-	env.LogTest(t, "✅ Jobs page loads correctly")
+	// Check for console errors
+	env.LogTest(t, "Checking for console errors...")
+	if len(consoleErrors) > 0 {
+		env.LogTest(t, "ERROR: Found %d console error(s):", len(consoleErrors))
+		for i, errMsg := range consoleErrors {
+			env.LogTest(t, "  [%d] %s", i+1, errMsg)
+		}
+		t.Errorf("Found %d console error(s) on page load", len(consoleErrors))
+	} else {
+		env.LogTest(t, "✓ No console errors found")
+	}
+
+	// Check for notification errors
+	env.LogTest(t, "Checking for notification errors...")
+	var notificationErrors []string
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			Array.from(document.querySelectorAll('.notification.error, .notification.is-danger, .toast.error, .toast.is-danger'))
+				.map(el => el.textContent.trim())
+		`, &notificationErrors),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to check for notification errors: %v", err)
+	} else if len(notificationErrors) > 0 {
+		env.LogTest(t, "ERROR: Found %d notification error(s):", len(notificationErrors))
+		for i, errMsg := range notificationErrors {
+			env.LogTest(t, "  [%d] %s", i+1, errMsg)
+		}
+		t.Errorf("Found %d notification error(s) on page load", len(notificationErrors))
+	} else {
+		env.LogTest(t, "✓ No notification errors found")
+	}
+
+	env.LogTest(t, "✅ Jobs page loads correctly with no errors")
 }
 
 func TestJobsPageElements(t *testing.T) {
@@ -106,7 +155,6 @@ func TestJobsPageElements(t *testing.T) {
 		selector string
 	}{
 		{"Authentication section", `[x-data*="authPage"]`},
-		{"Sources section", `[x-data*="sourceManagement"]`},
 		{"Job Definitions section", `[x-data*="jobDefinitionsManagement"]`},
 		{"Card elements", ".card"},
 		{"Add Job Definition button", "button.btn-primary"},
@@ -311,7 +359,7 @@ func TestJobsAuthenticationSection(t *testing.T) {
 	env.LogTest(t, "✅ Authentication section displays correctly")
 }
 
-// TestJobsSourcesSection verifies the sources section displays correctly
+// TestJobsSourcesSection verifies the sources section has been removed
 func TestJobsSourcesSection(t *testing.T) {
 	env, err := common.SetupTestEnvironment("TestJobsSourcesSection")
 	if err != nil {
@@ -354,7 +402,7 @@ func TestJobsSourcesSection(t *testing.T) {
 		t.Fatalf("Failed to load jobs page: %v", err)
 	}
 
-	// Check for sources section
+	// Check that sources section does NOT exist (it was removed)
 	var sourcesSectionExists bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`document.querySelector('[x-data="sourceManagement"]') !== null`, &sourcesSectionExists),
@@ -365,16 +413,16 @@ func TestJobsSourcesSection(t *testing.T) {
 		t.Fatalf("Failed to check sources section: %v", err)
 	}
 
-	if !sourcesSectionExists {
-		env.LogTest(t, "ERROR: Sources section not found")
-		env.TakeScreenshot(ctx, "sources-section-not-found")
-		t.Error("Sources section not found on page")
+	if sourcesSectionExists {
+		env.LogTest(t, "ERROR: Sources section found (should have been removed)")
+		env.TakeScreenshot(ctx, "sources-section-found")
+		t.Error("Sources section should not exist on page (it was removed from the codebase)")
 	} else {
-		env.LogTest(t, "✓ Sources section found")
+		env.LogTest(t, "✓ Sources section correctly removed from page")
 	}
 
-	env.TakeScreenshot(ctx, "jobs-sources-section")
-	env.LogTest(t, "✅ Sources section displays correctly")
+	env.TakeScreenshot(ctx, "jobs-no-sources-section")
+	env.LogTest(t, "✅ Sources section has been successfully removed")
 }
 
 // TestJobsDefinitionsSection verifies the job definitions section displays correctly
