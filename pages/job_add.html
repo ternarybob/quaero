@@ -56,16 +56,16 @@
 
     {{template "navbar.html" .}}
 
-    <main class="page-container">
+    <main class="page-container" x-data="jobAddPage()">
 
         <!-- Page Title -->
         <div class="page-title">
-            <h1>Add Job Definition</h1>
-            <p>Upload a TOML file to create a new crawler job definition</p>
+            <h1 x-text="jobDefId ? 'Edit Job Definition' : 'Add Job Definition'">Add Job Definition</h1>
+            <p x-text="jobDefId ? 'Edit the TOML content below to update the job definition' : 'Upload a TOML file to create a new crawler job definition'">Upload a TOML file to create a new crawler job definition</p>
         </div>
 
         <!-- Job Add Form -->
-        <section style="margin-top: 1.5rem;" x-data="jobAddPage()">
+        <section style="margin-top: 1.5rem;">
             <div class="card">
                 <div class="card-header">
                     <header class="navbar">
@@ -91,8 +91,9 @@
                     <!-- TOML Editor -->
                     <div class="form-group">
                         <label class="form-label">TOML Content</label>
-                        <textarea id="toml-editor" x-ref="tomlEditor"></textarea>
-                        <p class="form-input-hint">
+                        <div x-show="isLoadingJob" class="loading loading-lg" style="margin: 2rem auto;"></div>
+                        <textarea id="toml-editor" x-ref="tomlEditor" x-show="!isLoadingJob"></textarea>
+                        <p class="form-input-hint" x-show="!isLoadingJob">
                             Define your crawler job in TOML format. See
                             <a href="https://github.com/ternarybob/quaero/blob/main/deployments/local/job-definitions/README.md" target="_blank">documentation</a>
                             for examples.
@@ -109,13 +110,9 @@
                             <i class="fas fa-check-circle"></i>
                             <span x-text="loading ? 'Validating...' : 'Validate'"></span>
                         </button>
-                        <button class="btn btn-success" @click="createJob()" :disabled="loading || validationStatus !== 'success'">
+                        <button class="btn btn-success" @click="saveJob()" :disabled="loading">
                             <i class="fas fa-save"></i>
-                            <span x-text="loading ? 'Creating...' : 'Create Job'"></span>
-                        </button>
-                        <button class="btn btn-warning" @click="saveAsInvalid()">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <span x-text="loading ? 'Saving...' : 'Save as Invalid'"></span>
+                            <span x-text="loading ? 'Saving...' : 'Save'"></span>
                         </button>
                         <button class="btn" @click="loadExample()">
                             <i class="fas fa-file-code"></i>
@@ -177,6 +174,8 @@ auto_start = false             # Auto-start on application startup</code></pre>
             return {
                 editor: null,
                 loading: false,
+                isLoadingJob: false,
+                jobDefId: null,
                 validationMessage: '',
                 validationStatus: '', // 'success' or 'error'
 
@@ -199,12 +198,61 @@ auto_start = false             # Auto-start on application startup</code></pre>
                         // Ensure the editor is editable
                         this.editor.setOption('readOnly', false);
 
-                        // Load example by default
-                        this.loadExample();
+                        // Check for ?id= URL parameter to load existing job
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const jobId = urlParams.get('id');
 
-                        // Focus the editor to make it immediately usable
-                        this.editor.focus();
+                        if (jobId) {
+                            this.jobDefId = jobId;
+                            this.loadJobDefinition(jobId);
+                        } else {
+                            // Load example by default for new jobs
+                            this.loadExample();
+                            // Focus the editor to make it immediately usable
+                            this.editor.focus();
+                        }
                     });
+                },
+
+                async loadJobDefinition(jobId) {
+                    this.isLoadingJob = true;
+                    this.validationMessage = '';
+                    this.validationStatus = '';
+
+                    try {
+                        const response = await fetch(`/api/job-definitions/${jobId}/export`, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'text/plain'
+                            }
+                        });
+
+                        if (response.ok) {
+                            const tomlContent = await response.text();
+                            this.editor.setValue(tomlContent);
+                            this.validationMessage = '';
+                            this.validationStatus = '';
+                            // Focus the editor after loading
+                            this.editor.focus();
+                        } else {
+                            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                            const errorMsg = `Failed to load job definition: ${errorData.error || response.statusText}`;
+                            this.validationMessage = errorMsg;
+                            this.validationStatus = 'error';
+                            window.showNotification(errorMsg, 'error');
+                            // Load example as fallback
+                            this.loadExample();
+                        }
+                    } catch (error) {
+                        const errorMsg = `Error loading job definition: ${error.message}`;
+                        this.validationMessage = errorMsg;
+                        this.validationStatus = 'error';
+                        window.showNotification(errorMsg, 'error');
+                        // Load example as fallback
+                        this.loadExample();
+                    } finally {
+                        this.isLoadingJob = false;
+                    }
                 },
 
                 handleFileUpload(event) {
@@ -259,49 +307,7 @@ auto_start = false             # Auto-start on application startup</code></pre>
                     }
                 },
 
-                async createJob() {
-                    const tomlContent = this.editor.getValue().trim();
-
-                    if (!tomlContent) {
-                        window.showNotification('Please enter TOML content', 'error');
-                        return;
-                    }
-
-                    if (this.validationStatus !== 'success') {
-                        window.showNotification('Please validate the TOML first', 'error');
-                        return;
-                    }
-
-                    this.loading = true;
-
-                    try {
-                        const response = await fetch('/api/job-definitions/upload', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'text/plain'
-                            },
-                            body: tomlContent
-                        });
-
-                        const data = await response.json();
-
-                        if (response.ok) {
-                            window.showNotification('Job definition created successfully', 'success');
-                            // Redirect to jobs page after 1 second
-                            setTimeout(() => {
-                                window.location.href = '/jobs';
-                            }, 1000);
-                        } else {
-                            window.showNotification(`Failed to create job: ${data.error || 'Unknown error'}`, 'error');
-                        }
-                    } catch (error) {
-                        window.showNotification(`Error creating job: ${error.message}`, 'error');
-                    } finally {
-                        this.loading = false;
-                    }
-                },
-
-                async saveAsInvalid() {
+                async saveJob() {
                     const tomlContent = this.editor.getValue().trim();
 
                     if (!tomlContent) {
@@ -312,7 +318,8 @@ auto_start = false             # Auto-start on application startup</code></pre>
                     this.loading = true;
 
                     try {
-                        const response = await fetch('/api/job-definitions/save-invalid', {
+                        // First, validate the TOML
+                        const validateResponse = await fetch('/api/job-definitions/validate', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'text/plain'
@@ -320,19 +327,65 @@ auto_start = false             # Auto-start on application startup</code></pre>
                             body: tomlContent
                         });
 
-                        const data = await response.json();
+                        const isValid = validateResponse.ok;
 
-                        if (response.ok) {
-                            window.showNotification('Invalid job definition saved successfully', 'success');
+                        // If invalid, ask user if they want to save anyway
+                        if (!isValid) {
+                            const validateData = await validateResponse.json();
+                            const errorMsg = validateData.error || 'Unknown validation error';
+
+                            const confirmSave = confirm(`TOML validation failed: ${errorMsg}\n\nDo you want to save as an invalid job definition anyway?`);
+                            if (!confirmSave) {
+                                this.validationMessage = `✗ Validation failed: ${errorMsg}`;
+                                this.validationStatus = 'error';
+                                this.loading = false;
+                                return;
+                            }
+
+                            // Save as invalid
+                            const saveInvalidResponse = await fetch('/api/job-definitions/save-invalid', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'text/plain'
+                                },
+                                body: tomlContent
+                            });
+
+                            if (saveInvalidResponse.ok) {
+                                window.showNotification('Invalid job definition saved successfully', 'success');
+                                setTimeout(() => {
+                                    window.location.href = '/jobs';
+                                }, 1000);
+                            } else {
+                                const data = await saveInvalidResponse.json();
+                                window.showNotification(`Failed to save invalid job: ${data.error || 'Unknown error'}`, 'error');
+                            }
+                            return;
+                        }
+
+                        // TOML is valid - proceed with normal save (create or update)
+                        const uploadResponse = await fetch('/api/job-definitions/upload', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'text/plain'
+                            },
+                            body: tomlContent
+                        });
+
+                        const uploadData = await uploadResponse.json();
+
+                        if (uploadResponse.ok) {
+                            const action = this.jobDefId ? 'updated' : 'created';
+                            window.showNotification(`Job definition ${action} successfully`, 'success');
                             // Redirect to jobs page after 1 second
                             setTimeout(() => {
                                 window.location.href = '/jobs';
                             }, 1000);
                         } else {
-                            window.showNotification(`Failed to save invalid job: ${data.error || 'Unknown error'}`, 'error');
+                            window.showNotification(`Failed to save job: ${uploadData.error || 'Unknown error'}`, 'error');
                         }
                     } catch (error) {
-                        window.showNotification(`Error saving invalid job: ${error.message}`, 'error');
+                        window.showNotification(`Error saving job: ${error.message}`, 'error');
                     } finally {
                         this.loading = false;
                     }

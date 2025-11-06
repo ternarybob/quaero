@@ -1,0 +1,335 @@
+{
+  "task": "Fix edit job button and simplify save button text",
+  "folder": "edit-job-button-fixes",
+  "summary": {
+    "description": "Implement functionality to allow editing existing job definitions by navigating to job_add page with ?id= query parameter, and simplify the Save button text from 'Create Job' and 'Save as Invalid' to just 'Save'",
+    "current_behavior": {
+      "edit_button": "The edit button in jobs.html (line 183) calls editJobDefinition() which currently opens a modal dialog for editing. System jobs are disabled from editing.",
+      "save_buttons": "job_add.html has two separate save buttons: 'Create Job' (line 112-115) and 'Save as Invalid' (line 116-119), which create confusion about when to use which button.",
+      "job_add_page": "job_add.html currently only supports creating new jobs via TOML upload. It does not support loading existing jobs for editing via URL query parameter."
+    },
+    "desired_behavior": {
+      "edit_button": "Clicking the edit button should navigate to /job_add?id={jobDefId} instead of opening a modal",
+      "save_button": "Single 'Save' button that validates and saves (create or update based on whether ID exists)",
+      "job_add_page": "Support loading an existing job definition when ?id= parameter is present in URL, populate the TOML editor with the job's exported TOML content"
+    }
+  },
+  "steps": [
+    {
+      "id": 1,
+      "task": "Update editJobDefinition function in common.js to navigate instead of opening modal",
+      "files_affected": [
+        "pages/static/common.js"
+      ],
+      "details": {
+        "location": "Line 436-454 in jobDefinitionsManagement Alpine component",
+        "changes": [
+          "Replace the editJobDefinition function to simply navigate to /job_add?id={jobDef.id}",
+          "Remove modal-related code (showEditModal, modalTriggerElement, etc.)",
+          "Keep the system job check to prevent navigation for system jobs"
+        ],
+        "code_change": "Change from opening modal to: window.location.href = `/job_add?id=${jobDef.id}`"
+      },
+      "validation": "Click edit button on a user job in /jobs page should navigate to /job_add?id={id} with the ID in the URL"
+    },
+    {
+      "id": 2,
+      "task": "Modify job_add.html Alpine component to detect and load job from URL parameter",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "jobAddPage() function starting at line 176",
+        "changes": [
+          "Add jobDefId property to component state",
+          "In init() method, check for ?id= URL parameter using URLSearchParams",
+          "If ID exists, fetch the job definition from /api/job-definitions/{id}/export",
+          "Load the returned TOML content into the CodeMirror editor",
+          "Update page title to show 'Edit Job Definition' vs 'Add Job Definition'"
+        ],
+        "implementation_notes": [
+          "Use the existing export endpoint which returns TOML format",
+          "Handle errors if job not found or export fails",
+          "Show loading state while fetching"
+        ]
+      },
+      "validation": "Navigate to /job_add?id={existing-job-id} should load the job's TOML into the editor"
+    },
+    {
+      "id": 3,
+      "task": "Update page title dynamically based on create vs edit mode",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "Page title section around line 62-64",
+        "changes": [
+          "Use Alpine.js x-text directive to dynamically set h1 text",
+          "Add computed property or method to return 'Edit Job Definition' or 'Add Job Definition'",
+          "Update description paragraph similarly if needed"
+        ]
+      },
+      "validation": "Page title should show 'Edit Job Definition' when ?id= is present, 'Add Job Definition' otherwise"
+    },
+    {
+      "id": 4,
+      "task": "Simplify save buttons - merge 'Create Job' and 'Save as Invalid' into single 'Save' button",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "Lines 106-128 (button group section)",
+        "changes": [
+          "Remove the 'Create Job' button (lines 112-115)",
+          "Remove the 'Save as Invalid' button (lines 116-119)",
+          "Replace both with a single 'Save' button",
+          "New button should: validate first, then save (create or update)",
+          "Button should work for both create and edit scenarios",
+          "Keep validation button and other utility buttons (Example, Clear)"
+        ],
+        "button_behavior": [
+          "If validation passes: save the job normally (create new or update existing)",
+          "If validation fails: show error but still allow saving (for invalid/draft jobs)",
+          "Determine create vs update based on presence of jobDefId"
+        ]
+      },
+      "validation": "Only one 'Save' button should be visible. It should validate before saving but allow saving invalid jobs with confirmation."
+    },
+    {
+      "id": 5,
+      "task": "Update save logic to support both create and update operations",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "createJob() and saveAsInvalid() functions (lines 262-339)",
+        "changes": [
+          "Merge createJob() and saveAsInvalid() into a single saveJob() function",
+          "Check if jobDefId exists to determine create vs update",
+          "For updates: use PUT /api/job-definitions/{id} endpoint",
+          "For creates: use POST /api/job-definitions/upload endpoint",
+          "Parse TOML and send as request body",
+          "Handle validation in the save flow (validate first, save if valid, or prompt to save as invalid)",
+          "On success, redirect to /jobs page"
+        ],
+        "api_endpoints": {
+          "create": "POST /api/job-definitions/upload (body: TOML content)",
+          "update": "PUT /api/job-definitions/{id} (body: JobDefinition JSON)",
+          "validate": "POST /api/job-definitions/validate (body: TOML content)",
+          "save_invalid": "POST /api/job-definitions/save-invalid (body: TOML content)"
+        }
+      },
+      "validation": "Saving should create new job if no ID, update existing job if ID present. Should handle both valid and invalid TOML."
+    },
+    {
+      "id": 6,
+      "task": "Add handler method to parse TOML and convert to JobDefinition JSON for updates",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "Add new method in jobAddPage component",
+        "changes": [
+          "The update endpoint expects JobDefinition JSON, not TOML",
+          "Need to validate TOML first to get the JobDefinition structure",
+          "Use the validate endpoint response to get the parsed JobDefinition",
+          "Then send that to the update endpoint"
+        ],
+        "flow": [
+          "User clicks Save on edited job",
+          "Validate TOML via POST /api/job-definitions/validate",
+          "If valid, the validation doesn't return the parsed object currently",
+          "Need to use upload endpoint which parses and saves",
+          "For updates: fetch current job definition, merge TOML changes, then PUT"
+        ],
+        "alternative_approach": "Use POST /api/job-definitions/upload for both create and update, which handles TOML parsing. The backend should detect existing ID and update instead of create."
+      },
+      "validation": "Editing and saving an existing job should update it in the database, not create a duplicate"
+    },
+    {
+      "id": 7,
+      "task": "Update backend handler to support update via TOML upload endpoint",
+      "files_affected": [
+        "internal/handlers/job_definition_handler.go"
+      ],
+      "details": {
+        "location": "UploadJobDefinitionTOMLHandler (lines 730-782)",
+        "changes": [
+          "Check if job definition with the ID from TOML already exists",
+          "If exists: call UpdateJobDefinition instead of SaveJobDefinition",
+          "If not exists: create new (current behavior)",
+          "This allows the upload endpoint to handle both create and update seamlessly",
+          "Return appropriate status code (200 for update, 201 for create)"
+        ],
+        "code_pattern": [
+          "Parse TOML to get job definition",
+          "Check if job exists: existingJob, err := h.jobDefStorage.GetJobDefinition(ctx, jobDef.ID)",
+          "If exists and is system job: return forbidden error",
+          "If exists: call UpdateJobDefinition",
+          "If not exists: call SaveJobDefinition"
+        ]
+      },
+      "validation": "POST /api/job-definitions/upload should update existing job if ID matches, create if new ID"
+    },
+    {
+      "id": 8,
+      "task": "Add loading state to job_add page while fetching job definition",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "Add to component state and UI",
+        "changes": [
+          "Add isLoading state property",
+          "Show loading spinner/message while fetching job definition",
+          "Disable editor and buttons while loading",
+          "Clear loading state after fetch completes or fails"
+        ]
+      },
+      "validation": "Loading indicator should appear briefly when opening /job_add?id={id}"
+    },
+    {
+      "id": 9,
+      "task": "Handle error cases for invalid or missing job IDs",
+      "files_affected": [
+        "pages/job_add.html"
+      ],
+      "details": {
+        "location": "jobAddPage init() and new loadJobDefinition() method",
+        "changes": [
+          "If ?id= parameter exists but job not found, show error notification",
+          "If export endpoint fails (system job, not found, etc.), show error",
+          "Provide option to go back to /jobs or clear editor and start fresh",
+          "Handle network errors gracefully"
+        ]
+      },
+      "validation": "Navigating to /job_add?id=invalid-id should show appropriate error message"
+    },
+    {
+      "id": 10,
+      "task": "Update tests to verify edit navigation functionality",
+      "files_affected": [
+        "test/ui/jobs_test.go"
+      ],
+      "details": {
+        "location": "Add new test case or update existing tests",
+        "changes": [
+          "Test clicking edit button navigates to correct URL",
+          "Test job_add page loads job definition from URL parameter",
+          "Test save button updates existing job",
+          "Test system jobs cannot be edited (button disabled)",
+          "Test invalid ID shows error message"
+        ],
+        "test_structure": [
+          "Create a test job definition",
+          "Navigate to /jobs page",
+          "Click edit button",
+          "Verify URL contains /job_add?id={id}",
+          "Verify TOML editor contains job definition",
+          "Modify TOML content",
+          "Click Save",
+          "Verify job updated in database"
+        ]
+      },
+      "validation": "All tests should pass after implementation"
+    },
+    {
+      "id": 11,
+      "task": "Update CLAUDE.md documentation",
+      "files_affected": [
+        "CLAUDE.md"
+      ],
+      "details": {
+        "location": "Frontend Architecture or relevant section",
+        "changes": [
+          "Document the edit flow: jobs page -> job_add page with ?id= parameter",
+          "Document that job_add page supports both create and edit modes",
+          "Document the single Save button behavior",
+          "Update any references to modal-based editing (if present)"
+        ]
+      },
+      "validation": "Documentation accurately reflects the new edit workflow"
+    },
+    {
+      "id": 12,
+      "task": "Manual testing and cleanup",
+      "files_affected": [
+        "All modified files"
+      ],
+      "details": {
+        "test_scenarios": [
+          "Create a new job via job_add page",
+          "Edit an existing job via edit button",
+          "Try to edit a system job (should be disabled)",
+          "Save valid TOML in both create and edit mode",
+          "Save invalid TOML and verify it's handled gracefully",
+          "Test all edge cases (missing ID, invalid ID, network errors)",
+          "Verify validation message appears correctly",
+          "Verify redirect to /jobs after successful save"
+        ],
+        "cleanup": [
+          "Remove unused modal-related code if no longer needed",
+          "Remove unused functions (createJob, saveAsInvalid)",
+          "Update code comments",
+          "Check for console errors",
+          "Verify no broken functionality in jobs page"
+        ]
+      },
+      "validation": "All test scenarios work as expected, no regressions in existing functionality"
+    }
+  ],
+  "technical_notes": {
+    "api_endpoints_used": [
+      "GET /api/job-definitions/{id}/export - Returns TOML content",
+      "POST /api/job-definitions/validate - Validates TOML",
+      "POST /api/job-definitions/upload - Creates new or updates existing job (modified in step 7)",
+      "PUT /api/job-definitions/{id} - Updates existing job (alternative approach)"
+    ],
+    "frontend_patterns": {
+      "url_parameters": "Use URLSearchParams to read ?id= from window.location.search",
+      "alpine_reactivity": "Use Alpine.js x-data and x-text for dynamic content",
+      "codemirror": "Use editor.setValue() to populate content programmatically",
+      "navigation": "Use window.location.href for page navigation"
+    },
+    "backend_considerations": {
+      "system_jobs": "System jobs (job_type='system') cannot be edited or deleted - enforce in UI and backend",
+      "toml_parsing": "Backend uses github.com/pelletier/go-toml/v2 for TOML parsing",
+      "validation": "CrawlerJobDefinitionFile.Validate() checks TOML structure",
+      "storage": "JobDefinitionStorage interface provides GetJobDefinition, SaveJobDefinition, UpdateJobDefinition"
+    }
+  },
+  "dependencies": {
+    "no_new_libraries": true,
+    "existing_infrastructure": [
+      "Alpine.js for reactivity",
+      "CodeMirror for TOML editing",
+      "Existing API endpoints",
+      "URLSearchParams browser API",
+      "Fetch API for HTTP requests"
+    ]
+  },
+  "risk_assessment": {
+    "low_risk": [
+      "Navigation change from modal to page",
+      "Button text simplification",
+      "URL parameter handling"
+    ],
+    "medium_risk": [
+      "Merging create and update logic",
+      "Backend handler modification to support update via upload endpoint",
+      "TOML to JSON conversion for update endpoint"
+    ],
+    "mitigation": [
+      "Comprehensive testing of create and edit flows",
+      "Maintain backward compatibility with existing API contracts",
+      "Error handling for all edge cases",
+      "Preserve system job protection"
+    ]
+  },
+  "testing_strategy": {
+    "unit_tests": "Not applicable - primarily frontend changes",
+    "integration_tests": "Test API endpoints continue to work correctly",
+    "ui_tests": "Add tests to test/ui/jobs_test.go for edit navigation and save functionality",
+    "manual_tests": "Verify all user workflows for create and edit scenarios"
+  }
+}

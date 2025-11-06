@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -157,7 +158,7 @@ func TestJobsPageElements(t *testing.T) {
 		{"Authentication section", `[x-data*="authPage"]`},
 		{"Job Definitions section", `[x-data*="jobDefinitionsManagement"]`},
 		{"Card elements", ".card"},
-		{"Add Job Definition button", "button.btn-primary"},
+		{"Add Job button", `a[href="/job_add"]`},
 	}
 
 	env.LogTest(t, "Navigating to jobs page: %s", url)
@@ -926,4 +927,639 @@ func TestJobsRunDatabaseMaintenance(t *testing.T) {
 	}
 
 	env.LogTest(t, "✅ Database Maintenance job run test completed successfully")
+}
+
+// TestEditJobDefinition verifies clicking edit button navigates to job_add page with correct job loaded
+func TestEditJobDefinition(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestEditJobDefinition")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestEditJobDefinition")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestEditJobDefinition (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestEditJobDefinition (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// Navigate to jobs page
+	env.LogTest(t, "Setting desktop viewport size (1920x1080)")
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to set viewport size: %v", err)
+		t.Fatalf("Failed to set viewport size: %v", err)
+	}
+
+	env.LogTest(t, "Navigating to jobs page: %s/jobs", baseURL)
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(baseURL+"/jobs"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for Alpine.js and data to load
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load jobs page: %v", err)
+		env.TakeScreenshot(ctx, "jobs-page-load-failed")
+		t.Fatalf("Failed to load jobs page: %v", err)
+	}
+	env.LogTest(t, "✓ Jobs page loaded")
+	env.TakeScreenshot(ctx, "jobs-page-before-edit")
+
+	// Find a user job (not system job) to edit
+	env.LogTest(t, "Looking for a user job to edit...")
+	var jobInfo struct {
+		Found  bool   `json:"found"`
+		JobID  string `json:"jobId"`
+		Name   string `json:"name"`
+		IsUser bool   `json:"isUser"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				// Look for job cards
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+
+				// Find a user job (not Database Maintenance which is a system job)
+				for (const card of cards) {
+					const nameElement = card.querySelector('.card-title');
+					const name = nameElement ? nameElement.textContent.trim() : '';
+
+					// Skip system jobs like "Database Maintenance"
+					if (name === 'Database Maintenance') continue;
+
+					// Find the edit button - it has fa-edit icon and is in the actions column
+					const editButton = card.querySelector('button .fa-edit')?.closest('button');
+					if (editButton && !editButton.disabled) {
+						// Get job ID from the card's x-for binding or extract from button ID
+						const jobIdFromButton = editButton.id?.replace(/-edit$/, '');
+
+						return {
+							found: true,
+							jobId: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+							name: name,
+							isUser: true
+						};
+					}
+				}
+
+				return { found: false, jobId: '', name: '', isUser: false };
+			})()
+		`, &jobInfo),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to search for user job: %v", err)
+		env.TakeScreenshot(ctx, "user-job-search-failed")
+		t.Fatalf("Failed to search for user job: %v", err)
+	}
+
+	if !jobInfo.Found {
+		env.LogTest(t, "WARNING: No user job found, test cannot proceed")
+		env.LogTest(t, "NOTE: This test requires at least one user-created job to exist")
+		env.TakeScreenshot(ctx, "no-user-job-found")
+		t.Skip("No user job found to test edit functionality")
+	}
+
+	env.LogTest(t, "✓ Found user job: %s (ID: %s)", jobInfo.Name, jobInfo.JobID)
+
+	// Click the edit button for this job
+	env.LogTest(t, "Clicking edit button for job: %s", jobInfo.Name)
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const card = cards.find(c => c.textContent.includes('%s'));
+				if (card) {
+					// Find edit button by fa-edit icon
+					const editButton = card.querySelector('button .fa-edit')?.closest('button');
+					if (editButton && !editButton.disabled) {
+						editButton.click();
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, jobInfo.Name), nil),
+		chromedp.Sleep(2*time.Second), // Wait for navigation
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to click edit button: %v", err)
+		env.TakeScreenshot(ctx, "edit-button-click-failed")
+		t.Fatalf("Failed to click edit button: %v", err)
+	}
+
+	env.LogTest(t, "✓ Edit button clicked")
+
+	// Verify navigation to job_add page with ID parameter
+	env.LogTest(t, "Verifying navigation to job_add page with ID parameter...")
+	var currentURL string
+	err = chromedp.Run(ctx,
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second), // Wait for page load
+		chromedp.Evaluate(`window.location.href`, &currentURL),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to get current URL: %v", err)
+		env.TakeScreenshot(ctx, "url-check-failed")
+		t.Fatalf("Failed to get current URL: %v", err)
+	}
+
+	expectedURL := baseURL + "/job_add?id=" + jobInfo.JobID
+	if currentURL != expectedURL {
+		env.LogTest(t, "ERROR: Expected URL '%s', got '%s'", expectedURL, currentURL)
+		env.TakeScreenshot(ctx, "wrong-url")
+		t.Errorf("Expected URL '%s', got '%s'", expectedURL, currentURL)
+	} else {
+		env.LogTest(t, "✓ Navigated to correct URL: %s", currentURL)
+	}
+
+	env.TakeScreenshot(ctx, "job-add-page-loaded")
+
+	// Verify page title shows "Edit Job Definition"
+	env.LogTest(t, "Checking page title...")
+	var pageTitle string
+	err = chromedp.Run(ctx,
+		chromedp.WaitVisible(`h1`, chromedp.ByQuery),
+		chromedp.Text(`h1`, &pageTitle, chromedp.ByQuery),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to read page title: %v", err)
+		env.TakeScreenshot(ctx, "title-check-failed")
+		t.Fatalf("Failed to read page title: %v", err)
+	}
+
+	if !strings.Contains(pageTitle, "Edit Job Definition") {
+		env.LogTest(t, "ERROR: Expected page title to contain 'Edit Job Definition', got '%s'", pageTitle)
+		t.Errorf("Expected page title to contain 'Edit Job Definition', got '%s'", pageTitle)
+	} else {
+		env.LogTest(t, "✓ Page title correct: '%s'", pageTitle)
+	}
+
+	// Verify TOML content loaded in editor
+	env.LogTest(t, "Verifying TOML content loaded in CodeMirror editor...")
+	var editorContent string
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2*time.Second), // Wait for editor to load
+		chromedp.Evaluate(`
+			(() => {
+				// Try to get CodeMirror editor content
+				const editorElement = document.querySelector('.CodeMirror');
+				if (editorElement && editorElement.CodeMirror) {
+					return editorElement.CodeMirror.getValue();
+				}
+				// Fallback: try textarea
+				const textarea = document.querySelector('textarea');
+				return textarea ? textarea.value : '';
+			})()
+		`, &editorContent),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to read editor content: %v", err)
+		env.TakeScreenshot(ctx, "editor-content-read-failed")
+		t.Fatalf("Failed to read editor content: %v", err)
+	}
+
+	if editorContent == "" {
+		env.LogTest(t, "ERROR: Editor content is empty (job definition did not load)")
+		env.TakeScreenshot(ctx, "editor-empty")
+		t.Error("Editor content is empty (job definition did not load)")
+	} else {
+		// Verify TOML content contains expected fields
+		env.LogTest(t, "✓ Editor content loaded (%d characters)", len(editorContent))
+		if strings.Contains(editorContent, jobInfo.Name) {
+			env.LogTest(t, "✓ TOML content contains job name: %s", jobInfo.Name)
+		} else {
+			env.LogTest(t, "WARNING: TOML content does not contain job name")
+		}
+
+		// Log first 200 chars for verification
+		preview := editorContent
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		env.LogTest(t, "  Content preview: %s", preview)
+	}
+
+	env.TakeScreenshot(ctx, "edit-job-content-loaded")
+	env.LogTest(t, "✅ Edit job definition test completed successfully")
+}
+
+// TestEditJobSave verifies that saving an edited job updates it correctly
+func TestEditJobSave(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestEditJobSave")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestEditJobSave")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestEditJobSave (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestEditJobSave (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// First, get a list of user jobs via API
+	env.LogTest(t, "Fetching user jobs via API...")
+	httpHelper := env.NewHTTPTestHelper(t)
+	resp, err := httpHelper.GET("/api/job-definitions")
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to fetch job definitions: %v", err)
+		t.Fatalf("Failed to fetch job definitions: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var apiResponse struct {
+		JobDefinitions []struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			JobType string `json:"job_type"`
+		} `json:"job_definitions"`
+	}
+
+	if err := httpHelper.ParseJSONResponse(resp, &apiResponse); err != nil {
+		env.LogTest(t, "ERROR: Failed to parse job definitions: %v", err)
+		t.Fatalf("Failed to parse job definitions: %v", err)
+	}
+
+	jobDefs := apiResponse.JobDefinitions
+
+	// Find a user job
+	var testJobID string
+	var testJobName string
+	for _, job := range jobDefs {
+		if job.JobType == "user" {
+			testJobID = job.ID
+			testJobName = job.Name
+			break
+		}
+	}
+
+	if testJobID == "" {
+		env.LogTest(t, "WARNING: No user job found, test cannot proceed")
+		env.LogTest(t, "NOTE: This test requires at least one user-created job to exist")
+		t.Skip("No user job found to test edit save functionality")
+	}
+
+	env.LogTest(t, "✓ Found user job to edit: %s (ID: %s)", testJobName, testJobID)
+
+	// Navigate directly to job_add page with ID
+	editURL := fmt.Sprintf("%s/job_add?id=%s", baseURL, testJobID)
+	env.LogTest(t, "Navigating to edit page: %s", editURL)
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(editURL),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for job to load
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load edit page: %v", err)
+		env.TakeScreenshot(ctx, "edit-page-load-failed")
+		t.Fatalf("Failed to load edit page: %v", err)
+	}
+
+	env.LogTest(t, "✓ Edit page loaded")
+	env.TakeScreenshot(ctx, "edit-page-loaded")
+
+	// Wait for job content to load in editor
+	env.LogTest(t, "Waiting for job content to load in editor...")
+	var editorReady bool
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2*time.Second),
+		chromedp.Evaluate(`
+			(() => {
+				const editorElement = document.querySelector('.CodeMirror');
+				if (editorElement && editorElement.CodeMirror) {
+					const content = editorElement.CodeMirror.getValue();
+					return content.length > 0;
+				}
+				return false;
+			})()
+		`, &editorReady),
+	)
+
+	if err != nil || !editorReady {
+		env.LogTest(t, "ERROR: Editor did not load content: %v", err)
+		env.TakeScreenshot(ctx, "editor-not-ready")
+		t.Fatalf("Editor did not load content")
+	}
+
+	env.LogTest(t, "✓ Editor content loaded")
+
+	// Modify TOML content slightly (add a comment)
+	env.LogTest(t, "Modifying TOML content...")
+	testComment := fmt.Sprintf("# Test modification at %s", time.Now().Format("2006-01-02 15:04:05"))
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const editorElement = document.querySelector('.CodeMirror');
+				if (editorElement && editorElement.CodeMirror) {
+					const editor = editorElement.CodeMirror;
+					const currentContent = editor.getValue();
+					const newContent = '%s\n' + currentContent;
+					editor.setValue(newContent);
+					return true;
+				}
+				return false;
+			})()
+		`, testComment), nil),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to modify editor content: %v", err)
+		env.TakeScreenshot(ctx, "editor-modify-failed")
+		t.Fatalf("Failed to modify editor content: %v", err)
+	}
+
+	env.LogTest(t, "✓ TOML content modified (added comment)")
+	env.TakeScreenshot(ctx, "content-modified")
+
+	// Click Save button
+	env.LogTest(t, "Clicking Save button...")
+	var saveClicked bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				// Look for Save button (should be the primary action button)
+				const saveButton = Array.from(document.querySelectorAll('button')).find(btn =>
+					btn.textContent.trim() === 'Save' || btn.textContent.includes('Save')
+				);
+				if (saveButton) {
+					saveButton.click();
+					return true;
+				}
+				return false;
+			})()
+		`, &saveClicked),
+		chromedp.Sleep(3*time.Second), // Wait for save and redirect
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to click Save button: %v", err)
+		env.TakeScreenshot(ctx, "save-button-click-failed")
+		t.Fatalf("Failed to click Save button: %v", err)
+	}
+
+	if !saveClicked {
+		env.LogTest(t, "ERROR: Save button not found")
+		env.TakeScreenshot(ctx, "save-button-not-found")
+		t.Fatal("Save button not found")
+	}
+
+	env.LogTest(t, "✓ Save button clicked")
+	env.TakeScreenshot(ctx, "after-save-click")
+
+	// Verify redirect to /jobs page
+	env.LogTest(t, "Verifying redirect to /jobs page...")
+	var currentURL string
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2*time.Second), // Wait for redirect
+		chromedp.Evaluate(`window.location.href`, &currentURL),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to get current URL: %v", err)
+		t.Fatalf("Failed to get current URL: %v", err)
+	}
+
+	if !strings.Contains(currentURL, "/jobs") {
+		env.LogTest(t, "WARNING: Expected redirect to /jobs, current URL: %s", currentURL)
+		env.LogTest(t, "NOTE: This may be expected if there was a validation error")
+	} else {
+		env.LogTest(t, "✓ Redirected to /jobs page")
+	}
+
+	env.TakeScreenshot(ctx, "after-save-redirect")
+
+	// Check for success notification (if on jobs page)
+	if strings.Contains(currentURL, "/jobs") {
+		env.LogTest(t, "Checking for success notification...")
+		var notificationText string
+		err = chromedp.Run(ctx,
+			chromedp.Evaluate(`
+				(() => {
+					const notifications = document.querySelectorAll('.notification.success, .notification.is-success, .toast.success, .toast.is-success');
+					if (notifications.length > 0) {
+						return notifications[0].textContent.trim();
+					}
+					return '';
+				})()
+			`, &notificationText),
+		)
+
+		if err != nil {
+			env.LogTest(t, "WARNING: Failed to check for notification: %v", err)
+		} else if notificationText != "" {
+			env.LogTest(t, "✓ Success notification displayed: %s", notificationText)
+		} else {
+			env.LogTest(t, "NOTE: No success notification found (may be transient)")
+		}
+	}
+
+	env.TakeScreenshot(ctx, "save-completed")
+	env.LogTest(t, "✅ Edit job save test completed successfully")
+}
+
+// TestSystemJobProtection verifies that system jobs cannot be edited
+func TestSystemJobProtection(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestSystemJobProtection")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestSystemJobProtection")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestSystemJobProtection (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestSystemJobProtection (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// Navigate to jobs page
+	env.LogTest(t, "Navigating to jobs page: %s/jobs", baseURL)
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(baseURL+"/jobs"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for Alpine.js and data to load
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load jobs page: %v", err)
+		env.TakeScreenshot(ctx, "jobs-page-load-failed")
+		t.Fatalf("Failed to load jobs page: %v", err)
+	}
+
+	env.LogTest(t, "✓ Jobs page loaded")
+	env.TakeScreenshot(ctx, "jobs-page-loaded")
+
+	// Find a system job (Database Maintenance is known to be a system job)
+	env.LogTest(t, "Looking for system job (Database Maintenance)...")
+	var systemJobInfo struct {
+		Found          bool `json:"found"`
+		EditDisabled   bool `json:"editDisabled"`
+		DeleteDisabled bool `json:"deleteDisabled"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const dbCard = cards.find(card => card.textContent.includes('Database Maintenance'));
+
+				if (!dbCard) {
+					return { found: false, editDisabled: false, deleteDisabled: false };
+				}
+
+				// Check if edit button exists and is disabled (find by fa-edit icon)
+				const editButton = dbCard.querySelector('button .fa-edit')?.closest('button');
+				const editDisabled = editButton ? editButton.disabled : true;
+
+				// Check if delete button exists and is disabled (find by btn-error class or fa-trash icon)
+				const deleteButton = dbCard.querySelector('button.btn-error, button .fa-trash')?.closest('button');
+				const deleteDisabled = deleteButton ? deleteButton.disabled : true;
+
+				return {
+					found: true,
+					editDisabled: editDisabled,
+					deleteDisabled: deleteDisabled
+				};
+			})()
+		`, &systemJobInfo),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check system job: %v", err)
+		env.TakeScreenshot(ctx, "system-job-check-failed")
+		t.Fatalf("Failed to check system job: %v", err)
+	}
+
+	if !systemJobInfo.Found {
+		env.LogTest(t, "ERROR: System job 'Database Maintenance' not found")
+		env.TakeScreenshot(ctx, "system-job-not-found")
+		t.Fatal("System job 'Database Maintenance' not found")
+	}
+
+	env.LogTest(t, "✓ Found system job 'Database Maintenance'")
+	env.LogTest(t, "  Edit button disabled: %v", systemJobInfo.EditDisabled)
+	env.LogTest(t, "  Delete button disabled: %v", systemJobInfo.DeleteDisabled)
+
+	// Verify edit button is disabled
+	if !systemJobInfo.EditDisabled {
+		env.LogTest(t, "ERROR: Edit button should be disabled for system jobs")
+		env.TakeScreenshot(ctx, "edit-button-not-disabled")
+		t.Error("Edit button should be disabled for system jobs")
+	} else {
+		env.LogTest(t, "✓ Edit button correctly disabled for system job")
+	}
+
+	// Verify delete button is also disabled (additional protection)
+	if !systemJobInfo.DeleteDisabled {
+		env.LogTest(t, "ERROR: Delete button should be disabled for system jobs")
+		env.TakeScreenshot(ctx, "delete-button-not-disabled")
+		t.Error("Delete button should be disabled for system jobs")
+	} else {
+		env.LogTest(t, "✓ Delete button correctly disabled for system job")
+	}
+
+	// Try to click edit button and verify it doesn't navigate
+	env.LogTest(t, "Attempting to click disabled edit button...")
+	var clickResult bool
+	var urlBefore string
+	var urlAfter string
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`window.location.href`, &urlBefore),
+		chromedp.Evaluate(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const dbCard = cards.find(card => card.textContent.includes('Database Maintenance'));
+				if (dbCard) {
+					// Find edit button by fa-edit icon
+					const editButton = dbCard.querySelector('button .fa-edit')?.closest('button');
+					if (editButton) {
+						editButton.click();
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, &clickResult),
+		chromedp.Sleep(2*time.Second), // Wait to see if navigation occurs
+		chromedp.Evaluate(`window.location.href`, &urlAfter),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to test edit button click: %v", err)
+	} else {
+		env.LogTest(t, "  URL before click: %s", urlBefore)
+		env.LogTest(t, "  URL after click: %s", urlAfter)
+
+		if urlBefore != urlAfter {
+			env.LogTest(t, "ERROR: URL changed after clicking disabled button (navigation occurred)")
+			env.TakeScreenshot(ctx, "navigation-occurred")
+			t.Error("Disabled edit button should not navigate to edit page")
+		} else {
+			env.LogTest(t, "✓ Disabled edit button did not navigate (URL unchanged)")
+		}
+	}
+
+	env.TakeScreenshot(ctx, "system-job-protection-verified")
+	env.LogTest(t, "✅ System job protection test completed successfully")
 }

@@ -321,6 +321,15 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 	fmt.Fprintf(logFile, "✓ Service URL: http://%s:%d\n", config.Service.Host, config.Service.Port)
 	fmt.Fprintf(logFile, "✓ Test can proceed\n\n")
 
+	// Load test job definitions
+	fmt.Fprintf(logFile, "\n=== LOADING TEST JOB DEFINITIONS ===\n")
+	if err := env.LoadTestJobDefinitions(); err != nil {
+		fmt.Fprintf(logFile, "❌ Failed to load test job definitions: %v\n", err)
+		env.Cleanup()
+		return nil, fmt.Errorf("failed to load test job definitions: %w", err)
+	}
+	fmt.Fprintf(logFile, "✓ Test job definitions loaded\n")
+
 	return env, nil
 }
 
@@ -705,6 +714,85 @@ func (env *TestEnvironment) GetResultsDir() string {
 	return env.ResultsDir
 }
 
+// LoadJobDefinitionFile reads a TOML file and uploads it via the job definition upload API
+func (env *TestEnvironment) LoadJobDefinitionFile(filePath string) error {
+	// Read the TOML file
+	tomlBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read job definition file %s: %w", filePath, err)
+	}
+
+	// Upload via POST /api/job-definitions/upload
+	url := fmt.Sprintf("%s/api/job-definitions/upload", env.GetBaseURL())
+	fmt.Fprintf(env.LogFile, "POST %s (Content-Type: text/plain, %d bytes)\n", url, len(tomlBytes))
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(tomlBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create request for %s: %w", filePath, err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to upload job definition file %s: %w", filePath, err)
+	}
+	defer resp.Body.Close()
+
+	// Check response status (201 Created or 200 OK for updates)
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upload failed for %s: status %d, body: %s", filePath, resp.StatusCode, string(bodyBytes))
+	}
+
+	// Log success
+	fmt.Fprintf(env.LogFile, "✓ Loaded job definition: %s (status: %d)\n", filepath.Base(filePath), resp.StatusCode)
+	return nil
+}
+
+// LoadTestJobDefinitions loads required and optional job definition files for tests
+func (env *TestEnvironment) LoadTestJobDefinitions() error {
+	// Define required job configs (must exist and load successfully)
+	requiredConfigs := []string{
+		"../config/news-crawler.toml",
+	}
+
+	// Define optional job configs (warn if missing but continue)
+	optionalConfigs := []string{
+		"../config/my-custom-crawler.toml",
+	}
+
+	fmt.Fprintf(env.LogFile, "\n=== LOADING TEST JOB DEFINITIONS ===\n")
+
+	// Load required configs
+	for _, configPath := range requiredConfigs {
+		absPath, err := filepath.Abs(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve path for required config %s: %w", configPath, err)
+		}
+
+		if err := env.LoadJobDefinitionFile(absPath); err != nil {
+			return fmt.Errorf("failed to load required config %s: %w", configPath, err)
+		}
+	}
+
+	// Load optional configs
+	for _, configPath := range optionalConfigs {
+		absPath, err := filepath.Abs(configPath)
+		if err != nil {
+			fmt.Fprintf(env.LogFile, "⚠  Warning: Could not resolve path for optional config %s: %v\n", configPath, err)
+			continue
+		}
+
+		if err := env.LoadJobDefinitionFile(absPath); err != nil {
+			fmt.Fprintf(env.LogFile, "⚠  Warning: Could not load optional config %s: %v\n", configPath, err)
+		}
+	}
+
+	fmt.Fprintf(env.LogFile, "✓ Test job definitions loaded successfully\n")
+	return nil
+}
+
 // TakeScreenshot captures a screenshot using chromedp and saves it to the test results directory
 func (env *TestEnvironment) TakeScreenshot(ctx context.Context, name string) error {
 	screenshotPath := env.GetScreenshotPath(name)
@@ -790,6 +878,21 @@ func (h *HTTPTestHelper) POST(path string, body interface{}) (*http.Response, er
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+
+	return h.Client.Do(req)
+}
+
+// POSTBody makes a POST request with raw byte content and specified content type
+func (h *HTTPTestHelper) POSTBody(path string, contentType string, body []byte) (*http.Response, error) {
+	url := h.BaseURL + path
+	h.T.Logf("POST %s (Content-Type: %s, %d bytes)", url, contentType, len(body))
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", contentType)
 
 	return h.Client.Do(req)
 }

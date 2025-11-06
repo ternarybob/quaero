@@ -1,0 +1,163 @@
+{
+  "current_step": 10,
+  "completed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  "status": "implementing",
+  "last_updated": "2025-11-06T00:00:00Z",
+  "notes": "Agent 2 completed Step 10: Added three comprehensive UI tests for edit job functionality in test/ui/jobs_test.go",
+  "step_1_details": {
+    "changes_made": [
+      "Removed modal-related code (showEditModal, modalTriggerElement, async/await)",
+      "Added system job type check with error notification",
+      "Changed to window.location.href navigation with job ID query parameter",
+      "Function signature simplified (removed async)"
+    ],
+    "file_modified": "pages/static/common.js",
+    "lines_affected": "436-445"
+  },
+  "step_2_details": {
+    "changes_made": [
+      "Added jobDefId property to track edit vs create mode",
+      "Added isLoadingJob property for loading state management",
+      "Modified init() to detect ?id= URL parameter using URLSearchParams",
+      "Created loadJobDefinition() method to fetch TOML from /api/job-definitions/{id}/export",
+      "Added error handling for failed job loads with fallback to example TOML",
+      "Wrapped page in single Alpine component to enable dynamic title",
+      "Updated page title to show 'Edit Job Definition' when jobDefId exists",
+      "Updated description text based on edit vs create mode",
+      "Added loading spinner during job fetch operation"
+    ],
+    "file_modified": "pages/job_add.html",
+    "lines_affected": "59-101, 177-259",
+    "api_endpoint_used": "GET /api/job-definitions/{id}/export",
+    "error_handling": [
+      "Shows notification on fetch failure",
+      "Displays error in validation message area",
+      "Falls back to example TOML on error",
+      "Handles network errors and invalid IDs"
+    ]
+  },
+  "step_3_details": {
+    "changes_made": [
+      "Step 3 was already completed in Step 2 (dynamic page title)"
+    ],
+    "notes": "No additional work needed - dynamic title already implemented in step 2"
+  },
+  "step_4_details": {
+    "changes_made": [
+      "Removed 'Create Job' button",
+      "Removed 'Save as Invalid' button",
+      "Added single 'Save' button that calls unified saveJob() function",
+      "Kept Validate, Load Example, and Clear buttons"
+    ],
+    "file_modified": "pages/job_add.html",
+    "lines_affected": "107-125"
+  },
+  "step_5_details": {
+    "changes_made": [
+      "Removed createJob() function",
+      "Removed saveAsInvalid() function",
+      "Created unified saveJob() function that:",
+      "  - Validates TOML first via /api/job-definitions/validate",
+      "  - If invalid: prompts user to save as invalid (with confirmation)",
+      "  - If valid: saves via /api/job-definitions/upload (handles both create and update)",
+      "  - Shows appropriate success message based on create vs update",
+      "  - Redirects to /jobs page after successful save"
+    ],
+    "file_modified": "pages/job_add.html",
+    "lines_affected": "310-392",
+    "flow": [
+      "1. User clicks Save button",
+      "2. Validate TOML via POST /api/job-definitions/validate",
+      "3a. If invalid: confirm with user, then POST /api/job-definitions/save-invalid",
+      "3b. If valid: POST /api/job-definitions/upload (backend determines create vs update)",
+      "4. Show success notification and redirect to /jobs"
+    ]
+  },
+  "step_6_details": {
+    "changes_made": [
+      "No TOML/JSON conversion needed - upload endpoint accepts TOML directly"
+    ],
+    "notes": "Step 6 not applicable - backend already handles TOML parsing and conversion"
+  },
+  "step_7_details": {
+    "changes_made": [
+      "Modified UploadJobDefinitionTOMLHandler to detect if job already exists",
+      "Added check: GetJobDefinition(ctx, jobDef.ID) to determine create vs update",
+      "If exists and is system job: return 403 Forbidden",
+      "If exists and is user job: call UpdateJobDefinition()",
+      "If not exists: call SaveJobDefinition()",
+      "Return 200 OK for updates, 201 Created for new jobs",
+      "Added appropriate logging for create vs update actions"
+    ],
+    "file_modified": "internal/handlers/job_definition_handler.go",
+    "lines_affected": "728-806",
+    "api_behavior": [
+      "POST /api/job-definitions/upload now handles both create and update",
+      "Determines action based on whether job ID exists in database",
+      "System jobs are protected from updates (403 Forbidden)",
+      "Returns appropriate status codes (200 for update, 201 for create)"
+    ]
+  },
+  "step_10_details": {
+    "changes_made": [
+      "Added TestEditJobDefinition() - Tests edit button navigation to job_add?id={id}",
+      "Added TestEditJobSave() - Tests saving an edited job via API and UI",
+      "Added TestSystemJobProtection() - Tests that system job edit buttons are disabled",
+      "Added 'fmt' import for string formatting in tests",
+      "All tests use SetupTestEnvironment() for automatic service lifecycle management",
+      "All tests save screenshots to timestamped result directories",
+      "Tests gracefully skip if no user jobs exist (instead of failing)"
+    ],
+    "file_modified": "test/ui/jobs_test.go",
+    "lines_added": "~630 lines (3 new test functions)",
+    "test_coverage": [
+      "TestEditJobDefinition:",
+      "  - Navigates to /jobs page",
+      "  - Finds a user job (not system job)",
+      "  - Clicks edit button",
+      "  - Verifies URL is /job_add?id={jobId}",
+      "  - Verifies page title shows 'Edit Job Definition'",
+      "  - Verifies TOML content loads in CodeMirror editor",
+      "  - Takes screenshots at each verification step",
+      "",
+      "TestEditJobSave:",
+      "  - Fetches user jobs via API",
+      "  - Navigates directly to /job_add?id={jobId}",
+      "  - Waits for TOML content to load",
+      "  - Modifies TOML content (adds comment with timestamp)",
+      "  - Clicks Save button",
+      "  - Verifies redirect to /jobs page",
+      "  - Checks for success notification",
+      "  - Takes screenshots at each step",
+      "",
+      "TestSystemJobProtection:",
+      "  - Navigates to /jobs page",
+      "  - Finds 'Database Maintenance' system job",
+      "  - Verifies edit button is disabled",
+      "  - Verifies delete button is disabled",
+      "  - Attempts to click disabled edit button",
+      "  - Verifies no navigation occurs (URL unchanged)",
+      "  - Takes verification screenshots"
+    ],
+    "test_infrastructure": [
+      "Uses common.SetupTestEnvironment() for automatic service lifecycle",
+      "Test server runs on port 18085 (separate from dev server)",
+      "Results saved to test/results/ui/jobs-{timestamp}/{testName}/",
+      "Screenshots capture test progress and verification points",
+      "Tests log detailed execution steps for debugging",
+      "HTTPTestHelper used for API calls in TestEditJobSave",
+      "Tests handle missing user jobs with t.Skip() instead of failure"
+    ],
+    "api_endpoints_tested": [
+      "GET /api/job-definitions (fetch all jobs)",
+      "GET /api/job-definitions/{id}/export (load job for editing)",
+      "POST /api/job-definitions/upload (save edited job)"
+    ],
+    "notes": [
+      "Tests require at least one user-created job to fully execute TestEditJobDefinition and TestEditJobSave",
+      "TestSystemJobProtection always runs since Database Maintenance is a system job",
+      "Tests are NOT executed by Agent 2 - Agent 3 (Validator) will run them",
+      "Agent 2's role is implementation only"
+    ]
+  }
+}

@@ -433,24 +433,15 @@ document.addEventListener('alpine:init', () => {
             });
         },
 
-        async editJobDefinition(jobDef, event) {
-            this.modalTriggerElement = event?.target || document.activeElement;
-            this.currentJobDefinition = JSON.parse(JSON.stringify(jobDef));
-            // Defensive initialization for backward compatibility with old job definitions
-            if (!this.currentJobDefinition.post_jobs) {
-                this.currentJobDefinition.post_jobs = [];
+        editJobDefinition(jobDef, event) {
+            // Check if this is a system job
+            if (jobDef.job_type === 'system') {
+                window.showNotification('System jobs cannot be edited', 'error');
+                return;
             }
-            this.showEditModal = true;
-            document.body.classList.add('modal-open');
-            await this.loadJobDefinitions();
 
-            this.$nextTick(() => {
-                const modal = document.querySelector('.modal.active .modal-container');
-                if (modal) {
-                    const firstFocusable = modal.querySelector('input, select, textarea, button');
-                    if (firstFocusable) firstFocusable.focus();
-                }
-            });
+            // Navigate to job_add page with the job ID as a query parameter
+            window.location.href = `/job_add?id=${jobDef.id}`;
         },
 
         detectPostJobCycle() {

@@ -726,7 +726,7 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 }
 
 // UploadJobDefinitionTOMLHandler handles POST /api/job-definitions/upload
-// Creates a job definition from TOML content
+// Creates or updates a job definition from TOML content
 func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWriter, r *http.Request) {
 	// Read TOML content from request body
 	tomlContent, err := io.ReadAll(r.Body)
@@ -769,16 +769,40 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 		return
 	}
 
-	// Save job definition
 	ctx := r.Context()
-	if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
-		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save job definition")
-		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
-		return
+
+	// Check if job definition already exists
+	existingJobDef, err := h.jobDefStorage.GetJobDefinition(ctx, jobDef.ID)
+	isUpdate := false
+
+	if err == nil && existingJobDef != nil {
+		// Job exists - check if it's a system job
+		if existingJobDef.IsSystemJob() {
+			h.logger.Warn().Str("job_def_id", jobDef.ID).Msg("Cannot update system job via upload")
+			WriteError(w, http.StatusForbidden, "Cannot update system-managed jobs")
+			return
+		}
+		isUpdate = true
 	}
 
-	h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
-	WriteJSON(w, http.StatusCreated, jobDef)
+	// Save or update job definition
+	if isUpdate {
+		if err := h.jobDefStorage.UpdateJobDefinition(ctx, jobDef); err != nil {
+			h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to update job definition")
+			WriteError(w, http.StatusInternalServerError, "Failed to update job definition")
+			return
+		}
+		h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from TOML upload")
+		WriteJSON(w, http.StatusOK, jobDef)
+	} else {
+		if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
+			h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save job definition")
+			WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
+			return
+		}
+		h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
+		WriteJSON(w, http.StatusCreated, jobDef)
+	}
 }
 
 // SaveInvalidJobDefinitionHandler handles POST /api/job-definitions/save-invalid
