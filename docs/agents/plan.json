@@ -1,0 +1,76 @@
+{
+  "steps": [
+    {
+      "id": 1,
+      "task": "Make TOML Content textarea editable by removing or commenting out the readonly attribute in CodeMirror initialization",
+      "files": ["pages/job_add.html"],
+      "validation": "Open the Job Add page in a browser and verify that: (1) You can type directly into the TOML Content editor, (2) The editor accepts keyboard input without any restrictions, (3) The cursor appears when clicking in the editor area"
+    },
+    {
+      "id": 2,
+      "task": "Add new database column 'toml' to job_definitions table to store raw TOML content for invalid/incomplete jobs",
+      "files": ["internal/storage/sqlite/schema.go", "internal/storage/sqlite/migrations.go"],
+      "validation": "Run the application and verify that: (1) The database migration creates the new 'toml' TEXT column in job_definitions table, (2) Query the database schema using '.schema job_definitions' to confirm the column exists, (3) No migration errors appear in logs"
+    },
+    {
+      "id": 3,
+      "task": "Update JobDefinition model to include TOML field for storing raw TOML content",
+      "files": ["internal/models/job_definition.go"],
+      "validation": "Review the JobDefinition struct and confirm: (1) A new TOML field with json tag 'toml' is added, (2) The field is a string type to store raw TOML text, (3) The field is optional (not required for validation)"
+    },
+    {
+      "id": 4,
+      "task": "Update JobDefinitionStorage SaveJobDefinition and UpdateJobDefinition to handle the new TOML field in database operations",
+      "files": ["internal/storage/sqlite/job_definition_storage.go"],
+      "validation": "Review the modified SQL queries and verify: (1) INSERT query includes toml column in the column list and values, (2) ON CONFLICT clause updates the toml field, (3) UPDATE query includes toml = ? in SET clause, (4) Both methods include the TOML value in ExecContext arguments"
+    },
+    {
+      "id": 5,
+      "task": "Update JobDefinitionStorage GetJobDefinition and scanJobDefinition methods to retrieve and populate the TOML field from database",
+      "files": ["internal/storage/sqlite/job_definition_storage.go"],
+      "validation": "Verify that: (1) SELECT query includes COALESCE(toml, '') AS toml in column list, (2) scanJobDefinition method scans toml into a string variable, (3) JobDefinition struct has TOML field populated from scanned value, (4) scanJobDefinitions also handles the new field"
+    },
+    {
+      "id": 6,
+      "task": "Create new handler endpoint SaveInvalidJobDefinitionHandler to accept and save invalid/incomplete TOML with validation bypass",
+      "files": ["internal/handlers/job_definition_handler.go"],
+      "validation": "Verify the new handler: (1) Accepts POST requests with TOML content as request body, (2) Creates a JobDefinition with ID='invalid-{timestamp}', Name='Invalid', and stores raw TOML in TOML field, (3) Bypasses validation by not calling jobDef.Validate(), (4) Returns 201 Created status with saved job definition on success"
+    },
+    {
+      "id": 7,
+      "task": "Register the new /api/job-definitions/save-invalid route in the server router",
+      "files": ["internal/server/routes.go"],
+      "validation": "Check routes.go and verify: (1) Route POST /api/job-definitions/save-invalid is registered, (2) Route is mapped to SaveInvalidJobDefinitionHandler, (3) Route appears in the job definitions section of route registrations"
+    },
+    {
+      "id": 8,
+      "task": "Update the job_add.html UI to add a 'Save as Invalid' button that calls the new save-invalid endpoint without requiring validation to pass",
+      "files": ["pages/job_add.html"],
+      "validation": "Test the UI and confirm: (1) A new 'Save as Invalid' button appears next to the Create Job button, (2) Button is enabled regardless of validation status, (3) Clicking the button shows appropriate loading state, (4) Success shows notification and redirects to jobs page, (5) Error shows appropriate error notification"
+    },
+    {
+      "id": 9,
+      "task": "Update CrawlerJobDefinitionFile.Validate() to make source_type optional by removing or relaxing the validation requirement",
+      "files": ["internal/storage/sqlite/load_job_definitions.go"],
+      "validation": "Review the Validate() method and confirm: (1) No validation error is returned if source_type is empty or missing, (2) Other required fields (id, name, start_urls) still validate correctly, (3) Numeric fields (max_depth, max_pages, concurrency) still validate correctly"
+    },
+    {
+      "id": 10,
+      "task": "Update ValidateJobDefinitionTOMLHandler to handle cases where source_type is missing without failing validation",
+      "files": ["internal/handlers/job_definition_handler.go"],
+      "validation": "Test the /api/job-definitions/validate endpoint with TOML missing source_type and verify: (1) The endpoint returns 200 OK status, (2) Response includes {status: 'valid', message: '...'}, (3) No error about source_type being required, (4) Other validation errors still properly detected"
+    },
+    {
+      "id": 11,
+      "task": "Update UploadJobDefinitionTOMLHandler to handle missing source_type by setting a default value or allowing it to be empty",
+      "files": ["internal/handlers/job_definition_handler.go"],
+      "validation": "Test the /api/job-definitions/upload endpoint with TOML missing source_type and verify: (1) Job definition is created successfully, (2) source_type field is either empty or has a sensible default value, (3) Response returns 201 Created status, (4) Job definition is stored in database correctly"
+    },
+    {
+      "id": 12,
+      "task": "Update JobDefinition.Validate() in models to make source_type optional or provide a default value",
+      "files": ["internal/models/job_definition.go"],
+      "validation": "Review JobDefinition.Validate() and confirm: (1) Validation does not fail when source_type is empty, (2) Other required field validations still work correctly, (3) Test cases pass with and without source_type"
+    }
+  ]
+}

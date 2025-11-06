@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
@@ -777,5 +778,43 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	}
 
 	h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
+	WriteJSON(w, http.StatusCreated, jobDef)
+}
+
+// SaveInvalidJobDefinitionHandler handles POST /api/job-definitions/save-invalid
+// Saves invalid/incomplete TOML content without validation for testing purposes
+func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "POST") {
+		return
+	}
+
+	// Read TOML content from request body
+	tomlContent, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to read request body")
+		WriteError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Generate unique ID with invalid- prefix
+	id := fmt.Sprintf("invalid-%d", time.Now().Unix())
+
+	// Create JobDefinition with minimal fields and raw TOML
+	jobDef := &models.JobDefinition{
+		ID:   id,
+		Name: "Invalid",
+		TOML: string(tomlContent),
+	}
+
+	// Save directly to storage without validation
+	ctx := r.Context()
+	if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save invalid job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
+		return
+	}
+
+	h.logger.Info().Str("job_def_id", jobDef.ID).Msg("Invalid job definition saved without validation")
 	WriteJSON(w, http.StatusCreated, jobDef)
 }

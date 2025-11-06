@@ -219,6 +219,12 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check for /save-invalid suffix (save invalid TOML for later editing)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/save-invalid") {
+		s.app.JobDefinitionHandler.SaveInvalidJobDefinitionHandler(w, r)
+		return
+	}
+
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)

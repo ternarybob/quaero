@@ -108,8 +108,8 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 	query := `
 		INSERT INTO job_definitions (
 			id, name, type, job_type, description, source_type, base_url, auth_id, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, toml, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
@@ -127,13 +127,14 @@ func (s *JobDefinitionStorage) SaveJobDefinition(ctx context.Context, jobDef *mo
 			pre_jobs = excluded.pre_jobs,
 			post_jobs = excluded.post_jobs,
 			error_tolerance = excluded.error_tolerance,
+			toml = excluded.toml,
 			updated_at = excluded.updated_at
 	`
 
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.ID, jobDef.Name, string(jobDef.Type), string(jobDef.JobType), jobDef.Description,
 		jobDef.SourceType, jobDef.BaseURL, authID, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, createdAt, updatedAt,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, jobDef.TOML, createdAt, updatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to save job definition: %w", err)
@@ -241,6 +242,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 			pre_jobs = ?,
 			post_jobs = ?,
 			error_tolerance = ?,
+			toml = ?,
 			updated_at = ?
 		WHERE id = ?
 	`
@@ -248,7 +250,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 	_, err = s.db.DB().ExecContext(ctx, query,
 		jobDef.Name, string(jobDef.Type), string(jobDef.JobType), jobDef.Description,
 		jobDef.SourceType, jobDef.BaseURL, authID, stepsJSON, jobDef.Schedule, jobDef.Timeout,
-		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, updatedAt, jobDef.ID,
+		enabled, autoStart, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, jobDef.TOML, updatedAt, jobDef.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update job definition: %w", err)
@@ -266,7 +268,7 @@ func (s *JobDefinitionStorage) UpdateJobDefinition(ctx context.Context, jobDef *
 func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) (*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, COALESCE(job_type, 'user') AS job_type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, COALESCE(toml, '') AS toml, created_at, updated_at
 		FROM job_definitions
 		WHERE id = ?
 	`
@@ -287,7 +289,7 @@ func (s *JobDefinitionStorage) GetJobDefinition(ctx context.Context, id string) 
 func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *interfaces.JobDefinitionListOptions) ([]*models.JobDefinition, error) {
 	query := `
 		SELECT id, name, type, COALESCE(job_type, 'user') AS job_type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, COALESCE(toml, '') AS toml, created_at, updated_at
 		FROM job_definitions
 		WHERE 1=1
 	`
@@ -351,8 +353,8 @@ func (s *JobDefinitionStorage) ListJobDefinitions(ctx context.Context, opts *int
 // GetJobDefinitionsByType retrieves all job definitions of a specific type
 func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobType string) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
+		SELECT id, name, type, COALESCE(job_type, 'user') AS job_type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, COALESCE(toml, '') AS toml, created_at, updated_at
 		FROM job_definitions
 		WHERE type = ?
 		ORDER BY created_at DESC
@@ -370,8 +372,8 @@ func (s *JobDefinitionStorage) GetJobDefinitionsByType(ctx context.Context, jobT
 // GetEnabledJobDefinitions retrieves all enabled job definitions
 func (s *JobDefinitionStorage) GetEnabledJobDefinitions(ctx context.Context) ([]*models.JobDefinition, error) {
 	query := `
-		SELECT id, name, type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
-		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, created_at, updated_at
+		SELECT id, name, type, COALESCE(job_type, 'user') AS job_type, description, COALESCE(source_type, '') AS source_type, COALESCE(base_url, '') AS base_url, COALESCE(auth_id, '') AS auth_id, steps, schedule, COALESCE(timeout, '') AS timeout,
+		       enabled, auto_start, config, COALESCE(pre_jobs, '[]') AS pre_jobs, COALESCE(post_jobs, '[]') AS post_jobs, COALESCE(error_tolerance, '{}') AS error_tolerance, COALESCE(toml, '') AS toml, created_at, updated_at
 		FROM job_definitions
 		WHERE enabled = 1
 		ORDER BY created_at DESC
@@ -508,15 +510,15 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	dbMaintenanceQuery := `
 		INSERT INTO job_definitions (
 			id, name, type, job_type, description, source_type, base_url, auth_id, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, toml, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	dbMaintenanceResult, err := s.db.DB().ExecContext(ctx, dbMaintenanceQuery,
 		dbMaintenanceJob.ID, dbMaintenanceJob.Name, string(dbMaintenanceJob.Type), string(dbMaintenanceJob.JobType), dbMaintenanceJob.Description,
 		dbMaintenanceJob.SourceType, dbMaintenanceJob.BaseURL, dbMaintenanceAuthID, dbMaintenanceStepsJSON, dbMaintenanceJob.Schedule, dbMaintenanceJob.Timeout,
-		dbMaintenanceEnabled, dbMaintenanceAutoStart, dbMaintenanceConfigJSON, dbMaintenancePreJobsJSON, dbMaintenancePostJobsJSON, dbMaintenanceErrorToleranceJSON, dbMaintenanceCreatedAt, dbMaintenanceUpdatedAt,
+		dbMaintenanceEnabled, dbMaintenanceAutoStart, dbMaintenanceConfigJSON, dbMaintenancePreJobsJSON, dbMaintenancePostJobsJSON, dbMaintenanceErrorToleranceJSON, dbMaintenanceJob.TOML, dbMaintenanceCreatedAt, dbMaintenanceUpdatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -618,15 +620,15 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 	corpusQuery := `
 		INSERT INTO job_definitions (
 			id, name, type, job_type, description, source_type, base_url, auth_id, steps, schedule, timeout,
-			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			enabled, auto_start, config, pre_jobs, post_jobs, error_tolerance, toml, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO NOTHING
 	`
 
 	corpusResult, err := s.db.DB().ExecContext(ctx, corpusQuery,
 		corpusSummaryJob.ID, corpusSummaryJob.Name, string(corpusSummaryJob.Type), string(corpusSummaryJob.JobType), corpusSummaryJob.Description,
 		corpusSummaryJob.SourceType, corpusSummaryJob.BaseURL, corpusAuthID, corpusStepsJSON, corpusSummaryJob.Schedule, corpusSummaryJob.Timeout,
-		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusErrorToleranceJSON, corpusCreatedAt, corpusUpdatedAt,
+		corpusEnabled, corpusAutoStart, corpusConfigJSON, corpusPreJobsJSON, corpusPostJobsJSON, corpusErrorToleranceJSON, corpusSummaryJob.TOML, corpusCreatedAt, corpusUpdatedAt,
 	)
 	if err != nil {
 		s.logger.Error().
@@ -657,14 +659,14 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 // scanJobDefinition scans a single row into a JobDefinition
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
-		id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
-		enabled, autoStart                                                                                                                                                    int
-		createdAt, updatedAt                                                                                                                                                  int64
+		id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, toml string
+		enabled, autoStart                                                                                                                                                                int
+		createdAt, updatedAt                                                                                                                                                              int64
 	)
 
 	err := row.Scan(
 		&id, &name, &jobDefType, &jobOwnerType, &description, &sourceType, &baseURL, &authID, &stepsJSON, &schedule, &timeout,
-		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
+		&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &toml, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -684,6 +686,7 @@ func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefin
 		Timeout:     timeout,
 		Enabled:     enabled == 1,
 		AutoStart:   autoStart == 1,
+		TOML:        toml,
 		CreatedAt:   time.Unix(createdAt, 0),
 		UpdatedAt:   time.Unix(updatedAt, 0),
 	}
@@ -742,14 +745,14 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 
 	for rows.Next() {
 		var (
-			id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON string
-			enabled, autoStart                                                                                                                                                    int
-			createdAt, updatedAt                                                                                                                                                  int64
+			id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, toml string
+			enabled, autoStart                                                                                                                                                                int
+			createdAt, updatedAt                                                                                                                                                              int64
 		)
 
 		err := rows.Scan(
 			&id, &name, &jobDefType, &jobOwnerType, &description, &sourceType, &baseURL, &authID, &stepsJSON, &schedule, &timeout,
-			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &createdAt, &updatedAt,
+			&enabled, &autoStart, &configJSON, &preJobsJSON, &postJobsJSON, &errorToleranceJSON, &toml, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			s.logger.Warn().
@@ -772,6 +775,7 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 			Timeout:     timeout,
 			Enabled:     enabled == 1,
 			AutoStart:   autoStart == 1,
+			TOML:        toml,
 			CreatedAt:   time.Unix(createdAt, 0),
 			UpdatedAt:   time.Unix(updatedAt, 0),
 		}

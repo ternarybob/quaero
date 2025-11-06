@@ -10,11 +10,20 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
 
     <style>
+        #toml-editor {
+            display: none;
+        }
+
         .CodeMirror {
             height: 400px;
             border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 14px;
+            cursor: text;
+        }
+
+        .CodeMirror-scroll {
+            cursor: text;
         }
 
         .validation-message {
@@ -104,6 +113,10 @@
                             <i class="fas fa-save"></i>
                             <span x-text="loading ? 'Creating...' : 'Create Job'"></span>
                         </button>
+                        <button class="btn btn-warning" @click="saveAsInvalid()">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span x-text="loading ? 'Saving...' : 'Save as Invalid'"></span>
+                        </button>
                         <button class="btn" @click="loadExample()">
                             <i class="fas fa-file-code"></i>
                             <span>Load Example</span>
@@ -168,19 +181,30 @@ auto_start = false             # Auto-start on application startup</code></pre>
                 validationStatus: '', // 'success' or 'error'
 
                 init() {
-                    // Initialize CodeMirror
-                    this.editor = CodeMirror.fromTextArea(this.$refs.tomlEditor, {
-                        mode: 'toml',
-                        theme: 'monokai',
-                        lineNumbers: true,
-                        lineWrapping: true,
-                        indentUnit: 4,
-                        tabSize: 4,
-                        indentWithTabs: false
-                    });
+                    // Wait for next tick to ensure DOM is fully ready
+                    this.$nextTick(() => {
+                        // Initialize CodeMirror
+                        this.editor = CodeMirror.fromTextArea(this.$refs.tomlEditor, {
+                            mode: 'toml',
+                            theme: 'monokai',
+                            lineNumbers: true,
+                            lineWrapping: true,
+                            indentUnit: 4,
+                            tabSize: 4,
+                            indentWithTabs: false,
+                            readOnly: false,
+                            autofocus: false
+                        });
 
-                    // Load example by default
-                    this.loadExample();
+                        // Ensure the editor is editable
+                        this.editor.setOption('readOnly', false);
+
+                        // Load example by default
+                        this.loadExample();
+
+                        // Focus the editor to make it immediately usable
+                        this.editor.focus();
+                    });
                 },
 
                 handleFileUpload(event) {
@@ -272,6 +296,43 @@ auto_start = false             # Auto-start on application startup</code></pre>
                         }
                     } catch (error) {
                         window.showNotification(`Error creating job: ${error.message}`, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async saveAsInvalid() {
+                    const tomlContent = this.editor.getValue().trim();
+
+                    if (!tomlContent) {
+                        window.showNotification('Please enter TOML content', 'error');
+                        return;
+                    }
+
+                    this.loading = true;
+
+                    try {
+                        const response = await fetch('/api/job-definitions/save-invalid', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'text/plain'
+                            },
+                            body: tomlContent
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            window.showNotification('Invalid job definition saved successfully', 'success');
+                            // Redirect to jobs page after 1 second
+                            setTimeout(() => {
+                                window.location.href = '/jobs';
+                            }, 1000);
+                        } else {
+                            window.showNotification(`Failed to save invalid job: ${data.error || 'Unknown error'}`, 'error');
+                        }
+                    } catch (error) {
+                        window.showNotification(`Error saving invalid job: ${error.message}`, 'error');
                     } finally {
                         this.loading = false;
                     }

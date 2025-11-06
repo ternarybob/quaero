@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	config TEXT,
 	post_jobs TEXT,
 	error_tolerance TEXT,
+	toml TEXT,
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL,
@@ -418,6 +419,11 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 27: Add job_type column to job_definitions table
 	if err := s.migrateAddJobDefinitionTypeColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 28: Add toml column to job_definitions table
+	if err := s.migrateAddTomlColumn(); err != nil {
 		return err
 	}
 
@@ -2458,5 +2464,38 @@ func (s *SQLiteDB) migrateAddJobDefinitionTypeColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: job_type column added to job_definitions successfully")
+	return nil
+}
+
+// migrateAddTomlColumn adds the toml column to job_definitions table
+func (s *SQLiteDB) migrateAddTomlColumn() error {
+	s.logger.Info().Msg("Running migration: Adding toml column to job_definitions table")
+
+	// Check if column already exists
+	var columnExists bool
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) > 0
+		FROM pragma_table_info('job_definitions')
+		WHERE name = 'toml'
+	`).Scan(&columnExists)
+	if err != nil {
+		return fmt.Errorf("failed to check if toml column exists: %w", err)
+	}
+
+	if columnExists {
+		s.logger.Info().Msg("toml column already exists, skipping migration")
+		return nil
+	}
+
+	// Add toml column (nullable for backward compatibility)
+	_, err = s.db.Exec(`
+		ALTER TABLE job_definitions
+		ADD COLUMN toml TEXT
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to add toml column: %w", err)
+	}
+
+	s.logger.Info().Msg("Migration: toml column added to job_definitions successfully")
 	return nil
 }

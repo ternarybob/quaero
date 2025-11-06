@@ -101,6 +101,7 @@ type JobDefinition struct {
 	Type           JobDefinitionType      `json:"type"`            // Type of job definition (crawler, summarizer, custom)
 	JobType        JobOwnerType           `json:"job_type"`        // Job owner type (system or user)
 	Description    string                 `json:"description"`     // Job description
+	TOML           string                 `json:"toml" db:"toml"`  // Raw TOML content from which this job definition was loaded (optional)
 	SourceType     string                 `json:"source_type"`     // Source type: "jira", "confluence", "github"
 	BaseURL        string                 `json:"base_url"`        // Base URL for the source (e.g., "https://company.atlassian.net")
 	AuthID         string                 `json:"auth_id"`         // Reference to auth_credentials.id for authentication
@@ -145,22 +146,21 @@ func (j *JobDefinition) Validate() error {
 	}
 
 	// Validate source fields for crawler jobs
+	// Note: source_type is optional for file-based crawler definitions that don't require source integration
 	if j.Type == JobDefinitionTypeCrawler {
-		if j.SourceType == "" {
-			return errors.New("source_type is required for crawler jobs")
+		// Validate source type only if provided
+		if j.SourceType != "" {
+			validTypes := map[string]bool{
+				"jira":       true,
+				"confluence": true,
+				"github":     true,
+			}
+			if !validTypes[j.SourceType] {
+				return fmt.Errorf("invalid source_type: %s (must be one of: jira, confluence, github)", j.SourceType)
+			}
 		}
-		// Validate source type
-		validTypes := map[string]bool{
-			"jira":       true,
-			"confluence": true,
-			"github":     true,
-		}
-		if !validTypes[j.SourceType] {
-			return fmt.Errorf("invalid source_type: %s (must be one of: jira, confluence, github)", j.SourceType)
-		}
-		if j.BaseURL == "" {
-			return errors.New("base_url is required for crawler jobs")
-		}
+		// Base URL is optional (only required if source_type is set)
+		// Note: Removed strict base_url requirement to support generic crawler jobs
 	}
 
 	// Validate Steps array is not empty

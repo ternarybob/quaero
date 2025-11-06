@@ -1,0 +1,27 @@
+{
+  "step": 9,
+  "completed": true,
+  "changes": [
+    "Removed strict source_type requirement for crawler jobs",
+    "Made source_type validation conditional - only validates format if provided",
+    "Removed base_url requirement to support generic crawler definitions",
+    "Added explanatory comments about optional source fields"
+  ],
+  "files_modified": [
+    "internal/models/job_definition.go"
+  ],
+  "lines_modified": "148-164",
+  "validation_change": "Lines 150-151 removed the error 'source_type is required for crawler jobs'. Now source_type is optional and only validated for format when provided. Base URL requirement also removed.",
+  "validation": {
+    "compile_test": "PASSED - go build completed without errors",
+    "source_type_optional": true,
+    "base_url_optional": true,
+    "format_validation_preserved": true
+  },
+  "notes": [
+    "File-based crawler definitions can now be saved without source_type",
+    "If source_type is provided, it's still validated for correct format (jira/confluence/github)",
+    "Base URL is now optional to support generic crawler jobs",
+    "All other validations remain intact (steps, schedule, timeout, etc.)"
+  ]
+}
