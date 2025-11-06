@@ -234,6 +234,12 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check for /export suffix (download as TOML)
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/export") {
+		s.app.JobDefinitionHandler.ExportJobDefinitionHandler(w, r)
+		return
+	}
+
 	// Check for /status suffix (job tree status aggregation)
 	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/status") {
 		s.app.JobDefinitionHandler.GetJobTreeStatusHandler(w, r)

@@ -323,7 +323,7 @@ if ($Web) {
     # Deploy pages directory
     $pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
     $pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
-    
+
     if (Test-Path $pagesSourcePath) {
         if (Test-Path $pagesDestPath) {
             Remove-Item -Path $pagesDestPath -Recurse -Force
@@ -334,6 +334,36 @@ if ($Web) {
         Write-Error "Source pages directory not found: $pagesSourcePath"
         Stop-Transcript
         exit 1
+    }
+
+    # Deploy job-definitions directory from deployments/local (if exists)
+    # Only copies files that don't exist in bin/ (no override)
+    $jobDefsSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\job-definitions"
+    $jobDefsDestPath = Join-Path -Path $binDir -ChildPath "job-definitions"
+
+    if (Test-Path $jobDefsSourcePath) {
+        if (-not (Test-Path $jobDefsDestPath)) {
+            New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
+        }
+
+        # Copy files without overriding existing ones
+        $sourceFiles = Get-ChildItem -Path $jobDefsSourcePath -File
+        $copiedCount = 0
+        $skippedCount = 0
+
+        foreach ($file in $sourceFiles) {
+            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $file.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $file.FullName -Destination $destFile
+                $copiedCount++
+            } else {
+                $skippedCount++
+            }
+        }
+
+        if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
+            Write-Host "Deployed job definitions: deployments/local/job-definitions -> bin/ (copied: $copiedCount, skipped: $skippedCount)" -ForegroundColor Green
+        }
     }
     
     # Restart server in new window
@@ -684,6 +714,36 @@ if (Test-Path $pagesSourcePath) {
     }
     Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
     Write-Host "Deployed web pages: pages -> bin/" -ForegroundColor Green
+}
+
+# Deploy job-definitions directory from deployments/local (if exists)
+# Only copies files that don't exist in bin/ (no override)
+$jobDefsSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\job-definitions"
+$jobDefsDestPath = Join-Path -Path $binDir -ChildPath "job-definitions"
+
+if (Test-Path $jobDefsSourcePath) {
+    if (-not (Test-Path $jobDefsDestPath)) {
+        New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
+    }
+
+    # Copy files without overriding existing ones
+    $sourceFiles = Get-ChildItem -Path $jobDefsSourcePath -File
+    $copiedCount = 0
+    $skippedCount = 0
+
+    foreach ($file in $sourceFiles) {
+        $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $file.Name
+        if (-not (Test-Path $destFile)) {
+            Copy-Item -Path $file.FullName -Destination $destFile
+            $copiedCount++
+        } else {
+            $skippedCount++
+        }
+    }
+
+    if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
+        Write-Host "Deployed job definitions: deployments/local/job-definitions -> bin/ (copied: $copiedCount, skipped: $skippedCount)" -ForegroundColor Green
+    }
 }
 
 # Verify executable was created

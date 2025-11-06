@@ -91,7 +91,9 @@ type JobDefinition struct {
 	Name           string                 `json:"name"`            // Human-readable job name
 	Type           JobDefinitionType      `json:"type"`            // Type of job definition (crawler, summarizer, custom)
 	Description    string                 `json:"description"`     // Job description
-	Sources        []string               `json:"sources"`         // Array of source IDs this job operates on
+	SourceType     string                 `json:"source_type"`     // Source type: "jira", "confluence", "github"
+	BaseURL        string                 `json:"base_url"`        // Base URL for the source (e.g., "https://company.atlassian.net")
+	AuthID         string                 `json:"auth_id"`         // Reference to auth_credentials.id for authentication
 	Steps          []JobStep              `json:"steps"`           // Ordered array of execution steps
 	Schedule       string                 `json:"schedule"`        // Cron expression for scheduling
 	Timeout        string                 `json:"timeout"`         // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
@@ -122,6 +124,25 @@ func (j *JobDefinition) Validate() error {
 	// Validate JobDefinitionType is one of the allowed constants
 	if !IsValidJobDefinitionType(j.Type) {
 		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom)", j.Type)
+	}
+
+	// Validate source fields for crawler jobs
+	if j.Type == JobDefinitionTypeCrawler {
+		if j.SourceType == "" {
+			return errors.New("source_type is required for crawler jobs")
+		}
+		// Validate source type
+		validTypes := map[string]bool{
+			"jira":       true,
+			"confluence": true,
+			"github":     true,
+		}
+		if !validTypes[j.SourceType] {
+			return fmt.Errorf("invalid source_type: %s (must be one of: jira, confluence, github)", j.SourceType)
+		}
+		if j.BaseURL == "" {
+			return errors.New("base_url is required for crawler jobs")
+		}
 	}
 
 	// Validate Steps array is not empty
@@ -212,23 +233,6 @@ func (j *JobDefinition) MarshalSteps() (string, error) {
 func (j *JobDefinition) UnmarshalSteps(data string) error {
 	if err := json.Unmarshal([]byte(data), &j.Steps); err != nil {
 		return fmt.Errorf("failed to unmarshal steps: %w", err)
-	}
-	return nil
-}
-
-// MarshalSources serializes the sources array to JSON string for database storage
-func (j *JobDefinition) MarshalSources() (string, error) {
-	data, err := json.Marshal(j.Sources)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal sources: %w", err)
-	}
-	return string(data), nil
-}
-
-// UnmarshalSources deserializes the sources JSON string from database
-func (j *JobDefinition) UnmarshalSources(data string) error {
-	if err := json.Unmarshal([]byte(data), &j.Sources); err != nil {
-		return fmt.Errorf("failed to unmarshal sources: %w", err)
 	}
 	return nil
 }

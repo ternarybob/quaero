@@ -351,16 +351,22 @@
 
                                     <!-- Right side: Actions -->
                                     <div class="column col-2 text-right">
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-run'" class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)" :disabled="!jobDef.enabled" title="Run Job" aria-label="Run Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-run'" class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)" :disabled="!jobDef.enabled" title="Run Job"
+                                            aria-label="Run Job">
                                             <i class="fas fa-play"></i>
                                         </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)" title="Edit Job Definition" aria-label="Edit Job">
                                             <i class="fas fa-edit"></i>
                                         </button>
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'" class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)" :disabled="jobDef.type !== 'crawler'"
+                                            title="Download as TOML" aria-label="Download Job" x-show="jobDef.type === 'crawler'">
+                                            <i class="fas fa-download"></i>
+                                        </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'" class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)" title="Delete Job Definition" aria-label="Delete Job">
                                             <i class="fas fa-trash"></i>
                                         </button>
-                                    </div>                                </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </template>

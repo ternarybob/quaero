@@ -168,24 +168,7 @@ CREATE TABLE IF NOT EXISTS job_logs (
 CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_logs_level ON job_logs(level, created_at DESC);
 
--- Source configurations table
-CREATE TABLE IF NOT EXISTS sources (
-	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	type TEXT NOT NULL,
-	base_url TEXT NOT NULL,
-	enabled INTEGER DEFAULT 1,
-	auth_id TEXT,
-	crawl_config TEXT NOT NULL,
-	filters TEXT,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
-);
 
-CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(type, enabled);
-CREATE INDEX IF NOT EXISTS idx_sources_enabled ON sources(enabled, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sources_auth ON sources(auth_id);
 
 -- Job settings table for persisting scheduler job configurations
 CREATE TABLE IF NOT EXISTS job_settings (
@@ -203,7 +186,9 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	name TEXT NOT NULL,
 	type TEXT NOT NULL,
 	description TEXT,
-	sources TEXT NOT NULL,
+	source_type TEXT,
+	base_url TEXT,
+	auth_id TEXT,
 	steps TEXT NOT NULL,
 	schedule TEXT NOT NULL,
 	timeout TEXT,
@@ -213,7 +198,8 @@ CREATE TABLE IF NOT EXISTS job_definitions (
 	post_jobs TEXT,
 	error_tolerance TEXT,
 	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
+	updated_at INTEGER NOT NULL,
+	FOREIGN KEY (auth_id) REFERENCES auth_credentials(id) ON DELETE SET NULL
 );
 
 -- Job definitions indexes

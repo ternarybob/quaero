@@ -1,12 +1,10 @@
 // -----------------------------------------------------------------------
-// Last Modified: Tuesday, 4th November 2025 4:23:28 pm
-// Modified By: Bob McAllan
+// API Test Suite Main Entry Point
 // -----------------------------------------------------------------------
 
-package ui
+package api
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,13 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test"
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// TestMain runs before all tests in the ui package
-// It verifies the service is accessible before running any UI tests
+// TestMain runs before all tests in the api package
+// It verifies the service is accessible before running any API tests
 // NOTE: Service connectivity check is optional - tests using SetupTestEnvironment
 //
 //	will start their own service instance
@@ -34,7 +31,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(mw, "\n⚠ Service not pre-started (tests using SetupTestEnvironment will start their own)\n")
 		fmt.Fprintf(mw, "   Note: %v\n\n", err)
 	} else {
-		fmt.Fprintln(mw, "✓ Service connectivity verified - proceeding with UI tests")
+		fmt.Fprintln(mw, "✓ Service connectivity verified - proceeding with API tests")
 	}
 
 	// Run all tests with cleanup guarantee
@@ -71,39 +68,21 @@ func cleanupAllResources(w io.Writer) {
 func verifyServiceConnectivity() error {
 	baseURL := test.MustGetTestServerURL()
 
-	// Test 1: HTTP health check
+	// HTTP health check
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(baseURL)
+	resp, err := client.Get(baseURL + "/api/health")
 	if err != nil {
 		return fmt.Errorf("service not accessible at %s: %w", baseURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("service returned status %d (expected 200 OK)", resp.StatusCode)
-	}
-
-	// Test 2: Homepage loads in browser
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	var title string
-	err = chromedp.Run(ctx,
-		chromedp.Navigate(baseURL),
-		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		chromedp.Title(&title),
-	)
-
-	if err != nil {
-		return fmt.Errorf("homepage failed to load in browser: %w", err)
+		return fmt.Errorf("health check returned status %d (expected 200 OK)", resp.StatusCode)
 	}
 
 	fmt.Printf("   Service URL: %s\n", baseURL)
-	fmt.Printf("   Status: 200 OK\n")
-	fmt.Printf("   Homepage Title: %s\n", title)
+	fmt.Printf("   Health Check: 200 OK\n")
 
 	return nil
 }
+

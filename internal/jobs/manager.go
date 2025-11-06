@@ -874,8 +874,21 @@ func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions)
 
 	if opts != nil {
 		if opts.Status != "" {
-			query += " AND status = ?"
-			args = append(args, opts.Status)
+			// Support comma-separated status values (e.g., "pending,running,completed")
+			statuses := strings.Split(opts.Status, ",")
+			if len(statuses) == 1 {
+				// Single status value
+				query += " AND status = ?"
+				args = append(args, strings.TrimSpace(statuses[0]))
+			} else {
+				// Multiple status values - use IN clause
+				placeholders := strings.Repeat("?,", len(statuses))
+				placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+				for _, s := range statuses {
+					args = append(args, strings.TrimSpace(s))
+				}
+			}
 		}
 		if opts.ParentID != "" {
 			if opts.ParentID == "root" {
@@ -990,8 +1003,21 @@ func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.JobListOptions
 
 	if opts != nil {
 		if opts.Status != "" {
-			query += " AND status = ?"
-			args = append(args, opts.Status)
+			// Support comma-separated status values (e.g., "pending,running,completed")
+			statuses := strings.Split(opts.Status, ",")
+			if len(statuses) == 1 {
+				// Single status value
+				query += " AND status = ?"
+				args = append(args, strings.TrimSpace(statuses[0]))
+			} else {
+				// Multiple status values - use IN clause
+				placeholders := strings.Repeat("?,", len(statuses))
+				placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
+				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
+				for _, s := range statuses {
+					args = append(args, strings.TrimSpace(s))
+				}
+			}
 		}
 		if opts.ParentID != "" {
 			if opts.ParentID == "root" {

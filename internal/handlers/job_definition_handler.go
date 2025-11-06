@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
@@ -499,6 +500,12 @@ func extractJobDefinitionID(path string) string {
 	// Handle /execute suffix
 	path = strings.TrimSuffix(path, "/execute")
 
+	// Handle /export suffix
+	path = strings.TrimSuffix(path, "/export")
+
+	// Handle /status suffix
+	path = strings.TrimSuffix(path, "/status")
+
 	// Extract ID from path like "/api/job-definitions/{id}"
 	parts := strings.Split(path, "/")
 	if len(parts) >= 4 && parts[1] == "api" && parts[2] == "job-definitions" {
@@ -506,4 +513,149 @@ func extractJobDefinitionID(path string) string {
 	}
 
 	return ""
+}
+
+// ExportJobDefinitionHandler handles GET /api/job-definitions/{id}/export
+// Exports a job definition as a TOML file for download
+func (h *JobDefinitionHandler) ExportJobDefinitionHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	id := extractJobDefinitionID(r.URL.Path)
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "Job definition ID is required")
+		return
+	}
+
+	ctx := r.Context()
+	jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
+	if err != nil {
+		if err == ErrJobDefinitionNotFound {
+			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found for export")
+			WriteError(w, http.StatusNotFound, "Job definition not found")
+			return
+		}
+		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to get job definition for export")
+		WriteError(w, http.StatusInternalServerError, "Failed to get job definition")
+		return
+	}
+
+	// Only export crawler jobs (other types are internal)
+	if jobDef.Type != models.JobDefinitionTypeCrawler {
+		h.logger.Warn().Str("job_def_id", id).Str("type", string(jobDef.Type)).Msg("Cannot export non-crawler job definition")
+		WriteError(w, http.StatusBadRequest, "Only crawler job definitions can be exported")
+		return
+	}
+
+	// Convert to simplified TOML format
+	tomlData, err := h.convertJobDefinitionToTOML(jobDef)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to convert job definition to TOML")
+		WriteError(w, http.StatusInternalServerError, "Failed to export job definition")
+		return
+	}
+
+	// Set headers for file download
+	filename := fmt.Sprintf("%s.toml", jobDef.ID)
+	w.Header().Set("Content-Type", "application/toml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Content-Length", strconv.Itoa(len(tomlData)))
+
+	h.logger.Info().Str("job_def_id", id).Str("filename", filename).Msg("Exporting job definition as TOML")
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(tomlData)
+}
+
+// convertJobDefinitionToTOML converts a JobDefinition to simplified TOML format
+func (h *JobDefinitionHandler) convertJobDefinitionToTOML(jobDef *models.JobDefinition) ([]byte, error) {
+	// Extract crawler configuration from first step
+	var crawlConfig map[string]interface{}
+	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Action == "crawl" {
+		crawlConfig = jobDef.Steps[0].Config
+	} else {
+		crawlConfig = make(map[string]interface{})
+	}
+
+	// Build simplified structure matching the file format
+	simplified := map[string]interface{}{
+		"id":          jobDef.ID,
+		"name":        jobDef.Name,
+		"description": jobDef.Description,
+		"schedule":    jobDef.Schedule,
+		"timeout":     jobDef.Timeout,
+		"enabled":     jobDef.Enabled,
+		"auto_start":  jobDef.AutoStart,
+	}
+
+	// Extract crawler-specific fields from config
+	if startURLs, ok := crawlConfig["start_urls"].([]interface{}); ok {
+		urls := make([]string, 0, len(startURLs))
+		for _, url := range startURLs {
+			if urlStr, ok := url.(string); ok {
+				urls = append(urls, urlStr)
+			}
+		}
+		simplified["start_urls"] = urls
+	} else {
+		simplified["start_urls"] = []string{}
+	}
+
+	if includePatterns, ok := crawlConfig["include_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(includePatterns))
+		for _, pattern := range includePatterns {
+			if patternStr, ok := pattern.(string); ok {
+				patterns = append(patterns, patternStr)
+			}
+		}
+		simplified["include_patterns"] = patterns
+	} else {
+		simplified["include_patterns"] = []string{}
+	}
+
+	if excludePatterns, ok := crawlConfig["exclude_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(excludePatterns))
+		for _, pattern := range excludePatterns {
+			if patternStr, ok := pattern.(string); ok {
+				patterns = append(patterns, patternStr)
+			}
+		}
+		simplified["exclude_patterns"] = patterns
+	} else {
+		simplified["exclude_patterns"] = []string{}
+	}
+
+	// Extract numeric fields with defaults
+	if maxDepth, ok := crawlConfig["max_depth"].(float64); ok {
+		simplified["max_depth"] = int(maxDepth)
+	} else {
+		simplified["max_depth"] = 2
+	}
+
+	if maxPages, ok := crawlConfig["max_pages"].(float64); ok {
+		simplified["max_pages"] = int(maxPages)
+	} else {
+		simplified["max_pages"] = 100
+	}
+
+	if concurrency, ok := crawlConfig["concurrency"].(float64); ok {
+		simplified["concurrency"] = int(concurrency)
+	} else {
+		simplified["concurrency"] = 5
+	}
+
+	if followLinks, ok := crawlConfig["follow_links"].(bool); ok {
+		simplified["follow_links"] = followLinks
+	} else {
+		simplified["follow_links"] = true
+	}
+
+	// Marshal to TOML
+	tomlData, err := toml.Marshal(simplified)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal to TOML: %w", err)
+	}
+
+	return tomlData, nil
 }

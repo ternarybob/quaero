@@ -154,6 +154,7 @@ type LoggingConfig struct {
 // JobsConfig contains configuration for default scheduled jobs
 type JobsConfig struct {
 	CrawlAndCollect JobConfig `toml:"crawl_and_collect"`
+	DefinitionsDir  string    `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
 }
 
 // JobConfig defines configuration for a single job
@@ -290,6 +291,7 @@ func NewDefaultConfig() *Config {
 				Schedule:    "*/5 * * * *", // Every 5 minutes
 				Description: "Crawl and collect website data, store as markdown",
 			},
+			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
 		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Quaero/1.0 (Web Crawler)",

@@ -6,12 +6,13 @@
 package ui
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ternarybob/quaero/test/common"
 
 	"github.com/chromedp/chromedp"
 )
@@ -182,8 +183,19 @@ func TestNavigation(t *testing.T) {
 	}
 	defer env.Cleanup()
 
-	t.Logf("Test environment ready, service running at: %s", env.GetBaseURL())
-	t.Logf("Results directory: %s", env.GetResultsDir())
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestNavigation")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestNavigation (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestNavigation (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
 
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
@@ -198,15 +210,18 @@ func TestNavigation(t *testing.T) {
 		linkHref      string
 		expectedTitle string
 	}{
-		{"Sources", "/sources", "Source Management"},
 		{"Jobs", "/jobs", "Job Management"},
+		{"Queue", "/queue", "Queue"},
 		{"Documents", "/documents", "Document Management"},
+		{"Search", "/search", "Search"},
 		{"Chat", "/chat", "Chat"},
-		{"Settings", "/config", "Configuration"},
+		{"Settings", "/settings", "Settings"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.linkText, func(t *testing.T) {
+			env.LogTest(t, "Testing navigation to %s (%s)", tt.linkText, tt.linkHref)
+
 			var title string
 			err := chromedp.Run(ctx,
 				chromedp.EmulateViewport(1920, 1080),
@@ -218,19 +233,25 @@ func TestNavigation(t *testing.T) {
 			)
 
 			if err != nil {
+				env.LogTest(t, "ERROR: Failed to navigate to %s: %v", tt.linkText, err)
 				t.Fatalf("Failed to navigate to %s: %v", tt.linkText, err)
 			}
 
 			// Take screenshot of the navigated page
 			screenshotName := fmt.Sprintf("navigation-%s", strings.ToLower(tt.linkText))
 			if err := env.TakeScreenshot(ctx, screenshotName); err != nil {
+				env.LogTest(t, "ERROR: Failed to take screenshot for %s: %v", tt.linkText, err)
 				t.Fatalf("Failed to take screenshot for %s: %v", tt.linkText, err)
 			}
-			t.Logf("Screenshot saved: %s", env.GetScreenshotPath(screenshotName))
+			env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath(screenshotName))
 
 			if !strings.Contains(title, tt.expectedTitle) {
+				env.LogTest(t, "ERROR: Title mismatch for %s - expected to contain '%s', got '%s'",
+					tt.linkText, tt.expectedTitle, title)
 				t.Errorf("After clicking '%s', expected title to contain '%s', got '%s'",
 					tt.linkText, tt.expectedTitle, title)
+			} else {
+				env.LogTest(t, "✓ Navigation to %s successful, title: %s", tt.linkText, title)
 			}
 		})
 	}

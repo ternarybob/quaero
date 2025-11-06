@@ -1,0 +1,51 @@
+# Example Crawler Job Definition
+# This file demonstrates how to define a custom crawler job in TOML format
+# Place .toml or .json files in the job-definitions directory to auto-load at startup
+
+id = "example-news-crawler"
+name = "Example News Crawler"
+description = "Example crawler job that crawls a news website and filters for specific content"
+
+# Initial URLs to start crawling from
+start_urls = [
+    "https://example.com/news",
+    "https://example.com/articles"
+]
+
+# Cron schedule (empty = manual execution only)
+# Examples:
+#   "*/5 * * * *"  = Every 5 minutes
+#   "0 */6 * * *"  = Every 6 hours
+#   "0 0 * * *"    = Daily at midnight
+schedule = ""
+
+# Maximum execution time (e.g., "30m", "1h", "2h30m")
+timeout = "30m"
+
+# Whether this job is enabled
+enabled = true
+
+# Whether to auto-start when scheduler initializes
+auto_start = false
+
+# URL filtering patterns (regex)
+# Only URLs matching these patterns will be crawled
+include_patterns = [
+    "article",
+    "news",
+    "post"
+]
+
+# URLs matching these patterns will be excluded
+exclude_patterns = [
+    "login",
+    "logout",
+    "admin"
+]
+
+# Crawler behavior
+max_depth = 2          # Maximum depth to follow links
+max_pages = 100        # Maximum number of pages to crawl
+concurrency = 5        # Number of concurrent workers
+follow_links = true    # Whether to follow discovered links
+

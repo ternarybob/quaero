@@ -12,7 +12,8 @@ import (
 )
 
 // SeedJobDefinitions creates default job definitions if they don't exist
-func (m *Manager) SeedJobDefinitions(ctx context.Context) error {
+// and loads user-defined job definitions from the specified directory
+func (m *Manager) SeedJobDefinitions(ctx context.Context, jobDefsDir string) error {
 	m.logger.Info().Msg("Seeding default job definitions")
 
 	// Database Maintenance job definition
@@ -43,6 +44,51 @@ func (m *Manager) SeedJobDefinitions(ctx context.Context) error {
 
 	if err := m.upsertJobDefinition(ctx, dbMaintenanceDef); err != nil {
 		return err
+	}
+
+	// Stockhead Crawler job definition
+	stockheadCrawlerDef := &models.JobDefinition{
+		ID:          "stockhead-crawler",
+		Name:        "Stockhead News Crawler",
+		Type:        models.JobDefinitionTypeCrawler,
+		Description: "Crawls Stockhead 'Just In' news section, filtering for 'rise-and-shine' articles with 1-level depth",
+		Sources:     []string{}, // No pre-configured source needed - uses start_urls
+		Steps: []models.JobStep{
+			{
+				Name:   "crawl_stockhead",
+				Action: "crawl",
+				Config: map[string]interface{}{
+					"start_urls":       []string{"https://stockhead.com.au/just-in/"},
+					"include_patterns": []string{"rise-and-shine"},
+					"exclude_patterns": []string{},
+					"max_depth":        1,
+					"max_pages":        100,
+					"concurrency":      5,
+					"follow_links":     true,
+				},
+				OnError: models.ErrorStrategyContinue,
+			},
+		},
+		Schedule:  "", // Manual execution only (no automatic schedule)
+		Timeout:   "30m",
+		Enabled:   true,
+		AutoStart: false,
+		Config:    map[string]interface{}{},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := m.upsertJobDefinition(ctx, stockheadCrawlerDef); err != nil {
+		return err
+	}
+
+	// Load user-defined crawler jobs from files
+	// This allows users to define custom crawler jobs without modifying code
+	if jobDefsDir != "" {
+		if err := m.LoadJobDefinitionsFromFiles(ctx, jobDefsDir); err != nil {
+			m.logger.Warn().Err(err).Msg("Failed to load job definitions from files")
+			// Don't fail startup - file loading is optional
+		}
 	}
 
 	m.logger.Info().Msg("Default job definitions seeded successfully")

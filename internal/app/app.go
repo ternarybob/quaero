@@ -210,10 +210,10 @@ func (a *App) initDatabase() error {
 		Str("vector_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableVector)).
 		Msg("Storage layer initialized")
 
-	// Seed default job definitions
+	// Seed default job definitions and load user-defined jobs from files
 	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
 		ctx := context.Background()
-		if err := sqliteMgr.SeedJobDefinitions(ctx); err != nil {
+		if err := sqliteMgr.SeedJobDefinitions(ctx, a.Config.Jobs.DefinitionsDir); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to seed job definitions")
 		}
 	}
