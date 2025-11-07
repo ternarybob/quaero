@@ -1241,3 +1241,288 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 
 	return int(rowsAffected), nil
 }
+
+// ============================================================================
+// Real-Time Progress Tracking Methods (Task 4.1)
+// ============================================================================
+
+// CrawlerProgressStats represents comprehensive progress statistics for crawler jobs
+type CrawlerProgressStats struct {
+	// Basic job information
+	JobID    string `json:"job_id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Status   string `json:"status"`
+	JobType  string `json:"job_type"`
+
+	// Child job statistics
+	TotalChildren     int `json:"total_children"`
+	CompletedChildren int `json:"completed_children"`
+	FailedChildren    int `json:"failed_children"`
+	RunningChildren   int `json:"running_children"`
+	PendingChildren   int `json:"pending_children"`
+	CancelledChildren int `json:"cancelled_children"`
+
+	// Progress calculation
+	OverallProgress float64 `json:"overall_progress"` // 0.0 to 1.0
+	ProgressText    string  `json:"progress_text"`    // Human-readable progress
+
+	// Link following statistics (crawler-specific)
+	LinksFound    int `json:"links_found"`
+	LinksFiltered int `json:"links_filtered"`
+	LinksFollowed int `json:"links_followed"`
+	LinksSkipped  int `json:"links_skipped"`
+
+	// Timing information
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	EstimatedEnd *time.Time `json:"estimated_end,omitempty"`
+	Duration     *float64   `json:"duration_seconds,omitempty"`
+
+	// Error information
+	Errors   []string `json:"errors,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// GetCrawlerProgressStats retrieves comprehensive progress statistics for a crawler job
+// This method calculates parent job progress from child job statistics and includes
+// link following metrics for real-time monitoring
+func (m *Manager) GetCrawlerProgressStats(ctx context.Context, jobID string) (*CrawlerProgressStats, error) {
+	// Get the job details
+	job, err := m.GetJobInternal(ctx, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job: %w", err)
+	}
+
+	stats := &CrawlerProgressStats{
+		JobID:     job.ID,
+		Status:    job.Status,
+		JobType:   job.Type,
+		StartedAt: job.StartedAt,
+	}
+
+	if job.ParentID != nil {
+		stats.ParentID = *job.ParentID
+	}
+
+	// Calculate duration if job has started
+	if job.StartedAt != nil {
+		var endTime time.Time
+		if job.CompletedAt != nil {
+			endTime = *job.CompletedAt
+		} else {
+			endTime = time.Now()
+		}
+		duration := endTime.Sub(*job.StartedAt).Seconds()
+		stats.Duration = &duration
+	}
+
+	// Get child job statistics
+	childStats, err := m.getChildJobStatistics(ctx, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child statistics: %w", err)
+	}
+
+	stats.TotalChildren = childStats.TotalChildren
+	stats.CompletedChildren = childStats.CompletedChildren
+	stats.FailedChildren = childStats.FailedChildren
+	stats.RunningChildren = childStats.RunningChildren
+	stats.PendingChildren = childStats.PendingChildren
+	stats.CancelledChildren = childStats.CancelledChildren
+
+	// Calculate overall progress
+	if stats.TotalChildren > 0 {
+		terminalCount := stats.CompletedChildren + stats.FailedChildren + stats.CancelledChildren
+		stats.OverallProgress = float64(terminalCount) / float64(stats.TotalChildren)
+	} else {
+		// No children yet, use parent job progress if available
+		if job.ProgressTotal > 0 {
+			stats.OverallProgress = float64(job.ProgressCurrent) / float64(job.ProgressTotal)
+		}
+	}
+
+	// Generate progress text
+	stats.ProgressText = m.generateProgressText(stats)
+
+	// Get link following statistics from crawler metadata
+	linkStats, err := m.getLinkFollowingStats(ctx, jobID)
+	if err == nil {
+		stats.LinksFound = linkStats.LinksFound
+		stats.LinksFiltered = linkStats.LinksFiltered
+		stats.LinksFollowed = linkStats.LinksFollowed
+		stats.LinksSkipped = linkStats.LinksSkipped
+	}
+
+	// Estimate completion time
+	if stats.OverallProgress > 0 && stats.OverallProgress < 1.0 && stats.StartedAt != nil && stats.RunningChildren > 0 {
+		elapsed := time.Since(*stats.StartedAt)
+		totalEstimated := float64(elapsed) / stats.OverallProgress
+		remaining := totalEstimated - float64(elapsed)
+		estimatedEnd := time.Now().Add(time.Duration(remaining))
+		stats.EstimatedEnd = &estimatedEnd
+	}
+
+	// Extract errors and warnings
+	if job.Error != nil && *job.Error != "" {
+		stats.Errors = []string{*job.Error}
+	}
+
+	return stats, nil
+}
+
+// childJobStatistics holds detailed child job statistics
+type childJobStatistics struct {
+	TotalChildren     int
+	CompletedChildren int
+	FailedChildren    int
+	RunningChildren   int
+	PendingChildren   int
+	CancelledChildren int
+}
+
+// getChildJobStatistics retrieves detailed child job statistics
+func (m *Manager) getChildJobStatistics(ctx context.Context, parentJobID string) (*childJobStatistics, error) {
+	var stats childJobStatistics
+
+	row := m.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
+		FROM jobs
+		WHERE parent_id = ?
+	`, parentJobID)
+
+	if err := row.Scan(
+		&stats.TotalChildren,
+		&stats.CompletedChildren,
+		&stats.FailedChildren,
+		&stats.RunningChildren,
+		&stats.PendingChildren,
+		&stats.CancelledChildren,
+	); err != nil {
+		return nil, fmt.Errorf("failed to aggregate child statistics: %w", err)
+	}
+
+	return &stats, nil
+}
+
+// linkFollowingStats holds link following statistics
+type linkFollowingStats struct {
+	LinksFound    int
+	LinksFiltered int
+	LinksFollowed int
+	LinksSkipped  int
+}
+
+// getLinkFollowingStats retrieves link following statistics from crawler metadata
+// This aggregates link statistics across all child jobs for a parent crawler job
+func (m *Manager) getLinkFollowingStats(ctx context.Context, jobID string) (*linkFollowingStats, error) {
+	// For now, return empty stats as this would require parsing crawler metadata
+	// In a full implementation, this would query the documents table or job metadata
+	// to aggregate link statistics from all child jobs
+	return &linkFollowingStats{}, nil
+}
+
+// generateProgressText creates human-readable progress text
+func (m *Manager) generateProgressText(stats *CrawlerProgressStats) string {
+	if stats.TotalChildren == 0 {
+		return "No child jobs spawned yet"
+	}
+
+	return fmt.Sprintf("%d URLs (%d completed, %d failed, %d running, %d pending)",
+		stats.TotalChildren,
+		stats.CompletedChildren,
+		stats.FailedChildren,
+		stats.RunningChildren,
+		stats.PendingChildren,
+	)
+}
+
+// GetJobTreeProgressStats retrieves progress statistics for multiple parent jobs
+// This is optimized for bulk operations when displaying multiple jobs in the UI
+func (m *Manager) GetJobTreeProgressStats(ctx context.Context, parentJobIDs []string) (map[string]*CrawlerProgressStats, error) {
+	if len(parentJobIDs) == 0 {
+		return make(map[string]*CrawlerProgressStats), nil
+	}
+
+	result := make(map[string]*CrawlerProgressStats)
+
+	// Get all parent jobs in a single query
+	placeholders := make([]string, len(parentJobIDs))
+	args := make([]interface{}, len(parentJobIDs))
+	for i, id := range parentJobIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, parent_id, job_type, status, started_at, completed_at, error,
+		       progress_json, created_at
+		FROM jobs
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	rows, err := m.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query parent jobs: %w", err)
+	}
+	defer rows.Close()
+
+	// Process each parent job
+	for rows.Next() {
+		var jobID, jobType, status string
+		var parentID sql.NullString
+		var startedAt, completedAt sql.NullInt64
+		var errorMsg sql.NullString
+		var progressJSON string
+		var createdAtUnix int64
+
+		if err := rows.Scan(&jobID, &parentID, &jobType, &status, &startedAt, &completedAt, &errorMsg, &progressJSON, &createdAtUnix); err != nil {
+			continue // Skip invalid rows
+		}
+
+		stats := &CrawlerProgressStats{
+			JobID:   jobID,
+			Status:  status,
+			JobType: jobType,
+		}
+
+		if parentID.Valid {
+			stats.ParentID = parentID.String
+		}
+
+		if startedAt.Valid {
+			t := unixToTime(startedAt.Int64)
+			stats.StartedAt = &t
+		}
+
+		if errorMsg.Valid && errorMsg.String != "" {
+			stats.Errors = []string{errorMsg.String}
+		}
+
+		// Get child statistics for this parent
+		childStats, err := m.getChildJobStatistics(ctx, jobID)
+		if err == nil {
+			stats.TotalChildren = childStats.TotalChildren
+			stats.CompletedChildren = childStats.CompletedChildren
+			stats.FailedChildren = childStats.FailedChildren
+			stats.RunningChildren = childStats.RunningChildren
+			stats.PendingChildren = childStats.PendingChildren
+			stats.CancelledChildren = childStats.CancelledChildren
+
+			// Calculate progress
+			if stats.TotalChildren > 0 {
+				terminalCount := stats.CompletedChildren + stats.FailedChildren + stats.CancelledChildren
+				stats.OverallProgress = float64(terminalCount) / float64(stats.TotalChildren)
+			}
+
+			stats.ProgressText = m.generateProgressText(stats)
+		}
+
+		result[jobID] = stats
+	}
+
+	return result, rows.Err()
+}

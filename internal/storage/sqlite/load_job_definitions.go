@@ -52,6 +52,8 @@ func (c *CrawlerJobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		Type:        models.JobDefinitionTypeCrawler,
 		JobType:     jobType,
 		Description: c.Description,
+		SourceType:  "web", // Generic web crawler for arbitrary websites
+		BaseURL:     "",    // Base URL can be empty for web crawlers (uses start_urls)
 		Steps: []models.JobStep{
 			{
 				Name:   "crawl",

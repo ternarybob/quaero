@@ -30,13 +30,8 @@ func NewCrawlerStepExecutor(
 
 // ExecuteStep executes a crawl step
 func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
-	// Validate source fields in job definition
-	if jobDef.SourceType == "" {
-		return "", fmt.Errorf("source_type not set in job definition")
-	}
-	if jobDef.BaseURL == "" {
-		return "", fmt.Errorf("base_url not set in job definition")
-	}
+	// No source type validation needed - crawler is agnostic
+	// BaseURL validation removed - crawler uses start_urls from step config
 
 	// Parse step config map into CrawlConfig struct
 	stepConfig := step.Config

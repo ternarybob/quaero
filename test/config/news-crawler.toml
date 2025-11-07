@@ -4,6 +4,7 @@
 
 id = "news-crawler"
 name = "News Crawler"
+job_type = "user"
 description = "Crawler job that crawls a news website and filters for specific content"
 
 # Initial URLs to start crawling from

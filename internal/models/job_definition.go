@@ -154,9 +154,10 @@ func (j *JobDefinition) Validate() error {
 				"jira":       true,
 				"confluence": true,
 				"github":     true,
+				"web":        true, // Generic web crawler for arbitrary websites
 			}
 			if !validTypes[j.SourceType] {
-				return fmt.Errorf("invalid source_type: %s (must be one of: jira, confluence, github)", j.SourceType)
+				return fmt.Errorf("invalid source_type: %s (must be one of: jira, confluence, github, web)", j.SourceType)
 			}
 		}
 		// Base URL is optional (only required if source_type is set)

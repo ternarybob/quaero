@@ -195,6 +195,48 @@ type JobStatusUpdate struct {
 	RunningChildren int      `json:"running_children,omitempty"` // Number of running child jobs
 }
 
+// CrawlerJobProgressUpdate represents real-time progress updates for crawler jobs
+// This includes comprehensive parent-child job statistics and link following metrics
+type CrawlerJobProgressUpdate struct {
+	// Basic job information
+	JobID     string    `json:"job_id"`
+	ParentID  string    `json:"parent_id,omitempty"`
+	Status    string    `json:"status"`
+	JobType   string    `json:"job_type"`
+	Timestamp time.Time `json:"timestamp"`
+
+	// Child job statistics
+	TotalChildren     int `json:"total_children"`
+	CompletedChildren int `json:"completed_children"`
+	FailedChildren    int `json:"failed_children"`
+	RunningChildren   int `json:"running_children"`
+	PendingChildren   int `json:"pending_children"`
+	CancelledChildren int `json:"cancelled_children"`
+
+	// Progress calculation
+	OverallProgress float64 `json:"overall_progress"` // 0.0 to 1.0
+	ProgressText    string  `json:"progress_text"`    // Human-readable progress
+
+	// Link following statistics (crawler-specific)
+	LinksFound    int `json:"links_found"`
+	LinksFiltered int `json:"links_filtered"`
+	LinksFollowed int `json:"links_followed"`
+	LinksSkipped  int `json:"links_skipped"`
+
+	// Timing information
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	EstimatedEnd *time.Time `json:"estimated_end,omitempty"`
+	Duration     *float64   `json:"duration_seconds,omitempty"`
+
+	// Error information
+	Errors   []string `json:"errors,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+
+	// Current activity
+	CurrentURL      string `json:"current_url,omitempty"`
+	CurrentActivity string `json:"current_activity,omitempty"`
+}
+
 // HandleWebSocket handles WebSocket connections
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -696,6 +738,100 @@ func (h *WebSocketHandler) BroadcastJobStatusChange(update JobStatusUpdate) {
 	}
 }
 
+// BroadcastCrawlerJobProgress sends crawler job progress updates to all connected clients
+// This includes comprehensive parent-child job statistics and link following metrics
+func (h *WebSocketHandler) BroadcastCrawlerJobProgress(update CrawlerJobProgressUpdate) {
+	msg := WSMessage{
+		Type:    "crawler_job_progress",
+		Payload: update,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal crawler job progress message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send crawler job progress to client")
+		}
+	}
+}
+
+// StreamCrawlerJobLog sends crawler-specific log messages to all connected clients
+// This method formats log messages with job context for better debugging
+func (h *WebSocketHandler) StreamCrawlerJobLog(jobID, level, message string, metadata map[string]interface{}) {
+	// Create enhanced log entry with crawler context
+	entry := interfaces.LogEntry{
+		Timestamp: time.Now().Format("15:04:05"),
+		Level:     strings.ToLower(level),
+		Message:   message,
+	}
+
+	// Add job context to the message if metadata is provided
+	if metadata != nil {
+		if url, ok := metadata["url"].(string); ok && url != "" {
+			entry.Message = fmt.Sprintf("[%s] %s", url, entry.Message)
+		}
+		if depth, ok := metadata["depth"].(int); ok {
+			entry.Message = fmt.Sprintf("[depth:%d] %s", depth, entry.Message)
+		}
+	}
+
+	// Create WebSocket message with job context
+	msg := WSMessage{
+		Type: "crawler_job_log",
+		Payload: map[string]interface{}{
+			"job_id":    jobID,
+			"timestamp": entry.Timestamp,
+			"level":     entry.Level,
+			"message":   entry.Message,
+			"metadata":  metadata,
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal crawler job log message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send crawler job log to client")
+		}
+	}
+}
+
 // SubscribeToCrawlerEvents subscribes to crawler progress events
 func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	if h.eventService == nil {
@@ -820,6 +956,93 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		}
 
 		h.BroadcastJobSpawn(spawn)
+		return nil
+	})
+
+	// Subscribe to crawler job progress events for real-time monitoring
+	h.eventService.Subscribe("crawler_job_progress", func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid crawler job progress event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["crawler_job_progress"] {
+			return nil
+		}
+
+		// Convert payload to CrawlerJobProgressUpdate
+		update := CrawlerJobProgressUpdate{
+			JobID:             getString(payload, "job_id"),
+			ParentID:          getString(payload, "parent_id"),
+			Status:            getString(payload, "status"),
+			JobType:           getString(payload, "job_type"),
+			Timestamp:         time.Now(),
+			TotalChildren:     getInt(payload, "total_children"),
+			CompletedChildren: getInt(payload, "completed_children"),
+			FailedChildren:    getInt(payload, "failed_children"),
+			RunningChildren:   getInt(payload, "running_children"),
+			PendingChildren:   getInt(payload, "pending_children"),
+			CancelledChildren: getInt(payload, "cancelled_children"),
+			OverallProgress:   getFloat64(payload, "overall_progress"),
+			ProgressText:      getString(payload, "progress_text"),
+			LinksFound:        getInt(payload, "links_found"),
+			LinksFiltered:     getInt(payload, "links_filtered"),
+			LinksFollowed:     getInt(payload, "links_followed"),
+			LinksSkipped:      getInt(payload, "links_skipped"),
+			CurrentURL:        getString(payload, "current_url"),
+			CurrentActivity:   getString(payload, "current_activity"),
+		}
+
+		// Parse timing information
+		if startedAtStr := getString(payload, "started_at"); startedAtStr != "" {
+			if startedAt, err := time.Parse(time.RFC3339, startedAtStr); err == nil {
+				update.StartedAt = &startedAt
+			}
+		}
+
+		if estimatedEndStr := getString(payload, "estimated_end"); estimatedEndStr != "" {
+			if estimatedEnd, err := time.Parse(time.RFC3339, estimatedEndStr); err == nil {
+				update.EstimatedEnd = &estimatedEnd
+			}
+		}
+
+		if duration := getFloat64(payload, "duration_seconds"); duration > 0 {
+			update.Duration = &duration
+		}
+
+		// Extract errors and warnings
+		update.Errors = getStringSlice(payload, "errors")
+		update.Warnings = getStringSlice(payload, "warnings")
+
+		// Broadcast to all clients
+		h.BroadcastCrawlerJobProgress(update)
+		return nil
+	})
+
+	// Subscribe to crawler job log events for real-time log streaming
+	h.eventService.Subscribe("crawler_job_log", func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid crawler job log event payload type")
+			return nil
+		}
+
+		jobID := getString(payload, "job_id")
+		level := getString(payload, "level")
+		message := getString(payload, "message")
+
+		// Extract metadata if present
+		var metadata map[string]interface{}
+		if metadataRaw, ok := payload["metadata"]; ok {
+			if metadataMap, ok := metadataRaw.(map[string]interface{}); ok {
+				metadata = metadataMap
+			}
+		}
+
+		// Stream the log message
+		h.StreamCrawlerJobLog(jobID, level, message, metadata)
 		return nil
 	})
 }

@@ -358,16 +358,17 @@ func (a *App) initServices() error {
 
 	// 6.7. Register job executors with job processor
 
-	// Register crawler_url executor (new interface)
-	crawlerURLExecutor := processor.NewCrawlerURLExecutor(
+	// Register enhanced crawler_url executor (new interface with ChromeDP and content processing)
+	enhancedCrawlerExecutor := processor.NewEnhancedCrawlerExecutor(
 		a.CrawlerService,
 		jobMgr,
 		queueMgr,
-		a.StorageManager.JobStorage(),
+		a.StorageManager.DocumentStorage(),
 		a.Logger,
+		a.EventService,
 	)
-	jobProcessor.RegisterExecutor(crawlerURLExecutor)
-	a.Logger.Info().Msg("Crawler URL executor registered for job type: crawler_url")
+	jobProcessor.RegisterExecutor(enhancedCrawlerExecutor)
+	a.Logger.Info().Msg("Enhanced crawler URL executor registered for job type: crawler_url")
 
 	// Register database maintenance executor (new interface)
 	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 
@@ -30,6 +29,7 @@ const (
 	SourceTypeJira       = "jira"
 	SourceTypeConfluence = "confluence"
 	SourceTypeGithub     = "github"
+	SourceTypeWeb        = "web" // Generic web crawler for arbitrary websites
 )
 
 // ============================================================================
@@ -118,12 +118,8 @@ type Service struct {
 	logger          arbor.ILogger
 	config          *common.Config
 
-	// Browser pool for chromedp (reusable browser instances)
-	browserPool      []context.Context
-	browserCancels   []context.CancelFunc
-	allocatorCancels []context.CancelFunc
-	browserPoolMu    sync.Mutex
-	browserPoolSize  int
+	// ChromeDP browser pool for efficient JavaScript rendering
+	chromeDPPool *ChromeDPPool
 
 	activeJobs map[string]*models.Job
 	jobResults map[string][]*CrawlResult
@@ -139,6 +135,20 @@ type Service struct {
 func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Create ChromeDP pool configuration from app config
+	poolConfig := ChromeDPPoolConfig{
+		MaxInstances:       config.Crawler.MaxConcurrency,
+		UserAgent:          config.Crawler.UserAgent,
+		Headless:           true, // Always headless for server environments
+		DisableGPU:         true,
+		NoSandbox:          true,
+		JavaScriptWaitTime: config.Crawler.JavaScriptWaitTime,
+		RequestTimeout:     config.Crawler.RequestTimeout,
+	}
+
+	// Initialize ChromeDP pool
+	chromeDPPool := NewChromeDPPool(poolConfig, logger)
+
 	s := &Service{
 		authService:     authService,
 		authStorage:     authStorage,
@@ -148,6 +158,7 @@ func NewService(authService interfaces.AuthService, authStorage interfaces.AuthS
 		queueManager:    queueManager,
 		logger:          logger,
 		config:          config,
+		chromeDPPool:    chromeDPPool,
 		activeJobs:      make(map[string]*models.Job),
 		jobResults:      make(map[string][]*CrawlResult),
 		jobClients:      make(map[string]*http.Client),
@@ -160,107 +171,67 @@ func NewService(authService interfaces.AuthService, authStorage interfaces.AuthS
 
 // Start starts the crawler service
 func (s *Service) Start() error {
-	s.logger.Info().Msg("Crawler service started")
-	return nil
-}
+	// Initialize ChromeDP pool if JavaScript rendering is enabled
+	if s.config.Crawler.EnableJavaScript {
+		poolConfig := ChromeDPPoolConfig{
+			MaxInstances:       s.config.Crawler.MaxConcurrency,
+			UserAgent:          s.config.Crawler.UserAgent,
+			Headless:           true,
+			DisableGPU:         true,
+			NoSandbox:          true,
+			JavaScriptWaitTime: s.config.Crawler.JavaScriptWaitTime,
+			RequestTimeout:     s.config.Crawler.RequestTimeout,
+		}
 
-// initBrowserPool creates a pool of reusable browser instances for efficient JavaScript rendering
-// This prevents resource exhaustion from creating a new browser for every URL
-func (s *Service) initBrowserPool(poolSize int) error {
-	s.browserPoolMu.Lock()
-	defer s.browserPoolMu.Unlock()
+		if err := s.chromeDPPool.InitBrowserPool(poolConfig); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to initialize ChromeDP browser pool")
+			return fmt.Errorf("failed to initialize ChromeDP browser pool: %w", err)
+		}
 
-	s.browserPoolSize = poolSize
-	s.browserPool = make([]context.Context, 0, poolSize)
-	s.browserCancels = make([]context.CancelFunc, 0, poolSize)
-	s.allocatorCancels = make([]context.CancelFunc, 0, poolSize)
-
-	s.logger.Info().
-		Int("pool_size", poolSize).
-		Msg("Initializing browser pool for chromedp")
-
-	for i := 0; i < poolSize; i++ {
-		// Create allocator context (long-lived browser process)
-		allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
-			context.Background(),
-			append(
-				chromedp.DefaultExecAllocatorOptions[:],
-				chromedp.Flag("headless", true),
-				chromedp.Flag("disable-gpu", true),
-				chromedp.Flag("no-sandbox", true),
-				chromedp.Flag("disable-dev-shm-usage", true),
-				chromedp.UserAgent(s.config.Crawler.UserAgent),
-			)...,
-		)
-
-		// Create browser context from allocator
-		browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
-
-		s.browserPool = append(s.browserPool, browserCtx)
-		s.browserCancels = append(s.browserCancels, browserCancel)
-		s.allocatorCancels = append(s.allocatorCancels, allocatorCancel)
-
-		s.logger.Debug().
-			Int("browser_index", i).
-			Msg("Browser instance created in pool")
+		s.logger.Info().
+			Int("pool_size", poolConfig.MaxInstances).
+			Bool("javascript_enabled", true).
+			Msg("Crawler service started with ChromeDP browser pool")
+	} else {
+		s.logger.Info().
+			Bool("javascript_enabled", false).
+			Msg("Crawler service started without JavaScript rendering")
 	}
-
-	s.logger.Info().
-		Int("browsers_created", len(s.browserPool)).
-		Msg("Browser pool initialized successfully")
 
 	return nil
 }
 
-// getBrowserFromPool returns a browser context from the pool (round-robin)
-func (s *Service) getBrowserFromPool(workerIndex int) (context.Context, context.CancelFunc) {
-	s.browserPoolMu.Lock()
-	defer s.browserPoolMu.Unlock()
-
-	if len(s.browserPool) == 0 {
-		return nil, nil
+// GetBrowserFromPool returns a browser context from the ChromeDP pool
+// This method provides backward compatibility for existing code
+func (s *Service) GetBrowserFromPool() (context.Context, func(), error) {
+	if s.chromeDPPool == nil {
+		return nil, nil, fmt.Errorf("ChromeDP pool not initialized")
 	}
-
-	// Use worker index for consistent browser assignment
-	index := workerIndex % len(s.browserPool)
-	return s.browserPool[index], s.browserCancels[index]
+	return s.chromeDPPool.GetBrowser()
 }
 
-// shutdownBrowserPool cleans up all browser instances in the pool
-func (s *Service) shutdownBrowserPool() {
-	s.browserPoolMu.Lock()
-	defer s.browserPoolMu.Unlock()
+// GetChromeDPPool returns the ChromeDP pool instance
+func (s *Service) GetChromeDPPool() *ChromeDPPool {
+	return s.chromeDPPool
+}
 
-	s.logger.Info().
-		Int("browser_count", len(s.browserPool)).
-		Msg("Shutting down browser pool")
+// IsChromeDPPoolInitialized returns whether the ChromeDP pool is initialized
+func (s *Service) IsChromeDPPoolInitialized() bool {
+	if s.chromeDPPool == nil {
+		return false
+	}
+	return s.chromeDPPool.IsInitialized()
+}
 
-	// Cancel all browser contexts
-	for i, cancel := range s.browserCancels {
-		if cancel != nil {
-			cancel()
-			s.logger.Debug().
-				Int("browser_index", i).
-				Msg("Browser context cancelled")
+// GetChromeDPPoolStats returns statistics about the ChromeDP pool
+func (s *Service) GetChromeDPPoolStats() map[string]interface{} {
+	if s.chromeDPPool == nil {
+		return map[string]interface{}{
+			"initialized": false,
+			"error":       "ChromeDP pool not created",
 		}
 	}
-
-	// Cancel all allocator contexts
-	for i, cancel := range s.allocatorCancels {
-		if cancel != nil {
-			cancel()
-			s.logger.Debug().
-				Int("browser_index", i).
-				Msg("Browser allocator cancelled")
-		}
-	}
-
-	// Clear the pools
-	s.browserPool = nil
-	s.browserCancels = nil
-	s.allocatorCancels = nil
-
-	s.logger.Info().Msg("Browser pool shut down successfully")
+	return s.chromeDPPool.GetPoolStats()
 }
 
 // StartCrawl creates a job, seeds queue, starts workers, emits started event
@@ -287,21 +258,15 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Create context logger for this job (logs automatically sent to database)
 	contextLogger := s.logger.WithContextWriter(jobID)
 
-	// Validate source type to prevent invalid values like "crawler"
-	// Explicitly reject "crawler" - this is a job definition type, not a source type
-	if sourceType == "crawler" {
-		err := fmt.Errorf("invalid source type 'crawler': this is a job definition type, not a source type. Expected: jira, confluence, or github")
-		contextLogger.Error().Str("source_type", sourceType).Msg("Invalid source type 'crawler' detected - this is a job definition type not a source type")
-		return "", err
-	}
-
+	// Validate source type - support both platform-specific and generic web crawling
 	validSourceTypes := map[string]bool{
 		SourceTypeJira:       true,
 		SourceTypeConfluence: true,
 		SourceTypeGithub:     true,
+		SourceTypeWeb:        true, // Generic web crawler for arbitrary websites
 	}
 	if !validSourceTypes[sourceType] {
-		err := fmt.Errorf("invalid source type: %s (must be one of: jira, confluence, github)", sourceType)
+		err := fmt.Errorf("invalid source type: %s (must be one of: jira, confluence, github, web)", sourceType)
 		contextLogger.Error().Str("source_type", sourceType).Msg("Invalid source type detected")
 		return "", err
 	}
@@ -631,12 +596,26 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Note: Job remains in JobStatusPending state until first worker picks up a URL
 	// At that point, Execute() will transition to JobStatusRunning and publish EventJobStarted
 
-	// Initialize browser pool if JavaScript rendering is enabled
-	if s.config.Crawler.EnableJavaScript {
-		if err := s.initBrowserPool(config.Concurrency); err != nil {
-			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to initialize browser pool")
-			return "", fmt.Errorf("failed to initialize browser pool: %w", err)
+	// Ensure ChromeDP pool is initialized if JavaScript rendering is enabled
+	if s.config.Crawler.EnableJavaScript && s.chromeDPPool != nil && !s.chromeDPPool.IsInitialized() {
+		poolConfig := ChromeDPPoolConfig{
+			MaxInstances:       config.Concurrency,
+			UserAgent:          s.config.Crawler.UserAgent,
+			Headless:           true,
+			DisableGPU:         true,
+			NoSandbox:          true,
+			JavaScriptWaitTime: s.config.Crawler.JavaScriptWaitTime,
+			RequestTimeout:     s.config.Crawler.RequestTimeout,
 		}
+
+		if err := s.chromeDPPool.InitBrowserPool(poolConfig); err != nil {
+			contextLogger.Error().Err(err).Msg("Failed to initialize ChromeDP browser pool for job")
+			return "", fmt.Errorf("failed to initialize ChromeDP browser pool: %w", err)
+		}
+
+		contextLogger.Debug().
+			Int("pool_size", config.Concurrency).
+			Msg("ChromeDP browser pool initialized for job")
 	}
 
 	// Note: Workers are managed globally by queue.WorkerPool (started at app initialization)
@@ -1114,8 +1093,12 @@ func (s *Service) Shutdown() error {
 	s.cancel()
 	s.wg.Wait()
 
-	// Shutdown browser pool
-	s.shutdownBrowserPool()
+	// Shutdown ChromeDP browser pool
+	if s.chromeDPPool != nil {
+		if err := s.chromeDPPool.ShutdownBrowserPool(); err != nil {
+			s.logger.Warn().Err(err).Msg("Error shutting down ChromeDP browser pool")
+		}
+	}
 
 	// Clean up all per-job HTTP clients
 	s.jobsMu.Lock()

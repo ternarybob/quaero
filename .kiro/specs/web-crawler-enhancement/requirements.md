@@ -9,12 +9,13 @@ This specification defines the requirements for enhancing the Quaero web crawler
 - **Crawler_System**: The web crawling subsystem within Quaero that processes websites and extracts content
 - **Parent_Job**: A top-level crawler job that orchestrates the crawling process and spawns child jobs
 - **Child_Job**: Individual URL crawling tasks spawned by a parent job
-- **Job_Queue**: The goqite-based message queue system that manages job execution
+- **Job_Queue**: The standard goqite-based message queue system that manages job execution without modification
 - **WebSocket_Logger**: Real-time logging system that streams job progress to the UI via WebSocket
 - **ChromeDP_Engine**: Headless Chrome automation tool used for rendering JavaScript-heavy websites
 - **Content_Processor**: Component that converts HTML content to markdown format
 - **Job_Definition**: TOML configuration that defines crawler behavior and parameters
 - **Queue_Page**: UI page that displays active jobs with real-time status updates
+- **Job_Details_Page**: UI page that shows individual job information with live updates for running jobs
 
 ## Requirements
 
@@ -24,11 +25,11 @@ This specification defines the requirements for enhancing the Quaero web crawler
 
 #### Acceptance Criteria
 
-1. WHEN a crawler job is executed, THE Crawler_System SHALL create a parent job record in the database
-2. WHEN the parent job discovers URLs to crawl, THE Crawler_System SHALL spawn child jobs for each URL
-3. WHEN child jobs are created, THE Crawler_System SHALL link them to the parent job via parent_id relationship
-4. WHEN viewing job details, THE Crawler_System SHALL display all child jobs under their parent
-5. WHEN a parent job is cancelled, THE Crawler_System SHALL cancel all associated child jobs
+1. WHEN a crawler job is executed, THE Crawler_System SHALL create a parent job record with metadata in the database
+2. WHEN the parent job discovers URLs to crawl, THE Crawler_System SHALL enqueue child job messages to the standard Job_Queue
+3. WHEN child jobs are created, THE Crawler_System SHALL store parent_id metadata to link them to the parent job
+4. WHEN viewing job details, THE Crawler_System SHALL query job metadata to display all child jobs under their parent
+5. WHEN a parent job is cancelled, THE Crawler_System SHALL update child job status using standard job management operations
 
 ### Requirement 2: Real-Time Job Monitoring
 
@@ -109,10 +110,10 @@ This specification defines the requirements for enhancing the Quaero web crawler
 #### Acceptance Criteria
 
 1. WHEN crawler jobs execute, THE WebSocket_Logger SHALL capture all log messages via arbor channel logger
-2. WHEN job status changes, THE Crawler_System SHALL send status updates via WebSocket to connected clients
-3. WHEN errors occur, THE Crawler_System SHALL log detailed error information with context
+2. WHEN job status changes, THE Crawler_System SHALL send status updates via WebSocket using standard job management
+3. WHEN errors occur, THE Crawler_System SHALL log detailed error information with context using standard job logging
 4. WHEN jobs complete, THE Crawler_System SHALL log summary statistics (URLs processed, success rate, duration)
-5. WHEN viewing job logs, THE Queue_Page SHALL display logs linked to both parent and child jobs
+5. WHEN viewing job logs, THE Queue_Page SHALL display logs using parent_id metadata to group related jobs
 
 ### Requirement 9: UI Integration and User Experience
 
@@ -123,8 +124,9 @@ This specification defines the requirements for enhancing the Quaero web crawler
 1. WHEN viewing the queue page, THE Queue_Page SHALL show parent jobs with expandable child job lists
 2. WHEN a job is running, THE Queue_Page SHALL display progress indicators and live log updates
 3. WHEN clicking on a job, THE Queue_Page SHALL navigate to detailed job view with full logs and configuration
-4. WHEN jobs complete, THE Queue_Page SHALL show completion status and link to extracted documents
-5. WHEN errors occur, THE Queue_Page SHALL highlight failed jobs with error details
+4. WHEN viewing job details for a running job, THE Job_Details_Page SHALL poll for status and log updates every 2 seconds
+5. WHEN jobs complete, THE Queue_Page SHALL show completion status and link to extracted documents
+6. WHEN errors occur, THE Queue_Page SHALL highlight failed jobs with error details
 
 ### Requirement 10: Performance and Scalability
 
@@ -136,4 +138,4 @@ This specification defines the requirements for enhancing the Quaero web crawler
 2. WHEN processing large websites, THE Crawler_System SHALL respect rate limiting to avoid overwhelming target servers
 3. WHEN storing documents, THE Crawler_System SHALL batch database operations for improved performance
 4. WHEN memory usage exceeds thresholds, THE Crawler_System SHALL implement cleanup procedures
-5. WHEN queue depth grows large, THE Job_Queue SHALL maintain processing efficiency through proper indexing
+5. WHEN queue depth grows large, THE Job_Queue SHALL maintain processing efficiency using standard goqite operations
