@@ -22,7 +22,7 @@ type SQLiteDB struct {
 }
 
 // NewSQLiteDB creates a new SQLite database connection
-func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig, environment string) (*SQLiteDB, error) {
+func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig) (*SQLiteDB, error) {
 	// Ensure the directory exists
 	dir := filepath.Dir(config.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -31,9 +31,9 @@ func NewSQLiteDB(logger arbor.ILogger, config *common.SQLiteConfig, environment 
 
 	// Handle reset_on_startup (development only)
 	if config.ResetOnStartup {
-		if environment != "development" {
+		if config.Environment != "development" {
 			logger.Warn().
-				Str("environment", environment).
+				Str("environment", config.Environment).
 				Msg("reset_on_startup is enabled but environment is not 'development' - ignoring reset request for safety")
 		} else {
 			if err := resetDatabase(logger, config.Path); err != nil {

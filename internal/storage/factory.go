@@ -13,7 +13,7 @@ import (
 func NewStorageManager(logger arbor.ILogger, config *common.Config) (interfaces.StorageManager, error) {
 	switch config.Storage.Type {
 	case "sqlite", "":
-		return sqlite.NewManager(logger, &config.Storage.SQLite, config.Environment)
+		return sqlite.NewManager(logger, &config.Storage.SQLite)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", config.Storage.Type)
 	}

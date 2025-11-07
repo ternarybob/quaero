@@ -81,6 +81,7 @@ type SQLiteConfig struct {
 	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
 	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
 	ResetOnStartup     bool   `toml:"reset_on_startup"`    // Delete database on startup (development only)
+	Environment        string `toml:"environment"`         // Environment setting for SQLite operations ("development" or "production")
 }
 
 type RavenDBConfig struct {
@@ -228,12 +229,13 @@ func NewDefaultConfig() *Config {
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
 				Path:               "./data/quaero.db",
-				EnableFTS5:         true,  // Full-text search for keyword queries
-				EnableVector:       true,  // Vector embeddings for semantic search
-				EmbeddingDimension: 768,   // Matches nomic-embed-text model output
-				CacheSizeMB:        64,    // Balanced performance for typical workloads
-				WALMode:            true,  // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS:      10000, // 10 seconds for high-concurrency job processing
+				EnableFTS5:         true,         // Full-text search for keyword queries
+				EnableVector:       true,         // Vector embeddings for semantic search
+				EmbeddingDimension: 768,          // Matches nomic-embed-text model output
+				CacheSizeMB:        64,           // Balanced performance for typical workloads
+				WALMode:            true,         // Write-Ahead Logging for better concurrency
+				BusyTimeoutMS:      10000,        // 10 seconds for high-concurrency job processing
+				Environment:        "development", // Default to development mode
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",
@@ -369,8 +371,10 @@ func applyEnvOverrides(config *Config) {
 	// Environment configuration (highest priority: QUAERO_ENV, fallback: GO_ENV)
 	if env := os.Getenv("QUAERO_ENV"); env != "" {
 		config.Environment = env
+		config.Storage.SQLite.Environment = env // Sync to SQLiteConfig
 	} else if env := os.Getenv("GO_ENV"); env != "" {
 		config.Environment = env
+		config.Storage.SQLite.Environment = env // Sync to SQLiteConfig
 	}
 
 	// Server configuration
