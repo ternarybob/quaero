@@ -66,51 +66,82 @@ graph TB
     JobManager --> LogsDB
 ```
 
-### Parent-Child Job Architecture
+### Single Parent Job with Hidden Children Architecture
 
-The crawler uses a flat hierarchical job structure where:
+The crawler uses a single visible parent job with hidden child job processing:
 
-1. **Parent Job**: Created when a crawler job definition is executed
+1. **Parent Job**: The ONLY job visible in the UI queue
+   - Created when a crawler job definition is executed
    - Stores overall configuration and metadata
    - Tracks aggregate progress across all child jobs
    - Manages job lifecycle and cleanup
-   - Does not process URLs directly
+   - Shows unified status and progress to users
 
-2. **Child Jobs**: Individual URL crawling tasks that ALL reference the parent
-   - Each child job processes a single URL using the same process:
+2. **Child Jobs**: Hidden URL processing tasks that execute in the background
+   - Each child job processes a single URL but is NOT visible in the queue UI
+   - Child jobs process URLs using the same workflow:
      - Access the page and convert to markdown
      - Extract links and filter using include/exclude patterns
-     - Follow filtered links by spawning more children (respecting depth limits)
-   - ALL child jobs have the same `parent_id` (flat structure, not nested)
-   - Child jobs can spawn additional child jobs from discovered links
-   - Depth tracking prevents infinite recursion
+     - Follow filtered links by spawning more hidden children (respecting depth limits)
+   - ALL child jobs reference the same `parent_id` (flat structure)
+   - Progress is aggregated and displayed only on the parent job
+   - Child jobs update parent job progress counters
 
 ```mermaid
 graph TD
-    ParentJob[Parent Job<br/>ID: parent-123<br/>Type: crawler<br/>Status: running<br/>Depth: 0]
+    ParentJob[VISIBLE Parent Job<br/>ID: parent-123<br/>Type: crawler<br/>Status: running<br/>Progress: 2/5 URLs]
     
-    ChildJob1[Child Job 1<br/>ID: child-123-1<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page1<br/>Depth: 1]
+    ChildJob1[HIDDEN Child Job 1<br/>ID: child-123-1<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page1]
     
-    ChildJob2[Child Job 2<br/>ID: child-123-2<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page2<br/>Depth: 1]
+    ChildJob2[HIDDEN Child Job 2<br/>ID: child-123-2<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page2]
     
-    ChildJob3[Child Job 3<br/>ID: child-123-3<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page3<br/>Depth: 2]
-    
-    ChildJob4[Child Job 4<br/>ID: child-123-4<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page4<br/>Depth: 3]
+    ChildJob3[HIDDEN Child Job 3<br/>ID: child-123-3<br/>Parent: parent-123<br/>Type: crawler_url<br/>URL: /page3]
     
     ParentJob --> ChildJob1
     ParentJob --> ChildJob2
     ParentJob --> ChildJob3
-    ParentJob --> ChildJob4
     
     ChildJob1 -.->|spawns| ChildJob3
-    ChildJob2 -.->|spawns| ChildJob4
     
-    note1[All children reference<br/>same parent_id<br/>Queue remains flat]
+    note1[Only parent job visible in UI<br/>Children update parent progress<br/>All processing happens in background]
+```
+
+## Critical Implementation Requirements
+
+### Ensuring Functional Crawler Execution
+
+The current implementation has fundamental issues that prevent crawling from working. The design must address:
+
+1. **Immediate Job Execution**: Jobs must transition from "Pending" to "Running" immediately when started
+2. **Actual URL Processing**: ChromeDP must successfully navigate to URLs and extract content
+3. **Progress Updates**: Real-time progress counters must increment as URLs are processed
+4. **Error Handling**: Failures should be logged but not stop the entire crawling process
+5. **Job Completion**: Jobs must properly transition to "Completed" status when finished
+
+### UI Display Requirements
+
+The queue page must display status information inline, matching the existing UI style:
+
+```html
+<!-- CORRECT: Inline status display -->
+<div class="job-status-line">
+  <span class="status-badge running">Running</span>
+  <span class="progress-text">2 of 5 URLs processed</span>
+  <span class="document-count">3 Documents</span>
+  <span class="timestamp">started: 07/11/2025, 17:13:31</span>
+</div>
+
+<!-- WRONG: Separate status boxes -->
+<div class="status-boxes">
+  <div class="box">Running</div>
+  <div class="box">2 of 5 URLs</div>
+  <div class="box">3 Documents</div>
+</div>
 ```
 
 ## Components and Interfaces
 
-### Enhanced Crawler Executor
+### Enhanced Crawler Executor with Working Implementation
 
 ```go
 type CrawlerExecutor struct {
@@ -123,23 +154,27 @@ type CrawlerExecutor struct {
 }
 
 func (e *CrawlerExecutor) Execute(ctx context.Context, job *models.JobModel) error {
-    // 1. Extract URL and configuration from job
-    // 2. Acquire ChromeDP browser instance from pool
-    // 3. Navigate to URL and wait for JavaScript rendering
-    // 4. Extract content and convert to markdown
-    // 5. Store document with metadata
-    // 6. Extract and filter links using include/exclude patterns
-    // 7. Log link discovery: "Links found: 10 | filtered: 2 | followed: 2"
+    // CRITICAL: This must actually work and make progress
+    // 1. Immediately update job status to "Running"
+    // 2. Extract URL and configuration from job
+    // 3. Acquire ChromeDP browser instance from pool
+    // 4. Navigate to URL and wait for JavaScript rendering (with proper error handling)
+    // 5. Extract content and convert to markdown
+    // 6. Store document with metadata and increment progress counter
+    // 7. Extract and filter links using include/exclude patterns
     // 8. Spawn child jobs for filtered links (respecting depth limits)
-    // 9. Update job progress and status
-    // 10. Stream logs via WebSocket
+    // 9. Update parent job progress: "X of Y URLs processed"
+    // 10. Stream progress updates via WebSocket immediately
+    // 11. Handle errors gracefully but continue processing
+    // 12. Mark job as "Completed" when all URLs processed
 }
 
-type LinkProcessingResult struct {
-    Found     int `json:"found"`
-    Filtered  int `json:"filtered"`
-    Followed  int `json:"followed"`
-    Skipped   int `json:"skipped_depth"`
+type ParentJobProgress struct {
+    TotalURLs     int    `json:"total_urls"`
+    CompletedURLs int    `json:"completed_urls"`
+    FailedURLs    int    `json:"failed_urls"`
+    Status        string `json:"status"`
+    ProgressText  string `json:"progress_text"` // "2 of 5 URLs processed"
 }
 ```
 
@@ -193,7 +228,7 @@ func (p *ContentProcessor) ProcessHTML(html string, sourceURL string) (*Processe
 func (p *ContentProcessor) FilterLinks(links []string, includePatterns, excludePatterns []string) *LinkFilterResult
 ```
 
-### Real-Time Logging System
+### Real-Time Logging System with Inline Status Updates
 
 ```go
 type WebSocketLogger struct {
@@ -204,7 +239,17 @@ type WebSocketLogger struct {
 
 func (w *WebSocketLogger) StreamJobLog(jobID, level, message string)
 func (w *WebSocketLogger) BroadcastJobStatus(jobID string, status JobStatus)
+func (w *WebSocketLogger) BroadcastInlineProgress(jobID string, progress ParentJobProgress)
 func (w *WebSocketLogger) GetRecentLogs(jobID string, limit int) []JobLog
+
+// UI Integration - Status must be displayed inline, not in boxes
+type InlineStatusUpdate struct {
+    JobID        string `json:"job_id"`
+    Status       string `json:"status"`        // "Running", "Completed", etc.
+    ProgressText string `json:"progress_text"` // "2 of 5 URLs processed"
+    DocumentCount int   `json:"document_count"`
+    LastUpdated  string `json:"last_updated"`
+}
 ```
 
 ## Data Models

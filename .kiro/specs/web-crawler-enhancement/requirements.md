@@ -19,41 +19,41 @@ This specification defines the requirements for enhancing the Quaero web crawler
 
 ## Requirements
 
-### Requirement 1: Parent-Child Job Architecture
+### Requirement 1: Single Parent Job with All Children Architecture
 
-**User Story:** As a system administrator, I want crawler jobs to be structured with parent-child relationships, so that I can track the overall crawling progress and manage spawned tasks effectively.
-
-#### Acceptance Criteria
-
-1. WHEN a crawler job is executed, THE Crawler_System SHALL create a parent job record with metadata in the database
-2. WHEN the parent job discovers URLs to crawl, THE Crawler_System SHALL enqueue child job messages to the standard Job_Queue
-3. WHEN child jobs are created, THE Crawler_System SHALL store parent_id metadata to link them to the parent job
-4. WHEN viewing job details, THE Crawler_System SHALL query job metadata to display all child jobs under their parent
-5. WHEN a parent job is cancelled, THE Crawler_System SHALL update child job status using standard job management operations
-
-### Requirement 2: Real-Time Job Monitoring
-
-**User Story:** As a user monitoring crawler progress, I want to see live status updates and scrolling logs on the queue page, so that I can track crawling activity in real-time.
+**User Story:** As a system administrator, I want crawler jobs to show as a single parent job with all spawned URL tasks as children, so that I can see one unified job instead of multiple separate jobs.
 
 #### Acceptance Criteria
 
-1. WHEN a crawler job is running, THE Queue_Page SHALL display the current job status with live updates
-2. WHEN job logs are generated, THE WebSocket_Logger SHALL stream the latest 3-5 log entries to connected clients
-3. WHEN multiple jobs are running, THE Queue_Page SHALL show activity for all active jobs simultaneously
-4. WHEN job status changes, THE Queue_Page SHALL update the status indicator within 2 seconds
+1. WHEN a crawler job definition is executed, THE Crawler_System SHALL create exactly one parent job visible in the UI
+2. WHEN the parent job processes start URLs, THE Crawler_System SHALL spawn child jobs that are NOT visible as separate jobs in the queue
+3. WHEN child jobs discover additional URLs, THE Crawler_System SHALL spawn more child jobs that ALL reference the same parent_id
+4. WHEN viewing the queue page, THE Queue_Page SHALL display only the parent job, never showing child jobs as separate entries
+5. WHEN viewing job details, THE Queue_Page SHALL show all child job activity aggregated under the single parent job
+
+### Requirement 2: Inline Status Display and Real-Time Monitoring
+
+**User Story:** As a user monitoring crawler progress, I want to see status information displayed inline on a single line matching the existing UI style, so that the interface remains consistent and clean.
+
+#### Acceptance Criteria
+
+1. WHEN displaying crawler job status, THE Queue_Page SHALL show status information inline on a single line, not in separate boxes
+2. WHEN showing crawling progress, THE Queue_Page SHALL display "0 of 2 URLs processed" format inline with other job metadata
+3. WHEN job logs are generated, THE WebSocket_Logger SHALL stream the latest 3-5 log entries to connected clients
+4. WHEN job status changes, THE Queue_Page SHALL update the status indicator within 2 seconds using the existing status badge style
 5. WHEN viewing job details, THE Queue_Page SHALL display scrolling logs with automatic refresh
 
-### Requirement 3: ChromeDP-Based Content Extraction
+### Requirement 3: Functional ChromeDP-Based Content Extraction
 
-**User Story:** As a content collector, I want the crawler to handle JavaScript-rendered websites, so that I can extract content from modern web applications.
+**User Story:** As a content collector, I want the crawler to actually work and process URLs successfully, so that I can extract content and see crawling progress.
 
 #### Acceptance Criteria
 
-1. WHEN crawling a URL, THE ChromeDP_Engine SHALL render the page with JavaScript execution
-2. WHEN page rendering is complete, THE Content_Processor SHALL extract the full HTML content
-3. WHEN HTML content is extracted, THE Content_Processor SHALL convert it to markdown format
-4. WHEN content processing fails, THE Crawler_System SHALL log the error and continue with next URL
-5. WHEN JavaScript takes longer than 30 seconds to load, THE ChromeDP_Engine SHALL timeout and proceed with available content
+1. WHEN a crawler job starts, THE Crawler_System SHALL immediately begin processing the configured start URLs
+2. WHEN processing a URL, THE ChromeDP_Engine SHALL successfully navigate to the page and extract content
+3. WHEN content is extracted, THE Crawler_System SHALL store the document and update the progress counter
+4. WHEN URLs are discovered, THE Crawler_System SHALL follow them according to the configured depth and patterns
+5. WHEN crawling progresses, THE Queue_Page SHALL show updated counts like "1 of 2 URLs processed" in real-time
 
 ### Requirement 4: Generic Content Processing
 
@@ -128,7 +128,19 @@ This specification defines the requirements for enhancing the Quaero web crawler
 5. WHEN jobs complete, THE Queue_Page SHALL show completion status and link to extracted documents
 6. WHEN errors occur, THE Queue_Page SHALL highlight failed jobs with error details
 
-### Requirement 10: Performance and Scalability
+### Requirement 10: Working Crawler Job Execution
+
+**User Story:** As a user running crawler jobs, I want the jobs to actually execute and make progress, so that I can successfully crawl websites and extract content.
+
+#### Acceptance Criteria
+
+1. WHEN a crawler job is started, THE Crawler_System SHALL immediately transition from "Pending" to "Running" status
+2. WHEN processing URLs, THE Crawler_System SHALL show visible progress updates with incrementing URL counts
+3. WHEN a URL is successfully processed, THE Crawler_System SHALL store the extracted document and increment the completed count
+4. WHEN all URLs are processed, THE Crawler_System SHALL transition the job status to "Completed"
+5. WHEN errors occur during processing, THE Crawler_System SHALL log the errors but continue processing remaining URLs
+
+### Requirement 11: Performance and Scalability
 
 **User Story:** As a system administrator, I want the crawler to handle multiple concurrent jobs efficiently, so that I can process large websites without performance degradation.
 

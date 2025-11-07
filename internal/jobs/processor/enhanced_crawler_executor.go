@@ -92,8 +92,14 @@ func (e *EnhancedCrawlerExecutor) Validate(job *models.JobModel) error {
 // 4. Link discovery and filtering
 // 5. Child job spawning for discovered links (respecting depth limits)
 func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobModel) error {
-	// Create job-specific logger for consistent logging
-	jobLogger := e.logger.WithCorrelationId(job.ID)
+	// Create job-specific logger using parent context for log aggregation
+	// All children log under the root parent ID for unified log viewing
+	parentID := job.GetParentID()
+	if parentID == "" {
+		// This is a root job (shouldn't happen for crawler_url type, but handle gracefully)
+		parentID = job.ID
+	}
+	jobLogger := e.logger.WithCorrelationId(parentID)
 
 	// Extract configuration
 	seedURL, _ := job.GetConfigString("seed_url")
@@ -104,9 +110,11 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	crawlConfig, err := e.extractCrawlConfig(job.Config)
 	if err != nil {
 		jobLogger.Error().Err(err).Msg("Failed to extract crawl config")
-		e.publishCrawlerJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed to extract crawl config: %v", err), map[string]interface{}{
-			"url":   seedURL,
-			"depth": job.Depth,
+		e.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to extract crawl config: %v", err), map[string]interface{}{
+			"url":        seedURL,
+			"depth":      job.Depth,
+			"child_id":   job.ID,
+			"discovered": job.Metadata["discovered_by"],
 		})
 		e.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid crawl config: %v", err))
 		e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
@@ -115,6 +123,7 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 
 	jobLogger.Info().
 		Str("job_id", job.ID).
+		Str("parent_id", parentID).
 		Str("seed_url", seedURL).
 		Str("source_type", sourceType).
 		Str("entity_type", entityType).
@@ -123,12 +132,14 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		Bool("follow_links", crawlConfig.FollowLinks).
 		Msg("Starting enhanced crawler job execution")
 
-	// Publish real-time log for job start
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Starting enhanced crawl of URL: %s (depth: %d)", seedURL, job.Depth), map[string]interface{}{
+	// Publish real-time log for job start (under parent context)
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Starting enhanced crawl of URL: %s (depth: %d)", seedURL, job.Depth), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"max_depth":    crawlConfig.MaxDepth,
 		"follow_links": crawlConfig.FollowLinks,
+		"child_id":     job.ID,
+		"discovered":   job.Metadata["discovered_by"],
 	})
 
 	// Update job status to running
@@ -142,25 +153,31 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	// Publish initial progress update
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
 
-	// Step 1: Acquire ChromeDP browser instance from pool
-	e.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
-	browserCtx, releaseBrowser, err := e.crawlerService.GetBrowserFromPool()
-	if err != nil {
-		jobLogger.Error().Err(err).Msg("Failed to acquire browser from ChromeDP pool")
-		e.publishCrawlerJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed to acquire browser from ChromeDP pool: %v", err), map[string]interface{}{
-			"url":   seedURL,
-			"depth": job.Depth,
-		})
-		e.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Browser pool error: %v", err))
-		e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
-		return fmt.Errorf("failed to acquire browser: %w", err)
-	}
-	defer releaseBrowser()
+	// Step 1: Create a fresh ChromeDP browser instance for this request
+	// TEMPORARY: Bypassing pool to debug context cancellation issue
+	e.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
 
-	jobLogger.Debug().Msg("Acquired browser from ChromeDP pool")
-	e.publishCrawlerJobLog(ctx, job.ID, "debug", "Acquired browser from ChromeDP pool", map[string]interface{}{
-		"url":   seedURL,
-		"depth": job.Depth,
+	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
+		context.Background(),
+		append(
+			chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("headless", true),
+			chromedp.Flag("disable-gpu", true),
+			chromedp.Flag("no-sandbox", true),
+			chromedp.Flag("disable-dev-shm-usage", true),
+			chromedp.UserAgent("Quaero/1.0 (Web Crawler)"),
+		)...,
+	)
+	defer allocatorCancel()
+
+	browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
+	defer browserCancel()
+
+	jobLogger.Debug().Msg("Created fresh browser instance (not using pool)")
+	e.publishCrawlerJobLog(ctx, parentID, "debug", "Created fresh browser instance", map[string]interface{}{
+		"url":      seedURL,
+		"depth":    job.Depth,
+		"child_id": job.ID,
 	})
 
 	// Step 2: Navigate to URL and render JavaScript
@@ -169,9 +186,10 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	htmlContent, statusCode, err := e.renderPageWithChromeDp(ctx, browserCtx, seedURL, jobLogger)
 	if err != nil {
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to render page with ChromeDP")
-		e.publishCrawlerJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed to render page with ChromeDP: %v", err), map[string]interface{}{
-			"url":   seedURL,
-			"depth": job.Depth,
+		e.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to render page with ChromeDP: %v", err), map[string]interface{}{
+			"url":      seedURL,
+			"depth":    job.Depth,
+			"child_id": job.ID,
 		})
 		e.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Page rendering failed: %v", err))
 		e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
@@ -186,12 +204,13 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		Dur("render_time", renderTime).
 		Msg("Successfully rendered page with JavaScript")
 
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Successfully rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime), map[string]interface{}{
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Successfully rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime), map[string]interface{}{
 		"url":         seedURL,
 		"depth":       job.Depth,
 		"status_code": statusCode,
 		"html_length": len(htmlContent),
 		"render_time": renderTime.String(),
+		"child_id":    job.ID,
 	})
 
 	// Step 3: Process HTML content and convert to markdown
@@ -199,9 +218,10 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	processedContent, err := e.contentProcessor.ProcessHTML(htmlContent, seedURL)
 	if err != nil {
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to process HTML content")
-		e.publishCrawlerJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed to process HTML content: %v", err), map[string]interface{}{
-			"url":   seedURL,
-			"depth": job.Depth,
+		e.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to process HTML content: %v", err), map[string]interface{}{
+			"url":      seedURL,
+			"depth":    job.Depth,
+			"child_id": job.ID,
 		})
 		e.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Content processing failed: %v", err))
 		e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
@@ -216,13 +236,14 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		Dur("process_time", processedContent.ProcessTime).
 		Msg("Successfully processed HTML content")
 
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Successfully processed content: '%s' (%d bytes, %d links, %v)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links), processedContent.ProcessTime), map[string]interface{}{
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Successfully processed content: '%s' (%d bytes, %d links, %v)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links), processedContent.ProcessTime), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"title":        processedContent.Title,
 		"content_size": processedContent.ContentSize,
 		"links_found":  len(processedContent.Links),
 		"process_time": processedContent.ProcessTime.String(),
+		"child_id":     job.ID,
 	})
 
 	// Step 4: Create crawled document with comprehensive metadata
@@ -246,10 +267,11 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	docPersister := crawler.NewDocumentPersister(e.documentStorage, jobLogger)
 	if err := docPersister.SaveCrawledDocument(crawledDoc); err != nil {
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to save crawled document")
-		e.publishCrawlerJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed to save crawled document: %v", err), map[string]interface{}{
+		e.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to save crawled document: %v", err), map[string]interface{}{
 			"url":         seedURL,
 			"depth":       job.Depth,
 			"document_id": crawledDoc.ID,
+			"child_id":    job.ID,
 		})
 		e.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Document storage failed: %v", err))
 		e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
@@ -262,12 +284,13 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		Int("content_size", crawledDoc.ContentSize).
 		Msg("Successfully saved crawled document")
 
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Document saved: %s (%d bytes)", crawledDoc.Title, crawledDoc.ContentSize), map[string]interface{}{
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Document saved: %s (%d bytes)", crawledDoc.Title, crawledDoc.ContentSize), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"document_id":  crawledDoc.ID,
 		"title":        crawledDoc.Title,
 		"content_size": crawledDoc.ContentSize,
+		"child_id":     job.ID,
 	})
 
 	// Add job log for successful document storage
@@ -298,12 +321,13 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 			Int("links_excluded", filterResult.Excluded).
 			Msg("Link filtering completed")
 
-		e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Link filtering completed: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded), map[string]interface{}{
+		e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Link filtering completed: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded), map[string]interface{}{
 			"url":            seedURL,
 			"depth":          job.Depth,
 			"links_found":    filterResult.Found,
 			"links_filtered": filterResult.Filtered,
 			"links_excluded": filterResult.Excluded,
+			"child_id":       job.ID,
 		})
 
 		// Check depth limits for child job spawning
@@ -319,11 +343,12 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 						Int("max_pages", crawlConfig.MaxPages).
 						Int("skipped", linkStats.Skipped).
 						Msg("Reached max pages limit, skipping remaining links")
-					e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped), map[string]interface{}{
+					e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped), map[string]interface{}{
 						"url":       seedURL,
 						"depth":     job.Depth,
 						"max_pages": crawlConfig.MaxPages,
 						"skipped":   linkStats.Skipped,
+						"child_id":  job.ID,
 					})
 					break
 				}
@@ -333,11 +358,12 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 						Err(err).
 						Str("child_url", link).
 						Msg("Failed to spawn child job for discovered link")
-					e.publishCrawlerJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link), map[string]interface{}{
+					e.publishCrawlerJobLog(ctx, parentID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link), map[string]interface{}{
 						"url":       seedURL,
 						"depth":     job.Depth,
 						"child_url": link,
 						"error":     err.Error(),
+						"child_id":  job.ID,
 					})
 					continue
 				}
@@ -352,11 +378,12 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 				Int("max_depth", crawlConfig.MaxDepth).
 				Msg("Child jobs spawned for discovered links")
 
-			e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Spawned %d child jobs for discovered links", childJobsSpawned), map[string]interface{}{
+			e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Spawned %d child jobs for discovered links", childJobsSpawned), map[string]interface{}{
 				"url":                seedURL,
 				"depth":              job.Depth,
 				"max_depth":          crawlConfig.MaxDepth,
 				"child_jobs_spawned": childJobsSpawned,
+				"child_id":           job.ID,
 			})
 		} else if job.Depth >= crawlConfig.MaxDepth {
 			// All filtered links are skipped due to depth limit
@@ -367,7 +394,7 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 				Int("links_skipped", linkStats.Skipped).
 				Msg("Reached maximum depth, skipping all discovered links")
 
-			e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped), map[string]interface{}{
+			e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped), map[string]interface{}{
 				"url":           seedURL,
 				"current_depth": job.Depth,
 				"max_depth":     crawlConfig.MaxDepth,
@@ -411,11 +438,12 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		Dur("total_time", totalTime).
 		Msg("Enhanced crawler job execution completed successfully")
 
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Crawl completed successfully in %v", totalTime), map[string]interface{}{
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Crawl completed successfully in %v", totalTime), map[string]interface{}{
 		"url":        seedURL,
 		"depth":      job.Depth,
 		"total_time": totalTime.String(),
 		"status":     "completed",
+		"child_id":   job.ID,
 	})
 
 	// Add final job log
@@ -495,22 +523,27 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 	var htmlContent string
 	var statusCode int64 = 200 // Default status code
 
-	// Create a timeout context for the navigation
-	navCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	// Check if browser context is already cancelled
+	if err := browserCtx.Err(); err != nil {
+		logger.Error().Err(err).Str("url", url).Msg("Browser context already cancelled before navigation")
+		return "", 0, fmt.Errorf("browser context cancelled: %w", err)
+	}
 
 	// Navigate to URL and wait for JavaScript rendering
-	err := chromedp.Run(navCtx,
+	// Use the browserCtx (ChromeDP context) for ChromeDP operations
+	err := chromedp.Run(browserCtx,
 		chromedp.Navigate(url),
 		chromedp.Sleep(2*time.Second), // Wait for JavaScript to render
 		chromedp.OuterHTML("html", &htmlContent),
-		// Try to get status code from performance API
-		chromedp.Evaluate(`({
-			statusCode: window.performance?.getEntriesByType?.('navigation')?.[0]?.responseStatus || 200
-		})`, &statusCode),
+		// Try to get status code from performance API - just use default 200 if not available
+		chromedp.Evaluate(`window.performance?.getEntriesByType?.('navigation')?.[0]?.responseStatus || 200`, &statusCode),
 	)
 
 	if err != nil {
+		// Check if context was cancelled during operation
+		if browserCtx.Err() != nil {
+			logger.Error().Err(browserCtx.Err()).Str("url", url).Msg("Browser context cancelled during navigation")
+		}
 		logger.Error().Err(err).Str("url", url).Msg("ChromeDP navigation failed")
 		return "", 0, fmt.Errorf("chromedp navigation failed: %w", err)
 	}
@@ -699,7 +732,13 @@ func (e *EnhancedCrawlerExecutor) publishLinkDiscoveryEvent(ctx context.Context,
 		return
 	}
 
-	e.publishCrawlerJobLog(ctx, job.ID, "info", fmt.Sprintf("Links found: %d | filtered: %d | followed: %d | skipped: %d",
+	// Use parent ID for log aggregation
+	parentID := job.GetParentID()
+	if parentID == "" {
+		parentID = job.ID
+	}
+
+	e.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Links found: %d | filtered: %d | followed: %d | skipped: %d",
 		linkStats.Found, linkStats.Filtered, linkStats.Followed, linkStats.Skipped), map[string]interface{}{
 		"url":            currentURL,
 		"depth":          job.Depth,
@@ -707,6 +746,7 @@ func (e *EnhancedCrawlerExecutor) publishLinkDiscoveryEvent(ctx context.Context,
 		"links_filtered": linkStats.Filtered,
 		"links_followed": linkStats.Followed,
 		"links_skipped":  linkStats.Skipped,
+		"child_id":       job.ID,
 	})
 }
 
@@ -716,8 +756,15 @@ func (e *EnhancedCrawlerExecutor) publishJobSpawnEvent(ctx context.Context, pare
 		return
 	}
 
+	// Get root parent ID for hierarchy tracking
+	rootParentID := parentJob.GetParentID()
+	if rootParentID == "" {
+		rootParentID = parentJob.ID // This job is the root parent
+	}
+
 	payload := map[string]interface{}{
-		"parent_job_id": parentJob.GetParentID(),
+		"parent_job_id": rootParentID, // Root parent for flat hierarchy
+		"discovered_by": parentJob.ID, // Immediate parent that discovered this link
 		"child_job_id":  childJobID,
 		"job_type":      "crawler_url",
 		"url":           childURL,

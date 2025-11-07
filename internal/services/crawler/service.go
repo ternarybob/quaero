@@ -253,7 +253,20 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		authSnapshot = snapshot
 	}
 
-	jobID := uuid.New().String()
+	// If jobDefinitionID is provided, it means this crawl is part of a job definition execution
+	// In this case, we should use the existing parent job instead of creating a new one
+	var jobID string
+	var isExistingParentJob bool
+
+	if jobDefinitionID != "" {
+		// Use the existing parent job ID from JobExecutor
+		jobID = jobDefinitionID
+		isExistingParentJob = true
+	} else {
+		// Create a new parent job for standalone crawl operations
+		jobID = uuid.New().String()
+		isExistingParentJob = false
+	}
 
 	// Create context logger for this job (logs automatically sent to database)
 	contextLogger := s.logger.WithContextWriter(jobID)
@@ -288,31 +301,41 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Msg("Job definition ID stored in job metadata")
 	}
 
-	// Create JobModel
-	jobModel := &models.JobModel{
-		ID:        jobID,
-		ParentID:  nil, // Parent jobs have no parent
-		Type:      string(models.JobTypeParent),
-		Name:      fmt.Sprintf("Crawl %s %s", sourceType, entityType),
-		Config:    jobConfig,
-		Metadata:  metadata,
-		CreatedAt: time.Now(),
-		Depth:     0,
-	}
+	var job *models.Job
 
-	// Create Job with runtime state
-	job := &models.Job{
-		JobModel: jobModel,
-		Status:   JobStatusPending,
-		Progress: &models.JobProgress{
-			TotalURLs:     len(seedURLs),
-			CompletedURLs: 0,
-			FailedURLs:    0,
-			PendingURLs:   len(seedURLs),
-			Percentage:    0,
-		},
-		ResultCount: 0,
-		FailedCount: 0,
+	if !isExistingParentJob {
+		// Create JobModel for new parent job (standalone crawl, not from JobExecutor)
+		jobModel := &models.JobModel{
+			ID:        jobID,
+			ParentID:  nil, // Parent jobs have no parent
+			Type:      string(models.JobTypeParent),
+			Name:      fmt.Sprintf("Crawl %s %s", sourceType, entityType),
+			Config:    jobConfig,
+			Metadata:  metadata,
+			CreatedAt: time.Now(),
+			Depth:     0,
+		}
+
+		// Create Job with runtime state
+		job = &models.Job{
+			JobModel: jobModel,
+			Status:   JobStatusPending,
+			Progress: &models.JobProgress{
+				TotalURLs:     len(seedURLs),
+				CompletedURLs: 0,
+				FailedURLs:    0,
+				PendingURLs:   len(seedURLs),
+				Percentage:    0,
+			},
+			ResultCount: 0,
+			FailedCount: 0,
+		}
+	} else {
+		// For existing parent jobs from JobExecutor, we don't create a new job object
+		// The JobExecutor has already created the parent job - we just spawn children under it
+		contextLogger.Info().
+			Str("existing_parent_job_id", jobID).
+			Msg("Using existing parent job from JobExecutor - will spawn children directly under this parent")
 	}
 
 	// Log the source type being used for audit trail and debugging
@@ -387,14 +410,16 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Store auth snapshot if provided
 	var httpClientType string
 	if authSnapshot != nil {
-		// Store auth snapshot in job config
-		authJSON, err := json.Marshal(authSnapshot)
-		if err != nil {
-			// Log auth snapshot serialization failure
-			contextLogger.Error().Err(err).Msg("Failed to serialize auth snapshot")
-			return "", fmt.Errorf("failed to serialize auth snapshot: %w", err)
+		// Store auth snapshot in job config (only for new parent jobs)
+		if !isExistingParentJob && job != nil {
+			authJSON, err := json.Marshal(authSnapshot)
+			if err != nil {
+				// Log auth snapshot serialization failure
+				contextLogger.Error().Err(err).Msg("Failed to serialize auth snapshot")
+				return "", fmt.Errorf("failed to serialize auth snapshot: %w", err)
+			}
+			job.Config["auth_snapshot"] = string(authJSON)
 		}
-		job.Config["auth_snapshot"] = string(authJSON)
 
 		// Log auth snapshot presence
 		cookieCount := 0
@@ -427,16 +452,16 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Log HTTP client configuration
 	contextLogger.Debug().Str("client_type", httpClientType).Msg(fmt.Sprintf("HTTP client configured: type=%s", httpClientType))
 
-	// Persist job to database
-	if s.jobStorage != nil {
+	// Persist job to database (only for new parent jobs)
+	if !isExistingParentJob && s.jobStorage != nil {
 		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
 			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to persist job to database")
 			return "", fmt.Errorf("failed to save job: %w", err)
 		}
 	}
 
-	// Publish EventJobCreated after successful job persistence
-	if s.eventService != nil {
+	// Publish EventJobCreated after successful job persistence (only for new parent jobs)
+	if !isExistingParentJob && s.eventService != nil {
 		createdEvent := interfaces.Event{
 			Type: interfaces.EventJobCreated,
 			Payload: map[string]interface{}{
@@ -462,10 +487,18 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		Str("job_id", jobID).
 		Msg("Pre-validation skipped (not yet implemented in new queue system)")
 
-	s.jobsMu.Lock()
-	s.activeJobs[jobID] = job
-	s.jobResults[jobID] = make([]*CrawlResult, 0)
-	s.jobsMu.Unlock()
+	// Track job in active jobs (only for new parent jobs)
+	if !isExistingParentJob {
+		s.jobsMu.Lock()
+		s.activeJobs[jobID] = job
+		s.jobResults[jobID] = make([]*CrawlResult, 0)
+		s.jobsMu.Unlock()
+	} else {
+		// For existing parent jobs, just initialize results tracking
+		s.jobsMu.Lock()
+		s.jobResults[jobID] = make([]*CrawlResult, 0)
+		s.jobsMu.Unlock()
+	}
 
 	// Seed queue with job messages for crawler workers
 	// Build config map for job messages
@@ -492,8 +525,8 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Enqueue seed URLs as job messages
 	actuallyEnqueued := 0
 	for i, seedURL := range seedURLs {
-		// Generate child job ID
-		childID := fmt.Sprintf("%s-seed-%d", jobID, i)
+		// Generate child job ID using UUID for uniqueness
+		childID := uuid.New().String()
 
 		// Persist seed URL as child Job record before enqueueing
 		// This ensures child job exists in database when worker picks up the message
@@ -505,16 +538,25 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		childConfig["entity_type"] = entityType
 		childConfig["seed_url"] = seedURL
 
+		// Build child metadata
+		childMetadata := make(map[string]interface{})
+		if jobDefinitionID != "" {
+			childMetadata["job_definition_id"] = jobDefinitionID
+		}
+		childMetadata["seed_index"] = i
+
 		// Create child JobModel
+		// For existing parent jobs (from JobExecutor), children are at depth 1
+		// For new parent jobs (standalone), children are also at depth 1
 		childJobModel := &models.JobModel{
 			ID:        childID,
 			ParentID:  &jobID,
 			Type:      string(models.JobTypeCrawlerURL),
 			Name:      fmt.Sprintf("URL: %s", seedURL),
 			Config:    childConfig,
-			Metadata:  make(map[string]interface{}),
+			Metadata:  childMetadata,
 			CreatedAt: time.Now(),
-			Depth:     1,
+			Depth:     1, // First level children are always depth 1
 		}
 
 		// Create child Job with runtime state
@@ -587,11 +629,13 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		actuallyEnqueued++
 	}
 
-	// Update PendingURLs and TotalURLs to match actual queue state
-	s.jobsMu.Lock()
-	job.Progress.PendingURLs = actuallyEnqueued
-	job.Progress.TotalURLs = actuallyEnqueued
-	s.jobsMu.Unlock()
+	// Update PendingURLs and TotalURLs to match actual queue state (only for new parent jobs)
+	if !isExistingParentJob {
+		s.jobsMu.Lock()
+		job.Progress.PendingURLs = actuallyEnqueued
+		job.Progress.TotalURLs = actuallyEnqueued
+		s.jobsMu.Unlock()
+	}
 
 	// Note: Job remains in JobStatusPending state until first worker picks up a URL
 	// At that point, Execute() will transition to JobStatusRunning and publish EventJobStarted

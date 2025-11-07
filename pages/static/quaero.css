@@ -1246,15 +1246,22 @@ body.modal-open {
     flex: 1;
 }
 
-/* Tree item URL */
+/* Tree item URL - now clickable */
 .tree-item-url {
     flex: 1;
     font-family: 'SF Mono', Monaco, Consolas, monospace;
-    color: var(--text-secondary);
+    color: var(--color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.tree-item-url:hover {
+    color: var(--color-info);
+    text-decoration: underline;
 }
 
 /* Tree item metadata */
@@ -1394,6 +1401,123 @@ body.modal-open {
 
 .tree-item.fade-in {
     animation: treeItemFadeIn 0.2s ease-out;
+}
+
+/* Tree log toggle button */
+.tree-log-toggle {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    margin-left: 0.5rem;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+.tree-log-toggle:hover {
+    background-color: var(--page-bg);
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+}
+
+/* Mini log viewer container */
+.tree-item-logs {
+    margin-left: calc(var(--depth) * 1.5rem + 2rem);
+    margin-top: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.mini-log-viewer {
+    background-color: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 0.5rem;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.7rem;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.mini-log-viewer .log-line {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--code-color);
+}
+
+.mini-log-viewer .log-line:last-child {
+    border-bottom: none;
+}
+
+.mini-log-viewer .log-time {
+    color: #8b949e;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.mini-log-viewer .log-level {
+    font-weight: bold;
+    min-width: 50px;
+    flex-shrink: 0;
+}
+
+.mini-log-viewer .level-info {
+    color: #58a6ff;
+}
+
+.mini-log-viewer .level-warn {
+    color: #d29922;
+}
+
+.mini-log-viewer .level-error {
+    color: #f85149;
+}
+
+.mini-log-viewer .level-debug {
+    color: #8b949e;
+}
+
+.mini-log-viewer .log-message {
+    flex: 1;
+    word-break: break-word;
+    color: var(--code-color);
+}
+
+/* Scrollbar for mini log viewer */
+.mini-log-viewer::-webkit-scrollbar {
+    width: 6px;
+}
+
+.mini-log-viewer::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.mini-log-viewer::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.mini-log-viewer::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Loading state for mini log viewer */
+.mini-log-viewer .loading-logs {
+    text-align: center;
+    padding: 1rem;
+    color: #8b949e;
+}
+
+/* Empty state for mini log viewer */
+.mini-log-viewer .no-logs {
+    text-align: center;
+    padding: 1rem;
+    color: #8b949e;
+    font-style: italic;
 }
 
 /* 15. QUEUE PAGE SPECIFIC STYLES

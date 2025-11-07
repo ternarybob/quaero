@@ -1194,7 +1194,10 @@ func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map
 		SELECT parent_id,
 		       COUNT(*) as child_count,
 		       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
-		       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children
+		       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children,
+		       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_children,
+		       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_children,
+		       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_children
 		FROM jobs
 		WHERE parent_id IN (%s)
 		GROUP BY parent_id
@@ -1211,7 +1214,7 @@ func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map
 		var parentID string
 		var stat interfaces.JobChildStats
 
-		if err := rows.Scan(&parentID, &stat.ChildCount, &stat.CompletedChildren, &stat.FailedChildren); err != nil {
+		if err := rows.Scan(&parentID, &stat.ChildCount, &stat.CompletedChildren, &stat.FailedChildren, &stat.CancelledChildren, &stat.PendingChildren, &stat.RunningChildren); err != nil {
 			return nil, fmt.Errorf("failed to scan child stats: %w", err)
 		}
 
@@ -1525,4 +1528,52 @@ func (m *Manager) GetJobTreeProgressStats(ctx context.Context, parentJobIDs []st
 	}
 
 	return result, rows.Err()
+}
+
+// ChildJobStats represents statistics for child jobs of a parent job
+type ChildJobStats struct {
+	TotalChildren     int `json:"total_children"`
+	CompletedChildren int `json:"completed_children"`
+	FailedChildren    int `json:"failed_children"`
+	CancelledChildren int `json:"cancelled_children"`
+	RunningChildren   int `json:"running_children"`
+	PendingChildren   int `json:"pending_children"`
+}
+
+// GetChildJobStats retrieves child job statistics for a single parent job
+// This is used by the ParentJobExecutor to monitor child job progress
+func (m *Manager) GetChildJobStats(ctx context.Context, parentJobID string) (*ChildJobStats, error) {
+	var stats ChildJobStats
+
+	query := `
+		SELECT
+			COUNT(*) as total_children,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children,
+			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_children,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_children,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_children
+		FROM jobs
+		WHERE parent_id = ?
+	`
+
+	err := m.db.QueryRowContext(ctx, query, parentJobID).Scan(
+		&stats.TotalChildren,
+		&stats.CompletedChildren,
+		&stats.FailedChildren,
+		&stats.CancelledChildren,
+		&stats.RunningChildren,
+		&stats.PendingChildren,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child job stats: %w", err)
+	}
+
+	return &stats, nil
+}
+
+// GetQueue returns the queue manager for enqueueing jobs
+func (m *Manager) GetQueue() *queue.Manager {
+	return m.queue
 }

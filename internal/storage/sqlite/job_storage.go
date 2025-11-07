@@ -372,11 +372,11 @@ func (s *JobStorage) scanJobs(rows *sql.Rows) ([]*models.JobModel, error) {
 
 	for rows.Next() {
 		var (
-			id, jobType, name, description, configJSON, metadataJSON, status, progressJSON, errorMsg string
-			parentID                                                                                 sql.NullString
-			createdAt                                                                                int64
-			startedAt, completedAt, finishedAt, lastHeartbeat                                        sql.NullInt64
-			resultCount, failedCount, depth                                                          int
+			id, jobType, name, description, configJSON, metadataJSON, status, progressJSON string
+			parentID, errorMsg                                                             sql.NullString
+			createdAt                                                                      int64
+			startedAt, completedAt, finishedAt, lastHeartbeat                              sql.NullInt64
+			resultCount, failedCount, depth                                                int
 		)
 
 		err := rows.Scan(
@@ -495,7 +495,10 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 			parent_id,
 			COUNT(*) as child_count,
 			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children,
+			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_children,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_children,
+			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_children
 		FROM jobs
 		WHERE parent_id IN (%s)
 		GROUP BY parent_id
@@ -515,9 +518,9 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 	stats := make(map[string]*interfaces.JobChildStats)
 	for rows.Next() {
 		var parentID string
-		var childCount, completedChildren, failedChildren int
+		var childCount, completedChildren, failedChildren, cancelledChildren, pendingChildren, runningChildren int
 
-		if err := rows.Scan(&parentID, &childCount, &completedChildren, &failedChildren); err != nil {
+		if err := rows.Scan(&parentID, &childCount, &completedChildren, &failedChildren, &cancelledChildren, &pendingChildren, &runningChildren); err != nil {
 			return nil, fmt.Errorf("failed to scan child stats: %w", err)
 		}
 
@@ -525,6 +528,9 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 			ChildCount:        childCount,
 			CompletedChildren: completedChildren,
 			FailedChildren:    failedChildren,
+			CancelledChildren: cancelledChildren,
+			PendingChildren:   pendingChildren,
+			RunningChildren:   runningChildren,
 		}
 	}
 

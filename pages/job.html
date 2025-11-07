@@ -26,8 +26,7 @@
             <div class="job-header-info">
                 <h1 x-text="job.name || 'Job Details'"></h1>
                 <div class="job-header-status">
-                    <span class="label" :class="getStatusBadgeClass(job.status)"
-                        x-text="getStatusText(job.status)"></span>
+                    <span class="label" :class="getStatusBadgeClass(job.status)" x-text="getStatusText(job.status)"></span>
                 </div>
             </div>
             <div class="job-header-actions">
@@ -99,8 +98,7 @@
                         </div>
                         <div class="column col-3" x-show="isCrawlerJob(job)">
                             <p class="text-small text-gray">Current URL</p>
-                            <p class="text-small" style="font-family: monospace; word-break: break-all;"
-                                x-text="getCurrentUrl(job) || 'N/A'"></p>
+                            <p class="text-small" style="font-family: monospace; word-break: break-all;" x-text="getCurrentUrl(job) || 'N/A'"></p>
                         </div>
                     </div>
                 </div>
@@ -118,90 +116,66 @@
                     <div class="card-body">
                         <!-- Progress Overview -->
                         <div style="margin-bottom: 1.5rem;">
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                                 <span style="font-weight: 500;">Overall Progress</span>
                                 <span x-text="getCrawlerProgressText(job)" style="font-weight: 500;"></span>
                             </div>
-                            <div class="progress-bar"
-                                style="width: 100%; height: 12px; background-color: #e0e0e0; border-radius: 6px; overflow: hidden;">
-                                <div class="progress-bar-fill"
-                                    :style="'width: ' + getCrawlerProgressPercentage(job) + '%; background-color: ' + getCrawlerProgressColor(job)"
-                                    style="height: 100%; transition: width 0.3s ease;"></div>
+                            <div class="progress-bar" style="width: 100%; height: 12px; background-color: #e0e0e0; border-radius: 6px; overflow: hidden;">
+                                <div class="progress-bar-fill" :style="'width: ' + getCrawlerProgressPercentage(job) + '%; background-color: ' + getCrawlerProgressColor(job)" style="height: 100%; transition: width 0.3s ease;"></div>
                             </div>
                         </div>
 
                         <!-- Link Following Statistics Grid -->
-                        <div class="crawler-stats-grid"
-                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #e3f2fd; border-radius: 8px; text-align: center;">
-                                <div
-                                    style="font-size: 0.8rem; color: #1976d2; font-weight: 500; margin-bottom: 0.5rem;">
+                        <div class="crawler-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #e3f2fd; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 0.8rem; color: #1976d2; font-weight: 500; margin-bottom: 0.5rem;">
                                     URLs Found</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #1976d2;"
-                                    x-text="getCrawlerStat(job, 'links_found') || '0'"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #1976d2;" x-text="getCrawlerStat(job, 'links_found') || '0'"></div>
                                 <div style="font-size: 0.7rem; color: #1976d2; margin-top: 0.25rem;">Total discovered
                                 </div>
                             </div>
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #f3e5f5; border-radius: 8px; text-align: center;">
-                                <div
-                                    style="font-size: 0.8rem; color: #7b1fa2; font-weight: 500; margin-bottom: 0.5rem;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #f3e5f5; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 0.8rem; color: #7b1fa2; font-weight: 500; margin-bottom: 0.5rem;">
                                     Filtered</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #7b1fa2;"
-                                    x-text="getCrawlerStat(job, 'links_filtered') || '0'"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #7b1fa2;" x-text="getCrawlerStat(job, 'links_filtered') || '0'"></div>
                                 <div style="font-size: 0.7rem; color: #7b1fa2; margin-top: 0.25rem;">Passed filters
                                 </div>
                             </div>
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #e8f5e8; border-radius: 8px; text-align: center;">
-                                <div
-                                    style="font-size: 0.8rem; color: #388e3c; font-weight: 500; margin-bottom: 0.5rem;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #e8f5e8; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 0.8rem; color: #388e3c; font-weight: 500; margin-bottom: 0.5rem;">
                                     Followed</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #388e3c;"
-                                    x-text="getCrawlerStat(job, 'links_followed') || '0'"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #388e3c;" x-text="getCrawlerStat(job, 'links_followed') || '0'"></div>
                                 <div style="font-size: 0.7rem; color: #388e3c; margin-top: 0.25rem;">Successfully
                                     crawled</div>
                             </div>
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #fff3e0; border-radius: 8px; text-align: center;">
-                                <div
-                                    style="font-size: 0.8rem; color: #f57c00; font-weight: 500; margin-bottom: 0.5rem;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #fff3e0; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 0.8rem; color: #f57c00; font-weight: 500; margin-bottom: 0.5rem;">
                                     Max Depth</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #f57c00;"
-                                    x-text="getCrawlerStat(job, 'max_depth') || '1'"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #f57c00;" x-text="getCrawlerStat(job, 'max_depth') || '1'"></div>
                                 <div style="font-size: 0.7rem; color: #f57c00; margin-top: 0.25rem;">Levels deep</div>
                             </div>
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #ffebee; border-radius: 8px; text-align: center;">
-                                <div
-                                    style="font-size: 0.8rem; color: #d32f2f; font-weight: 500; margin-bottom: 0.5rem;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #ffebee; border-radius: 8px; text-align: center;">
+                                <div style="font-size: 0.8rem; color: #d32f2f; font-weight: 500; margin-bottom: 0.5rem;">
                                     Failed</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #d32f2f;"
-                                    x-text="getCrawlerStat(job, 'failed_urls') || '0'"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #d32f2f;" x-text="getCrawlerStat(job, 'failed_urls') || '0'"></div>
                                 <div style="font-size: 0.7rem; color: #d32f2f; margin-top: 0.25rem;">Errors encountered
                                 </div>
                             </div>
-                            <div class="stat-card"
-                                style="padding: 1rem; background-color: #f5f5f5; border-radius: 8px; text-align: center;">
+                            <div class="stat-card" style="padding: 1rem; background-color: #f5f5f5; border-radius: 8px; text-align: center;">
                                 <div style="font-size: 0.8rem; color: #666; font-weight: 500; margin-bottom: 0.5rem;">
                                     Processing Time</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #666;"
-                                    x-text="getProcessingTime(job)"></div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #666;" x-text="getProcessingTime(job)"></div>
                                 <div style="font-size: 0.7rem; color: #666; margin-top: 0.25rem;">Duration</div>
                             </div>
                         </div>
 
                         <!-- Current Activity (for running jobs) -->
                         <template x-if="job.status === 'running' && getCurrentUrl(job)">
-                            <div
-                                style="margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border-left: 4px solid #3b82f6; border-radius: 4px;">
+                            <div style="margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border-left: 4px solid #3b82f6; border-radius: 4px;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem; color: #3b82f6;">
                                     <i class="fas fa-spinner fa-pulse"></i> Currently Processing
                                 </div>
-                                <div style="font-family: monospace; font-size: 0.9rem; word-break: break-all;"
-                                    x-text="getCurrentUrl(job)"></div>
+                                <div style="font-family: monospace; font-size: 0.9rem; word-break: break-all;" x-text="getCurrentUrl(job)"></div>
                             </div>
                         </template>
                     </div>
@@ -221,15 +195,11 @@
                                 <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">Start URLs</h4>
                                 <div class="start-urls-list">
                                     <template x-for="url in getStartUrls(job)" :key="url">
-                                        <div
-                                            style="margin-bottom: 0.5rem; padding: 0.5rem; background-color: #f8f9fa; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
+                                        <div style="margin-bottom: 0.5rem; padding: 0.5rem; background-color: #f8f9fa; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
                                             <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                            <a :href="url" target="_blank" rel="noopener noreferrer"
-                                                class="text-primary"
-                                                style="text-decoration: none; flex: 1; word-break: break-all;">
+                                            <a :href="url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none; flex: 1; word-break: break-all;">
                                                 <span x-text="url"></span>
-                                                <i class="fas fa-external-link-alt"
-                                                    style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
+                                                <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                             </a>
                                         </div>
                                     </template>
@@ -238,43 +208,34 @@
                         </template>
 
                         <!-- Crawler Settings Grid -->
-                        <div class="crawler-config-grid"
-                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
-                            <div class="config-item"
-                                style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                        <div class="crawler-config-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
                                     <i class="fas fa-layer-group" style="color: #3b82f6; margin-right: 0.5rem;"></i>
                                     Max Depth
                                 </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;"
-                                    x-text="job.config?.max_depth || 'Unlimited'"></div>
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;" x-text="job.config?.max_depth || 'Unlimited'"></div>
                             </div>
-                            <div class="config-item"
-                                style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
                                     <i class="fas fa-file-alt" style="color: #10b981; margin-right: 0.5rem;"></i>
                                     Max Pages
                                 </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #10b981;"
-                                    x-text="job.config?.max_pages || 'Unlimited'"></div>
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #10b981;" x-text="job.config?.max_pages || 'Unlimited'"></div>
                             </div>
-                            <div class="config-item"
-                                style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
                                     <i class="fas fa-clock" style="color: #f59e0b; margin-right: 0.5rem;"></i>
                                     Timeout
                                 </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #f59e0b;"
-                                    x-text="job.config?.timeout || 'Default'"></div>
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #f59e0b;" x-text="job.config?.timeout || 'Default'"></div>
                             </div>
-                            <div class="config-item"
-                                style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
                                     <i class="fas fa-code" style="color: #7c3aed; margin-right: 0.5rem;"></i>
                                     JavaScript
                                 </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #7c3aed;"
-                                    x-text="job.config?.enable_js ? 'Enabled' : 'Disabled'"></div>
+                                <div style="font-size: 1.2rem; font-weight: 600; color: #7c3aed;" x-text="job.config?.enable_js ? 'Enabled' : 'Disabled'"></div>
                             </div>
                         </div>
 
@@ -283,32 +244,27 @@
                             <div style="margin-bottom: 1.5rem;">
                                 <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">URL Filtering Patterns
                                 </h4>
-                                <div class="patterns-grid"
-                                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                    <template
-                                        x-if="job.config?.include_patterns && job.config.include_patterns.length > 0">
+                                <div class="patterns-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                    <template x-if="job.config?.include_patterns && job.config.include_patterns.length > 0">
                                         <div>
                                             <div style="font-weight: 500; margin-bottom: 0.5rem; color: #10b981;">
                                                 <i class="fas fa-check-circle"></i> Include Patterns
                                             </div>
                                             <div class="pattern-list">
                                                 <template x-for="pattern in job.config.include_patterns" :key="pattern">
-                                                    <div style="padding: 0.25rem 0.5rem; background-color: #d1fae5; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;"
-                                                        x-text="pattern"></div>
+                                                    <div style="padding: 0.25rem 0.5rem; background-color: #d1fae5; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
                                                 </template>
                                             </div>
                                         </div>
                                     </template>
-                                    <template
-                                        x-if="job.config?.exclude_patterns && job.config.exclude_patterns.length > 0">
+                                    <template x-if="job.config?.exclude_patterns && job.config.exclude_patterns.length > 0">
                                         <div>
                                             <div style="font-weight: 500; margin-bottom: 0.5rem; color: #ef4444;">
                                                 <i class="fas fa-times-circle"></i> Exclude Patterns
                                             </div>
                                             <div class="pattern-list">
                                                 <template x-for="pattern in job.config.exclude_patterns" :key="pattern">
-                                                    <div style="padding: 0.25rem 0.5rem; background-color: #fee2e2; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;"
-                                                        x-text="pattern"></div>
+                                                    <div style="padding: 0.25rem 0.5rem; background-color: #fee2e2; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
                                                 </template>
                                             </div>
                                         </div>
@@ -340,29 +296,25 @@
                 <div class="card-body">
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                         <template x-if="job.status === 'running'">
-                            <button class="btn btn-error" @click="cancelJob()" title="Cancel running job"
-                                :id="'cancel-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
+                            <button class="btn btn-error" @click="cancelJob()" title="Cancel running job" :id="'cancel-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
                                 <i class="fas fa-stop"></i> Cancel Job
                             </button>
                         </template>
                         <template x-if="job.status !== 'running'">
-                            <button class="btn btn-primary" @click="rerunJob()"
-                                title="Create a copy of this job and add to queue"
-                                :id="'rerun-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
+                            <button class="btn btn-primary" @click="rerunJob()" title="Create a copy of this job and add to queue" :id="'rerun-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
                                 <i class="fas fa-redo"></i> Rerun Job
                             </button>
                         </template>
-                        <template x-if="job.status !== 'running'">
-                            <button class="btn btn-error" @click="deleteJob()" title="Delete this job permanently"
+                        <template x-if="job.status !== 'running' || job.type === 'parent'">
+                            <button class="btn btn-error" @click="deleteJob()" :title="job.status === 'running' && job.type === 'parent' ? 'Cancel and delete this orchestrating job' : 'Delete this job permanently'"
                                 :id="'delete-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
-                                <i class="fas fa-trash"></i> Delete Job
+                                <i class="fas fa-trash"></i>
+                                <span x-text="job.status === 'running' && job.type === 'parent' ? 'Cancel & Delete' : 'Delete Job'"></span>
                             </button>
                         </template>
                         <template x-if="isCrawlerJob(job) && (job.status === 'completed' || job.result_count > 0)">
-                            <button class="btn btn-success" @click="viewDocuments()"
-                                title="View documents created by this crawl">
-                                <i class="fas fa-file-alt"></i> View Documents (<span
-                                    x-text="job.result_count || 0"></span>)
+                            <button class="btn btn-success" @click="viewDocuments()" title="View documents created by this crawl">
+                                <i class="fas fa-file-alt"></i> View Documents (<span x-text="job.result_count || 0"></span>)
                             </button>
                         </template>
                     </div>
@@ -382,8 +334,7 @@
                         </section>
                         <section class="navbar-section">
                             <!-- Log Level Filter -->
-                            <select class="form-select select-sm" x-model="selectedLogLevel" title="Filter by log level"
-                                style="margin-right: 0.5rem;">
+                            <select class="form-select select-sm" x-model="selectedLogLevel" title="Filter by log level" style="margin-right: 0.5rem;">
                                 <option value="all">All Levels</option>
                                 <option value="error">Error</option>
                                 <option value="warning">Warning</option>
@@ -391,8 +342,7 @@
                                 <option value="debug">Debug</option>
                             </select>
 
-                            <button class="btn btn-sm" @click="toggleAutoScroll()"
-                                :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
+                            <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
                                 <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
                             </button>
                             <button class="btn btn-sm" @click="refreshLogs()" title="Refresh Logs">

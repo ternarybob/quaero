@@ -192,58 +192,81 @@ Convert the web crawler enhancement design into a series of prompts for a code-g
   - Implement document links and previews for completed crawl jobs
   - _Requirements: 9.5, 9.6_
 
-- [ ] 6. Add Comprehensive Error Handling and Performance Optimization
-  - Implement robust error handling with retry logic and error classification
-  - Add performance monitoring and resource management
-  - Implement rate limiting and concurrency control
-  - Add comprehensive logging and metrics collection
-  - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 10.1, 10.2, 10.3, 10.4, 10.5_
+- [x] 6. Fix Critical Crawler Functionality Issues
 
-- [ ] 6.1 Implement error handling and retry logic
-  - Create error classification system for different failure types
-  - Implement exponential backoff retry logic for transient failures
-  - Add comprehensive error logging with context and recovery suggestions
-  - _Requirements: 7.1, 7.2, 7.3_
 
-- [ ] 6.2 Add performance monitoring and resource management
-  - Implement crawler metrics collection (success rate, processing time, etc.)
-  - Add memory and resource usage monitoring for browser pool
-  - Create performance optimization for large-scale crawling
-  - _Requirements: 10.1, 10.2, 10.3_
 
-- [ ] 6.3 Implement rate limiting and concurrency control
-  - Add per-domain rate limiting to respect target servers
-  - Implement global concurrency limits and queue depth monitoring
-  - Add configuration options for rate limiting and performance tuning
-  - _Requirements: 10.4, 10.5_
 
-- [ ]* 6.4 Add comprehensive testing suite
-  - Create unit tests for ChromeDP pool management and content processing
-  - Add integration tests for end-to-end crawler workflow
-  - Implement UI tests for real-time monitoring and job management
+
+  - Debug and fix the core crawler execution to ensure jobs actually start and progress
+  - Fix parent-child job architecture to show only one parent job in UI
+  - Update UI to display status inline instead of in separate boxes
+  - Ensure real-time progress updates work correctly
+  - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 3.1, 3.2, 10.1, 10.2, 10.3, 10.4, 10.5_
+
+- [x] 6.1 Debug and fix crawler job execution
+
+
+
+
+
+
+
+
+
+  - Investigate why crawler jobs are not progressing from "Pending" to "Running"
+  - Fix ChromeDP navigation and content extraction to actually work
+  - Ensure URL processing increments progress counters correctly
+  - Fix job completion status transitions
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+
+- [x] 6.2 Fix parent-child job visibility in UI
+
+
+  - Modify queue display logic to show only parent jobs, never child jobs
+  - Ensure child job spawning doesn't create separate visible queue entries
+  - Fix job filtering to hide child jobs from queue page
+  - Update job status aggregation to roll up child progress to parent
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [x] 6.3 Fix inline status display formatting
+
+  - Remove separate status boxes and implement inline status display
+  - Update queue page template to match existing UI style
+  - Fix progress text formatting to show "X of Y URLs processed" inline
+  - Ensure status updates maintain consistent styling with other job types
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+- [ ]* 6.4 Add comprehensive testing for fixed functionality
+  - Create tests to verify single parent job visibility
+  - Test that crawler jobs actually execute and complete
+  - Validate inline status display formatting
+  - Test real-time progress updates
   - _Requirements: All requirements validation_
 
-- [ ] 7. Final Integration and Configuration
-  - Update application configuration to support all crawler enhancement features
-  - Integrate all components with existing Quaero architecture
-  - Add comprehensive documentation and configuration examples
-  - Perform final testing and validation of complete system
-  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
-
-- [ ] 7.1 Update application configuration and initialization
-  - Add crawler configuration options to main config structure
-  - Update application initialization to properly wire all crawler components
-  - Add environment variable support for crawler settings
-  - _Requirements: 5.1, 5.2_
-
-- [ ] 7.2 Create comprehensive job definition examples
-  - Create example TOML job definitions for various crawler scenarios
-  - Add configuration validation and helpful error messages
-  - Update job definition handler to support crawler-specific configurations
-  - _Requirements: 5.3, 5.4, 5.5_
-
-- [ ] 7.3 Perform final integration testing and validation
-  - Test complete crawler workflow from job creation to document storage
-  - Validate real-time monitoring and parent-child job relationships
-  - Ensure all error handling and performance features work correctly
+- [ ] 7. Validate and Test Fixed Crawler System
+  - Perform end-to-end testing of the fixed crawler functionality
+  - Validate that all critical issues have been resolved
+  - Test various crawler scenarios to ensure robustness
+  - Document the working crawler system
   - _Requirements: All requirements validation_
+
+- [ ] 7.1 Test single parent job architecture
+  - Verify that only one parent job appears in the queue when running crawler jobs
+  - Test that child job spawning works correctly in the background
+  - Validate that progress aggregation shows correct totals on parent job
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [ ] 7.2 Test functional crawler execution
+  - Verify that crawler jobs transition from "Pending" to "Running" to "Completed"
+  - Test that URLs are actually processed and documents are created
+  - Validate that progress counters increment correctly during execution
+  - Test error handling for failed URLs
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+
+- [ ] 7.3 Test inline status display and real-time updates
+  - Verify that status information displays inline, not in separate boxes
+  - Test that progress updates appear in real-time during job execution
+  - Validate that the UI matches existing job display styles
+  - Test WebSocket updates for live progress monitoring
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_

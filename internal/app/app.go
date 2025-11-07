@@ -21,7 +21,6 @@ import (
 	"github.com/ternarybob/quaero/internal/jobs/processor"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/services/atlassian"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/config"
@@ -70,10 +69,6 @@ type App struct {
 	JobProcessor *processor.JobProcessor
 	JobExecutor  *executor.JobExecutor
 	JobService   *jobsvc.Service
-
-	// Specialized transformers
-	JiraTransformer       *atlassian.JiraTransformer
-	ConfluenceTransformer *atlassian.ConfluenceTransformer
 
 	// Source-agnostic services
 	StatusService *status.Service
@@ -334,29 +329,7 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Crawler service initialized")
 
-	// 6.6. Initialize specialized transformers (subscribe to collection events)
-	// NOTE: Must be initialized after crawler service to access GetJobResults()
-	a.JiraTransformer = atlassian.NewJiraTransformer(
-		a.StorageManager.JobStorage(),
-		a.StorageManager.DocumentStorage(),
-		a.EventService,
-		a.CrawlerService, // Add crawler service parameter
-		a.Logger,
-		true, // enableEmptyOutputFallback
-	)
-	a.Logger.Info().Msg("Jira transformer initialized and subscribed to collection events")
-
-	a.ConfluenceTransformer = atlassian.NewConfluenceTransformer(
-		a.StorageManager.JobStorage(),
-		a.StorageManager.DocumentStorage(),
-		a.EventService,
-		a.CrawlerService, // Add crawler service parameter
-		a.Logger,
-		true, // enableEmptyOutputFallback
-	)
-	a.Logger.Info().Msg("Confluence transformer initialized and subscribed to collection events")
-
-	// 6.7. Register job executors with job processor
+	// 6.6. Register job executors with job processor
 
 	// Register enhanced crawler_url executor (new interface with ChromeDP and content processing)
 	enhancedCrawlerExecutor := processor.NewEnhancedCrawlerExecutor(
@@ -369,6 +342,16 @@ func (a *App) initServices() error {
 	)
 	jobProcessor.RegisterExecutor(enhancedCrawlerExecutor)
 	a.Logger.Info().Msg("Enhanced crawler URL executor registered for job type: crawler_url")
+
+	// Create parent job executor for managing parent job lifecycle
+	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
+	// to avoid blocking queue workers with long-running monitoring loops
+	parentJobExecutor := processor.NewParentJobExecutor(
+		jobMgr,
+		a.EventService,
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Parent job executor created (runs in background goroutines, not via queue)")
 
 	// Register database maintenance executor (new interface)
 	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(
@@ -387,7 +370,8 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Transform service initialized")
 
 	// 6.9. Initialize JobExecutor for job definition execution
-	a.JobExecutor = executor.NewJobExecutor(jobMgr, a.Logger)
+	// Pass parentJobExecutor so it can start monitoring goroutines for crawler jobs
+	a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobExecutor, a.Logger)
 
 	// Register step executors
 	crawlerStepExecutor := executor.NewCrawlerStepExecutor(a.CrawlerService, a.Logger)

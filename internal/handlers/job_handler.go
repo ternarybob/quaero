@@ -147,6 +147,18 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.logger.Warn().Err(err).Msg("Failed to get child statistics, continuing without stats")
 			childStatsMap = make(map[string]*interfaces.JobChildStats)
+		} else {
+			// Debug: Log child statistics
+			for parentID, stats := range childStatsMap {
+				h.logger.Debug().
+					Str("parent_id", parentID).
+					Int("child_count", stats.ChildCount).
+					Int("pending", stats.PendingChildren).
+					Int("running", stats.RunningChildren).
+					Int("completed", stats.CompletedChildren).
+					Int("failed", stats.FailedChildren).
+					Msg("Child statistics for parent job")
+			}
 		}
 	} else {
 		childStatsMap = make(map[string]*interfaces.JobChildStats)
@@ -174,10 +186,16 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 				jobMap["child_count"] = stats.ChildCount
 				jobMap["completed_children"] = stats.CompletedChildren
 				jobMap["failed_children"] = stats.FailedChildren
+				jobMap["cancelled_children"] = stats.CancelledChildren
+				jobMap["pending_children"] = stats.PendingChildren
+				jobMap["running_children"] = stats.RunningChildren
 			} else {
 				jobMap["child_count"] = 0
 				jobMap["completed_children"] = 0
 				jobMap["failed_children"] = 0
+				jobMap["cancelled_children"] = 0
+				jobMap["pending_children"] = 0
+				jobMap["running_children"] = 0
 			}
 
 			enrichedJobs = append(enrichedJobs, jobMap)
@@ -245,10 +263,16 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			parentMap["child_count"] = stats.ChildCount
 			parentMap["completed_children"] = stats.CompletedChildren
 			parentMap["failed_children"] = stats.FailedChildren
+			parentMap["cancelled_children"] = stats.CancelledChildren
+			parentMap["pending_children"] = stats.PendingChildren
+			parentMap["running_children"] = stats.RunningChildren
 		} else {
 			parentMap["child_count"] = 0
 			parentMap["completed_children"] = 0
 			parentMap["failed_children"] = 0
+			parentMap["cancelled_children"] = 0
+			parentMap["pending_children"] = 0
+			parentMap["running_children"] = 0
 		}
 
 		groups = append(groups, map[string]interface{}{
@@ -319,10 +343,16 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 			jobMap["child_count"] = stats.ChildCount
 			jobMap["completed_children"] = stats.CompletedChildren
 			jobMap["failed_children"] = stats.FailedChildren
+			jobMap["cancelled_children"] = stats.CancelledChildren
+			jobMap["pending_children"] = stats.PendingChildren
+			jobMap["running_children"] = stats.RunningChildren
 		} else {
 			jobMap["child_count"] = 0
 			jobMap["completed_children"] = 0
 			jobMap["failed_children"] = 0
+			jobMap["cancelled_children"] = 0
+			jobMap["pending_children"] = 0
+			jobMap["running_children"] = 0
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -848,18 +878,42 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Type assert to get job details
-	job, ok := jobInterface.(*models.CrawlJob)
+	job, ok := jobInterface.(*models.Job)
 	if !ok {
 		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type retrieved")
 		h.writeDeleteError(w, 500, "Internal server error", "Invalid job type", jobID, "", 0)
 		return
 	}
 
-	// Check if job is running
-	if job.Status == models.JobStatusRunning {
+	// Check if job is running (but allow deletion of orchestrating jobs)
+	// Orchestrating jobs are parent jobs monitoring children - deletion will cancel them
+	if job.Status == models.JobStatusRunning && job.Type != "parent" {
 		h.logger.Warn().Str("job_id", jobID).Msg("Attempt to delete running job blocked")
 		h.writeDeleteError(w, 400, "Cannot delete running job", fmt.Sprintf("Job %s is currently running. Cancel it first.", jobID), jobID, string(job.Status), 0)
 		return
+	}
+
+	// If job is orchestrating (parent job), cancel it and all children first before deletion
+	if job.Status == models.JobStatusRunning && job.Type == "parent" {
+		h.logger.Info().Str("job_id", jobID).Msg("Cancelling orchestrating job and children before deletion")
+
+		// Cancel all child jobs first
+		childrenCancelled, err := h.jobManager.StopAllChildJobs(ctx, jobID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to cancel child jobs")
+		} else {
+			h.logger.Info().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
+		}
+
+		// Cancel the parent job by updating its status
+		job.Status = models.JobStatusCancelled
+		if err := h.jobManager.UpdateJob(ctx, job); err != nil {
+			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel orchestrating job")
+			h.writeDeleteError(w, 500, "Failed to cancel job", err.Error(), jobID, string(job.Status), 0)
+			return
+		}
+
+		h.logger.Info().Str("job_id", jobID).Msg("Orchestrating job cancelled successfully")
 	}
 
 	// Get child count for response
@@ -912,6 +966,7 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetJobStatsHandler returns statistics about jobs
 // GET /api/jobs/stats
+// NOTE: Counts ALL jobs (parent + children) to show total queue depth
 func (h *JobHandler) GetJobStatsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

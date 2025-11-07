@@ -457,6 +457,8 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	h.logger.Info().
 		Str("job_def_id", jobDef.ID).
 		Str("job_name", jobDef.Name).
+		Str("job_def_type", string(jobDef.Type)).
+		Str("source_type", jobDef.SourceType).
 		Int("step_count", len(jobDef.Steps)).
 		Msg("Executing job definition")
 

@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/quaero/internal/interfaces/jobtypes"
@@ -377,15 +378,16 @@ func (j *CrawlJob) GetStatusReport(childStats *jobtypes.JobChildStats) *jobtypes
 		report.ChildCount = childStats.ChildCount
 		report.CompletedChildren = childStats.CompletedChildren
 		report.FailedChildren = childStats.FailedChildren
-		report.RunningChildren = childStats.ChildCount - childStats.CompletedChildren - childStats.FailedChildren
-		if report.RunningChildren < 0 {
-			report.RunningChildren = 0
-		}
+		report.CancelledChildren = childStats.CancelledChildren
+		report.RunningChildren = childStats.RunningChildren
+		report.PendingChildren = childStats.PendingChildren
 	} else {
 		report.ChildCount = 0
 		report.CompletedChildren = 0
 		report.FailedChildren = 0
+		report.CancelledChildren = 0
 		report.RunningChildren = 0
+		report.PendingChildren = 0
 	}
 
 	// Generate progress text based on job type and available data
@@ -394,11 +396,29 @@ func (j *CrawlJob) GetStatusReport(childStats *jobtypes.JobChildStats) *jobtypes
 		if report.ChildCount == 0 {
 			report.ProgressText = "No child jobs spawned yet"
 		} else {
-			report.ProgressText = fmt.Sprintf("Completed: %d | Failed: %d | Running: %d | Total: %d",
-				report.CompletedChildren,
-				report.FailedChildren,
-				report.RunningChildren,
-				report.ChildCount)
+			// Build progress text with all child job statuses
+			parts := []string{}
+			if report.PendingChildren > 0 {
+				parts = append(parts, fmt.Sprintf("%d pending", report.PendingChildren))
+			}
+			if report.RunningChildren > 0 {
+				parts = append(parts, fmt.Sprintf("%d running", report.RunningChildren))
+			}
+			if report.CompletedChildren > 0 {
+				parts = append(parts, fmt.Sprintf("%d completed", report.CompletedChildren))
+			}
+			if report.FailedChildren > 0 {
+				parts = append(parts, fmt.Sprintf("%d failed", report.FailedChildren))
+			}
+			if report.CancelledChildren > 0 {
+				parts = append(parts, fmt.Sprintf("%d cancelled", report.CancelledChildren))
+			}
+
+			if len(parts) > 0 {
+				report.ProgressText = fmt.Sprintf("%s (Total: %d)", strings.Join(parts, ", "), report.ChildCount)
+			} else {
+				report.ProgressText = fmt.Sprintf("Total: %d", report.ChildCount)
+			}
 		}
 	} else {
 		// This is a child job - use job's own progress

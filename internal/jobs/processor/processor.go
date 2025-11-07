@@ -212,14 +212,24 @@ func (jp *JobProcessor) processNextJob() {
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
-			Msg("Job completed successfully")
+			Msg("Job execution completed successfully")
 
-		// Status is already set by executor, but ensure it's completed
-		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "completed")
+		// For parent jobs, do NOT mark as completed here - ParentJobExecutor will handle completion
+		// when all children are done. For other job types, mark as completed immediately.
+		if msg.Type == "parent" {
+			jp.logger.Info().
+				Str("job_id", msg.JobID).
+				Msg("Parent job execution completed - leaving in running state for child monitoring")
+			// Parent job remains in "running" state and will be re-enqueued by ParentJobExecutor
+			// to continue monitoring child jobs
+		} else {
+			// Non-parent jobs are marked as completed immediately
+			jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "completed")
 
-		// Set finished_at timestamp for completed jobs
-		if finishErr := jp.jobMgr.SetJobFinished(jp.ctx, msg.JobID); finishErr != nil {
-			jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")
+			// Set finished_at timestamp for completed jobs
+			if finishErr := jp.jobMgr.SetJobFinished(jp.ctx, msg.JobID); finishErr != nil {
+				jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")
+			}
 		}
 	}
 

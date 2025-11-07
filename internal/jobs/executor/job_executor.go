@@ -3,27 +3,31 @@ package executor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/processor"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
 // JobExecutor orchestrates job definition execution
 // It routes steps to appropriate StepExecutors and manages parent-child hierarchy
 type JobExecutor struct {
-	stepExecutors map[string]StepExecutor
-	jobManager    *jobs.Manager
-	logger        arbor.ILogger
+	stepExecutors     map[string]StepExecutor
+	jobManager        *jobs.Manager
+	parentJobExecutor *processor.ParentJobExecutor
+	logger            arbor.ILogger
 }
 
 // NewJobExecutor creates a new job executor
-func NewJobExecutor(jobManager *jobs.Manager, logger arbor.ILogger) *JobExecutor {
+func NewJobExecutor(jobManager *jobs.Manager, parentJobExecutor *processor.ParentJobExecutor, logger arbor.ILogger) *JobExecutor {
 	return &JobExecutor{
-		stepExecutors: make(map[string]StepExecutor),
-		jobManager:    jobManager,
-		logger:        logger,
+		stepExecutors:     make(map[string]StepExecutor),
+		jobManager:        jobManager,
+		parentJobExecutor: parentJobExecutor,
+		logger:            logger,
 	}
 }
 
@@ -55,10 +59,11 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		Msg("Starting job definition execution")
 
 	// Create parent job record in database to track overall progress
+	// Use old jobs.Job format for now (will be migrated to models.Job later)
 	parentJob := &jobs.Job{
 		ID:              parentJobID,
-		ParentID:        nil, // This is a root job
-		Type:            string(jobDef.Type),
+		ParentID:        nil,         // This is a root job
+		Type:            "parent",    // Always use "parent" type for parent jobs created by JobExecutor
 		Name:            jobDef.Name, // Use job definition name
 		Phase:           "execution",
 		Status:          "pending",
@@ -74,7 +79,15 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
 
-	// Update the job record with job definition config for UI display
+	// Add initial job log for debugging
+	initialLog := fmt.Sprintf("🚀 Starting job definition execution: %s (ID: %s, Type: '%s', Steps: %d)",
+		jobDef.Name, jobDef.ID, string(jobDef.Type), len(jobDef.Steps))
+	if err := e.jobManager.AddJobLog(ctx, parentJobID, "info", initialLog); err != nil {
+		parentLogger.Warn().Err(err).Msg("Failed to add initial job log")
+	}
+	parentLogger.Info().Str("job_def_id", jobDef.ID).Str("type", string(jobDef.Type)).Msg("Job definition loaded")
+
+	// Build job definition config for parent job
 	jobDefConfig := make(map[string]interface{})
 
 	// Include job definition configuration for display in UI
@@ -110,6 +123,8 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 	// Mark parent job as running
 	if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
 		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job status to running")
+	} else {
+		parentLogger.Info().Str("parent_job_id", parentJobID).Msg("✓ Parent job status updated to 'running'")
 	}
 
 	// Execute pre-jobs if any
@@ -240,22 +255,95 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		// TODO: Load and execute post-job definitions
 	}
 
-	// Mark parent job as completed
-	if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "completed"); err != nil {
-		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to mark parent job as completed")
+	// For crawler jobs, don't mark as completed immediately - let ParentJobExecutor handle completion
+	// For other job types, mark as completed immediately
+
+	// Add job log for debugging - show exact string comparison
+	typeComparison := fmt.Sprintf("Type check: '%s' == '%s' ? %v (len: %d vs %d)",
+		string(jobDef.Type), string(models.JobDefinitionTypeCrawler),
+		jobDef.Type == models.JobDefinitionTypeCrawler,
+		len(string(jobDef.Type)), len(string(models.JobDefinitionTypeCrawler)))
+	e.jobManager.AddJobLog(ctx, parentJobID, "info", typeComparison)
+
+	parentLogger.Info().
+		Str("job_def_type", string(jobDef.Type)).
+		Str("expected_type", string(models.JobDefinitionTypeCrawler)).
+		Bool("is_crawler", jobDef.Type == models.JobDefinitionTypeCrawler).
+		Int("type_len", len(string(jobDef.Type))).
+		Int("expected_len", len(string(models.JobDefinitionTypeCrawler))).
+		Msg("Checking job definition type for completion handling")
+
+	// Check if this is a crawler job by looking at the job definition type OR the steps
+	isCrawlerJob := jobDef.Type == models.JobDefinitionTypeCrawler
+
+	// Log all step actions for debugging
+	stepActions := make([]string, len(jobDef.Steps))
+	for i, step := range jobDef.Steps {
+		stepActions[i] = step.Action
+	}
+	e.jobManager.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Job has %d steps with actions: %v", len(jobDef.Steps), stepActions))
+
+	// Also check if any step has action "crawl" as a fallback
+	if !isCrawlerJob && len(jobDef.Steps) > 0 {
+		for _, step := range jobDef.Steps {
+			if step.Action == "crawl" {
+				isCrawlerJob = true
+				e.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected via step action (type mismatch - please check job definition)")
+				break
+			}
+		}
 	}
 
-	// Set finished_at timestamp for parent job
-	// Note: For now, we set finished_at immediately when the parent job completes
-	// TODO: In the future, this should wait for all spawned child jobs to complete
-	if err := e.jobManager.SetJobFinished(ctx, parentJobID); err != nil {
-		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to set finished_at timestamp")
+	if isCrawlerJob {
+		// Add job log for UI visibility
+		e.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected - leaving in running state for ParentJobExecutor to monitor child jobs")
+
+		parentLogger.Info().
+			Str("parent_job_id", parentJobID).
+			Msg("✓ Crawler job detected - starting parent job monitoring in background")
+
+		// Start parent job monitoring in a separate goroutine (NOT via queue)
+		// This prevents blocking the queue worker with long-running monitoring loops
+		parentJobModel := &models.JobModel{
+			ID:        parentJobID,
+			ParentID:  nil,
+			Type:      "parent",
+			Name:      jobDef.Name,
+			Config:    jobDefConfig,
+			Metadata:  make(map[string]interface{}),
+			CreatedAt: time.Now(),
+			Depth:     0,
+		}
+
+		// Start monitoring in background goroutine
+		e.parentJobExecutor.StartMonitoring(ctx, parentJobModel)
+
+		parentLogger.Info().Msg("✓ Parent job monitoring started in background goroutine")
+		e.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Parent job monitoring started - tracking child job progress")
+
+		// NOTE: Do NOT set finished_at for crawler jobs - ParentJobExecutor will handle this
+		// when all children complete
+	} else {
+		// For non-crawler jobs, mark as completed immediately
+		e.jobManager.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Non-crawler job (type: %s) - marking as completed immediately", string(jobDef.Type)))
+
+		if err := e.jobManager.UpdateJobStatus(ctx, parentJobID, "completed"); err != nil {
+			parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to mark parent job as completed")
+		} else {
+			e.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Job marked as completed")
+		}
+
+		// Set finished_at timestamp for non-crawler jobs
+		if err := e.jobManager.SetJobFinished(ctx, parentJobID); err != nil {
+			parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to set finished_at timestamp")
+		}
 	}
 
 	parentLogger.Info().
 		Str("job_def_id", jobDef.ID).
 		Str("parent_job_id", parentJobID).
 		Int("completed_steps", len(jobDef.Steps)).
+		Bool("is_crawler", jobDef.Type == models.JobDefinitionTypeCrawler).
 		Msg("Job definition execution completed successfully")
 
 	return parentJobID, nil
