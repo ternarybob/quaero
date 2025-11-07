@@ -73,12 +73,16 @@
                                         </td>
                                         <td x-text="auth.name || '-'"></td>
                                         <td>
-                                            <span class="label label-secondary" x-text="auth.service_type.toUpperCase()"></span>
+                                            <span class="label label-secondary"
+                                                x-text="auth.service_type.toUpperCase()"></span>
                                         </td>
                                         <td x-text="formatDate(auth.updated_at)"> </td>
                                         <td class="text-right">
-                                            <button class="btn btn-sm btn-error" @click="deleteAuthentication(auth.id, auth.site_domain)" :disabled="deleting === auth.id" title="Delete Authentication">
-                                                <i class="fas" :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
+                                            <button class="btn btn-sm btn-error"
+                                                @click="deleteAuthentication(auth.id, auth.site_domain)"
+                                                :disabled="deleting === auth.id" title="Delete Authentication">
+                                                <i class="fas"
+                                                    :class="deleting === auth.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
                                             </button>
                                         </td>
                                     </tr>
@@ -102,10 +106,10 @@
                             <h3>Job Definitions</h3>
                         </section>
                         <section class="navbar-section">
-                            <a href="/job_add" class="btn btn-sm btn-primary">
+                            <button class="btn btn-sm btn-primary">
                                 <i class="fas fa-plus"></i>
                                 <span>Add Job</span>
-                            </a>
+                            </button>
                             <button class="btn btn-sm" @click="loadJobDefinitions()" title="Refresh Job Definitions">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
@@ -134,14 +138,17 @@
                                         <div style="display: flex; align-items: center; gap: 0.5rem;">
                                             <div class="card-title h5" x-text="jobDef.name"></div>
                                             <!-- System Job Badge -->
-                                            <span x-show="jobDef.job_type === 'system'" class="label label-warning" title="System-managed job (readonly)">
+                                            <span x-show="jobDef.job_type === 'system'" class="label label-warning"
+                                                title="System-managed job (readonly)">
                                                 <i class="fas fa-lock"></i> System
                                             </span>
                                         </div>
-                                        <div class="card-subtitle text-gray" x-text="jobDef.description || 'No description provided'"></div>
+                                        <div class="card-subtitle text-gray"
+                                            x-text="jobDef.description || 'No description provided'"></div>
 
                                         <!-- Metadata -->
-                                        <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                        <div
+                                            style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
                                             <!-- Type -->
                                             <div>
                                                 <i class="fas fa-code"></i>
@@ -168,28 +175,41 @@
 
                                             <!-- Status -->
                                             <div>
-                                                <i class="fas" :class="jobDef.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
-                                                <span :class="jobDef.enabled ? 'text-success' : 'text-gray'" x-text="jobDef.enabled ? 'Enabled' : 'Disabled'"></span>
+                                                <i class="fas"
+                                                    :class="jobDef.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                                                <span :class="jobDef.enabled ? 'text-success' : 'text-gray'"
+                                                    x-text="jobDef.enabled ? 'Enabled' : 'Disabled'"></span>
                                             </div>
                                         </div>
                                     </div>
 
                                     <!-- Right side: Actions -->
                                     <div class="column col-2 text-right">
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-run'" class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)" :disabled="!jobDef.enabled" title="Run Job"
-                                            aria-label="Run Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-run'"
+                                            class="btn btn-sm btn-success"
+                                            @click="executeJobDefinition(jobDef.id, jobDef.name)"
+                                            :disabled="!jobDef.enabled" title="Run Job" aria-label="Run Job">
                                             <i class="fas fa-play"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)" :disabled="jobDef.job_type === 'system'"
-                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be edited' : 'Edit Job Definition'" aria-label="Edit Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'"
+                                            class="btn btn-sm" @click="editJobDefinition(jobDef, $event)"
+                                            :disabled="jobDef.job_type === 'system'"
+                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be edited' : 'Edit Job Definition'"
+                                            aria-label="Edit Job">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'" class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)" :disabled="jobDef.type !== 'crawler'"
-                                            title="Download as TOML" aria-label="Download Job" x-show="jobDef.type === 'crawler'">
+                                        <button
+                                            :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-download'"
+                                            class="btn btn-sm" @click="downloadJobDefinition(jobDef.id, jobDef.type)"
+                                            :disabled="jobDef.type !== 'crawler'" title="Download as TOML"
+                                            aria-label="Download Job" x-show="jobDef.type === 'crawler'">
                                             <i class="fas fa-download"></i>
                                         </button>
-                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'" class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)" :disabled="jobDef.job_type === 'system'"
-                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be deleted' : 'Delete Job Definition'" aria-label="Delete Job">
+                                        <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-delete'"
+                                            class="btn btn-sm btn-error" @click="deleteJobDefinition(jobDef.id)"
+                                            :disabled="jobDef.job_type === 'system'"
+                                            :title="jobDef.job_type === 'system' ? 'System jobs cannot be deleted' : 'Delete Job Definition'"
+                                            aria-label="Delete Job">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </div>

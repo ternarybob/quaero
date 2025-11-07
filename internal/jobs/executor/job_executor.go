@@ -74,6 +74,33 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
 
+	// Update the job record with job definition config for UI display
+	jobDefConfig := make(map[string]interface{})
+
+	// Include job definition configuration for display in UI
+	if len(jobDef.Steps) > 0 {
+		// Merge all step configs into the parent job config for display
+		for i, step := range jobDef.Steps {
+			stepKey := fmt.Sprintf("step_%d_%s", i+1, step.Action)
+			jobDefConfig[stepKey] = step.Config
+		}
+	}
+
+	// Add job definition metadata
+	jobDefConfig["job_definition_id"] = jobDef.ID
+	jobDefConfig["source_type"] = jobDef.SourceType
+	jobDefConfig["base_url"] = jobDef.BaseURL
+	jobDefConfig["schedule"] = jobDef.Schedule
+	jobDefConfig["timeout"] = jobDef.Timeout
+	jobDefConfig["enabled"] = jobDef.Enabled
+
+	// Update the job config in the database
+	if err := e.jobManager.UpdateJobConfig(ctx, parentJobID, jobDefConfig); err != nil {
+		parentLogger.Warn().Err(err).
+			Str("parent_job_id", parentJobID).
+			Msg("Failed to update job config, continuing without config display")
+	}
+
 	parentLogger.Info().
 		Str("parent_job_id", parentJobID).
 		Str("job_def_id", jobDef.ID).

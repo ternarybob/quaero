@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1722,4 +1723,480 @@ func TestSystemJobProtection(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "system-job-protection-verified")
 	env.LogTest(t, "✅ System job protection test completed successfully")
+}
+
+// TestNewsCrawlerJobLoad verifies loading and executing the news-crawler.toml job definition
+func TestNewsCrawlerJobLoad(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestNewsCrawlerJobLoad")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestNewsCrawlerJobLoad")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestNewsCrawlerJobLoad (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestNewsCrawlerJobLoad (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 120*time.Second) // Extended timeout for job execution
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// Step 1: Navigate to job_add page to load the news crawler
+	env.LogTest(t, "Step 1: Navigating to job_add page to load news crawler...")
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(baseURL+"/job_add"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second), // Wait for page to load
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load job_add page: %v", err)
+		env.TakeScreenshot(ctx, "job-add-page-load-failed")
+		t.Fatalf("Failed to load job_add page: %v", err)
+	}
+	env.LogTest(t, "✓ Job add page loaded")
+	env.TakeScreenshot(ctx, "job-add-page-loaded")
+
+	// Step 2: Load the news-crawler.toml file content
+	env.LogTest(t, "Step 2: Reading news-crawler.toml file content...")
+	newsCrawlerContent, err := os.ReadFile("../../test/config/news-crawler.toml")
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to read news-crawler.toml: %v", err)
+		t.Fatalf("Failed to read news-crawler.toml: %v", err)
+	}
+	env.LogTest(t, "✓ News crawler TOML content loaded (%d bytes)", len(newsCrawlerContent))
+
+	// Step 3: Wait for CodeMirror editor to be ready and paste the content
+	env.LogTest(t, "Step 3: Waiting for CodeMirror editor and pasting content...")
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(3*time.Second), // Wait for CodeMirror to initialize
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const editorElement = document.querySelector('.CodeMirror');
+				if (editorElement && editorElement.CodeMirror) {
+					const editor = editorElement.CodeMirror;
+					editor.setValue(%s);
+					return true;
+				}
+				return false;
+			})()
+		`, "`"+string(newsCrawlerContent)+"`"), nil),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to set editor content: %v", err)
+		env.TakeScreenshot(ctx, "editor-content-set-failed")
+		t.Fatalf("Failed to set editor content: %v", err)
+	}
+	env.LogTest(t, "✓ News crawler content pasted into editor")
+	env.TakeScreenshot(ctx, "news-crawler-content-pasted")
+
+	// Step 4: Save the job definition
+	env.LogTest(t, "Step 4: Saving the news crawler job definition...")
+	var saveResult bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				// Look for Save button
+				const saveButton = Array.from(document.querySelectorAll('button')).find(btn =>
+					btn.textContent.trim() === 'Save' || btn.textContent.includes('Save')
+				);
+				if (saveButton) {
+					saveButton.click();
+					return true;
+				}
+				return false;
+			})()
+		`, &saveResult),
+		chromedp.Sleep(3*time.Second), // Wait for save and redirect
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to save job definition: %v", err)
+		env.TakeScreenshot(ctx, "job-save-failed")
+		t.Fatalf("Failed to save job definition: %v", err)
+	}
+
+	if !saveResult {
+		env.LogTest(t, "ERROR: Save button not found")
+		env.TakeScreenshot(ctx, "save-button-not-found")
+		t.Fatal("Save button not found")
+	}
+
+	env.LogTest(t, "✓ Job definition saved")
+	env.TakeScreenshot(ctx, "job-definition-saved")
+
+	// Step 5: Verify redirect to jobs page and check for success notification
+	env.LogTest(t, "Step 5: Verifying redirect to jobs page...")
+	var currentURL string
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2*time.Second), // Wait for redirect
+		chromedp.Evaluate(`window.location.href`, &currentURL),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to get current URL: %v", err)
+		t.Fatalf("Failed to get current URL: %v", err)
+	}
+
+	if !strings.Contains(currentURL, "/jobs") {
+		env.LogTest(t, "WARNING: Expected redirect to /jobs, current URL: %s", currentURL)
+		// Continue anyway as the job might still be saved
+	} else {
+		env.LogTest(t, "✓ Redirected to jobs page")
+	}
+
+	// Step 6: Navigate to jobs page if not already there
+	if !strings.Contains(currentURL, "/jobs") {
+		env.LogTest(t, "Step 6: Navigating to jobs page...")
+		err = chromedp.Run(ctx,
+			chromedp.Navigate(baseURL+"/jobs"),
+			chromedp.WaitVisible(`body`, chromedp.ByQuery),
+			chromedp.Sleep(3*time.Second), // Wait for page and data to load
+		)
+		if err != nil {
+			env.LogTest(t, "ERROR: Failed to navigate to jobs page: %v", err)
+			t.Fatalf("Failed to navigate to jobs page: %v", err)
+		}
+	} else {
+		// Already on jobs page, just wait for it to load
+		err = chromedp.Run(ctx,
+			chromedp.Sleep(3*time.Second), // Wait for page and data to load
+		)
+	}
+
+	env.LogTest(t, "✓ On jobs page")
+	env.TakeScreenshot(ctx, "jobs-page-after-save")
+
+	// Step 7: Verify the News Crawler job appears in the job definitions list
+	env.LogTest(t, "Step 7: Verifying News Crawler job appears in job definitions...")
+	var newsCrawlerFound bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				// Wait a moment for Alpine.js to render
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				return cards.some(card => card.textContent.includes('News Crawler'));
+			})()
+		`, &newsCrawlerFound),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check for News Crawler job: %v", err)
+		env.TakeScreenshot(ctx, "news-crawler-check-failed")
+		t.Fatalf("Failed to check for News Crawler job: %v", err)
+	}
+
+	if !newsCrawlerFound {
+		env.LogTest(t, "ERROR: News Crawler job not found in job definitions list")
+		env.TakeScreenshot(ctx, "news-crawler-not-found")
+		t.Fatal("News Crawler job should appear in job definitions list after saving")
+	}
+
+	env.LogTest(t, "✓ News Crawler job found in job definitions list")
+
+	// Step 8: Execute the News Crawler job
+	env.LogTest(t, "Step 8: Executing the News Crawler job...")
+
+	// Wait for WebSocket connection first
+	env.LogTest(t, "Waiting for WebSocket connection...")
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		env.TakeScreenshot(ctx, "websocket-failed")
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+	env.LogTest(t, "✓ WebSocket connected")
+
+	// Override confirm dialog
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`window.confirm = function() { return true; }`, nil),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to override confirm dialog: %v", err)
+		t.Fatalf("Failed to override confirm dialog: %v", err)
+	}
+
+	// Find and click the run button for News Crawler
+	var runButtonClicked bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const newsCrawlerCard = cards.find(card => card.textContent.includes('News Crawler'));
+				if (newsCrawlerCard) {
+					const runButton = newsCrawlerCard.querySelector('button.btn-success');
+					if (runButton) {
+						runButton.click();
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, &runButtonClicked),
+		chromedp.Sleep(2*time.Second), // Wait for job to be triggered
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to click run button: %v", err)
+		env.TakeScreenshot(ctx, "run-button-click-failed")
+		t.Fatalf("Failed to click run button: %v", err)
+	}
+
+	if !runButtonClicked {
+		env.LogTest(t, "ERROR: Run button not found for News Crawler")
+		env.TakeScreenshot(ctx, "run-button-not-found")
+		t.Fatal("Run button not found for News Crawler")
+	}
+
+	env.LogTest(t, "✓ News Crawler job execution triggered")
+	env.TakeScreenshot(ctx, "news-crawler-triggered")
+
+	// Step 9: Navigate to queue page to monitor execution
+	env.LogTest(t, "Step 9: Navigating to queue page to monitor execution...")
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(baseURL+"/queue"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second), // Wait for page to load
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load queue page: %v", err)
+		env.TakeScreenshot(ctx, "queue-page-load-failed")
+		t.Fatalf("Failed to load queue page: %v", err)
+	}
+
+	env.LogTest(t, "✓ Queue page loaded")
+
+	// Initialize filters and load jobs
+	env.LogTest(t, "Initializing filters and loading jobs...")
+	var loadResult struct {
+		Success      bool   `json:"success"`
+		ErrorMessage string `json:"errorMessage"`
+		JobsLoaded   int    `json:"jobsLoaded"`
+	}
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(async () => {
+				try {
+					if (!window.activeFilters) {
+						window.activeFilters = {
+							status: new Set(['pending', 'running', 'completed', 'failed', 'cancelled']),
+							source: new Set(),
+							entity: new Set()
+						};
+					}
+					const jobListEl = document.querySelector('[x-data="jobList"]');
+					if (!jobListEl) {
+						return { success: false, errorMessage: 'jobList element not found', jobsLoaded: 0 };
+					}
+					const alpineData = Alpine.$data(jobListEl);
+					if (!alpineData || !alpineData.loadJobs) {
+						return { success: false, errorMessage: 'loadJobs method not found', jobsLoaded: 0 };
+					}
+					await alpineData.loadJobs();
+					return { success: true, errorMessage: '', jobsLoaded: alpineData.allJobs ? alpineData.allJobs.length : 0 };
+				} catch (e) {
+					return { success: false, errorMessage: e.toString(), jobsLoaded: 0 };
+				}
+			})()
+		`, &loadResult, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		}),
+		chromedp.Sleep(3*time.Second), // Wait for jobs to load and render
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to call loadJobs(): %v", err)
+	} else if !loadResult.Success {
+		env.LogTest(t, "WARNING: loadJobs() failed: %s", loadResult.ErrorMessage)
+	} else {
+		env.LogTest(t, "✓ Jobs loaded successfully (%d jobs)", loadResult.JobsLoaded)
+	}
+
+	env.TakeScreenshot(ctx, "queue-page-loaded")
+
+	// Step 10: Verify the News Crawler job appears in the queue
+	env.LogTest(t, "Step 10: Verifying News Crawler job appears in queue...")
+	var jobInQueue struct {
+		Found  bool   `json:"found"`
+		JobID  string `json:"jobId"`
+		Status string `json:"status"`
+		Name   string `json:"name"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Sleep(2*time.Second), // Wait for jobs to render
+		chromedp.Evaluate(`
+			(() => {
+				const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+				const newsCrawlerJob = jobCards.find(card => {
+					const titleElement = card.querySelector('.card-title');
+					return titleElement && titleElement.textContent.includes('News Crawler');
+				});
+
+				if (!newsCrawlerJob) {
+					return { found: false, jobId: '', status: '', name: '' };
+				}
+
+				const jobId = newsCrawlerJob.getAttribute('data-job-id') || '';
+				const statusBadge = newsCrawlerJob.querySelector('.label');
+				const status = statusBadge ? statusBadge.textContent.trim() : '';
+				const titleElement = newsCrawlerJob.querySelector('.card-title');
+				const name = titleElement ? titleElement.textContent.trim() : '';
+
+				return {
+					found: true,
+					jobId: jobId,
+					status: status,
+					name: name
+				};
+			})()
+		`, &jobInQueue),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check for News Crawler job in queue: %v", err)
+		env.TakeScreenshot(ctx, "queue-job-check-failed")
+		t.Fatalf("Failed to check for News Crawler job in queue: %v", err)
+	}
+
+	if !jobInQueue.Found {
+		env.LogTest(t, "ERROR: News Crawler job not found in queue")
+		env.TakeScreenshot(ctx, "news-crawler-job-not-in-queue")
+		t.Fatal("News Crawler job should appear in queue after execution")
+	}
+
+	env.LogTest(t, "✓ News Crawler job found in queue")
+	env.LogTest(t, "  Job ID: %s", jobInQueue.JobID)
+	env.LogTest(t, "  Status: %s", jobInQueue.Status)
+	env.LogTest(t, "  Name: %s", jobInQueue.Name)
+
+	env.TakeScreenshot(ctx, "news-crawler-in-queue")
+
+	// Step 11: Monitor job execution for a reasonable time
+	env.LogTest(t, "Step 11: Monitoring job execution...")
+
+	// Monitor for up to 30 seconds to see status changes
+	monitorStart := time.Now()
+	maxMonitorTime := 30 * time.Second
+	var finalStatus string
+
+	for time.Since(monitorStart) < maxMonitorTime {
+		var currentStatus string
+		err = chromedp.Run(ctx,
+			chromedp.Evaluate(`
+				(() => {
+					const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+					const newsCrawlerJob = jobCards.find(card => {
+						const titleElement = card.querySelector('.card-title');
+						return titleElement && titleElement.textContent.includes('News Crawler');
+					});
+
+					if (newsCrawlerJob) {
+						const statusBadge = newsCrawlerJob.querySelector('.label');
+						return statusBadge ? statusBadge.textContent.trim() : '';
+					}
+					return '';
+				})()
+			`, &currentStatus),
+		)
+
+		if err != nil {
+			env.LogTest(t, "WARNING: Failed to check job status: %v", err)
+			break
+		}
+
+		if currentStatus != finalStatus {
+			finalStatus = currentStatus
+			env.LogTest(t, "  Job status changed to: %s", finalStatus)
+		}
+
+		// If job completed or failed, we can stop monitoring
+		if strings.Contains(strings.ToLower(finalStatus), "completed") ||
+			strings.Contains(strings.ToLower(finalStatus), "failed") {
+			env.LogTest(t, "  Job reached terminal state: %s", finalStatus)
+			break
+		}
+
+		// Wait before next check
+		time.Sleep(2 * time.Second)
+	}
+
+	env.LogTest(t, "✓ Job monitoring completed. Final status: %s", finalStatus)
+	env.TakeScreenshot(ctx, "news-crawler-final-status")
+
+	// Step 12: Click on the job to view details (if it has a valid job ID)
+	if jobInQueue.JobID != "" {
+		env.LogTest(t, "Step 12: Clicking on News Crawler job to view details...")
+		var navigationResult struct {
+			Success bool   `json:"success"`
+			JobID   string `json:"jobId"`
+			Error   string `json:"error"`
+		}
+
+		err = chromedp.Run(ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					try {
+						const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+						const newsCrawlerJob = jobCards.find(card => {
+							const titleElement = card.querySelector('.card-title');
+							return titleElement && titleElement.textContent.includes('News Crawler');
+						});
+						
+						if (!newsCrawlerJob) {
+							return { success: false, jobId: '', error: 'Job card not found' };
+						}
+						
+						const jobId = newsCrawlerJob.getAttribute('data-job-id');
+						if (!jobId) {
+							return { success: false, jobId: '', error: 'Job ID not found' };
+						}
+						
+						// Navigate to job details
+						window.location.href = '/job?id=' + jobId;
+						return { success: true, jobId: jobId, error: '' };
+						
+					} catch (e) {
+						return { success: false, jobId: '', error: e.toString() };
+					}
+				})()
+			`), &navigationResult),
+			chromedp.Sleep(3*time.Second), // Wait for navigation
+		)
+
+		if err != nil {
+			env.LogTest(t, "WARNING: Failed to navigate to job details: %v", err)
+		} else if navigationResult.Success {
+			env.LogTest(t, "✓ Navigated to job details page (Job ID: %s)", navigationResult.JobID)
+
+			// Verify we're on the job details page
+			var currentURL string
+			err = chromedp.Run(ctx,
+				chromedp.Evaluate(`window.location.href`, &currentURL),
+			)
+
+			if err == nil && strings.Contains(currentURL, "/job?id=") {
+				env.LogTest(t, "✓ Successfully on job details page: %s", currentURL)
+				env.TakeScreenshot(ctx, "news-crawler-job-details")
+			}
+		} else {
+			env.LogTest(t, "WARNING: Failed to navigate to job details: %s", navigationResult.Error)
+		}
+	}
+
+	env.TakeScreenshot(ctx, "test-completed")
+	env.LogTest(t, "✅ News Crawler job load and execution test completed successfully")
 }

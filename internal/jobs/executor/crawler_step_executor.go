@@ -61,8 +61,36 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	// Build CrawlConfig struct from map with proper defaults
 	crawlConfig := e.buildCrawlConfig(stepConfig)
 
-	// Build seed URLs based on source type and entity type
-	seedURLs := e.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+	// Build seed URLs - prioritize start_urls from step config, fallback to source type
+	var seedURLs []string
+	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {
+		// Use start_urls from job definition config
+		for _, url := range startURLs {
+			if urlStr, ok := url.(string); ok {
+				seedURLs = append(seedURLs, urlStr)
+			}
+		}
+		e.logger.Info().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Using start_urls from job definition config")
+	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
+		// Handle case where start_urls is already []string
+		seedURLs = startURLsStr
+		e.logger.Info().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Using start_urls from job definition config")
+	} else {
+		// Fallback to building URLs based on source type and entity type
+		seedURLs = e.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+		e.logger.Info().
+			Str("step_name", step.Name).
+			Str("source_type", jobDef.SourceType).
+			Str("base_url", jobDef.BaseURL).
+			Strs("generated_urls", seedURLs).
+			Msg("Using generated URLs based on source type (no start_urls in config)")
+	}
 
 	e.logger.Info().
 		Str("step_name", step.Name).

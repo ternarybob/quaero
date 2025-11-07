@@ -567,6 +567,20 @@ func (m *Manager) SetJobFinished(ctx context.Context, jobID string) error {
 	return err
 }
 
+// UpdateJobConfig updates the job configuration in the database
+func (m *Manager) UpdateJobConfig(ctx context.Context, jobID string, config map[string]interface{}) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	_, err = m.db.ExecContext(ctx, `
+		UPDATE jobs SET config_json = ?
+		WHERE id = ?
+	`, string(configJSON), jobID)
+	return err
+}
+
 // AddJobLog adds a log entry for a job
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	now := time.Now()
