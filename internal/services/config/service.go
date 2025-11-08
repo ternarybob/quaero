@@ -73,16 +73,3 @@ func (s *Service) GetLoggingFormat() string {
 func (s *Service) GetLoggingOutput() []string {
 	return s.config.Logging.Output
 }
-
-// Sources configuration accessors
-func (s *Service) IsJiraEnabled() bool {
-	return s.config.Sources.Jira.Enabled
-}
-
-func (s *Service) IsConfluenceEnabled() bool {
-	return s.config.Sources.Confluence.Enabled
-}
-
-func (s *Service) IsGitHubEnabled() bool {
-	return s.config.Sources.GitHub.Enabled
-}

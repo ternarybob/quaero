@@ -179,21 +179,10 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	logger.Info().Msg("WebSocket handlers started (status broadcaster)")
 
 	// Log initialization summary
-	enabledSources := []string{}
-	if cfg.Sources.Jira.Enabled {
-		enabledSources = append(enabledSources, "Jira")
-	}
-	if cfg.Sources.Confluence.Enabled {
-		enabledSources = append(enabledSources, "Confluence")
-	}
-	if cfg.Sources.GitHub.Enabled {
-		enabledSources = append(enabledSources, "GitHub")
-	}
-
 	logger.Info().
-		Strs("enabled_sources", enabledSources).
 		Str("llm_mode", cfg.LLM.Mode).
 		Str("processing_enabled", fmt.Sprintf("%v", cfg.Processing.Enabled)).
+		Bool("crawler_enabled", true).
 		Msg("Application initialization complete")
 
 	return app, nil

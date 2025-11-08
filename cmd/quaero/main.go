@@ -174,11 +174,9 @@ var rootCmd = &cobra.Command{
 		logger.Debug().
 			Str("storage_type", config.Storage.Type).
 			Str("sqlite_path", config.Storage.SQLite.Path).
-			Str("jira_enabled", fmt.Sprintf("%v", config.Sources.Jira.Enabled)).
-			Str("confluence_enabled", fmt.Sprintf("%v", config.Sources.Confluence.Enabled)).
-			Str("github_enabled", fmt.Sprintf("%v", config.Sources.GitHub.Enabled)).
 			Str("log_level", config.Logging.Level).
 			Strs("log_output", config.Logging.Output).
+			Bool("crawler_enabled", true).
 			Msg("Resolved configuration (sanitized)")
 
 		// Log initialization complete

@@ -14,11 +14,12 @@ import (
 )
 
 const (
+	// ServiceNameAtlassian represents Atlassian services (Jira, Confluence)
+	// The auth service is generic and can support any authenticated site via cookie capture
 	ServiceNameAtlassian = "atlassian"
-	ServiceNameGitHub    = "github"
 )
 
-// Service manages authentication for multiple service providers
+// Service manages generic authentication for web services via cookie/token capture
 type Service struct {
 	serviceName string
 	client      *http.Client

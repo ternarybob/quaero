@@ -22,38 +22,6 @@ type AtlassianAuthService interface {
 	GetAtlToken() string
 }
 
-// JiraScraperService defines operations for Jira data scraping
-type JiraScraperService interface {
-	ScrapeProjects() error
-	GetProjectIssues(projectKey string) error
-	GetProjectIssueCount(projectKey string) (int, error)
-	DeleteProjectIssues(projectKey string) error
-	ClearProjectsCache() error
-	GetJiraData() (map[string]interface{}, error)
-	GetProjectCount() int
-	GetIssueCount() int
-	GetProjectStatus() (lastUpdated int64, details string, err error)
-	GetIssueStatus() (lastUpdated int64, details string, err error)
-	ClearAllData() error
-	Close() error
-}
-
-// ConfluenceScraperService defines operations for Confluence data scraping
-type ConfluenceScraperService interface {
-	ScrapeSpaces() error
-	ScrapeConfluence() error // Alias for ScrapeSpaces for compatibility
-	GetSpacePages(spaceKey string) error
-	GetSpacePageCount(spaceKey string) (int, error)
-	ClearSpacesCache() error
-	GetConfluenceData() (map[string]interface{}, error)
-	GetSpaceCount() int
-	GetPageCount() int
-	GetSpaceStatus() (lastUpdated int64, details string, err error)
-	GetPageStatus() (lastUpdated int64, details string, err error)
-	ClearAllData() error
-	Close() error
-}
-
 // AtlassianExtensionCookie represents a cookie from browser extension
 type AtlassianExtensionCookie struct {
 	Name     string `json:"name"`
@@ -113,9 +81,7 @@ func (a *AtlassianAuthData) GetHTTPCookies() []*http.Cookie {
 	return cookies
 }
 
-// Compatibility aliases for aktis-parser handlers
+// Compatibility aliases
 type AuthService = AtlassianAuthService
-type JiraScraper = JiraScraperService
-type ConfluenceScraper = ConfluenceScraperService
 type ExtensionCookie = AtlassianExtensionCookie
 type AuthData = AtlassianAuthData

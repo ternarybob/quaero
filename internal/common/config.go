@@ -16,7 +16,6 @@ type Config struct {
 	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
 	Server      ServerConfig     `toml:"server"`
 	Queue       QueueConfig      `toml:"queue"`
-	Sources     SourcesConfig    `toml:"sources"`
 	Storage     StorageConfig    `toml:"storage"`
 	LLM         LLMConfig        `toml:"llm"`
 	RAG         RAGConfig        `toml:"rag"`
@@ -41,28 +40,6 @@ type QueueConfig struct {
 	VisibilityTimeout string `toml:"visibility_timeout"` // e.g., "5m" - message visibility timeout for redelivery
 	MaxReceive        int    `toml:"max_receive"`        // Max times a message can be received before dead-letter
 	QueueName         string `toml:"queue_name"`         // Queue name in goqite table
-}
-
-type SourcesConfig struct {
-	Confluence ConfluenceConfig `toml:"confluence"`
-	Jira       JiraConfig       `toml:"jira"`
-	GitHub     GitHubConfig     `toml:"github"`
-}
-
-type ConfluenceConfig struct {
-	Enabled bool     `toml:"enabled"`
-	Spaces  []string `toml:"spaces"`
-}
-
-type JiraConfig struct {
-	Enabled  bool     `toml:"enabled"`
-	Projects []string `toml:"projects"`
-}
-
-type GitHubConfig struct {
-	Enabled bool     `toml:"enabled"`
-	Token   string   `toml:"token"`
-	Repos   []string `toml:"repos"`
 }
 
 type StorageConfig struct {

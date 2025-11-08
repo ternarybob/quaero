@@ -1214,18 +1214,11 @@ host = "localhost"
 port = 8085
 llama_dir = "./llama"
 
-[sources.confluence]
-enabled = true
-spaces = ["TEAM", "DOCS"]
-
-[sources.jira]
-enabled = true
-projects = ["DATA", "ENG"]
-
-[sources.github]
-enabled = false
-token = "${GITHUB_TOKEN}"
-repos = ["your-org/repo1"]
+# NOTE: Source-specific configuration sections ([sources.*]) have been removed.
+# Data collection is now managed exclusively through Crawler Jobs.
+# Configure data sources via job definitions in the job-definitions/ directory.
+# See job-definitions/ for examples of Jira/Confluence/GitHub crawlers.
+# Legacy sections removed: [sources.jira], [sources.confluence], [sources.github]
 
 [llm]
 mode = "offline"  # "offline", "cloud", or "mock"

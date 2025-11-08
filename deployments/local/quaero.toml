@@ -37,25 +37,6 @@ environment = "development"  # "development" or "production"
 # llama_dir = "./llama"  # Directory containing llama-server binary
 
 # =============================================================================
-# Data Sources Configuration
-# =============================================================================
-# Configure which sources to scrape and what projects/spaces to include.
-# These are user-specific and should be uncommented and customized.
-
-[sources.confluence]
-enabled = true
-spaces = ["TEAM", "DOCS"]  # Customize: Your Confluence spaces
-
-[sources.jira]
-enabled = true
-projects = ["DATA", "ENG"]  # Customize: Your Jira projects
-
-[sources.github]
-enabled = true
-token = "${GITHUB_TOKEN}"  # Use environment variable for security
-repos = ["your-org/repo1"] # Customize: Your GitHub repositories
-
-# =============================================================================
 # Storage Configuration
 # =============================================================================
 # Defaults: path="./data/quaero.db"

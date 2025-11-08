@@ -19,16 +19,6 @@ min_event_level = "debug"
 # path = "./data/quaero.db"  # Uncomment to override default
 reset_on_startup = true # Delete database on startup for clean test runs
 
-# Disable all sources for faster startup
-[sources.confluence]
-enabled = false
-
-[sources.jira]
-enabled = false
-
-[sources.github]
-enabled = false
-
 # Use mock LLM for fast tests (no model loading)
 [llm]
 mode = "offline"

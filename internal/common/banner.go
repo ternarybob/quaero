@@ -64,9 +64,6 @@ func PrintBanner(config *Config, logger arbor.ILogger) {
 	// Log configuration through Arbor
 	logger.Info().
 		Str("log_file", logFilePath).
-		Bool("jira_enabled", config.Sources.Jira.Enabled).
-		Bool("confluence_enabled", config.Sources.Confluence.Enabled).
-		Bool("github_enabled", config.Sources.GitHub.Enabled).
 		Str("llm_mode", config.LLM.Mode).
 		Str("storage_type", config.Storage.Type).
 		Msg("Configuration loaded")
@@ -80,23 +77,8 @@ func PrintBanner(config *Config, logger arbor.ILogger) {
 func printCapabilities(config *Config, logger arbor.ILogger) {
 	fmt.Printf("🎯 Enabled Features:\n")
 
-	// Build list of enabled sources for both console and logging
-	enabledSources := []string{}
-	if config.Sources.Jira.Enabled {
-		fmt.Printf("   • Jira integration (projects and issues)\n")
-		enabledSources = append(enabledSources, "jira")
-	}
-	if config.Sources.Confluence.Enabled {
-		fmt.Printf("   • Confluence integration (spaces and pages)\n")
-		enabledSources = append(enabledSources, "confluence")
-	}
-	if config.Sources.GitHub.Enabled {
-		fmt.Printf("   • GitHub integration (repositories)\n")
-		enabledSources = append(enabledSources, "github")
-	}
-	if len(enabledSources) == 0 {
-		fmt.Printf("   • No data sources enabled (configure in quaero.toml)\n")
-	}
+	// Show crawler integration
+	fmt.Printf("   • Generic web crawler (ChromeDP-based)\n")
 
 	// Show storage configuration
 	fmt.Printf("   • Local SQLite database with full-text search\n")
@@ -116,11 +98,11 @@ func printCapabilities(config *Config, logger arbor.ILogger) {
 
 	// Log capabilities through Arbor
 	logger.Info().
-		Strs("enabled_sources", enabledSources).
 		Str("storage", "sqlite_fts5").
 		Str("llm_mode", config.LLM.Mode).
 		Str("llm_description", llmDescription).
 		Str("authentication", "extension_oauth_sso").
+		Str("crawler", "chromedp").
 		Msg("System capabilities")
 }
 

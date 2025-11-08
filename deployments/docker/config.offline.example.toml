@@ -35,23 +35,21 @@ port = 8080
 host = "0.0.0.0"  # Listen on all interfaces in Docker
 
 # =============================================================================
-# Data Sources Configuration
+# Data Sources Configuration (DEPRECATED)
 # =============================================================================
-# Configure which sources to scrape and what projects/spaces to include.
-# These must be customized for your organization.
-
-[sources.confluence]
-enabled = true
-spaces = ["TEAM", "DOCS", "ENG"]  # Customize: Your Confluence spaces
-
-[sources.jira]
-enabled = true
-projects = ["DATA", "ENG", "OPS"]  # Customize: Your Jira projects
-
-[sources.github]
-enabled = false  # Enable if using GitHub
-# token = "${GITHUB_TOKEN}"  # Use environment variable for security
-# repos = ["your-org/repo1"]
+# NOTE: Source-specific configuration sections have been removed.
+# Data collection is now managed exclusively through Crawler Jobs.
+#
+# To configure data sources for production:
+# 1. Define crawler job definitions in the job-definitions/ directory
+# 2. Jobs specify seed URLs, URL patterns, and crawl rules
+# 3. Enable/disable jobs via the jobs configuration section below
+# 4. Mount job-definitions/ directory in Docker volume
+#
+# The generic ChromeDP-based crawler replaces direct API integrations.
+# See job-definitions/ directory for examples of Jira/Confluence/GitHub crawlers.
+#
+# Legacy sections removed: [sources.jira], [sources.confluence], [sources.github]
 
 # =============================================================================
 # Storage Configuration

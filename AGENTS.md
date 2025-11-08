@@ -236,8 +236,8 @@ The app initialization sequence in `internal/app/app.go` is critical:
 4. **Document Service** - Uses embedding service
 5. **Chat Service** - RAG-enabled chat with LLM
 6. **Event Service** - Pub/sub for system events
-7. **Auth Service** - Atlassian authentication
-8. **Jira/Confluence Services** - Auto-subscribe to collection events
+7. **Auth Service** - Generic web authentication
+8. **Crawler Service** - ChromeDP-based web crawler
 9. **Processing Service** - Document processing
 10. **Embedding Coordinator** - Auto-subscribes to embedding events
 11. **Scheduler Service** - Triggers events on cron (every 5 minutes)
@@ -245,24 +245,20 @@ The app initialization sequence in `internal/app/app.go` is critical:
 
 **Important:** Services that subscribe to events must be initialized after the EventService but before any events are published.
 
-### Data Flow: Collection → Processing → Embedding
+### Data Flow: Crawling → Processing → Embedding
 
 ```
-1. User clicks "Collect" in UI
+1. User triggers crawler job via UI or scheduled job
    ↓
-2. Handler triggers Jira/Confluence scraper
+2. Crawler job executes with seed URLs and patterns
    ↓
-3. Scraper stores raw data (jira_issues, confluence_pages)
+3. Crawler stores documents in documents table (markdown format)
    ↓
-4. Scheduler publishes EventCollectionTriggered (every 5 minutes)
+4. Scheduler publishes EventEmbeddingTriggered (every 5 minutes)
    ↓
-5. Jira/Confluence services transform raw data → documents table
+5. EmbeddingCoordinator processes unembedded documents
    ↓
-6. Scheduler publishes EventEmbeddingTriggered
-   ↓
-7. EmbeddingCoordinator processes unembedded documents
-   ↓
-8. Documents ready for search/RAG
+6. Documents ready for search/RAG
 ```
 
 ### LLM Service Architecture
@@ -323,13 +319,8 @@ mock_mode = false  # Set to true for testing
 - FTS5 index: documents_fts (title + content)
 - Force sync flags: force_sync_pending, force_embed_pending
 
-**Source Tables:**
-- `jira_projects`, `jira_issues` - Raw Jira data
-- `confluence_spaces`, `confluence_pages` - Raw Confluence data
-- Scrapers populate these, then transform to documents
-
 **Auth Table:**
-- `auth_credentials` - Atlassian authentication tokens
+- `auth_credentials` - Generic web authentication tokens and cookies
 
 **Job Tables:**
 - `crawl_jobs` - Persistent job state and progress tracking
@@ -342,20 +333,22 @@ mock_mode = false  # Set to true for testing
 ### Chrome Extension & Authentication Flow
 
 **Chrome Extension** (`cmd/quaero-chrome-extension/`):
-- Captures authentication cookies and tokens from Atlassian sites (Jira/Confluence)
+- Captures authentication cookies and tokens from authenticated websites
+- Generic auth capability - works with any site (not limited to specific platforms)
+- Examples: Jira, Confluence, GitHub, or any authenticated web service
 - Automatically deployed to `bin/` during build
 - Uses Chrome Side Panel API for modern UI
 - WebSocket connection for real-time server status
 
 **Authentication Flow:**
-1. User navigates to Jira/Confluence and logs in
+1. User navigates to an authenticated website (e.g., Jira, Confluence, GitHub)
 2. User clicks Quaero extension icon
-3. Extension captures cookies, cloudId, and atlToken
+3. Extension captures cookies and authentication tokens from the active site
 4. Extension sends auth data to `POST /api/auth`
 5. AuthHandler (`internal/handlers/auth_handler.go`) receives data
 6. AuthService (`internal/services/auth/service.go`) stores credentials
 7. AuthService configures HTTP client with cookies
-8. Crawler service can now access Jira/Confluence APIs
+8. Crawler service can now access authenticated content on that site
 
 **Auth API Endpoints:**
 - `POST /api/auth` - Capture authentication from Chrome extension
@@ -364,11 +357,11 @@ mock_mode = false  # Set to true for testing
 - `WS /ws` - WebSocket for real-time updates
 
 **Key Files:**
-- `cmd/quaero-chrome-extension/background.js` - Auth capture logic
+- `cmd/quaero-chrome-extension/background.js` - Generic auth capture logic
 - `cmd/quaero-chrome-extension/sidepanel.js` - Side panel UI with status
 - `internal/handlers/auth_handler.go` - HTTP handler for auth endpoints
 - `internal/services/auth/service.go` - Auth service with HTTP client config
-- `internal/interfaces/atlassian.go` - Auth data types
+- `internal/interfaces/auth.go` - Auth data types (generic, not platform-specific)
 
 **Configuration:**
 - Default server URL: `http://localhost:8085`
@@ -463,15 +456,13 @@ func main() {
 
 ### Quaero-Specific Requirements
 
-**Collectors (ONLY These):**
-1. **Jira** (`internal/services/atlassian/jira_*`)
-2. **Confluence** (`internal/services/atlassian/confluence_*`)
-3. **GitHub** (`internal/services/github/*`) - Future
-
-**DO NOT create:**
-- Generic document collectors
-- File system crawlers
-- Other data sources without explicit requirement
+**Data Collection:**
+- **Generic Crawler** - ChromeDP-based web crawler for all data sources
+- Configured via crawler job definitions in `job-definitions/` directory
+- Supports URL patterns, extractors, and authentication
+- Examples available for Jira, Confluence, GitHub patterns
+- **DO NOT** create source-specific API integrations
+- **DO NOT** create direct database scrapers for specific platforms
 
 **Web UI (NOT CLI):**
 - Server-side rendering with Go templates
@@ -702,14 +693,37 @@ The Go-native test infrastructure (`test/run_tests.go` and `test/main_test.go`):
 
 ### Adding a New Data Source
 
-1. Create storage interface in `internal/interfaces/`
-2. Implement SQLite storage in `internal/storage/sqlite/`
-3. Create scraper service in `internal/services/`
-4. Subscribe to `EventCollectionTriggered` in service constructor
-5. Initialize in `internal/app/app.go` (after EventService)
-6. Add handler in `internal/handlers/`
-7. Register routes in `internal/server/routes.go`
-8. Add UI page in `pages/`
+**Use the Generic Crawler Approach:**
+
+1. **Create a Crawler Job Definition** in `job-definitions/` directory:
+   - Define seed URLs (starting points for crawling)
+   - Specify URL patterns to match (regex or glob patterns)
+   - Configure crawl depth and concurrency
+   - Set authentication requirements (if needed)
+
+2. **Add URL Pattern Extractors** (optional):
+   - Create extractor in `internal/services/identifiers/` for page-specific identifier extraction
+   - Create extractor in `internal/services/metadata/` for page-specific metadata extraction
+   - Follow existing patterns for Jira/Confluence as examples
+
+3. **Configure Authentication** (if required):
+   - Use Chrome extension to capture authentication cookies
+   - Extension works generically with any authenticated site
+   - No code changes required for new authentication sources
+
+4. **Test the Crawler Job**:
+   - Trigger job via UI or API
+   - Monitor job progress via WebSocket events
+   - Verify documents are stored in documents table
+   - Check that metadata extraction works correctly
+
+**DO NOT:**
+- Create source-specific API integration code
+- Add new scraper services in `internal/services/`
+- Create direct database access for specific platforms
+- Build custom HTTP clients for specific APIs
+
+**The crawler is intentionally generic** - it works with any website, authenticated or not. Configure behavior through job definitions, not code.
 
 ### Adding a New API Endpoint
 
@@ -750,12 +764,12 @@ The scheduler service runs every 5 minutes and publishes:
 ### Document Processing Workflow
 
 Documents go through stages:
-1. **Raw** - Stored in source tables (jira_issues, confluence_pages)
-2. **Document** - Transformed to documents table
+1. **Crawled** - Fetched by crawler and converted to markdown
+2. **Stored** - Saved directly to documents table with metadata
 3. **Embedded** - Vector embedding generated
 4. **Searchable** - Available for RAG queries
 
-Use `force_sync_pending` and `force_embed_pending` flags to manually trigger processing.
+Use `force_embed_pending` flag to manually trigger embedding generation.
 
 ### RAG Implementation
 

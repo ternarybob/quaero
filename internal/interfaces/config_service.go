@@ -29,9 +29,4 @@ type ConfigService interface {
 	GetLoggingLevel() string
 	GetLoggingFormat() string
 	GetLoggingOutput() []string
-
-	// Sources configuration accessors
-	IsJiraEnabled() bool
-	IsConfluenceEnabled() bool
-	IsGitHubEnabled() bool
 }

@@ -1,6 +1,6 @@
 # Quaero Chrome Extension
 
-This Chrome extension captures authentication data from your active Jira/Confluence session and sends it to the Quaero service.
+This Chrome extension captures authentication data from authenticated websites and sends it to the Quaero service. While the examples below reference Jira/Confluence, the extension works generically with any authenticated website.
 
 ## Installation
 
@@ -25,21 +25,23 @@ For complete installation instructions, see the main `README.md` "LLM Setup (Off
 ## Usage
 
 1. Start the Quaero service (default: `http://localhost:8080`)
-2. Navigate to your Jira or Confluence instance and log in
-3. Click the Quaero extension icon in Chrome toolbar
-4. The popup will show current status and server connectivity
-5. Click "Capture Authentication" to send credentials to Quaero
-6. Use the Quaero web UI to manage sources and start crawling
+2. Navigate to any authenticated website (examples: Jira, Confluence, GitHub, documentation sites)
+3. Log in to the website normally (handles 2FA, SSO, etc.)
+4. Click the Quaero extension icon in Chrome toolbar
+5. The popup will show current status and server connectivity
+6. Click "Capture Authentication" to send credentials to Quaero
+7. Use the Quaero web UI to create crawler jobs for that site
 
 ## Features
 
 - **Dropdown Popup Interface**: Compact popup UI with all essential features
-- **Authentication Capture**: Extracts cookies and tokens from Atlassian sites
+- **Generic Authentication Capture**: Extracts cookies and tokens from any authenticated website
+- **Examples Supported**: Jira, Confluence, GitHub, documentation sites, or any web service requiring authentication
 - **Server Status**: Real-time check of Quaero server connection
 - **Settings**: Configurable server URL (default: http://localhost:8080, change if you customize the port)
 - **Version Display**: Shows both extension and server version
 - **Last Capture Tracking**: Displays when authentication was last captured
-- **Domain Validation**: Ensures you're on a Jira/Confluence page before capturing
+- **Flexible Domain Validation**: Configurable to work with any domain (not limited to specific platforms)
 
 ## API Endpoints
 
@@ -53,7 +55,8 @@ The extension uses the following Quaero API endpoints:
 - Authentication data is only sent to localhost (default: `localhost:8080`)
 - No data is sent to external servers
 - All communication is local to your machine
-- Domain validation prevents accidental capture on wrong sites
+- Generic capture works with any authenticated site - you control which sites to use
+- Configurable domain validation in extension settings
 
 ## Files
 

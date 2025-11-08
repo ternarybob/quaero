@@ -32,47 +32,6 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_site_domain ON auth_credentials(site_domain);
 CREATE INDEX IF NOT EXISTS idx_auth_service_type ON auth_credentials(service_type, site_domain);
 
--- Jira tables
-CREATE TABLE IF NOT EXISTS jira_projects (
-	key TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	id TEXT NOT NULL,
-	issue_count INTEGER DEFAULT 0,
-	data TEXT NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS jira_issues (
-	key TEXT PRIMARY KEY,
-	project_key TEXT NOT NULL,
-	id TEXT NOT NULL,
-	summary TEXT,
-	description TEXT,
-	fields TEXT NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-
--- Confluence tables
-CREATE TABLE IF NOT EXISTS confluence_spaces (
-	key TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	id TEXT NOT NULL,
-	page_count INTEGER DEFAULT 0,
-	data TEXT NOT NULL,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS confluence_pages (
-	id TEXT PRIMARY KEY,
-	space_id TEXT NOT NULL,
-	title TEXT NOT NULL,
-	content TEXT,
-	body TEXT NOT NULL,
-	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
-);
-
 -- Documents table (normalized from all sources)
 -- Supports Firecrawl-style layered crawling with detail_level
 -- PRIMARY CONTENT FORMAT: Markdown (content_markdown field)
@@ -424,6 +383,12 @@ func (s *SQLiteDB) runMigrations() error {
 
 	// MIGRATION 28: Add toml column to job_definitions table
 	if err := s.migrateAddTomlColumn(); err != nil {
+		return err
+	}
+
+	// MIGRATION 29: Remove Atlassian-specific tables (Jira/Confluence)
+	// These tables are unused - data sources now use generic crawler with job definitions
+	if err := s.migrateRemoveAtlassianTables(); err != nil {
 		return err
 	}
 
@@ -2497,5 +2462,32 @@ func (s *SQLiteDB) migrateAddTomlColumn() error {
 	}
 
 	s.logger.Info().Msg("Migration: toml column added to job_definitions successfully")
+	return nil
+}
+
+// migrateRemoveAtlassianTables removes Jira and Confluence tables that are no longer used
+// These tables were used for direct API integration but have been replaced by the generic
+// ChromeDP-based crawler with job definitions. This migration is idempotent and safe.
+func (s *SQLiteDB) migrateRemoveAtlassianTables() error {
+	s.logger.Info().Msg("Running migration: Removing unused Atlassian tables (Jira/Confluence)")
+
+	// Drop tables if they exist (idempotent using IF EXISTS)
+	tables := []string{
+		"jira_projects",
+		"jira_issues",
+		"confluence_spaces",
+		"confluence_pages",
+	}
+
+	for _, table := range tables {
+		s.logger.Info().Str("table", table).Msg("Dropping table")
+		_, err := s.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", table))
+		if err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", table, err)
+		}
+		s.logger.Info().Str("table", table).Msg("Table dropped successfully")
+	}
+
+	s.logger.Info().Msg("Migration: Atlassian tables removed successfully")
 	return nil
 }
