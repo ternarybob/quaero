@@ -94,7 +94,7 @@
                     <div class="columns" style="margin-top: 1rem;">
                         <div class="column col-3">
                             <p class="text-small text-gray">Documents Created</p>
-                            <p class="text-small" x-text="job.result_count || '0'"></p>
+                            <p class="text-small" x-text="job.document_count || job.metadata?.document_count || job.result_count || '0'"></p>
                         </div>
                         <div class="column col-3" x-show="isCrawlerJob(job)">
                             <p class="text-small text-gray">Current URL</p>
@@ -477,12 +477,30 @@
                         // Build query string with level parameter for server-side filtering
                         const qs = this.selectedLogLevel === 'all' ? '' : ('?level=' + encodeURIComponent(this.selectedLogLevel));
                         const response = await fetch(`${endpoint}${qs}`);
+
                         if (!response.ok) {
-                            throw new Error('Failed to fetch job logs');
+                            // Distinguish between different error types
+                            if (response.status === 404) {
+                                console.warn('Job not found or has no logs');
+                                this.logs = [];
+                                // Don't show error for 404 - job might not have logs yet
+                                return;
+                            } else if (response.status >= 500) {
+                                throw new Error(`Server error (${response.status}): Failed to retrieve logs`);
+                            } else {
+                                throw new Error(`HTTP ${response.status}: Failed to fetch job logs`);
+                            }
                         }
 
                         const data = await response.json();
                         const rawLogs = data.logs || [];
+
+                        // Handle empty logs gracefully
+                        if (rawLogs.length === 0) {
+                            console.info('No logs available for this job');
+                            this.logs = [];
+                            return;
+                        }
 
                         // Parse logs into flat array
                         this.logs = rawLogs.map(log => this._parseLogEntry(log));

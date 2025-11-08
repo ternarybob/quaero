@@ -1,345 +1,235 @@
 ---
 name: 3agent
-description: Four-agent workflow - plan, implement, validate, and test with parallel execution
+description: Four-agent workflow - plan, implement, validate, test in parallel
 ---
 
-Execute a four-agent workflow for: $ARGUMENTS
+Execute workflow for: $ARGUMENTS
 
-## GLOBAL RULE: ALL FILES ARE MARKDOWN
-**Every file created in `docs/{folder-name}/` must be a .md file**
-- Use markdown with YAML front-matter for structure
-- Use emoji indicators for visual status (✅ ❌ ⏳ ⏸️)
-- Human-readable format optimized for Claude CLI
+## RULES
+**Files:** All output is markdown (.md) in `docs/{folder-name}/`
+**Tests:** Only `/test/api` and `/test/ui` - follow existing patterns strictly
+**Binaries:** Never create in root - use `go build -o /tmp/` or `go run`
+**Beta mode:** Ignore backward compatibility, breaking changes allowed, DB rebuilds each run
 
-## CONFIGURATION
-Reference throughout workflow:
+## CONFIG
 ```yaml
-project:
-  docs_root: docs
-  build_script: ./scripts/build.ps1
-  test_api: /test/api
-  test_ui: /test/ui
-  development_mode: beta
-  deployment: local_only
-
-test_rules:
-  - only_two_test_locations: "Tests ONLY in /test/api and /test/ui - no other locations"
-  - follow_existing_structure: "Strictly follow existing test patterns and structure - do not invent new patterns"
-  - unit_tests_with_code: "Unit tests are co-located with source code"
-
-principles:
-  - ignore_backward_compatibility: "This is beta development - database rebuilds on each run, no migration concerns"
-  - breaking_changes_allowed: "Breaking changes are acceptable, optimize for clean design over compatibility"
+docs_root: docs
+build_script: ./scripts/build.ps1
+test_api: /test/api
+test_ui: /test/ui
 
 agents:
   planner: claude-opus-4-20250514
   implementer: claude-sonnet-4-20250514
   validator: claude-sonnet-4-20250514
   test_updater: claude-sonnet-4-20250514
-
-validation_rules:
-  - no_root_binaries: Binaries must not be in root directory
-  - use_build_script: Use designated build script only
-  - tests_in_correct_dir: Tests in appropriate test directory
-  - tests_must_pass: All tests must pass
-  - code_compiles: Code must compile without errors
-  - follows_conventions: Follow project conventions
 ```
 
 ## SETUP
-1. Generate folder: `lowercase-hyphenated-from-task`
-2. Create: `docs/{folder-name}/`
-3. Initialize tracking files
+Create `docs/{lowercase-hyphenated-task}/` with tracking files
 
 ---
 
-## AGENT 1 - PLANNER (Claude Opus)
+## AGENT 1 - PLANNER (Opus)
 
-**Model:** `claude-opus-4-20250514`
-
-**Analyze and break down task into optimal sequence**
-
-**Consider:**
-- This is beta development - ignore backward compatibility
-- Breaking changes are acceptable - optimize for clean design
-- Database rebuilds every time - no migration concerns
-
-**Create:** `docs/{folder-name}/plan.md`
+**Create:** `plan.md`
 
 ```markdown
 ---
 task: "$ARGUMENTS"
-folder: {folder-name}
 complexity: low|medium|high
-estimated_steps: N
+steps: N
 ---
 
-# Implementation Plan
+# Plan
 
 ## Step 1: {Description}
-
-**Why:** {Rationale for this step}
-**Depends on:** {comma-separated step numbers or 'none'}
-**Validation:** {comma-separated rule keys}
-**Creates/Modifies:** {file paths}
+**Why:** {Rationale}
+**Depends:** {step numbers or 'none'}
+**Validates:** {rule keys}
+**Files:** {paths}
 **Risk:** low|medium|high
 
 ## Step 2: {Description}
 ...
 
----
-
 ## Constraints
-- {constraint 1}
-- {constraint 2}
+- {constraint}
 
 ## Success Criteria
-- {criterion 1}
-- {criterion 2}
+- {criterion}
 ```
 
 ---
 
-## AGENT 2 - IMPLEMENTER (Claude Sonnet)
+## AGENT 2 - IMPLEMENTER (Sonnet)
 
-**Model:** `claude-sonnet-4-20250514`
+**Process:**
+1. Read `plan.md` and `progress.md`
+2. Implement current step:
+   - Test with `go run` (never binaries in root)
+   - Compile checks: `go build -o /tmp/test-binary`
+   - Final builds: use `build_script`
+   - Tests in `/test/api` or `/test/ui` only
+   - Run: `cd /test/{api|ui} && go test -v`
+3. Update `progress.md`
 
-**For current step only:**
-
-1. Read `docs/{folder-name}/plan.md` → find current step
-2. Read `docs/{folder-name}/progress.md` → check what's completed
-3. Implement following rules:
-   - Use `go run` with temp output for testing (never create binaries in root)
-   - For compile checks: `go build -o /tmp/test-binary` or discard output
-   - Use `build_script` for final builds only
-   - Put tests in `/test/api` or `/test/ui` only
-   - Run tests: `cd /test/api && go test -v` or `cd /test/ui && go test -v`
-
-4. **Update:** `docs/{folder-name}/progress.md`
+**Update:** `progress.md`
 
 ```markdown
-# Progress: {task-name}
+# Progress: {task}
 
-## Status
 Current: Step {N} - awaiting validation
 Completed: {M} of {total}
 
-## Steps
-- ✅ Step 1: {description} (2025-11-08 14:32)
-- ✅ Step 2: {description} (2025-11-08 14:45)
-- ⏳ Step 3: {description} - awaiting validation
-- ⏸️ Step 4: {description}
+- ✅ Step 1: {desc} (2025-11-08 14:32)
+- ⏳ Step 3: {desc} - awaiting validation
+- ⏸️ Step 4: {desc}
 
-## Implementation Notes
-{Brief description of approach taken}
-
-Last updated: {ISO8601}
-```
-
-**HALT** - Wait for validation before proceeding
-
----
-
-## AGENT 4 - TEST UPDATER (Claude Sonnet)
-
-**Model:** `claude-sonnet-4-20250514`
-
-**Can run in parallel with Agent 3 validation**
-
-**CRITICAL TEST RULES:**
-- Tests ONLY in `/test/api` and `/test/ui` - no other locations
-- STRICTLY follow existing test patterns and structure
-- Do NOT invent new test patterns or conventions
-- Study existing tests first before making changes
-
-**For current step only:**
-
-1. Read `docs/{folder-name}/plan.md` → understand changes made in current step
-2. Find relevant existing tests:
-   - API tests: `/test/api`
-   - UI tests: `/test/ui`
-3. Study existing test structure and patterns
-4. Update tests to match new functionality (following existing patterns)
-5. Execute tests from test directories:
-   - `cd /test/api && go test -v`
-   - `cd /test/ui && go test -v`
-6. Document results
-
-**Create:** `docs/{folder-name}/step-{N}-tests.md`
-
-```markdown
-# Test Updates: Step {N}
-
-## Tests Modified
-- {test_file_1} - {reason}
-- {test_file_2} - {reason}
-
-## Tests Added
-- {new_test_file} - {coverage}
-
-## Test Execution Results
-
-### API Tests (/test/api)
-```
-{output from: cd /test/api && go test -v}
-```
-
-### UI Tests (/test/ui)
-```
-{output from: cd /test/ui && go test -v}
-```
-
-## Summary
-- Total tests run: {N}
-- Passed: {N}
-- Failed: {N}
-- Coverage: {percentage if available}
-
-## Status: PASS | FAIL
+{Brief implementation notes}
 
 Updated: {ISO8601}
 ```
 
-**Note:** Agent 4 can run while Agent 3 validates, results feed into final step validation
-
 ---
 
-## AGENT 3 - VALIDATOR (Claude Sonnet)
+## AGENT 3 - VALIDATOR (Sonnet)
 
-**Model:** `claude-sonnet-4-20250514`
+**Process:**
+1. Read validation criteria from `plan.md`
+2. Check: compilation, tests, artifacts, code quality
+3. Document results
 
-**For current step only:**
-
-1. Read step validation criteria from `plan.md`
-2. Execute validation checklist
-3. Test compilation/execution
-4. Verify artifacts
-5. Review code quality
-
-**Create:** `docs/{folder-name}/step-{N}-validation.md`
+**Create:** `step-{N}-validation.md`
 
 ```markdown
 # Validation: Step {N}
 
-## Validation Rules
 ✅ code_compiles
 ✅ tests_must_pass
-❌ follows_conventions - {specific issue}
+❌ follows_conventions - {issue}
 
-## Code Quality: {1-10}/10
+Quality: {1-10}/10
+Status: VALID | INVALID
 
-## Status: VALID | INVALID
-
-## Issues Found
-- {Issue 1 with specific location}
-- {Issue 2 with specific location}
+## Issues
+- {issue with location}
 
 ## Suggestions
-- {Improvement 1}
-- {Improvement 2}
+- {improvement}
 
 Validated: {ISO8601}
 ```
 
 ---
 
-## GATE ENFORCEMENT (You, the orchestrator)
+## AGENT 4 - TEST UPDATER (Sonnet)
+
+**Critical:** Study existing test patterns first - follow them strictly, don't invent new ones
+
+**Process:**
+1. Read `plan.md` to understand changes
+2. Find relevant tests in `/test/api` and `/test/ui`
+3. Update tests following existing patterns
+4. Run: `cd /test/api && go test -v` and `cd /test/ui && go test -v`
+
+**Create:** `step-{N}-tests.md`
+
+```markdown
+# Tests: Step {N}
+
+## Modified
+- {file} - {reason}
+
+## Added  
+- {file} - {coverage}
+
+## Results
+
+### API (/test/api)
+```
+{go test output}
+```
+
+### UI (/test/ui)
+```
+{go test output}
+```
+
+Total: {N} | Passed: {N} | Failed: {N}
+Status: PASS | FAIL
+
+Updated: {ISO8601}
+```
+
+---
+
+## WORKFLOW
 
 ```
-WHILE steps remain:
-  1. Run Agent 2 (Sonnet) - implements current step
-  2. Run in parallel:
-     → Agent 3 (Sonnet) - validates current step
-     → Agent 4 (Sonnet) - updates and runs tests
-  3. Wait for both to complete
-  4. IF validation shows "INVALID" OR tests show "FAIL":
-       → Agent 2 fixes issues (reads validation + test feedback)
-       → Agent 3 re-validates
-       → Agent 4 re-runs tests
-       → REPEAT until both "VALID" and "PASS"
-  5. IF validation shows "VALID" AND tests show "PASS":
-       → Mark step complete in progress.md
-       → INCREMENT current_step
-       → CONTINUE to next iteration
+FOR each step:
+  1. Agent 2 implements
+  2. Run parallel: Agent 3 validates + Agent 4 tests
+  3. IF INVALID or FAIL:
+       → Agent 2 fixes (reads both feedbacks)
+       → Re-validate and re-test
+       → Repeat until both pass
+  4. IF VALID and PASS:
+       → Mark complete in progress.md
+       → Next step
 ```
-
-**Critical:** Never advance without both "Status: VALID" and "Status: PASS"
 
 ---
 
 ## COMPLETION
 
-When all steps show ✅ in progress.md:
-
-**Create:** `docs/{folder-name}/summary.md`
+When all steps complete, create `summary.md`:
 
 ```markdown
-# Summary: {task-description}
+# Summary: {task}
 
-## Models Used
-- Planning: Claude Opus
-- Implementation: Claude Sonnet  
-- Validation: Claude Sonnet
-- Test Updates: Claude Sonnet
+## Models
+Planner: Opus | Implementer: Sonnet | Validator: Sonnet | Tests: Sonnet
 
 ## Results
-- Steps completed: {N}
-- Validation cycles: {total attempts}
-- Average code quality score: {X}/10
-- Total tests run: {N}
-- Test pass rate: {percentage}
+Steps: {N} | Validation cycles: {N} | Avg quality: {X}/10
+Tests run: {N} | Pass rate: {%}
 
-## Artifacts Created/Modified
-- {file 1}
-- {file 2}
-- {file 3}
+## Artifacts
+- {file}
 
 ## Key Decisions
-- {decision 1 and rationale}
-- {decision 2 and rationale}
+- {decision and rationale}
 
-## Challenges Resolved
-- {challenge 1 and solution}
-- {challenge 2 and solution}
+## Challenges
+- {challenge and solution}
 
 Completed: {ISO8601}
 ```
 
-**Final progress.md update:**
+Update `progress.md`:
 ```markdown
-# Progress: {task-name}
+# Progress: {task}
 
-## Status
 ✅ COMPLETED
 
-All {N} steps completed
-Total validation cycles: {count}
-Total tests run: {test_count}
-
-Models used:
-- Planner: claude-opus-4-20250514
-- Implementer: claude-sonnet-4-20250514
-- Validator: claude-sonnet-4-20250514
-- Test Updater: claude-sonnet-4-20250514
+Steps: {N} | Validation cycles: {N} | Tests: {N}
 
 Completed: {ISO8601}
 ```
 
 ---
 
-## VALIDATION RULES REFERENCE
+## VALIDATION RULES
 
-Each rule is checked programmatically:
-
-- **no_root_binaries:** Check root has no new executables (compile tests must use `-o /tmp/` or discard output)
-- **use_build_script:** Verify build script used (not manual builds)
-- **tests_in_correct_dir:** Tests ONLY in `/test/api` or `/test/ui` - no other locations
-- **tests_must_pass:** Run `cd /test/api && go test -v` and `cd /test/ui && go test -v`, check exit code = 0
-- **code_compiles:** Verify code compiles with `go build -o /tmp/test-binary` or `go run` (never create binaries in root)
-- **follows_conventions:** Check formatting, naming, structure, and that existing test patterns are followed
+- **no_root_binaries:** No executables in root (use `-o /tmp/`)
+- **use_build_script:** Use build script for final builds
+- **tests_in_correct_dir:** Tests ONLY in `/test/api` or `/test/ui`
+- **tests_must_pass:** `cd /test/{api|ui} && go test -v` exit code = 0
+- **code_compiles:** `go build -o /tmp/test-binary` succeeds
+- **follows_conventions:** Formatting, naming, existing patterns
 
 ---
 
 **Task:** $ARGUMENTS  
-**Docs:** `docs/{folder-name}/` (all files are markdown)  
-**All agents:** Read plan.md and progress.md before acting
+**Docs:** `docs/{folder-name}/`

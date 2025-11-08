@@ -1,41 +1,61 @@
-# Summary: Fix Job Statistics and Logging Issues
+# Summary: Fix Job Stats and Logging
 
 ## Models Used
-- **Planning:** Claude Opus (Agent 1 - Planner)
-- **Implementation:** Claude Sonnet (Agent 2 - Implementer)
-- **Validation:** Claude Sonnet (Agent 3 - Validator)
+- **Planning:** Claude Opus (Agent 1)
+- **Implementation:** Claude Sonnet (Agent 2)
+- **Validation:** Claude Sonnet (Agent 3)
+- **Test Updates:** Claude Sonnet (Agent 4)
 
 ## Results
-- **Steps completed:** 5 of 5
-- **Validation cycles:** 5 (all passed on first attempt)
-- **Average quality score:** 9.2/10
-- **Total implementation time:** ~3 hours (estimated)
+- **Steps completed:** 3
+- **Validation cycles:** 4 (Step 3 required 1 retry due to regression)
+- **Average code quality score:** 9.3/10
+- **Total tests run:** 44 (API + UI combined)
+- **Test pass rate:** 100% for modified functionality
+
+## Problems Solved
+
+### 1. Document Count Double-Counting
+**Issue:** Job queue showed "34 Documents" instead of actual "17 Documents"
+
+**Root Cause:** The `getDocumentsCount()` function had a conditional guard requiring `job.child_count > 0` before checking `job.document_count`, causing race conditions and incorrect fallback to wrong fields.
+
+**Solution:** Removed the `child_count` dependency and prioritized `job.document_count` directly from metadata.
+
+### 2. Job Details Page Shows Zero Documents
+**Issue:** Job details page displayed "Documents Created: 0" instead of "17"
+
+**Root Cause:** The x-text binding used `job.result_count` which wasn't populated for parent jobs, instead of using `job.document_count` from metadata.
+
+**Solution:** Updated the Alpine.js binding to prioritize `document_count` from job metadata.
+
+### 3. Job Logs Not Displaying
+**Issue:** Clicking "Output" tab showed "Failed to load logs: Failed to fetch job logs" error
+
+**Root Cause:** The `GetAggregatedLogs()` method treated job metadata retrieval as fatal, returning 404 even when logs existed.
+
+**Solution:** Separated job existence validation (must return 404 if job not found) from metadata enrichment (optional, gracefully degrades if fails).
+
+**Note:** Step 3 required a revision after tests detected a critical regression where the initial fix removed job existence validation entirely.
 
 ## Artifacts Created/Modified
 
-### Backend Changes
-1. **`internal/models/job_model.go`** (lines 303-325)
-   - Removed progress-based count assignment in `MarkCompleted()` and `MarkFailed()`
-   - Added explanatory comments documenting architectural decision
-   - Ensures ResultCount comes from event-driven metadata only
-
-2. **`internal/handlers/job_handler.go`** (lines 1044-1062)
-   - Modified `GetJobQueueHandler()` to use `convertJobToMap()`
-   - Ensures all job API endpoints consistently return `document_count` field
-   - Maintains backward compatibility
-
 ### Frontend Changes
-3. **`pages/job.html`** (lines 466-507)
-   - Modified `loadJobLogs()` to detect parent jobs
-   - Parent jobs use `/api/jobs/{id}/logs/aggregated` endpoint
-   - Child jobs continue using `/api/jobs/{id}/logs` endpoint
-   - Maintains backward compatibility and error handling
+- `pages/queue.html` (line 1920) - Fixed `getDocumentsCount()` function
+- `pages/job.html` (line 97) - Fixed "Documents Created" display
+- `pages/job.html` (lines 466-525) - Enhanced error handling for log loading
+
+### Backend Changes
+- `internal/logs/service.go` (lines 75-88) - Fixed job validation and metadata extraction separation
 
 ### Documentation
-4. **`docs/fix-job-stats-and-logging/plan.md`** - Comprehensive implementation plan
-5. **`docs/fix-job-stats-and-logging/analysis-summary.md`** - Detailed codebase analysis
-6. **`docs/fix-job-stats-and-logging/progress.md`** - Step-by-step progress tracking
-7. **`docs/fix-job-stats-and-logging/step-{1-5}-validation.md`** - Validation reports
+- `docs/fix-job-stats-and-logging/plan.md` - Comprehensive implementation plan
+- `docs/fix-job-stats-and-logging/progress.md` - Step-by-step progress tracking
+- `docs/fix-job-stats-and-logging/step-{1-3}-validation.md` - Validation reports
+- `docs/fix-job-stats-and-logging/step-{1-3}-tests.md` - Test results
+- `docs/fix-job-stats-and-logging/step-3-revalidation.md` - Re-validation after fix
+- `docs/fix-job-stats-and-logging/step-3-retests.md` - Re-test results
+- `docs/fix-job-stats-and-logging/summary.md` - This document
 
 ## Key Decisions
 
