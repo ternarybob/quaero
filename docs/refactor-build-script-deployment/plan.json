@@ -1,0 +1,138 @@
+{
+  "task": "Refactor build.ps1 to separate build, deploy, and run operations",
+  "folder": "refactor-build-script-deployment",
+  "steps": [
+    {
+      "id": 1,
+      "task": "Remove version increment logic from build script - only update build timestamp",
+      "validation": "Run build script with no parameters, verify .version file shows only build timestamp change, not version increment. Check that version number stays the same across multiple builds.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 2,
+      "task": "Suppress all build success messages except errors - make default build operation silent",
+      "validation": "Run ./scripts/build.ps1 with no parameters. Verify no success messages appear (no 'Build Summary', no 'Build completed successfully'). Only errors should be shown if build fails.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 3,
+      "task": "Extract port detection logic into reusable function Get-ServerPort",
+      "validation": "Add function at top of script that reads port from bin/quaero.toml, returns 8085 as default. Test function can correctly parse port from config file. Verify existing code at lines 213-223 and 424-435 can be replaced with this function.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 4,
+      "task": "Extract process stop logic into reusable function Stop-QuaeroService",
+      "validation": "Create function that accepts port parameter, performs HTTP shutdown, waits for graceful exit, falls back to force stop. Test function can stop running service. Verify existing code at lines 202-285 and 414-497 can be replaced with this function call.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 5,
+      "task": "Extract llama-server cleanup logic into reusable function Stop-LlamaServers",
+      "validation": "Create function that finds and stops all llama-server processes. Test function can cleanup llama-server processes. Verify existing code at lines 287-321 and 499-533 can be replaced with this function call.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 6,
+      "task": "Extract file deployment logic into reusable function Deploy-Files",
+      "validation": "Create function that deploys: config (if not exists), Chrome extension, pages, job-definitions. Test function correctly copies all files to bin/. Verify existing deployment code at lines 670-747 can be replaced with this function call.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 7,
+      "task": "Refactor script structure: default operation builds without deployment",
+      "validation": "Default build (no parameters) should: (1) stop processes if running, (2) update .version build timestamp, (3) run go build, (4) output nothing on success. Verify build works and bin/ is NOT updated with new files.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 8,
+      "task": "Add -Deploy parameter: stops service using detected port, then deploys files",
+      "validation": "Run ./scripts/build.ps1 -Deploy. Verify: (1) builds executable, (2) detects port from bin/quaero.toml, (3) stops service on that port, (4) deploys all files to bin/. Service should be stopped but not restarted.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 9,
+      "task": "Update -Run parameter: automatically triggers deploy, then starts service",
+      "validation": "Run ./scripts/build.ps1 -Run. Verify: (1) builds, (2) stops service, (3) deploys files, (4) starts service in new terminal. Check that service is accessible on configured port.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 10,
+      "task": "Remove -Web parameter (no longer needed with new -Deploy/-Run behavior)",
+      "validation": "Verify -Web parameter is removed from param block and all Web-specific code (lines 196-395) is removed. Functionality is replaced by -Deploy.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 11,
+      "task": "Test script with no parameters: verify silent build only",
+      "validation": "Run ./scripts/build.ps1. Verify: (1) .version build timestamp updated, (2) .version version number NOT incremented, (3) go build executes, (4) NO output on success, (5) bin/ files NOT updated.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 12,
+      "task": "Test script with -Deploy parameter: verify stop and deploy",
+      "validation": "Start service manually, then run ./scripts/build.ps1 -Deploy. Verify: (1) service stops (port detected from config), (2) all files deployed to bin/, (3) service NOT restarted, (4) deployment summary shown.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 13,
+      "task": "Test script with -Run parameter: verify full workflow",
+      "validation": "Run ./scripts/build.ps1 -Run. Verify: (1) builds, (2) stops any running service, (3) deploys files, (4) starts service in new terminal, (5) service accessible on port from config.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 14,
+      "task": "Test script with -Clean: verify compatibility with new structure",
+      "validation": "Run ./scripts/build.ps1 -Clean. Verify: (1) bin/ directory deleted, (2) go.sum deleted, (3) fresh build succeeds.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 15,
+      "task": "Test script with -Release: verify compatibility with new structure",
+      "validation": "Run ./scripts/build.ps1 -Release. Verify: (1) optimized build with stripped debug info, (2) file size smaller than debug build.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 16,
+      "task": "Test script with -ResetDatabase: verify compatibility with new structure",
+      "validation": "Run ./scripts/build.ps1 -ResetDatabase. Verify: (1) database backed up, (2) database deleted, (3) build completes normally.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 17,
+      "task": "Update script documentation header with new parameter descriptions",
+      "validation": "Review lines 16-71 in build.ps1. Update .PARAMETER descriptions for -Deploy and -Run. Remove -Web documentation. Add examples for new usage patterns.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 18,
+      "task": "Update README.md Build & Development Commands section",
+      "validation": "Search for build.ps1 references in README.md. Update all examples to show: (1) ./scripts/build.ps1 (build only), (2) ./scripts/build.ps1 -Deploy (deploy), (3) ./scripts/build.ps1 -Run (run). Remove -Web references.",
+      "files_affected": ["README.md"]
+    },
+    {
+      "id": 19,
+      "task": "Update CLAUDE.md Build & Development Commands section",
+      "validation": "Search for build.ps1 references in CLAUDE.md. Update instructions to reflect: (1) default build behavior (silent, no deploy), (2) -Deploy parameter (stops and deploys), (3) -Run parameter (full workflow). Emphasize no version increment on normal builds.",
+      "files_affected": ["CLAUDE.md"]
+    },
+    {
+      "id": 20,
+      "task": "Update AGENTS.md with new build script behavior",
+      "validation": "Check if AGENTS.md exists and contains build script references. Update to match new behavior if present.",
+      "files_affected": ["AGENTS.md"]
+    },
+    {
+      "id": 21,
+      "task": "Verify all existing script flags work with refactored code",
+      "validation": "Test combinations: (1) -Clean -Run, (2) -Release -Deploy, (3) -ResetDatabase -Run, (4) -Verbose. All combinations should work correctly.",
+      "files_affected": ["scripts/build.ps1"]
+    },
+    {
+      "id": 22,
+      "task": "Final integration test: complete build-deploy-run workflow",
+      "validation": "From clean state: (1) ./scripts/build.ps1 -Clean (2) ./scripts/build.ps1 (3) ./scripts/build.ps1 -Deploy (4) Manually start service (5) ./scripts/build.ps1 -Run (should replace running service). Verify all steps complete successfully.",
+      "files_affected": ["scripts/build.ps1"]
+    }
+  ]
+}

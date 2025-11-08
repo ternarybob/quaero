@@ -8,6 +8,9 @@ environment = "development"
 port = 18085
 host = "localhost"
 
+[logging]
+min_event_level = "debug"  # Minimum log level to publish as real-time events to UI
+
 # Database storage configuration
 # Path is relative to the binary's working directory (test/bin/)
 # Default path: ./data/quaero.db resolves to test/bin/data/quaero.db

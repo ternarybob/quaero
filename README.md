@@ -351,16 +351,13 @@ See `internal/services/llm/offline/README.md` for detailed troubleshooting and A
 
 #### Windows (PowerShell)
 ```powershell
-# Development build
+# Development build (silent, no deployment)
 .\scripts\build.ps1
 
-# Clean build
-.\scripts\build.ps1 -Clean
+# Deploy files to bin directory after build
+.\scripts\build.ps1 -Deploy
 
-# Release build (optimized)
-.\scripts\build.ps1 -Release
-
-# Build and run
+# Build, deploy, and run in new terminal
 .\scripts\build.ps1 -Run
 ```
 
@@ -1046,21 +1043,114 @@ GET  /api/health                     - Health check
 WS   /ws                             - Real-time updates & log streaming
 ```
 
+**Event Types:**
+- `job_created` - New job created
+- `job_started` - Job execution started
+- `job_completed` - Job finished successfully
+- `job_failed` - Job execution failed
+- `job_cancelled` - Job cancelled by user
+- `crawl_progress` - Crawler progress updates
+- `job_spawn` - Child job spawned
+- `log_event` - Real-time log streaming (filtered by `logging.min_event_level`)
+
+### Logging and Real-Time Events
+
+Quaero uses a sophisticated logging architecture that separates audit logging from real-time UI updates:
+
+**Log Flow Architecture:**
+```
+Services → Arbor Logger → LogService → [Database + EventService]
+                                         ↓           ↓
+                                    (all logs)   (filtered)
+                                                    ↓
+                                               WebSocket → UI
+```
+
+**Key Concepts:**
+
+1. **All logs are saved to database** - Complete audit trail regardless of log level
+2. **Only filtered logs go to UI** - Reduce noise and network traffic with `logging.min_event_level`
+3. **LogService publishes events** - Only logs >= `min_event_level` are published to EventService
+4. **WebSocket broadcasts events** - Real-time updates delivered to connected UI clients
+
+**Configuration:**
+
+```toml
+[logging]
+level = "info"            # Application log level (what gets logged)
+min_event_level = "info"  # Minimum level for real-time UI events (what gets broadcast)
+                         # Options: "debug", "info", "warn", "error"
+```
+
+**Use Cases:**
+
+- **Show all logs in UI** (verbose development):
+  ```toml
+  level = "debug"
+  min_event_level = "debug"  # Broadcast everything to UI
+  ```
+
+- **Show only important logs in UI** (production):
+  ```toml
+  level = "info"             # Log everything at info+ level
+  min_event_level = "warn"   # Only show warnings/errors in UI
+  ```
+
+- **Audit all, show only critical**:
+  ```toml
+  level = "debug"            # Log everything for audit
+  min_event_level = "error"  # Only show errors in UI
+  ```
+
+**Legacy WebSocket Configuration:**
+
+The old WebSocket `min_level` configuration is **deprecated**. Use `logging.min_event_level` instead.
+
+```toml
+# ❌ DEPRECATED: Old WebSocket min_level
+# [websocket]
+# min_level = "info"
+
+# ✅ CORRECT: New logging min_event_level
+[logging]
+min_event_level = "info"
+```
+
+**Event Filtering:**
+
+You can further filter which events are broadcast to WebSocket clients:
+
+```toml
+[websocket]
+allowed_events = [
+    "job_created",
+    "job_started",
+    "job_completed",
+    "job_failed",
+    "log_event",  # Real-time log streaming (filtered by logging.min_event_level)
+]
+```
+
+**Environment Variables:**
+
+```bash
+QUAERO_LOG_LEVEL=info              # Application log level
+QUAERO_LOG_MIN_EVENT_LEVEL=warn    # Filter logs for real-time UI events
+QUAERO_WEBSOCKET_ALLOWED_EVENTS=job_created,job_completed,log_event
+```
+
 ## Development
 
 ### Building
 
 ```powershell
-# Development build
+# Development build (silent, no deployment)
 .\scripts\build.ps1
 
-# Production build
-.\scripts\build.ps1 -Release
+# Deploy files to bin directory after build
+.\scripts\build.ps1 -Deploy
 
-# Clean build
-.\scripts\build.ps1 -Clean
-
-# Build and run
+# Build, deploy, and run in new terminal
 .\scripts\build.ps1 -Run
 ```
 
@@ -1113,6 +1203,7 @@ See [CLAUDE.md](CLAUDE.md) for:
 QUAERO_PORT=8085
 QUAERO_HOST=localhost
 QUAERO_LOG_LEVEL=info
+QUAERO_LOG_MIN_EVENT_LEVEL=info  # Filter logs for real-time UI events
 ```
 
 ### Configuration File
@@ -1164,8 +1255,13 @@ enabled = true
 schedule = "0 */2 * * *"  # Every 2 hours
 
 [logging]
-level = "debug"
+level = "debug"              # Application log level: debug, info, warn, error
 output = ["console", "file"]
+min_event_level = "info"     # Minimum log level to publish as real-time events to UI
+                             # Logs below this level go to database only, not to UI
+                             # Options: "debug", "info", "warn", "error"
+                             # Example: Set to "warn" to only show warnings/errors in UI
+                             # Example: Set to "debug" to show all logs in UI (verbose)
 
 [storage]
 type = "sqlite"

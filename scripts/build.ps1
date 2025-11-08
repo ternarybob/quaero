@@ -1,16 +1,15 @@
 # -----------------------------------------------------------------------
 # Build Script for Quaero
 # -----------------------------------------------------------------------
+# Simplified: 2025-11-08
+# Removed backward compatibility parameters (-Clean, -Verbose, -Release,
+# -ResetDatabase, -Environment, -Version)
+# See docs/simplify-build-script/ for migration guide
+# -----------------------------------------------------------------------
 
 param (
-    [string]$Environment = "dev",
-    [string]$Version = "",
-    [switch]$Clean,
-    [switch]$Verbose,
-    [switch]$Release,
     [switch]$Run,
-    [switch]$Web,
-    [switch]$ResetDatabase
+    [switch]$Deploy
 )
 
 <#
@@ -19,55 +18,38 @@ param (
 
 .DESCRIPTION
     This script builds Quaero for local development and testing.
-    Outputs the executable to the project's bin directory.
 
-.PARAMETER Environment
-    Target environment for build (dev, staging, prod)
+    Three operations supported:
+    1. Default build (no parameters) - Builds executable silently, no deployment
+    2. -Deploy - Builds and deploys all files to bin directory (stops service if running)
+    3. -Run - Builds, deploys, and starts application in new terminal
 
-.PARAMETER Version
-    Version to embed in the binary (defaults to .version file or git commit hash)
-
-.PARAMETER Clean
-    Clean build artifacts before building
-
-.PARAMETER Verbose
-    Enable verbose output
-
-.PARAMETER Release
-    Build optimized release binary
+.PARAMETER Deploy
+    Deploy all required files to bin directory after building (config, pages, Chrome extension, job definitions)
+    Stops any running service before deployment
 
 .PARAMETER Run
-    Run the application in a new terminal after successful build
-
-.PARAMETER Web
-    Deploy web content only (skip build, deploy pages/, restart server)
-
-.PARAMETER ResetDatabase
-    Backup and delete the database after stopping the service
+    Build, deploy, and run the application in a new terminal
+    Automatically triggers deployment before starting the service
 
 .EXAMPLE
     .\build.ps1
-    Build quaero for development
+    Build quaero executable only (no deployment, silent on success)
 
 .EXAMPLE
-    .\build.ps1 -Web
-    Deploy only web content and restart server (no build)
-
-.EXAMPLE
-    .\build.ps1 -Release
-    Build optimized release version
-
-.EXAMPLE
-    .\build.ps1 -Environment prod -Version "1.0.0"
-    Build for production with specific version
+    .\build.ps1 -Deploy
+    Build and deploy all files to bin directory (stops service if running)
 
 .EXAMPLE
     .\build.ps1 -Run
-    Build and run the application in a new terminal
+    Build, deploy, and start the application in a new terminal
 
-.EXAMPLE
-    .\build.ps1 -ResetDatabase
-    Backup and delete the database for a clean start
+.NOTES
+    Default build operation does NOT increment version number, only updates build timestamp.
+    Version number must be manually incremented in .version file when needed.
+
+    For advanced operations removed in simplification (clean, database reset, etc.),
+    see docs/simplify-build-script/migration-guide.md
 #>
 
 # Error handling
@@ -106,129 +88,53 @@ Start-Transcript -Path $logFile -Append
 
 try {
 
-# Build configuration
-$gitCommit = ""
+# ========== HELPER FUNCTIONS ==========
 
-try {
-    $gitCommit = git rev-parse --short HEAD 2>$null
-    if (-not $gitCommit) { $gitCommit = "unknown" }
-}
-catch {
-    $gitCommit = "unknown"
-}
+# Function to get server port from config file
+function Get-ServerPort {
+    param(
+        [string]$BinDirectory
+    )
 
-Write-Host "Quaero Build Script" -ForegroundColor Cyan
-Write-Host "===================" -ForegroundColor Cyan
+    $configPath = Join-Path -Path $BinDirectory -ChildPath "quaero.toml"
+    $serverPort = 8085  # Default
 
-# Setup paths
-$scriptDir = $PSScriptRoot
-$projectRoot = Split-Path -Parent $scriptDir
-$versionFilePath = Join-Path -Path $projectRoot -ChildPath ".version"
-$binDir = Join-Path -Path $projectRoot -ChildPath "bin"
-$outputPath = Join-Path -Path $binDir -ChildPath "quaero.exe"
-
-Write-Host "Project Root: $projectRoot" -ForegroundColor Gray
-Write-Host "Environment: $Environment" -ForegroundColor Gray
-Write-Host "Git Commit: $gitCommit" -ForegroundColor Gray
-
-# Handle version file creation and maintenance
-$buildTimestamp = Get-Date -Format "MM-dd-HH-mm-ss"
-
-if (-not (Test-Path $versionFilePath)) {
-    # Create .version file if it doesn't exist
-    $versionContent = @"
-version: 0.1.0
-build: $buildTimestamp
-"@
-    Set-Content -Path $versionFilePath -Value $versionContent
-    Write-Host "Created .version file with version 0.1.0" -ForegroundColor Green
-} else {
-    # Read current version and increment patch version
-    $versionLines = Get-Content $versionFilePath
-    $currentVersion = ""
-    $updatedLines = @()
-
-    foreach ($line in $versionLines) {
-        if ($line -match '^version:\s*(.+)$') {
-            $currentVersion = $matches[1].Trim()
-
-            # Parse version (format: major.minor.patch)
-            if ($currentVersion -match '^(\d+)\.(\d+)\.(\d+)$') {
-                $major = [int]$matches[1]
-                $minor = [int]$matches[2]
-                $patch = [int]$matches[3]
-
-                # Increment patch version
-                $patch++
-                $newVersion = "$major.$minor.$patch"
-
-                $updatedLines += "version: $newVersion"
-                Write-Host "Incremented version: $currentVersion -> $newVersion" -ForegroundColor Green
-            } else {
-                $updatedLines += $line
-                Write-Host "Version format not recognized, keeping: $currentVersion" -ForegroundColor Yellow
+    if (Test-Path $configPath) {
+        $configContent = Get-Content $configPath
+        foreach ($line in $configContent) {
+            if ($line -match '^port\s*=\s*(\d+)') {
+                $serverPort = [int]$matches[1]
+                break
             }
-        } elseif ($line -match '^build:\s*') {
-            $updatedLines += "build: $buildTimestamp"
-        } else {
-            $updatedLines += $line
         }
     }
 
-    Set-Content -Path $versionFilePath -Value $updatedLines
-    Write-Host "Updated build timestamp to: $buildTimestamp" -ForegroundColor Green
+    return $serverPort
 }
 
-# Read version information from .version file
-$versionInfo = @{}
-$versionLines = Get-Content $versionFilePath
-foreach ($line in $versionLines) {
-    if ($line -match '^version:\s*(.+)$') {
-        $versionInfo.Version = $matches[1].Trim()
-    }
-    if ($line -match '^build:\s*(.+)$') {
-        $versionInfo.Build = $matches[1].Trim()
-    }
-}
+# Function to stop Quaero service gracefully
+function Stop-QuaeroService {
+    param(
+        [int]$Port
+    )
 
-Write-Host "Using version: $($versionInfo.Version), build: $($versionInfo.Build)" -ForegroundColor Cyan
-
-# Handle web-only deployment mode
-if ($Web) {
-    Write-Host "`n==== Web-Only Deployment Mode ====" -ForegroundColor Cyan
-    Write-Host "Skipping build process, deploying web content only" -ForegroundColor Yellow
-    
-    # Stop executing process if it's running (reuse existing logic)
     try {
         $processName = "quaero"
         $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
 
         if ($processes) {
             Write-Host "Stopping existing Quaero process(es)..." -ForegroundColor Yellow
-            
+
             # Try HTTP shutdown first
             $httpShutdownSucceeded = $false
-            
-            # Read port from config
-            $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-            $serverPort = 8085  # Default
-            if (Test-Path $configPath) {
-                $configContent = Get-Content $configPath
-                foreach ($line in $configContent) {
-                    if ($line -match '^port\s*=\s*(\d+)') {
-                        $serverPort = [int]$matches[1]
-                        break
-                    }
-                }
-            }
-            
-            Write-Host "  Attempting HTTP graceful shutdown on port $serverPort..." -ForegroundColor Gray
-            
+
+            Write-Host "  Attempting HTTP graceful shutdown on port $Port..." -ForegroundColor Gray
+
             # Try multiple times with short delays
             $maxAttempts = 3
             for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
                 try {
-                    $response = Invoke-WebRequest -Uri "http://localhost:$serverPort/api/shutdown" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+                    $response = Invoke-WebRequest -Uri "http://localhost:$Port/api/shutdown" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
                     if ($response.StatusCode -eq 200) {
                         Write-Host "  HTTP shutdown request sent successfully" -ForegroundColor Gray
                         $httpShutdownSucceeded = $true
@@ -243,16 +149,16 @@ if ($Web) {
                     }
                 }
             }
-            
+
             # Wait for graceful shutdown
             $timeout = if ($httpShutdownSucceeded) { 12 } else { 5 }
             $elapsed = 0
             $checkInterval = 0.5
-            
+
             while ((Get-Process -Name $processName -ErrorAction SilentlyContinue) -and ($elapsed -lt $timeout)) {
                 Start-Sleep -Seconds $checkInterval
                 $elapsed += $checkInterval
-                
+
                 if ($httpShutdownSucceeded -and $elapsed -eq 5) {
                     Write-Host "  Still waiting for graceful shutdown..." -ForegroundColor Gray
                 }
@@ -260,14 +166,14 @@ if ($Web) {
 
             # Check if processes exited gracefully
             $remainingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
-            
+
             if ($remainingProcesses) {
                 if ($httpShutdownSucceeded) {
                     Write-Warning "Process(es) did not exit gracefully within ${timeout}s, forcing termination..."
                 }
                 Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Milliseconds 500
-                
+
                 if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
                     Write-Warning "Some processes may still be running"
                 } else {
@@ -283,8 +189,10 @@ if ($Web) {
     catch {
         Write-Warning "Could not stop Quaero process: $($_.Exception.Message)"
     }
+}
 
-    # Clean up any llama-server processes
+# Function to stop all llama-server processes
+function Stop-LlamaServers {
     try {
         Write-Host "Checking for llama-server processes..." -ForegroundColor Yellow
         $llamaProcesses = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
@@ -319,27 +227,50 @@ if ($Web) {
     catch {
         Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
     }
-    
+}
+
+# Function to deploy files to bin directory
+function Deploy-Files {
+    param(
+        [string]$ProjectRoot,
+        [string]$BinDirectory
+    )
+
+    # Deploy configuration file (only if not exists)
+    $configSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\quaero.toml"
+    $configDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero.toml"
+
+    if (Test-Path $configSourcePath) {
+        if (-not (Test-Path $configDestPath)) {
+            Copy-Item -Path $configSourcePath -Destination $configDestPath
+        }
+    }
+
+    # Deploy Chrome extension
+    $extensionSourcePath = Join-Path -Path $ProjectRoot -ChildPath "cmd\quaero-chrome-extension"
+    $extensionDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero-chrome-extension"
+
+    if (Test-Path $extensionSourcePath) {
+        if (Test-Path $extensionDestPath) {
+            Remove-Item -Path $extensionDestPath -Recurse -Force
+        }
+        Copy-Item -Path $extensionSourcePath -Destination $extensionDestPath -Recurse
+    }
+
     # Deploy pages directory
-    $pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
-    $pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
+    $pagesSourcePath = Join-Path -Path $ProjectRoot -ChildPath "pages"
+    $pagesDestPath = Join-Path -Path $BinDirectory -ChildPath "pages"
 
     if (Test-Path $pagesSourcePath) {
         if (Test-Path $pagesDestPath) {
             Remove-Item -Path $pagesDestPath -Recurse -Force
         }
         Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
-        Write-Host "Deployed web pages: pages -> bin/" -ForegroundColor Green
-    } else {
-        Write-Error "Source pages directory not found: $pagesSourcePath"
-        Stop-Transcript
-        exit 1
     }
 
-    # Deploy job-definitions directory from deployments/local (if exists)
-    # Only copies files that don't exist in bin/ (no override)
-    $jobDefsSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\job-definitions"
-    $jobDefsDestPath = Join-Path -Path $binDir -ChildPath "job-definitions"
+    # Deploy job-definitions directory (only new files, no override)
+    $jobDefsSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\job-definitions"
+    $jobDefsDestPath = Join-Path -Path $BinDirectory -ChildPath "job-definitions"
 
     if (Test-Path $jobDefsSourcePath) {
         if (-not (Test-Path $jobDefsDestPath)) {
@@ -361,242 +292,89 @@ if ($Web) {
             }
         }
 
-        if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
-            Write-Host "Deployed job definitions: deployments/local/job-definitions -> bin/ (copied: $copiedCount, skipped: $skippedCount)" -ForegroundColor Green
-        }
     }
-    
-    # Restart server in new window
-    Write-Host "`n==== Restarting Application ====" -ForegroundColor Yellow
-    
-    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-    
-    if (-not (Test-Path $outputPath)) {
-        Write-Error "Quaero executable not found: $outputPath"
-        Write-Host "Please run a full build first: .\build.ps1" -ForegroundColor Yellow
-        Stop-Transcript
-        exit 1
-    }
-    
-    # Start in a new terminal window
-    # Use /c to close window when application exits
-    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
-    Start-Process cmd -ArgumentList "/c", $startCommand
-    
-    Write-Host "`n==== Web Deployment Summary ====" -ForegroundColor Cyan
-    Write-Host "Status: SUCCESS" -ForegroundColor Green
-    Write-Host "Deployed: pages/ directory" -ForegroundColor Green
-    Write-Host "Server: Restarted in new terminal" -ForegroundColor Green
-    Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
-    Write-Host "`nWeb deployment completed successfully!" -ForegroundColor Green
-    
-    Stop-Transcript
-    exit 0
 }
 
-# Clean build artifacts if requested
-if ($Clean) {
-    Write-Host "Cleaning build artifacts..." -ForegroundColor Yellow
-    if (Test-Path $binDir) {
-        Remove-Item -Path $binDir -Recurse -Force
+# ========== END HELPER FUNCTIONS ==========
+
+# Build configuration
+$gitCommit = ""
+
+try {
+    $gitCommit = git rev-parse --short HEAD 2>$null
+    if (-not $gitCommit) { $gitCommit = "unknown" }
+}
+catch {
+    $gitCommit = "unknown"
+}
+
+Write-Host "Quaero Build Script" -ForegroundColor Cyan
+Write-Host "===================" -ForegroundColor Cyan
+
+# Setup paths
+$scriptDir = $PSScriptRoot
+$projectRoot = Split-Path -Parent $scriptDir
+$versionFilePath = Join-Path -Path $projectRoot -ChildPath ".version"
+$binDir = Join-Path -Path $projectRoot -ChildPath "bin"
+$outputPath = Join-Path -Path $binDir -ChildPath "quaero.exe"
+
+Write-Host "Project Root: $projectRoot" -ForegroundColor Gray
+Write-Host "Git Commit: $gitCommit" -ForegroundColor Gray
+
+# Handle version file creation and maintenance
+$buildTimestamp = Get-Date -Format "MM-dd-HH-mm-ss"
+
+if (-not (Test-Path $versionFilePath)) {
+    # Create .version file if it doesn't exist
+    $versionContent = @"
+version: 0.1.0
+build: $buildTimestamp
+"@
+    Set-Content -Path $versionFilePath -Value $versionContent
+    Write-Host "Created .version file with version 0.1.0" -ForegroundColor Green
+} else {
+    # Read current version and update ONLY build timestamp (no version increment)
+    $versionLines = Get-Content $versionFilePath
+    $updatedLines = @()
+
+    foreach ($line in $versionLines) {
+        if ($line -match '^version:\s*(.+)$') {
+            # Keep version as-is
+            $updatedLines += $line
+        } elseif ($line -match '^build:\s*') {
+            # Update build timestamp
+            $updatedLines += "build: $buildTimestamp"
+        } else {
+            $updatedLines += $line
+        }
     }
-    if (Test-Path "go.sum") {
-        Remove-Item -Path "go.sum" -Force
+
+    Set-Content -Path $versionFilePath -Value $updatedLines
+}
+
+# Read version information from .version file
+$versionInfo = @{}
+$versionLines = Get-Content $versionFilePath
+foreach ($line in $versionLines) {
+    if ($line -match '^version:\s*(.+)$') {
+        $versionInfo.Version = $matches[1].Trim()
+    }
+    if ($line -match '^build:\s*(.+)$') {
+        $versionInfo.Build = $matches[1].Trim()
     }
 }
+
+Write-Host "Using version: $($versionInfo.Version), build: $($versionInfo.Build)" -ForegroundColor Cyan
 
 # Create bin directory
 if (-not (Test-Path $binDir)) {
     New-Item -ItemType Directory -Path $binDir | Out-Null
 }
 
-# Stop executing process if it's running (graceful shutdown with fallback)
-try {
-    $processName = "quaero"
-    $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
-
-    if ($processes) {
-        Write-Host "Stopping existing Quaero process(es)..." -ForegroundColor Yellow
-        
-        # Try HTTP shutdown first (most reliable on Windows)
-        $httpShutdownSucceeded = $false
-        
-        # Read port from config
-        $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-        $serverPort = 8085  # Default
-        if (Test-Path $configPath) {
-            $configContent = Get-Content $configPath
-            foreach ($line in $configContent) {
-                if ($line -match '^port\s*=\s*(\d+)') {
-                    $serverPort = [int]$matches[1]
-                    break
-                }
-            }
-        }
-        
-        Write-Host "  Attempting HTTP graceful shutdown on port $serverPort..." -ForegroundColor Gray
-        
-        # Try multiple times with short delays (server might still be starting)
-        $maxAttempts = 3
-        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-            try {
-                $response = Invoke-WebRequest -Uri "http://localhost:$serverPort/api/shutdown" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
-                if ($response.StatusCode -eq 200) {
-                    Write-Host "  HTTP shutdown request sent successfully" -ForegroundColor Gray
-                    $httpShutdownSucceeded = $true
-                    break
-                }
-            }
-            catch {
-                if ($attempt -lt $maxAttempts) {
-                    Start-Sleep -Milliseconds 500
-                } else {
-                    Write-Host "  HTTP shutdown not available (server may not be responding)" -ForegroundColor Gray
-                }
-            }
-        }
-        
-        # Wait for graceful shutdown
-        $timeout = if ($httpShutdownSucceeded) { 12 } else { 5 }
-        $elapsed = 0
-        $checkInterval = 0.5
-        
-        while ((Get-Process -Name $processName -ErrorAction SilentlyContinue) -and ($elapsed -lt $timeout)) {
-            Start-Sleep -Seconds $checkInterval
-            $elapsed += $checkInterval
-            
-            if ($httpShutdownSucceeded -and $elapsed -eq 5) {
-                Write-Host "  Still waiting for graceful shutdown..." -ForegroundColor Gray
-            }
-        }
-
-        # Check if processes exited gracefully
-        $remainingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
-        
-        if ($remainingProcesses) {
-            if ($httpShutdownSucceeded) {
-                Write-Warning "Process(es) did not exit gracefully within ${timeout}s, forcing termination..."
-            }
-            Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 500
-            
-            if (Get-Process -Name $processName -ErrorAction SilentlyContinue) {
-                Write-Warning "Some processes may still be running"
-            } else {
-                Write-Host "Process(es) force-stopped" -ForegroundColor Yellow
-            }
-        } else {
-            Write-Host "Process(es) stopped gracefully" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "No Quaero process found running" -ForegroundColor Gray
-    }
-}
-catch {
-    Write-Warning "Could not stop Quaero process: $($_.Exception.Message)"
-}
-
-# Clean up any llama-server processes (spawned by quaero)
-try {
-    Write-Host "Checking for llama-server processes..." -ForegroundColor Yellow
-    $llamaProcesses = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
-
-    if ($llamaProcesses) {
-        Write-Host "  Found $($llamaProcesses.Count) llama-server process(es), stopping..." -ForegroundColor Gray
-
-        foreach ($proc in $llamaProcesses) {
-            try {
-                $proc.Kill()
-                Write-Host "  Stopped llama-server (PID: $($proc.Id))" -ForegroundColor Gray
-            }
-            catch {
-                Write-Warning "  Failed to stop llama-server (PID: $($proc.Id)): $($_.Exception.Message)"
-            }
-        }
-
-        # Wait briefly for processes to exit
-        Start-Sleep -Milliseconds 500
-
-        # Verify cleanup
-        $remainingLlama = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
-        if ($remainingLlama) {
-            Write-Warning "Some llama-server processes may still be running"
-        } else {
-            Write-Host "  All llama-server processes stopped successfully" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  No llama-server processes found" -ForegroundColor Gray
-    }
-}
-catch {
-    Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
-}
-
-# Backup and delete database if requested
-if ($ResetDatabase) {
-    Write-Host "`n==== Database Reset ====" -ForegroundColor Cyan
-
-    # Read database path from config
-    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-    $dbPath = Join-Path -Path $binDir -ChildPath "data\quaero.db"  # Default
-
-    if (Test-Path $configPath) {
-        $configContent = Get-Content $configPath
-        foreach ($line in $configContent) {
-            if ($line -match '^\s*path\s*=\s*[''"](.+)[''"]') {
-                $dbPath = $matches[1]
-                # Make path relative to bin directory if not absolute
-                if (-not [System.IO.Path]::IsPathRooted($dbPath)) {
-                    $dbPath = Join-Path -Path $binDir -ChildPath $dbPath
-                }
-                break
-            }
-        }
-    }
-
-    Write-Host "Database path: $dbPath" -ForegroundColor Gray
-
-    if (Test-Path $dbPath) {
-        # Create backup directory
-        $backupDir = Join-Path -Path $binDir -ChildPath "backups"
-        if (-not (Test-Path $backupDir)) {
-            New-Item -ItemType Directory -Path $backupDir | Out-Null
-        }
-
-        # Create backup with timestamp
-        $timestamp = Get-Date -Format "yyyy-MM-dd-HH-mm-ss"
-        $backupPath = Join-Path -Path $backupDir -ChildPath "quaero-$timestamp.db"
-
-        Write-Host "Backing up database..." -ForegroundColor Yellow
-        Copy-Item -Path $dbPath -Destination $backupPath
-        Write-Host "  Backup created: $backupPath" -ForegroundColor Green
-
-        # Delete database files
-        Write-Host "Deleting database files..." -ForegroundColor Yellow
-        Remove-Item -Path $dbPath -Force
-        Write-Host "  Deleted: $dbPath" -ForegroundColor Green
-
-        # Delete WAL file if exists
-        $walPath = "$dbPath-wal"
-        if (Test-Path $walPath) {
-            Remove-Item -Path $walPath -Force
-            Write-Host "  Deleted: $walPath" -ForegroundColor Green
-        }
-
-        # Delete SHM file if exists
-        $shmPath = "$dbPath-shm"
-        if (Test-Path $shmPath) {
-            Remove-Item -Path $shmPath -Force
-            Write-Host "  Deleted: $shmPath" -ForegroundColor Green
-        }
-
-        Write-Host "Database reset complete!" -ForegroundColor Green
-        Write-Host "  Backup location: $backupPath" -ForegroundColor Cyan
-    } else {
-        Write-Host "Database file not found: $dbPath" -ForegroundColor Yellow
-        Write-Host "  This is normal for first run or if database was already deleted" -ForegroundColor Gray
-    }
-}
+# Stop services if running (using helper functions)
+$serverPort = Get-ServerPort -BinDirectory $binDir
+Stop-QuaeroService -Port $serverPort
+Stop-LlamaServers
 
 # Tidy and download dependencies
 Write-Host "Tidying dependencies..." -ForegroundColor Yellow
@@ -615,30 +393,12 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Build flags
+# Build flags (standard build - no conditional logic)
 $module = "github.com/ternarybob/quaero/internal/common"
-$buildFlags = @(
-    "-X", "$module.Version=$($versionInfo.Version)",
-    "-X", "$module.Build=$($versionInfo.Build)",
-    "-X", "$module.GitCommit=$gitCommit"
-)
-
-if ($Release) {
-    $buildFlags += @("-w", "-s")  # Strip debug info and symbol table
-}
-
-$ldflags = $buildFlags -join " "
+$ldflags = "-X $module.Version=$($versionInfo.Version) -X $module.Build=$($versionInfo.Build) -X $module.GitCommit=$gitCommit"
 
 # Build the Go application
-
 Write-Host "Building quaero..." -ForegroundColor Yellow
-
-# Disable CGO - using pure Go SQLite (modernc.org/sqlite)
-$env:CGO_ENABLED = "0"
-if ($Release) {
-    $env:GOOS = "windows"
-    $env:GOARCH = "amd64"
-}
 
 $buildArgs = @(
     "build"
@@ -649,10 +409,6 @@ $buildArgs = @(
 
 # Change to project root for build
 Push-Location $projectRoot
-
-if ($Verbose) {
-    $buildArgs += "-v"
-}
 
 Write-Host "Build command: go $($buildArgs -join ' ')" -ForegroundColor Gray
 
@@ -667,85 +423,6 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Copy configuration file to bin directory
-$configSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\quaero.toml"
-$configDestPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-
-if (Test-Path $configSourcePath) {
-    if (-not (Test-Path $configDestPath)) {
-        Copy-Item -Path $configSourcePath -Destination $configDestPath
-        Write-Host "Copied configuration: deployments/local/quaero.toml -> bin/" -ForegroundColor Green
-    } else {
-        Write-Host "Using existing bin/quaero.toml (preserving customizations)" -ForegroundColor Cyan
-    }
-}
-
-# Copy Chrome extension to bin directory
-$extensionSourcePath = Join-Path -Path $projectRoot -ChildPath "cmd\quaero-chrome-extension"
-$extensionDestPath = Join-Path -Path $binDir -ChildPath "quaero-chrome-extension"
-
-if (Test-Path $extensionSourcePath) {
-    if (Test-Path $extensionDestPath) {
-        Remove-Item -Path $extensionDestPath -Recurse -Force
-    }
-    Copy-Item -Path $extensionSourcePath -Destination $extensionDestPath -Recurse
-    Write-Host "Deployed Chrome extension: cmd/quaero-chrome-extension -> bin/" -ForegroundColor Green
-}
-
-# Generate favicon if it doesn't exist
-$faviconPath = Join-Path -Path $projectRoot -ChildPath "pages\static\favicon.ico"
-if (-not (Test-Path $faviconPath)) {
-    Write-Host "Generating favicon..." -ForegroundColor Yellow
-    $createFaviconScript = Join-Path -Path $projectRoot -ChildPath "scripts\create-favicon.ps1"
-    if (Test-Path $createFaviconScript) {
-        & $createFaviconScript
-    } else {
-        Write-Warning "Favicon script not found: $createFaviconScript"
-    }
-}
-
-# Copy pages directory to bin
-$pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
-$pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
-
-if (Test-Path $pagesSourcePath) {
-    if (Test-Path $pagesDestPath) {
-        Remove-Item -Path $pagesDestPath -Recurse -Force
-    }
-    Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
-    Write-Host "Deployed web pages: pages -> bin/" -ForegroundColor Green
-}
-
-# Deploy job-definitions directory from deployments/local (if exists)
-# Only copies files that don't exist in bin/ (no override)
-$jobDefsSourcePath = Join-Path -Path $projectRoot -ChildPath "deployments\local\job-definitions"
-$jobDefsDestPath = Join-Path -Path $binDir -ChildPath "job-definitions"
-
-if (Test-Path $jobDefsSourcePath) {
-    if (-not (Test-Path $jobDefsDestPath)) {
-        New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
-    }
-
-    # Copy files without overriding existing ones
-    $sourceFiles = Get-ChildItem -Path $jobDefsSourcePath -File
-    $copiedCount = 0
-    $skippedCount = 0
-
-    foreach ($file in $sourceFiles) {
-        $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $file.Name
-        if (-not (Test-Path $destFile)) {
-            Copy-Item -Path $file.FullName -Destination $destFile
-            $copiedCount++
-        } else {
-            $skippedCount++
-        }
-    }
-
-    if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
-        Write-Host "Deployed job definitions: deployments/local/job-definitions -> bin/ (copied: $copiedCount, skipped: $skippedCount)" -ForegroundColor Green
-    }
-}
-
 # Verify executable was created
 if (-not (Test-Path $outputPath)) {
     Write-Error "Build completed but executable not found: $outputPath"
@@ -753,46 +430,26 @@ if (-not (Test-Path $outputPath)) {
     exit 1
 }
 
-# Get file info for binary
-$fileInfo = Get-Item $outputPath
-$fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
+# Handle deployment and execution based on parameters
+if ($Run -or $Deploy) {
+    # Deploy files to bin directory
+    Deploy-Files -ProjectRoot $projectRoot -BinDirectory $binDir
 
-Write-Host "`n==== Build Summary ====" -ForegroundColor Cyan
-Write-Host "Status: SUCCESS" -ForegroundColor Green
-Write-Host "Environment: $Environment" -ForegroundColor Green
-Write-Host "Version: $($versionInfo.Version)" -ForegroundColor Green
-Write-Host "Build: $($versionInfo.Build)" -ForegroundColor Green
-Write-Host "Output: $outputPath ($([math]::Round($fileSizeMB, 2)) MB)" -ForegroundColor Green
-Write-Host "Build Time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Green
+    if ($Run) {
+        # Start application in new terminal
+        Write-Host "`n==== Starting Application ====" -ForegroundColor Yellow
 
-if ($Clean) {
-    Write-Host "Clean: EXECUTED" -ForegroundColor Green
-}
+        $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
+        $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
 
-Write-Host "`nBuild completed successfully!" -ForegroundColor Green
-Write-Host "Executable: $outputPath" -ForegroundColor Cyan
+        Start-Process cmd -ArgumentList "/c", $startCommand
 
-# Run application if -Run flag is set
-if ($Run) {
-    Write-Host "`n==== Starting Application ====" -ForegroundColor Yellow
-
-    # Use bin config (already deployed from deployments/local/)
-    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
-
-    # Start in a new terminal window
-    # Use /c to close window when application exits
-    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
-
-    Start-Process cmd -ArgumentList "/c", $startCommand
-
-    Write-Host "Application started in new terminal window" -ForegroundColor Green
-    Write-Host "Command: quaero.exe -c quaero.toml" -ForegroundColor Cyan
-    Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
-    Write-Host "Press Ctrl+C in the server window to stop gracefully" -ForegroundColor Yellow
-    Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
-} else {
-    Write-Host "`nTo run with local config:" -ForegroundColor Yellow
-    Write-Host "./bin/quaero.exe -c quaero.toml" -ForegroundColor White
+        Write-Host "Application started in new terminal window" -ForegroundColor Green
+        Write-Host "Command: quaero.exe -c quaero.toml" -ForegroundColor Cyan
+        Write-Host "Config: bin\quaero.toml" -ForegroundColor Gray
+        Write-Host "Press Ctrl+C in the server window to stop gracefully" -ForegroundColor Yellow
+        Write-Host "Check bin\logs\ for application logs" -ForegroundColor Yellow
+    }
 }
 
 } finally {

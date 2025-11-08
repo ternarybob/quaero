@@ -146,10 +146,11 @@ type ProcessingConfig struct {
 }
 
 type LoggingConfig struct {
-	Level       string   `toml:"level"`        // "debug", "info", "warn", "error"
-	Format      string   `toml:"format"`       // "json" or "text"
-	Output      []string `toml:"output"`       // "stdout", "file"
-	ClientDebug bool     `toml:"client_debug"` // Enable client-side debug logging
+	Level         string   `toml:"level"`           // "debug", "info", "warn", "error"
+	Format        string   `toml:"format"`          // "json" or "text"
+	Output        []string `toml:"output"`          // "stdout", "file"
+	ClientDebug   bool     `toml:"client_debug"`    // Enable client-side debug logging
+	MinEventLevel string   `toml:"min_event_level"` // Minimum log level to publish as events to UI ("debug", "info", "warn", "error")
 }
 
 // JobsConfig contains configuration for default scheduled jobs
@@ -282,9 +283,10 @@ func NewDefaultConfig() *Config {
 			Limit:    1000,            // Max documents per embedding run to prevent resource exhaustion
 		},
 		Logging: LoggingConfig{
-			Level:  "info",                     // Info level for production (debug|info|warn|error)
-			Format: "text",                     // Human-readable text format (text|json)
-			Output: []string{"stdout", "file"}, // Log to both console and file
+			Level:         "info",                     // Info level for production (debug|info|warn|error)
+			Format:        "text",                     // Human-readable text format (text|json)
+			Output:        []string{"stdout", "file"}, // Log to both console and file
+			MinEventLevel: "info",                     // Publish info and above as events to UI (debug logs only to DB)
 		},
 		Jobs: JobsConfig{
 			CrawlAndCollect: JobConfig{
@@ -499,6 +501,9 @@ func applyEnvOverrides(config *Config) {
 		if len(outputs) > 0 {
 			config.Logging.Output = outputs
 		}
+	}
+	if minEventLevel := os.Getenv("QUAERO_LOG_MIN_EVENT_LEVEL"); minEventLevel != "" {
+		config.Logging.MinEventLevel = minEventLevel
 	}
 
 	// Crawler configuration

@@ -374,38 +374,12 @@ func (h *WebSocketHandler) BroadcastAuth(authData *interfaces.AuthData) {
 	}
 }
 
-// BroadcastLog sends log entries to all connected clients
+// BroadcastLog is DEPRECATED - logs are now published via EventService
+// This method kept for backward compatibility but should not be called directly
+// LogService publishes "log_event" which WebSocket subscribes to
 func (h *WebSocketHandler) BroadcastLog(entry interfaces.LogEntry) {
-	msg := WSMessage{
-		Type:    "log",
-		Payload: entry,
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to marshal log message")
-		return
-	}
-
-	h.mu.RLock()
-	clients := make([]*websocket.Conn, 0, len(h.clients))
-	mutexes := make([]*sync.Mutex, 0, len(h.clients))
-	for conn := range h.clients {
-		clients = append(clients, conn)
-		mutexes = append(mutexes, h.clientMutex[conn])
-	}
-	h.mu.RUnlock()
-
-	for i, conn := range clients {
-		mutex := mutexes[i]
-		mutex.Lock()
-		err := conn.WriteMessage(websocket.TextMessage, data)
-		mutex.Unlock()
-
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to send log to client")
-		}
-	}
+	// No-op: Logs now flow through EventService
+	// LogService consumer publishes "log_event" -> WebSocket subscribes
 }
 
 // sendStatus sends current status to a specific client
@@ -474,14 +448,10 @@ func (h *WebSocketHandler) StartStatusBroadcaster() {
 	}()
 }
 
-// SendLog is a helper to broadcast log entries
+// SendLog is DEPRECATED - use logger with correlation ID instead
+// Logs should go through: logger.WithCorrelationId(jobID) -> LogService -> EventService -> WebSocket
 func (h *WebSocketHandler) SendLog(level, message string) {
-	entry := interfaces.LogEntry{
-		Timestamp: time.Now().Format("15:04:05"),
-		Level:     strings.ToLower(level), // Normalize to lowercase for consistency
-		Message:   message,
-	}
-	h.BroadcastLog(entry)
+	// No-op: Use logger with correlation ID instead
 }
 
 // GetRecentLogsHandler returns recent logs from the last 5 minutes as JSON
@@ -773,63 +743,13 @@ func (h *WebSocketHandler) BroadcastCrawlerJobProgress(update CrawlerJobProgress
 	}
 }
 
-// StreamCrawlerJobLog sends crawler-specific log messages to all connected clients
-// This method formats log messages with job context for better debugging
+// StreamCrawlerJobLog is DEPRECATED - use logger with correlation ID instead
+// Crawler logs should go through: jobLogger.WithCorrelationId(jobID).Info(msg) -> LogService -> EventService -> WebSocket
 func (h *WebSocketHandler) StreamCrawlerJobLog(jobID, level, message string, metadata map[string]interface{}) {
-	// Create enhanced log entry with crawler context
-	entry := interfaces.LogEntry{
-		Timestamp: time.Now().Format("15:04:05"),
-		Level:     strings.ToLower(level),
-		Message:   message,
-	}
-
-	// Add job context to the message if metadata is provided
-	if metadata != nil {
-		if url, ok := metadata["url"].(string); ok && url != "" {
-			entry.Message = fmt.Sprintf("[%s] %s", url, entry.Message)
-		}
-		if depth, ok := metadata["depth"].(int); ok {
-			entry.Message = fmt.Sprintf("[depth:%d] %s", depth, entry.Message)
-		}
-	}
-
-	// Create WebSocket message with job context
-	msg := WSMessage{
-		Type: "crawler_job_log",
-		Payload: map[string]interface{}{
-			"job_id":    jobID,
-			"timestamp": entry.Timestamp,
-			"level":     entry.Level,
-			"message":   entry.Message,
-			"metadata":  metadata,
-		},
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to marshal crawler job log message")
-		return
-	}
-
-	h.mu.RLock()
-	clients := make([]*websocket.Conn, 0, len(h.clients))
-	mutexes := make([]*sync.Mutex, 0, len(h.clients))
-	for conn := range h.clients {
-		clients = append(clients, conn)
-		mutexes = append(mutexes, h.clientMutex[conn])
-	}
-	h.mu.RUnlock()
-
-	for i, conn := range clients {
-		mutex := mutexes[i]
-		mutex.Lock()
-		err := conn.WriteMessage(websocket.TextMessage, data)
-		mutex.Unlock()
-
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to send crawler job log to client")
-		}
-	}
+	// No-op: Use logger with correlation ID instead
+	// Services should call: jobLogger := logger.WithCorrelationId(jobID)
+	// Then: jobLogger.Info().Msg(message)
+	// LogService will handle filtering and event publishing
 }
 
 // SubscribeToCrawlerEvents subscribes to crawler progress events
@@ -837,6 +757,52 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	if h.eventService == nil {
 		return
 	}
+
+	// Subscribe to log events from LogService (replaces direct BroadcastLog calls)
+	h.eventService.Subscribe("log_event", func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid log_event payload type")
+			return nil
+		}
+
+		// Convert to LogEntry for WebSocket broadcast
+		entry := interfaces.LogEntry{
+			Timestamp: getString(payload, "timestamp"),
+			Level:     getString(payload, "level"),
+			Message:   getString(payload, "message"),
+		}
+
+		// Broadcast log message to all clients
+		msg := WSMessage{
+			Type:    "log",
+			Payload: entry,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal log message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+		}
+
+		return nil
+	})
 
 	h.eventService.Subscribe(interfaces.EventCrawlProgress, func(ctx context.Context, event interfaces.Event) error {
 		// Extract payload map

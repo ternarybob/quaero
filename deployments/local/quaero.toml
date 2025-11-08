@@ -205,27 +205,44 @@ description = "Scan markdown documents and generate summaries with metadata"
 # include_metadata = true                   # Default: true
 
 # =============================================================================
-# WebSocket Log Streaming Configuration
+# Logging Configuration
 # =============================================================================
-# Configure server-side filtering for real-time log streaming and event broadcasting to browser UI.
-# Logs are filtered before broadcasting to reduce client load and network traffic.
-# Technical parameters have sensible defaults hardcoded in the application.
-# Only uncomment settings you want to override from defaults.
+# Configure application logging and real-time UI event publishing.
 #
-# Defaults: min_level="info", exclude_patterns=[...], allowed_events=[] (all), throttle_intervals={crawl_progress:1s, job_spawn:500ms}
-# Env vars: QUAERO_WEBSOCKET_MIN_LEVEL, QUAERO_WEBSOCKET_EXCLUDE_PATTERNS, QUAERO_WEBSOCKET_ALLOWED_EVENTS, QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS, QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN
+# Log Flow Architecture:
+#   Services → Arbor Logger → LogService → [Database + EventService]
+#                                             ↓           ↓
+#                                        (all logs)   (filtered)
+#                                                        ↓
+#                                                   WebSocket → UI
+#
+# Key Concept: LogService filters logs and publishes to EventService.
+# Only logs >= min_event_level are published as events to the UI.
+# All logs (regardless of level) are saved to the database for auditing.
+#
+# Defaults: level="info", format="text", min_event_level="info"
+# Env vars: QUAERO_LOG_LEVEL, QUAERO_LOG_FORMAT, QUAERO_LOG_MIN_EVENT_LEVEL
+
+# [logging]
+# level = "info"            # Application log level: debug, info, warn, error (default: info)
+# format = "text"           # Log format: text or json (default: text)
+# output = ["stdout", "file"]  # Log destinations (default: ["stdout", "file"])
+# min_event_level = "info"  # Minimum log level to publish as real-time events to UI
+#                           # Logs below this level go to database only, not to UI
+#                           # Options: "debug", "info", "warn", "error"
+#                           # Example: Set to "warn" to only show warnings/errors in UI
+#                           # Example: Set to "debug" to show all logs in UI (verbose)
+
+# =============================================================================
+# WebSocket Event Broadcasting Configuration
+# =============================================================================
+# Configure server-side filtering for real-time event broadcasting to browser UI.
+# Events are filtered before broadcasting to reduce client load and network traffic.
+#
+# Defaults: allowed_events=[] (all), throttle_intervals={crawl_progress:1s, job_spawn:500ms}
+# Env vars: QUAERO_WEBSOCKET_ALLOWED_EVENTS, QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS, QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN
 
 # [websocket]
-# min_level = "info"  # Minimum log level to broadcast ("debug", "info", "warn", "error")
-# exclude_patterns = [  # Log message patterns to exclude from broadcasting
-#     "WebSocket client connected",
-#     "WebSocket client disconnected",
-#     "HTTP request",
-#     "HTTP response",
-#     "Publishing Event",
-#     "DEBUG: Memory writer entry",
-# ]
-
 # Event Filtering - Control which events are broadcast to WebSocket clients
 # allowed_events = []  # Empty list allows all events (default)
 # allowed_events = [   # Whitelist specific events (example)
@@ -236,10 +253,10 @@ description = "Scan markdown documents and generate summaries with metadata"
 #     "job_cancelled",
 #     "crawl_progress",
 #     "job_spawn",
+#     "log_event",     # Real-time log streaming (filtered by logging.min_event_level)
 # ]
 
 # Event Throttling - Rate limit high-frequency events to prevent WebSocket flooding
-# Throttling reduces network traffic and client load during large crawls (1000s of URLs)
 # [websocket.throttle_intervals]
 # crawl_progress = "1s"   # Max 1 crawl progress update per second per job (default)
 # job_spawn = "500ms"     # Max 2 job spawn events per second (default)

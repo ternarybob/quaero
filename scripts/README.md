@@ -18,28 +18,22 @@ Build the Quaero application.
 ```
 
 **Options:**
-- `-Environment <env>` - Target environment (dev, staging, prod)
-- `-Version <ver>` - Version to embed in binary
-- `-Clean` - Clean build artifacts before building
-- `-Test` - Run tests before building
-- `-Verbose` - Enable verbose output
-- `-Release` - Build optimized release binary
-- `-Run` - Run the application after successful build (Windows only)
+- `-Deploy` - Deploy files to bin directory after building
+- `-Run` - Build, deploy, and run the application in new terminal (Windows only)
 
 **Examples:**
 ```powershell
-# Basic build
+# Basic build (no deployment)
 .\scripts\build.ps1
 
-# Clean build with tests
-.\scripts\build.ps1 -Clean -Test
+# Build and deploy files
+.\scripts\build.ps1 -Deploy
 
-# Release build
-.\scripts\build.ps1 -Release
-
-# Build and run
+# Build, deploy, and run
 .\scripts\build.ps1 -Run
 ```
+
+**Note:** Advanced options like `-Clean`, `-Verbose`, `-Release`, and `-ResetDatabase` have been removed for simplicity. See `docs/simplify-build-script/migration-guide.md` for alternatives.
 
 ### deploy.ps1 (Windows)
 
@@ -141,8 +135,8 @@ go test -v ./ui
 ### Release
 
 ```powershell
-# Clean release build
-.\scripts\build.ps1 -Clean -Release -Test
+# Build for production (use Docker for optimized builds)
+.\scripts\build.ps1
 
 # Deploy to production
 .\scripts\deploy.ps1 -Target production -Build
@@ -167,7 +161,7 @@ go test -v ./ui
 
 1. Ensure Go is installed and in PATH
 2. Run `go mod tidy` to fix dependencies
-3. Try a clean build: `.\scripts\build.ps1 -Clean`
+3. Try a clean build: Delete `bin/` directory manually and rebuild
 
 ### Tests Fail
 

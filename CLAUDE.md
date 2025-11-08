@@ -61,20 +61,22 @@ go test -timeout 20m -v ./...
 ### Building
 
 ```powershell
-# Development build
+# Development build (silent, no deployment, no version increment)
 .\scripts\build.ps1
 
-# Clean build
-.\scripts\build.ps1 -Clean
+# Deploy files to bin directory (stops service, deploys files)
+.\scripts\build.ps1 -Deploy
 
-# Release build (optimized)
-.\scripts\build.ps1 -Release
-
-# Build and run
+# Build, deploy, and run (starts service in new terminal)
 .\scripts\build.ps1 -Run
 ```
 
-**Note:** For AI agents, use ONLY the build script. Manual `quaero serve` commands are for end-users (see README.md).
+**Important Notes:**
+- **Default build (no parameters)** - Builds executable silently, does NOT increment version, does NOT deploy files
+- **Version management** - Version number in `.version` file is NEVER auto-incremented, only build timestamp updates
+- **Deployment** - Use `-Deploy` or `-Run` to copy files (config, pages, Chrome extension) to bin/
+- **For AI agents** - Use ONLY the build script. Manual `quaero serve` commands are for end-users (see README.md)
+- **Removed parameters** - `-Clean`, `-Verbose`, `-Release`, `-ResetDatabase` removed for simplicity. See `docs/simplify-build-script/migration-guide.md` for alternatives
 
 ## Architecture Overview
 

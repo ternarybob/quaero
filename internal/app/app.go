@@ -125,7 +125,14 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// This allows all derived loggers (via WithCorrelationId) to inherit the configured context channel
 	// IMPORTANT: LogService's logger must NOT have the context channel configured to avoid deadlock
 	// (the consumer goroutine would try to send logs to its own channel)
-	logService := logs.NewService(app.StorageManager.JobLogStorage(), app.StorageManager.JobStorage(), app.WSHandler, app.Logger)
+	// NEW: LogService publishes events instead of calling WebSocket directly
+	logService := logs.NewService(
+		app.StorageManager.JobLogStorage(),
+		app.StorageManager.JobStorage(),
+		app.EventService, // Changed from WSHandler to EventService
+		app.Logger,
+		app.Config.Logging.MinEventLevel, // Minimum log level for UI events
+	)
 	if err := logService.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start log service: %w", err)
 	}

@@ -1,0 +1,189 @@
+{
+  "task": "Simplify build.ps1 by removing backward compatibility - keep only standard build, -Deploy, and -Run",
+  "folder": "simplify-build-script",
+  "steps": [
+    {
+      "id": 1,
+      "task": "Remove -Clean parameter and related logic from build.ps1",
+      "validation": "Verify parameter declaration removed (line 8), parameter documentation removed (lines 32-33, examples 69-70), and Clean block removed (lines 396-404). Test that .\scripts\build.ps1 -Clean fails with parameter error.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 2,
+      "task": "Remove -Verbose parameter and related logic from build.ps1",
+      "validation": "Verify parameter declaration removed (line 9), parameter documentation removed (lines 35-36), and verbose logic removed (lines 530-532). Test that .\scripts\build.ps1 -Verbose fails with parameter error.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 3,
+      "task": "Remove -Release parameter and related logic from build.ps1",
+      "validation": "Verify parameter declaration removed (line 10), parameter documentation removed (lines 38-39, examples 64-65), and release build flags logic removed (lines 507-509, 519-522). Test that .\scripts\build.ps1 -Release fails with parameter error. Build should now use standard flags always.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 4,
+      "task": "Remove -ResetDatabase parameter and related logic from build.ps1",
+      "validation": "Verify parameter declaration removed (line 13), parameter documentation removed (lines 50-51, examples 72-73), and entire database reset block removed (lines 416-480). Test that .\scripts\build.ps1 -ResetDatabase fails with parameter error.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 5,
+      "task": "Remove -Environment and -Version parameters (unused in current flow)",
+      "validation": "Verify parameter declarations removed (lines 6-7) and any related logic removed if present. These parameters appear to be legacy and not actively used in the simplified workflow.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 6,
+      "task": "Simplify script header documentation to reflect only three operations",
+      "validation": "Verify .DESCRIPTION updated to describe only: default build, -Deploy, and -Run. Verify only 2 parameters documented: -Deploy and -Run. Verify examples show only these three usage patterns. Header should be ~40 lines instead of ~78 lines.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 7,
+      "task": "Remove CGO_ENABLED and GOOS/GOARCH environment variable setting",
+      "validation": "Verify lines 518-522 removed. These were only needed for release builds. Standard build should not set these environment variables.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 8,
+      "task": "Simplify build flags to remove conditional logic",
+      "validation": "Verify lines 500-509 simplified to only include the standard ldflags without conditional -w -s flags. Build flags should be consistent for all builds.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 9,
+      "task": "Test simplified script with no parameters",
+      "validation": "Run .\scripts\build.ps1 and verify: (1) builds silently, (2) no deployment occurs, (3) only build timestamp updated in .version, (4) quaero.exe created in bin/. Check logs for any errors.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 10,
+      "task": "Test simplified script with -Deploy parameter",
+      "validation": "Run .\scripts\build.ps1 -Deploy and verify: (1) builds, (2) stops running service, (3) deploys all files (pages, config, extension, job-definitions), (4) does NOT start service. Verify deployment by checking file timestamps in bin/.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 11,
+      "task": "Test simplified script with -Run parameter",
+      "validation": "Run .\scripts\build.ps1 -Run and verify: (1) builds, (2) deploys files, (3) starts service in new terminal, (4) service accessible on configured port. Verify new process is running and responds to HTTP requests.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 12,
+      "task": "Test that removed parameters now fail with appropriate errors",
+      "validation": "Run each removed parameter and verify PowerShell reports parameter error: .\scripts\build.ps1 -Clean, .\scripts\build.ps1 -Verbose, .\scripts\build.ps1 -Release, .\scripts\build.ps1 -ResetDatabase. All should fail with parameter binding error.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 13,
+      "task": "Update README.md to remove references to deleted parameters",
+      "validation": "Search README.md for -Clean, -Verbose, -Release, -ResetDatabase, -Environment, -Version references and remove them. Update Platform-Specific Build Instructions (around line 352) and Development section (around line 1059) to show only three commands. Verify no broken examples remain.",
+      "files_affected": [
+        "C:\\development\\quaero\\README.md"
+      ]
+    },
+    {
+      "id": 14,
+      "task": "Update CLAUDE.md Build & Development Commands section",
+      "validation": "Update Build & Development Commands section (around line 59-87) to remove all references to -Clean, -Verbose, -Release, -ResetDatabase. Update examples to show only: .\scripts\build.ps1, .\scripts\build.ps1 -Deploy, .\scripts\build.ps1 -Run. Update Important Notes to reflect simplified behavior.",
+      "files_affected": [
+        "C:\\development\\quaero\\CLAUDE.md"
+      ]
+    },
+    {
+      "id": 15,
+      "task": "Update AGENTS.md Build Instructions section",
+      "validation": "Update Build Instructions section (around line 9-42) to remove all references to deleted parameters. Ensure consistency with CLAUDE.md. Examples should show only the three supported operations.",
+      "files_affected": [
+        "C:\\development\\quaero\\AGENTS.md"
+      ]
+    },
+    {
+      "id": 16,
+      "task": "Create migration guide document",
+      "validation": "Create docs/simplify-build-script/migration-guide.md documenting what changed and alternative workflows. Document: (1) What was removed, (2) Why it was removed, (3) Alternative approaches for users who relied on removed flags (e.g., manual bin/ deletion instead of -Clean).",
+      "files_affected": [
+        "C:\\development\\quaero\\docs\\simplify-build-script\\migration-guide.md"
+      ]
+    },
+    {
+      "id": 17,
+      "task": "Create comprehensive test results document",
+      "validation": "Create docs/simplify-build-script/test-results.md documenting all test results from steps 9-12. Include screenshots or logs showing successful builds, deployments, runs, and parameter rejection errors.",
+      "files_affected": [
+        "C:\\development\\quaero\\docs\\simplify-build-script\\test-results.md"
+      ]
+    },
+    {
+      "id": 18,
+      "task": "Update build script to current version and document simplification in .version file comment",
+      "validation": "Consider adding a comment in build.ps1 header noting the simplification date and referring to docs/simplify-build-script/ for historical context. Verify .version file handling remains correct (only timestamp updates).",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1"
+      ]
+    },
+    {
+      "id": 19,
+      "task": "Perform final integration test: full development workflow",
+      "validation": "Execute complete workflow: (1) .\scripts\build.ps1 (verify silent build), (2) .\scripts\build.ps1 -Deploy (verify deployment without run), (3) .\scripts\build.ps1 -Run (verify service starts). Document results in test-results.md.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1",
+        "C:\\development\\quaero\\docs\\simplify-build-script\\test-results.md"
+      ]
+    },
+    {
+      "id": 20,
+      "task": "Calculate and document code reduction metrics",
+      "validation": "Count lines removed from build.ps1 (parameters, documentation, conditional logic). Document before/after line counts and complexity reduction. Compare with original ~590 lines to show percentage reduction. Add to summary.md.",
+      "files_affected": [
+        "C:\\development\\quaero\\docs\\simplify-build-script\\summary.md"
+      ]
+    },
+    {
+      "id": 21,
+      "task": "Create comprehensive summary document",
+      "validation": "Create docs/simplify-build-script/summary.md following the format of refactor-build-script-deployment/summary.md. Include: Executive Summary, Changes Made, Parameters Removed, Benefits, Test Results, Metrics, Migration Guide reference, and Sign-off section.",
+      "files_affected": [
+        "C:\\development\\quaero\\docs\\simplify-build-script\\summary.md"
+      ]
+    },
+    {
+      "id": 22,
+      "task": "Final validation and cleanup",
+      "validation": "Review all modified files for consistency. Verify no broken references to removed parameters exist. Verify all documentation is synchronized (README, CLAUDE, AGENTS). Verify test results are complete. Verify migration guide is comprehensive. Run spell check on documentation files.",
+      "files_affected": [
+        "C:\\development\\quaero\\scripts\\build.ps1",
+        "C:\\development\\quaero\\README.md",
+        "C:\\development\\quaero\\CLAUDE.md",
+        "C:\\development\\quaero\\AGENTS.md",
+        "C:\\development\\quaero\\docs\\simplify-build-script\\migration-guide.md",
+        "C:\\development\\quaero\\docs\\simplify-build-script\\test-results.md",
+        "C:\\development\\quaero\\docs\\simplify-build-script\\summary.md"
+      ]
+    }
+  ]
+}

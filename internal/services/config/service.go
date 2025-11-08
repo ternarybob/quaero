@@ -4,20 +4,16 @@ import (
 	"fmt"
 
 	"github.com/ternarybob/quaero/internal/common"
-	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
-// Service implements the ConfigService interface
+// Service implements ConfigService interface - simple wrapper around Config
 type Service struct {
 	config *common.Config
 }
 
-// NewService creates a new configuration service
-// The config parameter should already be loaded with defaults, file, env, and CLI overrides applied
-func NewService(config *common.Config) interfaces.ConfigService {
-	return &Service{
-		config: config,
-	}
+// NewService creates a new config service
+func NewService(cfg *common.Config) *Service {
+	return &Service{config: cfg}
 }
 
 // GetConfig returns the complete configuration

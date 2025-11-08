@@ -10,24 +10,28 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 
 **Building, compiling, and running the application MUST be done using:**
 - `.\scripts\build.ps1`
+- `.\scripts\build.ps1 -Deploy`
 - `.\scripts\build.ps1 -Run`
 - **ONLY exception:** `go build` for compile tests (no output binary)
 
 **Build Commands:**
 
 ```powershell
-# Development build
+# Development build (silent, no deployment, no version increment)
 .\scripts\build.ps1
 
-# Clean build
-.\scripts\build.ps1 -Clean
+# Deploy files to bin directory (stops service, deploys files)
+.\scripts\build.ps1 -Deploy
 
-# Release build (optimized)
-.\scripts\build.ps1 -Release
-
-# Build and run
+# Build, deploy, and run (starts service in new terminal)
 .\scripts\build.ps1 -Run
 ```
+
+**Important Notes:**
+- **Default build (no parameters)** - Builds executable silently, does NOT increment version, does NOT deploy files
+- **Version management** - Version number in `.version` file is NEVER auto-incremented, only build timestamp updates
+- **Deployment** - Use `-Deploy` or `-Run` to copy files (config, pages, Chrome extension) to bin/
+- **Removed parameters** - `-Clean`, `-Verbose`, `-Release`, `-ResetDatabase` removed for simplicity. See `docs/simplify-build-script/migration-guide.md` for alternatives
 
 ### Testing Instructions
 
