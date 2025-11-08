@@ -1,0 +1,73 @@
+{
+  "step": 1,
+  "step_name": "Add ended_at timestamp to job storage",
+  "validation_date": "2025-11-08T22:30:00Z",
+  "validator": "Agent 3 - VALIDATOR",
+  "status": "VALID",
+  "code_quality_score": 9,
+  "validation_rules": {
+    "code_compiles": {
+      "status": "PASS",
+      "evidence": "go build completed successfully with no errors"
+    },
+    "follows_conventions": {
+      "status": "PASS",
+      "evidence": "Uses existing SetJobFinished() method, follows error handling patterns, consistent code style"
+    },
+    "no_breaking_changes": {
+      "status": "PASS",
+      "evidence": "No signature changes, no schema changes, only additive modifications"
+    }
+  },
+  "requirements_met": {
+    "finished_at_on_completion": true,
+    "finished_at_on_failure": true,
+    "finished_at_on_cancellation": true,
+    "uses_existing_method": true,
+    "compiles": true,
+    "follows_patterns": true,
+    "no_breaking_changes": true
+  },
+  "terminal_states_covered": {
+    "completed": {
+      "covered": true,
+      "line_number": 178,
+      "method": "SetJobFinished"
+    },
+    "failed": {
+      "covered": true,
+      "line_number": 154,
+      "method": "SetJobFinished"
+    },
+    "cancelled": {
+      "covered": true,
+      "line_number": 144,
+      "method": "SetJobFinished"
+    }
+  },
+  "files_modified": [
+    "internal/jobs/processor/parent_job_executor.go"
+  ],
+  "changes_count": 3,
+  "issues_found": [],
+  "suggestions": [
+    {
+      "priority": "low",
+      "category": "testing",
+      "description": "Add unit tests to verify finished_at timestamp is set for all terminal states"
+    },
+    {
+      "priority": "low",
+      "category": "monitoring",
+      "description": "Consider adding telemetry for finished_at timestamp failures"
+    },
+    {
+      "priority": "low",
+      "category": "validation",
+      "description": "Run post-deployment SQL query to verify no jobs with NULL finished_at in terminal states"
+    }
+  ],
+  "next_step": 2,
+  "next_step_name": "Persist document_count in job metadata on completion",
+  "can_proceed": true
+}

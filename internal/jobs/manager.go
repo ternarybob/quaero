@@ -194,8 +194,11 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	// Create metadata JSON with phase
-	metadata := metadataJSON{Phase: "core"}
+	// Create metadata JSON with phase and document_count initialization
+	metadata := map[string]interface{}{
+		"phase":          "core",
+		"document_count": 0,
+	}
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return "", fmt.Errorf("marshal metadata: %w", err)
@@ -607,6 +610,50 @@ func (m *Manager) SetJobResult(ctx context.Context, jobID string, result interfa
 	_, err = m.db.ExecContext(context.Background(), `
 		UPDATE jobs SET metadata_json = ? WHERE id = ?
 	`, string(updatedMetadata), jobID)
+	return err
+}
+
+// IncrementDocumentCount increments the document_count in job metadata
+// This is used to track the number of documents saved by child jobs for a parent job
+func (m *Manager) IncrementDocumentCount(ctx context.Context, jobID string) error {
+	// Read current metadata
+	var metadataStr string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT metadata_json FROM jobs WHERE id = ?
+	`, jobID).Scan(&metadataStr)
+	if err != nil {
+		return fmt.Errorf("failed to get job metadata: %w", err)
+	}
+
+	// Parse metadata
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		return fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	// Increment document_count (default 0 if not exists)
+	currentCount := 0
+	if count, ok := metadata["document_count"].(float64); ok {
+		currentCount = int(count)
+	} else if count, ok := metadata["document_count"].(int); ok {
+		currentCount = count
+	}
+	metadata["document_count"] = currentCount + 1
+
+	// Save updated metadata
+	updatedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Use retry logic for write contention
+	err = retryOnBusy(ctx, func() error {
+		_, err := m.db.ExecContext(ctx, `
+			UPDATE jobs SET metadata_json = ? WHERE id = ?
+		`, string(updatedMetadata), jobID)
+		return err
+	})
+
 	return err
 }
 
@@ -1630,4 +1677,35 @@ func (m *Manager) GetChildJobStats(ctx context.Context, parentJobID string) (*Ch
 // GetQueue returns the queue manager for enqueueing jobs
 func (m *Manager) GetQueue() *queue.Manager {
 	return m.queue
+}
+
+// GetDocumentCount retrieves the document_count from job metadata
+// Returns 0 if document_count is not present in metadata
+func (m *Manager) GetDocumentCount(ctx context.Context, jobID string) (int, error) {
+	var metadataStr string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT metadata_json FROM jobs WHERE id = ?
+	`, jobID).Scan(&metadataStr)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to query metadata: %w", err)
+	}
+
+	// Parse metadata JSON
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		return 0, fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	// Extract document_count (handle both float64 and int types from JSON)
+	if val, ok := metadata["document_count"]; ok {
+		if floatVal, ok := val.(float64); ok {
+			return int(floatVal), nil
+		} else if intVal, ok := val.(int); ok {
+			return intVal, nil
+		}
+	}
+
+	// document_count not found in metadata, return 0
+	return 0, nil
 }

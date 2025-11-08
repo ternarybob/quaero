@@ -8,13 +8,8 @@ job_type = "user"
 description = "Crawler job that crawls a news website and filters for specific content"
 
 # Initial URLs to start crawling from
-start_urls = ["https://stockhead.com.au/just-in", "https://www.abc.net.au/news"]
+start_urls = ["https://www.abc.net.au/news"]
 
-# Cron schedule (empty = manual execution only)
-# Examples:
-#   "*/5 * * * *"  = Every 5 minutes
-#   "0 */6 * * *"  = Every 6 hours
-#   "0 0 * * *"    = Daily at midnight
 schedule = ""
 
 # Maximum execution time (e.g., "30m", "1h", "2h30m")
@@ -34,7 +29,7 @@ include_patterns = ["article", "news", "post"]
 exclude_patterns = ["login", "logout", "admin"]
 
 # Crawler behavior
-max_depth = 2       # Maximum depth to follow links
-max_pages = 100     # Maximum number of pages to crawl
+max_depth = 1       # Maximum depth to follow links
+max_pages = 1       # Maximum number of pages to crawl
 concurrency = 5     # Number of concurrent workers
 follow_links = true # Whether to follow discovered links

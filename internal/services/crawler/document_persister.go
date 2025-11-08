@@ -5,6 +5,7 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -16,13 +17,15 @@ import (
 // DocumentPersister handles persistence of crawled documents to the document storage system
 type DocumentPersister struct {
 	documentStorage interfaces.DocumentStorage
+	eventService    interfaces.EventService
 	logger          arbor.ILogger
 }
 
 // NewDocumentPersister creates a new document persister
-func NewDocumentPersister(documentStorage interfaces.DocumentStorage, logger arbor.ILogger) *DocumentPersister {
+func NewDocumentPersister(documentStorage interfaces.DocumentStorage, eventService interfaces.EventService, logger arbor.ILogger) *DocumentPersister {
 	return &DocumentPersister{
 		documentStorage: documentStorage,
+		eventService:    eventService,
 		logger:          logger,
 	}
 }
@@ -71,6 +74,37 @@ func (dp *DocumentPersister) SaveCrawledDocument(crawledDoc *CrawledDocument) er
 			Str("job_id", crawledDoc.JobID).
 			Int("content_size", crawledDoc.ContentSize).
 			Msg("Saved new crawled document")
+	}
+
+	// Publish document_saved event for parent job tracking
+	if dp.eventService != nil && crawledDoc.ParentJobID != "" {
+		payload := map[string]interface{}{
+			"job_id":        crawledDoc.JobID,
+			"parent_job_id": crawledDoc.ParentJobID,
+			"document_id":   doc.ID,
+			"source_url":    crawledDoc.SourceURL,
+			"timestamp":     time.Now().Format(time.RFC3339),
+		}
+		event := interfaces.Event{
+			Type:    interfaces.EventDocumentSaved,
+			Payload: payload,
+		}
+		// Publish asynchronously to not block document save
+		go func() {
+			if err := dp.eventService.Publish(context.Background(), event); err != nil {
+				dp.logger.Warn().
+					Err(err).
+					Str("document_id", doc.ID).
+					Str("parent_job_id", crawledDoc.ParentJobID).
+					Msg("Failed to publish document_saved event")
+			}
+		}()
+
+		dp.logger.Debug().
+			Str("document_id", doc.ID).
+			Str("job_id", crawledDoc.JobID).
+			Str("parent_job_id", crawledDoc.ParentJobID).
+			Msg("Published document_saved event")
 	}
 
 	return nil

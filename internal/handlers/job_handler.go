@@ -1140,6 +1140,7 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 
 // convertJobToMap converts a Job struct to a map for JSON response enrichment
 // IMPORTANT: Converts the Config field to a flexible map[string]interface{} for executor-agnostic display
+// Extracts document_count from metadata for easier UI access
 func convertJobToMap(job *models.Job) map[string]interface{} {
 	// Marshal to JSON then unmarshal to map to preserve all fields and JSON tags
 	data, err := json.Marshal(job)
@@ -1158,6 +1159,21 @@ func convertJobToMap(job *models.Job) map[string]interface{} {
 		// Config is already a map[string]interface{} after JSON round-trip
 		// Ensure it's displayed as a flexible object in the UI
 		jobMap["config"] = configInterface
+	}
+
+	// Extract document_count from metadata for easier access in UI
+	// This ensures completed parent jobs retain their document count after page reload
+	if metadataInterface, ok := jobMap["metadata"]; ok {
+		if metadata, ok := metadataInterface.(map[string]interface{}); ok {
+			if documentCount, ok := metadata["document_count"]; ok {
+				// Handle both float64 (from JSON unmarshal) and int types
+				if floatVal, ok := documentCount.(float64); ok {
+					jobMap["document_count"] = int(floatVal)
+				} else if intVal, ok := documentCount.(int); ok {
+					jobMap["document_count"] = intVal
+				}
+			}
+		}
 	}
 
 	return jobMap

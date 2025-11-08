@@ -140,12 +140,20 @@ func (e *ParentJobExecutor) monitorChildJobs(ctx context.Context, job *models.Jo
 		case <-ctx.Done():
 			jobLogger.Info().Msg("Parent job execution cancelled")
 			e.jobMgr.UpdateJobStatus(ctx, job.ID, "cancelled")
+			// Set finished_at timestamp for cancelled parent jobs
+			if err := e.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+				jobLogger.Warn().Err(err).Msg("Failed to set finished_at timestamp")
+			}
 			return ctx.Err()
 
 		case <-timeout:
 			jobLogger.Warn().Msg("Parent job timed out waiting for child jobs")
 			e.jobMgr.SetJobError(ctx, job.ID, "Timed out waiting for child jobs to complete")
 			e.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
+			// Set finished_at timestamp for failed parent jobs
+			if err := e.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+				jobLogger.Warn().Err(err).Msg("Failed to set finished_at timestamp")
+			}
 			return fmt.Errorf("parent job timed out")
 
 		case <-ticker.C:
@@ -164,6 +172,11 @@ func (e *ParentJobExecutor) monitorChildJobs(ctx context.Context, job *models.Jo
 				if err := e.jobMgr.UpdateJobStatus(ctx, job.ID, "completed"); err != nil {
 					jobLogger.Warn().Err(err).Msg("Failed to update job status to completed")
 					return fmt.Errorf("failed to update job status: %w", err)
+				}
+
+				// Set finished_at timestamp for completed parent jobs
+				if err := e.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+					jobLogger.Warn().Err(err).Msg("Failed to set finished_at timestamp")
 				}
 
 				// Add final job log
@@ -347,7 +360,46 @@ func (e *ParentJobExecutor) SubscribeToChildStatusChanges() {
 		return nil
 	})
 
-	e.logger.Info().Msg("ParentJobExecutor subscribed to child job status changes")
+	// Subscribe to document_saved events for real-time document count tracking
+	e.eventService.Subscribe(interfaces.EventDocumentSaved, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			e.logger.Warn().Msg("Invalid document_saved payload type")
+			return nil
+		}
+
+		// Extract parent job ID from payload
+		parentJobID := getStringFromPayload(payload, "parent_job_id")
+		if parentJobID == "" {
+			return nil // No parent job, ignore
+		}
+
+		// Extract additional fields for logging
+		documentID := getStringFromPayload(payload, "document_id")
+		jobID := getStringFromPayload(payload, "job_id")
+
+		// Increment document count in parent job metadata (async operation)
+		go func() {
+			if err := e.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
+				e.logger.Error().Err(err).
+					Str("parent_job_id", parentJobID).
+					Str("document_id", documentID).
+					Str("job_id", jobID).
+					Msg("Failed to increment document count for parent job")
+				return
+			}
+
+			e.logger.Debug().
+				Str("parent_job_id", parentJobID).
+				Str("document_id", documentID).
+				Str("job_id", jobID).
+				Msg("Incremented document count for parent job")
+		}()
+
+		return nil
+	})
+
+	e.logger.Info().Msg("ParentJobExecutor subscribed to child job status changes and document_saved events")
 }
 
 // formatProgressText generates the required progress format
@@ -374,6 +426,16 @@ func (e *ParentJobExecutor) publishParentJobProgressUpdate(
 	// Calculate overall status based on child states
 	overallStatus := e.calculateOverallStatus(stats)
 
+	// Get document count from job metadata (default to 0 if error)
+	documentCount, err := e.jobMgr.GetDocumentCount(ctx, parentJobID)
+	if err != nil {
+		// Log error but don't fail - just use default count of 0
+		e.logger.Debug().Err(err).
+			Str("parent_job_id", parentJobID).
+			Msg("Failed to retrieve document count from metadata, using default 0")
+		documentCount = 0
+	}
+
 	payload := map[string]interface{}{
 		"job_id":             parentJobID,
 		"status":             overallStatus,
@@ -384,6 +446,7 @@ func (e *ParentJobExecutor) publishParentJobProgressUpdate(
 		"failed_children":    stats.FailedChildren,
 		"cancelled_children": stats.CancelledChildren,
 		"progress_text":      progressText, // "X pending, Y running, Z completed, W failed"
+		"document_count":     documentCount, // Real-time document count from metadata
 		"timestamp":          time.Now().Format(time.RFC3339),
 	}
 

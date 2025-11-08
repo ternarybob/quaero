@@ -264,7 +264,7 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 
 	// Step 5: Store document with metadata
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Saving document to storage", seedURL)
-	docPersister := crawler.NewDocumentPersister(e.documentStorage, jobLogger)
+	docPersister := crawler.NewDocumentPersister(e.documentStorage, e.eventService, jobLogger)
 	if err := docPersister.SaveCrawledDocument(crawledDoc); err != nil {
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to save crawled document")
 		e.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to save crawled document: %v", err), map[string]interface{}{

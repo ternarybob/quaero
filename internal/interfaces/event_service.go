@@ -171,6 +171,17 @@ const (
 	//   - parent_id: string (optional - only present if this is a child job)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventJobStatusChange EventType = "job_status_change"
+
+	// EventDocumentSaved is published when a child job successfully saves a document.
+	// Published from DocumentPersister.SaveCrawledDocument after successful document persistence.
+	// Used by ParentJobExecutor to track document count for parent jobs in real-time.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (child job ID that saved the document)
+	//   - parent_job_id: string (parent job ID to update)
+	//   - document_id: string (saved document ID)
+	//   - source_url: string (document URL)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventDocumentSaved EventType = "document_saved"
 )
 
 // Event represents a system event

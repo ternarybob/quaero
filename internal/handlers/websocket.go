@@ -1027,6 +1027,7 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			"completed_children": getInt(payload, "completed_children"),
 			"failed_children":    getInt(payload, "failed_children"),
 			"cancelled_children": getInt(payload, "cancelled_children"),
+			"document_count":     getInt(payload, "document_count"),
 		}
 
 		// Broadcast to all clients

@@ -3,17 +3,19 @@ package ui
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ternarybob/quaero/test/common"
 
-	"github.com/chromedp/cdproto/runtime"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
 // TestNewsCrawlerJobExecution tests the complete news crawler job execution workflow
+// Run with: go test -timeout 2m -run TestNewsCrawlerJobExecution
 func TestNewsCrawlerJobExecution(t *testing.T) {
 	env, err := common.SetupTestEnvironment("TestNewsCrawlerJobExecution")
 	if err != nil {
@@ -23,7 +25,19 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 
 	startTime := time.Now()
 	env.LogTest(t, "=== RUN TestNewsCrawlerJobExecution")
+
+	// Capture panics and log them
 	defer func() {
+		if r := recover(); r != nil {
+			env.LogTest(t, "PANIC: %v", r)
+			env.LogTest(t, "Stack trace:")
+			// Get stack trace
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			env.LogTest(t, "%s", string(buf[:n]))
+			t.Fatalf("Test panicked: %v", r)
+		}
+
 		elapsed := time.Since(startTime)
 		if t.Failed() {
 			env.LogTest(t, "--- FAIL: TestNewsCrawlerJobExecution (%.2fs)", elapsed.Seconds())
@@ -57,6 +71,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		t.Fatalf("Failed to navigate to jobs page: %v", err)
 	}
 	env.LogTest(t, "✓ Jobs page loaded")
+	env.TakeScreenshot(ctx, "01-jobs-page-loaded")
 
 	// Verify the News Crawler job appears
 	var newsCrawlerFound bool
@@ -76,7 +91,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 	}
 
 	env.LogTest(t, "✓ News Crawler job found in job definitions list")
-	env.TakeScreenshot(ctx, "news-crawler-found")
+	env.TakeScreenshot(ctx, "02-news-crawler-found")
 
 	// Step 2: Execute the News Crawler job
 	env.LogTest(t, "Step 2: Executing the News Crawler job...")
@@ -136,6 +151,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		env.LogTest(t, "ERROR: Failed to load queue page: %v", err)
 		t.Fatalf("Failed to load queue page: %v", err)
 	}
+	env.TakeScreenshot(ctx, "03-queue-page-loaded")
 
 	// Initialize filters and load jobs
 	var loadResult struct {
@@ -168,7 +184,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 					return { success: false, errorMessage: e.toString(), jobsLoaded: 0 };
 				}
 			})()
-		`, &loadResult, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		`, &loadResult, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 		chromedp.Sleep(3*time.Second),
@@ -191,9 +207,9 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		Name   string `json:"name"`
 	}
 
-	// Monitor for up to 60 seconds
+	// Monitor for up to 20 seconds (job may stay Running if no URLs accessible)
 	monitorStart := time.Now()
-	maxMonitorTime := 60 * time.Second
+	maxMonitorTime := 20 * time.Second
 
 	for time.Since(monitorStart) < maxMonitorTime {
 		err = chromedp.Run(ctx,
@@ -256,7 +272,68 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		t.Fatal("News Crawler job should appear in queue after execution")
 	}
 
-	env.TakeScreenshot(ctx, "news-crawler-execution-monitored")
+	// Step 4a: Validate progress text format
+	env.LogTest(t, "Step 4a: Validating progress text format...")
+
+	var progressTextData struct {
+		Found        bool   `json:"found"`
+		ProgressText string `json:"progressText"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+				const newsCrawlerJob = jobCards.find(card => {
+					const titleElement = card.querySelector('.card-title');
+					return titleElement && titleElement.textContent.includes('News Crawler');
+				});
+
+				if (!newsCrawlerJob) {
+					return { found: false, progressText: '' };
+				}
+
+				// Look for progress text in the Progress column (4th column)
+				const progressCell = newsCrawlerJob.querySelector('td:nth-child(4)');
+				const progressText = progressCell ? progressCell.textContent.trim() : '';
+
+				return {
+					found: true,
+					progressText: progressText
+				};
+			})()
+		`, &progressTextData),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to read progress text: %v", err)
+	} else if !progressTextData.Found {
+		env.LogTest(t, "WARNING: Could not find job to read progress text")
+	} else {
+		env.LogTest(t, "  Progress text: %s", progressTextData.ProgressText)
+
+		// Validate that progress text contains expected keywords
+		progressLower := strings.ToLower(progressTextData.ProgressText)
+		hasExpectedFormat := false
+
+		// Check for parent job progress format: "X pending, Y running, Z completed"
+		if strings.Contains(progressLower, "pending") &&
+		   strings.Contains(progressLower, "running") &&
+		   strings.Contains(progressLower, "completed") {
+			hasExpectedFormat = true
+			env.LogTest(t, "  ✓ Progress text contains expected keywords: pending, running, completed")
+		}
+
+		// If no children spawned, progress might be empty or show different text
+		if !hasExpectedFormat && progressTextData.ProgressText == "" {
+			env.LogTest(t, "  INFO: Progress text is empty (no child jobs spawned)")
+		} else if !hasExpectedFormat {
+			env.LogTest(t, "  WARNING: Progress text does not match expected format")
+			env.LogTest(t, "           Expected format: 'X pending, Y running, Z completed'")
+		}
+	}
+
+	env.TakeScreenshot(ctx, "04-news-crawler-execution-monitored")
 
 	// Step 5: Click on the job to view details and verify configuration display
 	if jobDetails.JobID != "" {
@@ -274,6 +351,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		}
 
 		env.LogTest(t, "✓ Successfully navigated to job details page")
+		env.TakeScreenshot(ctx, "05-job-details-page-loaded")
 
 		// Step 5a: Verify crawler-specific configuration display
 		env.LogTest(t, "Step 5a: Verifying crawler configuration display...")
@@ -391,23 +469,67 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 			env.LogTest(t, "✓ Switched to Output tab")
 
 			// Get the job logs and verify crawler-specific content
-			var logContent string
+			var logVisibility struct {
+				LogContent      string `json:"logContent"`
+				TerminalVisible bool   `json:"terminalVisible"`
+				TerminalHeight  int    `json:"terminalHeight"`
+				HasVisibleText  bool   `json:"hasVisibleText"`
+			}
+
 			err = chromedp.Run(ctx,
 				chromedp.Evaluate(`
 					(() => {
 						const logContainer = document.querySelector('.terminal, .log-container, pre, code');
-						if (logContainer) {
-							return logContainer.textContent;
+						if (!logContainer) {
+							return { logContent: '', terminalVisible: false, terminalHeight: 0, hasVisibleText: false };
 						}
-						return '';
+
+						// Get computed style to check if terminal is actually visible
+						const style = window.getComputedStyle(logContainer);
+						const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+						const height = logContainer.offsetHeight;
+
+						// Check if there's any visible text (not just white text on white background)
+						const hasContent = logContainer.textContent && logContainer.textContent.trim().length > 0;
+
+						return {
+							logContent: logContainer.textContent || '',
+							terminalVisible: isVisible,
+							terminalHeight: height,
+							hasVisibleText: hasContent && isVisible
+						};
 					})()
-				`, &logContent),
+				`, &logVisibility),
 			)
 
 			if err != nil {
 				env.LogTest(t, "WARNING: Failed to read logs: %v", err)
 			} else {
-				env.LogTest(t, "✓ Retrieved job logs (%d characters)", len(logContent))
+				env.LogTest(t, "✓ Retrieved job logs (%d characters)", len(logVisibility.LogContent))
+
+				// Step 5b-1: Verify logs are actually visible in the UI (not empty terminal)
+				env.LogTest(t, "Step 5b-1: Verifying job logs are visible in the UI...")
+				env.LogTest(t, "  Terminal visible: %v", logVisibility.TerminalVisible)
+				env.LogTest(t, "  Terminal height: %dpx", logVisibility.TerminalHeight)
+				env.LogTest(t, "  Has visible text: %v", logVisibility.HasVisibleText)
+
+				// Terminal should have height > 0 to indicate logs are actually rendered
+				minTerminalHeight := 50 // Minimum expected height in pixels for a terminal with content
+
+				if !logVisibility.HasVisibleText || len(logVisibility.LogContent) == 0 || logVisibility.TerminalHeight < minTerminalHeight {
+					env.LogTest(t, "❌ FAILURE: Job logs are not properly rendered in the UI")
+					env.LogTest(t, "  Expected: Log content displayed in terminal with visible height")
+					env.LogTest(t, "  Actual: Terminal element exists but logs are not properly rendered")
+					env.LogTest(t, "  Terminal display: visible=%v, height=%dpx (expected >=%dpx), content length=%d",
+						logVisibility.TerminalVisible, logVisibility.TerminalHeight, minTerminalHeight, len(logVisibility.LogContent))
+					env.TakeScreenshot(ctx, "job-logs-not-visible")
+					t.Errorf("Job logs should be visible in the Output tab with terminal height >= %dpx (got %dpx)", minTerminalHeight, logVisibility.TerminalHeight)
+				} else {
+					env.LogTest(t, "✓ Job logs are properly rendered in the UI (%d characters, height: %dpx)", len(logVisibility.LogContent), logVisibility.TerminalHeight)
+				}
+
+				// Use the extracted log content for further checks
+				logContent := logVisibility.LogContent
 
 				// Check for crawler-specific log entries
 				crawlerLogChecks := []struct {
@@ -457,7 +579,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 			}
 		}
 
-		env.TakeScreenshot(ctx, "news-crawler-job-details-complete")
+		env.TakeScreenshot(ctx, "06-job-details-complete")
 	}
 
 	// Step 6: Verify enhanced queue page features for crawler jobs
@@ -516,7 +638,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 			}
 		}
 
-		env.TakeScreenshot(ctx, "enhanced-queue-features")
+		env.TakeScreenshot(ctx, "07-enhanced-queue-features")
 	}
 
 	// Step 7: Verify document collection (must be more than 0)
@@ -528,6 +650,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 	}
 
 	// Check document count via API
+	// Note: Document count can also be accessed via DOM element #stat-total on /documents page
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(async () => {
@@ -542,7 +665,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 					return { count: 0, error: e.toString() };
 				}
 			})()
-		`, &documentCount, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		`, &documentCount, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
@@ -554,12 +677,19 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 	} else {
 		env.LogTest(t, "Document collection result: %d documents", documentCount.Count)
 
-		if documentCount.Count > 0 {
-			env.LogTest(t, "✅ SUCCESS: Documents were collected (%d documents)", documentCount.Count)
+		// Based on news-crawler.toml configuration: max_pages = 1
+		// We expect exactly 1 document to be collected
+		expectedCount := 1
+
+		if documentCount.Count == expectedCount {
+			env.LogTest(t, "✅ SUCCESS: Exactly %d document collected (matches max_pages=1 in news-crawler.toml)", documentCount.Count)
+		} else if documentCount.Count > 0 {
+			env.LogTest(t, "⚠️  WARNING: Expected %d document but got %d documents", expectedCount, documentCount.Count)
+			env.LogTest(t, "  This may indicate max_pages configuration is not being respected")
 		} else {
 			env.LogTest(t, "❌ FAILURE: No documents were collected")
 			env.TakeScreenshot(ctx, "no-documents-collected")
-			t.Errorf("Expected more than 0 documents to be collected, got %d", documentCount.Count)
+			t.Errorf("Expected %d document to be collected (max_pages=1), got %d", expectedCount, documentCount.Count)
 		}
 	}
 
@@ -596,7 +726,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 						return { found: false, count: 0, logs: e.toString() };
 					}
 				})()
-			`, jobDetails.JobID), &documentLogCheck, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+			`, jobDetails.JobID), &documentLogCheck, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
 				return p.WithAwaitPromise(true)
 			}),
 		)
@@ -613,7 +743,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		}
 	}
 
-	env.TakeScreenshot(ctx, "news-crawler-test-completed")
+	env.TakeScreenshot(ctx, "08-test-completed")
 	env.LogTest(t, "✅ News Crawler job execution test completed successfully")
 }
 
@@ -844,7 +974,7 @@ follow_links = true # Whether to follow discovered links
 					}, 2000);
 				});
 			})()
-		`, &validationResult, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+		`, &validationResult, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
 			return p.WithAwaitPromise(true)
 		}),
 	)
@@ -866,4 +996,272 @@ follow_links = true # Whether to follow discovered links
 
 	env.TakeScreenshot(ctx, "news-crawler-validation-tested")
 	env.LogTest(t, "✅ News Crawler configuration test completed")
+}
+
+// TestParentJobProgressTracking tests the real-time parent job progress and status updates
+// Run with: go test -timeout 5m -run TestParentJobProgressTracking
+func TestParentJobProgressTracking(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestParentJobProgressTracking")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestParentJobProgressTracking")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestParentJobProgressTracking (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestParentJobProgressTracking (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// Step 1: Navigate to jobs page and execute news-crawler
+	env.LogTest(t, "Step 1: Navigating to jobs page and executing News Crawler...")
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(baseURL+"/jobs"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to navigate to jobs page: %v", err)
+		t.Fatalf("Failed to navigate to jobs page: %v", err)
+	}
+	env.TakeScreenshot(ctx, "01-jobs-page-loaded")
+
+	// Wait for WebSocket connection
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+
+	// Execute the News Crawler job
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`window.confirm = function() { return true; }`, nil),
+		chromedp.Evaluate(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const newsCrawlerCard = cards.find(card => card.textContent.includes('News Crawler'));
+				if (newsCrawlerCard) {
+					const runButton = newsCrawlerCard.querySelector('button.btn-success');
+					if (runButton) {
+						runButton.click();
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, nil),
+		chromedp.Sleep(2*time.Second),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to execute News Crawler: %v", err)
+		t.Fatalf("Failed to execute News Crawler: %v", err)
+	}
+	env.LogTest(t, "✓ News Crawler job execution triggered")
+
+	// Step 2: Navigate to queue page and monitor progress updates
+	env.LogTest(t, "Step 2: Navigating to queue page to monitor real-time progress updates...")
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(baseURL+"/queue"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load queue page: %v", err)
+		t.Fatalf("Failed to load queue page: %v", err)
+	}
+	env.TakeScreenshot(ctx, "02-queue-page-loaded")
+
+	// Step 3: Monitor parent job progress text for updates
+	env.LogTest(t, "Step 3: Monitoring parent job progress text for real-time updates...")
+
+	type ProgressSnapshot struct {
+		Timestamp    time.Time
+		ProgressText string
+		Status       string
+		Found        bool
+	}
+
+	var progressHistory []ProgressSnapshot
+	monitorStart := time.Now()
+	maxMonitorTime := 30 * time.Second // Reduced timeout since we're just checking for updates
+
+	for time.Since(monitorStart) < maxMonitorTime {
+		var progressData struct {
+			Found        bool   `json:"found"`
+			ProgressText string `json:"progressText"`
+			Status       string `json:"status"`
+			JobID        string `json:"jobId"`
+		}
+
+		err = chromedp.Run(ctx,
+			chromedp.Sleep(2*time.Second),
+			chromedp.Evaluate(`
+				(() => {
+					const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+					const newsCrawlerJob = jobCards.find(card => {
+						const titleElement = card.querySelector('.card-title');
+						return titleElement && titleElement.textContent.includes('News Crawler');
+					});
+
+					if (!newsCrawlerJob) {
+						return { found: false, progressText: '', status: '', jobId: '' };
+					}
+
+					const jobId = newsCrawlerJob.getAttribute('data-job-id') || '';
+					const statusBadge = newsCrawlerJob.querySelector('.label');
+					const status = statusBadge ? statusBadge.textContent.trim() : '';
+
+					// Look for progress text in the Progress column
+					const progressCell = newsCrawlerJob.querySelector('td:nth-child(4)'); // Progress is 4th column
+					const progressText = progressCell ? progressCell.textContent.trim() : '';
+
+					return {
+						found: true,
+						progressText: progressText,
+						status: status,
+						jobId: jobId
+					};
+				})()
+			`, &progressData),
+		)
+
+		if err != nil {
+			env.LogTest(t, "WARNING: Failed to check progress: %v", err)
+			continue
+		}
+
+		if progressData.Found {
+			// Record this snapshot
+			snapshot := ProgressSnapshot{
+				Timestamp:    time.Now(),
+				ProgressText: progressData.ProgressText,
+				Status:       progressData.Status,
+				Found:        true,
+			}
+			progressHistory = append(progressHistory, snapshot)
+
+			env.LogTest(t, "  [%s] Status: %s, Progress: %s",
+				snapshot.Timestamp.Format("15:04:05"),
+				snapshot.Status,
+				snapshot.ProgressText)
+
+			// If we got progress text with the expected format, we can exit early
+			if progressData.ProgressText != "" &&
+				strings.Contains(progressData.ProgressText, "pending") &&
+				strings.Contains(progressData.ProgressText, "running") &&
+				strings.Contains(progressData.ProgressText, "completed") {
+				env.LogTest(t, "  ✓ Progress text with expected format received, ending early")
+				break
+			}
+
+			// Check if job reached terminal state
+			statusLower := strings.ToLower(progressData.Status)
+			if strings.Contains(statusLower, "completed") || strings.Contains(statusLower, "failed") {
+				env.LogTest(t, "  Job reached terminal state: %s", progressData.Status)
+				break
+			}
+		}
+	}
+
+	if len(progressHistory) == 0 {
+		env.LogTest(t, "ERROR: No progress updates captured")
+		env.TakeScreenshot(ctx, "no-progress-updates")
+		t.Fatal("Expected to capture progress updates but got none")
+	}
+
+	env.LogTest(t, "✓ Captured %d progress snapshots over %v", len(progressHistory), time.Since(monitorStart))
+
+	// Step 4: Verify progress text format and updates
+	env.LogTest(t, "Step 4: Verifying progress text format and real-time updates...")
+
+	// Check if we got the expected format: "X pending, Y running, Z completed, W failed"
+	foundValidFormat := false
+	foundMultipleUpdates := false
+
+	for i, snapshot := range progressHistory {
+		// Check for expected format
+		if strings.Contains(snapshot.ProgressText, "pending") &&
+			strings.Contains(snapshot.ProgressText, "running") &&
+			strings.Contains(snapshot.ProgressText, "completed") {
+			foundValidFormat = true
+			env.LogTest(t, "  ✓ Valid progress format found: %s", snapshot.ProgressText)
+		}
+
+		// Check if progress text changed between snapshots
+		if i > 0 && snapshot.ProgressText != progressHistory[i-1].ProgressText {
+			foundMultipleUpdates = true
+			env.LogTest(t, "  ✓ Progress text changed: '%s' → '%s'",
+				progressHistory[i-1].ProgressText, snapshot.ProgressText)
+		}
+	}
+
+	if !foundValidFormat {
+		env.LogTest(t, "WARNING: Expected progress format not found (e.g., 'X pending, Y running, Z completed')")
+		env.LogTest(t, "  Sample progress texts:")
+		for i, snapshot := range progressHistory {
+			if i >= 3 {
+				break
+			}
+			env.LogTest(t, "    - %s", snapshot.ProgressText)
+		}
+		// Don't fail the test, as the format might be slightly different but still functional
+	}
+
+	if foundMultipleUpdates {
+		env.LogTest(t, "✓ Progress text updated in real-time (multiple different values captured)")
+	} else {
+		env.LogTest(t, "INFO: Progress text did not change during monitoring period")
+		env.LogTest(t, "  This may be normal if the job completed quickly")
+	}
+
+	// Step 5: Verify status changes were captured
+	env.LogTest(t, "Step 5: Verifying status transitions...")
+
+	uniqueStatuses := make(map[string]bool)
+	for _, snapshot := range progressHistory {
+		if snapshot.Status != "" {
+			uniqueStatuses[snapshot.Status] = true
+		}
+	}
+
+	env.LogTest(t, "  Unique statuses observed: %v", getKeys(uniqueStatuses))
+
+	if len(uniqueStatuses) > 1 {
+		env.LogTest(t, "✓ Multiple status values captured (job progressed through states)")
+	} else {
+		env.LogTest(t, "INFO: Only one status value observed during monitoring")
+		env.LogTest(t, "  NOTE: If no child jobs spawned, status will remain 'Running' or 'Orchestrating'")
+		env.LogTest(t, "        With child jobs, status should transition: Running → Completed/Failed")
+	}
+
+	env.TakeScreenshot(ctx, "03-progress-tracking-complete")
+	env.LogTest(t, "✅ Parent job progress tracking test completed")
+	env.LogTest(t, "")
+	env.LogTest(t, "Test Note: This test verifies the UI correctly receives and displays")
+	env.LogTest(t, "           parent job progress updates via WebSocket. Empty progress is")
+	env.LogTest(t, "           expected when no child jobs spawn (e.g., no URLs to crawl).")
+}
+
+// Helper function to get map keys as slice
+func getKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

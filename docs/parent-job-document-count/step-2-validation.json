@@ -1,0 +1,54 @@
+{
+  "step": 2,
+  "status": "VALID",
+  "validation_date": "2025-11-08",
+  "criteria_checked": [
+    {
+      "criterion": "EventService injected via constructor",
+      "passed": true,
+      "notes": "DocumentPersister struct has `eventService interfaces.EventService` field (line 20) and NewDocumentPersister() constructor accepts EventService as second parameter (line 25), properly storing it in the struct (line 28). Follows dependency injection pattern correctly."
+    },
+    {
+      "criterion": "Event published after save",
+      "passed": true,
+      "notes": "Event is published after successful document save/update (lines 79-108). The event publishing logic is placed after both the create path (lines 62-77) and update path (lines 40-59) have completed successfully, ensuring events are only published for successfully persisted documents."
+    },
+    {
+      "criterion": "All 5 payload fields present",
+      "passed": true,
+      "notes": "Event payload includes all 5 required fields as specified in plan.md: job_id (line 82), parent_job_id (line 83), document_id (line 84), source_url (line 85), and timestamp (line 86 in RFC3339 format). Payload structure matches Step 1 documentation in event_service.go lines 175-184."
+    },
+    {
+      "criterion": "Async publishing",
+      "passed": true,
+      "notes": "Event publishing is asynchronous via goroutine (lines 93-101). The go func() wrapper ensures document save operation is not blocked. Error handling is present inside the goroutine - if publish fails, only a warning is logged (lines 95-99), preventing failures from affecting document persistence."
+    },
+    {
+      "criterion": "Handles missing parent_job_id",
+      "passed": true,
+      "notes": "Conditional publishing logic checks both conditions (line 80): 'dp.eventService != nil && crawledDoc.ParentJobID != \"\"'. If EventService is nil OR ParentJobID is empty, event is not published. This gracefully handles cases where documents have no parent job (e.g., standalone crawls) or EventService is not initialized."
+    },
+    {
+      "criterion": "Follows DI pattern",
+      "passed": true,
+      "notes": "Implementation follows Quaero's dependency injection pattern perfectly. Constructor-based injection with explicit parameter passing. EventService is passed as interface (interfaces.EventService), not concrete type. No global state, no service locators. Consistent with codebase conventions shown in enhanced_crawler_executor.go and other service files."
+    },
+    {
+      "criterion": "Code compiles",
+      "passed": true,
+      "notes": "Code compiles successfully with 'go build ./...' command. No compilation errors. All imports are present (context added at line 8). Event type EventDocumentSaved defined in Step 1 is correctly referenced at line 89."
+    },
+    {
+      "criterion": "Executor updated correctly",
+      "passed": true,
+      "notes": "enhanced_crawler_executor.go correctly updated to pass EventService to DocumentPersister constructor at line 267: 'docPersister := crawler.NewDocumentPersister(e.documentStorage, e.eventService, jobLogger)'. EventService is available as field e.eventService (line 30). The same docPersister instance is reused at line 411 for updating link statistics, so event will be published again if needed."
+    }
+  ],
+  "issues_found": [],
+  "recommendations": [
+    "Consider adding debug logging inside the goroutine (lines 93-101) to confirm successful event publishing, not just failures. This would help with debugging and verification during testing.",
+    "In SaveCrawledDocuments() batch method (lines 114-139), no event publishing is implemented. If batch saves need document count tracking, consider adding similar event publishing logic for each document in the batch.",
+    "The event publishing happens for both create and update paths. This is correct for the use case (document count should track all saves), but if future requirements need to distinguish creates vs updates, consider adding a 'save_type' field to the event payload."
+  ],
+  "overall_assessment": "Step 2 implementation is VALID and fully compliant with plan.md requirements. All validation criteria passed successfully. The implementation follows Quaero's architectural patterns (dependency injection, async event publishing, error handling). The code is production-ready with proper error handling, logging, and defensive checks. EventService integration is clean and doesn't introduce coupling or breaking changes. The implementation matches the detailed specification in plan.md lines 59-100 exactly. Ready to proceed to Step 3 (Add document count tracking to job metadata)."
+}
