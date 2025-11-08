@@ -304,8 +304,9 @@ func (j *Job) MarkCompleted() {
 	j.Status = JobStatusCompleted
 	now := time.Now()
 	j.CompletedAt = &now
+	// Note: ResultCount is managed via event-driven metadata updates (EventDocumentSaved)
+	// Do not overwrite with progress.completed_urls as it causes double counting
 	if j.Progress != nil {
-		j.ResultCount = j.Progress.CompletedURLs
 		j.FailedCount = j.Progress.FailedURLs
 	}
 }
@@ -316,8 +317,9 @@ func (j *Job) MarkFailed(errorMsg string) {
 	j.Error = errorMsg
 	now := time.Now()
 	j.CompletedAt = &now
+	// Note: ResultCount is managed via event-driven metadata updates (EventDocumentSaved)
+	// Do not overwrite with progress.completed_urls as it causes double counting
 	if j.Progress != nil {
-		j.ResultCount = j.Progress.CompletedURLs
 		j.FailedCount = j.Progress.FailedURLs
 	}
 }

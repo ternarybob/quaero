@@ -1041,9 +1041,25 @@ func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// No need to mask sensitive data for JobModel - Config and Metadata are already maps
-	pendingJobs := pendingJobsInterface
-	runningJobs := runningJobsInterface
+	// Convert jobs to enriched maps to extract document_count from metadata
+	// This ensures the queue endpoint returns consistent data with document_count field
+	pendingJobs := make([]map[string]interface{}, 0, len(pendingJobsInterface))
+	for _, jobModel := range pendingJobsInterface {
+		// Convert JobModel to Job for convertJobToMap compatibility
+		job := models.NewJob(jobModel)
+		jobMap := convertJobToMap(job)
+		jobMap["parent_id"] = jobModel.ParentID
+		pendingJobs = append(pendingJobs, jobMap)
+	}
+
+	runningJobs := make([]map[string]interface{}, 0, len(runningJobsInterface))
+	for _, jobModel := range runningJobsInterface {
+		// Convert JobModel to Job for convertJobToMap compatibility
+		job := models.NewJob(jobModel)
+		jobMap := convertJobToMap(job)
+		jobMap["parent_id"] = jobModel.ParentID
+		runningJobs = append(runningJobs, jobMap)
+	}
 
 	totalCount := len(pendingJobs) + len(runningJobs)
 

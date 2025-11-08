@@ -466,9 +466,17 @@
                 async loadJobLogs() {
                     this.loading = true;
                     try {
+                        // Determine if this is a parent job (no parent_id or parent_id is empty/null)
+                        const isParentJob = !this.job.parent_id || this.job.parent_id === '';
+
+                        // Use aggregated logs endpoint for parent jobs, single job logs for child jobs
+                        const endpoint = isParentJob
+                            ? `/api/jobs/${this.jobId}/logs/aggregated`
+                            : `/api/jobs/${this.jobId}/logs`;
+
                         // Build query string with level parameter for server-side filtering
                         const qs = this.selectedLogLevel === 'all' ? '' : ('?level=' + encodeURIComponent(this.selectedLogLevel));
-                        const response = await fetch(`/api/jobs/${this.jobId}/logs${qs}`);
+                        const response = await fetch(`${endpoint}${qs}`);
                         if (!response.ok) {
                             throw new Error('Failed to fetch job logs');
                         }

@@ -1,9 +1,9 @@
 ---
 name: 3agent
-description: Three-agent workflow - plan, implement with validation gates
+description: Four-agent workflow - plan, implement, validate, and test with parallel execution
 ---
 
-Execute a three-agent workflow for: $ARGUMENTS
+Execute a four-agent workflow for: $ARGUMENTS
 
 ## GLOBAL RULE: ALL FILES ARE MARKDOWN
 **Every file created in `docs/{folder-name}/` must be a .md file**
@@ -17,13 +17,25 @@ Reference throughout workflow:
 project:
   docs_root: docs
   build_script: ./scripts/build.ps1
-  test_api: ./test/api/
-  test_ui: ./test/ui/
+  test_api: /test/api
+  test_ui: /test/ui
+  development_mode: beta
+  deployment: local_only
+
+test_rules:
+  - only_two_test_locations: "Tests ONLY in /test/api and /test/ui - no other locations"
+  - follow_existing_structure: "Strictly follow existing test patterns and structure - do not invent new patterns"
+  - unit_tests_with_code: "Unit tests are co-located with source code"
+
+principles:
+  - ignore_backward_compatibility: "This is beta development - database rebuilds on each run, no migration concerns"
+  - breaking_changes_allowed: "Breaking changes are acceptable, optimize for clean design over compatibility"
 
 agents:
   planner: claude-opus-4-20250514
   implementer: claude-sonnet-4-20250514
   validator: claude-sonnet-4-20250514
+  test_updater: claude-sonnet-4-20250514
 
 validation_rules:
   - no_root_binaries: Binaries must not be in root directory
@@ -46,6 +58,11 @@ validation_rules:
 **Model:** `claude-opus-4-20250514`
 
 **Analyze and break down task into optimal sequence**
+
+**Consider:**
+- This is beta development - ignore backward compatibility
+- Breaking changes are acceptable - optimize for clean design
+- Database rebuilds every time - no migration concerns
 
 **Create:** `docs/{folder-name}/plan.md`
 
@@ -92,10 +109,11 @@ estimated_steps: N
 1. Read `docs/{folder-name}/plan.md` → find current step
 2. Read `docs/{folder-name}/progress.md` → check what's completed
 3. Implement following rules:
-   - Use `go run` with temp output for testing
+   - Use `go run` with temp output for testing (never create binaries in root)
+   - For compile checks: `go build -o /tmp/test-binary` or discard output
    - Use `build_script` for final builds only
-   - Put tests in correct test directory
-   - Run: `cd {test_dir} && go test -v`
+   - Put tests in `/test/api` or `/test/ui` only
+   - Run tests: `cd /test/api && go test -v` or `cd /test/ui && go test -v`
 
 4. **Update:** `docs/{folder-name}/progress.md`
 
@@ -119,6 +137,70 @@ Last updated: {ISO8601}
 ```
 
 **HALT** - Wait for validation before proceeding
+
+---
+
+## AGENT 4 - TEST UPDATER (Claude Sonnet)
+
+**Model:** `claude-sonnet-4-20250514`
+
+**Can run in parallel with Agent 3 validation**
+
+**CRITICAL TEST RULES:**
+- Tests ONLY in `/test/api` and `/test/ui` - no other locations
+- STRICTLY follow existing test patterns and structure
+- Do NOT invent new test patterns or conventions
+- Study existing tests first before making changes
+
+**For current step only:**
+
+1. Read `docs/{folder-name}/plan.md` → understand changes made in current step
+2. Find relevant existing tests:
+   - API tests: `/test/api`
+   - UI tests: `/test/ui`
+3. Study existing test structure and patterns
+4. Update tests to match new functionality (following existing patterns)
+5. Execute tests from test directories:
+   - `cd /test/api && go test -v`
+   - `cd /test/ui && go test -v`
+6. Document results
+
+**Create:** `docs/{folder-name}/step-{N}-tests.md`
+
+```markdown
+# Test Updates: Step {N}
+
+## Tests Modified
+- {test_file_1} - {reason}
+- {test_file_2} - {reason}
+
+## Tests Added
+- {new_test_file} - {coverage}
+
+## Test Execution Results
+
+### API Tests (/test/api)
+```
+{output from: cd /test/api && go test -v}
+```
+
+### UI Tests (/test/ui)
+```
+{output from: cd /test/ui && go test -v}
+```
+
+## Summary
+- Total tests run: {N}
+- Passed: {N}
+- Failed: {N}
+- Coverage: {percentage if available}
+
+## Status: PASS | FAIL
+
+Updated: {ISO8601}
+```
+
+**Note:** Agent 4 can run while Agent 3 validates, results feed into final step validation
 
 ---
 
@@ -166,17 +248,22 @@ Validated: {ISO8601}
 ```
 WHILE steps remain:
   1. Run Agent 2 (Sonnet) - implements current step
-  2. Run Agent 3 (Sonnet) - validates current step
-  3. IF validation shows "INVALID":
-       → Agent 2 fixes (reads validation feedback)
+  2. Run in parallel:
+     → Agent 3 (Sonnet) - validates current step
+     → Agent 4 (Sonnet) - updates and runs tests
+  3. Wait for both to complete
+  4. IF validation shows "INVALID" OR tests show "FAIL":
+       → Agent 2 fixes issues (reads validation + test feedback)
        → Agent 3 re-validates
-       → REPEAT until "VALID"
-  4. IF validation shows "VALID":
+       → Agent 4 re-runs tests
+       → REPEAT until both "VALID" and "PASS"
+  5. IF validation shows "VALID" AND tests show "PASS":
        → Mark step complete in progress.md
-       → Move to next step
+       → INCREMENT current_step
+       → CONTINUE to next iteration
 ```
 
-**Critical:** Never advance without "Status: VALID"
+**Critical:** Never advance without both "Status: VALID" and "Status: PASS"
 
 ---
 
@@ -193,11 +280,14 @@ When all steps show ✅ in progress.md:
 - Planning: Claude Opus
 - Implementation: Claude Sonnet  
 - Validation: Claude Sonnet
+- Test Updates: Claude Sonnet
 
 ## Results
 - Steps completed: {N}
 - Validation cycles: {total attempts}
-- Average quality score: {X}/10
+- Average code quality score: {X}/10
+- Total tests run: {N}
+- Test pass rate: {percentage}
 
 ## Artifacts Created/Modified
 - {file 1}
@@ -224,6 +314,13 @@ Completed: {ISO8601}
 
 All {N} steps completed
 Total validation cycles: {count}
+Total tests run: {test_count}
+
+Models used:
+- Planner: claude-opus-4-20250514
+- Implementer: claude-sonnet-4-20250514
+- Validator: claude-sonnet-4-20250514
+- Test Updater: claude-sonnet-4-20250514
 
 Completed: {ISO8601}
 ```
@@ -234,12 +331,12 @@ Completed: {ISO8601}
 
 Each rule is checked programmatically:
 
-- **no_root_binaries:** Check root has no new executables
+- **no_root_binaries:** Check root has no new executables (compile tests must use `-o /tmp/` or discard output)
 - **use_build_script:** Verify build script used (not manual builds)
-- **tests_in_correct_dir:** Check test file paths
-- **tests_must_pass:** Run `go test -v`, check exit code = 0
-- **code_compiles:** Verify `go build` or `go run` succeeds
-- **follows_conventions:** Check formatting, naming, structure
+- **tests_in_correct_dir:** Tests ONLY in `/test/api` or `/test/ui` - no other locations
+- **tests_must_pass:** Run `cd /test/api && go test -v` and `cd /test/ui && go test -v`, check exit code = 0
+- **code_compiles:** Verify code compiles with `go build -o /tmp/test-binary` or `go run` (never create binaries in root)
+- **follows_conventions:** Check formatting, naming, structure, and that existing test patterns are followed
 
 ---
 

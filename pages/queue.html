@@ -1914,21 +1914,19 @@
 
 
                 getDocumentsCount(job) {
-                    // For parent jobs, use document_count from metadata (real-time count via WebSocket)
-                    if (job.child_count > 0 && job.document_count !== undefined && job.document_count !== null) {
+                    // PRIORITY 1: Use document_count from metadata (real-time count via WebSocket)
+                    // This field is extracted from job.metadata.document_count by the backend
+                    // and is the authoritative source for document counts
+                    if (job.document_count !== undefined && job.document_count !== null) {
                         return job.document_count;
                     }
 
-                    // For completed/failed/cancelled jobs, use result_count (authoritative snapshot)
-                    // For running/pending jobs, use progress.completed_urls (real-time counter)
-                    const terminalStatuses = ['completed', 'failed', 'cancelled'];
-
-                    // Check if job is in terminal status and has result_count
-                    if (terminalStatuses.includes(job.status) && job.result_count !== undefined && job.result_count !== null) {
-                        return job.result_count;
+                    // PRIORITY 2: For jobs without metadata.document_count, check metadata directly
+                    if (job.metadata && job.metadata.document_count !== undefined && job.metadata.document_count !== null) {
+                        return job.metadata.document_count;
                     }
 
-                    // For active jobs or fallback, use progress.completed_urls
+                    // PRIORITY 3: For active jobs, use progress.completed_urls (real-time counter)
                     if (job.progress) {
                         try {
                             const progress = typeof job.progress === 'string' ? JSON.parse(job.progress) : job.progress;
@@ -1940,7 +1938,8 @@
                         }
                     }
 
-                    // Final fallback to result_count if available
+                    // PRIORITY 4: Fallback to result_count (snapshot at completion)
+                    // Note: result_count should equal document_count for properly tracked jobs
                     if (job.result_count !== undefined && job.result_count !== null) {
                         return job.result_count;
                     }
