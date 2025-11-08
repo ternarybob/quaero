@@ -9,6 +9,12 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
+// nonLoggableEvents defines event types that should NOT be logged by EventService
+// to prevent circular logging conditions (e.g., log_event triggering more log_event)
+var nonLoggableEvents = map[interfaces.EventType]bool{
+	"log_event": true, // Log events are published by LogConsumer - don't log them
+}
+
 // Service implements EventService interface with pub/sub pattern
 type Service struct {
 	subscribers map[interfaces.EventType][]interfaces.EventHandler
@@ -82,10 +88,13 @@ func (s *Service) Publish(ctx context.Context, event interfaces.Event) error {
 		return nil
 	}
 
-	s.logger.Info().
-		Str("event_type", string(event.Type)).
-		Int("subscriber_count", len(handlers)).
-		Msg("Publishing event")
+	// Only log event publication if not in blacklist (prevents circular logging)
+	if !nonLoggableEvents[event.Type] {
+		s.logger.Info().
+			Str("event_type", string(event.Type)).
+			Int("subscriber_count", len(handlers)).
+			Msg("Publishing event")
+	}
 
 	for _, handler := range handlers {
 		go func(h interfaces.EventHandler) {
@@ -122,10 +131,13 @@ func (s *Service) PublishSync(ctx context.Context, event interfaces.Event) error
 		return nil
 	}
 
-	s.logger.Info().
-		Str("event_type", string(event.Type)).
-		Int("subscriber_count", len(handlers)).
-		Msg("*** EVENT SERVICE: Publishing event synchronously to all handlers")
+	// Only log event publication if not in blacklist (prevents circular logging)
+	if !nonLoggableEvents[event.Type] {
+		s.logger.Info().
+			Str("event_type", string(event.Type)).
+			Int("subscriber_count", len(handlers)).
+			Msg("*** EVENT SERVICE: Publishing event synchronously to all handlers")
+	}
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(handlers))
