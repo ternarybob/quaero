@@ -6,7 +6,6 @@ import (
 
 	"maragu.dev/goqite"
 
-	arbormodels "github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
@@ -40,11 +39,8 @@ type WebSocketHandler interface {
 	BroadcastLog(entry LogEntry)
 }
 
-// LogService manages batch log persistence
+// LogService manages log storage operations only
 type LogService interface {
-	Start() error
-	Stop() error
-	GetChannel() chan []arbormodels.LogEvent
 	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error
 	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error
 	GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error)

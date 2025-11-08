@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -530,6 +531,12 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 	if logs == nil {
 		logs = []interfaces.LogEntry{}
 	}
+
+	// Sort logs by timestamp in chronological order (oldest first)
+	// Timestamps are in "HH:MM:SS" format
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Timestamp < logs[j].Timestamp
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

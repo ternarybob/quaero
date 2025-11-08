@@ -18,10 +18,17 @@ type Service struct {
 
 // NewService creates a new event service
 func NewService(logger arbor.ILogger) interfaces.EventService {
-	return &Service{
+	service := &Service{
 		subscribers: make(map[interfaces.EventType][]interfaces.EventHandler),
 		logger:      logger,
 	}
+
+	// Subscribe logger to all event types for centralized event logging
+	if err := SubscribeLoggerToAllEvents(service, logger); err != nil {
+		logger.Warn().Err(err).Msg("Failed to subscribe logger to all events")
+	}
+
+	return service
 }
 
 // Subscribe registers a handler for an event type

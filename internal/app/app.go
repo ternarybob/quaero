@@ -65,6 +65,7 @@ type App struct {
 	// Job execution (using concrete types for refactored queue system)
 	QueueManager *queue.Manager
 	LogService   interfaces.LogService
+	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
 	JobManager   *jobs.Manager
 	JobProcessor *processor.JobProcessor
 	JobExecutor  *executor.JobExecutor
@@ -121,32 +122,36 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	app.EventService = events.NewService(app.Logger)
 	app.WSHandler = handlers.NewWebSocketHandler(app.EventService, app.Logger, &app.Config.WebSocket)
 
-	// Initialize log service BEFORE initServices to ensure context channel is set
-	// This allows all derived loggers (via WithCorrelationId) to inherit the configured context channel
-	// IMPORTANT: LogService's logger must NOT have the context channel configured to avoid deadlock
-	// (the consumer goroutine would try to send logs to its own channel)
-	// NEW: LogService publishes events instead of calling WebSocket directly
+	// Initialize log service (simplified to storage operations only)
 	logService := logs.NewService(
 		app.StorageManager.JobLogStorage(),
 		app.StorageManager.JobStorage(),
-		app.EventService, // Changed from WSHandler to EventService
+		app.Logger,
+	)
+	app.LogService = logService
+
+	// Create log consumer for arbor context channel
+	// Consumer handles log batching, storage, and event publishing
+	logConsumer := logs.NewConsumer(
+		app.StorageManager.JobLogStorage(),
+		app.EventService,
 		app.Logger,
 		app.Config.Logging.MinEventLevel, // Minimum log level for UI events
 	)
-	if err := logService.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start log service: %w", err)
+	if err := logConsumer.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start log consumer: %w", err)
 	}
-	app.LogService = logService
+	app.LogConsumer = logConsumer
 
-	// Configure Arbor with context channel BEFORE any services create loggers
-	// This ensures all derived loggers (via WithCorrelationId) inherit the configured context channel
-	logBatchChannel := logService.GetChannel()
+	// Configure Arbor with context channel from consumer
+	// This ensures all derived loggers (via WithCorrelationId) send logs to the consumer
+	logBatchChannel := logConsumer.GetChannel()
 	app.Logger.SetChannel("context", logBatchChannel)
 
 	app.Logger.Info().
 		Int("channel_capacity", cap(logBatchChannel)).
 		Int("channel_length", len(logBatchChannel)).
-		Msg("Log service initialized with Arbor context channel")
+		Msg("Log consumer initialized with Arbor context channel")
 
 	// Initialize services (AFTER LogService is configured)
 	if err := app.initServices(); err != nil {
@@ -700,12 +705,12 @@ func (a *App) Close() error {
 		a.Logger.Info().Msg("Job processor stopped")
 	}
 
-	// Stop log service
-	if a.LogService != nil {
-		if err := a.LogService.Stop(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to stop log service")
+	// Stop log consumer
+	if a.LogConsumer != nil {
+		if err := a.LogConsumer.Stop(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to stop log consumer")
 		} else {
-			a.Logger.Info().Msg("Log service stopped")
+			a.Logger.Info().Msg("Log consumer stopped")
 		}
 	}
 
