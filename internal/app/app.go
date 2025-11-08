@@ -23,7 +23,6 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
-	"github.com/ternarybob/quaero/internal/services/config"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
@@ -42,8 +41,7 @@ import (
 
 // App holds all application components and dependencies
 type App struct {
-	Config         *common.Config // Deprecated: Use ConfigService instead
-	ConfigService  interfaces.ConfigService
+	Config         *common.Config
 	Logger         arbor.ILogger
 	ctx            context.Context
 	cancelCtx      context.CancelFunc
@@ -102,13 +100,9 @@ type App struct {
 
 // New initializes the application with all dependencies
 func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
-	// Create ConfigService for dependency injection
-	configService := config.NewService(cfg)
-
 	app := &App{
-		Config:        cfg,           // Deprecated: kept for backward compatibility
-		ConfigService: configService, // Use this for new code
-		Logger:        logger,
+		Config: cfg,
+		Logger: logger,
 	}
 
 	// Initialize database
