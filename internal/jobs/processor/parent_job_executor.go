@@ -27,11 +27,16 @@ func NewParentJobExecutor(
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *ParentJobExecutor {
-	return &ParentJobExecutor{
+	executor := &ParentJobExecutor{
 		jobMgr:       jobMgr,
 		eventService: eventService,
 		logger:       logger,
 	}
+
+	// Subscribe to child job status changes for real-time progress tracking
+	executor.SubscribeToChildStatusChanges()
+
+	return executor
 }
 
 // StartMonitoring starts monitoring a parent job in a separate goroutine.
@@ -281,4 +286,161 @@ func (e *ParentJobExecutor) publishChildJobStats(ctx context.Context, parentJobI
 			e.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to publish child job stats event")
 		}
 	}()
+}
+
+// SubscribeToChildStatusChanges subscribes to child job status change events
+// This enables real-time progress tracking without polling
+func (e *ParentJobExecutor) SubscribeToChildStatusChanges() {
+	if e.eventService == nil {
+		return
+	}
+
+	// Subscribe to all job status changes
+	e.eventService.Subscribe(interfaces.EventJobStatusChange, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			e.logger.Warn().Msg("Invalid job_status_change payload type")
+			return nil
+		}
+
+		// Extract event data
+		jobID := getStringFromPayload(payload, "job_id")
+		parentID := getStringFromPayload(payload, "parent_id")
+		status := getStringFromPayload(payload, "status")
+		jobType := getStringFromPayload(payload, "job_type")
+
+		// Only process child job status changes
+		if parentID == "" {
+			return nil // Not a child job, ignore
+		}
+
+		// Log the status change
+		e.logger.Debug().
+			Str("job_id", jobID).
+			Str("parent_id", parentID).
+			Str("status", status).
+			Str("job_type", jobType).
+			Msg("Child job status changed")
+
+		// Get fresh child job stats for the parent
+		stats, err := e.jobMgr.GetChildJobStats(ctx, parentID)
+		if err != nil {
+			e.logger.Error().Err(err).
+				Str("parent_id", parentID).
+				Msg("Failed to get child job stats after status change")
+			return nil // Don't fail the event handler
+		}
+
+		// Generate progress text in required format
+		progressText := e.formatProgressText(stats)
+
+		// Add job log for parent job
+		e.jobMgr.AddJobLog(ctx, parentID, "info",
+			fmt.Sprintf("Child job %s → %s. %s",
+				jobID[:8], // Short job ID for readability
+				status,
+				progressText))
+
+		// Publish parent job progress update
+		e.publishParentJobProgressUpdate(ctx, parentID, stats, progressText)
+
+		return nil
+	})
+
+	e.logger.Info().Msg("ParentJobExecutor subscribed to child job status changes")
+}
+
+// formatProgressText generates the required progress format
+// Example: "66 pending, 1 running, 41 completed, 0 failed"
+func (e *ParentJobExecutor) formatProgressText(stats *jobs.ChildJobStats) string {
+	return fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
+		stats.PendingChildren,
+		stats.RunningChildren,
+		stats.CompletedChildren,
+		stats.FailedChildren)
+}
+
+// publishParentJobProgressUpdate publishes progress update for WebSocket consumption
+func (e *ParentJobExecutor) publishParentJobProgressUpdate(
+	ctx context.Context,
+	parentJobID string,
+	stats *jobs.ChildJobStats,
+	progressText string) {
+
+	if e.eventService == nil {
+		return
+	}
+
+	// Calculate overall status based on child states
+	overallStatus := e.calculateOverallStatus(stats)
+
+	payload := map[string]interface{}{
+		"job_id":             parentJobID,
+		"status":             overallStatus,
+		"total_children":     stats.TotalChildren,
+		"pending_children":   stats.PendingChildren,
+		"running_children":   stats.RunningChildren,
+		"completed_children": stats.CompletedChildren,
+		"failed_children":    stats.FailedChildren,
+		"cancelled_children": stats.CancelledChildren,
+		"progress_text":      progressText, // "X pending, Y running, Z completed, W failed"
+		"timestamp":          time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    "parent_job_progress",
+		Payload: payload,
+	}
+
+	// Publish asynchronously
+	go func() {
+		if err := e.eventService.Publish(ctx, event); err != nil {
+			e.logger.Warn().Err(err).
+				Str("parent_job_id", parentJobID).
+				Msg("Failed to publish parent job progress event")
+		}
+	}()
+}
+
+// calculateOverallStatus determines parent job status from child statistics
+func (e *ParentJobExecutor) calculateOverallStatus(stats *jobs.ChildJobStats) string {
+	// If no children yet, status is determined by parent job state (handled elsewhere)
+	if stats.TotalChildren == 0 {
+		return "running" // Waiting for children to spawn
+	}
+
+	// If any children are running, parent is "Running"
+	if stats.RunningChildren > 0 {
+		return "running"
+	}
+
+	// If any children are pending, parent is "Running" (still orchestrating)
+	if stats.PendingChildren > 0 {
+		return "running"
+	}
+
+	// All children in terminal state
+	terminalCount := stats.CompletedChildren + stats.FailedChildren + stats.CancelledChildren
+	if terminalCount >= stats.TotalChildren {
+		// All children complete - determine success/failure
+		if stats.FailedChildren > 0 {
+			return "failed" // At least one child failed
+		}
+		if stats.CancelledChildren == stats.TotalChildren {
+			return "cancelled" // All children cancelled
+		}
+		return "completed" // All children succeeded
+	}
+
+	return "running" // Default state
+}
+
+// Helper function to safely extract string from payload
+func getStringFromPayload(payload map[string]interface{}, key string) string {
+	if val, ok := payload[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
 }

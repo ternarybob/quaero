@@ -994,6 +994,76 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		return nil
 	})
 
+	// Subscribe to parent job progress events for real-time monitoring
+	h.eventService.Subscribe("parent_job_progress", func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid parent_job_progress event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["parent_job_progress"] {
+			return nil
+		}
+
+		// Extract job_id and progress_text for WebSocket message
+		jobID := getString(payload, "job_id")
+		progressText := getString(payload, "progress_text")
+		status := getString(payload, "status")
+
+		// Create simplified WebSocket message with job_id key
+		// UI will use job_id to update specific job row
+		wsPayload := map[string]interface{}{
+			"job_id":        jobID,
+			"progress_text": progressText, // "66 pending, 1 running, 41 completed, 0 failed"
+			"status":        status,
+			"timestamp":     getString(payload, "timestamp"),
+
+			// Include child statistics for advanced UI features
+			"total_children":     getInt(payload, "total_children"),
+			"pending_children":   getInt(payload, "pending_children"),
+			"running_children":   getInt(payload, "running_children"),
+			"completed_children": getInt(payload, "completed_children"),
+			"failed_children":    getInt(payload, "failed_children"),
+			"cancelled_children": getInt(payload, "cancelled_children"),
+		}
+
+		// Broadcast to all clients
+		msg := WSMessage{
+			Type:    "parent_job_progress",
+			Payload: wsPayload,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal parent job progress message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to send parent job progress to client")
+			}
+		}
+
+		return nil
+	})
+
 	// Subscribe to crawler job log events for real-time log streaming
 	h.eventService.Subscribe("crawler_job_log", func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})

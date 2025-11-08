@@ -26,7 +26,7 @@ func NewLoggerSubscriber(logger arbor.ILogger) interfaces.EventHandler {
 		}
 
 		// Log event with structured fields
-		logEvent := logger.Info().
+		logEvent := logger.Debug().
 			Str("event_type", string(event.Type))
 
 		if jobID != "" {

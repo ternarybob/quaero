@@ -160,6 +160,17 @@ const (
 	//   - failed_count: int
 	//   - timestamp: time.Time
 	EventJobCancelled EventType = "job_cancelled"
+
+	// EventJobStatusChange is published when any job changes status (pending → running → completed/failed/cancelled).
+	// Published from Manager.UpdateJobStatus after successful database update.
+	// Used by ParentJobExecutor to track child job progress in real-time.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (ID of the job that changed status)
+	//   - status: string (new status: "pending", "running", "completed", "failed", "cancelled")
+	//   - job_type: string (type of job)
+	//   - parent_id: string (optional - only present if this is a child job)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobStatusChange EventType = "job_status_change"
 )
 
 // Event represents a system event

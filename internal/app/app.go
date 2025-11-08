@@ -294,8 +294,8 @@ func (a *App) initServices() error {
 	a.QueueManager = queueMgr
 	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
-	// 5.8. Initialize job manager
-	jobMgr := jobs.NewManager(a.StorageManager.DB().(*sql.DB), queueMgr)
+	// 5.8. Initialize job manager with event service for status change publishing
+	jobMgr := jobs.NewManager(a.StorageManager.DB().(*sql.DB), queueMgr, a.EventService)
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 

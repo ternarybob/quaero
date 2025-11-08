@@ -18,14 +18,16 @@ import (
 // Manager handles job metadata and lifecycle.
 // It does NOT manage the queue - that's goqite's job.
 type Manager struct {
-	db    *sql.DB
-	queue *queue.Manager
+	db           *sql.DB
+	queue        *queue.Manager
+	eventService interfaces.EventService // Optional: may be nil for testing
 }
 
-func NewManager(db *sql.DB, queue *queue.Manager) *Manager {
+func NewManager(db *sql.DB, queue *queue.Manager, eventService interfaces.EventService) *Manager {
 	return &Manager{
-		db:    db,
-		queue: queue,
+		db:           db,
+		queue:        queue,
+		eventService: eventService,
 	}
 }
 
@@ -470,6 +472,17 @@ func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, er
 
 // UpdateJobStatus updates the job status
 func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) error {
+	// Get job details before update to access parent_id and job_type
+	var parentID sql.NullString
+	var jobType string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT parent_id, job_type FROM jobs WHERE id = ?
+	`, jobID).Scan(&parentID, &jobType)
+
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("failed to get job details: %w", err)
+	}
+
 	now := time.Now()
 	nowUnix := timeToUnix(now)
 
@@ -488,10 +501,51 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 	args = append(args, jobID)
 
 	// Use retry logic for status updates to handle write contention
-	return retryOnBusy(ctx, func() error {
+	err = retryOnBusy(ctx, func() error {
 		_, err := m.db.ExecContext(ctx, query, args...)
 		return err
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Add job log for status change
+	logMessage := fmt.Sprintf("Status changed: %s", status)
+	if err := m.AddJobLog(ctx, jobID, "info", logMessage); err != nil {
+		// Log error but don't fail the status update (logging is non-critical)
+	}
+
+	// Publish job status change event for parent job monitoring
+	// Only publish if eventService is available (optional dependency)
+	if m.eventService != nil {
+		payload := map[string]interface{}{
+			"job_id":    jobID,
+			"status":    status,
+			"job_type":  jobType,
+			"timestamp": now.Format(time.RFC3339),
+		}
+
+		// Include parent_id if this is a child job
+		if parentID.Valid {
+			payload["parent_id"] = parentID.String
+		}
+
+		event := interfaces.Event{
+			Type:    interfaces.EventJobStatusChange,
+			Payload: payload,
+		}
+
+		// Publish asynchronously to avoid blocking status updates
+		go func() {
+			if err := m.eventService.Publish(ctx, event); err != nil {
+				// Log error but don't fail the status update
+				// EventService will handle logging via its subscribers
+			}
+		}()
+	}
+
+	return nil
 }
 
 // UpdateJobProgress updates job progress
