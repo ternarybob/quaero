@@ -621,9 +621,9 @@ func applyEnvOverrides(config *Config) {
 	}
 }
 
-// ApplyCLIOverrides applies CLI flag overrides to config
-func ApplyCLIOverrides(config *Config, port int, host string) {
-	// CLI flags have highest priority
+// ApplyFlagOverrides applies command-line flag overrides to config
+func ApplyFlagOverrides(config *Config, port int, host string) {
+	// Command-line flags have highest priority
 	if port > 0 {
 		config.Server.Port = port
 	}

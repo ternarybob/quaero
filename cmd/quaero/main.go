@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Last Modified: Tuesday, 14th October 2025 12:40:41 pm
+// Last Modified: Friday, 8th November 2025 4:00:00 pm
 // Modified By: Bob McAllan
 // -----------------------------------------------------------------------
 
@@ -7,14 +7,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
-
-	"github.com/spf13/cobra"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/arbor/models"
@@ -24,183 +23,189 @@ import (
 )
 
 var (
-	// Global flags
-	configPath string
-	serverPort int
-	serverHost string
+	// Command-line flags
+	configPath   = flag.String("config", "", "Configuration file path")
+	configPathC  = flag.String("c", "", "Configuration file path (shorthand)")
+	serverPort   = flag.Int("port", 0, "Server port (overrides config)")
+	serverPortP  = flag.Int("p", 0, "Server port (shorthand, overrides config)")
+	serverHost   = flag.String("host", "", "Server host (overrides config)")
+	showVersion  = flag.Bool("version", false, "Print version information")
+	showVersionV = flag.Bool("v", false, "Print version information (shorthand)")
 
 	// Global state
 	config *common.Config
 	logger arbor.ILogger
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "quaero",
-	Short: "Quaero - Knowledge search system",
-	Long:  `Quaero (Latin: "I seek") - A local knowledge base system with natural language queries.`,
-	Run:   runServer,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Startup sequence (REQUIRED ORDER):
-		// 1. Load config (defaults -> file -> env)
-		// 2. Apply CLI overrides (highest priority)
-		// 3. Initialize logger
-		// 4. Print banner
-		var err error
+func main() {
+	// Parse command-line flags
+	flag.Parse()
 
-		// Auto-discover config file if not specified
-		if configPath == "" {
-			// Check current directory first
-			if _, err := os.Stat("quaero.toml"); err == nil {
-				configPath = "quaero.toml"
-			} else if _, err := os.Stat("deployments/local/quaero.toml"); err == nil {
-				// Fallback: check deployments/local for users running from project root
-				configPath = "deployments/local/quaero.toml"
+	// Handle version flag
+	if *showVersion || *showVersionV {
+		fmt.Printf("Quaero version %s\n", common.GetVersion())
+		os.Exit(0)
+	}
+
+	// Merge shorthand flags with full flags (shorthand takes precedence)
+	finalConfigPath := *configPath
+	if *configPathC != "" {
+		finalConfigPath = *configPathC
+	}
+
+	finalPort := *serverPort
+	if *serverPortP != 0 {
+		finalPort = *serverPortP
+	}
+
+	// Startup sequence (REQUIRED ORDER):
+	// 1. Load config (defaults -> file -> env)
+	// 2. Apply CLI overrides (highest priority)
+	// 3. Initialize logger
+	// 4. Print banner
+	var err error
+
+	// Auto-discover config file if not specified
+	if finalConfigPath == "" {
+		// Check current directory first
+		if _, err := os.Stat("quaero.toml"); err == nil {
+			finalConfigPath = "quaero.toml"
+		} else if _, err := os.Stat("deployments/local/quaero.toml"); err == nil {
+			// Fallback: check deployments/local for users running from project root
+			finalConfigPath = "deployments/local/quaero.toml"
+		}
+	}
+
+	// 1. Load configuration (default -> file -> env -> CLI)
+	config, err = common.LoadFromFile(finalConfigPath)
+	if err != nil {
+		// Use temporary logger for startup errors
+		tempLogger := arbor.NewLogger()
+		if finalConfigPath == "" {
+			tempLogger.Fatal().Err(err).Msg("Failed to load configuration: no config file found")
+		} else {
+			tempLogger.Fatal().Str("path", finalConfigPath).Err(err).Msg("Failed to load configuration file")
+		}
+		os.Exit(1)
+	}
+
+	// 2. Apply command-line flag overrides (highest priority)
+	common.ApplyFlagOverrides(config, finalPort, *serverHost)
+
+	// 3. Initialize logger with final configuration (inline from common.InitLogger)
+	logger = arbor.NewLogger()
+
+	// Get executable path for log directory
+	execPath, err := os.Executable()
+	if err != nil {
+		// Add console writer first, then log the warning
+		logger = logger.WithConsoleWriter(models.WriterConfiguration{
+			Type:             models.LogWriterTypeConsole,
+			TimeFormat:       "15:04:05",
+			TextOutput:       true,
+			DisableTimestamp: false,
+		})
+		logger.Warn().Err(err).Msg("Failed to get executable path - using fallback console logging")
+	} else {
+		execDir := filepath.Dir(execPath)
+		logsDir := filepath.Join(execDir, "logs")
+
+		// Check if file output is enabled
+		hasFileOutput := false
+		hasStdoutOutput := false
+		for _, output := range config.Logging.Output {
+			if output == "file" {
+				hasFileOutput = true
+			}
+			if output == "stdout" || output == "console" {
+				hasStdoutOutput = true
 			}
 		}
 
-		// 1. Load configuration (default -> file -> env -> CLI)
-		config, err = common.LoadFromFile(configPath)
-		if err != nil {
-			// Use temporary logger for startup errors
-			tempLogger := arbor.NewLogger()
-			if configPath == "" {
-				tempLogger.Fatal().Err(err).Msg("Failed to load configuration: no config file found")
+		// Configure file logging if enabled
+		if hasFileOutput {
+			if err := os.MkdirAll(logsDir, 0755); err != nil {
+				// Use console writer temporarily for this warning
+				tempLogger := logger.WithConsoleWriter(models.WriterConfiguration{
+					Type:             models.LogWriterTypeConsole,
+					TimeFormat:       "15:04:05",
+					TextOutput:       true,
+					DisableTimestamp: false,
+				})
+				tempLogger.Warn().Err(err).Str("logs_dir", logsDir).Msg("Failed to create logs directory")
 			} else {
-				tempLogger.Fatal().Str("path", configPath).Err(err).Msg("Failed to load configuration file")
+				logFile := filepath.Join(logsDir, "quaero.log")
+				logger = logger.WithFileWriter(models.WriterConfiguration{
+					Type:             models.LogWriterTypeFile,
+					FileName:         logFile,
+					TimeFormat:       "15:04:05",
+					MaxSize:          100 * 1024 * 1024, // 100 MB
+					MaxBackups:       3,
+					TextOutput:       true,
+					DisableTimestamp: false,
+				})
 			}
-			os.Exit(1)
 		}
 
-		// 2. Apply CLI flag overrides (highest priority)
-		common.ApplyCLIOverrides(config, serverPort, serverHost)
-
-		// 3. Initialize logger with final configuration (inline from common.InitLogger)
-		logger = arbor.NewLogger()
-
-		// Get executable path for log directory
-		execPath, err := os.Executable()
-		if err != nil {
-			// Add console writer first, then log the warning
+		// Configure console logging if enabled
+		if hasStdoutOutput {
 			logger = logger.WithConsoleWriter(models.WriterConfiguration{
 				Type:             models.LogWriterTypeConsole,
 				TimeFormat:       "15:04:05",
 				TextOutput:       true,
 				DisableTimestamp: false,
 			})
-			logger.Warn().Err(err).Msg("Failed to get executable path - using fallback console logging")
-		} else {
-			execDir := filepath.Dir(execPath)
-			logsDir := filepath.Join(execDir, "logs")
-
-			// Check if file output is enabled
-			hasFileOutput := false
-			hasStdoutOutput := false
-			for _, output := range config.Logging.Output {
-				if output == "file" {
-					hasFileOutput = true
-				}
-				if output == "stdout" || output == "console" {
-					hasStdoutOutput = true
-				}
-			}
-
-			// Configure file logging if enabled
-			if hasFileOutput {
-				if err := os.MkdirAll(logsDir, 0755); err != nil {
-					// Use console writer temporarily for this warning
-					tempLogger := logger.WithConsoleWriter(models.WriterConfiguration{
-						Type:             models.LogWriterTypeConsole,
-						TimeFormat:       "15:04:05",
-						TextOutput:       true,
-						DisableTimestamp: false,
-					})
-					tempLogger.Warn().Err(err).Str("logs_dir", logsDir).Msg("Failed to create logs directory")
-				} else {
-					logFile := filepath.Join(logsDir, "quaero.log")
-					logger = logger.WithFileWriter(models.WriterConfiguration{
-						Type:             models.LogWriterTypeFile,
-						FileName:         logFile,
-						TimeFormat:       "15:04:05",
-						MaxSize:          100 * 1024 * 1024, // 100 MB
-						MaxBackups:       3,
-						TextOutput:       true,
-						DisableTimestamp: false,
-					})
-				}
-			}
-
-			// Configure console logging if enabled
-			if hasStdoutOutput {
-				logger = logger.WithConsoleWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeConsole,
-					TimeFormat:       "15:04:05",
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
-			}
-
-			// Ensure at least one visible log writer is configured
-			if !hasFileOutput && !hasStdoutOutput {
-				logger = logger.WithConsoleWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeConsole,
-					TimeFormat:       "15:04:05",
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
-				logger.Warn().
-					Strs("configured_outputs", config.Logging.Output).
-					Msg("No visible log outputs configured - falling back to console")
-			}
 		}
 
-		// Always add memory writer for WebSocket log streaming
-		logger = logger.WithMemoryWriter(models.WriterConfiguration{
-			Type:             models.LogWriterTypeMemory,
-			TimeFormat:       "15:04:05",
-			TextOutput:       true,
-			DisableTimestamp: false,
-		})
-
-		// Set log level
-		logger = logger.WithLevelFromString(config.Logging.Level)
-
-		// Store logger in singleton for global access
-		common.InitLogger(logger)
-
-		// 4. Print banner with configuration and logger
-		common.PrintBanner(config, logger)
-
-		// Debug: Log final resolved configuration for troubleshooting
-		logger.Debug().
-			Str("storage_type", config.Storage.Type).
-			Str("sqlite_path", config.Storage.SQLite.Path).
-			Str("log_level", config.Logging.Level).
-			Strs("log_output", config.Logging.Output).
-			Bool("crawler_enabled", true).
-			Msg("Resolved configuration (sanitized)")
-
-		// Log initialization complete
-		logger.Info().
-			Str("config_path", configPath).
-			Int("port", config.Server.Port).
-			Str("host", config.Server.Host).
-			Str("llm_mode", config.LLM.Mode).
-			Msg("Application configuration loaded")
-	},
-}
-
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		if logger != nil {
-			logger.Fatal().Err(err).Msg("Command execution failed")
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		// Ensure at least one visible log writer is configured
+		if !hasFileOutput && !hasStdoutOutput {
+			logger = logger.WithConsoleWriter(models.WriterConfiguration{
+				Type:             models.LogWriterTypeConsole,
+				TimeFormat:       "15:04:05",
+				TextOutput:       true,
+				DisableTimestamp: false,
+			})
+			logger.Warn().
+				Strs("configured_outputs", config.Logging.Output).
+				Msg("No visible log outputs configured - falling back to console")
 		}
-		os.Exit(1)
 	}
-}
 
-func runServer(cmd *cobra.Command, args []string) {
+	// Always add memory writer for WebSocket log streaming
+	logger = logger.WithMemoryWriter(models.WriterConfiguration{
+		Type:             models.LogWriterTypeMemory,
+		TimeFormat:       "15:04:05",
+		TextOutput:       true,
+		DisableTimestamp: false,
+	})
+
+	// Set log level
+	logger = logger.WithLevelFromString(config.Logging.Level)
+
+	// Store logger in singleton for global access
+	common.InitLogger(logger)
+
+	// 4. Print banner with configuration and logger
+	common.PrintBanner(config, logger)
+
+	// Debug: Log final resolved configuration for troubleshooting
+	logger.Debug().
+		Str("storage_type", config.Storage.Type).
+		Str("sqlite_path", config.Storage.SQLite.Path).
+		Str("log_level", config.Logging.Level).
+		Strs("log_output", config.Logging.Output).
+		Bool("crawler_enabled", true).
+		Msg("Resolved configuration (sanitized)")
+
+	// Log initialization complete
+	logger.Info().
+		Str("config_path", finalConfigPath).
+		Int("port", config.Server.Port).
+		Str("host", config.Server.Host).
+		Str("llm_mode", config.LLM.Mode).
+		Msg("Application configuration loaded")
+
+	// Start server
 	logger.Info().
 		Int("port", config.Server.Port).
 		Str("host", config.Server.Host).
@@ -262,14 +267,4 @@ func runServer(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Info().Msg("Server stopped")
-}
-
-func init() {
-	// Global flags
-	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "Configuration file path")
-	rootCmd.PersistentFlags().IntVarP(&serverPort, "port", "p", 0, "Server port (overrides config)")
-	rootCmd.PersistentFlags().StringVar(&serverHost, "host", "", "Server host (overrides config)")
-
-	// Add subcommands
-	rootCmd.AddCommand(versionCmd)
 }
