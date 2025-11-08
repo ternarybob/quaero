@@ -90,7 +90,7 @@ func (s *Service) Publish(ctx context.Context, event interfaces.Event) error {
 
 	// Only log event publication if not in blacklist (prevents circular logging)
 	if !nonLoggableEvents[event.Type] {
-		s.logger.Info().
+		s.logger.Debug().
 			Str("event_type", string(event.Type)).
 			Int("subscriber_count", len(handlers)).
 			Msg("Publishing event")
@@ -133,7 +133,7 @@ func (s *Service) PublishSync(ctx context.Context, event interfaces.Event) error
 
 	// Only log event publication if not in blacklist (prevents circular logging)
 	if !nonLoggableEvents[event.Type] {
-		s.logger.Info().
+		s.logger.Debug().
 			Str("event_type", string(event.Type)).
 			Int("subscriber_count", len(handlers)).
 			Msg("*** EVENT SERVICE: Publishing event synchronously to all handlers")
