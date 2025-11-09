@@ -492,6 +492,7 @@ h2 {
     font-family: 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
     font-size: 0.600rem;
     line-height: 1.6;
+    min-height: 200px;
     max-height: 400px;
     overflow-y: auto;
 }

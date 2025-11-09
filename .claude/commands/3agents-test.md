@@ -1,6 +1,6 @@
 ---
-name: 3agent
-description: Three-agent workflow - plan, implement, validate
+name: 3agent-full
+description: Four-agent workflow - plan, implement, validate, test in parallel
 ---
 
 Execute workflow for: $ARGUMENTS
@@ -22,6 +22,7 @@ agents:
   planner: claude-opus-4-20250514
   implementer: claude-sonnet-4-20250514
   validator: claude-sonnet-4-20250514
+  test_updater: claude-sonnet-4-20250514
 ```
 
 ## SETUP
@@ -122,17 +123,58 @@ Validated: {ISO8601}
 
 ---
 
+## AGENT 4 - TEST UPDATER (Sonnet)
+
+**Critical:** Study existing test patterns first - follow them strictly, don't invent new ones
+
+**Process:**
+1. Read `plan.md` to understand changes
+2. Find relevant tests in `/test/api` and `/test/ui`
+3. Update tests following existing patterns
+4. Run: `cd /test/api && go test -v` and `cd /test/ui && go test -v`
+
+**Create:** `step-{N}-tests.md`
+
+```markdown
+# Tests: Step {N}
+
+## Modified
+- {file} - {reason}
+
+## Added  
+- {file} - {coverage}
+
+## Results
+
+### API (/test/api)
+```
+{go test output}
+```
+
+### UI (/test/ui)
+```
+{go test output}
+```
+
+Total: {N} | Passed: {N} | Failed: {N}
+Status: PASS | FAIL
+
+Updated: {ISO8601}
+```
+
+---
+
 ## WORKFLOW
 
 ```
 FOR each step:
   1. Agent 2 implements
-  2. Agent 3 validates
-  3. IF INVALID:
-       → Agent 2 fixes (reads validation feedback)
-       → Agent 3 re-validates
-       → Repeat until VALID
-  4. IF VALID:
+  2. Run parallel: Agent 3 validates + Agent 4 tests
+  3. IF INVALID or FAIL:
+       → Agent 2 fixes (reads both feedbacks)
+       → Re-validate and re-test
+       → Repeat until both pass
+  4. IF VALID and PASS:
        → Mark complete in progress.md
        → Next step
 ```
@@ -147,10 +189,11 @@ When all steps complete, create `summary.md`:
 # Summary: {task}
 
 ## Models
-Planner: Opus | Implementer: Sonnet | Validator: Sonnet
+Planner: Opus | Implementer: Sonnet | Validator: Sonnet | Tests: Sonnet
 
 ## Results
 Steps: {N} | Validation cycles: {N} | Avg quality: {X}/10
+Tests run: {N} | Pass rate: {%}
 
 ## Artifacts
 - {file}
@@ -170,7 +213,7 @@ Update `progress.md`:
 
 ✅ COMPLETED
 
-Steps: {N} | Validation cycles: {N}
+Steps: {N} | Validation cycles: {N} | Tests: {N}
 
 Completed: {ISO8601}
 ```

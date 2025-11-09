@@ -335,6 +335,73 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "04-news-crawler-execution-monitored")
 
+	// Step 4b: Extract and validate document count from queue page
+	env.LogTest(t, "Step 4b: Validating document count from queue page...")
+
+	var queueDocumentCount struct {
+		Found        bool   `json:"found"`
+		DocumentText string `json:"documentText"`
+		Count        int    `json:"count"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+				const newsCrawlerJob = jobCards.find(card => {
+					const titleElement = card.querySelector('.card-title');
+					return titleElement && titleElement.textContent.includes('News Crawler');
+				});
+
+				if (!newsCrawlerJob) {
+					return { found: false, documentText: '', count: 0 };
+				}
+
+				// Look for the document count text (e.g., "34 Documents")
+				const documentSpans = newsCrawlerJob.querySelectorAll('span');
+				for (const span of documentSpans) {
+					const text = span.textContent.trim();
+					if (text.includes('Document')) {
+						// Extract the number from text like "34 Documents" or "1 Document"
+						const match = text.match(/(\d+)\s*Document/);
+						if (match) {
+							return {
+								found: true,
+								documentText: text,
+								count: parseInt(match[1])
+							};
+						}
+					}
+				}
+
+				return { found: false, documentText: '', count: 0 };
+			})()
+		`, &queueDocumentCount),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to read document count from queue page: %v", err)
+	} else if !queueDocumentCount.Found {
+		env.LogTest(t, "WARNING: Document count not found in queue page job card")
+	} else {
+		env.LogTest(t, "✓ Document count from queue page: %s", queueDocumentCount.DocumentText)
+
+		// Based on news-crawler.toml configuration: max_pages = 1
+		// We expect exactly 1 document, so fail if count > 1
+		expectedMaxCount := 1
+
+		if queueDocumentCount.Count > expectedMaxCount {
+			env.LogTest(t, "❌ FAILURE: Queue page shows %d documents (expected <= %d)", queueDocumentCount.Count, expectedMaxCount)
+			env.LogTest(t, "  This indicates max_pages=1 configuration is not being respected")
+			env.TakeScreenshot(ctx, "queue-document-count-exceeded")
+			t.Errorf("Queue page document count should be <= %d (max_pages=1), got %d", expectedMaxCount, queueDocumentCount.Count)
+		} else if queueDocumentCount.Count == expectedMaxCount {
+			env.LogTest(t, "✅ SUCCESS: Queue page shows exactly %d document (matches max_pages=1)", queueDocumentCount.Count)
+		} else {
+			env.LogTest(t, "  Queue page shows %d documents (within expected limit of %d)", queueDocumentCount.Count, expectedMaxCount)
+		}
+	}
+
 	// Step 5: Click on the job to view details and verify configuration display
 	if jobDetails.JobID != "" {
 		env.LogTest(t, "Step 5: Navigating to job details page to verify configuration and logs...")
@@ -538,7 +605,7 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 					required    bool
 				}{
 					{"start_urls", "start_urls configuration", true},
-					{"stockhead.com.au", "stockhead.com.au URL", true},
+					{"stockhead.com.au", "stockhead.com.au URL", false}, // Optional: external URL may be temporarily unavailable
 					{"abc.net.au", "abc.net.au URL", true},
 					{"source_type", "source type configuration", true},
 					{"news-crawler", "job definition ID", true},
@@ -641,16 +708,71 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 		env.TakeScreenshot(ctx, "07-enhanced-queue-features")
 	}
 
-	// Step 7: Verify document collection (must be more than 0)
-	env.LogTest(t, "Step 7: Verifying document collection...")
+	// Step 7: Navigate to Documents page and verify document count
+	env.LogTest(t, "Step 7: Navigating to Documents page to verify document count...")
+
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(baseURL+"/documents"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load documents page: %v", err)
+		env.TakeScreenshot(ctx, "documents-page-load-failed")
+		t.Fatalf("Failed to load documents page: %v", err)
+	}
+
+	env.LogTest(t, "✓ Documents page loaded")
+	env.TakeScreenshot(ctx, "09-documents-page-loaded")
+
+	// Step 7a: Check document count from UI
+	env.LogTest(t, "Step 7a: Checking document count from UI...")
+
+	var documentUICount struct {
+		TotalCount int    `json:"totalCount"`
+		Error      string `json:"error"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				try {
+					// Look for the total documents stat in the Document Statistics section
+					const statElements = document.querySelectorAll('.has-text-centered');
+					for (const el of statElements) {
+						const heading = el.querySelector('p');
+						if (heading && heading.textContent.includes('TOTAL DOCUMENTS')) {
+							const countElement = el.querySelector('.title, .is-size-1, .is-size-2');
+							if (countElement) {
+								return { totalCount: parseInt(countElement.textContent.trim()) || 0, error: '' };
+							}
+						}
+					}
+					return { totalCount: 0, error: 'Total documents stat not found in UI' };
+				} catch (e) {
+					return { totalCount: 0, error: e.toString() };
+				}
+			})()
+		`, &documentUICount),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to read document count from UI: %v", err)
+	} else if documentUICount.Error != "" {
+		env.LogTest(t, "WARNING: Error reading document count from UI: %s", documentUICount.Error)
+	} else {
+		env.LogTest(t, "✓ Document count from UI: %d documents", documentUICount.TotalCount)
+	}
+
+	// Step 7b: Verify document collection via API
+	env.LogTest(t, "Step 7b: Verifying document collection via API...")
 
 	var documentCount struct {
 		Count int    `json:"count"`
 		Error string `json:"error"`
 	}
 
-	// Check document count via API
-	// Note: Document count can also be accessed via DOM element #stat-total on /documents page
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(async () => {
@@ -671,11 +793,16 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 	)
 
 	if err != nil {
-		env.LogTest(t, "WARNING: Failed to check document count: %v", err)
+		env.LogTest(t, "WARNING: Failed to check document count via API: %v", err)
 	} else if documentCount.Error != "" {
-		env.LogTest(t, "WARNING: Error fetching document stats: %s", documentCount.Error)
+		env.LogTest(t, "WARNING: Error fetching document stats from API: %s", documentCount.Error)
 	} else {
-		env.LogTest(t, "Document collection result: %d documents", documentCount.Count)
+		env.LogTest(t, "✓ Document count from API: %d documents", documentCount.Count)
+
+		// Compare UI and API counts
+		if documentUICount.TotalCount > 0 && documentCount.Count != documentUICount.TotalCount {
+			env.LogTest(t, "⚠️  WARNING: UI count (%d) differs from API count (%d)", documentUICount.TotalCount, documentCount.Count)
+		}
 
 		// Based on news-crawler.toml configuration: max_pages = 1
 		// We expect exactly 1 document to be collected
@@ -683,13 +810,14 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 
 		if documentCount.Count == expectedCount {
 			env.LogTest(t, "✅ SUCCESS: Exactly %d document collected (matches max_pages=1 in news-crawler.toml)", documentCount.Count)
-		} else if documentCount.Count > 0 {
-			env.LogTest(t, "⚠️  WARNING: Expected %d document but got %d documents", expectedCount, documentCount.Count)
-			env.LogTest(t, "  This may indicate max_pages configuration is not being respected")
 		} else {
-			env.LogTest(t, "❌ FAILURE: No documents were collected")
-			env.TakeScreenshot(ctx, "no-documents-collected")
-			t.Errorf("Expected %d document to be collected (max_pages=1), got %d", expectedCount, documentCount.Count)
+			env.LogTest(t, "❌ FAILURE: Expected exactly %d document but got %d documents", expectedCount, documentCount.Count)
+			env.LogTest(t, "  This indicates max_pages=1 configuration is not being respected")
+			if documentUICount.TotalCount > 0 {
+				env.LogTest(t, "  UI also shows: %d documents", documentUICount.TotalCount)
+			}
+			env.TakeScreenshot(ctx, "incorrect-document-count")
+			t.Errorf("Expected exactly %d document to be collected (max_pages=1), got %d", expectedCount, documentCount.Count)
 		}
 	}
 
@@ -1255,6 +1383,265 @@ func TestParentJobProgressTracking(t *testing.T) {
 	env.LogTest(t, "Test Note: This test verifies the UI correctly receives and displays")
 	env.LogTest(t, "           parent job progress updates via WebSocket. Empty progress is")
 	env.LogTest(t, "           expected when no child jobs spawn (e.g., no URLs to crawl).")
+}
+
+// TestCrawlerJobLogsVisibility tests that job logs are visible in the Output tab
+// Run with: go test -timeout 2m -run TestCrawlerJobLogsVisibility
+func TestCrawlerJobLogsVisibility(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestCrawlerJobLogsVisibility")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestCrawlerJobLogsVisibility")
+
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestCrawlerJobLogsVisibility (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestCrawlerJobLogsVisibility (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+
+	baseURL := env.GetBaseURL()
+
+	// Step 1: Navigate to jobs page and execute News Crawler
+	env.LogTest(t, "Step 1: Navigating to jobs page and executing News Crawler...")
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(baseURL+"/jobs"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to navigate to jobs page: %v", err)
+		env.TakeScreenshot(ctx, "jobs-page-load-failed")
+		t.Fatalf("Failed to navigate to jobs page: %v", err)
+	}
+	env.LogTest(t, "✓ Jobs page loaded")
+	env.TakeScreenshot(ctx, "01-jobs-page-loaded")
+
+	// Wait for WebSocket connection
+	if err := env.WaitForWebSocketConnection(ctx, 10); err != nil {
+		env.LogTest(t, "ERROR: WebSocket did not connect: %v", err)
+		env.TakeScreenshot(ctx, "websocket-failed")
+		t.Fatalf("WebSocket connection failed: %v", err)
+	}
+
+	// Execute the News Crawler job
+	env.LogTest(t, "Step 2: Executing News Crawler job...")
+	var runButtonClicked bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`window.confirm = function() { return true; }`, nil),
+		chromedp.Evaluate(`
+			(() => {
+				const cards = Array.from(document.querySelectorAll('[x-data="jobDefinitionsManagement"] .card-body > .card'));
+				const newsCrawlerCard = cards.find(card => card.textContent.includes('News Crawler'));
+				if (newsCrawlerCard) {
+					const runButton = newsCrawlerCard.querySelector('button.btn-success');
+					if (runButton) {
+						runButton.click();
+						return true;
+					}
+				}
+				return false;
+			})()
+		`, &runButtonClicked),
+		chromedp.Sleep(2*time.Second),
+	)
+
+	if err != nil || !runButtonClicked {
+		env.LogTest(t, "ERROR: Failed to execute News Crawler job")
+		env.TakeScreenshot(ctx, "run-button-click-failed")
+		t.Fatal("Failed to execute News Crawler job")
+	}
+	env.LogTest(t, "✓ News Crawler job execution triggered")
+
+	// Step 3: Navigate to queue page
+	env.LogTest(t, "Step 3: Navigating to queue page...")
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(baseURL+"/queue"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load queue page: %v", err)
+		env.TakeScreenshot(ctx, "queue-page-load-failed")
+		t.Fatalf("Failed to load queue page: %v", err)
+	}
+	env.TakeScreenshot(ctx, "02-queue-page-loaded")
+
+	// Step 4: Find the News Crawler job in queue
+	env.LogTest(t, "Step 4: Finding News Crawler job in queue...")
+	var jobDetails struct {
+		Found bool   `json:"found"`
+		JobID string `json:"jobId"`
+		Name  string `json:"name"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const jobCards = Array.from(document.querySelectorAll('.job-card-clickable'));
+				const newsCrawlerJob = jobCards.find(card => {
+					const titleElement = card.querySelector('.card-title');
+					return titleElement && titleElement.textContent.includes('News Crawler');
+				});
+
+				if (!newsCrawlerJob) {
+					return { found: false, jobId: '', name: '' };
+				}
+
+				const jobId = newsCrawlerJob.getAttribute('data-job-id') || '';
+				const titleElement = newsCrawlerJob.querySelector('.card-title');
+				const name = titleElement ? titleElement.textContent.trim() : '';
+
+				return {
+					found: true,
+					jobId: jobId,
+					name: name
+				};
+			})()
+		`, &jobDetails),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to find job in queue: %v", err)
+		env.TakeScreenshot(ctx, "job-not-found")
+		t.Fatalf("Failed to find job in queue: %v", err)
+	}
+
+	if !jobDetails.Found {
+		env.LogTest(t, "ERROR: News Crawler job not found in queue")
+		env.TakeScreenshot(ctx, "news-crawler-not-in-queue")
+		t.Fatal("News Crawler job should appear in queue")
+	}
+
+	env.LogTest(t, "✓ Found News Crawler job in queue (ID: %s)", jobDetails.JobID)
+
+	// Step 5: Navigate to job details page
+	env.LogTest(t, "Step 5: Navigating to job details page...")
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(fmt.Sprintf("%s/job?id=%s", baseURL, jobDetails.JobID)),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(3*time.Second),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to navigate to job details: %v", err)
+		env.TakeScreenshot(ctx, "job-details-nav-failed")
+		t.Fatalf("Failed to navigate to job details: %v", err)
+	}
+	env.LogTest(t, "✓ Successfully navigated to job details page")
+	env.TakeScreenshot(ctx, "03-job-details-page-loaded")
+
+	// Step 6: Click the Output tab
+	env.LogTest(t, "Step 6: Clicking Output tab...")
+	var outputTabClicked bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const outputTab = Array.from(document.querySelectorAll('button, .tab')).find(el =>
+					el.textContent && el.textContent.toLowerCase().includes('output')
+				);
+				if (outputTab) {
+					outputTab.click();
+					return true;
+				}
+				return false;
+			})()
+		`, &outputTabClicked),
+		chromedp.Sleep(3*time.Second),
+	)
+
+	if err != nil || !outputTabClicked {
+		env.LogTest(t, "ERROR: Failed to click Output tab")
+		env.TakeScreenshot(ctx, "output-tab-click-failed")
+		t.Fatal("Failed to click Output tab")
+	}
+	env.LogTest(t, "✓ Clicked Output tab")
+	env.TakeScreenshot(ctx, "04-output-tab-opened")
+
+	// Step 7: Verify logs are visible
+	env.LogTest(t, "Step 7: Verifying job logs are visible...")
+	var logVisibility struct {
+		LogContent      string `json:"logContent"`
+		TerminalVisible bool   `json:"terminalVisible"`
+		TerminalHeight  int    `json:"terminalHeight"`
+		HasVisibleText  bool   `json:"hasVisibleText"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const logContainer = document.querySelector('.terminal, .log-container, pre, code');
+				if (!logContainer) {
+					return { logContent: '', terminalVisible: false, terminalHeight: 0, hasVisibleText: false };
+				}
+
+				const style = window.getComputedStyle(logContainer);
+				const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+				const height = logContainer.offsetHeight;
+
+				const hasContent = logContainer.textContent && logContainer.textContent.trim().length > 0;
+
+				return {
+					logContent: logContainer.textContent || '',
+					terminalVisible: isVisible,
+					terminalHeight: height,
+					hasVisibleText: hasContent && isVisible
+				};
+			})()
+		`, &logVisibility),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check log visibility: %v", err)
+		env.TakeScreenshot(ctx, "log-visibility-check-failed")
+		t.Fatalf("Failed to check log visibility: %v", err)
+	}
+
+	env.LogTest(t, "Log visibility check:")
+	env.LogTest(t, "  Terminal visible: %v", logVisibility.TerminalVisible)
+	env.LogTest(t, "  Terminal height: %dpx", logVisibility.TerminalHeight)
+	env.LogTest(t, "  Has visible text: %v", logVisibility.HasVisibleText)
+	env.LogTest(t, "  Content length: %d characters", len(logVisibility.LogContent))
+
+	// Minimum expected terminal height for logs to be properly rendered
+	minTerminalHeight := 50
+
+	if !logVisibility.HasVisibleText || len(logVisibility.LogContent) == 0 {
+		env.LogTest(t, "❌ FAILURE: Job logs are not visible in Output tab")
+		env.LogTest(t, "  Expected: Log content displayed in terminal")
+		env.LogTest(t, "  Actual: No log content found")
+		env.TakeScreenshot(ctx, "no-logs-visible")
+		t.Error("Job logs should be visible in the Output tab but no content was found")
+	} else if logVisibility.TerminalHeight < minTerminalHeight {
+		env.LogTest(t, "❌ FAILURE: Job logs exist but are not properly rendered")
+		env.LogTest(t, "  Expected: Terminal height >= %dpx", minTerminalHeight)
+		env.LogTest(t, "  Actual: Terminal height = %dpx", logVisibility.TerminalHeight)
+		env.TakeScreenshot(ctx, "logs-not-rendered")
+		t.Errorf("Job logs terminal should have height >= %dpx (got %dpx)", minTerminalHeight, logVisibility.TerminalHeight)
+	} else {
+		env.LogTest(t, "✅ SUCCESS: Job logs are visible in Output tab")
+		env.LogTest(t, "  Terminal properly rendered with %d characters, height: %dpx",
+			len(logVisibility.LogContent), logVisibility.TerminalHeight)
+	}
+
+	env.TakeScreenshot(ctx, "05-test-completed")
+	env.LogTest(t, "✅ Job logs visibility test completed")
 }
 
 // Helper function to get map keys as slice
