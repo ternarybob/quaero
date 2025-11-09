@@ -17,12 +17,16 @@ Add to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`
       "command": "C:\\development\\quaero\\bin\\quaero-mcp\\quaero-mcp.exe",
       "args": [],
       "env": {
-        "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero.toml"
+        "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero-mcp\\quaero-mcp.toml"
       }
     }
   }
 }
 ```
+
+**Configuration Files:**
+- `quaero-mcp.toml` - Minimal config (database + logging only)
+- Alternative: Use `../quaero.toml` to share config with main app
 
 **Note:** Adjust paths to match your installation directory.
 

@@ -264,17 +264,27 @@ function Deploy-Files {
         Copy-Item -Path $extensionSourcePath -Destination $extensionDestPath -Recurse
     }
 
-    # Deploy MCP server documentation
+    # Deploy MCP server documentation and configuration
     $mcpSourcePath = Join-Path -Path $ProjectRoot -ChildPath "cmd\quaero-mcp"
     $mcpDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero-mcp"
 
     if (Test-Path $mcpSourcePath) {
         # MCP directory and executable already created during build
+
         # Copy MCP-specific README as the directory's README.md
         $mcpReadmePath = Join-Path -Path $mcpSourcePath -ChildPath "README.md"
         if (Test-Path $mcpReadmePath) {
             $destReadme = Join-Path -Path $mcpDestPath -ChildPath "README.md"
             Copy-Item -Path $mcpReadmePath -Destination $destReadme -Force
+        }
+
+        # Deploy MCP-specific config file (only if not exists)
+        $mcpConfigSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\quaero-mcp.toml"
+        $mcpConfigDestPath = Join-Path -Path $mcpDestPath -ChildPath "quaero-mcp.toml"
+        if (Test-Path $mcpConfigSourcePath) {
+            if (-not (Test-Path $mcpConfigDestPath)) {
+                Copy-Item -Path $mcpConfigSourcePath -Destination $mcpConfigDestPath
+            }
         }
     }
 

@@ -22,6 +22,7 @@ The MCP server is built automatically with the main Quaero application:
 
 This creates:
 - `bin/quaero-mcp/quaero-mcp.exe` - MCP server executable
+- `bin/quaero-mcp/quaero-mcp.toml` - Minimal MCP configuration
 - `bin/quaero-mcp/README.md` - MCP-specific documentation
 - `bin/README.md` - Project overview (in bin root)
 
@@ -50,7 +51,7 @@ Edit `claude_desktop_config.json` to add the Quaero MCP server:
       "command": "C:\\development\\quaero\\bin\\quaero-mcp\\quaero-mcp.exe",
       "args": [],
       "env": {
-        "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero.toml"
+        "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero-mcp\\quaero-mcp.toml"
       }
     }
   }
@@ -59,9 +60,10 @@ Edit `claude_desktop_config.json` to add the Quaero MCP server:
 
 **Important:**
 - Use **double backslashes** (`\\`) in Windows paths for JSON
-- MCP server is built into `bin\\quaero-mcp\\quaero-mcp.exe` directory
+- MCP server uses `quaero-mcp.toml` (minimal config with only database + logging settings)
+- **Alternative:** Use `bin\\quaero.toml` if you want shared config with main app
 - Adjust paths to match your Quaero installation directory
-- Ensure `quaero.toml` exists in the specified location
+- Database path in config must match the main Quaero database location
 
 ### 3. Restart Claude Desktop
 

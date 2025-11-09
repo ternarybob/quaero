@@ -1,0 +1,27 @@
+# Quaero MCP Server Configuration
+# =================================
+#
+# Minimal configuration for MCP (Model Context Protocol) server.
+# The MCP server only needs database access for search operations.
+# No web server, scheduler, LLM, or crawler settings required.
+
+# =============================================================================
+# Storage Configuration (REQUIRED)
+# =============================================================================
+# Database path - must match the main Quaero database
+# The MCP server reads from the same database as the main application
+
+[storage.sqlite]
+path = "./data/quaero.db"  # Same database as main Quaero application
+
+# =============================================================================
+# Logging Configuration (OPTIONAL)
+# =============================================================================
+# MCP uses stdio for JSON-RPC communication, so logging must go to stderr
+# Keep logging minimal to avoid interfering with stdio protocol
+# Default level: warn (errors and warnings only)
+
+[logging]
+level = "warn"    # warn, error, or info (default: warn for MCP)
+format = "text"   # text or json
+output = ["stderr"]  # Must use stderr (stdout reserved for JSON-RPC)
