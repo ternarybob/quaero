@@ -107,12 +107,17 @@ Quaero follows a clean architecture pattern with clear separation of concerns:
                   ↓
 ┌─────────────────────────────────────────┐
 │  internal/services/                     │  Business logic
-│  └─ Uses: storage/, interfaces/        │
+│  └─ Uses: storage/, interfaces/        │  ← MCP server uses search service
 └─────────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────────┐
 │  internal/storage/sqlite/               │  Data persistence
 │  └─ Uses: interfaces/                  │
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│  cmd/quaero-mcp/                        │  MCP Server (stdio/JSON-RPC)
+│  └─ Uses: internal/services/search     │  Thin wrapper, read-only
 └─────────────────────────────────────────┘
 ```
 
@@ -251,6 +256,133 @@ mock_mode = false  # Set to true for testing
 - Default server URL: `http://localhost:8085`
 - Configurable in extension settings
 - Supports WebSocket (WS) and secure WebSocket (WSS)
+
+### MCP Server Architecture
+
+**MCP Server** (`cmd/quaero-mcp/`):
+- Exposes Quaero's search functionality to AI assistants via Model Context Protocol (MCP)
+- Thin wrapper around existing `internal/services/search` package
+- Uses stdio/JSON-RPC transport for local-only communication
+- Integrates with Claude Desktop and other MCP-compatible clients
+- Built automatically with main application via `scripts/build.ps1`
+
+**Architecture Pattern:**
+- **Minimal wrapper (< 200 lines main.go)** - No business logic duplication
+- **Interface-based** - Uses existing SearchService interface
+- **Read-only** - MCP tools only query data, never modify
+- **Local-only** - No network exposure, all data stays on machine
+
+**MCP Tools (4 Total):**
+
+1. **search_documents** - Full-text search using SQLite FTS5
+   - Parameters: `query` (FTS5 syntax), `limit`, `source_types`
+   - Maps to: `SearchService.Search(query, opts)`
+   - Use case: Finding documents by keywords
+
+2. **get_document** - Retrieve single document by ID
+   - Parameters: `document_id` (format: doc_{uuid})
+   - Maps to: `SearchService.GetByID(id)`
+   - Use case: Getting complete document content
+
+3. **list_recent_documents** - List recently updated documents
+   - Parameters: `limit`, `source_type` (optional filter)
+   - Maps to: `SearchService.Search("", opts)` with ORDER BY updated_at DESC
+   - Use case: Seeing recent activity
+
+4. **get_related_documents** - Find documents by cross-reference
+   - Parameters: `reference` (e.g., BUG-123, PROJ-456)
+   - Maps to: `SearchService.SearchByReference(ref, opts)`
+   - Use case: Tracking issue relationships
+
+**Response Format:**
+- All tools return **Markdown** formatted results
+- Includes metadata (source type, URL, timestamps)
+- Content previews or full content depending on tool
+- Suitable for direct display in AI assistant interfaces
+
+**File Organization:**
+```
+cmd/quaero-mcp/
+├── main.go           # MCP server initialization (~70 lines)
+├── handlers.go       # Tool handler implementations (~163 lines)
+├── formatters.go     # Markdown response formatters (~127 lines)
+└── tools.go          # MCP tool definitions (~58 lines)
+```
+
+**Integration with Search Service:**
+```go
+// MCP server uses existing search service
+searchService := search.NewService(storage, logger)
+
+// Each tool handler calls appropriate method
+func handleSearchDocuments(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+    docs, err := searchService.Search(ctx, query, opts)
+    return formatSearchResults(docs), nil
+}
+```
+
+**Logging for MCP:**
+- **CRITICAL:** MCP uses stdio for JSON-RPC protocol
+- **NEVER** log to stdout (reserved for protocol)
+- **Use WARN level** by default (minimal stderr output)
+- Logging configuration in main.go:
+  ```go
+  logger := arbor.NewLogger().WithConsoleWriter(arbor_models.WriterConfiguration{
+      Type:             arbor_models.LogWriterTypeConsole,
+      TimeFormat:       "15:04:05",
+      TextOutput:       true,
+      DisableTimestamp: false,
+  }).WithLevelFromString("warn") // Minimal logging to avoid interfering with stdio
+  ```
+
+**Configuration:**
+- Uses standard `quaero.toml` config file
+- Environment variable: `QUAERO_CONFIG` points to config path
+- Same database as main Quaero application
+- No separate configuration needed
+
+**Testing:**
+- API tests in `test/api/mcp_server_test.go`
+- Tests verify handler logic and search integration
+- No stdio tests (complexity vs. value trade-off)
+- Manual testing via Claude Desktop recommended
+
+**Build Process:**
+```powershell
+# MCP server built automatically with main application
+.\scripts\build.ps1
+
+# Creates both binaries:
+# - bin/quaero.exe (main application)
+# - bin/quaero-mcp.exe (MCP server)
+```
+
+**Claude Desktop Integration:**
+Add to `%APPDATA%\Claude\claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "quaero": {
+      "command": "C:\\development\\quaero\\bin\\quaero-mcp.exe",
+      "args": [],
+      "env": {
+        "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero.toml"
+      }
+    }
+  }
+}
+```
+
+**Security Model:**
+- **Local-only execution** - No network communication
+- **Read-only access** - MCP tools never modify data
+- **Same security as main app** - Uses same database and permissions
+- **No cloud API calls** - All data processing local
+
+**Documentation:**
+- Setup guide: `docs/implement-mcp-server/mcp-configuration.md`
+- Usage examples: `docs/implement-mcp-server/usage-examples.md`
+- Implementation plan: `docs/implement-mcp-server/plan.md`
 
 ## Go Structure Standards
 
@@ -627,7 +759,37 @@ To change embedding/chat behavior:
 3. Update tests in `test/unit/`
 4. Consider mock mode for testing
 
+### Working with MCP Server
 
+**DO:**
+- Keep main.go under 200 lines (thin wrapper pattern)
+- Use existing SearchService interface (no duplication)
+- Return Markdown-formatted responses
+- Log at WARN level (avoid interfering with stdio)
+- Test handlers via API tests in `test/api/`
+- Document new tools in usage-examples.md
+
+**DON'T:**
+- Add business logic to MCP handlers (use services/)
+- Log to stdout (breaks JSON-RPC protocol)
+- Duplicate search functionality from SearchService
+- Add write/modify operations (MCP is read-only)
+- Skip testing (API tests verify integration)
+
+**Adding a New MCP Tool:**
+1. Define tool in `cmd/quaero-mcp/tools.go` (MCP schema)
+2. Add handler in `cmd/quaero-mcp/handlers.go` (calls SearchService)
+3. Add formatter in `cmd/quaero-mcp/formatters.go` (Markdown output)
+4. Register tool in `cmd/quaero-mcp/main.go` (server.AddTool)
+5. Add API test in `test/api/mcp_server_test.go`
+6. Document in `docs/implement-mcp-server/usage-examples.md`
+
+**MCP Server Constraints:**
+- Must use existing SearchService methods (no new queries)
+- Read-only operations only (no data modification)
+- Minimal logging (WARN level to stderr)
+- Markdown response format (for AI assistants)
+- File size: main.go < 200 lines, total < 500 lines
 
 ## Important Implementation Notes
 

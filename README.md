@@ -66,6 +66,57 @@ cd quaero
 
 **Important:** Always use the build scripts (`build.ps1` on Windows, `build.sh` on Linux/macOS). Direct `go build` is not supported for production builds as it doesn't handle versioning and assets correctly.
 
+## MCP Server for Claude CLI
+
+Quaero includes an **MCP (Model Context Protocol) server** that exposes search functionality to AI assistants like Claude CLI.
+
+### Features
+
+- **4 search tools** for Claude to access your knowledge base
+- **Stdio/JSON-RPC** communication (local-only, no network exposure)
+- **Markdown-formatted results** for easy reading in Claude Desktop
+- **Automatic build** with main Quaero application
+
+### Quick Setup
+
+1. **Build Quaero** (builds both quaero.exe and quaero-mcp.exe):
+   ```powershell
+   .\scripts\build.ps1
+   ```
+
+2. **Configure Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json`):
+   ```json
+   {
+     "mcpServers": {
+       "quaero": {
+         "command": "C:\\development\\quaero\\bin\\quaero-mcp.exe",
+         "args": [],
+         "env": {
+           "QUAERO_CONFIG": "C:\\development\\quaero\\bin\\quaero.toml"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop** to load the MCP server
+
+### Available Tools
+
+- `search_documents` - Full-text search with FTS5 (filters, limits, boolean operators)
+- `get_document` - Retrieve complete document by ID
+- `list_recent_documents` - Show recently updated documents
+- `get_related_documents` - Find documents referencing specific keys
+
+### Example Queries
+
+Ask Claude natural language questions:
+- "Search my knowledge base for authentication bugs"
+- "Show me the 15 most recent confluence pages"
+- "What documents reference issue PROJ-456?"
+
+For detailed configuration and troubleshooting, see [docs/implement-mcp-server/mcp-configuration.md](docs/implement-mcp-server/mcp-configuration.md).
+
 ### Configuration
 
 Create `quaero.toml` in your project directory (or use the default from `deployments/local/quaero.toml`):

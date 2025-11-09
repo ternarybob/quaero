@@ -246,6 +246,13 @@ function Deploy-Files {
         }
     }
 
+    # Deploy project README to bin root
+    $projectReadmePath = Join-Path -Path $ProjectRoot -ChildPath "README.md"
+    if (Test-Path $projectReadmePath) {
+        $binReadmePath = Join-Path -Path $BinDirectory -ChildPath "README.md"
+        Copy-Item -Path $projectReadmePath -Destination $binReadmePath -Force
+    }
+
     # Deploy Chrome extension
     $extensionSourcePath = Join-Path -Path $ProjectRoot -ChildPath "cmd\quaero-chrome-extension"
     $extensionDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero-chrome-extension"
@@ -255,6 +262,20 @@ function Deploy-Files {
             Remove-Item -Path $extensionDestPath -Recurse -Force
         }
         Copy-Item -Path $extensionSourcePath -Destination $extensionDestPath -Recurse
+    }
+
+    # Deploy MCP server documentation
+    $mcpSourcePath = Join-Path -Path $ProjectRoot -ChildPath "cmd\quaero-mcp"
+    $mcpDestPath = Join-Path -Path $BinDirectory -ChildPath "quaero-mcp"
+
+    if (Test-Path $mcpSourcePath) {
+        # MCP directory and executable already created during build
+        # Copy MCP-specific README as the directory's README.md
+        $mcpReadmePath = Join-Path -Path $mcpSourcePath -ChildPath "README.md"
+        if (Test-Path $mcpReadmePath) {
+            $destReadme = Join-Path -Path $mcpDestPath -ChildPath "README.md"
+            Copy-Item -Path $mcpReadmePath -Destination $destReadme -Force
+        }
     }
 
     # Deploy pages directory
@@ -429,6 +450,49 @@ if (-not (Test-Path $outputPath)) {
     Stop-Transcript
     exit 1
 }
+
+# Build MCP server
+Write-Host "Building quaero-mcp..." -ForegroundColor Yellow
+
+# Create MCP directory if it doesn't exist
+$mcpDir = Join-Path -Path $binDir -ChildPath "quaero-mcp"
+if (-not (Test-Path $mcpDir)) {
+    New-Item -ItemType Directory -Path $mcpDir | Out-Null
+}
+
+$mcpOutputPath = Join-Path -Path $mcpDir -ChildPath "quaero-mcp.exe"
+
+$mcpBuildArgs = @(
+    "build"
+    "-ldflags=$ldflags"
+    "-o", $mcpOutputPath
+    ".\cmd\quaero-mcp"
+)
+
+# Change to project root for build
+Push-Location $projectRoot
+
+Write-Host "Build command: go $($mcpBuildArgs -join ' ')" -ForegroundColor Gray
+
+& go @mcpBuildArgs
+
+# Return to original directory
+Pop-Location
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "MCP server build failed!" -ForegroundColor Red
+    Stop-Transcript
+    exit 1
+}
+
+# Verify MCP executable was created
+if (-not (Test-Path $mcpOutputPath)) {
+    Write-Error "MCP build completed but executable not found: $mcpOutputPath"
+    Stop-Transcript
+    exit 1
+}
+
+Write-Host "MCP server built successfully: $mcpOutputPath" -ForegroundColor Green
 
 # Handle deployment and execution based on parameters
 if ($Run -or $Deploy) {

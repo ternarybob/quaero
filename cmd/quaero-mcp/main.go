@@ -1,0 +1,70 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/ternarybob/arbor"
+	arbor_models "github.com/ternarybob/arbor/models"
+	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/services/search"
+	"github.com/ternarybob/quaero/internal/storage"
+)
+
+func main() {
+	// Load configuration
+	configPath := os.Getenv("QUAERO_CONFIG")
+	if configPath == "" {
+		configPath = "quaero.toml"
+	}
+
+	config, err := common.LoadFromFile(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize minimal logger for MCP server (console only, no file output)
+	logger := arbor.NewLogger().WithConsoleWriter(arbor_models.WriterConfiguration{
+		Type:             arbor_models.LogWriterTypeConsole,
+		TimeFormat:       "15:04:05",
+		TextOutput:       true,
+		DisableTimestamp: false,
+	}).WithLevelFromString("warn") // Minimal logging to avoid cluttering MCP stdio
+
+	// Initialize storage
+	storageManager, err := storage.NewStorageManager(logger, config)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize storage")
+	}
+	defer storageManager.Close()
+
+	// Initialize search service
+	searchService, err := search.NewSearchService(
+		storageManager.DocumentStorage(),
+		logger,
+		config,
+	)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to initialize search service")
+	}
+
+	// Create MCP server
+	mcpServer := server.NewMCPServer(
+		"quaero",
+		common.GetVersion(),
+		server.WithToolCapabilities(true),
+	)
+
+	// Register tools
+	mcpServer.AddTool(createSearchDocumentsTool(), handleSearchDocuments(searchService, logger))
+	mcpServer.AddTool(createGetDocumentTool(), handleGetDocument(searchService, logger))
+	mcpServer.AddTool(createListRecentDocumentsTool(), handleListRecent(searchService, logger))
+	mcpServer.AddTool(createGetRelatedDocumentsTool(), handleGetRelated(searchService, logger))
+
+	// Start server (blocks on stdio)
+	if err := server.ServeStdio(mcpServer); err != nil {
+		logger.Fatal().Err(err).Msg("MCP server failed")
+	}
+}
