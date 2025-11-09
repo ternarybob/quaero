@@ -174,11 +174,11 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 // scanJob scans a single job row
 func (s *JobStorage) scanJob(row *sql.Row) (*models.Job, error) {
 	var (
-		id, jobType, name, description, configJSON, metadataJSON, status, progressJSON, errorMsg string
-		parentID                                                                                 sql.NullString
-		createdAt                                                                                int64
-		startedAt, completedAt, finishedAt, lastHeartbeat                                        sql.NullInt64
-		resultCount, failedCount, depth                                                          int
+		id, jobType, name, description, configJSON, metadataJSON, status, progressJSON string
+		parentID, errorMsg                                                             sql.NullString
+		createdAt                                                                      int64
+		startedAt, completedAt, finishedAt, lastHeartbeat                              sql.NullInt64
+		resultCount, failedCount, depth                                                int
 	)
 
 	err := row.Scan(
@@ -237,12 +237,18 @@ func (s *JobStorage) scanJob(row *sql.Row) (*models.Job, error) {
 		Depth:     depth,
 	}
 
+	// Extract error message (NULL-safe)
+	var errorMessage string
+	if errorMsg.Valid {
+		errorMessage = errorMsg.String
+	}
+
 	// Build Job with runtime state
 	job := &models.Job{
 		JobModel:    jobModel,
 		Status:      models.JobStatus(status),
 		Progress:    progress,
-		Error:       errorMsg,
+		Error:       errorMessage,
 		ResultCount: resultCount,
 		FailedCount: failedCount,
 	}

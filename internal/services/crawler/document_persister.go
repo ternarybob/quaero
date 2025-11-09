@@ -35,6 +35,9 @@ func (dp *DocumentPersister) SaveCrawledDocument(crawledDoc *CrawledDocument) er
 	// Convert to standard document model
 	doc := crawledDoc.ToDocument()
 
+	// Track whether this is a new document (for event publishing)
+	isNewDocument := false
+
 	// Check if document already exists (by source URL)
 	existingDoc, err := dp.documentStorage.GetDocumentBySource("crawler", crawledDoc.SourceURL)
 	if err == nil && existingDoc != nil {
@@ -59,6 +62,8 @@ func (dp *DocumentPersister) SaveCrawledDocument(crawledDoc *CrawledDocument) er
 			Msg("Updated existing crawled document")
 	} else {
 		// Document doesn't exist, create new one
+		isNewDocument = true
+
 		if err := dp.documentStorage.SaveDocument(doc); err != nil {
 			dp.logger.Error().
 				Err(err).
@@ -76,8 +81,9 @@ func (dp *DocumentPersister) SaveCrawledDocument(crawledDoc *CrawledDocument) er
 			Msg("Saved new crawled document")
 	}
 
-	// Publish document_saved event for parent job tracking
-	if dp.eventService != nil && crawledDoc.ParentJobID != "" {
+	// Publish document_saved event ONLY for NEW documents (not updates)
+	// This prevents double-counting when the same URL is re-crawled
+	if isNewDocument && dp.eventService != nil && crawledDoc.ParentJobID != "" {
 		payload := map[string]interface{}{
 			"job_id":        crawledDoc.JobID,
 			"parent_job_id": crawledDoc.ParentJobID,
@@ -104,7 +110,13 @@ func (dp *DocumentPersister) SaveCrawledDocument(crawledDoc *CrawledDocument) er
 			Str("document_id", doc.ID).
 			Str("job_id", crawledDoc.JobID).
 			Str("parent_job_id", crawledDoc.ParentJobID).
-			Msg("Published document_saved event")
+			Msg("Published document_saved event for new document")
+	} else if !isNewDocument && crawledDoc.ParentJobID != "" {
+		dp.logger.Debug().
+			Str("document_id", doc.ID).
+			Str("job_id", crawledDoc.JobID).
+			Str("parent_job_id", crawledDoc.ParentJobID).
+			Msg("Skipped document_saved event for updated document (prevents double-counting)")
 	}
 
 	return nil

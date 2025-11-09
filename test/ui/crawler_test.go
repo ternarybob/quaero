@@ -579,21 +579,82 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 				env.LogTest(t, "  Terminal visible: %v", logVisibility.TerminalVisible)
 				env.LogTest(t, "  Terminal height: %dpx", logVisibility.TerminalHeight)
 				env.LogTest(t, "  Has visible text: %v", logVisibility.HasVisibleText)
+				env.LogTest(t, "  Content length: %d characters", len(logVisibility.LogContent))
 
-				// Terminal should have height > 0 to indicate logs are actually rendered
-				minTerminalHeight := 50 // Minimum expected height in pixels for a terminal with content
+				// CRITICAL: Check for empty, blank, or null content - these are ALL failures
+				logContentTrimmed := strings.TrimSpace(logVisibility.LogContent)
 
-				if !logVisibility.HasVisibleText || len(logVisibility.LogContent) == 0 || logVisibility.TerminalHeight < minTerminalHeight {
-					env.LogTest(t, "❌ FAILURE: Job logs are not properly rendered in the UI")
-					env.LogTest(t, "  Expected: Log content displayed in terminal with visible height")
-					env.LogTest(t, "  Actual: Terminal element exists but logs are not properly rendered")
-					env.LogTest(t, "  Terminal display: visible=%v, height=%dpx (expected >=%dpx), content length=%d",
-						logVisibility.TerminalVisible, logVisibility.TerminalHeight, minTerminalHeight, len(logVisibility.LogContent))
-					env.TakeScreenshot(ctx, "job-logs-not-visible")
-					t.Errorf("Job logs should be visible in the Output tab with terminal height >= %dpx (got %dpx)", minTerminalHeight, logVisibility.TerminalHeight)
-				} else {
-					env.LogTest(t, "✓ Job logs are properly rendered in the UI (%d characters, height: %dpx)", len(logVisibility.LogContent), logVisibility.TerminalHeight)
+				// Check for "No logs available" message (failure case)
+				if strings.Contains(strings.ToLower(logVisibility.LogContent), "no logs available") {
+					env.LogTest(t, "❌ FAILURE: Job logs show 'No logs available' message")
+					env.LogTest(t, "  This indicates the job has no logs or the GET /api/jobs/{id}/logs endpoint failed")
+					env.TakeScreenshot(ctx, "no-logs-available-message")
+
+					// Capture console errors
+					var consoleErrors []map[string]interface{}
+					chromedp.Evaluate(`
+						(() => {
+							const errors = [];
+							// Get console errors from window.__consoleErrors if available
+							if (window.__consoleErrors) {
+								errors.push(...window.__consoleErrors);
+							}
+							return errors;
+						})()
+					`, &consoleErrors).Do(ctx)
+
+					if len(consoleErrors) > 0 {
+						env.LogTest(t, "  Console errors detected:")
+						for i, errObj := range consoleErrors {
+							env.LogTest(t, "    %d. %v", i+1, errObj)
+						}
+					}
+
+					t.Errorf("Job logs show 'No logs available' - expected actual log content")
+					return
 				}
+
+				// STRICT CHECK: Empty, blank, or missing content is a FAILURE
+				// Any of these conditions mean the logs are NOT properly displayed:
+				// - logContentTrimmed is empty string ""
+				// - logVisibility.LogContent has zero length
+				// - Terminal text is not visible (hasVisibleText = false)
+				if logContentTrimmed == "" || len(logVisibility.LogContent) == 0 || !logVisibility.HasVisibleText {
+					env.LogTest(t, "❌ FAILURE: Job logs are EMPTY or NOT VISIBLE")
+					env.LogTest(t, "  Expected: Actual log content with text (job execution logs)")
+					env.LogTest(t, "  Actual: Empty/blank terminal with no content")
+					env.LogTest(t, "  Terminal display: visible=%v, height=%dpx, content_length=%d, trimmed_length=%d",
+						logVisibility.TerminalVisible, logVisibility.TerminalHeight, len(logVisibility.LogContent), len(logContentTrimmed))
+
+					// Capture console errors to diagnose the issue
+					var consoleErrors []map[string]interface{}
+					chromedp.Evaluate(`
+						(() => {
+							const errors = [];
+							// Capture all console errors
+							if (window.__consoleErrors) {
+								errors.push(...window.__consoleErrors);
+							}
+							return errors;
+						})()
+					`, &consoleErrors).Do(ctx)
+
+					if len(consoleErrors) > 0 {
+						env.LogTest(t, "  Console errors detected:")
+						for i, errObj := range consoleErrors {
+							env.LogTest(t, "    %d. %v", i+1, errObj)
+						}
+					} else {
+						env.LogTest(t, "  No console errors captured - logs may be failing to load silently")
+					}
+
+					env.TakeScreenshot(ctx, "job-logs-empty-or-blank")
+					t.Errorf("CRITICAL FAILURE: Job logs are empty/blank - logs MUST display actual content")
+					return
+				}
+
+				// If we got here, logs have actual content
+				env.LogTest(t, "✓ Job logs are visible in the UI (%d characters, height: %dpx)", len(logVisibility.LogContent), logVisibility.TerminalHeight)
 
 				// Use the extracted log content for further checks
 				logContent := logVisibility.LogContent
@@ -1620,7 +1681,8 @@ func TestCrawlerJobLogsVisibility(t *testing.T) {
 	env.LogTest(t, "  Content length: %d characters", len(logVisibility.LogContent))
 
 	// Minimum expected terminal height for logs to be properly rendered
-	minTerminalHeight := 50
+	// NOTE: Terminal height check disabled per user request - terminal height is a non-issue
+	// minTerminalHeight := 50
 
 	if !logVisibility.HasVisibleText || len(logVisibility.LogContent) == 0 {
 		env.LogTest(t, "❌ FAILURE: Job logs are not visible in Output tab")
@@ -1628,15 +1690,9 @@ func TestCrawlerJobLogsVisibility(t *testing.T) {
 		env.LogTest(t, "  Actual: No log content found")
 		env.TakeScreenshot(ctx, "no-logs-visible")
 		t.Error("Job logs should be visible in the Output tab but no content was found")
-	} else if logVisibility.TerminalHeight < minTerminalHeight {
-		env.LogTest(t, "❌ FAILURE: Job logs exist but are not properly rendered")
-		env.LogTest(t, "  Expected: Terminal height >= %dpx", minTerminalHeight)
-		env.LogTest(t, "  Actual: Terminal height = %dpx", logVisibility.TerminalHeight)
-		env.TakeScreenshot(ctx, "logs-not-rendered")
-		t.Errorf("Job logs terminal should have height >= %dpx (got %dpx)", minTerminalHeight, logVisibility.TerminalHeight)
 	} else {
 		env.LogTest(t, "✅ SUCCESS: Job logs are visible in Output tab")
-		env.LogTest(t, "  Terminal properly rendered with %d characters, height: %dpx",
+		env.LogTest(t, "  Terminal rendered with %d characters, height: %dpx",
 			len(logVisibility.LogContent), logVisibility.TerminalHeight)
 	}
 

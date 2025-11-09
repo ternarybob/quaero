@@ -365,7 +365,7 @@
                                 No logs available for this job
                             </div>
                         </template>
-                        <template x-for="log in filteredLogs" :key="log.timestamp + log.message">
+                        <template x-for="(log, index) in filteredLogs" :key="`log-${index}-${log.timestamp}`">
                             <div class="terminal-line">
                                 <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
                                 <span :class="log.levelClass" x-text="`[${log.level.toUpperCase()}]`"></span>
