@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Load Job Definitions from Files - TOML/JSON crawler job definitions
+// Load Job Definitions from Files - TOML/JSON job definitions
 // -----------------------------------------------------------------------
 
 package sqlite
@@ -16,105 +16,69 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// CrawlerJobDefinitionFile represents a simplified crawler job definition file format
-// This is a user-friendly format for defining crawler jobs in TOML/JSON files
-type CrawlerJobDefinitionFile struct {
-	ID             string   `toml:"id" json:"id"`                       // Unique identifier
-	Name           string   `toml:"name" json:"name"`                   // Human-readable name
-	JobType        string   `toml:"job_type" json:"job_type"`           // Job owner type: "system" or "user" (default: "user")
-	Description    string   `toml:"description" json:"description"`     // Job description
-	StartURLs      []string `toml:"start_urls" json:"start_urls"`       // Initial URLs to crawl
-	Schedule       string   `toml:"schedule" json:"schedule"`           // Cron expression (empty = manual only)
-	Timeout        string   `toml:"timeout" json:"timeout"`             // Duration string (e.g., "30m", "1h")
-	Enabled        bool     `toml:"enabled" json:"enabled"`             // Whether job is enabled
-	AutoStart      bool     `toml:"auto_start" json:"auto_start"`       // Whether to auto-start on scheduler init
-	Authentication string   `toml:"authentication" json:"authentication"` // Authentication reference (site domain, e.g., "example.com")
-
-	// Crawler configuration
-	IncludePatterns []string `toml:"include_patterns" json:"include_patterns"` // URL patterns to include (regex)
-	ExcludePatterns []string `toml:"exclude_patterns" json:"exclude_patterns"` // URL patterns to exclude (regex)
-	MaxDepth        int      `toml:"max_depth" json:"max_depth"`               // Maximum crawl depth
-	MaxPages        int      `toml:"max_pages" json:"max_pages"`               // Maximum pages to crawl
-	Concurrency     int      `toml:"concurrency" json:"concurrency"`           // Number of concurrent workers
-	FollowLinks     bool     `toml:"follow_links" json:"follow_links"`         // Whether to follow discovered links
+// JobDefinitionFile represents a generic job definition file format (TOML/JSON)
+// This structure matches the models.JobDefinition closely for direct unmarshaling
+type JobDefinitionFile struct {
+	ID             string                 `toml:"id" json:"id"`
+	Name           string                 `toml:"name" json:"name"`
+	Type           string                 `toml:"type" json:"type"`                     // Job type: crawler, summarizer, custom, places
+	JobType        string                 `toml:"job_type" json:"job_type"`             // Owner type: system, user
+	Description    string                 `toml:"description" json:"description"`
+	SourceType     string                 `toml:"source_type" json:"source_type"`       // Optional for some job types
+	BaseURL        string                 `toml:"base_url" json:"base_url"`             // Optional
+	AuthID         string                 `toml:"auth_id" json:"auth_id"`               // Optional
+	Steps          []models.JobStep       `toml:"steps" json:"steps"`                   // Required
+	Schedule       string                 `toml:"schedule" json:"schedule"`             // Cron or empty
+	Timeout        string                 `toml:"timeout" json:"timeout"`               // Duration string
+	Enabled        bool                   `toml:"enabled" json:"enabled"`
+	AutoStart      bool                   `toml:"auto_start" json:"auto_start"`
+	Config         map[string]interface{} `toml:"config" json:"config"`                 // Optional job-level config
+	PreJobs        []string               `toml:"pre_jobs" json:"pre_jobs"`             // Optional
+	PostJobs       []string               `toml:"post_jobs" json:"post_jobs"`           // Optional
+	ErrorTolerance *models.ErrorTolerance `toml:"error_tolerance" json:"error_tolerance"` // Optional
 }
 
-// ToJobDefinition converts the simplified file format to a full JobDefinition model
-func (c *CrawlerJobDefinitionFile) ToJobDefinition() *models.JobDefinition {
+// ToJobDefinition converts the file format to a full JobDefinition model
+func (j *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 	// Default to 'user' if job_type is not specified
 	jobType := models.JobOwnerTypeUser
-	if c.JobType != "" {
-		jobType = models.JobOwnerType(c.JobType)
+	if j.JobType != "" {
+		jobType = models.JobOwnerType(j.JobType)
 	}
 
-	return &models.JobDefinition{
-		ID:          c.ID,
-		Name:        c.Name,
-		Type:        models.JobDefinitionTypeCrawler,
-		JobType:     jobType,
-		Description: c.Description,
-		SourceType:  "web", // Generic web crawler for arbitrary websites
-		BaseURL:     "",    // Base URL can be empty for web crawlers (uses start_urls)
-		AuthID:      c.Authentication, // Reference to auth credentials by site domain
-		Steps: []models.JobStep{
-			{
-				Name:   "crawl",
-				Action: "crawl",
-				Config: map[string]interface{}{
-					"start_urls":       c.StartURLs,
-					"include_patterns": c.IncludePatterns,
-					"exclude_patterns": c.ExcludePatterns,
-					"max_depth":        c.MaxDepth,
-					"max_pages":        c.MaxPages,
-					"concurrency":      c.Concurrency,
-					"follow_links":     c.FollowLinks,
-				},
-				OnError: models.ErrorStrategyContinue,
-			},
-		},
-		Schedule:  c.Schedule,
-		Timeout:   c.Timeout,
-		Enabled:   c.Enabled,
-		AutoStart: c.AutoStart,
-		Config:    map[string]interface{}{},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	jobDef := &models.JobDefinition{
+		ID:             j.ID,
+		Name:           j.Name,
+		Type:           models.JobDefinitionType(j.Type),
+		JobType:        jobType,
+		Description:    j.Description,
+		SourceType:     j.SourceType,
+		BaseURL:        j.BaseURL,
+		AuthID:         j.AuthID,
+		Steps:          j.Steps,
+		Schedule:       j.Schedule,
+		Timeout:        j.Timeout,
+		Enabled:        j.Enabled,
+		AutoStart:      j.AutoStart,
+		Config:         j.Config,
+		PreJobs:        j.PreJobs,
+		PostJobs:       j.PostJobs,
+		ErrorTolerance: j.ErrorTolerance,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
+
+	// Initialize empty maps if nil
+	if jobDef.Config == nil {
+		jobDef.Config = make(map[string]interface{})
+	}
+
+	return jobDef
 }
 
-// Validate validates the crawler job definition file
-func (c *CrawlerJobDefinitionFile) Validate() error {
-	if c.ID == "" {
-		return fmt.Errorf("id is required")
-	}
-	if c.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-	if len(c.StartURLs) == 0 {
-		return fmt.Errorf("start_urls must contain at least one URL")
-	}
-	if c.MaxDepth < 0 {
-		return fmt.Errorf("max_depth must be >= 0")
-	}
-	if c.MaxPages < 0 {
-		return fmt.Errorf("max_pages must be >= 0")
-	}
-	if c.Concurrency < 1 {
-		return fmt.Errorf("concurrency must be >= 1")
-	}
-
-	// Validate timeout format if provided
-	if c.Timeout != "" {
-		if _, err := time.ParseDuration(c.Timeout); err != nil {
-			return fmt.Errorf("invalid timeout duration '%s': %w", c.Timeout, err)
-		}
-	}
-
-	return nil
-}
-
-// LoadJobDefinitionsFromFiles loads crawler job definitions from TOML/JSON files
+// LoadJobDefinitionsFromFiles loads job definitions from TOML/JSON files
 // in the specified directory. This is called during startup to seed user-defined jobs.
+// Supports all job types (crawler, places, summarizer, custom) via generic loading.
 func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error {
 	m.logger.Info().Str("path", dirPath).Msg("Loading job definitions from files")
 
@@ -142,13 +106,13 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 		filePath := filepath.Join(dirPath, entry.Name())
 		ext := filepath.Ext(entry.Name())
 
-		var crawlerJobFile *CrawlerJobDefinitionFile
+		var jobFile *JobDefinitionFile
 
 		switch ext {
 		case ".toml":
-			crawlerJobFile, err = m.loadCrawlerJobFromTOML(filePath)
+			jobFile, err = m.loadJobDefFromTOML(filePath)
 		case ".json":
-			crawlerJobFile, err = m.loadCrawlerJobFromJSON(filePath)
+			jobFile, err = m.loadJobDefFromJSON(filePath)
 		default:
 			m.logger.Debug().Str("file", entry.Name()).Msg("Skipping non-TOML/JSON file")
 			skippedCount++
@@ -161,15 +125,8 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 			continue
 		}
 
-		// Validate crawler job file
-		if err := crawlerJobFile.Validate(); err != nil {
-			m.logger.Warn().Err(err).Str("file", entry.Name()).Msg("Invalid job definition in file")
-			skippedCount++
-			continue
-		}
-
 		// Convert to full JobDefinition model
-		jobDef := crawlerJobFile.ToJobDefinition()
+		jobDef := jobFile.ToJobDefinition()
 
 		// Validate full job definition
 		if err := jobDef.Validate(); err != nil {
@@ -177,6 +134,10 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 			skippedCount++
 			continue
 		}
+
+		// Save raw TOML/JSON content for reference
+		rawContent, _ := os.ReadFile(filePath)
+		jobDef.TOML = string(rawContent)
 
 		// Save job definition (idempotent - uses ON CONFLICT to update existing)
 		if err := m.jobDefinition.SaveJobDefinition(ctx, jobDef); err != nil {
@@ -187,8 +148,9 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 
 		m.logger.Info().
 			Str("job_def_id", jobDef.ID).
+			Str("type", string(jobDef.Type)).
 			Str("file", entry.Name()).
-			Msg("Loaded crawler job definition from file")
+			Msg("Loaded job definition from file")
 
 		loadedCount++
 	}
@@ -201,32 +163,32 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 	return nil
 }
 
-// loadCrawlerJobFromTOML loads a crawler job definition from a TOML file
-func (m *Manager) loadCrawlerJobFromTOML(filePath string) (*CrawlerJobDefinitionFile, error) {
+// loadJobDefFromTOML loads a generic job definition from a TOML file
+func (m *Manager) loadJobDefFromTOML(filePath string) (*JobDefinitionFile, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	var crawlerJob CrawlerJobDefinitionFile
-	if err := toml.Unmarshal(data, &crawlerJob); err != nil {
+	var jobFile JobDefinitionFile
+	if err := toml.Unmarshal(data, &jobFile); err != nil {
 		return nil, fmt.Errorf("failed to parse TOML: %w", err)
 	}
 
-	return &crawlerJob, nil
+	return &jobFile, nil
 }
 
-// loadCrawlerJobFromJSON loads a crawler job definition from a JSON file
-func (m *Manager) loadCrawlerJobFromJSON(filePath string) (*CrawlerJobDefinitionFile, error) {
+// loadJobDefFromJSON loads a generic job definition from a JSON file
+func (m *Manager) loadJobDefFromJSON(filePath string) (*JobDefinitionFile, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	var crawlerJob CrawlerJobDefinitionFile
-	if err := json.Unmarshal(data, &crawlerJob); err != nil {
+	var jobFile JobDefinitionFile
+	if err := json.Unmarshal(data, &jobFile); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
-	return &crawlerJob, nil
+	return &jobFile, nil
 }

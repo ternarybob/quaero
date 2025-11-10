@@ -743,23 +743,19 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	}
 	defer r.Body.Close()
 
-	// Parse TOML into CrawlerJobDefinitionFile
-	var crawlerJob sqlite.CrawlerJobDefinitionFile
-	if err := toml.Unmarshal(tomlContent, &crawlerJob); err != nil {
+	// Parse TOML into generic JobDefinitionFile
+	var jobFile sqlite.JobDefinitionFile
+	if err := toml.Unmarshal(tomlContent, &jobFile); err != nil {
 		h.logger.Error().Err(err).Msg("Invalid TOML syntax")
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid TOML syntax: %v", err))
 		return
 	}
 
-	// Validate crawler job file
-	if err := crawlerJob.Validate(); err != nil {
-		h.logger.Error().Err(err).Msg("Job definition validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Validation failed: %v", err))
-		return
-	}
-
 	// Convert to full JobDefinition model
-	jobDef := crawlerJob.ToJobDefinition()
+	jobDef := jobFile.ToJobDefinition()
+
+	// Store raw TOML content
+	jobDef.TOML = string(tomlContent)
 
 	// Validate full job definition
 	if err := jobDef.Validate(); err != nil {
@@ -962,35 +958,54 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		maxPages = *req.MaxPages
 	}
 
-	// Build crawler job definition file structure
-	crawlerJob := sqlite.CrawlerJobDefinitionFile{
-		ID:              jobID,
-		Name:            name,
-		JobType:         "user", // User-initiated quick crawl
-		Description:     fmt.Sprintf("Capture & Crawl initiated from Chrome extension for %s", req.URL),
-		StartURLs:       []string{req.URL},
-		Schedule:        "",      // Manual execution only (no schedule)
-		Timeout:         "30m",   // 30-minute timeout
-		Enabled:         true,
-		AutoStart:       false,
-		Authentication:  authID,  // Reference to auth credentials by ID (UUID)
-		IncludePatterns: req.IncludePatterns,
-		ExcludePatterns: req.ExcludePatterns,
-		MaxDepth:        maxDepth,
-		MaxPages:        maxPages,
-		Concurrency:     5,    // Reasonable default
-		FollowLinks:     true,
+	// Build crawler job definition with steps
+	crawlStepConfig := map[string]interface{}{
+		"start_urls": []interface{}{req.URL},
+		"max_depth":  maxDepth,
+		"max_pages":  maxPages,
+		"concurrency": 5,
+		"follow_links": true,
 	}
 
-	// Validate crawler job file
-	if err := crawlerJob.Validate(); err != nil {
-		h.logger.Error().Err(err).Msg("Quick crawl job validation failed")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid quick crawl configuration: %v", err))
-		return
+	// Add optional patterns if provided
+	if len(req.IncludePatterns) > 0 {
+		patterns := make([]interface{}, len(req.IncludePatterns))
+		for i, p := range req.IncludePatterns {
+			patterns[i] = p
+		}
+		crawlStepConfig["include_patterns"] = patterns
+	}
+	if len(req.ExcludePatterns) > 0 {
+		patterns := make([]interface{}, len(req.ExcludePatterns))
+		for i, p := range req.ExcludePatterns {
+			patterns[i] = p
+		}
+		crawlStepConfig["exclude_patterns"] = patterns
 	}
 
-	// Convert to full JobDefinition model
-	jobDef := crawlerJob.ToJobDefinition()
+	jobDef := &models.JobDefinition{
+		ID:          jobID,
+		Name:        name,
+		Type:        models.JobDefinitionTypeCrawler,
+		JobType:     models.JobOwnerTypeUser,
+		Description: fmt.Sprintf("Capture & Crawl initiated from Chrome extension for %s", req.URL),
+		Schedule:    "", // Manual execution only (no schedule)
+		Timeout:     "30m",
+		Enabled:     true,
+		AutoStart:   false,
+		AuthID:      authID,
+		Steps: []models.JobStep{
+			{
+				Name:    "crawl",
+				Action:  "crawl",
+				Config:  crawlStepConfig,
+				OnError: models.ErrorStrategyFail,
+			},
+		},
+		Config: make(map[string]interface{}),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
 
 	// Validate full job definition
 	if err := jobDef.Validate(); err != nil {

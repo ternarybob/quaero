@@ -28,6 +28,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
 	"github.com/ternarybob/quaero/internal/services/mcp"
+	"github.com/ternarybob/quaero/internal/services/places"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/services/status"
@@ -75,6 +76,9 @@ type App struct {
 
 	// Transform service
 	TransformService *transform.Service
+
+	// Places service
+	PlacesService interfaces.PlacesService
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -324,6 +328,14 @@ func (a *App) initServices() error {
 	a.TransformService = transform.NewService(a.Logger)
 	a.Logger.Info().Msg("Transform service initialized")
 
+	// 6.8.1. Initialize Places service (Google Places API integration)
+	a.PlacesService = places.NewService(
+		&a.Config.PlacesAPI,
+		a.EventService,
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Places service initialized")
+
 	// 6.9. Initialize JobExecutor for job definition execution
 	// Pass parentJobExecutor so it can start monitoring goroutines for crawler jobs
 	a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobExecutor, a.Logger)
@@ -344,6 +356,10 @@ func (a *App) initServices() error {
 	dbMaintenanceStepExecutor := executor.NewDatabaseMaintenanceStepExecutor(a.JobManager, queueMgr, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(dbMaintenanceStepExecutor)
 	a.Logger.Info().Msg("Database maintenance step executor registered")
+
+	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(placesSearchStepExecutor)
+	a.Logger.Info().Msg("Places search step executor registered")
 
 	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
 

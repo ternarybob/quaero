@@ -4,11 +4,9 @@
 
 id = "news-crawler"
 name = "News Crawler"
+type = "crawler"
 job_type = "user"
 description = "Crawler job that crawls a news website and filters for specific content"
-
-# Initial URLs to start crawling from
-start_urls = ["https://stockhead.com.au/just-in", "https://www.abc.net.au/news"]
 
 # Cron schedule (empty = manual execution only)
 # Examples:
@@ -26,6 +24,16 @@ enabled = true
 # Whether to auto-start when scheduler initializes
 auto_start = false
 
+# Job steps definition
+[[steps]]
+name = "crawl_news_sites"
+action = "crawl"
+on_error = "fail"
+
+[steps.config]
+# Initial URLs to start crawling from
+start_urls = ["https://stockhead.com.au/just-in", "https://www.abc.net.au/news"]
+
 # URL filtering patterns (regex)
 # Only URLs matching these patterns will be crawled
 include_patterns = ["article", "news", "post"]
@@ -34,7 +42,7 @@ include_patterns = ["article", "news", "post"]
 exclude_patterns = ["login", "logout", "admin"]
 
 # Crawler behavior
-max_depth = 2       # Maximum depth to follow links
-max_pages = 100     # Maximum number of pages to crawl
-concurrency = 5     # Number of concurrent workers
-follow_links = true # Whether to follow discovered links
+max_depth = 2           # Maximum depth to follow links
+max_pages = 100         # Maximum number of pages to crawl
+concurrency = 5         # Number of concurrent workers
+follow_links = true     # Whether to follow discovered links

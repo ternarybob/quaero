@@ -50,82 +50,36 @@ environment = "development"  # "development" or "production"
 # attachments = "./data/attachments" # Default: ./data/attachments
 
 # =============================================================================
-# LLM Configuration
+# Google Places API Configuration
 # =============================================================================
-# ⚠️  CRITICAL: Offline LLM requires llama-server binary + model files
-# If llama-server binary is not found, service will automatically fall back
-# to MOCK mode and emit detailed warnings about missing offline LLM setup.
+# Configure Google Places API for location-based search functionality.
+# Get your API key from: https://console.cloud.google.com/apis/credentials
 #
-# REQUIREMENTS for offline mode:
-# 1. llama-server binary (see installation instructions below)
-# 2. GGUF model files (embedding + chat models)
-#
-# 📖 See README.md 'LLM Setup' section for complete installation guide
-#
-# Modes:
-# - "offline" (default): Local models via llama-server (100% local, no network)
-# - "cloud": External API providers (sends data externally - security implications)
-# - "mock": Fake responses for testing (used when offline setup incomplete)
-#
-# Env var: QUAERO_LLM_MODE
+# Env var: QUAERO_PLACES_API_KEY
 
-[llm]
-mode = "offline"  # "offline" or "cloud"
+[places_api]
+# api_key = "YOUR_GOOGLE_PLACES_API_KEY"  # Required for places search jobs
+# max_results_per_search = 20              # Maximum results per API call (default: 20)
+# request_timeout = "10s"                  # API request timeout (default: 10s)
+# rate_limit = "100ms"                     # Minimum time between API calls (default: 100ms)
 
-# Offline Mode - Local models via llama-server (100% local, no network calls)
+# =============================================================================
+# Job Definitions Configuration
+# =============================================================================
+# Job definitions are user-defined workflows stored as TOML/JSON files.
+# Place .toml or .json files in the definitions_dir to auto-load at startup.
 #
-# 🔧 llama-server binary search paths (checked in order):
-#   1. {server.llama_dir}/llama-server (default: ./llama/llama-server)
-#   2. ./bin/llama-server
-#   3. ./llama-server
-#   4. System PATH (llama-server command)
+# Supported job types:
+# - crawler: Web crawling jobs (scrape websites, follow links, extract content)
+# - places: Google Places API search jobs (find locations, get details)
+# - summarizer: Document summarization jobs (analyze content, generate summaries)
+# - custom: Custom workflow jobs (multi-step orchestration)
 #
-# 💡 Override search paths:
-#   - Config: server.llama_dir = "/custom/path"
-#   - Env: QUAERO_SERVER_LLAMA_DIR="/custom/path"
-#
-# 📦 llama-server installation methods:
-#   - Windows (winget): winget install llama.cpp
-#   - macOS (Homebrew): brew install llama.cpp
-#   - Linux (Nix): nix profile install nixpkgs#llama-cpp
-#   - Manual: Download from https://github.com/ggml-org/llama.cpp/releases
-#
-# 🤖 Model requirements:
-#   - Embedding model: nomic-embed-text-v1.5-q8.gguf (~150MB)
-#   - Chat model: qwen2.5-7b-instruct-q4.gguf (~4.5GB)
-#
-# 📁 Directory structure expected:
-#   ./llama/llama-server.exe    # Binary
-#   ./models/nomic-embed-text-v1.5-q8.gguf
-#   ./models/qwen2.5-7b-instruct-q4.gguf
-#
-# ⚠️  Troubleshooting: Check server startup logs for:
-#   - "LLM service initialized in offline mode" ✅
-#   - "Failed to create offline LLM service, falling back to MOCK mode" ❌
-#
-# 🔗 Model downloads:
-#   - Embedding: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
-#   - Chat: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf
+# Defaults: definitions_dir="./job-definitions"
+# Env var: QUAERO_JOBS_DEFINITIONS_DIR
 
-[llm.offline]
-model_dir = "./models"                          # Directory containing GGUF model files
-embed_model = "nomic-embed-text-v1.5-q8.gguf"  # Embedding model (~150MB)
-# Download: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
-chat_model = "qwen2.5-7b-instruct-q4.gguf"     # Chat model (~4.5GB)
-# Download: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf
-
-# Cloud Mode - API providers (sends data to external APIs)
-# WARNING: Only use cloud mode if you understand the security implications
-# [llm.cloud]
-# provider = "gemini"                  # "gemini", "openai", "anthropic"
-# api_key = "${QUAERO_LLM_CLOUD_API_KEY}"  # Use environment variable
-# embed_model = "text-embedding-004"   # Cloud embedding model
-# chat_model = "gemini-1.5-flash"      # Cloud chat model
-
-# Audit Logging - Compliance and security
-[llm.audit]
-enabled = true      # Enable audit logging to SQLite
-log_queries = false # Don't log query text (PII protection)
+[jobs]
+definitions_dir = "./job-definitions"  # Directory containing job definition TOML/JSON files
 
 # =============================================================================
 # Default Jobs Configuration

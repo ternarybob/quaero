@@ -23,6 +23,7 @@ type Config struct {
 	Crawler     CrawlerConfig    `toml:"crawler"`
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
+	PlacesAPI   PlacesAPIConfig  `toml:"places_api"`
 }
 
 type ServerConfig struct {
@@ -138,6 +139,14 @@ type WebSocketConfig struct {
 	ThrottleIntervals map[string]string `toml:"throttle_intervals"`
 }
 
+// PlacesAPIConfig contains Google Places API configuration
+type PlacesAPIConfig struct {
+	APIKey              string        `toml:"api_key"`                // Google Places API key
+	RateLimit           time.Duration `toml:"rate_limit"`             // Minimum time between API requests
+	RequestTimeout      time.Duration `toml:"request_timeout"`        // HTTP request timeout
+	MaxResultsPerSearch int           `toml:"max_results_per_search"` // Google Places API limit per request
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -236,6 +245,12 @@ func NewDefaultConfig() *Config {
 				"crawl_progress": "1s",    // Max 1 crawl progress update per second per job
 				"job_spawn":      "500ms", // Max 2 job spawn events per second
 			},
+		},
+		PlacesAPI: PlacesAPIConfig{
+			APIKey:              "",              // User must provide API key in config file
+			RateLimit:           1 * time.Second, // 1 request per second (respects Google API quotas)
+			RequestTimeout:      30 * time.Second,
+			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 	}
 }
@@ -474,6 +489,11 @@ func applyEnvOverrides(config *Config) {
 			}
 			config.WebSocket.ThrottleIntervals["job_spawn"] = jobSpawnThrottle
 		}
+	}
+
+	// Places API configuration
+	if apiKey := os.Getenv("QUAERO_PLACES_API_KEY"); apiKey != "" {
+		config.PlacesAPI.APIKey = apiKey
 	}
 }
 

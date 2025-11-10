@@ -1,0 +1,50 @@
+# Example Places Nearby Search Job Definition
+# This file demonstrates how to search for nearby places using coordinates
+# Place .toml files in job-definitions/ directory to auto-load at startup
+
+id = "places-nearby-restaurants"
+name = "Nearby Restaurants (Seattle Downtown)"
+type = "places"
+job_type = "user"
+description = "Search for restaurants near Seattle downtown using Google Places Nearby Search API"
+
+# Cron schedule (empty = manual execution only)
+schedule = ""
+
+# Maximum execution time
+timeout = "5m"
+
+# Whether this job is enabled
+enabled = true
+
+# Whether to auto-start when scheduler initializes
+auto_start = false
+
+# Job steps definition
+[[steps]]
+name = "search_nearby_restaurants"
+action = "places_search"
+on_error = "fail"
+
+[steps.config]
+# Required: Search query (used for list naming)
+search_query = "restaurants near Seattle downtown"
+
+# Required: Search type (nearby_search requires location)
+search_type = "nearby_search"
+
+# Optional: Maximum results
+max_results = 20
+
+# Optional: Custom list name
+list_name = "Seattle Downtown Restaurants"
+
+# Required for nearby_search: Location and radius
+[steps.config.location]
+latitude = 47.6062    # Seattle downtown coordinates
+longitude = -122.3321
+radius = 2000         # Search radius in meters (2km)
+
+# Optional: Filters
+[steps.config.filters]
+min_rating = 3.5
