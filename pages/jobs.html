@@ -106,7 +106,7 @@
                             <h3>Job Definitions</h3>
                         </section>
                         <section class="navbar-section">
-                            <button class="btn btn-sm btn-primary">
+                            <button class="btn btn-sm btn-primary" @click="window.location.href='/jobs/add'">
                                 <i class="fas fa-plus"></i>
                                 <span>Add Job</span>
                             </button>
@@ -141,6 +141,15 @@
                                             <span x-show="jobDef.job_type === 'system'" class="label label-warning"
                                                 title="System-managed job (readonly)">
                                                 <i class="fas fa-lock"></i> System
+                                            </span>
+                                            <!-- Validation Status Badge -->
+                                            <span x-show="jobDef.validation_status === 'valid'" class="label label-success"
+                                                title="TOML configuration is valid">
+                                                <i class="fas fa-check-circle"></i> Valid
+                                            </span>
+                                            <span x-show="jobDef.validation_status === 'invalid'" class="label label-error"
+                                                :title="jobDef.validation_error || 'TOML configuration is invalid'">
+                                                <i class="fas fa-exclamation-triangle"></i> Invalid
                                             </span>
                                         </div>
                                         <div class="card-subtitle text-gray"

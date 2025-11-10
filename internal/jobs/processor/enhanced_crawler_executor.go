@@ -163,13 +163,13 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	// Publish initial progress update
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
 
-	jobLogger.Info().Msg("🚨 ABOUT TO CREATE BROWSER INSTANCE")
+	jobLogger.Debug().Msg("🚨 ABOUT TO CREATE BROWSER INSTANCE")
 
 	// Step 1: Create a fresh ChromeDP browser instance for this request
 	// TEMPORARY: Bypassing pool to debug context cancellation issue
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
 
-	jobLogger.Info().Msg("🚨 PUBLISHED PROGRESS UPDATE FOR BROWSER CREATION")
+	jobLogger.Debug().Msg("🚨 PUBLISHED PROGRESS UPDATE FOR BROWSER CREATION")
 
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
 		context.Background(),
@@ -589,7 +589,7 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 	)
 
 	if err != nil {
-		logger.Warn().
+		logger.Debug().
 			Err(err).
 			Str("url", url).
 			Msg("🔐 WARNING: Failed to read cookies before navigation")
@@ -600,14 +600,14 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 			Msg("🔐 DIAGNOSTIC: Cookies applicable to URL before navigation")
 
 		if len(cookiesBeforeNav) == 0 {
-			logger.Warn().
+			logger.Debug().
 				Str("url", url).
 				Msg("🔐 WARNING: No cookies found for URL - navigating without authentication")
 		} else {
 			// Parse target URL for domain comparison
 			targetURLParsed, parseErr := neturl.Parse(url)
 			if parseErr != nil {
-				logger.Warn().Err(parseErr).Msg("🔐 WARNING: Failed to parse target URL for domain analysis")
+				logger.Debug().Err(parseErr).Msg("🔐 WARNING: Failed to parse target URL for domain analysis")
 			}
 
 			// Log each cookie with domain matching analysis
@@ -649,7 +649,7 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 						Msg("🔐 DIAGNOSTIC: Cookie domain analysis before navigation")
 
 					if !isMatch {
-						logger.Warn().
+						logger.Debug().
 							Str("cookie_name", cookie.Name).
 							Str("cookie_domain", cookie.Domain).
 							Str("target_domain", targetHost).
@@ -709,7 +709,7 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 
 		case *network.EventLoadingFailed:
 			// Log network failures that might indicate cookie issues
-			logger.Warn().
+			logger.Debug().
 				Str("request_url", evTyped.RequestID.String()).
 				Str("error_text", evTyped.ErrorText).
 				Str("type", evTyped.Type.String()).
@@ -770,7 +770,7 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 	)
 
 	if err != nil {
-		logger.Warn().
+		logger.Debug().
 			Err(err).
 			Str("url", url).
 			Msg("🔐 WARNING: Failed to read cookies after navigation")

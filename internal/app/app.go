@@ -531,11 +531,16 @@ func (a *App) initHandlers() error {
 
 	// Initialize job definition handler
 	// Note: JobExecutor and JobRegistry are nil during queue refactor, but handler can work without them
+	db, ok := a.StorageManager.DB().(*sql.DB)
+	if !ok {
+		return fmt.Errorf("storage manager DB is not *sql.DB")
+	}
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
 		a.JobExecutor,
 		a.StorageManager.AuthStorage(),
+		db, // Pass *sql.DB for validation service
 		a.Logger,
 	)
 

@@ -257,7 +257,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		creds, err := s.authStorage.GetCredentialsByID(context.Background(), sourceID)
 		if err == nil && creds != nil {
 			authSnapshot = creds
-			s.logger.Info().
+			s.logger.Debug().
 				Str("auth_id", sourceID).
 				Str("site_domain", creds.SiteDomain).
 				Msg("Loaded authentication credentials from storage using auth ID")
@@ -361,7 +361,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	}
 
 	// Log the source type being used for audit trail and debugging
-	contextLogger.Info().Str("source_type", sourceType).Str("entity_type", entityType).Msg("Creating crawl job with source type")
+	contextLogger.Debug().Str("source_type", sourceType).Str("entity_type", entityType).Msg("Creating crawl job with source type")
 
 	// Validate seed URLs and detect test URLs
 	testURLCount := 0
@@ -467,7 +467,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 	} else {
 		// Log missing auth snapshot
-		contextLogger.Info().Msg("No auth snapshot provided - requests will use default HTTP client")
+		contextLogger.Debug().Msg("No auth snapshot provided - requests will use default HTTP client")
 		httpClientType = "default (no auth)"
 	}
 

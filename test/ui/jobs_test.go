@@ -159,7 +159,7 @@ func TestJobsPageElements(t *testing.T) {
 		{"Authentication section", `[x-data*="authPage"]`},
 		{"Job Definitions section", `[x-data*="jobDefinitionsManagement"]`},
 		{"Card elements", ".card"},
-		{"Add Job button", `a[href="/job_add"]`},
+		{"Add Job button", `button.btn-primary`}, // Primary button in job definitions section
 	}
 
 	env.LogTest(t, "Navigating to jobs page: %s", url)

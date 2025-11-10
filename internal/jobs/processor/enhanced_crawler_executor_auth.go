@@ -22,14 +22,14 @@ import (
 
 // injectAuthCookies loads authentication credentials from storage and injects cookies into ChromeDP browser
 func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browserCtx context.Context, parentJobID, targetURL string, logger arbor.ILogger) error {
-	logger.Info().
+	logger.Debug().
 		Str("parent_job_id", parentJobID).
 		Str("target_url", targetURL).
 		Msg("🔐 START: Cookie injection process initiated")
 
 	// Check if authStorage is available
 	if e.authStorage == nil {
-		logger.Warn().Msg("🔐 SKIP: Auth storage not configured, skipping cookie injection")
+		logger.Debug().Msg("🔐 SKIP: Auth storage not configured, skipping cookie injection")
 		return nil
 	}
 	logger.Debug().Msg("🔐 OK: Auth storage is configured")
@@ -83,16 +83,16 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 	if authIDVal, exists := jobModel.Metadata["auth_id"]; exists {
 		if authIDStr, ok := authIDVal.(string); ok && authIDStr != "" {
 			authID = authIDStr
-			logger.Info().
+			logger.Debug().
 				Str("auth_id", authID).
 				Msg("🔐 FOUND: Auth ID in job metadata")
 		} else {
-			logger.Warn().
+			logger.Debug().
 				Str("auth_id_value", fmt.Sprintf("%v", authIDVal)).
 				Msg("🔐 WARNING: auth_id exists but is not a valid string")
 		}
 	} else {
-		logger.Warn().Msg("🔐 WARNING: auth_id NOT found in job metadata")
+		logger.Debug().Msg("🔐 WARNING: auth_id NOT found in job metadata")
 	}
 
 	// If not in metadata, try job_definition_id
@@ -110,28 +110,28 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 				}
 				if jobDef != nil && jobDef.AuthID != "" {
 					authID = jobDef.AuthID
-					logger.Info().
+					logger.Debug().
 						Str("auth_id", authID).
 						Str("job_def_id", jobDefIDStr).
 						Msg("🔐 FOUND: Auth ID from job definition")
 				} else {
-					logger.Warn().
+					logger.Debug().
 						Str("job_def_id", jobDefIDStr).
 						Msg("🔐 WARNING: Job definition has no AuthID")
 				}
 			}
 		} else {
-			logger.Warn().Msg("🔐 WARNING: job_definition_id NOT found in metadata")
+			logger.Debug().Msg("🔐 WARNING: job_definition_id NOT found in metadata")
 		}
 	}
 
 	if authID == "" {
-		logger.Warn().Msg("🔐 SKIP: No auth_id found - skipping cookie injection")
+		logger.Debug().Msg("🔐 SKIP: No auth_id found - skipping cookie injection")
 		return nil
 	}
 
 	// Load authentication credentials from storage using AuthID
-	logger.Info().
+	logger.Debug().
 		Str("auth_id", authID).
 		Msg("🔐 Loading auth credentials from storage")
 	authCreds, err := e.authStorage.GetCredentialsByID(ctx, authID)
@@ -144,7 +144,7 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 		logger.Error().Str("auth_id", authID).Msg("🔐 ERROR: Auth credentials not found in storage")
 		return fmt.Errorf("auth credentials not found for ID: %s", authID)
 	}
-	logger.Info().
+	logger.Debug().
 		Str("auth_id", authID).
 		Str("site_domain", authCreds.SiteDomain).
 		Msg("🔐 OK: Auth credentials loaded successfully")
@@ -158,11 +158,11 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 	}
 
 	if len(extensionCookies) == 0 {
-		logger.Warn().Msg("🔐 WARNING: No cookies found in auth credentials")
+		logger.Debug().Msg("🔐 WARNING: No cookies found in auth credentials")
 		return nil
 	}
 
-	logger.Info().
+	logger.Debug().
 		Int("cookie_count", len(extensionCookies)).
 		Str("site_domain", authCreds.SiteDomain).
 		Msg("🔐 SUCCESS: Cookies loaded - preparing to inject into browser")
@@ -224,7 +224,7 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 			Msg("🔐 DIAGNOSTIC: Cookie domain analysis")
 
 		if !isMatch {
-			logger.Warn().
+			logger.Debug().
 				Str("cookie_name", c.Name).
 				Str("cookie_domain", cookieDomain).
 				Str("target_domain", targetHost).
@@ -233,7 +233,7 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 
 		// Check secure flag compatibility with scheme
 		if c.Secure && targetURLParsed.Scheme != "https" {
-			logger.Warn().
+			logger.Debug().
 				Str("cookie_name", c.Name).
 				Str("target_scheme", targetURLParsed.Scheme).
 				Msg("🔐 WARNING: Secure cookie will not be sent to non-HTTPS URL")
@@ -463,7 +463,7 @@ func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browser
 		}
 
 		if len(unexpectedCookies) > 0 {
-			logger.Warn().
+			logger.Debug().
 				Strs("unexpected_cookies", unexpectedCookies).
 				Int("unexpected_count", len(unexpectedCookies)).
 				Msg("🔐 WARNING: Cookies verified but not injected (pre-existing or set by page)")

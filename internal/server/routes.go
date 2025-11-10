@@ -18,7 +18,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
 	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("jobs.html", "auth"))       // Jobs page (auth section)
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Jobs page
-	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
+	mux.HandleFunc("/jobs/add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
+	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Legacy route (backwards compat)
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/job", s.app.PageHandler.ServePage("job.html", "job")) // Job details page (uses ?id= query param)
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))

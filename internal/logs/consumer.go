@@ -111,6 +111,16 @@ func (c *Consumer) consumer() {
 					continue
 				}
 
+				// Skip HTTP request logs - these are not job-specific logs
+				// HTTP middleware generates correlation IDs for all requests, but these
+				// should not be stored in job_logs table (they're for request tracing only)
+				if event.Message == "HTTP request" ||
+					event.Message == "HTTP request - client error" ||
+					event.Message == "HTTP request - server error" ||
+					strings.Contains(event.Message, "WebSocket client") {
+					continue
+				}
+
 				// Transform arbor log event to JobLogEntry
 				logEntry := transformEvent(event)
 

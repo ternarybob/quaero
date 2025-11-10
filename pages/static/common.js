@@ -440,8 +440,8 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
-            // Navigate to job_add page with the job ID as a query parameter
-            window.location.href = `/job_add?id=${jobDef.id}`;
+            // Navigate to job add page with the job ID as a query parameter
+            window.location.href = `/jobs/add?id=${jobDef.id}`;
         },
 
         detectPostJobCycle() {

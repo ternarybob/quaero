@@ -108,14 +108,14 @@ func (s *Service) extractAtlassianDetails(authData *interfaces.AtlassianAuthData
 		s.cloudID = cloudID
 		s.logger.Debug().Str("cloudId", cloudID).Msg("CloudID extracted")
 	} else {
-		s.logger.Warn().Msg("CloudID not found in auth tokens")
+		s.logger.Debug().Msg("CloudID not found in auth tokens")
 	}
 
 	if atlToken, ok := authData.Tokens["atlToken"].(string); ok {
 		s.atlToken = atlToken
 		s.logger.Debug().Msg("atlToken extracted")
 	} else {
-		s.logger.Warn().Msg("atlToken not found in auth tokens")
+		s.logger.Debug().Msg("atlToken not found in auth tokens")
 	}
 }
 

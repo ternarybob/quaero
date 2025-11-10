@@ -111,11 +111,14 @@ type JobDefinition struct {
 	Enabled        bool                   `json:"enabled"`         // Whether the job is enabled
 	AutoStart      bool                   `json:"auto_start"`      // Whether to auto-start on scheduler initialization
 	Config         map[string]interface{} `json:"config"`          // Job-specific configuration
-	PreJobs        []string               `json:"pre_jobs"`        // Array of job definition IDs to execute before main steps (validation, pre-checks)
-	PostJobs       []string               `json:"post_jobs"`       // Array of job IDs to execute after this job completes
-	ErrorTolerance *ErrorTolerance        `json:"error_tolerance"` // Optional error tolerance configuration for child job failure management
-	CreatedAt      time.Time              `json:"created_at"`      // Creation timestamp
-	UpdatedAt      time.Time              `json:"updated_at"`      // Last update timestamp
+	PreJobs          []string               `json:"pre_jobs"`           // Array of job definition IDs to execute before main steps (validation, pre-checks)
+	PostJobs         []string               `json:"post_jobs"`          // Array of job IDs to execute after this job completes
+	ErrorTolerance   *ErrorTolerance        `json:"error_tolerance"`    // Optional error tolerance configuration for child job failure management
+	ValidationStatus string                 `json:"validation_status"`  // TOML validation status: "valid", "invalid", "unknown"
+	ValidationError  string                 `json:"validation_error"`   // TOML validation error message (if invalid)
+	ValidatedAt      *time.Time             `json:"validated_at"`       // Timestamp of last validation (nil if never validated)
+	CreatedAt        time.Time              `json:"created_at"`         // Creation timestamp
+	UpdatedAt        time.Time              `json:"updated_at"`         // Last update timestamp
 }
 
 // Validate validates the job definition

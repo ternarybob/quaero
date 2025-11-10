@@ -577,8 +577,20 @@
 
                 formatLogTimestamp(timestamp) {
                     if (!timestamp) return '';
-                    // Handle both ISO 8601 strings and Unix timestamps
+
+                    // If timestamp is already in HH:MM:SS format, return as-is
+                    if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
+                        return timestamp;
+                    }
+
+                    // Handle ISO 8601 strings and Unix timestamps
                     const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
+
+                    // Check if date is valid
+                    if (isNaN(date.getTime())) {
+                        return timestamp; // Return original if can't parse
+                    }
+
                     return date.toLocaleTimeString();
                 },
 

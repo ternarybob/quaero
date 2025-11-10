@@ -1,117 +1,110 @@
 ---
 name: 3agents-tester
-description: Test workflow - review implementation docs, create/update tests, execute, and summarize results
+description: Test workflow - review 3agents implementation, create/update tests with @test-writer skill, execute, and provide feedback
 ---
 
 Execute testing for: $ARGUMENTS
 
 ## RULES
+**Integration:** Reads from 3agents `docs/{task}/` output - designed to run AFTER 3agents completes
 **Test directories:** ONLY `/test/api` and `/test/ui` - maintain existing structure
 **Test patterns:** Study and follow existing test patterns STRICTLY - don't invent new ones
 **Test framework:** Use chromedp for UI tests, standard Go testing for API tests
-**Results:** All results documented in `docs/{same-folder-as-implementation}/test-results/`
+**Results:** All results documented in `docs/{task}/test-results/`
 **Common utilities:** Use existing `test/common` package - don't duplicate
-**Auto-continue:** Run full test suite and generate results automatically
+**Skill:** Use @test-writer for test creation/updates
+**Feedback loop:** Generate actionable feedback for 3agents if tests fail
+**Auto-continue:** Run full workflow automatically, pause only on critical failures
 
 ## CONFIG
-```yaml
+````yaml
 test_api: /test/api
 test_ui: /test/ui
 test_common: /test/common
+source_docs: docs/{task}
 results_dir: docs/{task}/test-results
 
 test_execution:
   timeout: 30s
   retries: 1  # Retry flaky tests once
   screenshot_on_failure: true
-```
+
+feedback:
+  create_on_failure: true
+  format: 3agents-compatible  # Matches 3agents step format
+  auto_create_fix_steps: true  # Generate fix steps for 3agents
+````
 
 ## SETUP
-1. Read implementation docs from `docs/{task}/`
-2. Create test results directory: `docs/{task}/test-results/`
-3. Review existing test structure and patterns
+1. Verify 3agents docs exist at `docs/{task}/`
+2. Read implementation from 3agents output:
+   - `plan.md` - original plan
+   - `progress.md` - what was implemented
+   - `summary.md` - completion summary
+3. Create test results directory: `docs/{task}/test-results/`
+4. Review existing test structure and patterns
 
 ---
 
 ## PHASE 1: ANALYSIS
 
-### 1.1 Read Implementation Docs
-Read from `docs/{task}/`:
-- `work-log.md` - what was implemented
-- `implementation-summary.md` - complete change list
-- Any other relevant docs
+### 1.1 Read 3agents Implementation
+**Read from `docs/{task}/`:**
+- `plan.md` - understand original requirements and steps
+- `progress.md` - see what was completed
+- `summary.md` - review final implementation
+- Any `step-{N}-validation-*.md` files - understand what was validated
 
-### 1.2 Review Test Structure
-Study existing test patterns in:
-- `/test/ui/` - UI tests (chromedp-based)
-- `/test/api/` - API tests
-- `/test/common/` - shared test utilities
-
-Document findings in `test-analysis.md`:
-```markdown
+**Document in `test-analysis.md`:**
+````markdown
 # Test Analysis: {task}
 
-## Implementation Changes
-- {file}: {what changed}
-- {file}: {what changed}
-
-## Existing Test Coverage
-**UI Tests:** ({N} files)
-- {test_file.go}: {what it tests}
-- {test_file.go}: {what it tests}
-
-**API Tests:** ({N} files)
-- {test_file.go}: {what it tests}
-- {test_file.go}: {what it tests}
-
-## Test Patterns Identified
-**UI Test Pattern:**
-- Setup: `common.SetupTestEnvironment(testName)`
-- Logging: `env.LogTest(t, message)`
-- WebSocket: `env.WaitForWebSocketConnection(ctx, timeout)`
-- Screenshots: `env.TakeScreenshot(ctx, name)`
-- Cleanup: `defer env.Cleanup()`
-
-**API Test Pattern:**
-- {pattern description}
-
-## Test Gaps
-- {feature}: No test coverage
-- {feature}: Incomplete coverage
-- {feature}: Test needs update due to implementation changes
-
-## Test Plan
-### New Tests Required:
-- [ ] Test{Name}: {what it should test}
-- [ ] Test{Name}: {what it should test}
-
-### Tests to Update:
-- [ ] {existing_test}: {why it needs update}
-
-### Tests to Run:
-- [ ] All UI tests in /test/ui
-- [ ] All API tests in /test/api
-
-**Analysis completed:** {ISO8601}
-```
+**Source:** 3agents output from `docs/{task}/`
+**Analyzed:** {ISO8601}
 
 ---
 
-## PHASE 2: TEST CREATION/UPDATE
+## 3agents Implementation Summary
 
-### 2.1 Create New Tests (if needed)
-**CRITICAL:** Follow existing patterns EXACTLY
+**Original task:** {from plan.md}
+**Steps completed:** {N}/{N}
+**Quality rating:** {from summary.md}
 
-For UI tests in `/test/ui/`:
+### Implementation Changes
+{Parse from progress.md and summary.md}
+- Step {N}: {what was implemented}
+  - Files: {list}
+  - Skill used: @{skill}
+  - Risk: {low|medium|high}
+
+### Key Artifacts Created/Modified
+- `{file}`: {description of changes}
+- `{file}`: {description of changes}
+
+---
+
+## Existing Test Coverage
+
+### Current Test Structure
+**UI Tests:** ({N} files in `/test/ui`)
+- {test_file.go}: {what it tests} - {last modified}
+- {test_file.go}: {what it tests} - {last modified}
+
+**API Tests:** ({N} files in `/test/api`)
+- {test_file.go}: {what it tests} - {last modified}
+- {test_file.go}: {what it tests} - {last modified}
+
+### Test Patterns Identified
+**UI Test Pattern:**
 ```go
+// Standard pattern from existing tests
 func Test{Name}(t *testing.T) {
-    // Setup test environment with test name
     env, err := common.SetupTestEnvironment("{TestName}")
     if err != nil {
         t.Fatalf("Failed to setup test environment: %v", err)
     }
     defer env.Cleanup()
-
+    
     startTime := time.Now()
     env.LogTest(t, "=== RUN Test{Name}")
     defer func() {
@@ -120,6 +113,128 @@ func Test{Name}(t *testing.T) {
             env.LogTest(t, "--- FAIL: Test{Name} (%.2fs)", elapsed.Seconds())
         } else {
             env.LogTest(t, "--- PASS: Test{Name} (%.2fs)", elapsed.Seconds())
+        }
+    }()
+    
+    // Test implementation
+}
+```
+
+**API Test Pattern:**
+{Document pattern found in /test/api}
+
+**Common Utilities Available:**
+- `common.SetupTestEnvironment(name)` - Test setup
+- `env.LogTest(t, format, args...)` - Logging
+- `env.TakeScreenshot(ctx, name)` - Screenshots
+- `env.WaitForWebSocketConnection(ctx, timeout)` - WebSocket testing
+- `env.Cleanup()` - Teardown
+- {list other utilities found}
+
+---
+
+## Test Gap Analysis
+
+### Features Requiring Test Coverage
+{Map implementation steps to test requirements}
+
+**From Step {N}:** {description}
+- **Test needed:** UI test for {scenario}
+- **Existing coverage:** None | Partial in {test_file}
+- **Priority:** Critical | High | Medium | Low
+- **Risk if untested:** {potential issues}
+
+**From Step {N}:** {description}
+- **Test needed:** API test for {scenario}
+- **Existing coverage:** None | Partial in {test_file}
+- **Priority:** Critical | High | Medium | Low
+- **Risk if untested:** {potential issues}
+
+### Tests Requiring Updates
+- `{test_file.go}`: {existing test} needs update because {reason from implementation}
+- `{test_file.go}`: {existing test} needs update because {reason from implementation}
+
+---
+
+## Test Plan
+
+### New Tests to Create (Using @test-writer):
+**UI Tests:**
+- [ ] **Test{Name}** - `/test/ui/{file}.go`
+  - **Covers:** Step {N} - {description}
+  - **Scenarios:** {list key test scenarios}
+  - **Pattern:** Based on {existing_test.go}
+  - **Priority:** {Critical|High|Medium|Low}
+
+- [ ] **Test{Name}** - `/test/ui/{file}.go`
+  - **Covers:** Step {N} - {description}
+  - **Scenarios:** {list key test scenarios}
+  - **Pattern:** Based on {existing_test.go}
+  - **Priority:** {Critical|High|Medium|Low}
+
+**API Tests:**
+- [ ] **Test{Name}** - `/test/api/{file}.go`
+  - **Covers:** Step {N} - {description}
+  - **Scenarios:** {list key test scenarios}
+  - **Pattern:** Based on {existing_test.go}
+  - **Priority:** {Critical|High|Medium|Low}
+
+### Existing Tests to Update:
+- [ ] **{test_file.go}**: Test{Name}
+  - **Update needed:** {what to modify}
+  - **Reason:** Implementation changed in Step {N}
+
+### All Tests to Execute:
+- [ ] Run `/test/ui` suite
+- [ ] Run `/test/api` suite
+
+**Analysis completed:** {ISO8601}
+````
+
+---
+
+## PHASE 2: TEST CREATION/UPDATE (@test-writer)
+
+### 2.1 Invoke @test-writer Skill
+**For EACH new test identified in test plan:**
+
+**Context to provide @test-writer:**
+- Implementation step it's testing (from 3agents docs)
+- Existing test pattern to follow (from test-analysis.md)
+- Test scenario requirements
+- Files affected by implementation
+
+**@test-writer creates test following:**
+
+**UI Test Template (`/test/ui/{feature}_test.go`):**
+````go
+package main
+
+import (
+    "context"
+    "testing"
+    "time"
+
+    "github.com/chromedp/chromedp"
+    "quaero/test/common"
+)
+
+func Test{Feature}{Scenario}(t *testing.T) {
+    // Setup test environment with descriptive test name
+    env, err := common.SetupTestEnvironment("{Feature}{Scenario}")
+    if err != nil {
+        t.Fatalf("Failed to setup test environment: %v", err)
+    }
+    defer env.Cleanup()
+
+    startTime := time.Now()
+    env.LogTest(t, "=== RUN Test{Feature}{Scenario}")
+    defer func() {
+        elapsed := time.Since(startTime)
+        if t.Failed() {
+            env.LogTest(t, "--- FAIL: Test{Feature}{Scenario} (%.2fs)", elapsed.Seconds())
+        } else {
+            env.LogTest(t, "--- PASS: Test{Feature}{Scenario} (%.2fs)", elapsed.Seconds())
         }
     }()
 
@@ -132,376 +247,283 @@ func Test{Name}(t *testing.T) {
     ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
     defer cancel()
 
-    // Test implementation here
-    // Use env.LogTest() for all logging
-    // Use env.TakeScreenshot() for visual verification
-    // Use env.WaitForWebSocketConnection() if testing real-time features
+    // Test implementation - Testing: {description from 3agents Step N}
+    env.LogTest(t, "Starting test: {scenario description}")
+    
+    // Navigate, interact, verify
+    err = chromedp.Run(ctx,
+        chromedp.Navigate(env.GetBaseURL()),
+        // Test actions here following existing patterns
+    )
+    
+    if err != nil {
+        env.TakeScreenshot(ctx, "failure")
+        t.Fatalf("Test failed: %v", err)
+    }
+    
+    env.LogTest(t, "Test completed successfully")
 }
-```
+````
 
-For API tests in `/test/api/`:
-- Follow existing patterns in that directory
-- Study existing tests first
+**API Test Template (`/test/api/{feature}_test.go`):**
+{Follow existing API test patterns in /test/api}
 
-### 2.2 Update Existing Tests (if needed)
-- Modify only what's necessary to reflect implementation changes
+### 2.2 Update Existing Tests
+**Using @test-writer:**
+- Modify only what's necessary to reflect 3agents implementation changes
 - Preserve test structure and patterns
-- Document changes in test-analysis.md
+- Document all changes
 
-### 2.3 Document Test Changes
-Update `test-analysis.md` with:
-```markdown
-## Test Creation/Updates
+### 2.3 Document Test Creation
+**Update `test-analysis.md`:**
+````markdown
+## Test Creation/Updates (@test-writer)
 
-### Created:
-- `/test/ui/{file}.go`: Test{Name}
-  - **Purpose:** {what it tests}
-  - **Pattern used:** {which existing test was used as template}
-  - **Coverage:** {what scenarios are covered}
+**Skill used:** @test-writer
+**Created:** {ISO8601}
 
-### Updated:
-- `/test/ui/{file}.go`: Test{Name}
+### Tests Created:
+- `/test/ui/{file}.go`: **Test{Name}**
+  - **Covers 3agents Step:** {N} - {description}
+  - **Purpose:** {what specific scenario it tests}
+  - **Pattern source:** Based on `{existing_test.go}`
+  - **Test scenarios:**
+    1. {scenario 1}
+    2. {scenario 2}
+  - **Expected behavior:** {what should happen}
+  - **Priority:** {Critical|High|Medium|Low}
+
+- `/test/api/{file}.go`: **Test{Name}**
+  - **Covers 3agents Step:** {N} - {description}
+  - **Purpose:** {what specific scenario it tests}
+  - **Pattern source:** Based on `{existing_test.go}`
+  - **Priority:** {Critical|High|Medium|Low}
+
+### Tests Updated:
+- `/test/ui/{file}.go`: **Test{Name}**
   - **Changes:** {what was modified}
-  - **Reason:** {why it was needed}
+  - **Reason:** 3agents Step {N} changed {what}
+  - **Impact:** {what behavior changed}
+
+### Tests Compilation Check:
+```bash
+cd /test/ui && go build
+cd /test/api && go build
+```
+✅ All tests compile successfully
+❌ Compilation errors: {details}
 
 **Test prep completed:** {ISO8601}
-```
+````
 
 ---
 
 ## PHASE 3: TEST EXECUTION
 
 ### 3.1 Run UI Tests
-```bash
+````bash
 cd /test/ui
-go test -v
-```
+go test -v -timeout 60s
+````
 
-Capture:
+**Capture:**
 - Exit code
-- Full output
+- Full output (stdout + stderr)
+- Individual test results
 - Test timing
-- Pass/fail counts
+- Screenshots generated
 
 ### 3.2 Run API Tests
-```bash
+````bash
 cd /test/api
-go test -v
-```
+go test -v -timeout 60s
+````
 
-Capture:
+**Capture:**
 - Exit code
 - Full output
+- Individual test results
 - Test timing
-- Pass/fail counts
 
 ### 3.3 Document Execution
-Create `test-execution.md`:
-```markdown
+**Create `test-execution.md`:**
+````markdown
 # Test Execution: {task}
 
+**Testing 3agents implementation from:** `docs/{task}/`
 **Executed:** {ISO8601}
+
+---
 
 ## UI Tests (/test/ui)
 
-**Command:** `cd /test/ui && go test -v`
-**Duration:** {time}
+**Command:** `cd /test/ui && go test -v -timeout 60s`
+**Duration:** {MM:SS}
 **Exit Code:** {code}
 
-### Results
-```
-{full go test output}
-```
+### Full Output
+````
+{complete go test -v output}
+````
 
-**Summary:**
-- Total: {N}
-- Passed: ✅ {N}
-- Failed: ❌ {N}
-- Skipped: ⏭️ {N}
+### Results Summary
+**Total tests:** {N}
+**Passed:** ✅ {N}
+**Failed:** ❌ {N}
+**Skipped:** ⏭️ {N}
 
 ### Individual Test Results
-- ✅ Test{Name} ({duration}s)
-- ❌ Test{Name} ({duration}s) - {error summary}
-- ✅ Test{Name} ({duration}s)
+| Test Name | Status | Duration | 3agents Step | Notes |
+|-----------|--------|----------|--------------|-------|
+| Test{Name} | ✅ | {N}s | Step {N} | {notes} |
+| Test{Name} | ❌ | {N}s | Step {N} | {error summary} |
+| Test{Name} | ✅ | {N}s | Step {N} | {notes} |
 
 ### Screenshots Generated
-- {test-name}/{screenshot-name}.png
-- {test-name}/{screenshot-name}.png
+````
+test-results/{test-name}/
+├── success.png
+├── failure.png
+└── ...
+````
 
 ---
 
 ## API Tests (/test/api)
 
-**Command:** `cd /test/api && go test -v`
-**Duration:** {time}
+**Command:** `cd /test/api && go test -v -timeout 60s`
+**Duration:** {MM:SS}
 **Exit Code:** {code}
 
-### Results
-```
-{full go test output}
-```
+### Full Output
+````
+{complete go test -v output}
+````
 
-**Summary:**
-- Total: {N}
-- Passed: ✅ {N}
-- Failed: ❌ {N}
-- Skipped: ⏭️ {N}
+### Results Summary
+**Total tests:** {N}
+**Passed:** ✅ {N}
+**Failed:** ❌ {N}
+**Skipped:** ⏭️ {N}
 
 ### Individual Test Results
-- ✅ Test{Name} ({duration}s)
-- ❌ Test{Name} ({duration}s) - {error summary}
+| Test Name | Status | Duration | 3agents Step | Notes |
+|-----------|--------|----------|--------------|-------|
+| Test{Name} | ✅ | {N}s | Step {N} | {notes} |
+| Test{Name} | ❌ | {N}s | Step {N} | {error summary} |
 
 ---
 
-## Overall Status
-**Status:** {PASS | FAIL | PARTIAL}
-**Total Tests:** {N}
-**Pass Rate:** {XX.X}%
+## Overall Test Status
+
+**Combined Results:**
+- Total tests executed: {N}
+- Pass rate: {XX.X}%
+- Status: **{PASS ✅ | FAIL ❌ | PARTIAL ⚠️}**
 
 **Execution completed:** {ISO8601}
-```
+````
 
 ---
 
-## PHASE 4: RESULTS ANALYSIS
+## PHASE 4: FAILURE ANALYSIS & 3AGENTS FEEDBACK
 
-### 4.1 Analyze Failures
-For each failed test, create detailed analysis:
-
-```markdown
+### 4.1 Analyze Each Failure
+**For EACH failed test, create detailed analysis:**
+````markdown
 ## Failure Analysis
 
-### Test{Name} - FAILED
+### Test{Name} - ❌ FAILED
+**Test file:** `/test/{ui|api}/{file}.go`
+**Testing 3agents Step:** {N} - {description}
 **Duration:** {time}
-**Error:** {error message}
 
-**Root Cause:**
-{Analysis of why it failed}
+**Error Output:**
+````
+{exact error message from test}
+````
 
-**Related Changes:**
-- {implementation change that may have caused this}
+**Root Cause Analysis:**
+{Detailed analysis of why test failed}
 
-**Screenshots:**
-{Reference to failure screenshots if available}
+**Related Implementation:**
+- **3agents Step:** {N}
+- **Files changed:** {list from progress.md}
+- **Skill used:** @{skill}
+- **Hypothesis:** {why implementation might have caused this}
 
-**Recommendation:**
-- [ ] Implementation needs fix: {what needs fixing}
-- [ ] Test needs update: {what needs updating}
-- [ ] Known issue: {describe if expected}
+**Test Validity:**
+- ✅ Test is correct - implementation has bug
+- ❌ Test is incorrect - needs update
+- ⚠️ Unclear - needs investigation
 
----
-```
+**Screenshots/Artifacts:**
+{Reference to failure artifacts}
 
-### 4.2 Coverage Assessment
-```markdown
-## Coverage Assessment
-
-**Implementation Changes:** {N}
-**Tests Created:** {N}
-**Tests Updated:** {N}
-**Tests Executed:** {N}
-
-### Coverage by Feature:
-- {feature}: ✅ Fully tested
-- {feature}: ⚠️ Partially tested ({reason})
-- {feature}: ❌ Not tested ({reason})
-
-### Coverage Gaps:
-- {feature/scenario}: {why not covered}
-- {feature/scenario}: {why not covered}
-
-**Recommendations:**
-{What additional tests would improve coverage}
-```
+**Impact Assessment:**
+- **Severity:** Critical | High | Medium | Low
+- **Affects:** {what functionality is broken}
+- **User impact:** {how would users be affected}
 
 ---
+````
 
-## PHASE 5: SUMMARY
+### 4.2 Generate 3agents Feedback
+**IF tests failed, create `3agents-feedback.md`:**
+````markdown
+# Feedback for 3agents: Test Failures Found
 
-Create `TEST-SUMMARY.md` in `docs/{task}/test-results/`:
-
-```markdown
-# Test Summary: {task}
-
-**Date:** {ISO8601}
-**Implementation Docs:** `docs/{task}/`
-**Test Results:** `docs/{task}/test-results/`
+**Testing task:** {task}
+**Test date:** {ISO8601}
+**3agents docs:** `docs/{task}/`
+**Test results:** `docs/{task}/test-results/`
 
 ---
 
 ## Executive Summary
 
-**Overall Status:** {PASS ✅ | FAIL ❌ | PARTIAL ⚠️}
-
-- Implementation changes tested: {N}/{N}
-- Tests executed: {N}
-- Tests passed: {N}
-- Tests failed: {N}
-- Pass rate: {XX.X}%
+**Test Status:** ❌ FAILED - Action Required
+**Failed tests:** {N}
+**Affected 3agents steps:** {list step numbers}
 
 ---
 
-## Test Execution Results
+## Issues Found
 
-### UI Tests (/test/ui)
-**Status:** {PASS | FAIL}
-**Duration:** {time}
-**Pass Rate:** {XX.X}%
+### Issue 1: {Description}
+**Affects 3agents Step:** {N} - {description}
+**Severity:** Critical | High | Medium | Low
 
-| Test | Status | Duration | Notes |
-|------|--------|----------|-------|
-| Test{Name} | ✅ | {time}s | {notes} |
-| Test{Name} | ❌ | {time}s | {error summary} |
-| Test{Name} | ✅ | {time}s | {notes} |
+**Test that failed:** `Test{Name}` in `/test/{ui|api}/{file}.go`
 
-### API Tests (/test/api)
-**Status:** {PASS | FAIL}
-**Duration:** {time}
-**Pass Rate:** {XX.X}%
+**Problem:**
+{Clear description of what's wrong}
 
-| Test | Status | Duration | Notes |
-|------|--------|----------|-------|
-| Test{Name} | ✅ | {time}s | {notes} |
-| Test{Name} | ❌ | {time}s | {error summary} |
+**Evidence:**
+````
+{relevant error output}
+````
 
----
+**Root cause:**
+{Analysis of what in the implementation needs fixing}
 
-## Test Coverage
+**Suggested fix:**
+{Specific actionable fix for implementer}
 
-**Changes Requiring Tests:** {N}
-**Tests Created:** {N}
-**Tests Updated:** {N}
-
-### New Tests Added:
-- `/test/ui/{file}.go`: Test{Name} - {purpose}
-- `/test/ui/{file}.go`: Test{Name} - {purpose}
-
-### Tests Updated:
-- `/test/ui/{file}.go`: Test{Name} - {what changed}
-
-### Coverage Gaps:
-- {feature}: {reason for gap}
+**Files to review:**
+- `{file}` - {what to check/fix}
+- `{file}` - {what to check/fix}
 
 ---
 
-## Failures & Issues
-
-{If no failures:}
-✅ **All tests passed - no issues found**
-
-{If failures exist:}
-### Critical Failures (Block Release)
-1. **Test{Name}** - {error}
-   - **Impact:** {description}
-   - **Fix Required:** {what needs to be done}
-
-### Non-Critical Failures (Can Release)
-1. **Test{Name}** - {error}
-   - **Impact:** {description}
-   - **Fix Recommended:** {what should be done}
-
-### Known Issues (Expected)
-- {description of expected failures}
+### Issue 2: {Description}
+{Repeat structure for each issue}
 
 ---
 
-## Test Artifacts
+## Recommended Next Steps for 3agents
 
-### Screenshots
-{List of screenshot directories/files generated}
-- `test-results/{test-name}/`
-
-### Logs
-- `test-execution.md` - Full test output
-- `test-analysis.md` - Test planning and analysis
-
----
-
-## Recommendations
-
-### Immediate Actions Required:
-- [ ] {action based on test results}
-- [ ] {action based on test results}
-
-### Future Test Improvements:
-- {suggestion for better coverage}
-- {suggestion for test refactoring}
-
-### Implementation Feedback:
-- {any issues found in implementation that need fixing}
-- {any suggested improvements}
-
----
-
-## Sign-Off
-
-**Testing completed:** {ISO8601}
-**Tested by:** Claude Sonnet 4.5 (tester command)
-
-**Status for Release:**
-- ✅ APPROVED - All tests passing
-- ⚠️ APPROVED WITH ISSUES - See non-critical failures
-- ❌ BLOCKED - Critical failures must be resolved
-
----
-
-## Next Steps
-
-{If all passed:}
-✅ Implementation is ready
-- Review TEST-SUMMARY.md
-- Run implementation command again if needed
-- Deploy/merge changes
-
-{If failures exist:}
-❌ Implementation needs fixes
-1. Review failure analysis above
-2. Fix issues in implementation
-3. Rerun implementer command with fixes
-4. Rerun tester command to verify
-
-**Resume command:** `Continue` or re-run `implementer` then `tester`
-```
-
----
-
-## VALIDATION CHECKS
-
-Before completing:
-- ✅ All test directories reviewed (`/test/api`, `/test/ui`)
-- ✅ Test patterns followed (studied existing tests)
-- ✅ Both test suites executed (`go test -v` in both directories)
-- ✅ Results documented in `docs/{task}/test-results/`
-- ✅ Failures analyzed (if any)
-- ✅ Summary created (`TEST-SUMMARY.md`)
-- ✅ Screenshots/logs preserved
-- ✅ Recommendations provided
-
----
-
-## TEST STRUCTURE MAINTENANCE
-
-**Directory Structure:**
-```
-/test/
-├── api/           # API tests (Go standard testing)
-│   └── *.go
-├── ui/            # UI tests (chromedp-based)
-│   └── *.go
-└── common/        # Shared test utilities
-    └── *.go
-```
-
-**Pattern Preservation:**
-- Always use `common.SetupTestEnvironment()`
-- Always use `env.LogTest()` for logging
-- Always use `env.TakeScreenshot()` for visual verification
-- Always use `defer env.Cleanup()`
-- Follow existing test naming: `Test{Feature}{Scenario}`
-- Follow existing test structure (setup, execute, verify, cleanup)
-
----
-
-**Task:** $ARGUMENTS  
-**Docs:** `docs/{task}/test-results/`  
-**Mode:** Full test suite with comprehensive results
+### Option 1: Create Fix Plan (Recommended)
+Resume 3agents with new plan to fix test failures:
+````
+Run 3agents with: "Fix test failures from docs/{task}/test-results/3agents-feedback.md"
