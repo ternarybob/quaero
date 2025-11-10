@@ -202,7 +202,6 @@ func main() {
 		Str("config_path", finalConfigPath).
 		Int("port", config.Server.Port).
 		Str("host", config.Server.Host).
-		Str("llm_mode", config.LLM.Mode).
 		Msg("Application configuration loaded")
 
 	// Start server

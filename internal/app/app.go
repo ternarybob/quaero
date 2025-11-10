@@ -22,13 +22,11 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/auth"
-	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
-	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
 	"github.com/ternarybob/quaero/internal/services/search"
@@ -48,12 +46,9 @@ type App struct {
 	StorageManager interfaces.StorageManager
 
 	// Document services
-	LLMService        interfaces.LLMService
-	AuditLogger       llm.AuditLogger
 	DocumentService   interfaces.DocumentService
 	SearchService     interfaces.SearchService
 	IdentifierService *identifiers.Extractor
-	ChatService       interfaces.ChatService
 
 	// Event-driven services
 	EventService     interfaces.EventService
@@ -89,7 +84,6 @@ type App struct {
 	DocumentHandler      *handlers.DocumentHandler
 	SearchHandler        *handlers.SearchHandler
 	SchedulerHandler     *handlers.SchedulerHandler
-	ChatHandler          *handlers.ChatHandler
 	MCPHandler           *handlers.MCPHandler
 	JobHandler           *handlers.JobHandler
 	StatusHandler        *handlers.StatusHandler
@@ -174,7 +168,6 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Log initialization summary
 	logger.Info().
-		Str("llm_mode", cfg.LLM.Mode).
 		Str("processing_enabled", fmt.Sprintf("%v", cfg.Processing.Enabled)).
 		Bool("crawler_enabled", true).
 		Msg("Application initialization complete")
@@ -228,32 +221,7 @@ func (a *App) initDatabase() error {
 func (a *App) initServices() error {
 	var err error
 
-	// 1. Initialize LLM service (required for embeddings)
-	a.LLMService, a.AuditLogger, err = llm.NewLLMService(
-		a.Config,
-		a.StorageManager.DB(),
-		a.Logger,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to initialize LLM service: %w", err)
-	}
-
-	// Log LLM mode
-	mode := a.LLMService.GetMode()
-	a.Logger.Info().
-		Str("mode", string(mode)).
-		Msg("LLM service initialized")
-
-	// 2. Initialize embedding service (now uses LLM abstraction)
-	// NOTE: Phase 4 - EmbeddingService removed completely
-	// a.EmbeddingService = embeddings.NewService(
-	// 	a.LLMService,
-	// 	a.AuditLogger,
-	// 	a.Config.Embeddings.Dimension,
-	// 	a.Logger,
-	// )
-
-	// 3. Initialize document service (no longer uses EmbeddingService)
+	// Initialize document service
 	a.DocumentService = documents.NewService(
 		a.StorageManager.DocumentStorage(),
 		a.Logger,
@@ -269,17 +237,7 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize search service: %w", err)
 	}
 
-	// 4. Initialize chat service (agent-based chat with LLM)
-	a.ChatService = chat.NewChatService(
-		a.LLMService,
-		a.StorageManager.DocumentStorage(),
-		a.SearchService,
-		a.Logger,
-	)
-
-	// 5. Initialize event service (must be early for subscriptions)
-	// Already initialized in New() before LogService setup
-	// NOTE: EventService is created early to support WebSocketHandler initialization
+	// Initialize event service (already created in New() before LogService setup)
 
 	// 5.5. Initialize status service
 	a.StatusService = status.NewService(a.EventService, a.Logger)
@@ -391,21 +349,7 @@ func (a *App) initServices() error {
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
-	// 7. Initialize embedding coordinator
-	// NOTE: Embedding coordinator disabled during embedding removal (Phase 3)
-	// EmbeddingService kept temporarily for backward compatibility
-	// a.EmbeddingCoordinator = embeddings.NewCoordinatorService(
-	// 	a.EmbeddingService,
-	// 	a.StorageManager.DocumentStorage(),
-	// 	a.EventService,
-	// 	a.Logger,
-	// 	a.Config.Processing.Limit,
-	// )
-	// if err := a.EmbeddingCoordinator.Start(); err != nil {
-	// 	return fmt.Errorf("failed to start embedding coordinator: %w", err)
-	// }
-
-	// 11.5 Initialize summary service
+	// Initialize summary service
 	a.SummaryService = summary.NewService(
 		a.StorageManager.DocumentStorage(),
 		a.DocumentService,
@@ -497,17 +441,6 @@ func (a *App) initHandlers() error {
 		a.StorageManager.DocumentStorage(),
 	)
 
-	// NOTE: Phase 4 - EmbeddingHandler removed (no longer needed)
-	// a.EmbeddingHandler = handlers.NewEmbeddingHandler(
-	// 	a.EmbeddingService,
-	// 	a.StorageManager.DocumentStorage(),
-	// 	a.Logger,
-	// )
-
-	a.ChatHandler = handlers.NewChatHandler(
-		a.ChatService,
-		a.Logger,
-	)
 
 	// Initialize MCP handler with SearchService
 	mcpService := mcp.NewDocumentService(
@@ -725,13 +658,6 @@ func (a *App) Close() error {
 	if a.EventService != nil {
 		if err := a.EventService.Close(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to close event service")
-		}
-	}
-
-	// Close LLM service
-	if a.LLMService != nil {
-		if err := a.LLMService.Close(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to close LLM service")
 		}
 	}
 

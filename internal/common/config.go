@@ -16,11 +16,8 @@ type Config struct {
 	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
 	Server      ServerConfig     `toml:"server"`
 	Queue       QueueConfig      `toml:"queue"`
-	Storage     StorageConfig    `toml:"storage"`
-	LLM         LLMConfig        `toml:"llm"`
-	RAG         RAGConfig        `toml:"rag"`
-	Embeddings  EmbeddingsConfig `toml:"embeddings"`
-	Processing  ProcessingConfig `toml:"processing"`
+	Storage    StorageConfig    `toml:"storage"`
+	Processing ProcessingConfig `toml:"processing"`
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
 	Crawler     CrawlerConfig    `toml:"crawler"`
@@ -29,9 +26,8 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port     int    `toml:"port"`
-	Host     string `toml:"host"`
-	LlamaDir string `toml:"llama_dir"` // Directory containing llama-cli binary
+	Port int    `toml:"port"`
+	Host string `toml:"host"`
 }
 
 type QueueConfig struct {
@@ -71,52 +67,7 @@ type FilesystemConfig struct {
 	Attachments string `toml:"attachments"`
 }
 
-type LLMConfig struct {
-	Mode    string           `toml:"mode"` // "offline" or "cloud"
-	Offline OfflineLLMConfig `toml:"offline"`
-	Cloud   CloudLLMConfig   `toml:"cloud"`
-	Audit   AuditConfig      `toml:"audit"`
-}
-
-type OfflineLLMConfig struct {
-	ModelDir    string `toml:"model_dir"`    // Directory containing model files
-	EmbedModel  string `toml:"embed_model"`  // e.g., "nomic-embed-text-v1.5-q8.gguf"
-	ChatModel   string `toml:"chat_model"`   // e.g., "qwen2.5-7b-instruct-q4.gguf"
-	ContextSize int    `toml:"context_size"` // Context window size
-	ThreadCount int    `toml:"thread_count"` // CPU threads for inference
-	GPULayers   int    `toml:"gpu_layers"`   // Number of layers to offload to GPU
-	MockMode    bool   `toml:"mock_mode"`    // Enable mock mode for testing (bypasses binary/model requirements)
-}
-
-type CloudLLMConfig struct {
-	Provider    string  `toml:"provider"`    // "gemini", "openai", "anthropic"
-	APIKey      string  `toml:"api_key"`     // API key (should use env var)
-	EmbedModel  string  `toml:"embed_model"` // e.g., "text-embedding-004"
-	ChatModel   string  `toml:"chat_model"`  // e.g., "gemini-1.5-flash"
-	MaxTokens   int     `toml:"max_tokens"`  // Max response tokens
-	Temperature float64 `toml:"temperature"` // 0.0-1.0
-}
-
-type AuditConfig struct {
-	Enabled    bool `toml:"enabled"`     // Enable audit logging
-	LogQueries bool `toml:"log_queries"` // Log query text (disable for PII)
-}
-
-type RAGConfig struct {
-	MaxDocuments  int     `toml:"max_documents"`  // Maximum number of documents to retrieve
-	MinSimilarity float64 `toml:"min_similarity"` // Minimum similarity score (0.0-1.0)
-	SearchMode    string  `toml:"search_mode"`    // "vector", "keyword", or "hybrid"
-}
-
-type EmbeddingsConfig struct {
-	Enabled   bool   `toml:"enabled"`
-	OllamaURL string `toml:"ollama_url"`
-	Model     string `toml:"model"`
-	Dimension int    `toml:"dimension"`
-	BatchSize int    `toml:"batch_size"`
-}
-
-type ProcessingConfig struct {
+type ProcessingConfig struct{
 	Enabled  bool   `toml:"enabled"`
 	Schedule string `toml:"schedule"` // Cron schedule format
 	Limit    int    `toml:"limit"`    // Max documents to process per embedding run
@@ -194,9 +145,8 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		Environment: "development", // Default to development mode - allows test URLs
 		Server: ServerConfig{
-			Port:     8080,
-			Host:     "localhost",
-			LlamaDir: "./llama",
+			Port: 8080,
+			Host: "localhost",
 		},
 		Queue: QueueConfig{
 			PollInterval:      "1s",
@@ -221,40 +171,6 @@ func NewDefaultConfig() *Config {
 				Images:      "./data/images",
 				Attachments: "./data/attachments",
 			},
-		},
-		LLM: LLMConfig{
-			Mode: "offline", // Secure by default - no data leaves the machine
-			Offline: OfflineLLMConfig{
-				ModelDir:    "./models",
-				EmbedModel:  "nomic-embed-text-v1.5-q8.gguf",
-				ChatModel:   "qwen2.5-7b-instruct-q4.gguf",
-				ContextSize: 24000, // Large context for Pointer RAG with extensive cross-source linking
-				ThreadCount: 4,     // Conservative CPU thread count for compatibility
-				GPULayers:   0,     // CPU-only by default for maximum compatibility
-			},
-			Cloud: CloudLLMConfig{
-				Provider:    "gemini",
-				EmbedModel:  "text-embedding-004",
-				ChatModel:   "gemini-1.5-flash",
-				MaxTokens:   2048, // Reasonable default for chat responses
-				Temperature: 0.7,  // Balanced between deterministic and creative
-			},
-			Audit: AuditConfig{
-				Enabled:    true,
-				LogQueries: false, // Don't log query text by default (PII/compliance safety)
-			},
-		},
-		RAG: RAGConfig{
-			MaxDocuments:  20,       // Retrieve up to 20 documents (local LLM can handle larger contexts)
-			MinSimilarity: 0.6,      // Lower threshold to include more potentially relevant docs
-			SearchMode:    "vector", // Default to semantic vector search
-		},
-		Embeddings: EmbeddingsConfig{
-			Enabled:   true,
-			OllamaURL: "http://localhost:11434", // Standard Ollama default port
-			Model:     "nomic-embed-text",       // 768-dimensional embeddings
-			Dimension: 768,                      // Matches model output
-			BatchSize: 10,                       // Conservative batch size for stability
 		},
 		Processing: ProcessingConfig{
 			Enabled:  false,           // Disabled by default - user must explicitly opt-in
@@ -369,9 +285,6 @@ func applyEnvOverrides(config *Config) {
 	if host := os.Getenv("QUAERO_SERVER_HOST"); host != "" {
 		config.Server.Host = host
 	}
-	if llamaDir := os.Getenv("QUAERO_SERVER_LLAMA_DIR"); llamaDir != "" {
-		config.Server.LlamaDir = llamaDir
-	}
 
 	// Queue configuration
 	if pollInterval := os.Getenv("QUAERO_QUEUE_POLL_INTERVAL"); pollInterval != "" {
@@ -400,67 +313,6 @@ func applyEnvOverrides(config *Config) {
 	}
 	if sqlitePath := os.Getenv("QUAERO_SQLITE_PATH"); sqlitePath != "" {
 		config.Storage.SQLite.Path = sqlitePath
-	}
-
-	// LLM configuration
-	if llmMode := os.Getenv("QUAERO_LLM_MODE"); llmMode != "" {
-		config.LLM.Mode = llmMode
-	}
-	if modelDir := os.Getenv("QUAERO_LLM_OFFLINE_MODEL_DIR"); modelDir != "" {
-		config.LLM.Offline.ModelDir = modelDir
-	}
-	if embedModel := os.Getenv("QUAERO_LLM_OFFLINE_EMBED_MODEL"); embedModel != "" {
-		config.LLM.Offline.EmbedModel = embedModel
-	}
-	if chatModel := os.Getenv("QUAERO_LLM_OFFLINE_CHAT_MODEL"); chatModel != "" {
-		config.LLM.Offline.ChatModel = chatModel
-	}
-	if contextSize := os.Getenv("QUAERO_LLM_OFFLINE_CONTEXT_SIZE"); contextSize != "" {
-		if cs, err := strconv.Atoi(contextSize); err == nil {
-			config.LLM.Offline.ContextSize = cs
-		}
-	}
-	if threadCount := os.Getenv("QUAERO_LLM_OFFLINE_THREAD_COUNT"); threadCount != "" {
-		if tc, err := strconv.Atoi(threadCount); err == nil {
-			config.LLM.Offline.ThreadCount = tc
-		}
-	}
-	if gpuLayers := os.Getenv("QUAERO_LLM_OFFLINE_GPU_LAYERS"); gpuLayers != "" {
-		if gl, err := strconv.Atoi(gpuLayers); err == nil {
-			config.LLM.Offline.GPULayers = gl
-		}
-	}
-	if provider := os.Getenv("QUAERO_LLM_CLOUD_PROVIDER"); provider != "" {
-		config.LLM.Cloud.Provider = provider
-	}
-	if apiKey := os.Getenv("QUAERO_LLM_CLOUD_API_KEY"); apiKey != "" {
-		config.LLM.Cloud.APIKey = apiKey
-	}
-	if embedModel := os.Getenv("QUAERO_LLM_CLOUD_EMBED_MODEL"); embedModel != "" {
-		config.LLM.Cloud.EmbedModel = embedModel
-	}
-	if chatModel := os.Getenv("QUAERO_LLM_CLOUD_CHAT_MODEL"); chatModel != "" {
-		config.LLM.Cloud.ChatModel = chatModel
-	}
-	if maxTokens := os.Getenv("QUAERO_LLM_CLOUD_MAX_TOKENS"); maxTokens != "" {
-		if mt, err := strconv.Atoi(maxTokens); err == nil {
-			config.LLM.Cloud.MaxTokens = mt
-		}
-	}
-	if temperature := os.Getenv("QUAERO_LLM_CLOUD_TEMPERATURE"); temperature != "" {
-		if temp, err := strconv.ParseFloat(temperature, 64); err == nil {
-			config.LLM.Cloud.Temperature = temp
-		}
-	}
-	if auditEnabled := os.Getenv("QUAERO_LLM_AUDIT_ENABLED"); auditEnabled != "" {
-		if enabled, err := strconv.ParseBool(auditEnabled); err == nil {
-			config.LLM.Audit.Enabled = enabled
-		}
-	}
-	if logQueries := os.Getenv("QUAERO_LLM_AUDIT_LOG_QUERIES"); logQueries != "" {
-		if lq, err := strconv.ParseBool(logQueries); err == nil {
-			config.LLM.Audit.LogQueries = lq
-		}
 	}
 
 	// Logging configuration

@@ -64,7 +64,6 @@ func PrintBanner(config *Config, logger arbor.ILogger) {
 	// Log configuration through Arbor
 	logger.Info().
 		Str("log_file", logFilePath).
-		Str("llm_mode", config.LLM.Mode).
 		Str("storage_type", config.Storage.Type).
 		Msg("Configuration loaded")
 
@@ -83,24 +82,12 @@ func printCapabilities(config *Config, logger arbor.ILogger) {
 	// Show storage configuration
 	fmt.Printf("   • Local SQLite database with full-text search\n")
 
-	// Show LLM mode
-	llmDescription := ""
-	if config.LLM.Mode == "offline" {
-		llmDescription = "secure, data stays local"
-		fmt.Printf("   • Offline LLM mode (%s)\n", llmDescription)
-	} else if config.LLM.Mode == "cloud" {
-		llmDescription = "uses external APIs"
-		fmt.Printf("   • Cloud LLM mode (%s)\n", llmDescription)
-	}
-
 	// Show authentication
 	fmt.Printf("   • Extension-based authentication (OAuth/SSO)\n")
 
 	// Log capabilities through Arbor
 	logger.Info().
 		Str("storage", "sqlite_fts5").
-		Str("llm_mode", config.LLM.Mode).
-		Str("llm_description", llmDescription).
 		Str("authentication", "extension_oauth_sso").
 		Str("crawler", "chromedp").
 		Msg("System capabilities")

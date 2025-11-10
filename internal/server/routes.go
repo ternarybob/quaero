@@ -57,10 +57,6 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Search
 	mux.HandleFunc("/api/search", s.handleSearchRoute)
 
-	// API routes - Chat (RAG-enabled chat)
-	mux.HandleFunc("/api/chat", s.app.ChatHandler.ChatHandler)
-	mux.HandleFunc("/api/chat/health", s.app.ChatHandler.HealthHandler)
-
 	// MCP (Model Context Protocol) endpoints
 	mux.HandleFunc("/mcp", s.app.MCPHandler.HandleRPC)
 	mux.HandleFunc("/mcp/info", s.app.MCPHandler.InfoHandler)
