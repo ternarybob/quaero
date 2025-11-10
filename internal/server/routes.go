@@ -225,6 +225,12 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check for /quick-crawl suffix (create and execute from Chrome extension)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/quick-crawl") {
+		s.app.JobDefinitionHandler.CreateAndExecuteQuickCrawlHandler(w, r)
+		return
+	}
+
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)

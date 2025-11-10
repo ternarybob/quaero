@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type JobDefinitionHandler struct {
 	jobDefStorage interfaces.JobDefinitionStorage
 	jobStorage    interfaces.JobStorage
 	jobExecutor   *executor.JobExecutor
+	authStorage   interfaces.AuthStorage
 	logger        arbor.ILogger
 }
 
@@ -35,6 +37,7 @@ func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.JobStorage,
 	jobExecutor *executor.JobExecutor,
+	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -46,16 +49,20 @@ func NewJobDefinitionHandler(
 	if jobExecutor == nil {
 		panic("jobExecutor cannot be nil")
 	}
+	if authStorage == nil {
+		panic("authStorage cannot be nil")
+	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
 
-	logger.Info().Msg("Job definition handler initialized with job executor")
+	logger.Info().Msg("Job definition handler initialized with job executor and auth storage")
 
 	return &JobDefinitionHandler{
 		jobDefStorage: jobDefStorage,
 		jobStorage:    jobStorage,
 		jobExecutor:   jobExecutor,
+		authStorage:   authStorage,
 		logger:        logger,
 	}
 }
@@ -596,13 +603,14 @@ func (h *JobDefinitionHandler) convertJobDefinitionToTOML(jobDef *models.JobDefi
 
 	// Build simplified structure matching the file format
 	simplified := map[string]interface{}{
-		"id":          jobDef.ID,
-		"name":        jobDef.Name,
-		"description": jobDef.Description,
-		"schedule":    jobDef.Schedule,
-		"timeout":     jobDef.Timeout,
-		"enabled":     jobDef.Enabled,
-		"auto_start":  jobDef.AutoStart,
+		"id":             jobDef.ID,
+		"name":           jobDef.Name,
+		"description":    jobDef.Description,
+		"schedule":       jobDef.Schedule,
+		"timeout":        jobDef.Timeout,
+		"enabled":        jobDef.Enabled,
+		"auto_start":     jobDef.AutoStart,
+		"authentication": jobDef.AuthID, // Include authentication reference
 	}
 
 	// Extract crawler-specific fields from config
@@ -843,4 +851,202 @@ func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWr
 
 	h.logger.Info().Str("job_def_id", jobDef.ID).Msg("Invalid job definition saved without validation")
 	WriteJSON(w, http.StatusCreated, jobDef)
+}
+
+// CreateAndExecuteQuickCrawlHandler handles POST /api/job-definitions/quick-crawl
+// Creates a temporary crawler job definition from the current page URL and executes it immediately
+// This endpoint is designed for the Chrome extension's "Capture & Crawl" button
+func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "POST") {
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		URL             string                   `json:"url"`                        // Current page URL (required)
+		Name            string                   `json:"name,omitempty"`             // Optional custom name
+		MaxDepth        *int                     `json:"max_depth,omitempty"`        // Optional override (defaults to config value)
+		MaxPages        *int                     `json:"max_pages,omitempty"`        // Optional override (defaults to config value)
+		IncludePatterns []string                 `json:"include_patterns,omitempty"` // Optional URL patterns to include
+		ExcludePatterns []string                 `json:"exclude_patterns,omitempty"` // Optional URL patterns to exclude
+		Cookies         []map[string]interface{} `json:"cookies,omitempty"`          // Optional auth cookies from extension
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to decode quick crawl request")
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	defer r.Body.Close()
+
+	// Validate required fields
+	if req.URL == "" {
+		WriteError(w, http.StatusBadRequest, "URL is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse URL to extract domain
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("url", req.URL).Msg("Failed to parse URL")
+		WriteError(w, http.StatusBadRequest, "Invalid URL")
+		return
+	}
+	siteDomain := parsedURL.Host
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+
+	// Store authentication cookies if provided and get the auth ID
+	var authID string
+	if len(req.Cookies) > 0 {
+		// Marshal cookies to JSON
+		cookiesJSON, err := json.Marshal(req.Cookies)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal cookies")
+			WriteError(w, http.StatusInternalServerError, "Failed to store authentication")
+			return
+		}
+
+		// Create auth credentials
+		authCreds := &models.AuthCredentials{
+			SiteDomain:  siteDomain,
+			ServiceType: "generic", // Generic web authentication
+			BaseURL:     baseURL,
+			Cookies:     cookiesJSON,
+			Tokens:      make(map[string]string),
+			Data:        make(map[string]interface{}),
+		}
+
+		// Store credentials (will update if exists for same site_domain)
+		if err := h.authStorage.StoreCredentials(ctx, authCreds); err != nil {
+			h.logger.Error().Err(err).Str("site_domain", siteDomain).Msg("Failed to store auth credentials")
+			WriteError(w, http.StatusInternalServerError, "Failed to store authentication")
+			return
+		}
+
+		h.logger.Info().
+			Str("site_domain", siteDomain).
+			Int("cookies_count", len(req.Cookies)).
+			Msg("Auth credentials stored for quick crawl")
+
+		// Retrieve the stored credentials to get the ID
+		storedCreds, err := h.authStorage.GetCredentialsBySiteDomain(ctx, siteDomain)
+		if err != nil {
+			h.logger.Error().Err(err).Str("site_domain", siteDomain).Msg("Failed to retrieve stored auth credentials")
+			WriteError(w, http.StatusInternalServerError, "Failed to retrieve authentication")
+			return
+		}
+		if storedCreds != nil {
+			authID = storedCreds.ID
+			h.logger.Info().
+				Str("auth_id", authID).
+				Str("site_domain", siteDomain).
+				Msg("Retrieved auth ID for job definition")
+		}
+	}
+
+	// Generate unique ID for this quick crawl job
+	jobID := fmt.Sprintf("capture-crawl-%d", time.Now().UnixNano())
+
+	// Generate name from URL if not provided
+	name := req.Name
+	if name == "" {
+		name = fmt.Sprintf("Capture & Crawl: %s", req.URL)
+	}
+
+	// Get crawler defaults from config (need access to config - will use default values for now)
+	// TODO: Pass config through handler initialization or use a config service
+	maxDepth := 2
+	maxPages := 10
+	if req.MaxDepth != nil {
+		maxDepth = *req.MaxDepth
+	}
+	if req.MaxPages != nil {
+		maxPages = *req.MaxPages
+	}
+
+	// Build crawler job definition file structure
+	crawlerJob := sqlite.CrawlerJobDefinitionFile{
+		ID:              jobID,
+		Name:            name,
+		JobType:         "user", // User-initiated quick crawl
+		Description:     fmt.Sprintf("Capture & Crawl initiated from Chrome extension for %s", req.URL),
+		StartURLs:       []string{req.URL},
+		Schedule:        "",      // Manual execution only (no schedule)
+		Timeout:         "30m",   // 30-minute timeout
+		Enabled:         true,
+		AutoStart:       false,
+		Authentication:  authID,  // Reference to auth credentials by ID (UUID)
+		IncludePatterns: req.IncludePatterns,
+		ExcludePatterns: req.ExcludePatterns,
+		MaxDepth:        maxDepth,
+		MaxPages:        maxPages,
+		Concurrency:     5,    // Reasonable default
+		FollowLinks:     true,
+	}
+
+	// Validate crawler job file
+	if err := crawlerJob.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Quick crawl job validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid quick crawl configuration: %v", err))
+		return
+	}
+
+	// Convert to full JobDefinition model
+	jobDef := crawlerJob.ToJobDefinition()
+
+	// Validate full job definition
+	if err := jobDef.Validate(); err != nil {
+		h.logger.Error().Err(err).Msg("Job definition validation failed")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid job definition: %v", err))
+		return
+	}
+
+	// Save job definition
+	if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save quick crawl job definition")
+		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
+		return
+	}
+
+	h.logger.Info().
+		Str("job_def_id", jobDef.ID).
+		Str("job_name", jobDef.Name).
+		Str("url", req.URL).
+		Int("max_depth", maxDepth).
+		Int("max_pages", maxPages).
+		Msg("Quick crawl job definition created")
+
+	// Execute job definition asynchronously
+	go func() {
+		bgCtx := context.Background()
+
+		parentJobID, err := h.jobExecutor.Execute(bgCtx, jobDef)
+		if err != nil {
+			h.logger.Error().
+				Err(err).
+				Str("job_def_id", jobDef.ID).
+				Msg("Quick crawl job execution failed")
+			return
+		}
+
+		h.logger.Info().
+			Str("job_def_id", jobDef.ID).
+			Str("parent_job_id", parentJobID).
+			Msg("Quick crawl job execution started successfully")
+	}()
+
+	// Return response
+	response := map[string]interface{}{
+		"job_id":        jobDef.ID,
+		"job_name":      jobDef.Name,
+		"status":        "running",
+		"message":       "Quick crawl job created and started",
+		"url":           req.URL,
+		"max_depth":     maxDepth,
+		"max_pages":     maxPages,
+	}
+
+	WriteJSON(w, http.StatusAccepted, response)
 }

@@ -164,6 +164,8 @@ type CrawlerConfig struct {
 	EnableEmptyOutputFallback bool          `toml:"enable_empty_output_fallback"` // Apply HTML stripping fallback when HTML→MD conversion produces empty output (default: true)
 	EnableJavaScript          bool          `toml:"enable_javascript"`            // Enable JavaScript rendering with chromedp (default: true for SPAs like Jira)
 	JavaScriptWaitTime        time.Duration `toml:"javascript_wait_time"`         // Time to wait for JavaScript to render (default: 3s)
+	QuickCrawlMaxDepth        int           `toml:"quick_crawl_max_depth"`        // Default max depth for quick crawl operations (default: 2)
+	QuickCrawlMaxPages        int           `toml:"quick_crawl_max_pages"`        // Default max pages for quick crawl operations (default: 10)
 }
 
 // SearchConfig contains configuration for search behavior
@@ -293,6 +295,8 @@ func NewDefaultConfig() *Config {
 			EnableEmptyOutputFallback: true,                                      // Apply HTML stripping fallback when conversion produces empty output
 			EnableJavaScript:          true,                                      // Enable JavaScript rendering for SPAs like Jira
 			JavaScriptWaitTime:        3 * time.Second,                           // Wait 3 seconds for JavaScript to render
+			QuickCrawlMaxDepth:        2,                                         // Default max depth for quick crawl from extension
+			QuickCrawlMaxPages:        10,                                        // Default max pages for quick crawl from extension
 		},
 		Search: SearchConfig{
 			Mode:                    "advanced", // Advanced search with Google-style query parsing (fts5|advanced|disabled)

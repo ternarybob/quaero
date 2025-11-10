@@ -79,6 +79,34 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
 
+	// Persist metadata immediately after job creation to avoid race with child jobs
+	// This ensures auth_id and job_definition_id are available when crawler jobs start
+	parentMetadata := make(map[string]interface{})
+
+	// Include auth_id in metadata if present (required for cookie injection)
+	if jobDef.AuthID != "" {
+		parentMetadata["auth_id"] = jobDef.AuthID
+	}
+	// Include job_definition_id in metadata as fallback
+	if jobDef.ID != "" {
+		parentMetadata["job_definition_id"] = jobDef.ID
+	}
+	// Include phase in metadata
+	parentMetadata["phase"] = "execution"
+
+	// Persist metadata to database so child jobs can retrieve it
+	if err := e.jobManager.UpdateJobMetadata(ctx, parentJobID, parentMetadata); err != nil {
+		parentLogger.Warn().
+			Err(err).
+			Str("parent_job_id", parentJobID).
+			Msg("Failed to update job metadata, auth may not work for child jobs")
+	} else {
+		parentLogger.Debug().
+			Str("parent_job_id", parentJobID).
+			Int("metadata_keys", len(parentMetadata)).
+			Msg("Job metadata persisted to database")
+	}
+
 	// Add initial job log for debugging
 	initialLog := fmt.Sprintf("🚀 Starting job definition execution: %s (ID: %s, Type: '%s', Steps: %d)",
 		jobDef.Name, jobDef.ID, string(jobDef.Type), len(jobDef.Steps))
@@ -106,6 +134,14 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 	jobDefConfig["schedule"] = jobDef.Schedule
 	jobDefConfig["timeout"] = jobDef.Timeout
 	jobDefConfig["enabled"] = jobDef.Enabled
+
+	// Include auth_id if present (required for cookie injection)
+	if jobDef.AuthID != "" {
+		jobDefConfig["auth_id"] = jobDef.AuthID
+		parentLogger.Debug().
+			Str("auth_id", jobDef.AuthID).
+			Msg("Auth ID included in job config for cookie injection")
+	}
 
 	// Update the job config in the database
 	if err := e.jobManager.UpdateJobConfig(ctx, parentJobID, jobDefConfig); err != nil {
@@ -304,13 +340,28 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 
 		// Start parent job monitoring in a separate goroutine (NOT via queue)
 		// This prevents blocking the queue worker with long-running monitoring loops
+		// Note: parentMetadata was already persisted earlier (right after CreateJobRecord)
+		// We reconstruct it here for the in-memory parentJobModel only
+		parentMetadata := make(map[string]interface{})
+
+		// Include auth_id in metadata if present (required for cookie injection)
+		if jobDef.AuthID != "" {
+			parentMetadata["auth_id"] = jobDef.AuthID
+		}
+		// Include job_definition_id in metadata as fallback
+		if jobDef.ID != "" {
+			parentMetadata["job_definition_id"] = jobDef.ID
+		}
+		// Include phase in metadata
+		parentMetadata["phase"] = "execution"
+
 		parentJobModel := &models.JobModel{
 			ID:        parentJobID,
 			ParentID:  nil,
 			Type:      "parent",
 			Name:      jobDef.Name,
 			Config:    jobDefConfig,
-			Metadata:  make(map[string]interface{}),
+			Metadata:  parentMetadata,
 			CreatedAt: time.Now(),
 			Depth:     0,
 		}

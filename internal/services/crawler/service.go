@@ -251,6 +251,22 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			return "", fmt.Errorf("invalid auth snapshot type: expected *models.AuthCredentials")
 		}
 		authSnapshot = snapshot
+	} else if sourceID != "" && s.authStorage != nil {
+		// If no auth snapshot provided but sourceID is given, try to load from storage
+		// sourceID is the auth credentials ID (UUID) from job definition's AuthID field
+		creds, err := s.authStorage.GetCredentialsByID(context.Background(), sourceID)
+		if err == nil && creds != nil {
+			authSnapshot = creds
+			s.logger.Info().
+				Str("auth_id", sourceID).
+				Str("site_domain", creds.SiteDomain).
+				Msg("Loaded authentication credentials from storage using auth ID")
+		} else if err != nil {
+			s.logger.Warn().
+				Err(err).
+				Str("auth_id", sourceID).
+				Msg("Failed to load authentication credentials from storage")
+		}
 	}
 
 	// If jobDefinitionID is provided, it means this crawl is part of a job definition execution
@@ -299,6 +315,12 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		contextLogger.Debug().
 			Str("job_definition_id", jobDefinitionID).
 			Msg("Job definition ID stored in job metadata")
+	}
+	if sourceID != "" {
+		metadata["auth_id"] = sourceID
+		contextLogger.Debug().
+			Str("auth_id", sourceID).
+			Msg("Auth ID stored in job metadata for cookie injection")
 	}
 
 	var job *models.Job
@@ -542,6 +564,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		childMetadata := make(map[string]interface{})
 		if jobDefinitionID != "" {
 			childMetadata["job_definition_id"] = jobDefinitionID
+		}
+		if sourceID != "" {
+			childMetadata["auth_id"] = sourceID
 		}
 		childMetadata["seed_index"] = i
 

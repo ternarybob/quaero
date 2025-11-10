@@ -7,8 +7,12 @@ package processor
 import (
 	"context"
 	"fmt"
+	neturl "net/url"
+	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/log"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -22,12 +26,14 @@ import (
 // content processing, and child job spawning for discovered links
 type EnhancedCrawlerExecutor struct {
 	// Core dependencies
-	crawlerService  *crawler.Service
-	jobMgr          *jobs.Manager
-	queueMgr        *queue.Manager
-	documentStorage interfaces.DocumentStorage
-	logger          arbor.ILogger
-	eventService    interfaces.EventService
+	crawlerService   *crawler.Service
+	jobMgr           *jobs.Manager
+	queueMgr         *queue.Manager
+	documentStorage  interfaces.DocumentStorage
+	authStorage      interfaces.AuthStorage
+	jobDefStorage    interfaces.JobDefinitionStorage
+	logger           arbor.ILogger
+	eventService     interfaces.EventService
 
 	// Content processing components
 	contentProcessor *crawler.ContentProcessor
@@ -39,6 +45,8 @@ func NewEnhancedCrawlerExecutor(
 	jobMgr *jobs.Manager,
 	queueMgr *queue.Manager,
 	documentStorage interfaces.DocumentStorage,
+	authStorage interfaces.AuthStorage,
+	jobDefStorage interfaces.JobDefinitionStorage,
 	logger arbor.ILogger,
 	eventService interfaces.EventService,
 ) *EnhancedCrawlerExecutor {
@@ -47,6 +55,8 @@ func NewEnhancedCrawlerExecutor(
 		jobMgr:           jobMgr,
 		queueMgr:         queueMgr,
 		documentStorage:  documentStorage,
+		authStorage:      authStorage,
+		jobDefStorage:    jobDefStorage,
 		logger:           logger,
 		eventService:     eventService,
 		contentProcessor: crawler.NewContentProcessor(logger),
@@ -153,9 +163,13 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 	// Publish initial progress update
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
 
+	jobLogger.Info().Msg("🚨 ABOUT TO CREATE BROWSER INSTANCE")
+
 	// Step 1: Create a fresh ChromeDP browser instance for this request
 	// TEMPORARY: Bypassing pool to debug context cancellation issue
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
+
+	jobLogger.Info().Msg("🚨 PUBLISHED PROGRESS UPDATE FOR BROWSER CREATION")
 
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
 		context.Background(),
@@ -179,6 +193,17 @@ func (e *EnhancedCrawlerExecutor) Execute(ctx context.Context, job *models.JobMo
 		"depth":    job.Depth,
 		"child_id": job.ID,
 	})
+
+	// Step 1.5: Load and inject authentication cookies into browser
+	if err := e.injectAuthCookies(ctx, browserCtx, parentID, seedURL, jobLogger); err != nil {
+		jobLogger.Warn().Err(err).Msg("Failed to inject authentication cookies - continuing without authentication")
+		e.publishCrawlerJobLog(ctx, parentID, "warn", fmt.Sprintf("Failed to inject authentication cookies: %v", err), map[string]interface{}{
+			"url":      seedURL,
+			"depth":    job.Depth,
+			"child_id": job.ID,
+			"error":    err.Error(),
+		})
+	}
 
 	// Step 2: Navigate to URL and render JavaScript
 	e.publishCrawlerProgressUpdate(ctx, job, "running", "Rendering page with JavaScript", seedURL)
@@ -529,9 +554,183 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 		return "", 0, fmt.Errorf("browser context cancelled: %w", err)
 	}
 
+	// ===== ENABLE NETWORK DOMAIN FOR COOKIE OPERATIONS =====
+	logger.Debug().Msg("🔐 DIAGNOSTIC: Enabling ChromeDP network domain for cookie operations")
+	if err := chromedp.Run(browserCtx, network.Enable()); err != nil {
+		logger.Error().Err(err).Msg("🔐 ERROR: Failed to enable network domain")
+		return "", 0, fmt.Errorf("failed to enable network domain: %w", err)
+	}
+	logger.Debug().Msg("🔐 SUCCESS: Network domain enabled successfully")
+
+	// Enable log domain for capturing browser console messages
+	logger.Debug().Msg("🔐 DIAGNOSTIC: Enabling ChromeDP log domain for browser console messages")
+	if err := chromedp.Run(browserCtx, log.Enable()); err != nil {
+		logger.Warn().Err(err).Msg("🔐 WARNING: Failed to enable log domain")
+	} else {
+		logger.Debug().Msg("🔐 SUCCESS: Log domain enabled successfully")
+	}
+	// ===== END NETWORK DOMAIN ENABLEMENT =====
+
+	// ===== PHASE 3: COOKIE MONITORING BEFORE NAVIGATION =====
+	logger.Debug().
+		Str("url", url).
+		Msg("🔐 DIAGNOSTIC: Checking cookies before navigation")
+
+	var cookiesBeforeNav []*network.Cookie
+	err := chromedp.Run(browserCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			cookies, err := network.GetCookies().WithURLs([]string{url}).Do(ctx)
+			if err != nil {
+				return err
+			}
+			cookiesBeforeNav = cookies
+			return nil
+		}),
+	)
+
+	if err != nil {
+		logger.Warn().
+			Err(err).
+			Str("url", url).
+			Msg("🔐 WARNING: Failed to read cookies before navigation")
+	} else {
+		logger.Debug().
+			Int("cookie_count", len(cookiesBeforeNav)).
+			Str("url", url).
+			Msg("🔐 DIAGNOSTIC: Cookies applicable to URL before navigation")
+
+		if len(cookiesBeforeNav) == 0 {
+			logger.Warn().
+				Str("url", url).
+				Msg("🔐 WARNING: No cookies found for URL - navigating without authentication")
+		} else {
+			// Parse target URL for domain comparison
+			targetURLParsed, parseErr := neturl.Parse(url)
+			if parseErr != nil {
+				logger.Warn().Err(parseErr).Msg("🔐 WARNING: Failed to parse target URL for domain analysis")
+			}
+
+			// Log each cookie with domain matching analysis
+			for i, cookie := range cookiesBeforeNav {
+				// Perform domain matching analysis
+				var matchType string
+				isMatch := false
+				if targetURLParsed != nil && targetURLParsed.Host != "" {
+					cookieDomain := cookie.Domain
+					normalizedCookieDomain := strings.TrimPrefix(cookieDomain, ".")
+					targetHost := targetURLParsed.Host
+
+					if normalizedCookieDomain == targetHost {
+						matchType = "exact_match"
+						isMatch = true
+					} else if strings.HasSuffix(targetHost, "."+normalizedCookieDomain) {
+						matchType = "parent_domain_match"
+						isMatch = true
+					} else if strings.HasSuffix(normalizedCookieDomain, "."+targetHost) {
+						matchType = "subdomain_of_target"
+						isMatch = false
+					} else {
+						matchType = "domain_mismatch"
+						isMatch = false
+					}
+
+					logger.Debug().
+						Int("cookie_index", i).
+						Str("cookie_name", cookie.Name).
+						Str("cookie_domain", cookie.Domain).
+						Str("normalized_cookie_domain", normalizedCookieDomain).
+						Str("target_domain", targetHost).
+						Str("cookie_path", cookie.Path).
+						Str("match_type", matchType).
+						Bool("will_be_sent", isMatch).
+						Bool("secure", cookie.Secure).
+						Bool("http_only", cookie.HTTPOnly).
+						Str("same_site", string(cookie.SameSite)).
+						Msg("🔐 DIAGNOSTIC: Cookie domain analysis before navigation")
+
+					if !isMatch {
+						logger.Warn().
+							Str("cookie_name", cookie.Name).
+							Str("cookie_domain", cookie.Domain).
+							Str("target_domain", targetHost).
+							Msg("🔐 WARNING: Cookie domain mismatch - cookie may not be sent")
+					}
+				} else {
+					logger.Debug().
+						Int("cookie_index", i).
+						Str("cookie_name", cookie.Name).
+						Str("cookie_domain", cookie.Domain).
+						Str("cookie_path", cookie.Path).
+						Bool("secure", cookie.Secure).
+						Bool("http_only", cookie.HTTPOnly).
+						Str("same_site", string(cookie.SameSite)).
+						Msg("🔐 DIAGNOSTIC: Cookie will be sent with navigation")
+				}
+			}
+		}
+	}
+	// ===== END PHASE 3 PART 1 =====
+
+	// ===== PHASE 3 PART 1.5: EVENT LISTENERS FOR DIAGNOSTICS =====
+	// Subscribe to browser console log events for cookie-related messages
+	chromedp.ListenTarget(browserCtx, func(ev interface{}) {
+		switch evTyped := ev.(type) {
+		case *log.EventEntryAdded:
+			// Log browser console messages that mention cookies
+			if strings.Contains(strings.ToLower(evTyped.Entry.Text), "cookie") {
+				logger.Debug().
+					Str("source", evTyped.Entry.Source.String()).
+					Str("level", evTyped.Entry.Level.String()).
+					Str("message", evTyped.Entry.Text).
+					Msg("🔐 DIAGNOSTIC: Browser console message about cookies")
+			}
+
+		case *network.EventRequestWillBeSent:
+			// Log the request and any Cookie header sent
+			cookieHeader := ""
+			if evTyped.Request.Headers != nil {
+				if cookie, exists := evTyped.Request.Headers["Cookie"]; exists {
+					if cookieStr, ok := cookie.(string); ok {
+						cookieHeader = cookieStr
+					}
+				}
+			}
+
+			if cookieHeader != "" {
+				logger.Debug().
+					Str("request_url", evTyped.Request.URL).
+					Str("cookie_header", cookieHeader).
+					Msg("🔐 DIAGNOSTIC: Cookie header sent with request")
+			} else {
+				logger.Debug().
+					Str("request_url", evTyped.Request.URL).
+					Msg("🔐 DIAGNOSTIC: No Cookie header in request")
+			}
+
+		case *network.EventLoadingFailed:
+			// Log network failures that might indicate cookie issues
+			logger.Warn().
+				Str("request_url", evTyped.RequestID.String()).
+				Str("error_text", evTyped.ErrorText).
+				Str("type", evTyped.Type.String()).
+				Msg("🔐 WARNING: Network request failed (possible cookie issue)")
+
+		case *network.EventResponseReceivedExtraInfo:
+			// Log Set-Cookie headers in responses
+			if evTyped.Headers != nil {
+				if setCookie, exists := evTyped.Headers["Set-Cookie"]; exists {
+					logger.Debug().
+						Str("set_cookie_header", fmt.Sprintf("%v", setCookie)).
+						Msg("🔐 DIAGNOSTIC: Server sent Set-Cookie header")
+				}
+			}
+		}
+	})
+	// ===== END PHASE 3 PART 1.5 =====
+
 	// Navigate to URL and wait for JavaScript rendering
 	// Use the browserCtx (ChromeDP context) for ChromeDP operations
-	err := chromedp.Run(browserCtx,
+	err = chromedp.Run(browserCtx,
 		chromedp.Navigate(url),
 		chromedp.Sleep(2*time.Second), // Wait for JavaScript to render
 		chromedp.OuterHTML("html", &htmlContent),
@@ -552,6 +751,55 @@ func (e *EnhancedCrawlerExecutor) renderPageWithChromeDp(ctx context.Context, br
 		logger.Warn().Str("url", url).Msg("ChromeDP returned empty HTML content")
 		return "", int(statusCode), fmt.Errorf("empty HTML content returned")
 	}
+
+	// ===== PHASE 3 PART 2: COOKIE MONITORING AFTER NAVIGATION =====
+	logger.Debug().
+		Str("url", url).
+		Msg("🔐 DIAGNOSTIC: Checking cookies after navigation")
+
+	var cookiesAfterNav []*network.Cookie
+	err = chromedp.Run(browserCtx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			cookies, err := network.GetCookies().WithURLs([]string{url}).Do(ctx)
+			if err != nil {
+				return err
+			}
+			cookiesAfterNav = cookies
+			return nil
+		}),
+	)
+
+	if err != nil {
+		logger.Warn().
+			Err(err).
+			Str("url", url).
+			Msg("🔐 WARNING: Failed to read cookies after navigation")
+	} else {
+		logger.Debug().
+			Int("cookie_count", len(cookiesAfterNav)).
+			Str("url", url).
+			Msg("🔐 DIAGNOSTIC: Cookies after navigation")
+
+		// Compare before/after cookie counts
+		if len(cookiesBeforeNav) > 0 && len(cookiesAfterNav) < len(cookiesBeforeNav) {
+			logger.Warn().
+				Int("cookies_before", len(cookiesBeforeNav)).
+				Int("cookies_after", len(cookiesAfterNav)).
+				Int("cookies_lost", len(cookiesBeforeNav)-len(cookiesAfterNav)).
+				Msg("🔐 WARNING: Cookies were cleared during navigation")
+		} else if len(cookiesAfterNav) > len(cookiesBeforeNav) {
+			logger.Debug().
+				Int("cookies_before", len(cookiesBeforeNav)).
+				Int("cookies_after", len(cookiesAfterNav)).
+				Int("cookies_gained", len(cookiesAfterNav)-len(cookiesBeforeNav)).
+				Msg("🔐 DIAGNOSTIC: New cookies set during navigation")
+		} else if len(cookiesBeforeNav) > 0 {
+			logger.Debug().
+				Int("cookie_count", len(cookiesAfterNav)).
+				Msg("🔐 SUCCESS: Cookies persisted through navigation")
+		}
+	}
+	// ===== END PHASE 3 =====
 
 	logger.Debug().
 		Str("url", url).

@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadLastCapture();
 
   // Set up event listeners
-  document.getElementById('capture-auth-btn').addEventListener('click', captureAuth);
+  document.getElementById('capture-auth-btn').addEventListener('click', captureAndCrawl);
   document.getElementById('refresh-status-btn').addEventListener('click', refreshStatus);
   document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
   document.getElementById('settings-toggle').addEventListener('click', toggleSettings);
@@ -91,11 +91,11 @@ async function loadLastCapture() {
   }
 }
 
-// Capture authentication
-async function captureAuth() {
+// Capture authentication and start crawl
+async function captureAndCrawl() {
   const button = document.getElementById('capture-auth-btn');
   button.disabled = true;
-  button.textContent = 'Capturing...';
+  button.textContent = 'Capturing & Starting Crawl...';
 
   try {
     // Get current tab
@@ -108,23 +108,17 @@ async function captureAuth() {
     const url = new URL(tab.url);
     const baseURL = `${url.protocol}//${url.host}`;
 
-    // Check if on Atlassian domain
-    if (!url.hostname.includes('atlassian.net') && !url.hostname.includes('jira.com') && !url.hostname.includes('confluence')) {
-      showMessage('⚠️ Please navigate to a Jira or Confluence page first', 'error');
-      return;
-    }
-
     // Get cookies
     const cookies = await chrome.cookies.getAll({ url: baseURL });
 
-    if (cookies.length === 0) {
-      throw new Error('No cookies found. Make sure you are logged in.');
-    }
-
-    // Extract tokens from cookies
+    // Extract all auth-related tokens from cookies (generic approach)
     const tokens = {};
     for (const cookie of cookies) {
-      if (cookie.name.includes('cloud') || cookie.name.includes('atl')) {
+      const name = cookie.name.toLowerCase();
+      // Capture cookies that might contain auth info
+      if (name.includes('token') || name.includes('auth') ||
+          name.includes('session') || name.includes('csrf') ||
+          name.includes('jwt') || name.includes('bearer')) {
         tokens[cookie.name] = cookie.value;
       }
     }
@@ -138,10 +132,10 @@ async function captureAuth() {
       timestamp: Date.now()
     };
 
-    // Send to server
-    showMessage('Sending to Quaero server...', 'info');
-    
-    const response = await fetch(`${serverUrl}/api/auth`, {
+    // Step 1: Capture authentication
+    showMessage('Capturing authentication...', 'info');
+
+    const authResponse = await fetch(`${serverUrl}/api/auth`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -149,26 +143,51 @@ async function captureAuth() {
       body: JSON.stringify(authData)
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Server error: ${response.status} - ${errorText}`);
+    if (!authResponse.ok) {
+      throw new Error(`Auth capture failed: ${authResponse.status}`);
     }
-
-    const result = await response.json();
 
     // Update last capture time
     const now = new Date().toLocaleString();
     document.getElementById('last-capture').textContent = now;
-    await chrome.storage.sync.set({ lastCapture: now });
 
-    showMessage(`✓ ${result.message || 'Authentication captured successfully!'}`, 'success');
+    try {
+      await chrome.storage.sync.set({ lastCapture: now });
+    } catch (storageError) {
+      console.warn('Failed to save last capture time to storage:', storageError);
+    }
+
+    // Step 2: Start quick crawl
+    showMessage('Starting crawl job...', 'info');
+
+    const crawlRequest = {
+      url: tab.url,
+      cookies: cookies
+    };
+
+    const crawlResponse = await fetch(`${serverUrl}/api/job-definitions/quick-crawl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(crawlRequest)
+    });
+
+    if (!crawlResponse.ok) {
+      const errorData = await crawlResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Crawl start failed: ${crawlResponse.status}`);
+    }
+
+    const crawlResult = await crawlResponse.json();
+
+    showMessage(`✓ Auth captured and crawl started! Job ID: ${crawlResult.job_id}`, 'success');
 
   } catch (error) {
-    console.error('Capture error:', error);
+    console.error('Capture & crawl error:', error);
     showMessage(`✗ Error: ${error.message}`, 'error');
   } finally {
     button.disabled = false;
-    button.textContent = 'Capture Authentication';
+    button.textContent = 'Capture & Crawl';
   }
 }
 

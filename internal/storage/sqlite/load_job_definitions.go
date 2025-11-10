@@ -19,15 +19,16 @@ import (
 // CrawlerJobDefinitionFile represents a simplified crawler job definition file format
 // This is a user-friendly format for defining crawler jobs in TOML/JSON files
 type CrawlerJobDefinitionFile struct {
-	ID          string   `toml:"id" json:"id"`                   // Unique identifier
-	Name        string   `toml:"name" json:"name"`               // Human-readable name
-	JobType     string   `toml:"job_type" json:"job_type"`       // Job owner type: "system" or "user" (default: "user")
-	Description string   `toml:"description" json:"description"` // Job description
-	StartURLs   []string `toml:"start_urls" json:"start_urls"`   // Initial URLs to crawl
-	Schedule    string   `toml:"schedule" json:"schedule"`       // Cron expression (empty = manual only)
-	Timeout     string   `toml:"timeout" json:"timeout"`         // Duration string (e.g., "30m", "1h")
-	Enabled     bool     `toml:"enabled" json:"enabled"`         // Whether job is enabled
-	AutoStart   bool     `toml:"auto_start" json:"auto_start"`   // Whether to auto-start on scheduler init
+	ID             string   `toml:"id" json:"id"`                       // Unique identifier
+	Name           string   `toml:"name" json:"name"`                   // Human-readable name
+	JobType        string   `toml:"job_type" json:"job_type"`           // Job owner type: "system" or "user" (default: "user")
+	Description    string   `toml:"description" json:"description"`     // Job description
+	StartURLs      []string `toml:"start_urls" json:"start_urls"`       // Initial URLs to crawl
+	Schedule       string   `toml:"schedule" json:"schedule"`           // Cron expression (empty = manual only)
+	Timeout        string   `toml:"timeout" json:"timeout"`             // Duration string (e.g., "30m", "1h")
+	Enabled        bool     `toml:"enabled" json:"enabled"`             // Whether job is enabled
+	AutoStart      bool     `toml:"auto_start" json:"auto_start"`       // Whether to auto-start on scheduler init
+	Authentication string   `toml:"authentication" json:"authentication"` // Authentication reference (site domain, e.g., "example.com")
 
 	// Crawler configuration
 	IncludePatterns []string `toml:"include_patterns" json:"include_patterns"` // URL patterns to include (regex)
@@ -54,6 +55,7 @@ func (c *CrawlerJobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		Description: c.Description,
 		SourceType:  "web", // Generic web crawler for arbitrary websites
 		BaseURL:     "",    // Base URL can be empty for web crawlers (uses start_urls)
+		AuthID:      c.Authentication, // Reference to auth credentials by site domain
 		Steps: []models.JobStep{
 			{
 				Name:   "crawl",

@@ -1,6 +1,15 @@
 // Background service worker for Quaero extension
 
 console.log('Quaero extension loaded');
+console.log('Extension ID:', chrome.runtime.id);
+
+// For testing: Store extension ID in chrome.storage so it can be accessed
+// This allows automated tests to discover the extension ID
+if (chrome.runtime.id) {
+  chrome.storage.local.set({ extensionId: chrome.runtime.id }, () => {
+    console.log('Extension ID stored for testing:', chrome.runtime.id);
+  });
+}
 
 // Listen for messages from popup (if needed for advanced features)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -30,36 +39,38 @@ async function captureAuthData() {
   // Get cookies for the domain
   const cookies = await chrome.cookies.getAll({ url: baseURL });
 
-  // Inject content script to extract cloudId and atlToken from page
+  // Inject content script to extract auth tokens from page (generic approach)
   const [{ result: pageTokens }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => {
       const tokens = {};
 
-      // Try to get cloudId from window object
-      if (window.cloudId) {
-        tokens.cloudId = window.cloudId;
-      }
+      // Extract common auth-related meta tags
+      const metaTags = document.querySelectorAll('meta[name], meta[property]');
+      metaTags.forEach(meta => {
+        const name = meta.getAttribute('name') || meta.getAttribute('property');
+        const content = meta.getAttribute('content');
+        if (name && content) {
+          // Store any meta tag that might contain auth info
+          if (name.toLowerCase().includes('token') ||
+              name.toLowerCase().includes('csrf') ||
+              name.toLowerCase().includes('auth') ||
+              name.toLowerCase().includes('session')) {
+            tokens[name] = content;
+          }
+        }
+      });
 
-      // Try to get from meta tags
-      const metaCloudId = document.querySelector('meta[name="ajs-cloud-id"]');
-      if (metaCloudId && metaCloudId.content) {
-        tokens.cloudId = metaCloudId.content;
-      }
-
-      // Try to get atlToken
-      const atlTokenMeta = document.querySelector('meta[name="atl-token"]');
-      if (atlTokenMeta && atlTokenMeta.content) {
-        tokens.atlToken = atlTokenMeta.content;
-      }
-
-      // Try localStorage
+      // Try to extract auth tokens from localStorage
       try {
-        const cloudIdStorage = localStorage.getItem('cloudId');
-        if (cloudIdStorage) tokens.cloudId = cloudIdStorage;
-
-        const atlTokenStorage = localStorage.getItem('atlToken');
-        if (atlTokenStorage) tokens.atlToken = atlTokenStorage;
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.toLowerCase().includes('token') ||
+                      key.toLowerCase().includes('auth') ||
+                      key.toLowerCase().includes('session'))) {
+            tokens[key] = localStorage.getItem(key);
+          }
+        }
       } catch (e) {
         // localStorage might be blocked
       }
@@ -68,18 +79,8 @@ async function captureAuthData() {
     }
   });
 
-  // Merge page tokens with any tokens from cookies
+  // Build tokens object from page tokens and cookies
   const tokens = { ...pageTokens };
-  for (const cookie of cookies) {
-    if (cookie.name.includes('cloud') || cookie.name.includes('atl')) {
-      if (!tokens.cloudId && cookie.name.includes('cloud')) {
-        tokens.cloudId = cookie.value;
-      }
-      if (!tokens.atlToken && cookie.name.includes('atl')) {
-        tokens.atlToken = cookie.value;
-      }
-    }
-  }
 
   // Get user agent
   const userAgent = navigator.userAgent;

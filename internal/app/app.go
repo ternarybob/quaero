@@ -332,6 +332,8 @@ func (a *App) initServices() error {
 		jobMgr,
 		queueMgr,
 		a.StorageManager.DocumentStorage(),
+		a.StorageManager.AuthStorage(),
+		a.StorageManager.JobDefinitionStorage(),
 		a.Logger,
 		a.EventService,
 	)
@@ -533,6 +535,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
 		a.JobExecutor,
+		a.StorageManager.AuthStorage(),
 		a.Logger,
 	)
 

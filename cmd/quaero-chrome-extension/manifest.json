@@ -1,30 +1,32 @@
 {
-  "manifest_version": 3,
-  "name": "Quaero Auth Capture",
-  "version": "0.1.0",
-  "description": "Captures authentication data from Jira/Confluence for Quaero",
-  "permissions": [
-    "cookies",
-    "activeTab",
-    "tabs",
-    "storage",
-    "scripting"
-  ],
-  "host_permissions": [
-    "http://localhost/*",
-    "https://*.atlassian.net/*",
-    "https://*.jira.com/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Quaero Auth Capture"
-  },
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  }
+    "manifest_version": 3,
+    "name": "Quaero Web Crawler",
+    "version": "0.1.0",
+    "description": "Capture authentication and instantly crawl any website with Quaero",
+    "permissions": [
+        "cookies",
+        "activeTab",
+        "tabs",
+        "storage",
+        "scripting"
+    ],
+    "host_permissions": [
+        "http://*/*",
+        "https://*/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Quaero Web Crawler"
+    },
+    "side_panel": {
+        "default_path": "sidepanel.html"
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    }
 }

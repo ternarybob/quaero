@@ -682,6 +682,48 @@ func (m *Manager) UpdateJobConfig(ctx context.Context, jobID string, config map[
 	return err
 }
 
+// UpdateJobMetadata updates the job metadata in the database
+// This method merges new metadata with existing metadata to preserve fields like phase
+func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata map[string]interface{}) error {
+	// Read existing metadata
+	var existingMetadataJSON string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT metadata_json FROM jobs WHERE id = ?
+	`, jobID).Scan(&existingMetadataJSON)
+	if err != nil {
+		return fmt.Errorf("failed to read existing metadata: %w", err)
+	}
+
+	// Unmarshal existing metadata
+	var existingMetadata map[string]interface{}
+	if err := json.Unmarshal([]byte(existingMetadataJSON), &existingMetadata); err != nil {
+		// If unmarshal fails, start with empty map
+		existingMetadata = make(map[string]interface{})
+	}
+
+	// Merge new metadata into existing metadata (new values override existing)
+	for key, value := range metadata {
+		existingMetadata[key] = value
+	}
+
+	// Marshal merged metadata
+	mergedMetadataJSON, err := json.Marshal(existingMetadata)
+	if err != nil {
+		return fmt.Errorf("marshal merged metadata: %w", err)
+	}
+
+	// Update database with merged metadata using retry logic for write contention
+	err = retryOnBusy(ctx, func() error {
+		_, err := m.db.ExecContext(ctx, `
+			UPDATE jobs SET metadata_json = ?
+			WHERE id = ?
+		`, string(mergedMetadataJSON), jobID)
+		return err
+	})
+
+	return err
+}
+
 // AddJobLog adds a log entry for a job
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	now := time.Now()

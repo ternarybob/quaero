@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   connectWebSocket();
 
   // Set up event listeners
-  document.getElementById('capture-auth-btn').addEventListener('click', captureAuth);
+  document.getElementById('capture-auth-btn').addEventListener('click', captureAndCrawl);
   document.getElementById('refresh-status-btn').addEventListener('click', refreshStatus);
   document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
 });
@@ -119,11 +119,11 @@ async function updatePageInfo() {
   }
 }
 
-// Capture authentication
-async function captureAuth() {
+// Capture authentication and start crawl
+async function captureAndCrawl() {
   const button = document.getElementById('capture-auth-btn');
   button.disabled = true;
-  button.textContent = 'Capturing...';
+  button.textContent = 'Capturing & Starting Crawl...';
 
   try {
     // Get current tab
@@ -139,10 +139,14 @@ async function captureAuth() {
     // Get cookies
     const cookies = await chrome.cookies.getAll({ url: baseURL });
 
-    // Extract tokens from cookies
+    // Extract all auth-related tokens from cookies (generic approach)
     const tokens = {};
     for (const cookie of cookies) {
-      if (cookie.name.includes('cloud') || cookie.name.includes('atl')) {
+      const name = cookie.name.toLowerCase();
+      // Capture cookies that might contain auth info
+      if (name.includes('token') || name.includes('auth') ||
+          name.includes('session') || name.includes('csrf') ||
+          name.includes('jwt') || name.includes('bearer')) {
         tokens[cookie.name] = cookie.value;
       }
     }
@@ -156,9 +160,10 @@ async function captureAuth() {
       timestamp: Date.now()
     };
 
-    // Send to server
     const serverUrl = document.getElementById('server-url').value;
-    const response = await fetch(`${serverUrl}/api/auth`, {
+
+    // Step 1: Capture authentication
+    const authResponse = await fetch(`${serverUrl}/api/auth`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -166,11 +171,9 @@ async function captureAuth() {
       body: JSON.stringify(authData)
     });
 
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+    if (!authResponse.ok) {
+      throw new Error(`Auth capture failed: ${authResponse.status}`);
     }
-
-    const result = await response.json();
 
     // Update last capture time
     const now = new Date().toLocaleString();
@@ -180,17 +183,91 @@ async function captureAuth() {
       await chrome.storage.sync.set({ lastCapture: now });
     } catch (storageError) {
       console.warn('Failed to save last capture time to storage:', storageError);
-      // Non-critical error, continue with success message
     }
 
-    showSuccess(result.message || 'Authentication captured successfully');
+    // Step 2: Start quick crawl
+    const crawlRequest = {
+      url: tab.url,
+      cookies: cookies
+    };
+
+    const crawlResponse = await fetch(`${serverUrl}/api/job-definitions/quick-crawl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(crawlRequest)
+    });
+
+    if (!crawlResponse.ok) {
+      const errorData = await crawlResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Crawl start failed: ${crawlResponse.status}`);
+    }
+
+    const crawlResult = await crawlResponse.json();
+
+    showSuccess(`Auth captured and crawl started! Job ID: ${crawlResult.job_id}`);
 
   } catch (error) {
-    console.error('Auth capture error:', error);
-    showError(`Failed to capture authentication: ${error.message}`);
+    console.error('Capture & crawl error:', error);
+    showError(`Failed to capture & crawl: ${error.message}`);
   } finally {
     button.disabled = false;
-    button.textContent = 'Capture Authentication';
+    button.textContent = 'Capture & Crawl';
+  }
+}
+
+// Crawl current page
+async function crawlCurrentPage() {
+  const button = document.getElementById('crawl-page-btn');
+  button.disabled = true;
+  button.textContent = 'Starting Crawl...';
+
+  try {
+    // Get current tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.url) {
+      throw new Error('No active tab found');
+    }
+
+    // Get cookies for auth (optional, will be used if available)
+    const url = new URL(tab.url);
+    const baseURL = `${url.protocol}//${url.host}`;
+    const cookies = await chrome.cookies.getAll({ url: baseURL });
+
+    // Build quick crawl request
+    const crawlRequest = {
+      url: tab.url,
+      cookies: cookies
+      // max_depth and max_pages will use server defaults
+    };
+
+    // Send to server
+    const serverUrl = document.getElementById('server-url').value;
+    const response = await fetch(`${serverUrl}/api/job-definitions/quick-crawl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(crawlRequest)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server error: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    showSuccess(`Crawl started! Job ID: ${result.job_id}`);
+
+  } catch (error) {
+    console.error('Crawl error:', error);
+    showError(`Failed to start crawl: ${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Crawl Current Page';
   }
 }
 

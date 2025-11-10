@@ -484,6 +484,28 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Pages copied from %s to: %s\n", pagesSourcePath, pagesDestPath)
 
+	// Copy Chrome extension to bin/quaero-chrome-extension
+	extensionSourcePath, err := filepath.Abs("../../cmd/quaero-chrome-extension")
+	if err != nil {
+		return fmt.Errorf("failed to resolve extension source path: %w", err)
+	}
+
+	extensionDestPath := filepath.Join(binDir, "quaero-chrome-extension")
+
+	// Remove existing extension directory if it exists
+	if _, err := os.Stat(extensionDestPath); err == nil {
+		if err := os.RemoveAll(extensionDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing extension directory: %w", err)
+		}
+	}
+
+	// Copy extension directory
+	if err := env.copyDir(extensionSourcePath, extensionDestPath); err != nil {
+		return fmt.Errorf("failed to copy extension directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Chrome extension copied from %s to: %s\n", extensionSourcePath, extensionDestPath)
+
 	return nil
 }
 
@@ -712,6 +734,25 @@ func (env *TestEnvironment) GetBaseURL() string {
 // GetResultsDir returns the results directory for this test run
 func (env *TestEnvironment) GetResultsDir() string {
 	return env.ResultsDir
+}
+
+// GetExtensionPath returns the absolute path to the Chrome extension in bin directory
+func (env *TestEnvironment) GetExtensionPath() (string, error) {
+	// Get bin directory from binary output path
+	binaryOutput, err := filepath.Abs(env.Config.Build.BinaryOutput)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve binary output path: %w", err)
+	}
+
+	binDir := filepath.Dir(binaryOutput)
+	extensionPath := filepath.Join(binDir, "quaero-chrome-extension")
+
+	// Verify extension directory exists
+	if _, err := os.Stat(extensionPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("extension directory not found: %s", extensionPath)
+	}
+
+	return extensionPath, nil
 }
 
 // LoadJobDefinitionFile reads a TOML file and uploads it via the job definition upload API
