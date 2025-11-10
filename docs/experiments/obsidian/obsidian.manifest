@@ -1,0 +1,10 @@
+{
+	"id": "go-app-runner",
+	"name": "Go App Runner",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Executes an external Go binary from within Obsidian using Node.js child_process.",
+	"author": "Gemini",
+	"authorUrl": "https://www.google.com",
+	"isDesktopOnly": true
+}
