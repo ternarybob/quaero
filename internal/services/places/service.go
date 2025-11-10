@@ -155,10 +155,20 @@ func (s *Service) textSearch(ctx context.Context, req *models.PlacesSearchReques
 		apiResp.Results = apiResp.Results[:maxResults]
 	}
 
-	s.logger.Debug().
+	// Log sample place names for debugging search relevance
+	samplePlaces := []string{}
+	for i, place := range apiResp.Results {
+		if i < 3 { // Log first 3 places
+			samplePlaces = append(samplePlaces, place.Name)
+		}
+	}
+
+	s.logger.Info().
+		Str("search_query", req.SearchQuery).
 		Int("results_count", len(apiResp.Results)).
 		Str("status", apiResp.Status).
-		Msg("Received Google Places API response")
+		Strs("sample_places", samplePlaces).
+		Msg("Google Places Text Search completed - verify relevance")
 
 	return apiResp.Results, nil
 }
@@ -183,13 +193,27 @@ func (s *Service) nearbySearch(ctx context.Context, req *models.PlacesSearchRequ
 	} else {
 		params.Set("radius", "5000") // Default 5km radius
 	}
+
+	// Add type filter if specified (critical for filtering results)
+	if req.Filters != nil {
+		if placeType, ok := req.Filters["type"].(string); ok && placeType != "" {
+			params.Set("type", placeType)
+			s.logger.Debug().Str("type_filter", placeType).Msg("Applied type filter to nearby search")
+		}
+	}
+
 	params.Set("key", s.config.APIKey)
 
 	fullURL := fmt.Sprintf("%s?%s", apiURL, params.Encode())
 
 	// Redact API key in logs
-	logURL := fmt.Sprintf("%s?location=%f,%f&radius=%d&key=***REDACTED***",
-		apiURL, req.Location.Latitude, req.Location.Longitude, req.Location.Radius)
+	logURL := fmt.Sprintf("%s?location=%f,%f&radius=%d", apiURL, req.Location.Latitude, req.Location.Longitude, req.Location.Radius)
+	if req.Filters != nil {
+		if placeType, ok := req.Filters["type"].(string); ok && placeType != "" {
+			logURL += fmt.Sprintf("&type=%s", placeType)
+		}
+	}
+	logURL += "&key=***REDACTED***"
 	s.logger.Debug().Str("url", logURL).Msg("Calling Google Places Nearby Search API")
 
 	resp, err := s.httpClient.Get(fullURL)
@@ -217,10 +241,31 @@ func (s *Service) nearbySearch(ctx context.Context, req *models.PlacesSearchRequ
 		apiResp.Results = apiResp.Results[:maxResults]
 	}
 
-	s.logger.Debug().
+	// Log sample place names for debugging search relevance
+	samplePlaces := []string{}
+	for i, place := range apiResp.Results {
+		if i < 3 { // Log first 3 places
+			samplePlaces = append(samplePlaces, place.Name)
+		}
+	}
+
+	logEvent := s.logger.Info().
+		Str("search_query", req.SearchQuery).
+		Float64("latitude", req.Location.Latitude).
+		Float64("longitude", req.Location.Longitude).
+		Int("radius", req.Location.Radius).
 		Int("results_count", len(apiResp.Results)).
 		Str("status", apiResp.Status).
-		Msg("Received Google Places API response")
+		Strs("sample_places", samplePlaces)
+
+	// Add type filter to log if specified
+	if req.Filters != nil {
+		if placeType, ok := req.Filters["type"].(string); ok && placeType != "" {
+			logEvent = logEvent.Str("type_filter", placeType)
+		}
+	}
+
+	logEvent.Msg("Google Places Nearby Search completed - verify relevance")
 
 	return apiResp.Results, nil
 }

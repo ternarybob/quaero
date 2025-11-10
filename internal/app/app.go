@@ -357,7 +357,7 @@ func (a *App) initServices() error {
 	a.JobExecutor.RegisterStepExecutor(dbMaintenanceStepExecutor)
 	a.Logger.Info().Msg("Database maintenance step executor registered")
 
-	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.Logger)
+	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(placesSearchStepExecutor)
 	a.Logger.Info().Msg("Places search step executor registered")
 

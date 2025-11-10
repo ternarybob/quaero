@@ -3,10 +3,10 @@
 # Place .toml files in job-definitions/ directory to auto-load at startup
 
 id = "places-nearby-restaurants"
-name = "Nearby Restaurants (Seattle Downtown)"
+name = "Nearby Restaurants (Wheelers Hill)"
 type = "places"
 job_type = "user"
-description = "Search for restaurants near Seattle downtown using Google Places Nearby Search API"
+description = "Search for restaurants near Wheelers Hill using Google Places Nearby Search API"
 
 # Cron schedule (empty = manual execution only)
 schedule = ""
@@ -28,7 +28,7 @@ on_error = "fail"
 
 [steps.config]
 # Required: Search query (used for list naming)
-search_query = "restaurants near Seattle downtown"
+search_query = "restaurants near Wheelers Hill"
 
 # Required: Search type (nearby_search requires location)
 search_type = "nearby_search"
@@ -37,14 +37,15 @@ search_type = "nearby_search"
 max_results = 20
 
 # Optional: Custom list name
-list_name = "Seattle Downtown Restaurants"
+list_name = "Wheelers Hill Restaurants"
 
 # Required for nearby_search: Location and radius
 [steps.config.location]
-latitude = 47.6062    # Seattle downtown coordinates
-longitude = -122.3321
+latitude = -37.9167   # Wheelers Hill, Melbourne, Australia
+longitude = 145.1833
 radius = 2000         # Search radius in meters (2km)
 
 # Optional: Filters
 [steps.config.filters]
+type = "restaurant"   # Filter to only restaurants (required to avoid returning city/locality)
 min_rating = 3.5

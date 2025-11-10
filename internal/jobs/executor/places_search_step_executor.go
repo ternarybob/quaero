@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -12,18 +14,24 @@ import (
 
 // PlacesSearchStepExecutor executes "places_search" action steps
 type PlacesSearchStepExecutor struct {
-	placesService interfaces.PlacesService
-	logger        arbor.ILogger
+	placesService   interfaces.PlacesService
+	documentService interfaces.DocumentService
+	eventService    interfaces.EventService
+	logger          arbor.ILogger
 }
 
 // NewPlacesSearchStepExecutor creates a new places search step executor
 func NewPlacesSearchStepExecutor(
 	placesService interfaces.PlacesService,
+	documentService interfaces.DocumentService,
+	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *PlacesSearchStepExecutor {
 	return &PlacesSearchStepExecutor{
-		placesService: placesService,
-		logger:        logger,
+		placesService:   placesService,
+		documentService: documentService,
+		eventService:    eventService,
+		logger:          logger,
 	}
 }
 
@@ -129,6 +137,54 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 		Str("parent_job_id", parentJobID).
 		Msg("Places search step completed successfully")
 
+	// Convert search result to document for storage
+	doc, err := e.convertPlacesResultToDocument(result, parentJobID)
+	if err != nil {
+		return "", fmt.Errorf("failed to convert places result to document: %w", err)
+	}
+
+	// Save document to database
+	if err := e.documentService.SaveDocument(ctx, doc); err != nil {
+		return "", fmt.Errorf("failed to save places document: %w", err)
+	}
+
+	e.logger.Info().
+		Str("document_id", doc.ID).
+		Str("document_title", doc.Title).
+		Int("places_count", result.TotalResults).
+		Msg("Places search result saved as document")
+
+	// Publish document_saved event for parent job document count tracking
+	// This is a generic, job-type agnostic event that ANY executor can publish
+	if e.eventService != nil && parentJobID != "" {
+		payload := map[string]interface{}{
+			"job_id":        parentJobID, // For places jobs, the parent job is the job itself
+			"parent_job_id": parentJobID,
+			"document_id":   doc.ID,
+			"source_type":   "places",
+			"timestamp":     time.Now().Format(time.RFC3339),
+		}
+		event := interfaces.Event{
+			Type:    interfaces.EventDocumentSaved,
+			Payload: payload,
+		}
+		// Publish asynchronously to not block document save
+		go func() {
+			if err := e.eventService.Publish(context.Background(), event); err != nil {
+				e.logger.Warn().
+					Err(err).
+					Str("document_id", doc.ID).
+					Str("parent_job_id", parentJobID).
+					Msg("Failed to publish document_saved event")
+			} else {
+				e.logger.Debug().
+					Str("document_id", doc.ID).
+					Str("parent_job_id", parentJobID).
+					Msg("Published document_saved event for parent job document count")
+			}
+		}()
+	}
+
 	// Return JSON string to be stored in job progress
 	return string(resultJSON), nil
 }
@@ -136,4 +192,74 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 // GetStepType returns "places_search"
 func (e *PlacesSearchStepExecutor) GetStepType() string {
 	return "places_search"
+}
+
+// convertPlacesResultToDocument converts a PlacesSearchResult to a Document for storage
+func (e *PlacesSearchStepExecutor) convertPlacesResultToDocument(result *models.PlacesSearchResult, jobID string) (*models.Document, error) {
+	// Generate document ID from job ID and timestamp
+	docID := fmt.Sprintf("doc_places_%s", jobID)
+
+	// Build markdown content with formatted places list
+	var contentBuilder strings.Builder
+	contentBuilder.WriteString(fmt.Sprintf("# Places Search Results: %s\n\n", result.SearchQuery))
+	contentBuilder.WriteString(fmt.Sprintf("**Search Type:** %s\n", result.SearchType))
+	contentBuilder.WriteString(fmt.Sprintf("**Total Results:** %d\n\n", result.TotalResults))
+	contentBuilder.WriteString("## Places\n\n")
+
+	for i, place := range result.Places {
+		contentBuilder.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, place.Name))
+
+		if place.FormattedAddress != "" {
+			contentBuilder.WriteString(fmt.Sprintf("**Address:** %s\n\n", place.FormattedAddress))
+		}
+
+		if place.Rating > 0 {
+			contentBuilder.WriteString(fmt.Sprintf("**Rating:** %.1f/5.0 (%d reviews)\n\n", place.Rating, place.UserRatingsTotal))
+		}
+
+		if place.Website != "" {
+			contentBuilder.WriteString(fmt.Sprintf("**Website:** %s\n\n", place.Website))
+		}
+
+		if place.PhoneNumber != "" {
+			contentBuilder.WriteString(fmt.Sprintf("**Phone:** %s\n\n", place.PhoneNumber))
+		}
+
+		if len(place.Types) > 0 {
+			contentBuilder.WriteString(fmt.Sprintf("**Types:** %s\n\n", strings.Join(place.Types, ", ")))
+		}
+
+		if place.Latitude != 0 && place.Longitude != 0 {
+			contentBuilder.WriteString(fmt.Sprintf("**Location:** %.6f, %.6f\n\n", place.Latitude, place.Longitude))
+		}
+
+		contentBuilder.WriteString(fmt.Sprintf("**Place ID:** %s\n\n", place.PlaceID))
+		contentBuilder.WriteString("---\n\n")
+	}
+
+	// Convert result to metadata map
+	metadataBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal places result to metadata: %w", err)
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal places metadata: %w", err)
+	}
+
+	now := time.Now()
+	doc := &models.Document{
+		ID:              docID,
+		SourceType:      "places",
+		SourceID:        jobID,
+		Title:           fmt.Sprintf("Places Search: %s", result.SearchQuery),
+		ContentMarkdown: contentBuilder.String(),
+		DetailLevel:     models.DetailLevelFull,
+		Metadata:        metadata,
+		URL:             "",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	return doc, nil
 }

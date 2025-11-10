@@ -1,0 +1,402 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/ternarybob/quaero/test/common"
+)
+
+// TestPlacesJobCreatesDocument verifies that a places job creates a document
+// in the documents table after successful completion
+func TestPlacesJobCreatesDocument(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestPlacesJobCreatesDocument")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
+
+	// 1. Create places job definition
+	// Note: This uses a real Google Places API endpoint, so results may vary
+	// The test will pass as long as a document is created
+	jobDef := map[string]interface{}{
+		"id":          "test-places-doc-job",
+		"name":        "Test Places Document Creation",
+		"type":        "places",
+		"job_type":    "user",
+		"description": "Test that places job creates a document",
+		"enabled":     true,
+		"steps": []map[string]interface{}{
+			{
+				"name":   "search_nearby_test",
+				"action": "places_search",
+				"config": map[string]interface{}{
+					"search_query": "restaurants near Sydney",
+					"search_type":  "nearby_search",
+					"max_results":  5,
+					"list_name":    "Test Sydney Restaurants",
+					"location": map[string]interface{}{
+						"latitude":  -33.8688,
+						"longitude": 151.2093,
+						"radius":    1000,
+					},
+				},
+				"on_error": "fail",
+			},
+		},
+	}
+
+	jobDefResp, err := h.POST("/api/job-definitions", jobDef)
+	if err != nil {
+		t.Fatalf("Failed to create job definition: %v", err)
+	}
+	h.AssertStatusCode(jobDefResp, http.StatusCreated)
+
+	var jobDefResult map[string]interface{}
+	h.ParseJSONResponse(jobDefResp, &jobDefResult)
+	jobDefID := jobDefResult["id"].(string)
+	defer h.DELETE("/api/job-definitions/" + jobDefID)
+	t.Logf("✓ Created places job definition: %s", jobDefID)
+
+	// 2. Execute job definition
+	execResp, err := h.POST("/api/job-definitions/"+jobDefID+"/execute", nil)
+	if err != nil {
+		t.Fatalf("Failed to execute job definition: %v", err)
+	}
+	h.AssertStatusCode(execResp, http.StatusAccepted)
+	t.Log("✓ Job execution triggered")
+
+	// 3. Wait for parent job to be created
+	var parentJobID string
+	for attempt := 0; attempt < 30; attempt++ {
+		time.Sleep(500 * time.Millisecond)
+
+		jobsResp, err := h.GET("/api/jobs")
+		if err != nil {
+			continue
+		}
+
+		var paginatedResponse struct {
+			Jobs []map[string]interface{} `json:"jobs"`
+		}
+		if err := h.ParseJSONResponse(jobsResp, &paginatedResponse); err != nil {
+			continue
+		}
+
+		// Look for places job
+		for _, job := range paginatedResponse.Jobs {
+			jobType, _ := job["job_type"].(string)
+			jobName, _ := job["name"].(string)
+
+			if jobType == "places" && jobName == "Test Places Document Creation" {
+				parentJobID = job["id"].(string)
+				break
+			}
+		}
+
+		if parentJobID != "" {
+			break
+		}
+	}
+
+	if parentJobID == "" {
+		t.Fatal("Places job was not created")
+	}
+
+	defer h.DELETE("/api/jobs/" + parentJobID)
+	t.Logf("✓ Places job created: %s", parentJobID)
+
+	// 4. Wait for job to complete (places API calls can take a few seconds)
+	var finalJob map[string]interface{}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(1 * time.Second)
+
+		jobResp, err := h.GET("/api/jobs/" + parentJobID)
+		if err != nil {
+			continue
+		}
+
+		var job map[string]interface{}
+		if err := h.ParseJSONResponse(jobResp, &job); err != nil {
+			continue
+		}
+
+		finalJob = job
+
+		// Check if completed or failed
+		if status, ok := job["status"].(string); ok {
+			if status == "completed" {
+				t.Logf("✓ Job completed successfully")
+				break
+			} else if status == "failed" {
+				errorMsg := "unknown"
+				if errStr, ok := job["error"].(string); ok {
+					errorMsg = errStr
+				}
+				t.Fatalf("Job failed: %s", errorMsg)
+			}
+		}
+	}
+
+	if finalJob == nil {
+		t.Fatal("Failed to get final job status")
+	}
+
+	// Verify job completed
+	if status, ok := finalJob["status"].(string); !ok || status != "completed" {
+		t.Fatalf("Job should be completed, got status: %v", finalJob["status"])
+	}
+
+	// 5. Verify document was created
+	// Documents should exist with source_type="places"
+	docsResp, err := h.GET("/api/documents")
+	if err != nil {
+		t.Fatalf("Failed to fetch documents: %v", err)
+	}
+
+	var docsResult struct {
+		Documents []map[string]interface{} `json:"documents"`
+		Total     int                      `json:"total"`
+	}
+	if err := h.ParseJSONResponse(docsResp, &docsResult); err != nil {
+		t.Fatalf("Failed to parse documents response: %v", err)
+	}
+
+	// Find places document
+	var placesDoc map[string]interface{}
+	for _, doc := range docsResult.Documents {
+		sourceType, _ := doc["source_type"].(string)
+		sourceID, _ := doc["source_id"].(string)
+
+		if sourceType == "places" && sourceID == parentJobID {
+			placesDoc = doc
+			break
+		}
+	}
+
+	if placesDoc == nil {
+		t.Fatalf("No document with source_type='places' and source_id='%s' found. Total documents: %d", parentJobID, docsResult.Total)
+	}
+
+	t.Logf("✓ Document found: %s", placesDoc["id"])
+
+	// 6. Verify document structure
+	docID, ok := placesDoc["id"].(string)
+	if !ok || docID == "" {
+		t.Error("Document should have an ID")
+	}
+
+	title, ok := placesDoc["title"].(string)
+	if !ok || title == "" {
+		t.Error("Document should have a title")
+	} else {
+		t.Logf("  Title: %s", title)
+	}
+
+	contentMarkdown, ok := placesDoc["content_markdown"].(string)
+	if !ok || contentMarkdown == "" {
+		t.Error("Document should have content_markdown")
+	} else {
+		t.Logf("  Content length: %d bytes", len(contentMarkdown))
+	}
+
+	// Verify metadata contains places array
+	metadataStr, ok := placesDoc["metadata"].(string)
+	if !ok || metadataStr == "" {
+		t.Error("Document should have metadata")
+	} else {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+			t.Errorf("Failed to parse metadata JSON: %v", err)
+		} else {
+			// Check for places array in metadata
+			places, ok := metadata["places"].([]interface{})
+			if !ok {
+				t.Error("Metadata should contain 'places' array")
+			} else {
+				t.Logf("  Places count in metadata: %d", len(places))
+
+				// Verify at least one place has expected fields
+				if len(places) > 0 {
+					firstPlace, ok := places[0].(map[string]interface{})
+					if !ok {
+						t.Error("First place should be a JSON object")
+					} else {
+						// Check for required fields
+						requiredFields := []string{"place_id", "name"}
+						for _, field := range requiredFields {
+							if _, exists := firstPlace[field]; !exists {
+								t.Errorf("Place should have '%s' field", field)
+							}
+						}
+						t.Logf("  Sample place: %s (ID: %s)", firstPlace["name"], firstPlace["place_id"])
+					}
+				}
+			}
+
+			// Check for search metadata
+			searchQuery, _ := metadata["search_query"].(string)
+			searchType, _ := metadata["search_type"].(string)
+			totalResults, _ := metadata["total_results"].(float64)
+
+			t.Logf("  Search query: %s", searchQuery)
+			t.Logf("  Search type: %s", searchType)
+			t.Logf("  Total results: %d", int(totalResults))
+		}
+	}
+
+	sourceType, _ := placesDoc["source_type"].(string)
+	if sourceType != "places" {
+		t.Errorf("Document source_type should be 'places', got: %s", sourceType)
+	}
+
+	sourceID, _ := placesDoc["source_id"].(string)
+	if sourceID != parentJobID {
+		t.Errorf("Document source_id should be '%s', got: %s", parentJobID, sourceID)
+	}
+
+	t.Log("✓ Document structure verified - places job document creation working correctly")
+}
+
+// TestPlacesJobDocumentCount verifies that the job's document count is updated
+func TestPlacesJobDocumentCount(t *testing.T) {
+	env, err := common.SetupTestEnvironment("TestPlacesJobDocumentCount")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	h := env.NewHTTPTestHelper(t)
+
+	// 1. Create and execute places job
+	jobDef := map[string]interface{}{
+		"id":          "test-places-count-job",
+		"name":        "Test Places Count",
+		"type":        "places",
+		"job_type":    "user",
+		"description": "Test document count tracking",
+		"enabled":     true,
+		"steps": []map[string]interface{}{
+			{
+				"name":   "search_test",
+				"action": "places_search",
+				"config": map[string]interface{}{
+					"search_query": "cafes near Melbourne",
+					"search_type":  "nearby_search",
+					"max_results":  3,
+					"location": map[string]interface{}{
+						"latitude":  -37.8136,
+						"longitude": 144.9631,
+						"radius":    500,
+					},
+				},
+				"on_error": "fail",
+			},
+		},
+	}
+
+	jobDefResp, err := h.POST("/api/job-definitions", jobDef)
+	if err != nil {
+		t.Fatalf("Failed to create job definition: %v", err)
+	}
+	h.AssertStatusCode(jobDefResp, http.StatusCreated)
+
+	var jobDefResult map[string]interface{}
+	h.ParseJSONResponse(jobDefResp, &jobDefResult)
+	jobDefID := jobDefResult["id"].(string)
+	defer h.DELETE("/api/job-definitions/" + jobDefID)
+
+	execResp, err := h.POST("/api/job-definitions/"+jobDefID+"/execute", nil)
+	if err != nil {
+		t.Fatalf("Failed to execute job definition: %v", err)
+	}
+	h.AssertStatusCode(execResp, http.StatusAccepted)
+
+	// 2. Wait for job completion
+	var parentJobID string
+	var finalJob map[string]interface{}
+	deadline := time.Now().Add(60 * time.Second)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(1 * time.Second)
+
+		jobsResp, err := h.GET("/api/jobs")
+		if err != nil {
+			continue
+		}
+
+		var paginatedResponse struct {
+			Jobs []map[string]interface{} `json:"jobs"`
+		}
+		if err := h.ParseJSONResponse(jobsResp, &paginatedResponse); err != nil {
+			continue
+		}
+
+		for _, job := range paginatedResponse.Jobs {
+			jobType, _ := job["job_type"].(string)
+			jobName, _ := job["name"].(string)
+
+			if jobType == "places" && jobName == "Test Places Count" {
+				parentJobID = job["id"].(string)
+				finalJob = job
+
+				if status, ok := job["status"].(string); ok && status == "completed" {
+					goto done
+				}
+			}
+		}
+	}
+
+done:
+	if parentJobID == "" {
+		t.Fatal("Job not found")
+	}
+
+	defer h.DELETE("/api/jobs/" + parentJobID)
+
+	if finalJob == nil {
+		t.Fatal("Failed to get final job status")
+	}
+
+	// 3. Verify result_count is at least 1 (we created 1 document)
+	resultCount := 0
+	if rc, ok := finalJob["result_count"].(float64); ok {
+		resultCount = int(rc)
+	}
+
+	if resultCount < 1 {
+		t.Errorf("Job result_count should be at least 1 (created 1 document), got: %d", resultCount)
+	} else {
+		t.Logf("✓ Job result_count: %d", resultCount)
+	}
+
+	// 4. Verify document_count in job metadata
+	// This is set by the event-driven ParentJobExecutor when EventDocumentSaved is published
+	metadataStr, ok := finalJob["metadata_json"].(string)
+	if !ok || metadataStr == "" {
+		t.Error("Job should have metadata_json")
+	} else {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+			t.Errorf("Failed to parse job metadata JSON: %v", err)
+		} else {
+			documentCount := 0
+			if dc, ok := metadata["document_count"].(float64); ok {
+				documentCount = int(dc)
+			}
+
+			if documentCount < 1 {
+				t.Errorf("Job metadata document_count should be at least 1, got: %d. This indicates EventDocumentSaved was not published or processed", documentCount)
+			} else {
+				t.Logf("✓ Job metadata document_count: %d (event-driven tracking working)", documentCount)
+			}
+		}
+	}
+
+	t.Log("✓ Document count tracking verified (both result_count and metadata document_count)")
+}

@@ -1,6 +1,6 @@
 ---
 name: 3agents-tester
-description: Quick test - read 3agents output, test it, report back
+description: read 3agents output (folder), m, review if api and ui tets eixts, update to match the requirements, run the test, report back
 ---
 
 Test implementation from: $ARGUMENTS

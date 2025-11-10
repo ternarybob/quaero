@@ -1691,11 +1691,11 @@ func (m *Manager) GetChildJobStats(ctx context.Context, parentJobID string) (*Ch
 	query := `
 		SELECT
 			COUNT(*) as total_children,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children,
-			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_children,
-			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_children,
-			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_children
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_children,
+			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed_children,
+			COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) as cancelled_children,
+			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) as running_children,
+			COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending_children
 		FROM jobs
 		WHERE parent_id = ?
 	`

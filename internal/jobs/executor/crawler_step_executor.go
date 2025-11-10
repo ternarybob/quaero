@@ -87,9 +87,19 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 			Msg("Using generated URLs based on source type (no start_urls in config)")
 	}
 
+	// Default source_type to "web" for generic crawler jobs
+	// This maintains job-type agnostic architecture while supporting source-specific crawling
+	sourceType := jobDef.SourceType
+	if sourceType == "" {
+		sourceType = "web"
+		e.logger.Info().
+			Str("step_name", step.Name).
+			Msg("No source_type specified, defaulting to 'web' for generic web crawling")
+	}
+
 	e.logger.Info().
 		Str("step_name", step.Name).
-		Str("source_type", jobDef.SourceType).
+		Str("source_type", sourceType).
 		Str("base_url", jobDef.BaseURL).
 		Str("entity_type", entityType).
 		Int("seed_url_count", len(seedURLs)).
@@ -99,7 +109,7 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 
 	// Start crawl job with properly typed config
 	jobID, err := e.crawlerService.StartCrawl(
-		jobDef.SourceType,
+		sourceType,
 		entityType,
 		seedURLs,
 		crawlConfig,   // Pass CrawlConfig struct
@@ -111,7 +121,7 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to start crawl: %w", err)
+		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
 	}
 
 	e.logger.Info().

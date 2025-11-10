@@ -82,18 +82,9 @@ type LoggingConfig struct {
 	MinEventLevel string   `toml:"min_event_level"` // Minimum log level to publish as events to UI ("debug", "info", "warn", "error")
 }
 
-// JobsConfig contains configuration for default scheduled jobs
+// JobsConfig contains configuration for job definitions
 type JobsConfig struct {
-	CrawlAndCollect JobConfig `toml:"crawl_and_collect"`
-	DefinitionsDir  string    `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
-}
-
-// JobConfig defines configuration for a single job
-type JobConfig struct {
-	Enabled     bool   `toml:"enabled"`
-	AutoStart   bool   `toml:"auto_start"`
-	Schedule    string `toml:"schedule"`
-	Description string `toml:"description"`
+	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
 }
 
 // CrawlerConfig contains Firecrawl-inspired HTML scraping configuration
@@ -193,12 +184,6 @@ func NewDefaultConfig() *Config {
 			MinEventLevel: "info",                     // Publish info and above as events to UI (debug logs only to DB)
 		},
 		Jobs: JobsConfig{
-			CrawlAndCollect: JobConfig{
-				Enabled:     true,
-				AutoStart:   false,
-				Schedule:    "*/5 * * * *", // Every 5 minutes
-				Description: "Crawl and collect website data, store as markdown",
-			},
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
 		},
 		Crawler: CrawlerConfig{
