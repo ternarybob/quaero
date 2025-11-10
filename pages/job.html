@@ -331,8 +331,31 @@
                     <header class="navbar">
                         <section class="navbar-section">
                             <h3>Job Logs</h3>
+                            <!-- Live indicator for running jobs with WebSocket -->
+                            <template x-if="job.status === 'running' && wsConnected">
+                                <span class="label label-success" style="margin-left: 1rem;">
+                                    <i class="fas fa-circle" style="animation: pulse 2s infinite;"></i> Live (WebSocket)
+                                </span>
+                            </template>
+                            <!-- Polling indicator for running jobs without WebSocket -->
+                            <template x-if="job.status === 'running' && !wsConnected">
+                                <span class="label label-warning" style="margin-left: 1rem;">
+                                    <i class="fas fa-sync"></i> Polling (<span x-text="refreshInterval"></span>s)
+                                </span>
+                            </template>
                         </section>
                         <section class="navbar-section">
+                            <!-- Refresh Interval Selector (for running jobs) -->
+                            <template x-if="job.status === 'running'">
+                                <select class="form-select select-sm" x-model="refreshInterval" @change="updateRefreshInterval()" title="Auto-refresh interval" style="margin-right: 0.5rem;">
+                                    <option value="5">5s</option>
+                                    <option value="10">10s</option>
+                                    <option value="15">15s</option>
+                                    <option value="30">30s</option>
+                                    <option value="60">60s</option>
+                                </select>
+                            </template>
+
                             <!-- Log Level Filter -->
                             <select class="form-select select-sm" x-model="selectedLogLevel" title="Filter by log level" style="margin-right: 0.5rem;">
                                 <option value="all">All Levels</option>
@@ -393,6 +416,10 @@
                 autoScroll: true,
                 jobId: null,
                 activeTab: 'details',
+                wsConnected: false,
+                wsSubscription: null,
+                refreshInterval: 10, // Default 10 seconds
+                refreshIntervalId: null,
 
                 init() {
                     // Get job ID from URL query parameter
@@ -413,6 +440,9 @@
                     // Start auto-refresh for running jobs
                     this.startAutoRefresh();
 
+                    // Setup WebSocket for real-time log streaming
+                    this.setupWebSocket();
+
                     // Watch selectedLogLevel and reload logs when it changes
                     this.$watch('selectedLogLevel', () => {
                         this.loadJobLogs();
@@ -421,6 +451,15 @@
                     // Watch selectedLogType and reload logs when it changes
                     this.$watch('selectedLogType', () => {
                         this.loadJobLogs();
+                    });
+
+                    // Watch job status changes to switch between WebSocket and database logs
+                    this.$watch('job.status', (newStatus, oldStatus) => {
+                        if (oldStatus === 'running' && newStatus !== 'running') {
+                            // Job finished - reload logs from database
+                            console.log('Job finished, loading final logs from database');
+                            this.loadJobLogs();
+                        }
                     });
                 },
 
@@ -464,6 +503,9 @@
                 },
 
                 async loadJobLogs() {
+                    // Always load existing logs from database first
+                    // For running jobs: load historical logs, then switch to WebSocket for new logs
+                    // For completed jobs: load all logs from database
                     this.loading = true;
                     try {
                         // Determine if this is a parent job (no parent_id or parent_id is empty/null)
@@ -555,6 +597,7 @@
                 },
 
                 async refreshLogs() {
+                    // Always reload logs from database (includes historical logs for running jobs)
                     await this.loadJobLogs();
                     window.showNotification('Logs refreshed', 'success');
                 },
@@ -571,16 +614,99 @@
                     }
                 },
 
+                setupWebSocket() {
+                    // Get WebSocket manager from global scope
+                    if (!window.wsManager) {
+                        console.warn('WebSocket manager not available');
+                        return;
+                    }
+
+                    // Subscribe to log events
+                    this.wsSubscription = window.wsManager.subscribe('log', (data) => {
+                        this.handleWebSocketLog(data);
+                    });
+
+                    // Subscribe to connection status
+                    window.wsManager.subscribe('connection', (connected) => {
+                        this.wsConnected = connected;
+                        if (connected) {
+                            console.log('WebSocket connected - ready for real-time logs');
+                        } else {
+                            console.warn('WebSocket disconnected - falling back to polling');
+                        }
+                    });
+
+                    console.log('WebSocket subscription setup for job logs');
+                },
+
+                handleWebSocketLog(logData) {
+                    // Only process logs for this specific job (filter by job_id/correlation_id)
+                    if (logData.job_id !== this.jobId) {
+                        return;
+                    }
+
+                    // Only process logs if job is running
+                    if (this.job.status !== 'running') {
+                        return;
+                    }
+
+                    // Parse the log entry
+                    const logEntry = this._parseLogEntry({
+                        timestamp: logData.timestamp,
+                        level: logData.level,
+                        message: logData.message
+                    });
+
+                    // Apply level filter
+                    if (this.selectedLogLevel !== 'all') {
+                        const logLevel = logEntry.level.toUpperCase();
+                        const filterLevel = this.selectedLogLevel.toUpperCase();
+
+                        // Skip if doesn't match filter
+                        if (logLevel !== filterLevel &&
+                            !(filterLevel === 'ERROR' && (logLevel === 'ERR' || logLevel === 'ERROR')) &&
+                            !(filterLevel === 'WARNING' && (logLevel === 'WARN' || logLevel === 'WARNING'))) {
+                            return;
+                        }
+                    }
+
+                    // Add log to array
+                    this.logs.push(logEntry);
+
+                    // Auto-scroll to bottom if enabled
+                    if (this.autoScroll) {
+                        this.$nextTick(() => {
+                            const container = this.$refs.logContainer;
+                            if (container) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        });
+                    }
+                },
+
                 startAutoRefresh() {
-                    // Auto-refresh every 2 seconds for running jobs (enhanced for crawler monitoring)
-                    setInterval(async () => {
+                    // Clear any existing interval
+                    if (this.refreshIntervalId) {
+                        clearInterval(this.refreshIntervalId);
+                    }
+
+                    // Auto-refresh based on configured interval
+                    this.refreshIntervalId = setInterval(async () => {
                         if (this.job.status === 'running' || this.job.status === 'pending') {
                             await this.loadJob();
-                            if (this.activeTab === 'output') {
+
+                            // If WebSocket is not connected, also reload logs
+                            if (!this.wsConnected) {
                                 await this.loadJobLogs();
                             }
                         }
-                    }, 2000); // Reduced from 5000ms to 2000ms for better real-time monitoring
+                    }, this.refreshInterval * 1000); // Convert seconds to milliseconds
+                },
+
+                updateRefreshInterval() {
+                    // Restart auto-refresh with new interval
+                    console.log('Refresh interval changed to', this.refreshInterval, 'seconds');
+                    this.startAutoRefresh();
                 },
 
                 getStatusText(status) {

@@ -773,17 +773,18 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			return nil
 		}
 
-		// Convert to LogEntry for WebSocket broadcast
-		entry := interfaces.LogEntry{
-			Timestamp: getString(payload, "timestamp"),
-			Level:     getString(payload, "level"),
-			Message:   getString(payload, "message"),
+		// Build log payload with job_id for client-side filtering
+		logPayload := map[string]interface{}{
+			"timestamp": getString(payload, "timestamp"),
+			"level":     getString(payload, "level"),
+			"message":   getString(payload, "message"),
+			"job_id":    getString(payload, "job_id"), // Include job_id for filtering
 		}
 
 		// Broadcast log message to all clients
 		msg := WSMessage{
 			Type:    "log",
-			Payload: entry,
+			Payload: logPayload,
 		}
 
 		data, err := json.Marshal(msg)
