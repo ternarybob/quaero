@@ -17,6 +17,7 @@ require (
 	github.com/ternarybob/arbor v1.4.53
 	github.com/ternarybob/banner v0.0.5
 	golang.org/x/time v0.14.0
+	google.golang.org/adk v0.1.0
 	google.golang.org/genai v1.34.0
 	maragu.dev/goqite v0.3.1
 	modernc.org/sqlite v1.40.0
@@ -67,7 +68,6 @@ require (
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
-	google.golang.org/adk v0.1.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251014184007-4626949a642f // indirect
 	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
