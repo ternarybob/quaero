@@ -644,6 +644,15 @@ Audit logs are stored in SQLite and include:
 
 ## Architecture
 
+**For comprehensive documentation of the job system, see [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md).**
+
+Quaero uses a Manager/Worker pattern for job orchestration and execution:
+- **Managers** create parent jobs and define workflows
+- **Workers** execute individual jobs from the queue
+- **Orchestrators** monitor parent job progress and aggregate child statistics
+
+For detailed system architecture including Markdown+Metadata design, see [Architecture Documentation](docs/architecture/).
+
 ### Core Components
 
 #### 1. Crawler Service
@@ -905,7 +914,7 @@ GET    /api/queue/stats                  # Queue statistics and health
 GET    /api/queue/jobs                   # List queued jobs
 ```
 
-For comprehensive technical documentation including database schemas, error handling strategies, lifecycle states, and troubleshooting guides, see `docs/JOB_QUEUE_MANAGEMENT.md`, `docs/architecture/QUEUE_ARCHITECTURE.md` and `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`.
+For comprehensive technical documentation including database schemas, error handling strategies, lifecycle states, and troubleshooting guides, see [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md).
 
 ### Authentication Flow
 
@@ -1347,7 +1356,9 @@ type quaero.toml
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - System architecture and design
+- [Architecture Documentation](docs/architecture/) - Comprehensive architecture guides
+  - [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md) - Job system orchestration and execution
+  - [Markdown+Metadata Architecture](docs/architecture/architecture.md) - Document storage and search design
 - [Dependency Injection](docs/dependency-injection.md) - Constructor-based DI pattern
 - [Requirements](docs/requirements.md) - Current requirements
 - [Remaining Requirements](docs/remaining-requirements.md) - Future work

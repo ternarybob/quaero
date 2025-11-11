@@ -16,7 +16,8 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// DatabaseMaintenanceExecutor handles database maintenance jobs
+// DatabaseMaintenanceWorker processes individual database maintenance jobs from the queue
+// (DEPRECATED - will be replaced by manager/worker split)
 type DatabaseMaintenanceExecutor struct {
 	*BaseExecutor
 	db *sql.DB
@@ -37,15 +38,15 @@ func NewDatabaseMaintenanceExecutor(
 	}
 }
 
-// GetJobType returns the job type this executor handles
-func (e *DatabaseMaintenanceExecutor) GetJobType() string {
+// GetWorkerType returns "database_maintenance" - the job type this worker handles
+func (e *DatabaseMaintenanceExecutor) GetWorkerType() string {
 	return "database_maintenance"
 }
 
 // Validate validates the job model
 func (e *DatabaseMaintenanceExecutor) Validate(job *models.JobModel) error {
-	if job.Type != e.GetJobType() {
-		return fmt.Errorf("invalid job type: expected %s, got %s", e.GetJobType(), job.Type)
+	if job.Type != e.GetWorkerType() {
+		return fmt.Errorf("invalid job type: expected %s, got %s", e.GetWorkerType(), job.Type)
 	}
 	return nil
 }

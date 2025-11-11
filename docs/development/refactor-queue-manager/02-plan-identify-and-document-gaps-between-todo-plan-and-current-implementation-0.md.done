@@ -101,7 +101,8 @@ References:
 - internal\queue\types.go
 - internal\app\app.go
 - pages\jobs.html
-- docs\architecture\QUEUE_ARCHITECTURE.md
+- docs\architecture\MANAGER_WORKER_ARCHITECTURE.md
+- docs\architecture\README.md
 
 Create comprehensive gap analysis document with the following structure:
 
@@ -385,9 +386,10 @@ The refactor will be considered complete when:
 **12. References**
 
 **Key Files:**
-- Original Plan: `docs/refactor-queue-manager/01-refactor.md`
-- Implementation Tracker: `docs/refactor-queue-manager/IMPLEMENTATION_TODO.md`
-- Current Architecture: `docs/architecture/QUEUE_ARCHITECTURE.md`
+- Original Plan: `docs/development/refactor-queue-manager/01-refactor.md`
+- Implementation Tracker: `docs/development/refactor-queue-manager/IMPLEMENTATION_TODO.md`
+- Current Architecture: `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
+- Architecture Overview: `docs/architecture/README.md`
 - Schema: `internal/storage/sqlite/schema.go` (lines 114-173)
 - Job Manager: `internal/jobs/manager.go`
 - Worker Pool: `internal/worker/pool.go`
@@ -397,7 +399,8 @@ The refactor will be considered complete when:
 - Message Types: `internal/queue/types.go`
 
 **Related Documents:**
-- Architecture Overview: `docs/architecture/QUEUE_ARCHITECTURE.md`
+- Architecture Overview: `docs/architecture/README.md`
+- Manager-Worker Architecture: `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
 - Agent Guidelines: `AGENTS.md` (needs update)
 - Main README: `README.md` (needs update)
 

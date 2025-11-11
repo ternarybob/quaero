@@ -12,7 +12,7 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// AgentStepExecutor executes "agent" action steps
+// AgentManager creates parent agent jobs and orchestrates AI-powered document processing workflows
 type AgentStepExecutor struct {
 	jobMgr        *jobs.Manager
 	queueMgr      *queue.Manager
@@ -35,8 +35,9 @@ func NewAgentStepExecutor(
 	}
 }
 
-// ExecuteStep executes an agent step
-func (e *AgentStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob creates a parent agent job, queries documents matching the filter, and enqueues
+// individual agent jobs for each document. Returns the parent job ID for tracking.
+func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	// Parse step config
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -60,7 +61,7 @@ func (e *AgentStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Str("parent_job_id", parentJobID).
-		Msg("Executing agent step")
+		Msg("Creating parent agent job")
 
 	// Query documents to process
 	documents, err := e.queryDocuments(ctx, jobDef, documentFilter)
@@ -116,14 +117,14 @@ func (e *AgentStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
-		Msg("Agent step completed successfully")
+		Msg("Agent job orchestration completed successfully")
 
 	// Return parent job ID for chaining
 	return parentJobID, nil
 }
 
-// GetStepType returns "agent"
-func (e *AgentStepExecutor) GetStepType() string {
+// GetManagerType returns "agent" - the action type this manager handles
+func (e *AgentStepExecutor) GetManagerType() string {
 	return "agent"
 }
 

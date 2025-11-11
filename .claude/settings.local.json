@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.scriptsbuild.ps1)"
+      "Bash(exit 0)"
     ],
     "deny": [],
     "ask": []

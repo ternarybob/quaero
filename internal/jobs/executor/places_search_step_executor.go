@@ -12,7 +12,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// PlacesSearchStepExecutor executes "places_search" action steps
+// PlacesSearchManager orchestrates Google Places API search workflows and document creation
 type PlacesSearchStepExecutor struct {
 	placesService   interfaces.PlacesService
 	documentService interfaces.DocumentService
@@ -35,8 +35,10 @@ func NewPlacesSearchStepExecutor(
 	}
 }
 
-// ExecuteStep executes a places search step
-func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob executes a places search operation using the Google Places API.
+// Searches for places matching the query and creates documents for each result.
+// Returns a placeholder job ID since places search doesn't create async jobs.
+func (e *PlacesSearchStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return "", fmt.Errorf("step config is required for places_search")
@@ -117,7 +119,7 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 		Str("search_query", req.SearchQuery).
 		Str("search_type", req.SearchType).
 		Int("max_results", req.MaxResults).
-		Msg("Executing places search step")
+		Msg("Orchestrating places search")
 
 	// Execute search
 	result, err := e.placesService.SearchPlaces(ctx, parentJobID, req)
@@ -135,7 +137,7 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 		Str("step_name", step.Name).
 		Int("total_results", result.TotalResults).
 		Str("parent_job_id", parentJobID).
-		Msg("Places search step completed successfully")
+		Msg("Places search orchestration completed successfully")
 
 	// Convert search result to document for storage
 	doc, err := e.convertPlacesResultToDocument(result, parentJobID, jobDef.Tags)
@@ -189,8 +191,8 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 	return string(resultJSON), nil
 }
 
-// GetStepType returns "places_search"
-func (e *PlacesSearchStepExecutor) GetStepType() string {
+// GetManagerType returns "places_search" - the action type this manager handles
+func (e *PlacesSearchStepExecutor) GetManagerType() string {
 	return "places_search"
 }
 

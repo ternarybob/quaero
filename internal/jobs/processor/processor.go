@@ -14,11 +14,11 @@ import (
 )
 
 // JobProcessor is a job-agnostic processor that uses goqite for queue management.
-// It routes jobs to registered executors based on job type.
+// It routes jobs to registered workers based on job type.
 type JobProcessor struct {
 	queueMgr  *queue.Manager
 	jobMgr    *jobs.Manager
-	executors map[string]interfaces.JobExecutor
+	executors map[string]interfaces.JobWorker // Job workers keyed by job type
 	logger    arbor.ILogger
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -34,7 +34,7 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 	return &JobProcessor{
 		queueMgr:  queueMgr,
 		jobMgr:    jobMgr,
-		executors: make(map[string]interfaces.JobExecutor),
+		executors: make(map[string]interfaces.JobWorker), // Initialize job worker map
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -42,14 +42,14 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 	}
 }
 
-// RegisterExecutor registers a job executor for a job type.
-// The executor must implement the JobExecutor interface.
-func (jp *JobProcessor) RegisterExecutor(executor interfaces.JobExecutor) {
-	jobType := executor.GetJobType()
-	jp.executors[jobType] = executor
+// RegisterExecutor registers a job worker for a job type.
+// The worker must implement the JobWorker interface.
+func (jp *JobProcessor) RegisterExecutor(worker interfaces.JobWorker) {
+	jobType := worker.GetWorkerType()
+	jp.executors[jobType] = worker
 	jp.logger.Info().
 		Str("job_type", jobType).
-		Msg("Job executor registered")
+		Msg("Job worker registered")
 }
 
 // Start starts the job processor.
@@ -150,10 +150,10 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Get executor for job type
-	executor, ok := jp.executors[msg.Type]
+	// Get worker for job type
+	worker, ok := jp.executors[msg.Type]
 	if !ok {
-		errMsg := fmt.Sprintf("No executor registered for job type: %s", msg.Type)
+		errMsg := fmt.Sprintf("No worker registered for job type: %s", msg.Type)
 		jp.logger.Error().
 			Str("job_type", msg.Type).
 			Str("job_id", msg.JobID).
@@ -170,8 +170,8 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Validate job model with executor
-	if err := executor.Validate(jobModel); err != nil {
+	// Validate job model with worker
+	if err := worker.Validate(jobModel); err != nil {
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
@@ -189,8 +189,8 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Execute the job using the executor
-	err = executor.Execute(jp.ctx, jobModel)
+	// Execute the job using the worker
+	err = worker.Execute(jp.ctx, jobModel)
 
 	if err != nil {
 		// Job failed
@@ -200,7 +200,7 @@ func (jp *JobProcessor) processNextJob() {
 			Str("job_type", msg.Type).
 			Msg("Job execution failed")
 
-		// Error is already set by executor, just ensure status is updated
+		// Error is already set by worker, just ensure status is updated
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
 
 		// Set finished_at timestamp for failed jobs

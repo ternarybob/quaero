@@ -22,8 +22,8 @@ import (
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
-// CrawlerExecutor executes crawler jobs with ChromeDP rendering,
-// content processing, and child job spawning for discovered links
+// CrawlerWorker processes individual crawler jobs from the queue, rendering pages with ChromeDP,
+// extracting content, and spawning child jobs for discovered links
 type CrawlerExecutor struct {
 	// Core dependencies
 	crawlerService   *crawler.Service
@@ -63,8 +63,8 @@ func NewCrawlerExecutor(
 	}
 }
 
-// GetJobType returns the job type this executor handles
-func (e *CrawlerExecutor) GetJobType() string {
+// GetWorkerType returns "crawler_url" - the job type this worker handles
+func (e *CrawlerExecutor) GetWorkerType() string {
 	return "crawler_url"
 }
 

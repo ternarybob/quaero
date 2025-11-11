@@ -15,8 +15,8 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// AgentExecutor executes agent jobs with document loading,
-// agent processing, and metadata updates
+// AgentWorker processes individual agent jobs from the queue, loading documents, executing AI agents,
+// and updating document metadata with results
 type AgentExecutor struct {
 	// Core dependencies
 	agentService    interfaces.AgentService
@@ -43,8 +43,8 @@ func NewAgentExecutor(
 	}
 }
 
-// GetJobType returns the job type this executor handles
-func (e *AgentExecutor) GetJobType() string {
+// GetWorkerType returns "agent" - the job type this worker handles
+func (e *AgentExecutor) GetWorkerType() string {
 	return "agent"
 }
 

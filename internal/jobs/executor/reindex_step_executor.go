@@ -11,8 +11,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// ReindexStepExecutor handles "reindex" action steps
-// It rebuilds the FTS5 full-text search index for optimal search performance
+// ReindexManager orchestrates FTS5 full-text search index rebuilding workflows for optimal search performance
 type ReindexStepExecutor struct {
 	documentStorage interfaces.DocumentStorage
 	jobManager      *jobs.Manager
@@ -28,13 +27,14 @@ func NewReindexStepExecutor(documentStorage interfaces.DocumentStorage, jobManag
 	}
 }
 
-// ExecuteStep executes a reindex step
-func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob executes a reindex operation to rebuild the FTS5 full-text search index.
+// This is a synchronous operation. Returns a placeholder job ID since reindex doesn't create async jobs.
+func (e *ReindexStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).
 		Str("parent_job_id", parentJobID).
-		Msg("Starting reindex step")
+		Msg("Orchestrating reindex")
 
 	// Generate job ID for this step
 	jobID := uuid.New().String()
@@ -114,7 +114,7 @@ func (e *ReindexStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	return jobID, nil
 }
 
-// GetStepType returns the step type this executor handles
-func (e *ReindexStepExecutor) GetStepType() string {
+// GetManagerType returns "reindex" - the action type this manager handles
+func (e *ReindexStepExecutor) GetManagerType() string {
 	return "reindex"
 }

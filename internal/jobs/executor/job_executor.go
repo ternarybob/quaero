@@ -13,9 +13,9 @@ import (
 )
 
 // JobExecutor orchestrates job definition execution
-// It routes steps to appropriate StepExecutors and manages parent-child hierarchy
+// It routes steps to appropriate JobManagers and manages parent-child hierarchy
 type JobExecutor struct {
-	stepExecutors     map[string]StepExecutor
+	stepExecutors     map[string]JobManager // Job managers keyed by action type
 	jobManager        *jobs.Manager
 	parentJobExecutor *processor.ParentJobExecutor
 	logger            arbor.ILogger
@@ -24,19 +24,19 @@ type JobExecutor struct {
 // NewJobExecutor creates a new job executor
 func NewJobExecutor(jobManager *jobs.Manager, parentJobExecutor *processor.ParentJobExecutor, logger arbor.ILogger) *JobExecutor {
 	return &JobExecutor{
-		stepExecutors:     make(map[string]StepExecutor),
+		stepExecutors:     make(map[string]JobManager), // Initialize job manager map
 		jobManager:        jobManager,
 		parentJobExecutor: parentJobExecutor,
 		logger:            logger,
 	}
 }
 
-// RegisterStepExecutor registers a step executor for an action type
-func (e *JobExecutor) RegisterStepExecutor(executor StepExecutor) {
-	e.stepExecutors[executor.GetStepType()] = executor
+// RegisterStepExecutor registers a job manager for an action type
+func (e *JobExecutor) RegisterStepExecutor(manager JobManager) {
+	e.stepExecutors[manager.GetManagerType()] = manager
 	e.logger.Info().
-		Str("action_type", executor.GetStepType()).
-		Msg("Step executor registered")
+		Str("action_type", manager.GetManagerType()).
+		Msg("Job manager registered")
 }
 
 // Execute executes a job definition sequentially
@@ -180,15 +180,15 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			Int("total_steps", len(jobDef.Steps)).
 			Msg("Executing step")
 
-		// Get executor for this step
-		executor, exists := e.stepExecutors[step.Action]
+		// Get manager for this step
+		manager, exists := e.stepExecutors[step.Action]
 		if !exists {
-			err := fmt.Errorf("no executor registered for action: %s", step.Action)
+			err := fmt.Errorf("no manager registered for action: %s", step.Action)
 			parentLogger.Error().
 				Err(err).
 				Str("action", step.Action).
 				Str("step_name", step.Name).
-				Msg("Failed to find executor")
+				Msg("Failed to find manager")
 
 			// Set parent job error
 			if setErr := e.jobManager.SetJobError(ctx, parentJobID, err.Error()); setErr != nil {
@@ -202,7 +202,7 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			// Log and continue for "continue" strategy
 			parentLogger.Warn().
 				Str("step_name", step.Name).
-				Msg("Continuing despite missing executor")
+				Msg("Continuing despite missing manager")
 
 			// Check error tolerance after error
 			if jobDef.ErrorTolerance != nil {
@@ -223,8 +223,8 @@ func (e *JobExecutor) Execute(ctx context.Context, jobDef *models.JobDefinition)
 			continue
 		}
 
-		// Execute step
-		childJobID, err := executor.ExecuteStep(ctx, step, jobDef, parentJobID)
+		// Execute step via manager (creates parent job and orchestrates children)
+		childJobID, err := manager.CreateParentJob(ctx, step, jobDef, parentJobID)
 		if err != nil {
 			parentLogger.Error().
 				Err(err).

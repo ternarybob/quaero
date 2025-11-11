@@ -144,9 +144,16 @@ Quaero follows a clean architecture pattern with clear separation of concerns:
 - Enables testing with mocks
 - Allows swapping implementations
 
-### Queue-Based Job Processing
+### Job System Architecture
 
-Quaero uses a queue-based architecture for distributed job processing with goqite (SQLite-backed message queue):
+**For comprehensive documentation of the job system, see [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md).**
+
+Quaero uses a Manager/Worker pattern for job orchestration and execution:
+- **Managers** create parent jobs and define workflows
+- **Workers** execute individual jobs from the queue
+- **Orchestrators** monitor parent job progress and aggregate child statistics
+
+The queue-based architecture uses goqite (SQLite-backed message queue) for distributed job processing:
 
 **Core Components:**
 
@@ -226,24 +233,26 @@ max_receive = 3
 
 **Important Distinction:**
 
-- **JobExecutor** (`internal/services/jobs/executor.go`):
+- **Job Definition Orchestration** (`internal/services/jobs/executor.go`):
   - Orchestrates multi-step workflows defined by users (JobDefinitions)
   - Executes steps sequentially with retry logic and error handling
-  - Polls crawl jobs asynchronously when wait_for_completion is enabled
+  - Uses managers (e.g., CrawlerManager) to create parent jobs
+  - Polls jobs asynchronously when wait_for_completion is enabled
   - Publishes progress events for UI updates
   - Supports error strategies: fail, continue, retry
 
-- **Queue Jobs** (`internal/jobs/types/`):
-  - Handle individual task execution (CrawlerJob, SummarizerJob, CleanupJob)
-  - Process URLs, generate summaries, clean up old jobs
-  - Provide persistent queue with worker pool
+- **Queue-Based Execution** (`internal/jobs/processor/`, `internal/jobs/worker/`):
+  - Workers handle individual task execution (CrawlerWorker, AgentWorker, etc.)
+  - Process URLs, generate summaries, extract keywords
+  - Orchestrators monitor parent job progress
+  - Persistent queue with worker pool
   - Enable job spawning and depth tracking
 
 **Both systems coexist and complement each other:**
-- JobDefinitions can trigger crawl jobs via the "crawl" action
-- JobExecutor polls those crawl jobs until completion
-- Crawl jobs are executed by the queue-based CrawlerJob type
-- JobExecutor is NOT replaced by the queue system - it serves a different purpose
+- JobDefinitions can trigger jobs via action steps (e.g., "crawl", "agent")
+- Managers create parent jobs that spawn child jobs into the queue
+- Workers execute individual jobs pulled from the queue
+- Orchestrators monitor parent job progress until all children complete
 
 ### Service Initialization Flow
 
@@ -260,9 +269,10 @@ The app initialization sequence in `internal/app/app.go` is critical:
 9. **Processing Service** - Document processing
 10. **Embedding Coordinator** - Auto-subscribes to embedding events
 11. **Scheduler Service** - Triggers events on cron (every 5 minutes)
-12. **Handlers** - HTTP/WebSocket handlers
+12. **Agent Service** - Google ADK with Gemini models (optional, requires API key)
+13. **Handlers** - HTTP/WebSocket handlers
 
-**Important:** Services that subscribe to events must be initialized after the EventService but before any events are published.
+**Important:** Services that subscribe to events must be initialized after the EventService but before any events are published. Agent Service is initialized after Scheduler Service and registers workers with JobProcessor and managers with job definition orchestration.
 
 ### Data Flow: Crawling → Processing → Embedding
 
@@ -386,6 +396,186 @@ mock_mode = false  # Set to true for testing
 - Default server URL: `http://localhost:8085`
 - Configurable in extension settings
 - Supports WebSocket (WS) and secure WebSocket (WSS)
+
+### Agent Framework Architecture
+
+**Agent framework provides AI-powered document processing using Google ADK (Agent Development Kit) with Gemini models.**
+
+The agent framework enables intelligent document analysis and enrichment through AI agents that process existing documents in the database. Current capabilities include keyword extraction, with future support planned for summarization, classification, and entity extraction.
+
+**Key Integration Points:**
+- Queue-based job execution via `JobProcessor` and `AgentWorker`
+- Document metadata storage in `documents` table
+- Event publishing for workflow coordination
+- Google ADK with Gemini API (no offline fallback)
+
+**Core Components:**
+
+**AgentService** (`internal/services/agents/service.go`):
+- Manages Google ADK model lifecycle with `gemini.NewModel()`
+- Registers agent processors in internal registry
+- Routes execution requests by agent type
+- Health check validates API key and model initialization
+- Constructor: `NewService(config *common.AgentConfig, logger arbor.ILogger)`
+- Returns `nil` if `GoogleAPIKey` is empty (graceful degradation)
+
+**AgentProcessor Interface** (internal to service):
+- `Execute(ctx context.Context, model model.LLM, input map[string]interface{}) (map[string]interface{}, error)`
+- `GetType() string` - Returns agent type identifier
+- Implemented by: `KeywordExtractor`, future agent types
+- Agents receive pre-initialized ADK model, input parameters, and return structured results
+
+**AgentWorker** (`internal/jobs/processor/agent_executor.go` → will be renamed to `agent_worker.go`):
+- Queue-based job worker for individual agent jobs
+- Job type: `"agent"`
+- Workflow: Load document → Execute agent → Update metadata → Publish event
+- Real-time logging via `publishAgentJobLog()`
+- Handles document querying, agent execution, and metadata persistence
+
+**AgentManager** (`internal/jobs/executor/agent_step_executor.go` → will be renamed to `agent_manager.go`):
+- Job definition manager for orchestrating agent workflows
+- Step action: `"agent"`
+- Creates agent jobs for documents matching filter
+- Supports agent chaining via sequential steps
+- Validates agent type and document filter configuration
+
+**Agent Execution Flow:**
+
+```
+User triggers job → JobDefinition → Job Orchestration → AgentManager
+  ↓
+Query documents (document_filter) → Create agent jobs → Enqueue to queue
+  ↓
+Queue → JobProcessor → AgentWorker
+  ↓
+Load document → AgentService.Execute() → KeywordExtractor
+  ↓
+ADK llmagent.New() → Gemini API → Parse response
+  ↓
+Update document.Metadata[agent_type] → Publish event
+```
+
+**Step-by-Step:**
+1. User triggers agent job via UI or API (`POST /api/job-definitions/{id}/execute`)
+2. Job orchestration reads job definition and executes agent steps sequentially
+3. AgentManager queries documents matching `document_filter` criteria
+4. For each document, creates individual agent job and enqueues to message queue
+5. JobProcessor receives agent job from queue
+6. AgentWorker loads document and calls `AgentService.Execute()`
+7. AgentService routes to appropriate agent (e.g., `KeywordExtractor`)
+8. Agent uses ADK's `llmagent.New()` to create agent with instructions
+9. Agent runner sends request to Gemini API and processes response stream
+10. Structured results stored in `document.Metadata[agentType]`
+11. Event published for workflow coordination
+
+**Note:** Both queue-based execution (via `AgentWorker`) and job definition orchestration (via `AgentManager`) are supported.
+
+**Google ADK Integration:**
+
+**Model Initialization:**
+- Uses `gemini.NewModel(ctx, modelName, clientConfig)` from `google.golang.org/adk/model/gemini`
+- Client config: `APIKey`, `Backend: genai.BackendGeminiAPI`
+- Default model: `gemini-2.0-flash` (fast, cost-effective)
+- Model shared across all agents for efficiency
+- Initialization happens once at service startup
+
+**Agent Loop Pattern:**
+- Uses `llmagent.New(config)` from `google.golang.org/adk/agent/llmagent`
+- Config includes: `Model`, `Name`, `Instruction`, `GenerateContentConfig`
+- Execution via `runner.New(config)` and `runner.Run(ctx, ...)`
+- Event stream processing with `IsFinalResponse()` check
+- Response parsing handles both simple arrays and structured objects
+
+**No Offline Fallback:**
+- Service initialization fails if `GoogleAPIKey` is empty
+- Error message: "Google API key is required for agent service"
+- Agent features unavailable if service initialization fails
+- Graceful degradation: Service logs warning, application continues without agents
+- Unlike LLM service (which has offline/mock modes), agents require cloud API
+
+**Agent Types:**
+
+**Keyword Extractor** (`internal/services/agents/keyword_extractor.go`):
+- Type identifier: `"keyword_extractor"`
+- Input: `document_id`, `content`, `max_keywords` (5-15 range, default: 10)
+- Output: `keywords` array, `confidence` map (optional)
+- Metadata storage: `document.Metadata["keyword_extractor"]`
+- Prompt engineering: Instructs model to extract domain-specific terms, avoid stop words, prioritize relevance
+- Response parsing: Supports both simple array `["keyword1", "keyword2"]` and object with confidence scores
+- Example output:
+  ```json
+  {
+    "keywords": ["machine learning", "neural networks", "deep learning"],
+    "confidence": {"machine learning": 0.95, "neural networks": 0.87, "deep learning": 0.82}
+  }
+  ```
+
+**Future Agent Types:**
+- **Summarizer**: Generate concise document summaries with configurable length
+- **Classifier**: Categorize documents by topic/domain with confidence scores
+- **Entity Extractor**: Extract named entities (people, places, organizations)
+- All future agents will follow same `AgentProcessor` interface pattern (internal to service)
+- Registration happens in `AgentService.NewService()` function
+
+**Agent Chaining:**
+
+**How It Works:**
+- Multiple agent steps in job definition execute sequentially
+- Each agent stores results in `document.Metadata[agentType]`
+- Next agent can access previous results via metadata
+- Example workflow: Keyword extractor → Summarizer (uses keywords for context)
+- Document filter ensures same documents processed by all chained agents
+
+**Configuration Pattern:**
+```toml
+[[steps]]
+name = "extract_keywords"
+action = "agent"
+[steps.config]
+agent_type = "keyword_extractor"
+[steps.config.document_filter]
+source_type = "crawler"
+max_keywords = 10
+
+[[steps]]
+name = "generate_summary"
+action = "agent"
+[steps.config]
+agent_type = "summarizer"
+[steps.config.document_filter]
+source_type = "crawler"
+use_keywords = true  # Access metadata["keyword_extractor"]["keywords"]
+```
+
+**Best Practices:**
+- Use same `document_filter` for chained steps to ensure consistency
+- Order steps by dependency (keywords before summarization)
+- Monitor job logs for each step's completion
+- Test each agent individually before chaining
+- Consider timeout implications for long chains
+
+**Configuration:**
+
+**Agent Config Section** (`quaero.toml`):
+```toml
+[agent]
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required
+model_name = "gemini-2.0-flash"                # Default
+max_turns = 10                                  # Agent conversation turns
+timeout = "5m"                                  # Execution timeout
+```
+
+**Environment Variables:**
+- `QUAERO_AGENT_GOOGLE_API_KEY` - Overrides config file
+- `QUAERO_AGENT_MODEL_NAME` - Overrides model name
+- `QUAERO_AGENT_MAX_TURNS` - Overrides max turns
+- `QUAERO_AGENT_TIMEOUT` - Overrides timeout
+
+**API Key Setup:**
+- Get API key from: https://aistudio.google.com/app/apikey
+- Free tier available with rate limits (15 requests/minute, 1500/day as of 2024)
+- Store in config file or environment variable (environment takes precedence)
+- API key required for agent service to initialize
 
 ## Go Structure Standards
 
@@ -931,6 +1121,65 @@ curl http://localhost:8085/api/health
 ```
 
 **Note:** Adjust port if configured differently in your quaero.toml.
+
+### Agent Service Issues
+
+**Agent Service Not Initialized:**
+- **Symptom**: Log message "Failed to initialize agent service - agent features will be unavailable"
+- **Cause**: Missing or invalid Google API key
+- **Solution**:
+  - Check `quaero.toml` has `[agent]` section with `google_api_key` set
+  - Or set environment variable: `QUAERO_AGENT_GOOGLE_API_KEY=your_key_here`
+  - Get API key from: https://aistudio.google.com/app/apikey
+  - Verify API key is valid (not expired, not revoked)
+- **Verification**: Look for log message "Agent service initialized with Google ADK"
+
+**Agent Jobs Fail with "Unknown Agent Type":**
+- **Symptom**: Job fails with error "unknown agent type: {type}"
+- **Cause**: Agent type not registered or typo in job definition
+- **Solution**:
+  - Check job definition `agent_type` matches registered agent (e.g., `"keyword_extractor"`)
+  - Verify agent is registered in `service.go` `NewService()` function
+  - Check service logs for "Agent registered" messages at startup
+- **Available Types**: `keyword_extractor` (more coming soon)
+
+**Agent Execution Timeout:**
+- **Symptom**: Job fails with "context deadline exceeded" error
+- **Cause**: Agent execution exceeds configured timeout (default: 5m)
+- **Solution**:
+  - Increase timeout in `quaero.toml`: `[agent] timeout = "10m"`
+  - Or set environment variable: `QUAERO_AGENT_TIMEOUT=10m`
+  - Check document size (large documents take longer to process)
+  - Monitor Gemini API rate limits (may cause delays)
+- **Note**: Timeout applies per agent execution, not per job
+
+**Keywords Not Appearing in Document Metadata:**
+- **Symptom**: Agent job completes but `metadata["keyword_extractor"]` is empty
+- **Cause**: Document not updated or agent returned no keywords
+- **Solution**:
+  - Check job logs for "Document metadata updated successfully" message
+  - Verify document has sufficient content (minimum ~100 words recommended)
+  - Check agent response in logs for malformed JSON
+  - Query document via `GET /api/documents/{id}` to verify metadata
+- **Metadata Structure**:
+  ```json
+  {
+    "keyword_extractor": {
+      "keywords": ["keyword1", "keyword2", ...],
+      "confidence": {"keyword1": 0.95, ...}
+    }
+  }
+  ```
+
+**Gemini API Rate Limit Errors:**
+- **Symptom**: Job fails with "429 Too Many Requests" or "quota exceeded" error
+- **Cause**: Exceeded Gemini API free tier rate limits
+- **Solution**:
+  - Reduce job concurrency in `quaero.toml`: `[queue] concurrency = 2`
+  - Add delays between agent jobs (not currently supported, future feature)
+  - Upgrade to paid Gemini API tier for higher limits
+  - Monitor API usage at: https://aistudio.google.com/app/apikey
+- **Free Tier Limits**: 15 requests per minute, 1500 requests per day (as of 2024)
 
 ## API Endpoints Reference
 

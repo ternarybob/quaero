@@ -12,8 +12,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// TransformStepExecutor executes transform steps in job definitions
-// Transforms HTML content to markdown using the transform service
+// TransformManager orchestrates document transformation workflows, converting HTML content to markdown format
 type TransformStepExecutor struct {
 	transformService interfaces.TransformService
 	jobManager       *jobs.Manager
@@ -29,14 +28,14 @@ func NewTransformStepExecutor(transformService interfaces.TransformService, jobM
 	}
 }
 
-// ExecuteStep executes a transform step for the given job definition
-// This is a synchronous operation that directly transforms HTML to markdown
-// Returns a placeholder job ID since transforms don't create async jobs
-func (e *TransformStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob executes a transform operation for the given job definition.
+// This is a synchronous operation that directly transforms HTML to markdown.
+// Returns a placeholder job ID since transforms don't create async jobs.
+func (e *TransformStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("parent_job_id", parentJobID).
-		Msg("Executing transform step")
+		Msg("Orchestrating transformation")
 
 	// Generate a job ID for tracking (even though this is synchronous)
 	jobID := uuid.New().String()
@@ -74,8 +73,8 @@ func (e *TransformStepExecutor) ExecuteStep(ctx context.Context, step models.Job
 	return jobID, nil
 }
 
-// GetStepType returns the step type this executor handles
-func (e *TransformStepExecutor) GetStepType() string {
+// GetManagerType returns "transform" - the action type this manager handles
+func (e *TransformStepExecutor) GetManagerType() string {
 	return "transform"
 }
 

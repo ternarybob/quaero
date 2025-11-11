@@ -227,11 +227,12 @@ internal/jobs/
 
 ## Documentation Created
 
-1. **`docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`**
+1. **`docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`**
    - Complete architecture design
    - Interface definitions
    - Implementation plan
    - Benefits and trade-offs
+   - **Note:** This replaces and consolidates content from previous JOB_EXECUTOR_ARCHITECTURE.md, JOB_QUEUE_MANAGEMENT.md, and QUEUE_ARCHITECTURE.md
 
 2. **`docs/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md`** (this file)
    - What was done
@@ -246,7 +247,7 @@ internal/jobs/
 - `internal/jobs/executor/crawler_step_executor.go` (moved from `internal/executor/`)
 - `internal/jobs/processor/processor.go` (moved from `internal/worker/`)
 - `internal/jobs/processor/crawler_executor.go` (moved from `internal/worker/`)
-- `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`
+- `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
 
 ### Modified:
 - `internal/app/app.go` - Added JobExecutor initialization, updated imports for domain-driven structure

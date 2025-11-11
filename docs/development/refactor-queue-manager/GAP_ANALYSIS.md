@@ -12,7 +12,7 @@ The queue refactor is **approximately 65% complete** and currently in a transiti
 
 **Current State:**
 - ✅ Core infrastructure complete (Queue Manager, Worker Pool, Message types)
-- ✅ Architecture documented (`docs/architecture/QUEUE_ARCHITECTURE.md`)
+- ✅ Architecture documented (`docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` and `docs/architecture/README.md`)
 - ⚠️ Database schema mismatch (code vs schema.go)
 - ⚠️ CrawlerExecutor is placeholder only
 - ❌ Queue management UI missing
@@ -291,7 +291,8 @@ Re-enable and complete WebSocket broadcasting:
 **Status:** ⚠️ Partially complete
 
 **Current State:**
-- ✅ `docs/architecture/QUEUE_ARCHITECTURE.md` - Comprehensive and accurate (updated 2025-11-03)
+- ✅ `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` - Comprehensive and accurate (updated 2025-11-03)
+- ✅ `docs/architecture/README.md` - Architecture overview documentation
 - ⚠️ `IMPLEMENTATION_TODO.md` - Marked as "COMPLETED" but system incomplete
 - ⚠️ `AGENTS.md` - May reference old architecture
 - ⚠️ `README.md` - Likely references old queue system
@@ -677,9 +678,10 @@ The refactor will be considered **complete** when:
 - Migration (not applied): `docs/migrations/008_redesign_job_queue.sql`
 
 **Documentation:**
-- Current Architecture: `docs/architecture/QUEUE_ARCHITECTURE.md` (comprehensive, updated 2025-11-03)
-- Original Plan: `docs/refactor-queue-manager/01-refactor.md`
-- Implementation Tracker: `docs/refactor-queue-manager/IMPLEMENTATION_TODO.md`
+- Current Architecture: `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` (comprehensive, updated 2025-11-03)
+- Architecture Overview: `docs/architecture/README.md`
+- Original Plan: `docs/development/refactor-queue-manager/01-refactor.md`
+- Implementation Tracker: `docs/development/refactor-queue-manager/IMPLEMENTATION_TODO.md`
 
 **UI:**
 - Current Page: `pages/jobs.html` (auth/sources/job definitions)
@@ -689,7 +691,8 @@ The refactor will be considered **complete** when:
 
 ### Related Documents
 
-- **Architecture Overview:** `docs/architecture/QUEUE_ARCHITECTURE.md`
+- **Architecture Overview:** `docs/architecture/README.md`
+- **Manager-Worker Architecture:** `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
 - **Agent Guidelines:** `AGENTS.md` (needs update)
 - **Main README:** `README.md` (needs update)
 

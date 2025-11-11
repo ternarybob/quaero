@@ -10,24 +10,25 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// JobExecutor defines the interface that all job executors must implement.
+// JobWorker defines the interface that all job workers must implement.
 // The queue engine uses this interface to execute jobs in a type-agnostic manner.
-type JobExecutor interface {
-	// Execute executes a job based on the job model
-	// Returns error if execution fails
+// Workers process individual jobs from the queue and perform the actual work.
+type JobWorker interface {
+	// Execute processes a single job from the queue. Returns error if execution fails.
+	// Worker is responsible for updating job status and logging progress.
 	Execute(ctx context.Context, job *models.JobModel) error
 
-	// GetJobType returns the job type this executor handles
-	// Examples: "database_maintenance", "crawler", "summarizer"
-	GetJobType() string
+	// GetWorkerType returns the job type this worker handles.
+	// Examples: "database_maintenance", "crawler_url", "agent"
+	GetWorkerType() string
 
-	// Validate validates that the job model is compatible with this executor
-	// Returns error if the job model is invalid for this executor
+	// Validate validates that the job model is compatible with this worker.
+	// Returns error if the job model is invalid for this worker.
 	Validate(job *models.JobModel) error
 }
 
-// JobSpawner defines the interface for jobs that can spawn child jobs.
-// This is optional - not all job executors need to implement this.
+// JobSpawner defines the interface for workers that can spawn child jobs.
+// This is optional - not all job workers need to implement this.
 type JobSpawner interface {
 	// SpawnChildJob creates and enqueues a child job
 	// The child job will be linked to the parent via ParentID

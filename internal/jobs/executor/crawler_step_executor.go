@@ -11,7 +11,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
-// CrawlerStepExecutor executes "crawl" action steps
+// CrawlerManager creates parent crawler jobs and orchestrates URL crawling workflows
 type CrawlerStepExecutor struct {
 	crawlerService interfaces.CrawlerService
 	logger         arbor.ILogger
@@ -28,8 +28,9 @@ func NewCrawlerStepExecutor(
 	}
 }
 
-// ExecuteStep executes a crawl step
-func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob creates a parent crawler job and triggers the crawler service to start crawling.
+// The crawler service will create child jobs for each URL discovered.
+func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	// No source type validation needed - crawler is agnostic
 	// BaseURL validation removed - crawler uses start_urls from step config
 
@@ -108,7 +109,7 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		Int("seed_url_count", len(seedURLs)).
 		Int("max_depth", crawlConfig.MaxDepth).
 		Int("max_pages", crawlConfig.MaxPages).
-		Msg("Executing crawl step")
+		Msg("Creating parent crawler job")
 
 	// Start crawl job with properly typed config
 	jobID, err := e.crawlerService.StartCrawl(
@@ -131,13 +132,13 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 		Str("step_name", step.Name).
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
-		Msg("Crawl step started successfully")
+		Msg("Parent crawler job created successfully")
 
 	return jobID, nil
 }
 
-// GetStepType returns "crawl"
-func (e *CrawlerStepExecutor) GetStepType() string {
+// GetManagerType returns "crawl" - the action type this manager handles
+func (e *CrawlerStepExecutor) GetManagerType() string {
 	return "crawl"
 }
 

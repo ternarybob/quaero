@@ -16,8 +16,8 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// DatabaseMaintenanceStepExecutor handles "database_maintenance" action steps
-// It creates a database_maintenance job and enqueues it to the queue
+// DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
+// optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceStepExecutor struct {
 	jobManager *jobs.Manager
 	queueMgr   *queue.Manager
@@ -33,13 +33,14 @@ func NewDatabaseMaintenanceStepExecutor(jobManager *jobs.Manager, queueMgr *queu
 	}
 }
 
-// ExecuteStep executes a database maintenance step
-func (e *DatabaseMaintenanceStepExecutor) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// CreateParentJob creates a parent database maintenance job and enqueues it to the queue for processing.
+// The job will execute database optimization operations based on the configuration.
+func (e *DatabaseMaintenanceStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	e.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).
 		Str("parent_job_id", parentJobID).
-		Msg("Starting database maintenance step")
+		Msg("Creating parent database maintenance job")
 
 	// Generate job ID for this step
 	jobID := uuid.New().String()
@@ -124,12 +125,12 @@ func (e *DatabaseMaintenanceStepExecutor) ExecuteStep(ctx context.Context, step 
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
 		Int("operation_count", len(operations)).
-		Msg("Database maintenance step enqueued successfully")
+		Msg("Database maintenance job created and enqueued successfully")
 
 	return jobID, nil
 }
 
-// GetStepType returns "database_maintenance"
-func (e *DatabaseMaintenanceStepExecutor) GetStepType() string {
+// GetManagerType returns "database_maintenance" - the action type this manager handles
+func (e *DatabaseMaintenanceStepExecutor) GetManagerType() string {
 	return "database_maintenance"
 }

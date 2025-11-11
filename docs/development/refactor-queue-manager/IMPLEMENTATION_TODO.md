@@ -587,8 +587,9 @@ Implement the missing pieces for production-ready job execution:
 ### 2.6.2 Update Documentation
 - [x] Updated IMPLEMENTATION_TODO.md with all Phase 2 status
 - [x] Created comprehensive architecture docs:
-  - [x] docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md
-  - [x] docs/architecture/QUEUE_ARCHITECTURE.md
+  - [x] ~~docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md~~ (Consolidated into MANAGER_WORKER_ARCHITECTURE.md)
+  - [x] ~~docs/architecture/QUEUE_ARCHITECTURE.md~~ (Consolidated into MANAGER_WORKER_ARCHITECTURE.md)
+  - [x] docs/architecture/MANAGER_WORKER_ARCHITECTURE.md (Single comprehensive document)
 - [x] Created completion summaries:
   - [x] docs/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md
   - [x] docs/refactor-queue-manager/PHASE1_COMPLETION.md
@@ -725,11 +726,11 @@ Implement the missing pieces for production-ready job execution:
 - ✅ Fast execution performance (< 1 second per job)
 
 ### [DOCS] Documentation References
-- **Current State:** `docs/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md`
-- **Architecture:** `docs/architecture/JOB_EXECUTOR_ARCHITECTURE.md`
-- **Queue Design:** `docs/architecture/QUEUE_ARCHITECTURE.md`
-- **Gap Analysis:** `docs/refactor-queue-manager/GAP_ANALYSIS.md`
-- **Phase 1 Summary:** `docs/refactor-queue-manager/PHASE1_COMPLETION.md`
+- **Current State:** `docs/development/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md`
+- **Architecture:** `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
+- **Architecture Overview:** `docs/architecture/README.md`
+- **Gap Analysis:** `docs/development/refactor-queue-manager/GAP_ANALYSIS.md`
+- **Phase 1 Summary:** `docs/development/refactor-queue-manager/PHASE1_COMPLETION.md`
 - **Implementation Plan:** This file
 
 ---
@@ -783,6 +784,6 @@ For historical context, see previous session notes in git history.
 ---
 
 **Document Last Updated:** 2025-11-03 21:15 AEDT (v0.1.1733)
-**Implementation Reference:** docs/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md
+**Implementation Reference:** docs/development/refactor-queue-manager/QUEUE_REFACTOR_COMPLETION_SUMMARY.md
 **Latest Changes:** Phase 2 COMPLETE ✅ - Committed (43fbb82), tested, and pushed to origin/main
 **Status:** All Phase 2 features operational and production-ready
