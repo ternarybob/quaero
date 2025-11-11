@@ -15,7 +15,7 @@ The Manager/Worker Architecture document provides the definitive guide to unders
 - Worker responsibilities: Execute individual jobs, process content, save results
 - Orchestrator responsibilities: Monitor parent job progress, aggregate statistics
 - Complete job execution flow with sequence diagrams
-- Interface definitions (JobManager, JobWorker, ParentJobOrchestrator)
+- Interface definitions (JobManager, JobWorker, JobOrchestrator)
 - File structure organization (manager/, worker/, orchestrator/)
 - Database schema (jobs table, job_logs table, queue table)
 - Real-time WebSocket events for progress tracking

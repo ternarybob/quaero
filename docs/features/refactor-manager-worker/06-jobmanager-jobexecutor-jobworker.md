@@ -45,7 +45,7 @@ The codebase is ready for parent job orchestrator migration after completing ARC
 
 5. **Target Directory Ready:**
    - `internal/jobs/orchestrator/` exists with interfaces.go (created in ARCH-003)
-   - ParentJobOrchestrator interface defined with 3 methods
+   - JobOrchestrator interface defined with 3 methods
    - Ready to receive implementation file
 
 6. **Interface Signature Mismatch:**
@@ -82,7 +82,7 @@ All dependencies are injected via constructor (good DI pattern).
 **Success Criteria:**
 
 1. New file created in internal/jobs/orchestrator/
-2. ParentJobExecutor renamed to ParentJobOrchestrator throughout
+2. ParentJobExecutor renamed to JobOrchestrator throughout
 3. Interface signature mismatch resolved
 4. app.go successfully imports and uses orchestrator package
 5. job_executor.go successfully imports and uses orchestrator package
@@ -106,7 +106,7 @@ This phase migrates the ParentJobExecutor from `internal/jobs/processor/` to `in
 1. **Direct Migration**: Create new file, update imports, delete old file immediately
 2. **No Backward Compatibility**: User explicitly stated breaking changes are OK
 3. **Complete Transformation**: Rename all references to use "orchestrator" terminology
-4. **Interface Compliance**: Ensure implementation matches ParentJobOrchestrator interface from ARCH-003
+4. **Interface Compliance**: Ensure implementation matches JobOrchestrator interface from ARCH-003
 5. **Consistent Naming**: Follow orchestrator naming convention (receiver variable `o` instead of `e`)
 
 **Why This Approach:**
@@ -119,7 +119,7 @@ This phase migrates the ParentJobExecutor from `internal/jobs/processor/` to `in
 
 **Migration Sequence:**
 
-1. **Create ParentJobOrchestrator** in orchestrator/ directory
+1. **Create JobOrchestrator** in orchestrator/ directory
 2. **Update app.go** imports and initialization
 3. **Update job_executor.go** imports and field references
 4. **Update comments** in 4 files that mention ParentJobExecutor
@@ -130,11 +130,11 @@ This phase migrates the ParentJobExecutor from `internal/jobs/processor/` to `in
 
 **File Migration:**
 - Source: `internal/jobs/processor/parent_job_executor.go`
-- Target: `internal/jobs/orchestrator/parent_job_orchestrator.go`
+- Target: `internal/jobs/orchestrator/job_orchestrator.go`
 - Package: `processor` → `orchestrator`
-- Struct: `ParentJobExecutor` → `ParentJobOrchestrator`
-- Constructor: `NewParentJobExecutor()` → `NewParentJobOrchestrator()`
-- Receiver: `func (e *ParentJobExecutor)` → `func (o *ParentJobOrchestrator)`
+- Struct: `ParentJobExecutor` → `JobOrchestrator`
+- Constructor: `NewParentJobExecutor()` → `NewJobOrchestrator()`
+- Receiver: `func (e *ParentJobExecutor)` → `func (o *JobOrchestrator)`
 - All references to `e.` → `o.` within method bodies
 
 **Import Updates:**
@@ -145,9 +145,9 @@ Only 2 files import ParentJobExecutor:
 
 Both need:
 - Import: `"github.com/ternarybob/quaero/internal/jobs/processor"` → `"github.com/ternarybob/quaero/internal/jobs/orchestrator"`
-- Type references: `processor.ParentJobExecutor` → `orchestrator.ParentJobOrchestrator`
-- Constructor calls: `processor.NewParentJobExecutor()` → `orchestrator.NewParentJobOrchestrator()`
-- Variable names: `parentJobExecutor` → `parentJobOrchestrator`
+- Type references: `processor.ParentJobExecutor` → `orchestrator.JobOrchestrator`
+- Constructor calls: `processor.NewParentJobExecutor()` → `orchestrator.NewJobOrchestrator()`
+- Variable names: `parentJobExecutor` → `jobOrchestrator`
 
 **Comment Updates:**
 
@@ -157,13 +157,13 @@ Both need:
 - `internal/jobs/manager.go` (line 1687)
 - `test/api/places_job_document_test.go` (line 379)
 
-All need: "ParentJobExecutor" → "ParentJobOrchestrator" in comments
+All need: "ParentJobExecutor" → "JobOrchestrator" in comments
 
 **Interface Compliance:**
 
-The orchestrator must implement the ParentJobOrchestrator interface created in ARCH-003:
+The orchestrator must implement the JobOrchestrator interface created in ARCH-003:
 ```go
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     StartMonitoring(ctx context.Context, parentJobID string) error
     StopMonitoring(parentJobID string) error
     GetMonitoringStatus(parentJobID string) bool
@@ -194,7 +194,7 @@ After migration:
 **Success Criteria:**
 
 1. New file created in internal/jobs/orchestrator/
-2. ParentJobExecutor renamed to ParentJobOrchestrator throughout
+2. ParentJobExecutor renamed to JobOrchestrator throughout
 3. app.go successfully imports and uses orchestrator package
 4. job_executor.go successfully imports and uses orchestrator package
 5. All comments updated to use "orchestrator" terminology
@@ -214,7 +214,7 @@ I systematically explored the codebase to understand the migration requirements:
 4. **Identified comment-only references** - Found 4 files that only mention ParentJobExecutor in comments
 5. **Read import contexts** - Examined app.go and job_executor.go to understand how ParentJobExecutor is initialized and used
 6. **Verified target directory** - Confirmed orchestrator/ directory exists with interfaces.go from ARCH-003
-7. **Checked interface definition** - Reviewed ParentJobOrchestrator interface to ensure compliance
+7. **Checked interface definition** - Reviewed JobOrchestrator interface to ensure compliance
 
 This comprehensive exploration revealed:
 - Clear scope: 1 file to migrate, 2 files to update imports, 4 files to update comments
@@ -228,7 +228,7 @@ This comprehensive exploration revealed:
 sequenceDiagram
     participant Dev as Developer
     participant Old as processor/parent_job_executor.go
-    participant New as orchestrator/parent_job_orchestrator.go
+    participant New as orchestrator/job_orchestrator.go
     participant Interface as orchestrator/interfaces.go
     participant App as internal/app/app.go
     participant JobExec as executor/job_executor.go
@@ -236,22 +236,22 @@ sequenceDiagram
     
     Note over Dev,Build: Phase 1: Create Orchestrator File
     
-    Dev->>New: Create parent_job_orchestrator.go
-    Note right of New: Copy from parent_job_executor.go<br/>Package: processor → orchestrator<br/>Struct: ParentJobExecutor → ParentJobOrchestrator<br/>Constructor: NewParentJobExecutor → NewParentJobOrchestrator<br/>Receiver: (e *ParentJobExecutor) → (o *ParentJobOrchestrator)
+    Dev->>New: Create job_orchestrator.go
+    Note right of New: Copy from parent_job_executor.go<br/>Package: processor → orchestrator<br/>Struct: ParentJobExecutor → JobOrchestrator<br/>Constructor: NewParentJobExecutor → NewJobOrchestrator<br/>Receiver: (e *ParentJobExecutor) → (o *JobOrchestrator)
     
-    Dev->>Interface: Update ParentJobOrchestrator interface
+    Dev->>Interface: Update JobOrchestrator interface
     Note right of Interface: Match implementation signature:<br/>StartMonitoring(ctx, job *JobModel)<br/>SubscribeToChildStatusChanges()<br/>Remove speculative methods
     
     Dev->>Build: Compile new orchestrator file
-    Build-->>Dev: ✓ parent_job_orchestrator.go compiles successfully
+    Build-->>Dev: ✓ job_orchestrator.go compiles successfully
     
     Note over Dev,Build: Phase 2: Update Import Paths
     
     Dev->>App: Update imports and initialization
-    Note right of App: Remove: processor import<br/>Add: orchestrator import<br/>orchestrator.NewParentJobOrchestrator()<br/>Variable: parentJobExecutor → parentJobOrchestrator
+    Note right of App: Remove: processor import<br/>Add: orchestrator import<br/>orchestrator.NewJobOrchestrator()<br/>Variable: parentJobExecutor → jobOrchestrator
     
     Dev->>JobExec: Update imports and field references
-    Note right of JobExec: Remove: processor import<br/>Add: orchestrator import<br/>Field: parentJobOrchestrator<br/>Call: o.parentJobOrchestrator.StartMonitoring()
+    Note right of JobExec: Remove: processor import<br/>Add: orchestrator import<br/>Field: jobOrchestrator<br/>Call: o.jobOrchestrator.StartMonitoring()
     
     Dev->>Build: Build application
     Build-->>Dev: ✓ Application compiles successfully
@@ -274,7 +274,7 @@ sequenceDiagram
     Build-->>Dev: ✓ All tests pass
     
     Dev->>App: Start application
-    App->>New: Initialize ParentJobOrchestrator
+    App->>New: Initialize JobOrchestrator
     App->>New: Subscribe to child status changes
     App-->>Dev: ✓ "Parent job orchestrator created"
     
@@ -293,14 +293,14 @@ sequenceDiagram
 
 ## Proposed File Changes
 
-### internal\jobs\orchestrator\parent_job_orchestrator.go(NEW)
+### internal\jobs\orchestrator\job_orchestrator.go(NEW)
 
 References: 
 
 - internal\jobs\processor\parent_job_executor.go(DELETE)
 - internal\jobs\orchestrator\interfaces.go(MODIFY)
 
-Create new ParentJobOrchestrator file by copying from `internal/jobs/processor/parent_job_executor.go` with the following transformations:
+Create new JobOrchestrator file by copying from `internal/jobs/processor/parent_job_executor.go` with the following transformations:
 
 **Package Declaration:**
 - Change: `package processor` → `package orchestrator`
@@ -316,23 +316,23 @@ Create new ParentJobOrchestrator file by copying from `internal/jobs/processor/p
 - No import changes needed (all use internal packages)
 
 **Struct Rename:**
-- Change: `type ParentJobExecutor struct` → `type ParentJobOrchestrator struct`
+- Change: `type ParentJobExecutor struct` → `type JobOrchestrator struct`
 - Keep all 3 fields unchanged:
   - jobMgr *jobs.Manager
   - eventService interfaces.EventService
   - logger arbor.ILogger
-- Update struct comment: "ParentJobOrchestrator monitors parent job progress and aggregates child job statistics. It runs in background goroutines (not via queue) and publishes real-time progress events."
+- Update struct comment: "JobOrchestrator monitors parent job progress and aggregates child job statistics. It runs in background goroutines (not via queue) and publishes real-time progress events."
 
 **Constructor Rename:**
-- Change: `func NewParentJobExecutor(...)` → `func NewParentJobOrchestrator(...)`
-- Change return type: `*ParentJobExecutor` → `*ParentJobOrchestrator`
-- Update struct initialization: `executor := &ParentJobExecutor{...}` → `orchestrator := &ParentJobOrchestrator{...}`
+- Change: `func NewParentJobExecutor(...)` → `func NewJobOrchestrator(...)`
+- Change return type: `*ParentJobExecutor` → `*JobOrchestrator`
+- Update struct initialization: `executor := &ParentJobExecutor{...}` → `orchestrator := &JobOrchestrator{...}`
 - Update return statement: `return executor` → `return orchestrator`
-- Update comment: "NewParentJobOrchestrator creates a new parent job orchestrator for monitoring parent job lifecycle and aggregating child job progress"
+- Update comment: "NewJobOrchestrator creates a new parent job orchestrator for monitoring parent job lifecycle and aggregating child job progress"
 - Keep all 3 parameters unchanged (same order, same types)
 
 **Method Receivers (All Methods):**
-- Change all method receivers: `func (e *ParentJobExecutor)` → `func (o *ParentJobOrchestrator)`
+- Change all method receivers: `func (e *ParentJobExecutor)` → `func (o *JobOrchestrator)`
 - Rename receiver variable from `e` to `o` for consistency (orchestrator convention)
 - Update all references to `e.` → `o.` within all method bodies
 - This applies to:
@@ -349,11 +349,11 @@ Create new ParentJobOrchestrator file by copying from `internal/jobs/processor/p
 
 **Comments:**
 - Update all comments referencing "executor" → "orchestrator"
-- Update all comments referencing "ParentJobExecutor" → "ParentJobOrchestrator"
+- Update all comments referencing "ParentJobExecutor" → "JobOrchestrator"
 - Keep all existing detailed comments (especially in monitorChildJobs method)
 - Update method comment for StartMonitoring: "StartMonitoring starts monitoring a parent job in a separate goroutine. This is the primary entry point for parent job orchestration - NOT via queue. Returns immediately after starting the goroutine."
 - Update method comment for validate: "validate validates that the job model is compatible with this orchestrator"
-- Update subscription log message (line 402): "ParentJobOrchestrator subscribed to child job status changes and document_saved events"
+- Update subscription log message (line 402): "JobOrchestrator subscribed to child job status changes and document_saved events"
 
 **Log Messages:**
 - Update log messages: "executor" → "orchestrator" where referring to this component
@@ -368,7 +368,7 @@ Create new ParentJobOrchestrator file by copying from `internal/jobs/processor/p
 - The interface in orchestrator/interfaces.go should be updated to match implementation (not part of this file)
 
 **Validation:**
-- Verify file compiles independently: `go build internal/jobs/orchestrator/parent_job_orchestrator.go`
+- Verify file compiles independently: `go build internal/jobs/orchestrator/job_orchestrator.go`
 - Verify all method signatures are correct
 - Total lines: ~510 (same as original)
 - Verify all 3 dependencies are properly injected via constructor
@@ -382,11 +382,11 @@ References:
 - internal\jobs\processor\parent_job_executor.go(DELETE)
 - internal\jobs\executor\job_executor.go(MODIFY)
 
-Update ParentJobOrchestrator interface to match the actual implementation signature.
+Update JobOrchestrator interface to match the actual implementation signature.
 
 **Current Interface (from ARCH-003):**
 ```go
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     StartMonitoring(ctx context.Context, parentJobID string) error
     StopMonitoring(parentJobID string) error
     GetMonitoringStatus(parentJobID string) bool
@@ -395,7 +395,7 @@ type ParentJobOrchestrator interface {
 
 **Updated Interface:**
 ```go
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     StartMonitoring(ctx context.Context, job *models.JobModel)
     SubscribeToChildStatusChanges()
 }
@@ -422,24 +422,24 @@ type ParentJobOrchestrator interface {
    - Should be part of the interface for completeness
 
 **Updated Interface Comment:**
-- Update comment: "ParentJobOrchestrator monitors parent job progress and aggregates child job statistics. It runs in background goroutines (not via queue) and publishes real-time progress events. Orchestrators subscribe to child job status changes for real-time tracking."
+- Update comment: "JobOrchestrator monitors parent job progress and aggregates child job statistics. It runs in background goroutines (not via queue) and publishes real-time progress events. Orchestrators subscribe to child job status changes for real-time tracking."
 
 **Import Updates:**
 - Add import: `"github.com/ternarybob/quaero/internal/models"` (needed for JobModel type)
 
 **Validation:**
 - Verify interface compiles with new signature
-- Verify ParentJobOrchestrator implementation satisfies updated interface
+- Verify JobOrchestrator implementation satisfies updated interface
 - Verify job_executor.go usage matches new interface signature
 
 ### internal\app\app.go(MODIFY)
 
 References: 
 
-- internal\jobs\orchestrator\parent_job_orchestrator.go(NEW)
+- internal\jobs\orchestrator\job_orchestrator.go(NEW)
 - internal\jobs\executor\job_executor.go(MODIFY)
 
-Update app.go to import and use the new orchestrator package for ParentJobOrchestrator.
+Update app.go to import and use the new orchestrator package for JobOrchestrator.
 
 **Import Section Updates (line 22):**
 
@@ -450,12 +450,12 @@ Remove processor import (no longer needed after this migration):
 
 Add orchestrator import:
 ```go
-"github.com/ternarybob/quaero/internal/jobs/orchestrator"  // NEW - for ParentJobOrchestrator
+"github.com/ternarybob/quaero/internal/jobs/orchestrator"  // NEW - for JobOrchestrator
 ```
 
 **Note:** After this change, processor import should be completely removed since parent_job_executor.go was the last file in processor/ directory.
 
-**ParentJobOrchestrator Initialization (lines 311-319):**
+**JobOrchestrator Initialization (lines 311-319):**
 
 Replace:
 ```go
@@ -475,7 +475,7 @@ With:
 // Create parent job orchestrator for monitoring parent job lifecycle
 // NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 // to avoid blocking queue workers with long-running monitoring loops
-parentJobOrchestrator := orchestrator.NewParentJobOrchestrator(
+jobOrchestrator := orchestrator.NewJobOrchestrator(
     jobMgr,
     a.EventService,
     a.Logger,
@@ -495,18 +495,18 @@ a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobExecutor, a.Logger)
 With:
 ```go
 // 6.9. Initialize JobExecutor for job definition execution
-// Pass parentJobOrchestrator so it can start monitoring goroutines for crawler jobs
-a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobOrchestrator, a.Logger)
+// Pass jobOrchestrator so it can start monitoring goroutines for crawler jobs
+a.JobExecutor = executor.NewJobExecutor(jobMgr, jobOrchestrator, a.Logger)
 ```
 
 **Variable Naming:**
-- Changed from `parentJobExecutor` to `parentJobOrchestrator` for clarity and consistency
-- Constructor call: `processor.NewParentJobExecutor()` → `orchestrator.NewParentJobOrchestrator()`
+- Changed from `parentJobExecutor` to `jobOrchestrator` for clarity and consistency
+- Constructor call: `processor.NewParentJobExecutor()` → `orchestrator.NewJobOrchestrator()`
 - All 3 parameters remain in same order (no changes to parameter list)
 
 **Comment Updates:**
 - "Create parent job executor" → "Create parent job orchestrator"
-- "Pass parentJobExecutor" → "Pass parentJobOrchestrator"
+- "Pass parentJobExecutor" → "Pass jobOrchestrator"
 - Keep note about NOT registering with JobProcessor (still accurate)
 
 **Log Message:**
@@ -515,7 +515,7 @@ a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobOrchestrator, a.Logger)
 
 **Validation:**
 - Verify application compiles successfully
-- Verify ParentJobOrchestrator is initialized correctly
+- Verify JobOrchestrator is initialized correctly
 - Verify it's passed to JobExecutor correctly
 - Run application and check startup logs for "Parent job orchestrator created (runs in background goroutines, not via queue)"
 - Verify parent job monitoring works correctly via UI or API
@@ -524,9 +524,9 @@ a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobOrchestrator, a.Logger)
 
 References: 
 
-- internal\jobs\orchestrator\parent_job_orchestrator.go(NEW)
+- internal\jobs\orchestrator\job_orchestrator.go(NEW)
 
-Update job_executor.go to import and use the new orchestrator package for ParentJobOrchestrator.
+Update job_executor.go to import and use the new orchestrator package for JobOrchestrator.
 
 **Import Section Updates (line 11):**
 
@@ -537,7 +537,7 @@ Remove processor import:
 
 Add orchestrator import:
 ```go
-"github.com/ternarybob/quaero/internal/jobs/orchestrator"  // NEW - for ParentJobOrchestrator
+"github.com/ternarybob/quaero/internal/jobs/orchestrator"  // NEW - for JobOrchestrator
 ```
 
 **Field Declaration Update (line 20):**
@@ -549,7 +549,7 @@ parentJobExecutor *processor.ParentJobExecutor
 
 With:
 ```go
-parentJobOrchestrator *orchestrator.ParentJobOrchestrator
+jobOrchestrator *orchestrator.JobOrchestrator
 ```
 
 **Constructor Parameter Update (line 25):**
@@ -561,7 +561,7 @@ func NewJobExecutor(jobManager *jobs.Manager, parentJobExecutor *processor.Paren
 
 With:
 ```go
-func NewJobExecutor(jobManager *jobs.Manager, parentJobOrchestrator *orchestrator.ParentJobOrchestrator, logger arbor.ILogger) *JobExecutor {
+func NewJobExecutor(jobManager *jobs.Manager, jobOrchestrator *orchestrator.JobOrchestrator, logger arbor.ILogger) *JobExecutor {
 ```
 
 **Constructor Body Update (line 29):**
@@ -581,7 +581,7 @@ With:
 return &JobExecutor{
     stepExecutors:        make(map[string]JobManager),
     jobManager:           jobManager,
-    parentJobOrchestrator: parentJobOrchestrator,
+    jobOrchestrator: jobOrchestrator,
     logger:               logger,
 }
 ```
@@ -597,33 +597,33 @@ e.parentJobExecutor.StartMonitoring(ctx, parentJobModel)
 With:
 ```go
 // Start monitoring in background goroutine
-e.parentJobOrchestrator.StartMonitoring(ctx, parentJobModel)
+e.jobOrchestrator.StartMonitoring(ctx, parentJobModel)
 ```
 
 **Comment Updates:**
 
-Update comments that reference "ParentJobExecutor" to "ParentJobOrchestrator":
+Update comments that reference "ParentJobExecutor" to "JobOrchestrator":
 
-- Line 335: "leaving in running state for ParentJobOrchestrator to monitor child jobs"
-- Line 375: "NOTE: Do NOT set finished_at for crawler jobs - ParentJobOrchestrator will handle this"
+- Line 335: "leaving in running state for JobOrchestrator to monitor child jobs"
+- Line 375: "NOTE: Do NOT set finished_at for crawler jobs - JobOrchestrator will handle this"
 
 **Variable Naming:**
-- Changed from `parentJobExecutor` to `parentJobOrchestrator` throughout
-- Field name: `parentJobExecutor` → `parentJobOrchestrator`
-- Parameter name: `parentJobExecutor` → `parentJobOrchestrator`
+- Changed from `parentJobExecutor` to `jobOrchestrator` throughout
+- Field name: `parentJobExecutor` → `jobOrchestrator`
+- Parameter name: `parentJobExecutor` → `jobOrchestrator`
 - All references updated consistently
 
 **Validation:**
 - Verify file compiles successfully
-- Verify JobExecutor constructor accepts ParentJobOrchestrator parameter
+- Verify JobExecutor constructor accepts JobOrchestrator parameter
 - Verify StartMonitoring call works correctly
-- Verify all references to parentJobOrchestrator are correct
+- Verify all references to jobOrchestrator are correct
 - Run application and verify job definition execution works correctly
 - Verify parent job monitoring starts correctly for crawler jobs
 
 ### internal\jobs\worker\job_processor.go(MODIFY)
 
-Update comments to use "ParentJobOrchestrator" terminology.
+Update comments to use "JobOrchestrator" terminology.
 
 **Comment Update (line 221):**
 
@@ -634,7 +634,7 @@ Replace:
 
 With:
 ```go
-// For parent jobs, do NOT mark as completed here - ParentJobOrchestrator will handle completion
+// For parent jobs, do NOT mark as completed here - JobOrchestrator will handle completion
 ```
 
 **Comment Update (line 227):**
@@ -646,12 +646,12 @@ Replace:
 
 With:
 ```go
-// Parent job remains in "running" state and will be re-enqueued by ParentJobOrchestrator
+// Parent job remains in "running" state and will be re-enqueued by JobOrchestrator
 ```
 
 **No Code Changes:**
 - Only comment updates
-- No import changes needed (file doesn't import ParentJobOrchestrator)
+- No import changes needed (file doesn't import JobOrchestrator)
 - No functional changes
 
 **Purpose:**
@@ -661,7 +661,7 @@ With:
 
 ### internal\interfaces\event_service.go(MODIFY)
 
-Update comments to use "ParentJobOrchestrator" terminology.
+Update comments to use "JobOrchestrator" terminology.
 
 **Comment Update (line 166):**
 
@@ -672,7 +672,7 @@ Replace:
 
 With:
 ```go
-// Used by ParentJobOrchestrator to track child job progress in real-time.
+// Used by JobOrchestrator to track child job progress in real-time.
 ```
 
 **Comment Update (line 177):**
@@ -684,12 +684,12 @@ Replace:
 
 With:
 ```go
-// Used by ParentJobOrchestrator to track document count for parent jobs in real-time.
+// Used by JobOrchestrator to track document count for parent jobs in real-time.
 ```
 
 **No Code Changes:**
 - Only comment updates in event documentation
-- No import changes needed (file doesn't import ParentJobOrchestrator)
+- No import changes needed (file doesn't import JobOrchestrator)
 - No functional changes
 
 **Purpose:**
@@ -699,7 +699,7 @@ With:
 
 ### internal\jobs\manager.go(MODIFY)
 
-Update comment to use "ParentJobOrchestrator" terminology.
+Update comment to use "JobOrchestrator" terminology.
 
 **Comment Update (line 1687):**
 
@@ -710,12 +710,12 @@ Replace:
 
 With:
 ```go
-// This is used by the ParentJobOrchestrator to monitor child job progress
+// This is used by the JobOrchestrator to monitor child job progress
 ```
 
 **No Code Changes:**
 - Only comment update in method documentation
-- No import changes needed (file doesn't import ParentJobOrchestrator)
+- No import changes needed (file doesn't import JobOrchestrator)
 - No functional changes
 
 **Purpose:**
@@ -725,7 +725,7 @@ With:
 
 ### test\api\places_job_document_test.go(MODIFY)
 
-Update comment to use "ParentJobOrchestrator" terminology.
+Update comment to use "JobOrchestrator" terminology.
 
 **Comment Update (line 379):**
 
@@ -736,12 +736,12 @@ Replace:
 
 With:
 ```go
-// This is set by the event-driven ParentJobOrchestrator when EventDocumentSaved is published
+// This is set by the event-driven JobOrchestrator when EventDocumentSaved is published
 ```
 
 **No Code Changes:**
 - Only comment update in test documentation
-- No import changes needed (test doesn't import ParentJobOrchestrator)
+- No import changes needed (test doesn't import JobOrchestrator)
 - No functional changes to test logic
 
 **Purpose:**
@@ -797,7 +797,7 @@ Update the orchestrator directory listing:
 ```markdown
 - `internal/jobs/orchestrator/` - Parent job orchestrator (monitoring layer)
   - ✅ `interfaces.go` (ARCH-003)
-  - ✅ `parent_job_orchestrator.go` (ARCH-007)
+  - ✅ `job_orchestrator.go` (ARCH-007)
 ```
 
 Update the old directories listing:
@@ -822,14 +822,14 @@ Update the migration progress:
 
 **Section to Update: "Core Components"**
 
-Update to reflect that ParentJobOrchestrator is now in orchestrator/ package:
+Update to reflect that JobOrchestrator is now in orchestrator/ package:
 
 ```markdown
 **Core Components:**
 - `JobProcessor` - `internal/jobs/worker/job_processor.go` (ARCH-006)
   - Routes jobs from queue to registered workers
   - Manages worker pool lifecycle (Start/Stop)
-- `ParentJobOrchestrator` - `internal/jobs/orchestrator/parent_job_orchestrator.go` (ARCH-007)
+- `JobOrchestrator` - `internal/jobs/orchestrator/job_orchestrator.go` (ARCH-007)
   - Monitors parent job progress in background goroutines
   - Aggregates child job statistics
   - Publishes real-time progress events
@@ -837,9 +837,9 @@ Update to reflect that ParentJobOrchestrator is now in orchestrator/ package:
 
 **Implementation Notes:**
 - Update migration status to show ARCH-007 complete
-- Add checkmark (✅) for parent_job_orchestrator.go
+- Add checkmark (✅) for job_orchestrator.go
 - Mark processor/ directory as EMPTY (all files migrated)
-- Add ParentJobOrchestrator to Core Components section
+- Add JobOrchestrator to Core Components section
 - Clarify that orchestrator runs in background goroutines (not via queue)
 
 ### docs\architecture\MANAGER_WORKER_ARCHITECTURE.md(MODIFY)
@@ -863,7 +863,7 @@ Change the section title and content to reflect ARCH-007 completion:
   - ✅ `agent_worker.go` - Migrated from processor/ (ARCH-006)
   - ✅ `job_processor.go` - Migrated from processor/ (ARCH-006)
 - ✅ `internal/jobs/orchestrator/` - Created with interfaces.go (ARCH-003)
-  - ✅ `parent_job_orchestrator.go` - Migrated from processor/ (ARCH-007)
+  - ✅ `job_orchestrator.go` - Migrated from processor/ (ARCH-007)
 
 **Old Directories (Still Active):**
 - `internal/jobs/executor/` - Contains 6 remaining implementation files:
@@ -897,22 +897,22 @@ Add a new subsection after "Remaining Worker Files Migrated (ARCH-006)":
 
 **File Moved from processor/ to orchestrator/:**
 
-1. **ParentJobOrchestrator** (`parent_job_orchestrator.go`)
+1. **JobOrchestrator** (`job_orchestrator.go`)
    - Old: `internal/jobs/processor/parent_job_executor.go`
-   - New: `internal/jobs/orchestrator/parent_job_orchestrator.go`
-   - Struct: `ParentJobExecutor` → `ParentJobOrchestrator`
-   - Constructor: `NewParentJobExecutor()` → `NewParentJobOrchestrator()`
-   - Receiver: `func (e *ParentJobExecutor)` → `func (o *ParentJobOrchestrator)`
+   - New: `internal/jobs/orchestrator/job_orchestrator.go`
+   - Struct: `ParentJobExecutor` → `JobOrchestrator`
+   - Constructor: `NewParentJobExecutor()` → `NewJobOrchestrator()`
+   - Receiver: `func (e *ParentJobExecutor)` → `func (o *JobOrchestrator)`
    - Dependencies: JobManager, EventService, Logger (3 dependencies)
    - Purpose: Monitors parent job progress in background goroutines, aggregates child job statistics, publishes real-time events
 
 **Transformations Applied:**
 
 - **Package**: `processor` → `orchestrator`
-- **Struct**: `ParentJobExecutor` → `ParentJobOrchestrator`
-- **Constructor**: `NewParentJobExecutor()` → `NewParentJobOrchestrator()`
-- **Receiver**: `func (e *ParentJobExecutor)` → `func (o *ParentJobOrchestrator)`
-- **Interface**: Updated `ParentJobOrchestrator` interface to match implementation signature
+- **Struct**: `ParentJobExecutor` → `JobOrchestrator`
+- **Constructor**: `NewParentJobExecutor()` → `NewJobOrchestrator()`
+- **Receiver**: `func (e *ParentJobExecutor)` → `func (o *JobOrchestrator)`
+- **Interface**: Updated `JobOrchestrator` interface to match implementation signature
 
 **Key Features Preserved:**
 
@@ -928,16 +928,16 @@ Add a new subsection after "Remaining Worker Files Migrated (ARCH-006)":
 
 **Interface Updates:**
 
-- Updated `ParentJobOrchestrator` interface in `orchestrator/interfaces.go` to match implementation:
+- Updated `JobOrchestrator` interface in `orchestrator/interfaces.go` to match implementation:
   - `StartMonitoring(ctx context.Context, job *models.JobModel)` - Takes full job model (not just ID)
   - `SubscribeToChildStatusChanges()` - Sets up event subscriptions
   - Removed speculative methods: `StopMonitoring()`, `GetMonitoringStatus()` (not implemented)
 
 **Import Path Updates:**
 
-- `internal/app/app.go` (lines 22, 314, 319, 377) - Updated to import and use `orchestrator.NewParentJobOrchestrator()`
+- `internal/app/app.go` (lines 22, 314, 319, 377) - Updated to import and use `orchestrator.NewJobOrchestrator()`
 - `internal/jobs/executor/job_executor.go` (lines 11, 20, 25, 29, 370) - Updated field, parameter, and method call
-- Variable renamed: `parentJobExecutor` → `parentJobOrchestrator`
+- Variable renamed: `parentJobExecutor` → `jobOrchestrator`
 
 **Comment Updates:**
 

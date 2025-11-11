@@ -44,7 +44,7 @@ Changes not staged for commit:
 
 Added error handling for both `EventService.Subscribe()` calls in `SubscribeToChildStatusChanges()`:
 
-**Location:** `internal/jobs/orchestrator/parent_job_orchestrator.go:312-363`
+**Location:** `internal/jobs/orchestrator/job_orchestrator.go:312-363`
 
 **Before:**
 ```go
@@ -104,28 +104,28 @@ Build: 11-11-19-43-37
 
 ---
 
-## Comment 3: Concrete struct is unexported despite plan specifying struct rename to ParentJobOrchestrator
+## Comment 3: Concrete struct is unexported despite plan specifying struct rename to JobOrchestrator
 
 ### Status: ✅ JUSTIFIED (Pattern Retained by Design)
 
 **Current Implementation:**
 ```go
 // Lowercase struct (unexported implementation detail)
-type parentJobOrchestrator struct {
+type jobOrchestrator struct {
     jobMgr       *jobs.Manager
     eventService interfaces.EventService
     logger       arbor.ILogger
 }
 
 // Uppercase interface (exported API)
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     StartMonitoring(ctx context.Context, job *models.JobModel)
     SubscribeToChildStatusChanges()
 }
 
 // Constructor returns interface type
-func NewParentJobOrchestrator(...) ParentJobOrchestrator {
-    orchestrator := &parentJobOrchestrator{...}
+func NewJobOrchestrator(...) JobOrchestrator {
+    orchestrator := &jobOrchestrator{...}
     return orchestrator
 }
 ```
@@ -133,8 +133,8 @@ func NewParentJobOrchestrator(...) ParentJobOrchestrator {
 **Rationale for Lowercase Struct Pattern:**
 
 1. **Avoids Interface/Struct Name Collision:**
-   - Attempting to name both the struct and interface `ParentJobOrchestrator` causes Go compilation error
-   - Error: "ParentJobOrchestrator redeclared in this block"
+   - Attempting to name both the struct and interface `JobOrchestrator` causes Go compilation error
+   - Error: "JobOrchestrator redeclared in this block"
    - This issue was encountered and resolved in Step 2
 
 2. **Follows Go Best Practices:**
@@ -161,8 +161,8 @@ func NewParentJobOrchestrator(...) ParentJobOrchestrator {
 **Alternative Considered (Uppercase Struct):**
 ```go
 // Would require different interface name to avoid collision
-type ParentJobOrchestratorImpl struct { ... }  // Verbose, adds noise
-type ParentJobOrchestrator interface { ... }    // OK
+type JobOrchestratorImpl struct { ... }  // Verbose, adds noise
+type JobOrchestrator interface { ... }    // OK
 ```
 
 **Recommendation:**
@@ -200,7 +200,7 @@ Using version: 0.1.1969, build: 11-11-19-43-37
 ```
 
 **Files Modified in Verification:**
-1. `internal/jobs/orchestrator/parent_job_orchestrator.go`
+1. `internal/jobs/orchestrator/job_orchestrator.go`
    - Added error handling for EventJobStatusChange subscription (lines 312, 362-364)
    - Added error handling for EventDocumentSaved subscription (lines 367, 403-406)
 
@@ -229,7 +229,7 @@ Using version: 0.1.1969, build: 11-11-19-43-37
 ## Next Actions
 
 **For Deployment:**
-1. Commit changes with message: "fix: Add error handling for event subscriptions in ParentJobOrchestrator (ARCH-007 verification)"
+1. Commit changes with message: "fix: Add error handling for event subscriptions in JobOrchestrator (ARCH-007 verification)"
 2. Run full test suite (unit, API, UI tests)
 3. Deploy to test environment
 4. Verify runtime behavior with WebSocket events

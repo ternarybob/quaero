@@ -6,7 +6,7 @@
 Removed the deprecated file: `internal/jobs/processor/parent_job_executor.go`
 
 **Rationale:**
-- All functionality migrated to `internal/jobs/orchestrator/parent_job_orchestrator.go`
+- All functionality migrated to `internal/jobs/orchestrator/job_orchestrator.go`
 - All references updated in previous steps (Steps 1-5)
 - Breaking changes acceptable per requirements
 - No backward compatibility needed
@@ -55,7 +55,7 @@ MCP server built successfully
 ```
 internal/jobs/
 ├── orchestrator/
-│   ├── parent_job_orchestrator.go  ✅ NEW
+│   ├── job_orchestrator.go  ✅ NEW
 │   └── interfaces.go               ✅ UPDATED
 ├── processor/
 │   └── parent_job_executor.go      ❌ DELETED

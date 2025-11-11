@@ -539,7 +539,7 @@ Update to reflect that AgentWorker and JobProcessor are now in worker/ package:
   - Implementations: `CrawlerManager`, `DatabaseMaintenanceManager`, `AgentManager` (ARCH-004)
 - `JobWorker` interface - `internal/jobs/worker/interfaces.go`
   - Implementations: `CrawlerWorker` (ARCH-005), `AgentWorker` (ARCH-006)
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+- `JobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
 
 **Core Components:**
 - `JobProcessor` - `internal/jobs/worker/job_processor.go` (ARCH-006)

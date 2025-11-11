@@ -163,7 +163,7 @@ const (
 
 	// EventJobStatusChange is published when any job changes status (pending → running → completed/failed/cancelled).
 	// Published from Manager.UpdateJobStatus after successful database update.
-	// Used by ParentJobOrchestrator to track child job progress in real-time.
+	// Used by JobOrchestrator to track child job progress in real-time.
 	// Payload structure: map[string]interface{} with keys:
 	//   - job_id: string (ID of the job that changed status)
 	//   - status: string (new status: "pending", "running", "completed", "failed", "cancelled")
@@ -174,7 +174,7 @@ const (
 
 	// EventDocumentSaved is published when a child job successfully saves a document.
 	// Published from DocumentPersister.SaveCrawledDocument after successful document persistence.
-	// Used by ParentJobOrchestrator to track document count for parent jobs in real-time.
+	// Used by JobOrchestrator to track document count for parent jobs in real-time.
 	// Payload structure: map[string]interface{} with keys:
 	//   - job_id: string (child job ID that saved the document)
 	//   - parent_job_id: string (parent job ID to update)

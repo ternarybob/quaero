@@ -19,7 +19,7 @@ Created new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job
 
 **2. Interface Definitions (Lines 13-39):**
 - Copied JobManager interface from original (lines 13-25)
-- Copied ParentJobOrchestrator interface to avoid import cycle (lines 27-39)
+- Copied JobOrchestrator interface to avoid import cycle (lines 27-39)
 - **Key Decision**: Defined interfaces locally to avoid import cycle between jobs/ and orchestrator/ packages
 
 **3. Struct Definition (Lines 41-47):**
@@ -28,13 +28,13 @@ Created new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job
 - Updated comment: "JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate JobManagers"
 - Field type changes:
   - `stepExecutors map[string]JobManager` (no package prefix needed)
-  - `parentJobOrchestrator ParentJobOrchestrator` (local interface, not orchestrator.ParentJobOrchestrator)
+  - `jobOrchestrator JobOrchestrator` (local interface, not orchestrator.JobOrchestrator)
 
 **4. Constructor (Lines 49-57):**
 - OLD: `func NewJobExecutor(...) *JobExecutor`
 - NEW: `func NewJobDefinitionOrchestrator(...) *JobDefinitionOrchestrator`
 - Updated comment: "NewJobDefinitionOrchestrator creates a new job definition orchestrator for routing job definition steps to managers"
-- Parameter type: `ParentJobOrchestrator` (local interface)
+- Parameter type: `JobOrchestrator` (local interface)
 - Updated return struct: `&JobExecutor{...}` → `&JobDefinitionOrchestrator{...}`
 
 **5. Method Receivers:**
@@ -50,7 +50,7 @@ Created new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job
 **6. Import Changes:**
 - Removed: `"github.com/ternarybob/quaero/internal/jobs/orchestrator"` (to avoid cycle)
 - Kept: Standard Go imports (context, fmt, time, uuid, arbor, models)
-- **Import Cycle Resolution**: Defined ParentJobOrchestrator interface locally instead of importing orchestrator package
+- **Import Cycle Resolution**: Defined JobOrchestrator interface locally instead of importing orchestrator package
 
 **7. Comments:**
 - Line 41: Updated struct comment to use "JobDefinitionOrchestrator"
@@ -74,7 +74,7 @@ go build -o nul ./cmd/quaero
 
 **Import Cycle Resolution Strategy:**
 The original executor/job_executor.go didn't have import cycles because it was in a separate package. Moving to jobs/ package created a cycle:
-- jobs/ → orchestrator/ (for ParentJobOrchestrator)
+- jobs/ → orchestrator/ (for JobOrchestrator)
 - orchestrator/ → jobs/ (for jobs.Manager, jobs.ChildJobStats)
 
 **Solution**: Define interface types locally in job_definition_orchestrator.go. Manager and orchestrator implementations automatically satisfy these interfaces without needing to import them (duck typing in Go).
@@ -94,7 +94,7 @@ The original executor/job_executor.go didn't have import cycles because it was i
 
 **Interface Design:**
 ✅ JobManager interface defined locally (lines 13-25)
-✅ ParentJobOrchestrator interface defined locally (lines 27-39)
+✅ JobOrchestrator interface defined locally (lines 27-39)
 ✅ Both interfaces match their original definitions exactly
 ✅ Import cycle successfully avoided
 ✅ Duck typing principle utilized correctly
@@ -112,22 +112,22 @@ The original executor/job_executor.go didn't have import cycles because it was i
 ✅ No references to "JobExecutor" or "executor" remain (except in historical comments)
 
 **Functional Integrity:**
-✅ All 4 fields preserved: stepExecutors, jobManager, parentJobOrchestrator, logger
+✅ All 4 fields preserved: stepExecutors, jobManager, jobOrchestrator, logger
 ✅ Job definition execution logic intact (66-453)
 ✅ Parent job creation logic preserved
 ✅ Metadata persistence logic preserved
 ✅ Error tolerance checking logic preserved
 ✅ Crawler job detection logic preserved
-✅ ParentJobOrchestrator integration preserved
+✅ JobOrchestrator integration preserved
 ✅ Error handling preserved throughout
 ✅ Logging messages consistent
 ✅ Total functional lines match original (467)
 
 **Architectural Correctness:**
 ✅ Lives at jobs/ root as planned (not in subdirectory)
-✅ Distinct from ParentJobOrchestrator (different responsibilities)
+✅ Distinct from JobOrchestrator (different responsibilities)
 ✅ JobDefinitionOrchestrator: Routes job definition steps to managers
-✅ ParentJobOrchestrator: Monitors parent job progress
+✅ JobOrchestrator: Monitors parent job progress
 ✅ Clear separation of concerns maintained
 
 **Quality Score:** 10/10

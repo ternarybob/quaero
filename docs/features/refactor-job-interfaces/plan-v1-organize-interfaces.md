@@ -28,7 +28,7 @@ Create a new file to consolidate all job-related interfaces from the three separ
    - Methods: `CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)` and `GetManagerType() string`
    - Documentation comments explaining the interface purpose and usage
 
-2. **ParentJobOrchestrator interface** - Moved from `internal/jobs/orchestrator/interfaces.go`
+2. **JobOrchestrator interface** - Moved from `internal/jobs/orchestrator/interfaces.go`
    - Methods: `StartMonitoring(ctx context.Context, job *models.JobModel)` and `SubscribeToChildStatusChanges()`
    - Documentation comments explaining background monitoring and event subscription
 
@@ -48,7 +48,7 @@ Delete this file as the JobManager interface has been moved to `internal/interfa
 
 ### internal\jobs\orchestrator\interfaces.go(DELETE)
 
-Delete this file as the ParentJobOrchestrator interface has been moved to `internal/interfaces/job_interfaces.go`. The orchestrator implementation will now reference the centralized interface.
+Delete this file as the JobOrchestrator interface has been moved to `internal/interfaces/job_interfaces.go`. The orchestrator implementation will now reference the centralized interface.
 
 ### internal\jobs\worker\interfaces.go(DELETE)
 
@@ -64,7 +64,7 @@ Remove the duplicate local interface definitions and update to use centralized i
 
 1. **Remove duplicate interfaces** (lines 13-27):
    - Delete the local `JobManager` interface definition (lines 13-19)
-   - Delete the local `ParentJobOrchestrator` interface definition (lines 21-27)
+   - Delete the local `JobOrchestrator` interface definition (lines 21-27)
    - Remove the comments explaining these are local copies to avoid import cycles
 
 2. **Update imports**:
@@ -73,10 +73,10 @@ Remove the duplicate local interface definitions and update to use centralized i
 
 3. **Update struct field types** (lines 29-35):
    - Change `stepExecutors map[string]JobManager` to `stepExecutors map[string]interfaces.JobManager`
-   - Change `parentJobOrchestrator ParentJobOrchestrator` to `parentJobOrchestrator interfaces.ParentJobOrchestrator`
+   - Change `jobOrchestrator JobOrchestrator` to `jobOrchestrator interfaces.JobOrchestrator`
 
 4. **Update function signatures**:
-   - `NewJobDefinitionOrchestrator` parameter: Change `parentJobOrchestrator ParentJobOrchestrator` to `parentJobOrchestrator interfaces.ParentJobOrchestrator`
+   - `NewJobDefinitionOrchestrator` parameter: Change `jobOrchestrator JobOrchestrator` to `jobOrchestrator interfaces.JobOrchestrator`
    - `RegisterStepExecutor` parameter: Change `mgr JobManager` to `mgr interfaces.JobManager`
 
 No changes to method implementations are required - only type references need updating.
@@ -95,10 +95,10 @@ Update imports and type references to use centralized interfaces:
    - Keep existing imports for other dependencies
 
 2. **Update struct field type** (line 25):
-   - Change `parentJobOrchestrator orchestrator.ParentJobOrchestrator` to `parentJobOrchestrator interfaces.ParentJobOrchestrator`
+   - Change `jobOrchestrator orchestrator.JobOrchestrator` to `jobOrchestrator interfaces.JobOrchestrator`
 
 3. **Update function signature** (line 30):
-   - Change parameter type from `orchestrator.ParentJobOrchestrator` to `interfaces.ParentJobOrchestrator`
+   - Change parameter type from `orchestrator.JobOrchestrator` to `interfaces.JobOrchestrator`
 
 No changes to method implementations are required.
 
@@ -135,8 +135,8 @@ Update imports to remove now-deleted interface packages:
 
 1. **Remove unnecessary imports** (lines 20-22):
    - The imports `"github.com/ternarybob/quaero/internal/jobs/manager"`, `"github.com/ternarybob/quaero/internal/jobs/orchestrator"`, and `"github.com/ternarybob/quaero/internal/jobs/worker"` are still needed for concrete implementations
-   - However, verify that these imports are only used for concrete types (e.g., `manager.NewCrawlerManager`, `orchestrator.NewParentJobOrchestrator`, `worker.NewJobProcessor`)
-   - The interface types are now accessed via `interfaces.JobManager`, `interfaces.ParentJobOrchestrator`, `interfaces.JobWorker`
+   - However, verify that these imports are only used for concrete types (e.g., `manager.NewCrawlerManager`, `orchestrator.NewJobOrchestrator`, `worker.NewJobProcessor`)
+   - The interface types are now accessed via `interfaces.JobManager`, `interfaces.JobOrchestrator`, `interfaces.JobWorker`
 
 2. **No code changes required**:
    - All concrete type instantiations remain the same (e.g., `manager.NewCrawlerManager`, `worker.NewCrawlerWorker`)
@@ -243,7 +243,7 @@ Verify interface implementation compatibility:
 
 No import changes needed - this file doesn't directly reference the interface type, only implements it.
 
-### internal\jobs\orchestrator\parent_job_orchestrator.go(MODIFY)
+### internal\jobs\orchestrator\job_orchestrator.go(MODIFY)
 
 References: 
 
@@ -252,7 +252,7 @@ References:
 Verify interface implementation compatibility:
 
 1. **No code changes required**:
-   - The `ParentJobOrchestrator` struct already implements the `ParentJobOrchestrator` interface methods: `StartMonitoring` and `SubscribeToChildStatusChanges`
+   - The `JobOrchestrator` struct already implements the `JobOrchestrator` interface methods: `StartMonitoring` and `SubscribeToChildStatusChanges`
    - The interface is now defined in `internal/interfaces/job_interfaces.go` instead of `internal/jobs/orchestrator/interfaces.go`
    - Go's duck typing ensures the implementation automatically satisfies the interface
 

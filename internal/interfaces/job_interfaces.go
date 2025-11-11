@@ -21,10 +21,10 @@ type StepManager interface {
 	GetManagerType() string
 }
 
-// ParentJobOrchestrator monitors parent job progress and aggregates child job statistics.
+// JobOrchestrator monitors parent job progress and aggregates child job statistics.
 // It runs in background goroutines (not via queue) and publishes real-time progress events.
 // Orchestrators subscribe to child job status changes for real-time tracking.
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
 	// StartMonitoring begins monitoring a parent job in a background goroutine.
 	// Takes the full job model (not just ID) to access config fields like source_type and entity_type.
 	// Returns immediately after starting the monitoring goroutine.

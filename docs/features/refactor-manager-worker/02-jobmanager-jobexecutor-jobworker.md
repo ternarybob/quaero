@@ -662,11 +662,11 @@ Update `app.go` to use renamed interfaces and update registration calls.
 Update test file comment to use new terminology.
 
 **Comment Update (line 379):**
-- Change: "This is set by the event-driven ParentJobExecutor when EventDocumentSaved is published" → "This is set by the event-driven ParentJobOrchestrator when EventDocumentSaved is published"
+- Change: "This is set by the event-driven ParentJobExecutor when EventDocumentSaved is published" → "This is set by the event-driven JobOrchestrator when EventDocumentSaved is published"
 
 **Implementation Notes:**
 - This is the only test file with a reference to the old terminology
 - Only a comment update, no functional changes
 - Ensures documentation consistency with new architecture
 
-**Note:** The actual `ParentJobExecutor` struct will be renamed to `ParentJobOrchestrator` in ARCH-006
+**Note:** The actual `ParentJobExecutor` struct will be renamed to `JobOrchestrator` in ARCH-006

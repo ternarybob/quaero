@@ -11,11 +11,11 @@ Complete the Manager/Worker architecture by splitting database maintenance into 
    - Files: `internal/jobs/manager/database_maintenance_manager.go`
    - User decision: no
    - Changes:
-     - Add ParentJobOrchestrator dependency to struct and constructor
+     - Add JobOrchestrator dependency to struct and constructor
      - Rewrite CreateParentJob() to create parent job record
      - Loop through operations and create child job for each operation
      - Each child job config: `{"operation": "vacuum"}` (single operation, not array)
-     - Start ParentJobOrchestrator monitoring after enqueueing children
+     - Start JobOrchestrator monitoring after enqueueing children
      - Update job types: parent=`"database_maintenance_parent"`, child=`"database_maintenance_operation"`
 
 2. **Create DatabaseMaintenanceWorker for individual operation execution**
@@ -43,7 +43,7 @@ Complete the Manager/Worker architecture by splitting database maintenance into 
    - Changes:
      - Remove old executor registration (lines 334-344)
      - Add new worker registration with 3 dependencies (db, jobMgr, logger)
-     - Update manager constructor to include parentJobOrchestrator parameter (line 392)
+     - Update manager constructor to include jobOrchestrator parameter (line 392)
      - Update log messages
 
 5. **Compile and validate**
@@ -74,7 +74,7 @@ Complete the Manager/Worker architecture by splitting database maintenance into 
 - Application compiles without errors
 - Documentation reflects ARCH-008 completion
 - Job types updated: parent=`"database_maintenance_parent"`, child=`"database_maintenance_operation"`
-- ParentJobOrchestrator monitors parent job progress
+- JobOrchestrator monitors parent job progress
 
 ## Architectural Pattern
 
@@ -91,7 +91,7 @@ Manager creates: 1 parent job + 3 child jobs
   - Child 2: {"operation": "analyze"}
   - Child 3: {"operation": "reindex"}
 Worker processes: ONE operation per job
-ParentJobOrchestrator: Monitors all children, updates parent progress
+JobOrchestrator: Monitors all children, updates parent progress
 ```
 
 ## Dependencies
@@ -99,7 +99,7 @@ ParentJobOrchestrator: Monitors all children, updates parent progress
 **Manager:**
 - jobManager (*jobs.Manager)
 - queueMgr (*queue.Manager)
-- parentJobOrchestrator (orchestrator.ParentJobOrchestrator) - NEW
+- jobOrchestrator (orchestrator.JobOrchestrator) - NEW
 - logger (arbor.ILogger)
 
 **Worker:**

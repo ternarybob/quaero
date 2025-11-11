@@ -20,8 +20,8 @@ Verifying that all concrete implementations automatically satisfy the centralize
   - `CrawlerWorker` - implements Execute, GetWorkerType, Validate
   - `DatabaseMaintenanceWorker` - implements Execute, GetWorkerType, Validate
   - `AgentWorker` - implements Execute, GetWorkerType, Validate
-- **Orchestrator (ParentJobOrchestrator):**
-  - `ParentJobOrchestrator` - implements StartMonitoring, SubscribeToChildStatusChanges
+- **Orchestrator (JobOrchestrator):**
+  - `JobOrchestrator` - implements StartMonitoring, SubscribeToChildStatusChanges
 
 **Changes made:**
 None - verification only

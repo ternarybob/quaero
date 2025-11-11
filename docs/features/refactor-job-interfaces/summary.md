@@ -12,9 +12,9 @@
 
 ### Modified
 - `internal/jobs/job_definition_orchestrator.go` - Removed duplicate interfaces, updated to use centralized interfaces
-- `internal/jobs/manager/database_maintenance_manager.go` - Updated to use interfaces.ParentJobOrchestrator
+- `internal/jobs/manager/database_maintenance_manager.go` - Updated to use interfaces.JobOrchestrator
 - `internal/jobs/worker/job_processor.go` - Updated to use interfaces.JobWorker
-- `internal/jobs/orchestrator/parent_job_orchestrator.go` - Fixed return type to use interfaces.ParentJobOrchestrator
+- `internal/jobs/orchestrator/job_orchestrator.go` - Fixed return type to use interfaces.JobOrchestrator
 
 ### Deleted
 - `internal/jobs/manager/interfaces.go` - Consolidated into central file

@@ -18,7 +18,7 @@
    - Skill: @code-architect
    - Files: `internal/jobs/orchestrator/` (new directory), `internal/jobs/orchestrator/interfaces.go` (new file)
    - User decision: no
-   - Description: Create new orchestrator package directory and define new ParentJobOrchestrator interface
+   - Description: Create new orchestrator package directory and define new JobOrchestrator interface
 
 4. **Update AGENTS.md with directory structure notes**
    - Skill: @none
@@ -44,7 +44,7 @@
 - Each directory contains an `interfaces.go` file with appropriate package declaration and interface definitions
 - JobManager interface copied to `manager/interfaces.go` with package name `manager`
 - JobWorker and JobSpawner interfaces copied to `worker/interfaces.go` with package name `worker`
-- ParentJobOrchestrator interface created in `orchestrator/interfaces.go` with methods: StartMonitoring, StopMonitoring, GetMonitoringStatus
+- JobOrchestrator interface created in `orchestrator/interfaces.go` with methods: StartMonitoring, StopMonitoring, GetMonitoringStatus
 - All new interface files compile independently without errors
 - Existing code in `internal/jobs/executor/` and `internal/jobs/processor/` remains unchanged and functional
 - AGENTS.md updated with directory structure transition notes

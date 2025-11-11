@@ -58,15 +58,15 @@ dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queu
 
 NEW CODE:
 ```go
-dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, parentJobOrchestrator, a.Logger)
+dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobOrchestrator, a.Logger)
 ```
 
 **Key Change:**
-- ✅ Added parentJobOrchestrator parameter (4th parameter)
+- ✅ Added jobOrchestrator parameter (4th parameter)
 - ✅ Updated log message: "Database maintenance manager registered (ARCH-008)"
 
 **Verification:**
-- ✅ parentJobOrchestrator variable already exists (created on line 314)
+- ✅ jobOrchestrator variable already exists (created on line 314)
 - ✅ Worker registration uses jobProcessor.RegisterExecutor()
 - ✅ Manager registration uses a.JobExecutor.RegisterStepExecutor()
 - ✅ Import already includes worker package (line 23)
@@ -87,7 +87,7 @@ cd internal/app && go build
 **Code Quality:**
 ✅ Old executor registration removed completely
 ✅ New worker registration with 3 dependencies (db, jobMgr, logger)
-✅ Manager constructor updated with parentJobOrchestrator parameter
+✅ Manager constructor updated with jobOrchestrator parameter
 ✅ Correct registration methods used (RegisterExecutor vs RegisterStepExecutor)
 ✅ Log messages updated with ARCH-008 marker
 ✅ Worker package already imported (no new imports needed)
@@ -95,12 +95,12 @@ cd internal/app && go build
 **Architecture:**
 ✅ Worker registered with JobProcessor (for queue processing)
 ✅ Manager registered with JobExecutor (for job definition steps)
-✅ parentJobOrchestrator exists and properly initialized (line 314)
+✅ jobOrchestrator exists and properly initialized (line 314)
 ✅ No references to old executor remain in app.go
 ✅ Follows established pattern from other workers (CrawlerWorker, AgentWorker)
 
 **Startup Sequence:**
-✅ Worker registration after parentJobOrchestrator creation
+✅ Worker registration after jobOrchestrator creation
 ✅ Manager registration in step executors section
 ✅ Proper dependency injection order maintained
 

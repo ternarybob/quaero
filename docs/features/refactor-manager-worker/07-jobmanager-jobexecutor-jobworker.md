@@ -96,7 +96,7 @@ for _, operation := range operations {
     // Enqueue child job
 }
 
-// Start ParentJobOrchestrator monitoring
+// Start JobOrchestrator monitoring
 ```
 
 **Dependencies Analysis:**
@@ -127,7 +127,7 @@ for _, operation := range operations {
 4. App.go registers new worker with correct dependencies
 5. Application compiles without errors
 6. Database maintenance job executes all operations
-7. ParentJobOrchestrator tracks progress correctly
+7. JobOrchestrator tracks progress correctly
 8. Job logs show individual operation execution
 9. Documentation updated (AGENTS.md, MANAGER_WORKER_ARCHITECTURE.md)
 
@@ -156,7 +156,7 @@ This phase completes the Manager/Worker architecture by splitting database maint
 2. **Granularity**: Each operation is a separate job with its own status/logs
 3. **Parallelization**: Multiple operations can run concurrently (queue concurrency)
 4. **Retry Logic**: Failed operations can be retried individually
-5. **Progress Tracking**: ParentJobOrchestrator aggregates child progress
+5. **Progress Tracking**: JobOrchestrator aggregates child progress
 6. **Clean Architecture**: Clear separation between orchestration and execution
 
 **Implementation Strategy:**
@@ -174,7 +174,7 @@ This phase completes the Manager/Worker architecture by splitting database maint
 - Loop through operations and create child job for each
 - Each child job type: `"database_maintenance_operation"` (new type to distinguish from old)
 - Child job config: `{"operation": "vacuum"}` (single operation, not array)
-- Start ParentJobOrchestrator monitoring after enqueueing children
+- Start JobOrchestrator monitoring after enqueueing children
 
 **Worker Design:**
 - Simpler than old executor (no BaseExecutor dependency)
@@ -198,7 +198,7 @@ This phase completes the Manager/Worker architecture by splitting database maint
 After implementation:
 1. Verify manager creates parent + child jobs correctly
 2. Verify worker processes single operation correctly
-3. Verify ParentJobOrchestrator aggregates progress
+3. Verify JobOrchestrator aggregates progress
 4. Build application successfully
 5. Run database maintenance job end-to-end
 6. Verify all operations execute (vacuum, analyze, reindex, optimize)
@@ -220,7 +220,7 @@ After implementation:
 4. App.go registers new worker (not old executor)
 5. Application compiles and runs successfully
 6. Database maintenance job executes all operations correctly
-7. ParentJobOrchestrator tracks progress correctly
+7. JobOrchestrator tracks progress correctly
 8. Documentation updated to reflect ARCH-008 completion
 
 ### Reasoning
@@ -256,7 +256,7 @@ sequenceDiagram
     Dev->>Manager: Update CreateParentJob() method
     Note right of Manager: OLD: Create 1 job with operations array<br/>NEW: Create parent + N child jobs<br/>Each child: single operation
     
-    Dev->>Manager: Add ParentJobOrchestrator dependency
+    Dev->>Manager: Add JobOrchestrator dependency
     Note right of Manager: Start monitoring after enqueueing children
     
     Dev->>Manager: Update job types
@@ -293,7 +293,7 @@ sequenceDiagram
     Note right of App: Add: worker.NewDatabaseMaintenanceWorker()<br/>3 dependencies: db, jobMgr, logger
     
     Dev->>App: Update manager constructor (line 392)
-    Note right of App: Add parentJobOrchestrator parameter<br/>Matches CrawlerManager pattern
+    Note right of App: Add jobOrchestrator parameter<br/>Matches CrawlerManager pattern
     
     Dev->>Build: Build application
     Build-->>Dev: ✓ Application compiles successfully
@@ -316,7 +316,7 @@ sequenceDiagram
         Manager->>Manager: Create child job (single operation)
         Manager->>Manager: Enqueue child job to queue
     end
-    Manager->>Manager: Start ParentJobOrchestrator monitoring
+    Manager->>Manager: Start JobOrchestrator monitoring
     Manager-->>App: Return parent job ID
     
     App->>Worker: Queue routes child job to worker
@@ -335,7 +335,7 @@ sequenceDiagram
 
 References: 
 
-- internal\jobs\orchestrator\parent_job_orchestrator.go
+- internal\jobs\orchestrator\job_orchestrator.go
 - internal\models\job_model.go
 
 Update DatabaseMaintenanceManager to create parent job + child jobs (one per operation) instead of single job with operations array.
@@ -354,15 +354,15 @@ Update DatabaseMaintenanceManager to create parent job + child jobs (one per ope
 
 **Implementation Changes:**
 
-1. **Import ParentJobOrchestrator** (line 7):
+1. **Import JobOrchestrator** (line 7):
    - Add: `"github.com/ternarybob/quaero/internal/jobs/orchestrator"`
 
 2. **Add Field to Struct** (line 24):
-   - Add: `parentJobOrchestrator *orchestrator.ParentJobOrchestrator`
+   - Add: `jobOrchestrator *orchestrator.JobOrchestrator`
 
 3. **Update Constructor** (line 28):
-   - Add parameter: `parentJobOrchestrator *orchestrator.ParentJobOrchestrator`
-   - Initialize field: `parentJobOrchestrator: parentJobOrchestrator`
+   - Add parameter: `jobOrchestrator *orchestrator.JobOrchestrator`
+   - Initialize field: `jobOrchestrator: jobOrchestrator`
 
 4. **Rewrite CreateParentJob Method** (lines 38-130):
 
@@ -428,7 +428,7 @@ Update DatabaseMaintenanceManager to create parent job + child jobs (one per ope
   }
   ```
 
-**Step 4: Start ParentJobOrchestrator Monitoring**
+**Step 4: Start JobOrchestrator Monitoring**
 - Convert parent job record to JobModel:
   ```
   parentJobModel := &models.JobModel{
@@ -439,7 +439,7 @@ Update DatabaseMaintenanceManager to create parent job + child jobs (one per ope
       // ... other fields ...
   }
   ```
-- Start monitoring: `m.parentJobOrchestrator.StartMonitoring(ctx, parentJobModel)`
+- Start monitoring: `m.jobOrchestrator.StartMonitoring(ctx, parentJobModel)`
 
 **Step 5: Update Log Messages**
 - Line 43: "Creating parent database maintenance job and child jobs for each operation"
@@ -453,7 +453,7 @@ Update DatabaseMaintenanceManager to create parent job + child jobs (one per ope
 - Verify parent job created with correct type
 - Verify N child jobs created (one per operation)
 - Verify each child job has single operation in config
-- Verify ParentJobOrchestrator monitoring started
+- Verify JobOrchestrator monitoring started
 - Verify all jobs enqueued to queue
 
 ### internal\jobs\worker\database_maintenance_worker.go(NEW)
@@ -734,17 +734,17 @@ dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queu
 
 With:
 ```
-dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, parentJobOrchestrator, a.Logger)
+dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobOrchestrator, a.Logger)
 ```
 
 **Rationale:**
-- Manager needs ParentJobOrchestrator to start monitoring after creating child jobs
+- Manager needs JobOrchestrator to start monitoring after creating child jobs
 - Matches CrawlerManager pattern (uses orchestrator for parent job monitoring)
 
 **Validation:**
 - Verify application compiles successfully
 - Verify DatabaseMaintenanceWorker is registered correctly
-- Verify manager has access to ParentJobOrchestrator
+- Verify manager has access to JobOrchestrator
 - Run application and check startup logs for:
   - "Database maintenance worker registered for job type: database_maintenance_operation"
   - "Database maintenance manager registered"
@@ -813,7 +813,7 @@ Update to reflect database maintenance worker:
 - `JobProcessor` - `internal/jobs/worker/job_processor.go` (ARCH-006)
   - Routes jobs from queue to registered workers
   - Manages worker pool lifecycle (Start/Stop)
-- `ParentJobOrchestrator` - `internal/jobs/orchestrator/parent_job_orchestrator.go` (ARCH-007)
+- `JobOrchestrator` - `internal/jobs/orchestrator/job_orchestrator.go` (ARCH-007)
   - Monitors parent job progress in background goroutines
   - Aggregates child job statistics
   - Publishes real-time progress events
@@ -851,7 +851,7 @@ Change the section title and content to reflect ARCH-008 completion:
   - ✅ `job_processor.go` - Migrated from processor/ (ARCH-006)
   - ✅ `database_maintenance_worker.go` - Created for manager/worker split (ARCH-008)
 - ✅ `internal/jobs/orchestrator/` - Created with interfaces.go (ARCH-003)
-  - ✅ `parent_job_orchestrator.go` - Migrated from processor/ (ARCH-007)
+  - ✅ `job_orchestrator.go` - Migrated from processor/ (ARCH-007)
 
 **Old Directories (Still Active):**
 - `internal/jobs/executor/` - Contains 5 remaining implementation files:
@@ -904,7 +904,7 @@ Completed the Manager/Worker split for database maintenance by updating the mana
    - Changes: Updated CreateParentJob() to create parent + child jobs
    - Parent job type: `"database_maintenance_parent"`
    - Child job type: `"database_maintenance_operation"`
-   - Starts ParentJobOrchestrator monitoring after enqueueing children
+   - Starts JobOrchestrator monitoring after enqueueing children
 
 2. **DatabaseMaintenanceWorker** (NEW)
    - File: `internal/jobs/worker/database_maintenance_worker.go`
@@ -921,11 +921,11 @@ Completed the Manager/Worker split for database maintenance by updating the mana
 **Transformations Applied:**
 
 **Manager Updates:**
-- Added ParentJobOrchestrator dependency
+- Added JobOrchestrator dependency
 - Create parent job record for orchestration tracking
 - Loop through operations and create child job for each
 - Each child job has single operation in config (not array)
-- Start ParentJobOrchestrator monitoring after enqueueing
+- Start JobOrchestrator monitoring after enqueueing
 
 **Worker Design:**
 - Simpler than old executor (no BaseExecutor dependency)
@@ -939,7 +939,7 @@ Completed the Manager/Worker split for database maintenance by updating the mana
 - **Granular Tracking**: Each operation is a separate job with its own status/logs
 - **Parallelization**: Multiple operations can run concurrently (queue concurrency)
 - **Retry Logic**: Failed operations can be retried individually
-- **Progress Aggregation**: ParentJobOrchestrator aggregates child progress
+- **Progress Aggregation**: JobOrchestrator aggregates child progress
 - **Simpler Worker**: Fewer dependencies, clearer responsibilities
 
 **Job Type Strategy:**

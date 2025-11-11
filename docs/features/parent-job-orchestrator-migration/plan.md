@@ -2,18 +2,18 @@
 
 ## Steps
 
-1. **Create ParentJobOrchestrator File**
+1. **Create JobOrchestrator File**
    - Skill: @code-architect
-   - Files: `internal/jobs/orchestrator/parent_job_orchestrator.go` (NEW)
+   - Files: `internal/jobs/orchestrator/job_orchestrator.go` (NEW)
    - User decision: no
    - Copy from `internal/jobs/processor/parent_job_executor.go` with transformations:
      - Package: processor → orchestrator
-     - Struct: ParentJobExecutor → ParentJobOrchestrator
-     - Constructor: NewParentJobExecutor → NewParentJobOrchestrator
-     - Receiver: (e *ParentJobExecutor) → (o *ParentJobOrchestrator)
+     - Struct: ParentJobExecutor → JobOrchestrator
+     - Constructor: NewParentJobExecutor → NewJobOrchestrator
+     - Receiver: (e *ParentJobExecutor) → (o *JobOrchestrator)
      - All method bodies: e. → o.
 
-2. **Update ParentJobOrchestrator Interface**
+2. **Update JobOrchestrator Interface**
    - Skill: @code-architect
    - Files: `internal/jobs/orchestrator/interfaces.go`
    - User decision: no
@@ -27,8 +27,8 @@
    - Files: `internal/app/app.go`
    - User decision: no
    - Update imports: processor → orchestrator
-   - Update variable names: parentJobExecutor → parentJobOrchestrator
-   - Update constructor calls: NewParentJobExecutor → NewParentJobOrchestrator
+   - Update variable names: parentJobExecutor → jobOrchestrator
+   - Update constructor calls: NewParentJobExecutor → NewJobOrchestrator
 
 4. **Update JobExecutor Integration**
    - Skill: @go-coder
@@ -36,13 +36,13 @@
    - User decision: no
    - Update imports: processor → orchestrator
    - Update field, parameter, and method calls
-   - Update variable names: parentJobExecutor → parentJobOrchestrator
+   - Update variable names: parentJobExecutor → jobOrchestrator
 
 5. **Update Comment References**
    - Skill: @go-coder
    - Files: `internal/jobs/worker/job_processor.go`, `internal/interfaces/event_service.go`, `internal/jobs/manager.go`, `test/api/places_job_document_test.go`
    - User decision: no
-   - Update all comments: ParentJobExecutor → ParentJobOrchestrator
+   - Update all comments: ParentJobExecutor → JobOrchestrator
 
 6. **Delete Deprecated File**
    - Skill: @go-coder
@@ -70,7 +70,7 @@
 ## Success Criteria
 
 - New file created in internal/jobs/orchestrator/
-- ParentJobExecutor renamed to ParentJobOrchestrator throughout
+- ParentJobExecutor renamed to JobOrchestrator throughout
 - Interface signature matches implementation
 - app.go successfully imports and uses orchestrator package
 - job_executor.go successfully imports and uses orchestrator package

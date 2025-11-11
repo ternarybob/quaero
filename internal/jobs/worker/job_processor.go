@@ -218,13 +218,13 @@ func (jp *JobProcessor) processNextJob() {
 			Str("job_type", msg.Type).
 			Msg("Job execution completed successfully")
 
-		// For parent jobs, do NOT mark as completed here - ParentJobOrchestrator will handle completion
+		// For parent jobs, do NOT mark as completed here - JobOrchestrator will handle completion
 		// when all children are done. For other job types, mark as completed immediately.
 		if msg.Type == "parent" {
 			jp.logger.Info().
 				Str("job_id", msg.JobID).
 				Msg("Parent job execution completed - leaving in running state for child monitoring")
-			// Parent job remains in "running" state and will be re-enqueued by ParentJobOrchestrator
+			// Parent job remains in "running" state and will be re-enqueued by JobOrchestrator
 			// to continue monitoring child jobs
 		} else {
 			// Non-parent jobs are marked as completed immediately

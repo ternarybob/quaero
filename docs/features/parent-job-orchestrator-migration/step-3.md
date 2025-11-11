@@ -9,21 +9,21 @@
 
 ### Agent 2 - Implementation
 
-Updated app.go to import and use the new orchestrator package for ParentJobOrchestrator.
+Updated app.go to import and use the new orchestrator package for JobOrchestrator.
 
 **Changes made:**
 - `internal/app/app.go`:
   - Line 22: Removed import `"github.com/ternarybob/quaero/internal/jobs/processor"`
   - Line 22: Added import `"github.com/ternarybob/quaero/internal/jobs/orchestrator"`
-  - Lines 311-319: Updated ParentJobOrchestrator initialization:
+  - Lines 311-319: Updated JobOrchestrator initialization:
     - Comment: "Create parent job executor" → "Create parent job orchestrator"
-    - Constructor call: `processor.NewParentJobExecutor()` → `orchestrator.NewParentJobOrchestrator()`
-    - Variable name: `parentJobExecutor` → `parentJobOrchestrator`
+    - Constructor call: `processor.NewParentJobExecutor()` → `orchestrator.NewJobOrchestrator()`
+    - Variable name: `parentJobExecutor` → `jobOrchestrator`
     - Log message: "Parent job executor created" → "Parent job orchestrator created"
     - All 3 parameters kept in same order (jobMgr, EventService, Logger)
   - Lines 375-377: Updated JobExecutor initialization:
-    - Comment: "Pass parentJobExecutor" → "Pass parentJobOrchestrator"
-    - Parameter: `parentJobExecutor` → `parentJobOrchestrator`
+    - Comment: "Pass parentJobExecutor" → "Pass jobOrchestrator"
+    - Parameter: `parentJobExecutor` → `jobOrchestrator`
 
 **Commands run:**
 ```bash
@@ -45,12 +45,12 @@ powershell -File scripts/build.ps1
 
 **Code Quality:**
 ✅ Import updated correctly (processor → orchestrator)
-✅ Variable names updated consistently (parentJobExecutor → parentJobOrchestrator)
+✅ Variable names updated consistently (parentJobExecutor → jobOrchestrator)
 ✅ Constructor call updated correctly
 ✅ Comments updated to reflect new terminology
 ✅ Log messages updated ("executor" → "orchestrator")
 ✅ All 3 parameters passed in correct order
-✅ Interface type used correctly (orchestrator.ParentJobOrchestrator)
+✅ Interface type used correctly (orchestrator.JobOrchestrator)
 ✅ Build successful with both quaero.exe and quaero-mcp.exe
 
 **Quality Score:** 10/10

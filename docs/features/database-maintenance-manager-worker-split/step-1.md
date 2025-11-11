@@ -18,15 +18,15 @@ Updated DatabaseMaintenanceManager to follow the established Manager/Worker patt
 **Changes made:**
 
 - **Line 7**: Added import for orchestrator package
-- **Line 23**: Added `parentJobOrchestrator` field to struct
-- **Line 28**: Updated constructor to accept `parentJobOrchestrator` parameter
+- **Line 23**: Added `jobOrchestrator` field to struct
+- **Line 28**: Updated constructor to accept `jobOrchestrator` parameter
 - **Lines 38-130**: Completely rewrote `CreateParentJob()` method:
   - Create parent job record for orchestration tracking
   - Parse operations from config (reused existing logic)
   - Loop through operations and create child job for each
   - Each child job has single operation in config
   - Enqueue all child jobs to queue
-  - Start ParentJobOrchestrator monitoring
+  - Start JobOrchestrator monitoring
   - Return parent job ID
 
 **Job Type Changes:**
@@ -39,7 +39,7 @@ Updated DatabaseMaintenanceManager to follow the established Manager/Worker patt
 2. Each child job references parent: `ParentID: &parentJobID`
 3. Child jobs use phase: `"execution"` (actual work)
 4. Parent job uses phase: `"orchestration"` (monitoring)
-5. ParentJobOrchestrator started after all children enqueued
+5. JobOrchestrator started after all children enqueued
 
 **Commands run:**
 ```bash
@@ -59,7 +59,7 @@ go build -o /tmp/test_manager internal/jobs/manager/database_maintenance_manager
 ✅ Parent job created with proper orchestration phase
 ✅ Child jobs created with execution phase
 ✅ Each child job has single operation in config (not array)
-✅ ParentJobOrchestrator monitoring started
+✅ JobOrchestrator monitoring started
 ✅ Proper error handling with context wrapping
 ✅ Structured logging with correlation IDs
 ✅ Job types correctly updated

@@ -9,7 +9,7 @@ Consolidate all job-related interfaces into `internal/interfaces/` to align with
    - Skill: @code-architect
    - Files: `internal/interfaces/job_interfaces.go` (NEW)
    - User decision: no
-   - Action: Create new file consolidating JobManager, ParentJobOrchestrator, JobWorker, and JobSpawner interfaces
+   - Action: Create new file consolidating JobManager, JobOrchestrator, JobWorker, and JobSpawner interfaces
 
 2. **Update job definition orchestrator**
    - Skill: @go-coder

@@ -13,19 +13,19 @@ import (
 
 // JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate StepManagers and managing parent-child hierarchy
 type JobDefinitionOrchestrator struct {
-	stepExecutors         map[string]interfaces.StepManager         // Step managers keyed by action type
-	jobManager            *Manager
-	parentJobOrchestrator interfaces.ParentJobOrchestrator
-	logger                arbor.ILogger
+	stepExecutors   map[string]interfaces.StepManager // Step managers keyed by action type
+	jobManager      *Manager
+	jobOrchestrator interfaces.JobOrchestrator
+	logger          arbor.ILogger
 }
 
 // NewJobDefinitionOrchestrator creates a new job definition orchestrator for routing job definition steps to managers
-func NewJobDefinitionOrchestrator(jobManager *Manager, parentJobOrchestrator interfaces.ParentJobOrchestrator, logger arbor.ILogger) *JobDefinitionOrchestrator {
+func NewJobDefinitionOrchestrator(jobManager *Manager, jobOrchestrator interfaces.JobOrchestrator, logger arbor.ILogger) *JobDefinitionOrchestrator {
 	return &JobDefinitionOrchestrator{
-		stepExecutors:         make(map[string]interfaces.StepManager), // Initialize step manager map
-		jobManager:            jobManager,
-		parentJobOrchestrator: parentJobOrchestrator,
-		logger:                logger,
+		stepExecutors:   make(map[string]interfaces.StepManager), // Initialize step manager map
+		jobManager:      jobManager,
+		jobOrchestrator: jobOrchestrator,
+		logger:          logger,
 	}
 }
 
@@ -289,7 +289,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		// TODO: Load and execute post-job definitions
 	}
 
-	// For crawler jobs, don't mark as completed immediately - let ParentJobOrchestrator handle completion
+	// For crawler jobs, don't mark as completed immediately - let JobOrchestrator handle completion
 	// For other job types, mark as completed immediately
 
 	// Add job log for debugging - show exact string comparison
@@ -330,7 +330,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 
 	if isCrawlerJob {
 		// Add job log for UI visibility
-		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected - leaving in running state for ParentJobOrchestrator to monitor child jobs")
+		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected - leaving in running state for JobOrchestrator to monitor child jobs")
 
 		parentLogger.Info().
 			Str("parent_job_id", parentJobID).
@@ -365,12 +365,12 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		}
 
 		// Start monitoring in background goroutine
-		o.parentJobOrchestrator.StartMonitoring(ctx, parentJobModel)
+		o.jobOrchestrator.StartMonitoring(ctx, parentJobModel)
 
 		parentLogger.Info().Msg("✓ Parent job monitoring started in background goroutine")
 		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Parent job monitoring started - tracking child job progress")
 
-		// NOTE: Do NOT set finished_at for crawler jobs - ParentJobOrchestrator will handle this
+		// NOTE: Do NOT set finished_at for crawler jobs - JobOrchestrator will handle this
 		// when all children complete
 	} else {
 		// For non-crawler jobs, mark as completed immediately

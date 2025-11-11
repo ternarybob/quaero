@@ -92,7 +92,7 @@
     - Skill: @none
     - Files: `test/api/places_job_document_test.go`
     - User decision: no
-    - Update comment referencing ParentJobExecutor to ParentJobOrchestrator
+    - Update comment referencing ParentJobExecutor to JobOrchestrator
 
 16. **Compile and verify all changes**
     - Skill: @go-coder

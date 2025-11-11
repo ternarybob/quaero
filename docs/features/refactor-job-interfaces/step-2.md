@@ -12,7 +12,7 @@
 Updating job_definition_orchestrator.go to remove duplicate interface definitions and use the centralized interfaces from `internal/interfaces/job_interfaces.go`.
 
 **Changes made:**
-- `internal/jobs/job_definition_orchestrator.go`: Remove duplicate JobManager and ParentJobOrchestrator interfaces, update imports to use centralized interfaces.StepManager
+- `internal/jobs/job_definition_orchestrator.go`: Remove duplicate JobManager and JobOrchestrator interfaces, update imports to use centralized interfaces.StepManager
 
 **Commands run:**
 ```bash
@@ -52,6 +52,6 @@ None - the refactoring is clean and improves code organization.
 **Quality:** 9/10
 
 **Notes:**
-Successfully removed duplicate interface definitions and updated all references to use the centralized interfaces from `internal/interfaces/job_interfaces.go`. The file now properly imports the interfaces package and uses `interfaces.StepManager` and `interfaces.ParentJobOrchestrator` throughout.
+Successfully removed duplicate interface definitions and updated all references to use the centralized interfaces from `internal/interfaces/job_interfaces.go`. The file now properly imports the interfaces package and uses `interfaces.StepManager` and `interfaces.JobOrchestrator` throughout.
 
 **→ Continuing to Step 3**

@@ -1,4 +1,4 @@
-# Step 2: Update ParentJobOrchestrator Interface
+# Step 2: Update JobOrchestrator Interface
 
 **Skill:** @code-architect
 **Files:** `internal/jobs/orchestrator/interfaces.go`
@@ -9,7 +9,7 @@
 
 ### Agent 2 - Implementation
 
-Updated ParentJobOrchestrator interface to match the actual implementation signature. Interface was originally created in ARCH-003 with speculative methods that don't exist in the implementation.
+Updated JobOrchestrator interface to match the actual implementation signature. Interface was originally created in ARCH-003 with speculative methods that don't exist in the implementation.
 
 **Changes made:**
 - `internal/jobs/orchestrator/interfaces.go`:
@@ -22,11 +22,11 @@ Updated ParentJobOrchestrator interface to match the actual implementation signa
   - Removed `GetMonitoringStatus(parentJobID string) bool` - Not implemented (speculative from ARCH-003)
   - Added `SubscribeToChildStatusChanges()` - Actual public method called during initialization
 
-- `internal/jobs/orchestrator/parent_job_orchestrator.go`:
-  - Changed struct name: `type ParentJobOrchestrator struct` → `type parentJobOrchestrator struct`
+- `internal/jobs/orchestrator/job_orchestrator.go`:
+  - Changed struct name: `type JobOrchestrator struct` → `type jobOrchestrator struct`
     - Lowercase to avoid name collision with interface
-    - Constructor now returns interface type: `func NewParentJobOrchestrator(...) ParentJobOrchestrator`
-    - All method receivers updated: `func (o *ParentJobOrchestrator)` → `func (o *parentJobOrchestrator)`
+    - Constructor now returns interface type: `func NewJobOrchestrator(...) JobOrchestrator`
+    - All method receivers updated: `func (o *JobOrchestrator)` → `func (o *jobOrchestrator)`
 
 **Rationale for interface changes:**
 - Implementation needs full job model (config fields like source_type, entity_type, metadata)
@@ -37,7 +37,7 @@ Updated ParentJobOrchestrator interface to match the actual implementation signa
 **Commands run:**
 ```bash
 # Compile orchestrator package with updated interface
-go build -o nul internal/jobs/orchestrator/interfaces.go internal/jobs/orchestrator/parent_job_orchestrator.go
+go build -o nul internal/jobs/orchestrator/interfaces.go internal/jobs/orchestrator/job_orchestrator.go
 # ✅ Compiles successfully
 ```
 
@@ -78,6 +78,6 @@ None - Interface now correctly matches implementation and follows Go best practi
 **Quality:** 10/10
 
 **Notes:**
-ParentJobOrchestrator interface updated successfully to match implementation signature. Removed speculative methods from ARCH-003 and added actual method that exists. Constructor now returns interface type (ParentJobOrchestrator) while struct is lowercase (parentJobOrchestrator) to follow Go best practices and avoid name collision.
+JobOrchestrator interface updated successfully to match implementation signature. Removed speculative methods from ARCH-003 and added actual method that exists. Constructor now returns interface type (JobOrchestrator) while struct is lowercase (jobOrchestrator) to follow Go best practices and avoid name collision.
 
 **→ Continuing to Step 3**

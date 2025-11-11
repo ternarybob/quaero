@@ -12,7 +12,7 @@
 Updating database_maintenance_manager.go to use centralized interfaces.
 
 **Changes made:**
-- `internal/jobs/manager/database_maintenance_manager.go`: Update imports and type references to use interfaces.ParentJobOrchestrator
+- `internal/jobs/manager/database_maintenance_manager.go`: Update imports and type references to use interfaces.JobOrchestrator
 
 **Commands run:**
 ```bash
@@ -31,7 +31,7 @@ go build ./internal/jobs/manager/   # Compiled successfully
 **Code Quality:**
 ✅ Removed orchestrator package import (no longer needed)
 ✅ Added interfaces package import
-✅ Updated ParentJobOrchestrator type reference
+✅ Updated JobOrchestrator type reference
 ✅ Function parameter type updated correctly
 ✅ No changes to business logic - pure refactoring
 
@@ -51,6 +51,6 @@ None - clean refactoring with no logic changes.
 **Quality:** 9/10
 
 **Notes:**
-Successfully updated database maintenance manager to use centralized interfaces. Removed the orchestrator package import and replaced with interfaces package. All type references now point to interfaces.ParentJobOrchestrator.
+Successfully updated database maintenance manager to use centralized interfaces. Removed the orchestrator package import and replaced with interfaces package. All type references now point to interfaces.JobOrchestrator.
 
 **→ Continuing to Step 4**

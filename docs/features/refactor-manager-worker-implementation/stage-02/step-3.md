@@ -9,13 +9,13 @@
 
 ### Agent 2 - Implementation
 
-Created new orchestrator package directory and defined new ParentJobOrchestrator interface for monitoring parent job progress.
+Created new orchestrator package directory and defined new JobOrchestrator interface for monitoring parent job progress.
 
 **Changes made:**
 - Created directory `internal/jobs/orchestrator/`
 - Created `internal/jobs/orchestrator/interfaces.go` with:
   - Package declaration `package orchestrator`
-  - New ParentJobOrchestrator interface with three methods:
+  - New JobOrchestrator interface with three methods:
     - `StartMonitoring(ctx context.Context, parentJobID string) error` - Begin monitoring in background goroutine
     - `StopMonitoring(parentJobID string) error` - Stop monitoring specific parent job
     - `GetMonitoringStatus(parentJobID string) bool` - Check if parent job is being monitored
@@ -63,7 +63,7 @@ None
 **Quality:** 10/10
 
 **Notes:**
-- ParentJobOrchestrator interface successfully created in new orchestrator package
+- JobOrchestrator interface successfully created in new orchestrator package
 - This is a new interface (not a copy) - ParentJobExecutor had no interface before
 - Interface defines monitoring, stopping, and status checking methods
 - Clearly documents that orchestrator runs in background goroutines (not via queue)

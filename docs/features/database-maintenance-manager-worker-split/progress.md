@@ -4,7 +4,7 @@
 
 1. **Step 1: Update DatabaseMaintenanceManager** - ✅ COMPLETE (Quality: 10/10)
    - Updated manager to create parent + child jobs
-   - Added ParentJobOrchestrator dependency
+   - Added JobOrchestrator dependency
    - Changed job types to parent/child pattern
 
 2. **Step 2: Create DatabaseMaintenanceWorker** - ✅ COMPLETE (Quality: 10/10)
@@ -19,7 +19,7 @@
 4. **Step 4: Update app.go registration** - ✅ COMPLETE (Quality: 10/10)
    - Removed old executor registration
    - Added new worker registration with 3 dependencies
-   - Updated manager constructor with parentJobOrchestrator parameter
+   - Updated manager constructor with jobOrchestrator parameter
 
 5. **Step 5: Compile and validate** - ✅ COMPLETE (Quality: 10/10)
    - Full application builds successfully

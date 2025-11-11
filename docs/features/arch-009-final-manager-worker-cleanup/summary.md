@@ -33,8 +33,8 @@ ARCH-009 completed the Manager/Worker/Orchestrator architecture migration by:
 4. **internal/jobs/job_definition_orchestrator.go** (519 lines)
    - Relocated from executor/job_executor.go
    - Routes job definition steps to registered managers
-   - **Import Cycle Fix**: Defined JobManager and ParentJobOrchestrator interfaces locally
-   - Dependencies: jobManager, parentJobOrchestrator, logger
+   - **Import Cycle Fix**: Defined JobManager and JobOrchestrator interfaces locally
+   - Dependencies: jobManager, jobOrchestrator, logger
 
 ### Modified (3 Files):
 
@@ -104,7 +104,7 @@ JobDefinitionOrchestrator followed orchestrator pattern:
 
 **Problem**: Moving JobExecutor from executor/ to jobs/ package created circular dependency:
 ```
-jobs/ → orchestrator/ (for ParentJobOrchestrator)
+jobs/ → orchestrator/ (for JobOrchestrator)
 orchestrator/ → jobs/ (for jobs.Manager, jobs.ChildJobStats)
 ```
 
@@ -116,7 +116,7 @@ type JobManager interface {
     GetManagerType() string
 }
 
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     StartMonitoring(ctx context.Context, job *models.JobModel)
     SubscribeToChildStatusChanges()
 }
@@ -157,7 +157,7 @@ executors map[string]JobWorker // Uses local interface
 3. DatabaseMaintenanceWorker (ARCH-008)
 
 **Orchestrators**:
-1. ParentJobOrchestrator (internal/jobs/orchestrator/) - Monitors parent job progress
+1. JobOrchestrator (internal/jobs/orchestrator/) - Monitors parent job progress
 2. JobDefinitionOrchestrator (internal/jobs/) - Routes job definition steps to managers
 
 ### Responsibilities
@@ -165,7 +165,7 @@ executors map[string]JobWorker // Uses local interface
 - **Managers**: Create parent jobs, enqueue children, orchestrate workflows
 - **Workers**: Execute individual jobs from queue, perform actual work
 - **Orchestrators**:
-  - ParentJobOrchestrator: Monitors parent job completion, aggregates child stats
+  - JobOrchestrator: Monitors parent job completion, aggregates child stats
   - JobDefinitionOrchestrator: Routes job definition steps to appropriate managers
 
 ## Testing

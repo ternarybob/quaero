@@ -12,7 +12,7 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 **2. MANAGER_WORKER_ARCHITECTURE.md**
 - Line 168-169: Updated file path and migration status
   - Changed from: `internal/jobs/processor/parent_job_executor.go` (will be renamed)
-  - Changed to: `internal/jobs/orchestrator/parent_job_orchestrator.go` (migrated)
+  - Changed to: `internal/jobs/orchestrator/job_orchestrator.go` (migrated)
 - Line 410: Updated interface duplication note
   - Clarified that old ParentJobExecutor had no interface before ARCH-007
 - Line 542-544: Updated Phase 6 description
@@ -27,10 +27,10 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 ```markdown
 # Before
 **File:** `internal/jobs/processor/parent_job_executor.go`
-**Current Name:** `ParentJobExecutor` (will be renamed to `ParentJobOrchestrator`)
+**Current Name:** `ParentJobExecutor` (will be renamed to `JobOrchestrator`)
 
 # After
-**File:** `internal/jobs/orchestrator/parent_job_orchestrator.go`
+**File:** `internal/jobs/orchestrator/job_orchestrator.go`
 **Migrated from:** `internal/jobs/processor/parent_job_executor.go` (deleted in ARCH-007)
 ```
 
@@ -47,12 +47,12 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 ```markdown
 # Before
 ### Phase 6: Orchestrator Migration
-- Move `ParentJobExecutor` → `ParentJobOrchestrator`
+- Move `ParentJobExecutor` → `JobOrchestrator`
 - Move to `internal/orchestrator/`
 
 # After
 ### Phase 6: Orchestrator Migration
-- Migrated `ParentJobExecutor` → `ParentJobOrchestrator` (ARCH-007 complete)
+- Migrated `ParentJobExecutor` → `JobOrchestrator` (ARCH-007 complete)
 - Moved to `internal/jobs/orchestrator/`
 - Deleted `internal/jobs/processor/parent_job_executor.go`
 ```
@@ -63,7 +63,7 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 - Phase ARCH-007: ⏳ Parent job orchestrator migration (pending)
 
 # After
-- Phase ARCH-007: ✅ Parent job orchestrator migrated (parent_job_executor.go → parent_job_orchestrator.go, deleted deprecated file) **(YOU ARE HERE)**
+- Phase ARCH-007: ✅ Parent job orchestrator migrated (parent_job_executor.go → job_orchestrator.go, deleted deprecated file) **(YOU ARE HERE)**
 ```
 
 ## Validation
@@ -72,7 +72,7 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 
 **AGENTS.md:**
 - ✅ No ParentJobExecutor references found
-- ✅ File uses correct ParentJobOrchestrator terminology throughout
+- ✅ File uses correct JobOrchestrator terminology throughout
 - ✅ Directory structure section updated in previous migrations
 
 **MANAGER_WORKER_ARCHITECTURE.md:**
@@ -84,10 +84,10 @@ Updated architecture documentation to reflect the completed ARCH-007 migration:
 ### Cross-Reference Verification
 
 **Code vs Documentation Consistency:**
-- ✅ Code uses: `internal/jobs/orchestrator/parent_job_orchestrator.go`
-- ✅ Docs reference: `internal/jobs/orchestrator/parent_job_orchestrator.go`
-- ✅ All struct/interface names match: `ParentJobOrchestrator`
-- ✅ Constructor name matches: `NewParentJobOrchestrator()`
+- ✅ Code uses: `internal/jobs/orchestrator/job_orchestrator.go`
+- ✅ Docs reference: `internal/jobs/orchestrator/job_orchestrator.go`
+- ✅ All struct/interface names match: `JobOrchestrator`
+- ✅ Constructor name matches: `NewJobOrchestrator()`
 
 ## Quality Assessment
 

@@ -18,7 +18,7 @@
 - **Skill:** @go-coder
 - **Status:** ✅ Complete (9/10)
 - **Iterations:** 1
-- **Notes:** Updated to use interfaces.ParentJobOrchestrator
+- **Notes:** Updated to use interfaces.JobOrchestrator
 
 ### Step 4: Update job processor
 - **Skill:** @go-coder

@@ -25,7 +25,7 @@ The codebase has completed ARCH-002 (interface renames) and is ready for directo
 
 4. **Key Insight - Orchestrator Needs Interface:**
    - `ParentJobExecutor` in `processor/parent_job_executor.go` currently has no interface
-   - This phase should create `ParentJobOrchestrator` interface for consistency
+   - This phase should create `JobOrchestrator` interface for consistency
    - Interface will define monitoring and progress aggregation methods
 
 **Architectural Clarity:**
@@ -86,13 +86,13 @@ internal/jobs/
 ├── worker/                # NEW - Workers execute jobs
 │   └── interfaces.go      # JobWorker interface (copy)
 └── orchestrator/          # NEW - Orchestrator monitors parent jobs
-    └── interfaces.go      # ParentJobOrchestrator interface (new)
+    └── interfaces.go      # JobOrchestrator interface (new)
 ```
 
 **Key Decisions:**
 
 1. **Interface Duplication**: Temporary duplication allows gradual migration without breaking imports
-2. **Orchestrator Interface**: Create new interface for ParentJobOrchestrator (currently has no interface)
+2. **Orchestrator Interface**: Create new interface for JobOrchestrator (currently has no interface)
 3. **Package Names**: Use directory names as package names (manager, worker, orchestrator)
 4. **No Implementation Moves**: Defer all implementation file moves to subsequent phases (ARCH-004 through ARCH-006)
 
@@ -171,8 +171,8 @@ Workers execute individual jobs from the queue and perform the actual work. They
 Create new directory for parent job orchestrator (monitoring layer).
 
 This directory will contain:
-- `interfaces.go` - ParentJobOrchestrator interface (new, created in this phase)
-- `parent_job_orchestrator.go` - Implementation (migrated from processor/parent_job_executor.go in ARCH-006)
+- `interfaces.go` - JobOrchestrator interface (new, created in this phase)
+- `job_orchestrator.go` - Implementation (migrated from processor/parent_job_executor.go in ARCH-006)
 
 **Purpose:**
 The orchestrator monitors parent job progress and aggregates child job statistics. It is responsible for:
@@ -188,7 +188,7 @@ The orchestrator monitors parent job progress and aggregates child job statistic
 - **Workers** execute individual jobs from queue (execution)
 - **Orchestrator** monitors parent jobs and aggregates progress (monitoring)
 
-**Note:** The ParentJobExecutor implementation will be moved here in ARCH-006 and renamed to ParentJobOrchestrator. This phase creates the directory and interface.
+**Note:** The ParentJobExecutor implementation will be moved here in ARCH-006 and renamed to JobOrchestrator. This phase creates the directory and interface.
 
 ### internal\jobs\manager\interfaces.go(NEW)
 
@@ -279,7 +279,7 @@ References:
 
 - internal\jobs\processor\parent_job_executor.go
 
-Create new ParentJobOrchestrator interface for the orchestrator package.
+Create new JobOrchestrator interface for the orchestrator package.
 
 **Purpose:**
 Define the interface for parent job monitoring and progress aggregation. Currently, `ParentJobExecutor` in `processor/parent_job_executor.go` has no interface - this creates one for architectural consistency.
@@ -294,9 +294,9 @@ import (
     "github.com/ternarybob/quaero/internal/models"
 )
 
-// ParentJobOrchestrator monitors parent job progress and aggregates child job statistics.
+// JobOrchestrator monitors parent job progress and aggregates child job statistics.
 // It runs in background goroutines (not via queue) and publishes real-time progress events.
-type ParentJobOrchestrator interface {
+type JobOrchestrator interface {
     // StartMonitoring begins monitoring a parent job in a background goroutine.
     // Polls child job statistics periodically and publishes progress events.
     // Automatically stops when all child jobs complete or parent job is cancelled.
@@ -334,7 +334,7 @@ type ParentJobOrchestrator interface {
 - **Orchestrator**: Monitor parent jobs and aggregate progress (monitoring)
 
 **Implementation Note:**
-The actual implementation in `processor/parent_job_executor.go` will be migrated to `orchestrator/parent_job_orchestrator.go` in ARCH-006 and updated to implement this interface.
+The actual implementation in `processor/parent_job_executor.go` will be migrated to `orchestrator/job_orchestrator.go` in ARCH-006 and updated to implement this interface.
 
 **Validation:**
 - Verify package name is `orchestrator`
@@ -380,7 +380,7 @@ Add a note about the new interfaces:
 **New Architecture (ARCH-003+):**
 - `JobManager` interface - `internal/jobs/manager/interfaces.go`
 - `JobWorker` interface - `internal/jobs/worker/interfaces.go`
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+- `JobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
 
 **Old Architecture (deprecated, will be removed in ARCH-008):**
 - `JobManager` interface - `internal/jobs/executor/interfaces.go` (duplicate)
@@ -448,7 +448,7 @@ During the migration (ARCH-003 through ARCH-008), interfaces are temporarily dup
 - New: `internal/jobs/worker/interfaces.go` (used by new implementations)
 - Resolution: Original deleted in ARCH-008
 
-**ParentJobOrchestrator Interface:**
+**JobOrchestrator Interface:**
 - New: `internal/jobs/orchestrator/interfaces.go` (created in ARCH-003)
 - No duplication - this is a new interface (ParentJobExecutor had no interface before)
 

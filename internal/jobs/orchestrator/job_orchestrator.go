@@ -11,23 +11,23 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// parentJobOrchestrator monitors parent job progress and aggregates child job statistics.
+// jobOrchestrator monitors parent job progress and aggregates child job statistics.
 // It runs in background goroutines (not via queue) and publishes real-time progress events.
 // NOTE: Parent jobs are NOT processed via the queue - they run in separate goroutines
 // to avoid blocking queue workers with long-running monitoring loops.
-type parentJobOrchestrator struct {
+type jobOrchestrator struct {
 	jobMgr       *jobs.Manager
 	eventService interfaces.EventService
 	logger       arbor.ILogger
 }
 
-// NewParentJobOrchestrator creates a new parent job orchestrator for monitoring parent job lifecycle and aggregating child job progress
-func NewParentJobOrchestrator(
+// NewJobOrchestrator creates a new parent job orchestrator for monitoring parent job lifecycle and aggregating child job progress
+func NewJobOrchestrator(
 	jobMgr *jobs.Manager,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
-) interfaces.ParentJobOrchestrator {
-	orchestrator := &parentJobOrchestrator{
+) interfaces.JobOrchestrator {
+	orchestrator := &jobOrchestrator{
 		jobMgr:       jobMgr,
 		eventService: eventService,
 		logger:       logger,
@@ -42,7 +42,7 @@ func NewParentJobOrchestrator(
 // StartMonitoring starts monitoring a parent job in a separate goroutine.
 // This is the primary entry point for parent job orchestration - NOT via queue.
 // Returns immediately after starting the goroutine.
-func (o *parentJobOrchestrator) StartMonitoring(ctx context.Context, job *models.JobModel) {
+func (o *jobOrchestrator) StartMonitoring(ctx context.Context, job *models.JobModel) {
 	// Validate job before starting
 	if err := o.validate(job); err != nil {
 		o.logger.Error().
@@ -53,6 +53,10 @@ func (o *parentJobOrchestrator) StartMonitoring(ctx context.Context, job *models
 		// Update job status to failed
 		o.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid job model: %v", err))
 		o.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
+		// Set finished_at timestamp for failed parent jobs
+		if err := o.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+			o.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to set finished_at timestamp")
+		}
 		return
 	}
 
@@ -72,7 +76,7 @@ func (o *parentJobOrchestrator) StartMonitoring(ctx context.Context, job *models
 }
 
 // validate validates that the job model is compatible with this orchestrator
-func (o *parentJobOrchestrator) validate(job *models.JobModel) error {
+func (o *jobOrchestrator) validate(job *models.JobModel) error {
 	if job.Type != string(models.JobTypeParent) {
 		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeParent, job.Type)
 	}
@@ -89,7 +93,7 @@ func (o *parentJobOrchestrator) validate(job *models.JobModel) error {
 
 // monitorChildJobs monitors child job progress and updates parent job status.
 // This runs in a separate goroutine and blocks until all children complete or timeout.
-func (o *parentJobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
+func (o *jobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
 	// Create job-specific logger for consistent logging
 	jobLogger := o.logger.WithCorrelationId(job.ID)
 
@@ -193,7 +197,7 @@ func (o *parentJobOrchestrator) monitorChildJobs(ctx context.Context, job *model
 }
 
 // checkChildJobProgress checks the progress of child jobs and returns true if all are complete
-func (o *parentJobOrchestrator) checkChildJobProgress(ctx context.Context, parentJobID string, logger arbor.ILogger) (bool, error) {
+func (o *jobOrchestrator) checkChildJobProgress(ctx context.Context, parentJobID string, logger arbor.ILogger) (bool, error) {
 	// Get child job statistics
 	childStats, err := o.jobMgr.GetChildJobStats(ctx, parentJobID)
 	if err != nil {
@@ -237,7 +241,7 @@ func (o *parentJobOrchestrator) checkChildJobProgress(ctx context.Context, paren
 }
 
 // publishParentJobProgress publishes a parent job progress update for real-time monitoring
-func (o *parentJobOrchestrator) publishParentJobProgress(ctx context.Context, job *models.JobModel, status, activity string) {
+func (o *jobOrchestrator) publishParentJobProgress(ctx context.Context, job *models.JobModel, status, activity string) {
 	if o.eventService == nil {
 		return
 	}
@@ -271,7 +275,7 @@ func (o *parentJobOrchestrator) publishParentJobProgress(ctx context.Context, jo
 }
 
 // publishChildJobStats publishes child job statistics for real-time monitoring
-func (o *parentJobOrchestrator) publishChildJobStats(ctx context.Context, parentJobID string, stats *jobs.ChildJobStats, progressText string) {
+func (o *jobOrchestrator) publishChildJobStats(ctx context.Context, parentJobID string, stats *jobs.ChildJobStats, progressText string) {
 	if o.eventService == nil {
 		return
 	}
@@ -303,7 +307,7 @@ func (o *parentJobOrchestrator) publishChildJobStats(ctx context.Context, parent
 
 // SubscribeToChildStatusChanges subscribes to child job status change events
 // This enables real-time progress tracking without polling
-func (o *parentJobOrchestrator) SubscribeToChildStatusChanges() {
+func (o *jobOrchestrator) SubscribeToChildStatusChanges() {
 	if o.eventService == nil {
 		return
 	}
@@ -405,12 +409,12 @@ func (o *parentJobOrchestrator) SubscribeToChildStatusChanges() {
 		return
 	}
 
-	o.logger.Info().Msg("ParentJobOrchestrator subscribed to child job status changes and document_saved events")
+	o.logger.Info().Msg("JobOrchestrator subscribed to child job status changes and document_saved events")
 }
 
 // formatProgressText generates the required progress format
 // Example: "66 pending, 1 running, 41 completed, 0 failed"
-func (o *parentJobOrchestrator) formatProgressText(stats *jobs.ChildJobStats) string {
+func (o *jobOrchestrator) formatProgressText(stats *jobs.ChildJobStats) string {
 	return fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
 		stats.PendingChildren,
 		stats.RunningChildren,
@@ -419,7 +423,7 @@ func (o *parentJobOrchestrator) formatProgressText(stats *jobs.ChildJobStats) st
 }
 
 // publishParentJobProgressUpdate publishes progress update for WebSocket consumption
-func (o *parentJobOrchestrator) publishParentJobProgressUpdate(
+func (o *jobOrchestrator) publishParentJobProgressUpdate(
 	ctx context.Context,
 	parentJobID string,
 	stats *jobs.ChildJobStats,
@@ -451,7 +455,7 @@ func (o *parentJobOrchestrator) publishParentJobProgressUpdate(
 		"completed_children": stats.CompletedChildren,
 		"failed_children":    stats.FailedChildren,
 		"cancelled_children": stats.CancelledChildren,
-		"progress_text":      progressText, // "X pending, Y running, Z completed, W failed"
+		"progress_text":      progressText,  // "X pending, Y running, Z completed, W failed"
 		"document_count":     documentCount, // Real-time document count from metadata
 		"timestamp":          time.Now().Format(time.RFC3339),
 	}
@@ -472,7 +476,7 @@ func (o *parentJobOrchestrator) publishParentJobProgressUpdate(
 }
 
 // calculateOverallStatus determines parent job status from child statistics
-func (o *parentJobOrchestrator) calculateOverallStatus(stats *jobs.ChildJobStats) string {
+func (o *jobOrchestrator) calculateOverallStatus(stats *jobs.ChildJobStats) string {
 	// If no children yet, status is determined by parent job state (handled elsewhere)
 	if stats.TotalChildren == 0 {
 		return "running" // Waiting for children to spawn

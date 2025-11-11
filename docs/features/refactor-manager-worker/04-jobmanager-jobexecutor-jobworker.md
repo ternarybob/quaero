@@ -504,7 +504,7 @@ Update to reflect that CrawlerWorker is now in worker/ package:
   - Implementations: `CrawlerManager`, `DatabaseMaintenanceManager`, `AgentManager` (ARCH-004)
 - `JobWorker` interface - `internal/jobs/worker/interfaces.go`
   - Implementations: `CrawlerWorker` (ARCH-005)
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+- `JobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
 
 **Old Architecture (deprecated, will be removed in ARCH-008):**
 - `JobManager` interface - `internal/jobs/executor/interfaces.go` (duplicate)

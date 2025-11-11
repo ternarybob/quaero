@@ -59,9 +59,9 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution (using concrete types for refactored queue system)
-	QueueManager *queue.Manager
-	LogService   interfaces.LogService
-	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
+	QueueManager              *queue.Manager
+	LogService                interfaces.LogService
+	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
 	JobManager                *jobs.Manager
 	JobProcessor              *worker.JobProcessor
 	JobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
@@ -307,15 +307,15 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(crawlerWorker)
 	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
 
-	// Create parent job orchestrator for monitoring parent job lifecycle
+	// Create job orchestrator for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 	// to avoid blocking queue workers with long-running monitoring loops
-	parentJobOrchestrator := orchestrator.NewParentJobOrchestrator(
+	jobOrchestrator := orchestrator.NewJobOrchestrator(
 		jobMgr,
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Parent job orchestrator created (runs in background goroutines, not via queue)")
+	a.Logger.Info().Msg("Job orchestrator created (runs in background goroutines, not via queue)")
 
 	// Register agent worker (if agent service is available)
 	if a.AgentService != nil {
@@ -369,8 +369,8 @@ func (a *App) initServices() error {
 	}
 
 	// 6.9. Initialize JobDefinitionOrchestrator for job definition execution (ARCH-009)
-	// Pass parentJobOrchestrator so it can start monitoring goroutines for crawler jobs
-	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, parentJobOrchestrator, a.Logger)
+	// Pass jobOrchestrator so it can start monitoring goroutines for crawler jobs
+	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobOrchestrator, a.Logger)
 
 	// Register managers for job definition steps
 	crawlerManager := manager.NewCrawlerManager(a.CrawlerService, a.Logger)
@@ -385,7 +385,7 @@ func (a *App) initServices() error {
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(reindexManager)
 	a.Logger.Info().Msg("Reindex manager registered")
 
-	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, parentJobOrchestrator, a.Logger)
+	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobOrchestrator, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
@@ -495,7 +495,6 @@ func (a *App) initHandlers() error {
 		a.SchedulerService,
 		a.StorageManager.DocumentStorage(),
 	)
-
 
 	// Initialize MCP handler with SearchService
 	mcpService := mcp.NewDocumentService(

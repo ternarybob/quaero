@@ -204,8 +204,8 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
     - `CrawlerWorker` (ARCH-005)
     - `AgentWorker` (ARCH-006)
     - `DatabaseMaintenanceWorker` (ARCH-008)
-- `ParentJobOrchestrator` interface - `internal/interfaces/job_interfaces.go` (centralized)
-  - Implementation: `ParentJobOrchestrator` (monitors parent job progress)
+- `JobOrchestrator` interface - `internal/interfaces/job_interfaces.go` (centralized)
+  - Implementation: `JobOrchestrator` (monitors parent job progress)
 - `JobSpawner` interface - `internal/interfaces/job_interfaces.go` (centralized)
   - Supports workers that spawn child jobs during execution
 - `JobDefinitionOrchestrator` - `internal/jobs/job_definition_orchestrator.go` (ARCH-009)
@@ -1151,7 +1151,7 @@ Check:
 - Homebrew (macOS/Linux): `brew install llama.cpp`
 - winget (Windows): `winget install llama.cpp`
 - MacPorts (macOS): `sudo port install llama.cpp`
-- Nix (macOS/Linux): `nix profile install nixpkgs#llama-cpp`
+- Nix (macOS/Linux): `nix profile install nixpkgs#llama-cpp` (Unix)
 
 **Build from Source:**
 - See detailed instructions in `internal/services/llm/offline/README.md`

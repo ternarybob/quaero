@@ -18,7 +18,7 @@
 - **Skill:** @code-architect
 - **Status:** ✅ Complete (10/10)
 - **Iterations:** 1
-- **Details:** Created `internal/jobs/orchestrator/` with new ParentJobOrchestrator interface
+- **Details:** Created `internal/jobs/orchestrator/` with new JobOrchestrator interface
 
 ### Step 4: Update AGENTS.md with directory structure notes
 - **Skill:** @none

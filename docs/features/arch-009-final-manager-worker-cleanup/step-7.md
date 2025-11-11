@@ -55,8 +55,8 @@ grep -r "github.com/ternarybob/quaero/internal/jobs/executor"
 ✅ 1 orchestrator at jobs/ root:
   - job_definition_orchestrator.go (ARCH-009, relocated from executor/)
 
-✅ ParentJobOrchestrator remains in orchestrator/:
-  - parent_job_orchestrator.go (ARCH-006, different responsibility)
+✅ JobOrchestrator remains in orchestrator/:
+  - job_orchestrator.go (ARCH-006, different responsibility)
 
 ✅ 3 workers in internal/jobs/worker/:
   - crawler_worker.go (ARCH-004)
@@ -109,7 +109,7 @@ grep -r "github.com/ternarybob/quaero/internal/jobs/executor"
 ✅ Manager/Worker/Orchestrator separation complete
 ✅ 6 managers properly registered with JobDefinitionOrchestrator
 ✅ 3 workers properly registered with job queue
-✅ ParentJobOrchestrator remains separate (correct)
+✅ JobOrchestrator remains separate (correct)
 ✅ JobDefinitionOrchestrator at jobs/ root (correct)
 ✅ Import cycle avoided via local interface definitions
 

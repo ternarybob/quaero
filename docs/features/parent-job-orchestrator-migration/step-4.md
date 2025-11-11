@@ -9,27 +9,27 @@
 
 ### Agent 2 - Implementation
 
-Updated job_executor.go to import and use the new orchestrator package for ParentJobOrchestrator.
+Updated job_executor.go to import and use the new orchestrator package for JobOrchestrator.
 
 **Changes made:**
 - `internal/jobs/executor/job_executor.go`:
   - Line 11: Removed import `"github.com/ternarybob/quaero/internal/jobs/processor"`
   - Line 11: Added import `"github.com/ternarybob/quaero/internal/jobs/orchestrator"`
   - Line 20: Updated field declaration:
-    - Field name: `parentJobExecutor` → `parentJobOrchestrator`
-    - Field type: `*processor.ParentJobExecutor` → `orchestrator.ParentJobOrchestrator` (interface)
+    - Field name: `parentJobExecutor` → `jobOrchestrator`
+    - Field type: `*processor.ParentJobExecutor` → `orchestrator.JobOrchestrator` (interface)
     - Field alignment adjusted for readability
   - Line 25: Updated constructor parameter:
-    - Parameter name: `parentJobExecutor` → `parentJobOrchestrator`
-    - Parameter type: `*processor.ParentJobExecutor` → `orchestrator.ParentJobOrchestrator` (interface)
+    - Parameter name: `parentJobExecutor` → `jobOrchestrator`
+    - Parameter type: `*processor.ParentJobExecutor` → `orchestrator.JobOrchestrator` (interface)
   - Line 29: Updated constructor body:
-    - Field initialization: `parentJobExecutor` → `parentJobOrchestrator`
+    - Field initialization: `parentJobExecutor` → `jobOrchestrator`
   - Line 335: Updated comment:
-    - "ParentJobExecutor" → "ParentJobOrchestrator"
+    - "ParentJobExecutor" → "JobOrchestrator"
   - Line 370: Updated method call:
-    - `e.parentJobExecutor.StartMonitoring()` → `e.parentJobOrchestrator.StartMonitoring()`
+    - `e.parentJobExecutor.StartMonitoring()` → `e.jobOrchestrator.StartMonitoring()`
   - Line 375: Updated comment:
-    - "ParentJobExecutor" → "ParentJobOrchestrator"
+    - "ParentJobExecutor" → "JobOrchestrator"
 
 **Commands run:**
 ```bash
@@ -52,11 +52,11 @@ powershell -File scripts/build.ps1
 **Code Quality:**
 ✅ Import updated correctly (processor → orchestrator)
 ✅ Field declaration updated (name and type)
-✅ Field type changed to interface (orchestrator.ParentJobOrchestrator)
+✅ Field type changed to interface (orchestrator.JobOrchestrator)
 ✅ Constructor parameter updated (name and type)
 ✅ Field initialization updated in constructor body
-✅ Method call updated (e.parentJobOrchestrator.StartMonitoring)
-✅ Comments updated ("ParentJobExecutor" → "ParentJobOrchestrator")
+✅ Method call updated (e.jobOrchestrator.StartMonitoring)
+✅ Comments updated ("ParentJobExecutor" → "JobOrchestrator")
 ✅ All references updated consistently
 ✅ Interface-based design preserved
 ✅ Build successful

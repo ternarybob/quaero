@@ -23,8 +23,8 @@ Updated `internal/app/app.go` to use new manager and orchestrator imports.
 - NEW: `JobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator`
 
 **3. Initialization (Line 373):**
-- OLD: `a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobOrchestrator, a.Logger)`
-- NEW: `a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, parentJobOrchestrator, a.Logger)`
+- OLD: `a.JobExecutor = executor.NewJobExecutor(jobMgr, jobOrchestrator, a.Logger)`
+- NEW: `a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobOrchestrator, a.Logger)`
 
 **4. Manager Registrations (Lines 380-403):**
 

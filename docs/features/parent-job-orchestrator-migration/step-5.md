@@ -4,7 +4,7 @@
 
 ### Files Updated
 
-Updated all comment-only references from `ParentJobExecutor` to `ParentJobOrchestrator` across 4 files:
+Updated all comment-only references from `ParentJobExecutor` to `JobOrchestrator` across 4 files:
 
 **1. internal/jobs/worker/job_processor.go**
 - Line 221: Updated comment in job completion logic
@@ -29,25 +29,25 @@ Updated all comment-only references from `ParentJobExecutor` to `ParentJobOrches
 ```go
 // internal/jobs/worker/job_processor.go (lines 221, 227)
 - // For parent jobs, do NOT mark as completed here - ParentJobExecutor will handle completion
-+ // For parent jobs, do NOT mark as completed here - ParentJobOrchestrator will handle completion
++ // For parent jobs, do NOT mark as completed here - JobOrchestrator will handle completion
 
 - // Parent job remains in "running" state and will be re-enqueued by ParentJobExecutor
-+ // Parent job remains in "running" state and will be re-enqueued by ParentJobOrchestrator
++ // Parent job remains in "running" state and will be re-enqueued by JobOrchestrator
 
 // internal/interfaces/event_service.go (lines 166, 177)
 - // Used by ParentJobExecutor to track child job progress in real-time.
-+ // Used by ParentJobOrchestrator to track child job progress in real-time.
++ // Used by JobOrchestrator to track child job progress in real-time.
 
 - // Used by ParentJobExecutor to track document count for parent jobs in real-time.
-+ // Used by ParentJobOrchestrator to track document count for parent jobs in real-time.
++ // Used by JobOrchestrator to track document count for parent jobs in real-time.
 
 // internal/jobs/manager.go (line 1687)
 - // This is used by the ParentJobExecutor to monitor child job progress
-+ // This is used by the ParentJobOrchestrator to monitor child job progress
++ // This is used by the JobOrchestrator to monitor child job progress
 
 // test/api/places_job_document_test.go (line 379)
 - // This is set by the event-driven ParentJobExecutor when EventDocumentSaved is published
-+ // This is set by the event-driven ParentJobOrchestrator when EventDocumentSaved is published
++ // This is set by the event-driven JobOrchestrator when EventDocumentSaved is published
 ```
 
 ## Validation
@@ -83,4 +83,4 @@ Updated all comment-only references from `ParentJobExecutor` to `ParentJobOrches
 ## Notes
 - This step ensures documentation and comments remain consistent with the code refactoring
 - All references to the old name have been updated across code, comments, and documentation
-- The codebase now consistently uses ParentJobOrchestrator terminology
+- The codebase now consistently uses JobOrchestrator terminology

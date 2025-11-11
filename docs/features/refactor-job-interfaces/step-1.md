@@ -12,11 +12,11 @@
 Created new centralized interface file `internal/interfaces/job_interfaces.go` consolidating all job-related interfaces from three separate locations. This aligns with the project's clean architecture pattern where all interfaces are centralized in `internal/interfaces/`.
 
 **Changes made:**
-- `internal/interfaces/job_interfaces.go`: NEW - Consolidated JobManager, ParentJobOrchestrator, JobWorker, and JobSpawner interfaces with their complete documentation
+- `internal/interfaces/job_interfaces.go`: NEW - Consolidated JobManager, JobOrchestrator, JobWorker, and JobSpawner interfaces with their complete documentation
 
 The file includes:
 1. **JobManager interface** - Creates parent jobs and manages job orchestration for specific action types
-2. **ParentJobOrchestrator interface** - Monitors parent job progress and aggregates child job statistics
+2. **JobOrchestrator interface** - Monitors parent job progress and aggregates child job statistics
 3. **JobWorker interface** - Common interface for all job workers processing individual jobs from the queue
 4. **JobSpawner interface** - Optional interface for workers that can spawn child jobs
 

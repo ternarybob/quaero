@@ -593,7 +593,7 @@ Update to reflect that managers are now in both locations:
 - `JobManager` interface - `internal/jobs/manager/interfaces.go`
   - Implementations: `CrawlerManager`, `DatabaseMaintenanceManager`, `AgentManager` (ARCH-004)
 - `JobWorker` interface - `internal/jobs/worker/interfaces.go`
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+- `JobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
 
 **Old Architecture (deprecated, will be removed in ARCH-008):**
 - `JobManager` interface - `internal/jobs/executor/interfaces.go` (duplicate)

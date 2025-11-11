@@ -65,7 +65,7 @@ Updated AGENTS.md to reflect ARCH-009 completion.
 - NEW: "Implementations (3 total):" with bullet list
 
 **Added:**
-- `ParentJobOrchestrator` interface with implementation note
+- `JobOrchestrator` interface with implementation note
 - `JobDefinitionOrchestrator` at jobs/ root (ARCH-009)
 
 **8. Removed "Old Architecture" Section:**
@@ -94,7 +94,7 @@ Updated AGENTS.md to reflect ARCH-009 completion.
 ✅ Manager count: 6 (correct)
 ✅ Worker count: 3 (correct)
 ✅ JobDefinitionOrchestrator location: internal/jobs/ (correct)
-✅ ParentJobOrchestrator location: internal/jobs/orchestrator/ (correct)
+✅ JobOrchestrator location: internal/jobs/orchestrator/ (correct)
 
 **Completeness:**
 ✅ All ARCH-009 changes documented

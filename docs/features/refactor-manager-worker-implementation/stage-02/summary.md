@@ -10,7 +10,7 @@
 ### New Files Created:
 - `internal/jobs/manager/interfaces.go` - JobManager interface (copied from executor)
 - `internal/jobs/worker/interfaces.go` - JobWorker and JobSpawner interfaces (copied from internal/interfaces)
-- `internal/jobs/orchestrator/interfaces.go` - ParentJobOrchestrator interface (new)
+- `internal/jobs/orchestrator/interfaces.go` - JobOrchestrator interface (new)
 
 ### Documentation Updated:
 - `AGENTS.md` - Added "Directory Structure (In Transition - ARCH-003)" and "Interfaces" sections
@@ -68,7 +68,7 @@ internal/jobs/
 ├── worker/                # NEW - Workers (execution)
 │   └── interfaces.go      # JobWorker, JobSpawner interfaces
 ├── orchestrator/          # NEW - Orchestrator (monitoring)
-│   └── interfaces.go      # ParentJobOrchestrator interface
+│   └── interfaces.go      # JobOrchestrator interface
 ├── executor/              # OLD - Still active (9 files)
 │   └── interfaces.go      # JobManager interface (duplicate)
 └── processor/             # OLD - Still active (5 files)
@@ -80,7 +80,7 @@ internal/jobs/
 **New Architecture (ARCH-003+):**
 - `JobManager` - `internal/jobs/manager/interfaces.go`
 - `JobWorker` - `internal/jobs/worker/interfaces.go`
-- `ParentJobOrchestrator` - `internal/jobs/orchestrator/interfaces.go`
+- `JobOrchestrator` - `internal/jobs/orchestrator/interfaces.go`
 
 **Old Architecture (Temporary):**
 - `JobManager` - `internal/jobs/executor/interfaces.go` (duplicate)
@@ -145,7 +145,7 @@ All step details available in:
 2. ✅ Each directory contains `interfaces.go` with correct package declarations
 3. ✅ JobManager interface copied to `manager/interfaces.go`
 4. ✅ JobWorker and JobSpawner interfaces copied to `worker/interfaces.go`
-5. ✅ ParentJobOrchestrator interface created in `orchestrator/interfaces.go`
+5. ✅ JobOrchestrator interface created in `orchestrator/interfaces.go`
 6. ✅ All interface files compile independently without errors
 7. ✅ Existing code remains unchanged and functional
 8. ✅ AGENTS.md updated with directory structure transition notes

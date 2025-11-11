@@ -1,16 +1,16 @@
 # Manager/Worker Architecture
 
-**Version:** 1.0
-**Last Updated:** 2025-11-11
+**Version:** 1.1
+**Last Updated:** 2025-01-15
 **Replaces:** JOB_EXECUTOR_ARCHITECTURE.md, JOB_QUEUE_MANAGEMENT.md, QUEUE_ARCHITECTURE.md
 
 ## Executive Summary
 
 Quaero's job system implements a **Manager/Worker pattern** for clear separation between orchestration and execution:
 
-- **Managers** (`JobManager` interface) - Orchestrate workflows by creating parent jobs and spawning child job hierarchies
+- **Managers** (`StepManager` interface) - Orchestrate workflows by creating parent jobs and spawning child job hierarchies
 - **Workers** (`JobWorker` interface) - Execute individual jobs pulled from the queue
-- **Orchestrator** (`ParentJobOrchestrator`) - Monitors parent job progress and aggregates child job statistics
+- **Orchestrator** (`JobOrchestrator`) - Monitors parent job progress and aggregates child job statistics
 
 This architecture provides:
 - Clear responsibility separation between coordination and execution
@@ -47,7 +47,7 @@ graph TB
 |-----------|-------|----------------|
 | **CrawlerManager** | Manager (Orchestration) | Implements StepManager - Creates parent jobs, defines seed URLs, initiates crawls |
 | **CrawlerWorker** | Worker (Execution) | Implements JobWorker - Renders pages, extracts content, spawns child jobs for links |
-| **ParentJobOrchestrator** | Orchestration (Monitoring) | Implements ParentJobOrchestrator interface - Tracks child job progress, aggregates statistics, determines completion |
+| **JobOrchestrator** | Orchestration (Monitoring) | Implements JobOrchestrator interface - Tracks child job progress, aggregates statistics, determines completion |
 | **JobProcessor** | Queue (Routing) | Routes queued jobs to registered workers based on job type |
 
 ## Manager vs Worker Distinction
@@ -100,6 +100,18 @@ func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobSte
 }
 ```
 
+**Other Manager Implementations:**
+
+All 6 managers follow the same pattern, implementing the `StepManager` interface:
+
+- **DatabaseMaintenanceManager** (`internal/jobs/manager/database_maintenance_manager.go`) - Orchestrates database vacuum, analyze, reindex, and optimize operations
+- **AgentManager** (`internal/jobs/manager/agent_manager.go`) - Orchestrates AI agent workflows for document processing (keyword extraction, summarization)
+- **TransformManager** (`internal/jobs/manager/transform_manager.go`) - Orchestrates HTML-to-markdown transformation for existing documents
+- **ReindexManager** (`internal/jobs/manager/reindex_manager.go`) - Orchestrates FTS5 full-text search index rebuilds
+- **PlacesSearchManager** (`internal/jobs/manager/places_search_manager.go`) - Orchestrates Google Places API searches and document creation
+
+Each manager creates a parent job and spawns child jobs specific to its domain.
+
 ### JobWorker Interface (Execution)
 
 **File:** `internal/interfaces/job_interfaces.go` (centralized)
@@ -110,8 +122,8 @@ type JobWorker interface {
     // Execute performs the actual work for a single job
     Execute(ctx context.Context, job *models.JobModel) error
 
-    // GetJobType returns the job type this worker handles
-    GetJobType() string
+    // GetWorkerType returns the job type this worker handles
+    GetWorkerType() string
 
     // Validate validates job model compatibility
     Validate(job *models.JobModel) error
@@ -164,9 +176,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.JobModel) error
 
 ## Orchestrator Responsibilities
 
-### ParentJobOrchestrator
+### JobOrchestrator
 
-**File:** `internal/jobs/orchestrator/parent_job_orchestrator.go`
+**File:** `internal/jobs/orchestrator/job_orchestrator.go`
 
 The orchestrator runs in a **separate goroutine** (NOT via queue) to avoid blocking queue workers with long-running monitoring loops.
 
@@ -184,7 +196,7 @@ The orchestrator runs in a **separate goroutine** (NOT via queue) to avoid block
 orchestrator.StartMonitoring(ctx, parentJobModel)
 
 // Monitoring loop (runs until all children complete or timeout)
-func (o *ParentJobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
+func (o *JobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
     ticker := time.NewTicker(5 * time.Second)
 
     for {
@@ -281,7 +293,7 @@ sequenceDiagram
 3. Manager calls `CrawlerService.StartCrawl()` with seed URLs
 4. Service creates parent job in database (type=`parent`)
 5. Service spawns child jobs (type=`crawler_url`) and enqueues them
-6. Service starts `ParentJobOrchestrator` in separate goroutine
+6. Service starts `JobOrchestrator` in separate goroutine
 7. Handler returns parent job ID to UI
 
 #### Phase 2: Job Execution (Worker Layer)
@@ -318,18 +330,21 @@ type StepManager interface {
 // JobWorker executes individual jobs from the queue
 type JobWorker interface {
     Execute(ctx context.Context, job *models.JobModel) error
-    GetJobType() string
+    GetWorkerType() string
     Validate(job *models.JobModel) error
 }
 
-// ParentJobOrchestrator monitors parent job progress
-type ParentJobOrchestrator interface {
-    StartMonitoring(ctx context.Context, job *models.JobModel) error
+// JobOrchestrator monitors parent job progress
+type JobOrchestrator interface {
+    StartMonitoring(ctx context.Context, job *models.JobModel)
+    SubscribeToChildStatusChanges()
 }
 
 // JobSpawner supports workers that spawn child jobs
 type JobSpawner interface {
-    SpawnChildJob(ctx context.Context, parentJob *models.JobModel, childConfig map[string]interface{}) error
+    // SpawnChildJob creates and enqueues a child job
+    // The child job will be linked to the parent via ParentID
+    SpawnChildJob(ctx context.Context, parentJob *models.JobModel, childType, childName string, config map[string]interface{}) error
 }
 ```
 
@@ -349,7 +364,7 @@ type JobSpawner interface {
 - ✅ `AgentWorker` (internal/jobs/worker/agent_worker.go)
 
 **Orchestrators (Monitoring):**
-- ✅ `ParentJobOrchestrator` (internal/jobs/orchestrator/parent_job_orchestrator.go)
+- ✅ `JobOrchestrator` (internal/jobs/orchestrator/job_orchestrator.go)
 - ✅ `JobDefinitionOrchestrator` (internal/jobs/job_definition_orchestrator.go)
 
 ## File Structure Changes
@@ -358,11 +373,11 @@ type JobSpawner interface {
 
 **Final Directory Structure:**
 - ✅ `internal/interfaces/` - Centralized interface definitions (refactor-job-interfaces)
-  - ✅ `job_interfaces.go` - StepManager, JobWorker, ParentJobOrchestrator, JobSpawner
+  - ✅ `job_interfaces.go` - StepManager, JobWorker, JobOrchestrator, JobSpawner
 - ✅ `internal/jobs/manager/` - 6 managers (orchestration, implement StepManager)
-  - ✅ `crawler_manager.go` - Web crawling orchestration
-  - ✅ `database_maintenance_manager.go` - Database maintenance orchestration
-  - ✅ `agent_manager.go` - AI agent orchestration
+  - ✅ `crawler_manager.go` - Web crawling workflows
+  - ✅ `database_maintenance_manager.go` - Database maintenance workflows
+  - ✅ `agent_manager.go` - AI agent workflows
   - ✅ `transform_manager.go` - HTML→markdown transformation
   - ✅ `reindex_manager.go` - FTS5 index rebuild
   - ✅ `places_search_manager.go` - Google Places API search
@@ -370,17 +385,18 @@ type JobSpawner interface {
   - ✅ `crawler_worker.go` - URL crawling execution
   - ✅ `database_maintenance_worker.go` - Database maintenance execution
   - ✅ `agent_worker.go` - AI agent execution
+  - ✅ `job_processor.go` - Routes jobs to workers
 - ✅ `internal/jobs/orchestrator/` - Parent job monitoring
-  - ✅ `parent_job_orchestrator.go` - Child job progress tracking (implements ParentJobOrchestrator)
+  - ✅ `job_orchestrator.go` - Child job progress tracking (implements JobOrchestrator)
 - ✅ `internal/jobs/` - Job definition routing
   - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers
 
 **Deleted Directories/Files:**
 - ❌ `internal/jobs/executor/` - 9 files deleted (migrated to manager/ + jobs/) [ARCH-009]
 - ❌ `internal/interfaces/job_executor.go` - Duplicate interface removed [ARCH-009]
-- ❌ `internal/jobs/manager/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
-- ❌ `internal/jobs/orchestrator/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
-- ❌ `internal/jobs/worker/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
+- ❌ `internal/jobs/manager/interfaces.go` - Removed, consolidated into `internal/interfaces/job_interfaces.go` [refactor-job-interfaces]
+- ❌ `internal/jobs/orchestrator/interfaces.go` - Removed, consolidated into `internal/interfaces/job_interfaces.go` [refactor-job-interfaces]
+- ❌ `internal/jobs/worker/interfaces.go` - Removed, consolidated into `internal/interfaces/job_interfaces.go` [refactor-job-interfaces]
 
 **Migration Timeline:**
 - Phase ARCH-001: ✅ Documentation created
@@ -393,6 +409,13 @@ type JobSpawner interface {
 - Phase ARCH-008: ✅ Database maintenance worker split
 - Phase ARCH-009: ✅ Final cleanup complete **(COMPLETED 2025-11-11)**
 - Phase ARCH-010: ✅ End-to-end validation complete
+- Phase refactor-job-interfaces: ✅ Interface consolidation complete
+  - Moved all job interfaces to `internal/interfaces/job_interfaces.go`
+  - Deleted `internal/jobs/manager/interfaces.go`
+  - Deleted `internal/jobs/worker/interfaces.go`
+  - Deleted `internal/jobs/orchestrator/interfaces.go`
+  - Eliminated import cycles
+  - Single source of truth for all job-related interfaces
 
 ### Final Cleanup (ARCH-009)
 
@@ -409,7 +432,13 @@ type JobSpawner interface {
 10. `internal/interfaces/job_executor.go` → Duplicate of JobWorker interface
 
 **Interface Consolidation (refactor-job-interfaces):**
-All job-related interfaces (StepManager, JobWorker, ParentJobOrchestrator, JobSpawner) are now centralized in `internal/interfaces/job_interfaces.go`. This eliminates import cycles and follows the project's clean architecture pattern. The `JobDefinitionOrchestrator` imports interfaces from the central location. Note: StepManager was renamed from JobManager to avoid naming conflict with the existing interfaces.JobManager (job CRUD operations).
+All job-related interfaces are now centralized in `internal/interfaces/job_interfaces.go`:
+- `StepManager` - Manager interface for job orchestration (renamed from JobManager to avoid conflict with job CRUD operations)
+- `JobWorker` - Worker interface for job execution
+- `JobOrchestrator` - Orchestrator interface for progress monitoring
+- `JobSpawner` - Optional interface for workers that spawn child jobs
+
+This consolidation eliminates import cycles, follows the project's clean architecture pattern, and provides a single source of truth. All managers, workers, and orchestrators import from this centralized location.
 
 ### Manager Migration Pattern (ARCH-004 + ARCH-009)
 
@@ -435,11 +464,14 @@ All managers followed the standardized transformation pattern:
 
 ### Final Architecture Structure
 
+**Note:** All interfaces are centralized in `internal/interfaces/job_interfaces.go` as of the refactor-job-interfaces phase. Individual `interfaces.go` files in subdirectories have been removed.
+
 ```
 internal/
+├── interfaces/
+│   └── job_interfaces.go                 # StepManager, JobWorker, JobOrchestrator, JobSpawner
 ├── jobs/
 │   ├── manager/                          # Managers (orchestration)
-│   │   ├── interfaces.go                 # JobManager interface
 │   │   ├── crawler_manager.go            # Web crawling workflows
 │   │   ├── database_maintenance_manager.go # Database maintenance workflows
 │   │   ├── agent_manager.go              # AI agent workflows
@@ -447,13 +479,12 @@ internal/
 │   │   ├── reindex_manager.go            # FTS5 index rebuild
 │   │   └── places_search_manager.go      # Google Places API search
 │   ├── worker/                           # Workers (execution)
-│   │   ├── interfaces.go                 # JobWorker interface
 │   │   ├── crawler_worker.go             # URL crawling execution
 │   │   ├── database_maintenance_worker.go # Database maintenance execution
-│   │   └── agent_worker.go               # AI agent execution
+│   │   ├── agent_worker.go               # AI agent execution
+│   │   └── job_processor.go              # Routes jobs to workers
 │   ├── orchestrator/                     # Orchestrators (monitoring)
-│   │   ├── interfaces.go                 # ParentJobOrchestrator interface
-│   │   └── parent_job_orchestrator.go    # Child job progress tracking
+│   │   └── job_orchestrator.go    # Child job progress tracking
 │   └── job_definition_orchestrator.go    # Routes job definition steps to managers
 ```
 
@@ -470,7 +501,7 @@ internal/
    - Single source of truth for each interface
 
 3. **Better Performance:**
-   - ParentJobOrchestrator runs in separate goroutine (non-blocking)
+   - JobOrchestrator runs in separate goroutine (non-blocking)
    - Queue-based worker pool scales with load
    - Real-time WebSocket updates without polling overhead
 
@@ -478,66 +509,6 @@ internal/
    - Intuitive naming (Manager/Worker/Orchestrator)
    - Clear file organization by responsibility
    - Import cycle resolution via local interfaces
-
-## Migration Summary (Complete)
-
-The migration from "executor" terminology to "manager/worker" pattern completed in 10 phases:
-
-### ✅ Phase ARCH-001: Documentation
-- Created MANAGER_WORKER_ARCHITECTURE.md (this document)
-- Deleted old architecture documents
-- Updated AGENTS.md and README.md references
-
-### ✅ Phase ARCH-002: Interface Rename
-- Renamed `StepExecutor` → `JobManager`
-- Renamed `JobExecutor` → `JobWorker`
-- Updated interface method names
-
-### ✅ Phase ARCH-003: Directory Creation
-- Created `internal/jobs/manager/` with interfaces.go
-- Created `internal/jobs/worker/` with interfaces.go
-- Created `internal/jobs/orchestrator/` with interfaces.go
-
-### ✅ Phase ARCH-004: Initial Manager Migration
-- Migrated CrawlerManager from executor/ to manager/
-- Migrated DatabaseMaintenanceManager from executor/ to manager/
-- Migrated AgentManager from executor/ to manager/
-- Updated imports in app.go and handlers
-
-### ✅ Phase ARCH-005: Crawler Worker Migration
-- Merged crawler_executor.go + crawler_executor_auth.go → crawler_worker.go
-- Consolidated authentication handling
-- Moved to `internal/jobs/worker/`
-
-### ✅ Phase ARCH-006: Remaining Worker Files
-- Migrated agent_worker.go to worker/ directory
-- Migrated job_processor.go to worker/ directory
-- Updated imports throughout codebase
-
-### ✅ Phase ARCH-007: Parent Job Orchestrator
-- Migrated ParentJobExecutor → ParentJobOrchestrator
-- Moved to `internal/jobs/orchestrator/`
-- Deleted deprecated parent_job_executor.go
-
-### ✅ Phase ARCH-008: Database Maintenance Worker
-- Split database maintenance executor into manager/worker
-- Created DatabaseMaintenanceWorker in worker/
-- Deleted old executor implementation
-
-### ✅ Phase ARCH-009: Final Cleanup (Completed 2025-11-11)
-- Migrated TransformManager, ReindexManager, PlacesSearchManager to manager/
-- Relocated JobDefinitionOrchestrator to internal/jobs/
-- Deleted entire executor/ directory (9 files)
-- Deleted duplicate interface file (internal/interfaces/job_executor.go)
-- Updated all imports and references
-
-### ✅ Phase ARCH-010: End-to-End Validation
-- ✅ Full application compiles without errors
-- ✅ No import cycles detected
-- ✅ All managers registered with JobDefinitionOrchestrator
-- ✅ All workers registered with JobProcessor
-- ✅ Documentation updated (AGENTS.md, MANAGER_WORKER_ARCHITECTURE.md)
-- ✅ Architecture follows manager/worker/orchestrator pattern
 
 ## Database Schema
 
@@ -856,7 +827,7 @@ cat bin/quaero.toml
 grep "Parent job monitoring" logs/quaero.log
 
 # Query child job statistics
-sqlite3 bin/quaero.db "SELECT status, COUNT(*) FROM jobs WHERE parent_id='job_abc123' GROUP BY status;"
+sqlite3 bin/quaero.db "SELECT status, COUNT(*) FROM jobs WHERE parent_id='job_abc123' GROUP BY status;""
 
 # Check if finished_at timestamp is set
 sqlite3 bin/quaero.db "SELECT id, status, finished_at FROM jobs WHERE id='job_abc123';"

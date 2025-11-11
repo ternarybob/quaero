@@ -25,7 +25,7 @@ The codebase is at ARCH-008 completion with the following remaining work:
 The `job_executor.go` file is fundamentally different from managers:
 - **Managers**: Create parent jobs, enqueue child jobs (CrawlerManager, AgentManager, etc.)
 - **JobExecutor**: Orchestrates job definitions by routing steps to appropriate managers
-- **ParentJobOrchestrator**: Monitors parent job progress (different responsibility)
+- **JobOrchestrator**: Monitors parent job progress (different responsibility)
 
 The JobExecutor is a job definition orchestrator, not a job manager. It should be renamed and relocated to clarify its purpose.
 
@@ -80,7 +80,7 @@ The `job_executor.go` file is NOT a manager - it's an orchestrator that routes j
 2. **Move to jobs/ root** - Simplifies structure (it's the only orchestrator of its kind)
 3. **Create orchestration/ directory** - Most explicit but adds directory for single file
 
-**Recommended: Option 2 (Move to jobs/ root)** - The file orchestrates job definitions by routing to managers. It's fundamentally different from ParentJobOrchestrator (which monitors parent jobs). Keeping it at `internal/jobs/job_definition_orchestrator.go` makes its purpose clear and avoids creating a directory for a single file.
+**Recommended: Option 2 (Move to jobs/ root)** - The file orchestrates job definitions by routing to managers. It's fundamentally different from JobOrchestrator (which monitors parent jobs). Keeping it at `internal/jobs/job_definition_orchestrator.go` makes its purpose clear and avoids creating a directory for a single file.
 
 **Migration Strategy:**
 
@@ -389,7 +389,7 @@ Create new PlacesSearchManager by copying from `internal/jobs/executor/places_se
 References: 
 
 - internal\jobs\executor\job_executor.go
-- internal\jobs\orchestrator\parent_job_orchestrator.go
+- internal\jobs\orchestrator\job_orchestrator.go
 
 Create new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job_executor.go` with transformations:
 
@@ -398,7 +398,7 @@ Create new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job_
 
 **Struct Rename:**
 - Change: `type JobExecutor struct` → `type JobDefinitionOrchestrator struct`
-- Keep all 4 fields unchanged: stepExecutors (map of JobManagers), jobManager, parentJobOrchestrator, logger
+- Keep all 4 fields unchanged: stepExecutors (map of JobManagers), jobManager, jobOrchestrator, logger
 - Update struct comment: "JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate JobManagers and managing parent-child hierarchy"
 
 **Constructor Rename:**
@@ -414,7 +414,7 @@ Create new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job_
 - Methods: RegisterStepExecutor(), Execute(), checkErrorTolerance()
 
 **Import Updates:**
-- Keep: `"github.com/ternarybob/quaero/internal/jobs/orchestrator"` (for ParentJobOrchestrator)
+- Keep: `"github.com/ternarybob/quaero/internal/jobs/orchestrator"` (for JobOrchestrator)
 - Update: Import manager package for JobManager interface (if not already imported via jobs package)
 
 **Comments:**
@@ -428,7 +428,7 @@ Create new JobDefinitionOrchestrator by moving from `internal/jobs/executor/job_
 
 **Key Distinction:**
 - This orchestrator routes job definition steps to managers (CrawlerManager, AgentManager, etc.)
-- Different from ParentJobOrchestrator which monitors parent job progress
+- Different from JobOrchestrator which monitors parent job progress
 - Lives at jobs/ root level since it's the only job definition orchestrator
 
 **Implementation Notes:**
@@ -475,12 +475,12 @@ JobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
 
 Replace:
 ```
-a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobOrchestrator, a.Logger)
+a.JobExecutor = executor.NewJobExecutor(jobMgr, jobOrchestrator, a.Logger)
 ```
 
 With:
 ```
-a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, parentJobOrchestrator, a.Logger)
+a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobOrchestrator, a.Logger)
 ```
 
 **Manager Registration Updates (lines 377-401):**
@@ -720,8 +720,8 @@ Quaero uses a Manager/Worker/Orchestrator architecture for job orchestration and
   - ✅ `job_processor.go` - Routes jobs from queue to workers
 
 - `internal/jobs/orchestrator/` - Parent job orchestrator (monitoring layer)
-  - ✅ `interfaces.go` - ParentJobOrchestrator interface
-  - ✅ `parent_job_orchestrator.go` - Monitors parent job progress
+  - ✅ `interfaces.go` - JobOrchestrator interface
+  - ✅ `job_orchestrator.go` - Monitors parent job progress
 
 - `internal/jobs/` - Job definition orchestration
   - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers
@@ -757,8 +757,8 @@ Remove "Old Architecture" section entirely:
   - Implementations: CrawlerWorker, AgentWorker, DatabaseMaintenanceWorker
   - Methods: Execute(), GetWorkerType(), Validate()
 
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
-  - Implementation: ParentJobOrchestrator
+- `JobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+  - Implementation: JobOrchestrator
   - Methods: StartMonitoring(), SubscribeToChildStatusChanges()
 
 **Core Components:**
@@ -771,7 +771,7 @@ Remove "Old Architecture" section entirely:
   - Manages parent-child job hierarchy
   - Handles error tolerance and retry logic
 
-- `ParentJobOrchestrator` - `internal/jobs/orchestrator/parent_job_orchestrator.go`
+- `JobOrchestrator` - `internal/jobs/orchestrator/job_orchestrator.go`
   - Monitors parent job progress in background goroutines
   - Aggregates child job statistics
   - Publishes real-time progress events
@@ -900,7 +900,7 @@ The Manager/Worker/Orchestrator architecture is now complete:
 - **Managers** (`internal/jobs/manager/`) - Create parent jobs, enqueue children, orchestrate workflows
 - **Workers** (`internal/jobs/worker/`) - Execute individual jobs from queue, perform actual work
 - **Orchestrators** - Two types:
-  - `ParentJobOrchestrator` (`internal/jobs/orchestrator/`) - Monitors parent job progress
+  - `JobOrchestrator` (`internal/jobs/orchestrator/`) - Monitors parent job progress
   - `JobDefinitionOrchestrator` (`internal/jobs/`) - Routes job definition steps to managers
 
 All three layers have clear separation of concerns and distinct responsibilities.

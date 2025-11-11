@@ -126,11 +126,11 @@ Move `internal/jobs/executor/job_executor.go` to `internal/jobs/job_definition_o
 - Constructor: `NewJobExecutor()` → `NewJobDefinitionOrchestrator()`
 - Receiver: `e *JobExecutor` → `o *JobDefinitionOrchestrator`
 - Update all comments and log messages referencing "JobExecutor" → "JobDefinitionOrchestrator"
-- Keep all 4 fields unchanged: stepExecutors, jobManager, parentJobOrchestrator, logger
+- Keep all 4 fields unchanged: stepExecutors, jobManager, jobOrchestrator, logger
 - Total lines: ~468 (same as original)
 
 **Key Distinction:**
-- This orchestrator routes job definition steps to managers (different from ParentJobOrchestrator)
+- This orchestrator routes job definition steps to managers (different from JobOrchestrator)
 - Lives at jobs/ root since it's the only job definition orchestrator
 
 **Validation Criteria:**
@@ -365,7 +365,7 @@ Update architecture documentation to reflect ARCH-009 completion:
 **Key Content:**
 - All managers in internal/jobs/manager/ directory (6 total)
 - All workers in internal/jobs/worker/ directory (3 workers + job processor)
-- ParentJobOrchestrator in internal/jobs/orchestrator/
+- JobOrchestrator in internal/jobs/orchestrator/
 - JobDefinitionOrchestrator in internal/jobs/ root
 - Old directories deleted: executor/, interfaces/job_executor.go
 

@@ -14,7 +14,7 @@ Created new DatabaseMaintenanceWorker that implements the JobWorker interface fo
 **Architectural Pattern:**
 - NEW Worker pattern (not BaseExecutor)
 - Simple struct with 3 dependencies: db, jobMgr, logger
-- No progress tracking within job (ParentJobOrchestrator handles that)
+- No progress tracking within job (JobOrchestrator handles that)
 - Process single operation per job (not operation array)
 
 **Implementation Details:**
@@ -123,7 +123,7 @@ go build -o nul internal/jobs/worker/database_maintenance_worker.go
 **Architecture:**
 ✅ Worker processes single operation per job (not array)
 ✅ Matches established Worker pattern (see CrawlerWorker, AgentWorker)
-✅ No progress tracking within worker (ParentJobOrchestrator handles parent progress)
+✅ No progress tracking within worker (JobOrchestrator handles parent progress)
 ✅ Correlation ID logging for parent job log aggregation
 ✅ Follows plan requirements exactly
 

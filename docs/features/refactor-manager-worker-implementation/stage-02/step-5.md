@@ -18,7 +18,7 @@ Updated MANAGER_WORKER_ARCHITECTURE.md to document ARCH-003 completion and expla
 - Added comprehensive migration status table showing all 10 phases
 - Added "Interface Duplication (Temporary)" section explaining duplication strategy
 - Documented resolution plan for each duplicated interface
-- Noted ParentJobOrchestrator is new (no duplication)
+- Noted JobOrchestrator is new (no duplication)
 
 **Content Added:**
 
@@ -28,7 +28,7 @@ Updated MANAGER_WORKER_ARCHITECTURE.md to document ARCH-003 completion and expla
 4. **Interface Duplication** - Explains temporary state:
    - JobManager: Original vs New locations
    - JobWorker: Original vs New locations
-   - ParentJobOrchestrator: New interface (no prior version)
+   - JobOrchestrator: New interface (no prior version)
 5. **Rationale** - Explains duplication allows gradual migration
 
 **Insertion Location:** After "File Structure Changes" heading (line 360)
