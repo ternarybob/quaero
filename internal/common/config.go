@@ -24,6 +24,7 @@ type Config struct {
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
 	PlacesAPI   PlacesAPIConfig  `toml:"places_api"`
+	Agent       AgentConfig      `toml:"agent"`
 }
 
 type ServerConfig struct {
@@ -138,6 +139,14 @@ type PlacesAPIConfig struct {
 	MaxResultsPerSearch int           `toml:"max_results_per_search"` // Google Places API limit per request
 }
 
+// AgentConfig contains Google ADK agent configuration
+type AgentConfig struct {
+	GoogleAPIKey string `toml:"google_api_key"` // Google Gemini API key for agent operations
+	ModelName    string `toml:"model_name"`     // Gemini model identifier (default: "gemini-2.0-flash")
+	MaxTurns     int    `toml:"max_turns"`      // Maximum agent conversation turns (default: 10)
+	Timeout      string `toml:"timeout"`        // Agent execution timeout as duration string (default: "5m")
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -236,6 +245,12 @@ func NewDefaultConfig() *Config {
 			RateLimit:           1 * time.Second, // 1 request per second (respects Google API quotas)
 			RequestTimeout:      30 * time.Second,
 			MaxResultsPerSearch: 20, // Google Places API default limit
+		},
+		Agent: AgentConfig{
+			GoogleAPIKey: "",                  // User must provide API key (no fallback)
+			ModelName:    "gemini-2.0-flash",  // Fast, cost-effective Gemini model
+			MaxTurns:     10,                  // Reasonable limit for agent loops
+			Timeout:      "5m",                // 5 minutes for agent execution
 		},
 	}
 }
@@ -479,6 +494,22 @@ func applyEnvOverrides(config *Config) {
 	// Places API configuration
 	if apiKey := os.Getenv("QUAERO_PLACES_API_KEY"); apiKey != "" {
 		config.PlacesAPI.APIKey = apiKey
+	}
+
+	// Agent configuration
+	if apiKey := os.Getenv("QUAERO_AGENT_GOOGLE_API_KEY"); apiKey != "" {
+		config.Agent.GoogleAPIKey = apiKey
+	}
+	if modelName := os.Getenv("QUAERO_AGENT_MODEL_NAME"); modelName != "" {
+		config.Agent.ModelName = modelName
+	}
+	if maxTurns := os.Getenv("QUAERO_AGENT_MAX_TURNS"); maxTurns != "" {
+		if mt, err := strconv.Atoi(maxTurns); err == nil {
+			config.Agent.MaxTurns = mt
+		}
+	}
+	if timeout := os.Getenv("QUAERO_AGENT_TIMEOUT"); timeout != "" {
+		config.Agent.Timeout = timeout
 	}
 }
 

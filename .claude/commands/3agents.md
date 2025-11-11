@@ -6,7 +6,7 @@ description: Three-agent workflow - plan, implement, validate. Only stops for us
 Execute workflow for: $ARGUMENTS
 
 ## RULES
-**Files:** Output markdown in `docs/feature/{folder-name}/`
+**Files:** Output markdown in `docs/features/{folder-name}/`
 **Tests:** Only `/test/api` and `/test/ui`
 **Binaries:** Never in root - use `go build -o /tmp/` or `go run`
 **Beta mode:** Breaking changes allowed
@@ -31,7 +31,7 @@ skills:
 ```
 
 ## SETUP
-Create `docs/feature/{lowercase-hyphenated-task}/`
+Create `docs/features/{lowercase-hyphenated-task}/`
 
 ---
 
@@ -268,7 +268,7 @@ Step 4: {description} - In progress
 ## WORKFLOW
 
 ```
-Create docs/feature/{task}/ folder
+Create docs/features/{task}/ folder
 
 Agent 1: Create plan.md
 
@@ -405,9 +405,9 @@ Reply with: "Option {N}" or provide your direction
 
 ## Documentation
 All step details available in:
-- `docs/feature/{task}/plan.md`
-- `docs/feature/{task}/step-{1..N}.md`
-- `docs/feature/{task}/progress.md`
+- `docs/features/{task}/plan.md`
+- `docs/features/{task}/step-{1..N}.md`
+- `docs/features/{task}/progress.md`
 
 **Completed:** {ISO8601}
 ```
@@ -474,5 +474,5 @@ Tests: ✅ All pass
 ---
 
 **Task:** $ARGUMENTS  
-**Docs:** `docs/feature/{folder-name}/`  
+**Docs:** `docs/features/{folder-name}/`  
 **Mode:** Run to completion with Agent 2/3 iteration per step, stop only for user decisions

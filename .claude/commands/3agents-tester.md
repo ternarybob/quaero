@@ -6,7 +6,7 @@ description: read 3agents output (folder), m, review if api and ui tets eixts, u
 Test implementation from: $ARGUMENTS
 
 ## RULES
-**Read from:** `docs/feature/{task}/`
+**Read from:** `docs/features/{task}/`
 **Create tests:** Use @test-writer in `/test/api` or `/test/ui`
 **Run tests:** Execute both test suites
 **Report:** Simple pass/fail with issues
@@ -16,7 +16,7 @@ Test implementation from: $ARGUMENTS
 ## PROCESS
 
 ### 1. Read 3agents Output
-From `docs/feature/{task}/`:
+From `docs/features/{task}/`:
 - `plan.md` - what was planned
 - `progress.md` - what was done
 - `summary.md` - completion status
@@ -68,7 +68,7 @@ cd /test/api && go test -v
 ✅ Implementation validated - ready to use
 
 {IF FAIL:}
-❌ Issues found - run: `3agents "Fix test failures from docs/feature/{task}/test-results.md"`
+❌ Issues found - run: `3agents "Fix test failures from docs/features/{task}/test-results.md"`
 ```
 
 If failures, also create `fixes-needed.md`:

@@ -1,0 +1,122 @@
+# ============================================================================
+# Keyword Extraction Agent Job Definition
+# ============================================================================
+# This job definition demonstrates how to use the Google Gemini-powered
+# agent framework to extract keywords from documents.
+#
+# The agent analyzes document content and identifies semantically relevant
+# keywords with confidence scores, storing results in Document.Metadata.
+#
+# Prerequisites:
+#   - Valid Google API key configured (QUAERO_AGENT_GOOGLE_API_KEY)
+#   - Documents crawled and stored in the database
+#
+# Job Flow:
+#   1. Query documents by source type
+#   2. For each document, create an agent job
+#   3. Agent analyzes content and extracts keywords
+#   4. Results stored in Document.Metadata["keyword_extractor"]
+# ============================================================================
+
+# Job metadata
+name = "Keyword Extraction Demo"
+type = "agent"
+description = "Extracts keywords from crawled documents using Google Gemini"
+enabled = false  # Set to true to enable automatic execution
+
+# Optional: Schedule for automatic execution
+# schedule = "0 0 * * *"  # Run daily at midnight
+
+# Optional: Tags for categorization
+tags = ["agent", "keyword-extraction", "nlp"]
+
+# ============================================================================
+# Job Steps
+# ============================================================================
+
+[[steps]]
+name = "Extract Keywords from Confluence Pages"
+action = "agent"
+
+# Step configuration
+[steps.config]
+# Agent type to execute (registered in agent service)
+agent_type = "keyword_extractor"
+
+# Optional: Maximum number of keywords to extract per document
+# max_keywords = 10
+
+# Optional: Filter documents to process
+[steps.config.document_filter]
+# Limit number of documents to process
+limit = 100
+
+# Optional: Filter by tags (if documents have tags)
+# tags = ["important", "technical"]
+
+# ============================================================================
+# Example: Multi-Step Agent Pipeline
+# ============================================================================
+# Uncomment to enable a multi-step workflow that processes documents
+# in sequence (e.g., crawl → extract keywords → summarize)
+
+# [[steps]]
+# name = "Crawl Confluence Pages"
+# action = "crawl"
+#
+# [steps.config]
+# start_urls = ["https://confluence.example.com/display/TEAM"]
+# max_depth = 2
+# max_pages = 50
+# follow_links = true
+
+# [[steps]]
+# name = "Extract Keywords"
+# action = "agent"
+#
+# [steps.config]
+# agent_type = "keyword_extractor"
+# max_keywords = 15
+#
+# [steps.config.document_filter]
+# limit = 50
+
+# ============================================================================
+# Usage Instructions
+# ============================================================================
+#
+# 1. Configure Google API Key:
+#    export QUAERO_AGENT_GOOGLE_API_KEY="your-api-key-here"
+#    OR set agent.google_api_key in quaero.toml
+#
+# 2. Enable the job:
+#    - Set enabled = true in this file
+#    - OR enable via UI at http://localhost:8085/job-definitions
+#
+# 3. Run manually via UI:
+#    - Navigate to Job Definitions page
+#    - Click "Run" button for this job
+#
+# 4. View results:
+#    - Navigate to Documents page
+#    - Check Document.Metadata["keyword_extractor"] for results
+#    - Results include "keywords" array and "confidence" scores
+#
+# 5. Monitor execution:
+#    - Check Jobs page for real-time progress
+#    - View logs for detailed execution information
+#
+# ============================================================================
+# Result Format
+# ============================================================================
+# Agent results are stored in Document.Metadata under the agent type key:
+#
+# Document.Metadata["keyword_extractor"] = {
+#   "keywords": ["microservices", "api design", "scalability"],
+#   "confidence": {
+#     "microservices": 0.95,
+#     "api design": 0.87,
+#     "scalability": 0.82
+#   }
+# }
+# ============================================================================

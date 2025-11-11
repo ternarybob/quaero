@@ -21,6 +21,7 @@ import (
 	"github.com/ternarybob/quaero/internal/jobs/processor"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
@@ -79,6 +80,9 @@ type App struct {
 
 	// Places service
 	PlacesService interfaces.PlacesService
+
+	// Agent service
+	AgentService interfaces.AgentService
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -312,6 +316,19 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Parent job executor created (runs in background goroutines, not via queue)")
 
+	// Register agent executor (if agent service is available)
+	if a.AgentService != nil {
+		agentExecutor := processor.NewAgentExecutor(
+			a.AgentService,
+			jobMgr,
+			a.StorageManager.DocumentStorage(),
+			a.Logger,
+			a.EventService,
+		)
+		jobProcessor.RegisterExecutor(agentExecutor)
+		a.Logger.Info().Msg("Agent executor registered for job type: agent")
+	}
+
 	// Register database maintenance executor (new interface)
 	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(
 		a.StorageManager.DB().(*sql.DB),
@@ -335,6 +352,23 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 	a.Logger.Info().Msg("Places service initialized")
+
+	// 6.8.2. Initialize Agent service (Google ADK with Gemini)
+	a.AgentService, err = agents.NewService(
+		&a.Config.Agent,
+		a.Logger,
+	)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to initialize agent service - agent features will be unavailable")
+		a.Logger.Info().Msg("To enable agents, set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config")
+	} else {
+		// Perform health check to validate API key and connectivity
+		if err := a.AgentService.HealthCheck(context.Background()); err != nil {
+			a.Logger.Warn().Err(err).Msg("Agent service health check failed - API key may be invalid")
+		} else {
+			a.Logger.Info().Msg("Agent service initialized and health check passed")
+		}
+	}
 
 	// 6.9. Initialize JobExecutor for job definition execution
 	// Pass parentJobExecutor so it can start monitoring goroutines for crawler jobs
@@ -360,6 +394,13 @@ func (a *App) initServices() error {
 	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(placesSearchStepExecutor)
 	a.Logger.Info().Msg("Places search step executor registered")
+
+	// Register agent step executor (if agent service is available)
+	if a.AgentService != nil {
+		agentStepExecutor := executor.NewAgentStepExecutor(jobMgr, queueMgr, a.SearchService, a.Logger)
+		a.JobExecutor.RegisterStepExecutor(agentStepExecutor)
+		a.Logger.Info().Msg("Agent step executor registered")
+	}
 
 	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
 
@@ -667,6 +708,13 @@ func (a *App) Close() error {
 	if a.CrawlerService != nil {
 		if err := a.CrawlerService.Close(); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to close crawler service")
+		}
+	}
+
+	// Close agent service
+	if a.AgentService != nil {
+		if err := a.AgentService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close agent service")
 		}
 	}
 

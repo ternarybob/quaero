@@ -64,6 +64,24 @@ environment = "development"  # "development" or "production"
 # rate_limit = "100ms"                     # Minimum time between API calls (default: 100ms)
 
 # =============================================================================
+# Agent Configuration (Google ADK with Gemini)
+# =============================================================================
+# Configure AI agents for document processing (keyword extraction, summarization, etc.)
+# Requires Google Gemini API key from: https://aistudio.google.com/app/apikey
+#
+# IMPORTANT: Agents require a valid API key. No offline fallback is available.
+# If the API key is missing or invalid, agent jobs will fail immediately.
+#
+# Env vars: QUAERO_AGENT_GOOGLE_API_KEY, QUAERO_AGENT_MODEL_NAME,
+#           QUAERO_AGENT_MAX_TURNS, QUAERO_AGENT_TIMEOUT
+
+[agent]
+# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for agent operations
+# model_name = "gemini-2.0-flash"                 # Gemini model (default: gemini-2.0-flash)
+# max_turns = 10                                   # Maximum agent conversation turns (default: 10)
+# timeout = "5m"                                   # Agent execution timeout (default: 5m)
+
+# =============================================================================
 # Job Definitions Configuration
 # =============================================================================
 # Job definitions are user-defined workflows stored as TOML/JSON files.
