@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Successfully completed ARCH-005 migration by merging two crawler executor files (crawler_executor.go + crawler_executor_auth.go) into a unified worker implementation (crawler_worker.go) and migrating from the processor package to the new worker package. The migration maintains full backward compatibility, preserves all functionality including conditional authentication logic, and follows the established manager/worker architectural pattern.
+Successfully completed ARCH-005 migration by merging two crawler executor files (crawler_executor.go + crawler_executor_auth.go) into a unified worker implementation (crawler_worker.go) and migrating from the processor package to the new worker package. The deprecated files were immediately deleted (breaking changes acceptable), preserving all functionality including conditional authentication logic, and following the established manager/worker architectural pattern.
 
 ## Migration Overview
 
@@ -84,24 +84,22 @@ if w.authStorage != nil {
 - Version 0.1.1969, Build 11-11-17-25-39, Commit 43db400
 - Both quaero.exe and quaero-mcp.exe generated
 
-### Step 3: Add Deprecation Notices to Old Files
+### Step 3: Remove Deprecated Files
 - **Skill:** @go-coder
 - **Quality:** 10/10
 - **Iterations:** 1
 - **Status:** ✅ Complete
 
 **Accomplishments:**
-- Added comprehensive deprecation notices to crawler_executor.go
-- Added comprehensive deprecation notices to crawler_executor_auth.go
-- Both files remain functional for backward compatibility
-- Notices document:
-  - Migration path (ARCH-005)
-  - Removal timeline (ARCH-008)
-  - All transformations applied
-  - New location (internal/jobs/worker)
+- Deleted `internal/jobs/processor/crawler_executor.go` immediately
+- Deleted `internal/jobs/processor/crawler_executor_auth.go` immediately
+- Breaking changes acceptable - no backward compatibility needed
+- Application rebuilds successfully after deletion
+- Processor directory now contains only 3 files: agent_executor.go, parent_job_executor.go, processor.go
 
-**Backward Compatibility:**
-Files continue to compile and function, ensuring gradual migration path for any external dependencies.
+**Verification:**
+- Build executed successfully (Version 0.1.1969, Build 11-11-17-45-20)
+- All references were correctly updated in Step 2 (no orphaned imports)
 
 ### Step 4: Update Architecture Documentation
 - **Skill:** @none (documentation)
@@ -224,7 +222,7 @@ func NewCrawlerWorker(
 - ✅ Clean compilation (no errors or warnings)
 - ✅ Interface compliance verified
 - ✅ All transformations consistent
-- ✅ Backward compatibility maintained
+- ✅ Deprecated files immediately removed (breaking changes acceptable)
 - ✅ Comprehensive documentation
 - ✅ Test suite compiles successfully
 
@@ -243,14 +241,12 @@ func NewCrawlerWorker(
 
 ### Files Modified
 1. `internal/app/app.go` - Worker registration
-2. `internal/jobs/processor/crawler_executor.go` - Deprecation notice
-3. `internal/jobs/processor/crawler_executor_auth.go` - Deprecation notice
-4. `AGENTS.md` - Architecture documentation
-5. `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` - Migration status
+2. `AGENTS.md` - Architecture documentation
+3. `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md` - Migration status
 
-### Files for Future Removal (ARCH-008)
-1. `internal/jobs/processor/crawler_executor.go`
-2. `internal/jobs/processor/crawler_executor_auth.go`
+### Files Deleted
+1. `internal/jobs/processor/crawler_executor.go` - Removed immediately (breaking change)
+2. `internal/jobs/processor/crawler_executor_auth.go` - Removed immediately (breaking change)
 
 ---
 
@@ -269,13 +265,12 @@ ARCH-005 represents the first complete worker implementation, establishing the p
 **Remaining Migrations:**
 - ⏳ ARCH-006: Places search worker migration
 - ⏳ ARCH-007: Additional worker migrations
-- 🗑️ ARCH-008: Remove deprecated processor files
 
 ### Pattern Established
 This migration serves as the template for future worker migrations:
 1. Merge related functionality into single worker file
 2. Update app registration
-3. Add deprecation notices to old files
+3. Delete old deprecated files immediately (breaking changes acceptable)
 4. Update documentation
 5. Validate compilation and interface compliance
 
@@ -299,7 +294,7 @@ All success criteria from the original requirements document achieved:
 
 ### Quality Standards
 - ✅ Code organization with clear section dividers
-- ✅ Backward compatibility via deprecation notices
+- ✅ Deprecated files immediately removed (breaking changes acceptable)
 - ✅ Interface compliance verified
 - ✅ No functionality lost during merge
 - ✅ Comprehensive step documentation created
@@ -319,7 +314,7 @@ All success criteria from the original requirements document achieved:
 ### Process Improvements
 1. **Pattern Template:** This migration establishes the template for future worker migrations
 2. **Validation Strategy:** Multi-level validation (independent, full build, test compilation) ensures quality
-3. **Backward Compatibility:** Deprecation notices provide smooth transition path
+3. **Breaking Changes:** Immediate file deletion acceptable - no need for deprecation periods
 
 ### Technical Insights
 1. **File Size Management:** ~1500 line file remains manageable with clear section organization
@@ -338,12 +333,7 @@ All success criteria from the original requirements document achieved:
 ### Short-term (ARCH-007)
 1. Migrate remaining workers using established pattern
 2. Continue updating architecture documentation
-3. Maintain backward compatibility until ARCH-008
-
-### Long-term (ARCH-008)
-1. Remove deprecated processor files after all migrations complete
-2. Clean up backward compatibility code
-3. Finalize manager/worker architecture implementation
+3. Delete deprecated files immediately upon migration
 
 ---
 

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/orchestrator"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
@@ -19,31 +20,33 @@ import (
 // DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceManager struct {
-	jobManager *jobs.Manager
-	queueMgr   *queue.Manager
-	logger     arbor.ILogger
+	jobManager            *jobs.Manager
+	queueMgr              *queue.Manager
+	parentJobOrchestrator orchestrator.ParentJobOrchestrator
+	logger                arbor.ILogger
 }
 
 // NewDatabaseMaintenanceManager creates a new database maintenance manager
-func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, logger arbor.ILogger) *DatabaseMaintenanceManager {
+func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, parentJobOrchestrator orchestrator.ParentJobOrchestrator, logger arbor.ILogger) *DatabaseMaintenanceManager {
 	return &DatabaseMaintenanceManager{
-		jobManager: jobManager,
-		queueMgr:   queueMgr,
-		logger:     logger,
+		jobManager:            jobManager,
+		queueMgr:              queueMgr,
+		parentJobOrchestrator: parentJobOrchestrator,
+		logger:                logger,
 	}
 }
 
-// CreateParentJob creates a parent database maintenance job and enqueues it to the queue for processing.
-// The job will execute database optimization operations based on the configuration.
+// CreateParentJob creates a parent database maintenance job and child jobs for each operation.
+// Each operation (VACUUM, ANALYZE, REINDEX, OPTIMIZE) is executed as a separate job for granular tracking.
 func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).
 		Str("parent_job_id", parentJobID).
-		Msg("Creating parent database maintenance job")
+		Msg("Creating parent database maintenance job and child jobs for each operation")
 
-	// Generate job ID for this step
-	jobID := uuid.New().String()
+	// Generate parent job ID
+	dbMaintenanceParentJobID := uuid.New().String()
 
 	// Get operations from step config
 	operations := []string{"vacuum", "analyze", "reindex"} // Default
@@ -60,74 +63,112 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		}
 	}
 
-	// Create job model
-	jobModel := models.NewChildJobModel(
-		parentJobID,
-		"database_maintenance",
-		step.Name,
-		map[string]interface{}{
-			"operations": operations,
-		},
-		map[string]interface{}{
-			"step_name": step.Name,
-		},
-		1, // depth
-	)
-
-	// Override job ID to match the one we generated
-	jobModel.ID = jobID
-
-	// Validate job model
-	if err := jobModel.Validate(); err != nil {
-		return "", fmt.Errorf("invalid job model: %w", err)
+	// Create parent job record for orchestration tracking
+	parentJob := &jobs.Job{
+		ID:       dbMaintenanceParentJobID,
+		ParentID: &parentJobID, // Reference to job definition parent
+		Type:     "database_maintenance_parent",
+		Name:     "Database Maintenance",
+		Phase:    "orchestration",
+		Status:   "running",
 	}
 
-	// Create job record in database BEFORE enqueueing
-	// This ensures the foreign key constraint is satisfied when logs start flowing
-	dbJob := &jobs.Job{
-		ID:       jobID,
-		ParentID: &parentJobID,
-		Type:     "database_maintenance",
-		Name:     "Database Maintenance", // Human-readable name
-		Phase:    "core",
-		Status:   "pending",
-	}
-
-	if err := m.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
-		return "", fmt.Errorf("failed to create job record: %w", err)
+	if err := m.jobManager.CreateJobRecord(ctx, parentJob); err != nil {
+		return "", fmt.Errorf("failed to create parent job record: %w", err)
 	}
 
 	m.logger.Debug().
-		Str("job_id", jobID).
-		Str("parent_job_id", parentJobID).
-		Msg("Job record created in database")
+		Str("parent_job_id", dbMaintenanceParentJobID).
+		Int("operation_count", len(operations)).
+		Msg("Parent job record created, creating child jobs for each operation")
 
-	// Serialize job model to JSON
-	payloadBytes, err := jobModel.ToJSON()
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize job model: %w", err)
+	// Create child job for each operation
+	for _, operation := range operations {
+		childJobID := uuid.New().String()
+
+		// Create child job model
+		childJob := models.NewChildJobModel(
+			dbMaintenanceParentJobID,
+			"database_maintenance_operation",
+			operation, // Use operation as name
+			map[string]interface{}{
+				"operation": operation, // Single operation
+			},
+			map[string]interface{}{
+				"step_name": step.Name,
+			},
+			1, // depth
+		)
+		childJob.ID = childJobID
+
+		// Validate job model
+		if err := childJob.Validate(); err != nil {
+			return "", fmt.Errorf("invalid child job model for operation %s: %w", operation, err)
+		}
+
+		// Create child job record in database
+		dbJob := &jobs.Job{
+			ID:       childJobID,
+			ParentID: &dbMaintenanceParentJobID,
+			Type:     "database_maintenance_operation",
+			Name:     fmt.Sprintf("Database Maintenance: %s", operation),
+			Phase:    "execution",
+			Status:   "pending",
+		}
+
+		if err := m.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
+			return "", fmt.Errorf("failed to create child job record for operation %s: %w", operation, err)
+		}
+
+		// Serialize job model to JSON
+		payloadBytes, err := childJob.ToJSON()
+		if err != nil {
+			return "", fmt.Errorf("failed to serialize child job model for operation %s: %w", operation, err)
+		}
+
+		// Create queue message
+		queueMsg := queue.Message{
+			JobID:   childJobID,
+			Type:    "database_maintenance_operation",
+			Payload: json.RawMessage(payloadBytes),
+		}
+
+		// Enqueue child job
+		if err := m.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+			return "", fmt.Errorf("failed to enqueue child job for operation %s: %w", operation, err)
+		}
+
+		m.logger.Debug().
+			Str("child_job_id", childJobID).
+			Str("operation", operation).
+			Msg("Child job created and enqueued")
 	}
 
-	// Create queue message
-	queueMsg := queue.Message{
-		JobID:   jobID,
-		Type:    "database_maintenance",
-		Payload: json.RawMessage(payloadBytes),
+	// Start ParentJobOrchestrator monitoring
+	parentJobModel := &models.JobModel{
+		ID:       dbMaintenanceParentJobID,
+		ParentID: &parentJobID,
+		Type:     "database_maintenance_parent",
+		Name:     "Database Maintenance",
+		Config: map[string]interface{}{
+			"source_type": "database",
+			"entity_type": "maintenance",
+		},
+		Metadata: map[string]interface{}{
+			"step_name": step.Name,
+		},
+		Depth: 0,
 	}
 
-	// Enqueue job
-	if err := m.queueMgr.Enqueue(ctx, queueMsg); err != nil {
-		return "", fmt.Errorf("failed to enqueue job: %w", err)
-	}
+	m.parentJobOrchestrator.StartMonitoring(ctx, parentJobModel)
 
 	m.logger.Info().
 		Str("step_name", step.Name).
-		Str("job_id", jobID).
-		Str("parent_job_id", parentJobID).
-		Int("operation_count", len(operations)).
-		Msg("Database maintenance job created and enqueued successfully")
+		Str("parent_job_id", dbMaintenanceParentJobID).
+		Int("child_job_count", len(operations)).
+		Msg("Database maintenance parent job created with child jobs enqueued successfully")
 
-	return jobID, nil
+	return dbMaintenanceParentJobID, nil
 }
 
 // GetManagerType returns "database_maintenance" - the action type this manager handles

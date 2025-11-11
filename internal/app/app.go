@@ -17,9 +17,8 @@ import (
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
-	"github.com/ternarybob/quaero/internal/jobs/executor"
 	"github.com/ternarybob/quaero/internal/jobs/manager"
-	"github.com/ternarybob/quaero/internal/jobs/processor"
+	"github.com/ternarybob/quaero/internal/jobs/orchestrator"
 	"github.com/ternarybob/quaero/internal/jobs/worker"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -63,10 +62,10 @@ type App struct {
 	QueueManager *queue.Manager
 	LogService   interfaces.LogService
 	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
-	JobManager   *jobs.Manager
-	JobProcessor *processor.JobProcessor
-	JobExecutor  *executor.JobExecutor
-	JobService   *jobsvc.Service
+	JobManager                *jobs.Manager
+	JobProcessor              *worker.JobProcessor
+	JobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
+	JobService                *jobsvc.Service
 
 	// Source-agnostic services
 	StatusService *status.Service
@@ -268,7 +267,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Job manager initialized")
 
 	// 5.9. Initialize job processor (replaces worker pool)
-	jobProcessor := processor.NewJobProcessor(queueMgr, jobMgr, a.Logger)
+	jobProcessor := worker.NewJobProcessor(queueMgr, jobMgr, a.Logger)
 	a.JobProcessor = jobProcessor
 	a.Logger.Info().Msg("Job processor initialized")
 
@@ -308,40 +307,37 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(crawlerWorker)
 	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
 
-	// Create parent job executor for managing parent job lifecycle
+	// Create parent job orchestrator for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 	// to avoid blocking queue workers with long-running monitoring loops
-	parentJobExecutor := processor.NewParentJobExecutor(
+	parentJobOrchestrator := orchestrator.NewParentJobOrchestrator(
 		jobMgr,
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Parent job executor created (runs in background goroutines, not via queue)")
+	a.Logger.Info().Msg("Parent job orchestrator created (runs in background goroutines, not via queue)")
 
-	// Register agent executor (if agent service is available)
+	// Register agent worker (if agent service is available)
 	if a.AgentService != nil {
-		agentExecutor := processor.NewAgentExecutor(
+		agentWorker := worker.NewAgentWorker(
 			a.AgentService,
 			jobMgr,
 			a.StorageManager.DocumentStorage(),
 			a.Logger,
 			a.EventService,
 		)
-		jobProcessor.RegisterExecutor(agentExecutor)
+		jobProcessor.RegisterExecutor(agentWorker)
 		a.Logger.Info().Msg("Agent worker registered for job type: agent")
 	}
 
-	// Register database maintenance executor (new interface)
-	dbMaintenanceExecutor := executor.NewDatabaseMaintenanceExecutor(
+	// Register database maintenance worker (ARCH-008)
+	dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
 		a.StorageManager.DB().(*sql.DB),
 		jobMgr,
-		queueMgr,
 		a.Logger,
-		a.LogService,
-		a.WSHandler,
 	)
-	jobProcessor.RegisterExecutor(dbMaintenanceExecutor)
-	a.Logger.Info().Msg("Database maintenance worker registered")
+	jobProcessor.RegisterExecutor(dbMaintenanceWorker)
+	a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -372,39 +368,39 @@ func (a *App) initServices() error {
 		}
 	}
 
-	// 6.9. Initialize JobExecutor for job definition execution
-	// Pass parentJobExecutor so it can start monitoring goroutines for crawler jobs
-	a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobExecutor, a.Logger)
+	// 6.9. Initialize JobDefinitionOrchestrator for job definition execution (ARCH-009)
+	// Pass parentJobOrchestrator so it can start monitoring goroutines for crawler jobs
+	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, parentJobOrchestrator, a.Logger)
 
-	// Register step executors
+	// Register managers for job definition steps
 	crawlerManager := manager.NewCrawlerManager(a.CrawlerService, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(crawlerManager)
+	a.JobDefinitionOrchestrator.RegisterStepExecutor(crawlerManager)
 	a.Logger.Info().Msg("Crawler manager registered")
 
-	transformStepExecutor := executor.NewTransformStepExecutor(a.TransformService, a.JobManager, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(transformStepExecutor)
+	transformManager := manager.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
+	a.JobDefinitionOrchestrator.RegisterStepExecutor(transformManager)
 	a.Logger.Info().Msg("Transform manager registered")
 
-	reindexStepExecutor := executor.NewReindexStepExecutor(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(reindexStepExecutor)
+	reindexManager := manager.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
+	a.JobDefinitionOrchestrator.RegisterStepExecutor(reindexManager)
 	a.Logger.Info().Msg("Reindex manager registered")
 
-	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(dbMaintenanceManager)
-	a.Logger.Info().Msg("Database maintenance manager registered")
+	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, parentJobOrchestrator, a.Logger)
+	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
+	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
-	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(placesSearchStepExecutor)
+	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
+	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
-	// Register agent step executor (if agent service is available)
+	// Register agent manager (if agent service is available)
 	if a.AgentService != nil {
 		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.Logger)
-		a.JobExecutor.RegisterStepExecutor(agentManager)
+		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered")
 	}
 
-	a.Logger.Info().Msg("JobExecutor initialized with all managers")
+	a.Logger.Info().Msg("JobDefinitionOrchestrator initialized with all managers (ARCH-009)")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
@@ -426,7 +422,7 @@ func (a *App) initServices() error {
 		a.CrawlerService,
 		a.StorageManager.JobStorage(),
 		a.StorageManager.JobDefinitionStorage(),
-		nil, // JobExecutor temporarily disabled
+		nil, // JobDefinitionOrchestrator temporarily disabled
 	)
 
 	// NOTE: Scheduler triggers event-driven processing:
@@ -530,7 +526,7 @@ func (a *App) initHandlers() error {
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
-		a.JobExecutor,
+		a.JobDefinitionOrchestrator,
 		a.StorageManager.AuthStorage(),
 		db, // Pass *sql.DB for validation service
 		a.Logger,
@@ -699,11 +695,11 @@ func (a *App) Close() error {
 
 	// Note: QueueManager (goqite) doesn't require explicit stop - it's stateless
 
-	// Shutdown job executor (cancels all background polling tasks)
-	// TODO Phase 8-11: Re-enable once JobExecutor is re-integrated
-	// if a.JobExecutor != nil {
-	// 	a.JobExecutor.Shutdown()
-	// 	a.Logger.Info().Msg("Job executor shutdown complete")
+	// Shutdown job definition orchestrator (cancels all background polling tasks)
+	// TODO Phase 8-11: Re-enable once JobDefinitionOrchestrator is re-integrated
+	// if a.JobDefinitionOrchestrator != nil {
+	// 	a.JobDefinitionOrchestrator.Shutdown()
+	// 	a.Logger.Info().Msg("Job definition orchestrator shutdown complete")
 	// }
 
 	// Close crawler service

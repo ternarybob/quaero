@@ -17,7 +17,6 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
-	"github.com/ternarybob/quaero/internal/jobs/executor"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/validation"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
@@ -27,20 +26,20 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage     interfaces.JobDefinitionStorage
-	jobStorage        interfaces.JobStorage
-	jobExecutor       *executor.JobExecutor
-	authStorage       interfaces.AuthStorage
-	validationService *validation.TOMLValidationService
-	db                *sql.DB
-	logger            arbor.ILogger
+	jobDefStorage             interfaces.JobDefinitionStorage
+	jobStorage                interfaces.JobStorage
+	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
+	authStorage               interfaces.AuthStorage
+	validationService         *validation.TOMLValidationService
+	db                        *sql.DB
+	logger                    arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.JobStorage,
-	jobExecutor *executor.JobExecutor,
+	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator,
 	authStorage interfaces.AuthStorage,
 	db *sql.DB,
 	logger arbor.ILogger,
@@ -51,8 +50,8 @@ func NewJobDefinitionHandler(
 	if jobStorage == nil {
 		panic("jobStorage cannot be nil")
 	}
-	if jobExecutor == nil {
-		panic("jobExecutor cannot be nil")
+	if jobDefinitionOrchestrator == nil {
+		panic("jobDefinitionOrchestrator cannot be nil")
 	}
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
@@ -64,16 +63,16 @@ func NewJobDefinitionHandler(
 		panic("logger cannot be nil")
 	}
 
-	logger.Info().Msg("Job definition handler initialized with job executor and auth storage")
+	logger.Info().Msg("Job definition handler initialized with job definition orchestrator and auth storage (ARCH-009)")
 
 	return &JobDefinitionHandler{
-		jobDefStorage:     jobDefStorage,
-		jobStorage:        jobStorage,
-		jobExecutor:       jobExecutor,
-		authStorage:       authStorage,
-		validationService: validation.NewTOMLValidationService(logger),
-		db:                db,
-		logger:            logger,
+		jobDefStorage:             jobDefStorage,
+		jobStorage:                jobStorage,
+		jobDefinitionOrchestrator: jobDefinitionOrchestrator,
+		authStorage:               authStorage,
+		validationService:         validation.NewTOMLValidationService(logger),
+		db:                        db,
+		logger:                    logger,
 	}
 }
 
@@ -483,7 +482,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobExecutor.Execute(bgCtx, jobDef)
+		parentJobID, err := h.jobDefinitionOrchestrator.Execute(bgCtx, jobDef)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -1033,7 +1032,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobExecutor.Execute(bgCtx, jobDef)
+		parentJobID, err := h.jobDefinitionOrchestrator.Execute(bgCtx, jobDef)
 		if err != nil {
 			h.logger.Error().
 				Err(err).

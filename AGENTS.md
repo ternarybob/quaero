@@ -155,53 +155,64 @@ Quaero uses a Manager/Worker pattern for job orchestration and execution:
 
 The queue-based architecture uses goqite (SQLite-backed message queue) for distributed job processing:
 
-#### Directory Structure (In Transition - ARCH-005)
+#### Directory Structure (Migration Complete - ARCH-009)
 
-Quaero is migrating to a Manager/Worker/Orchestrator architecture. The new structure is:
+Quaero uses a Manager/Worker/Orchestrator architecture for job orchestration and execution:
 
-**New Directories:**
+**Directories:**
 - `internal/jobs/manager/` - Job managers (orchestration layer)
   - ✅ `interfaces.go` (ARCH-003)
   - ✅ `crawler_manager.go` (ARCH-004)
   - ✅ `database_maintenance_manager.go` (ARCH-004)
   - ✅ `agent_manager.go` (ARCH-004)
-  - ⏳ `transform_manager.go` (pending)
-  - ⏳ `reindex_manager.go` (pending)
-  - ⏳ `places_search_manager.go` (pending)
+  - ✅ `transform_manager.go` (ARCH-009)
+  - ✅ `reindex_manager.go` (ARCH-009)
+  - ✅ `places_search_manager.go` (ARCH-009)
 - `internal/jobs/worker/` - Job workers (execution layer)
   - ✅ `interfaces.go` (ARCH-003)
   - ✅ `crawler_worker.go` (ARCH-005) - Merged from crawler_executor.go + crawler_executor_auth.go
-  - ⏳ `agent_worker.go` (pending - ARCH-006)
-  - ⏳ `database_maintenance_worker.go` (pending - ARCH-007)
-  - ⏳ `job_processor.go` (pending - ARCH-006)
+  - ✅ `agent_worker.go` (ARCH-006)
+  - ✅ `job_processor.go` (ARCH-006) - Routes jobs to workers
+  - ✅ `database_maintenance_worker.go` (ARCH-008)
 - `internal/jobs/orchestrator/` - Parent job orchestrator (monitoring layer) with `interfaces.go`
-
-**Old Directories (Still Active - Will be removed in ARCH-008):**
-- `internal/jobs/executor/` - Old manager implementations (6 remaining files)
-- `internal/jobs/processor/` - Old worker implementations (4 remaining files: agent_executor.go, processor.go, parent_job_executor.go, database_maintenance_executor.go)
+- `internal/jobs/` root - Job definition orchestrator
+  - ✅ `job_definition_orchestrator.go` (ARCH-009) - Routes job definition steps to managers
 
 **Migration Progress:**
 - Phase ARCH-003: ✅ Directory structure created
 - Phase ARCH-004: ✅ 3 managers migrated (crawler, database_maintenance, agent)
-- Phase ARCH-005: ✅ Crawler worker migrated (merged crawler_executor.go + crawler_executor_auth.go) (YOU ARE HERE)
-- Phase ARCH-006: ⏳ Remaining worker files migration (pending)
+- Phase ARCH-005: ✅ Crawler worker migrated (merged crawler_executor.go + crawler_executor_auth.go)
+- Phase ARCH-006: ✅ Remaining worker files migrated (agent_worker.go, job_processor.go)
+- Phase ARCH-008: ✅ Database maintenance worker migrated
+- Phase ARCH-009: ✅ Final cleanup complete - 3 remaining managers migrated, executor/ directory removed (COMPLETE)
 
 See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md) for complete details.
 
 #### Interfaces
 
-**New Architecture (ARCH-003+):**
+**Architecture (ARCH-003+, Completed ARCH-009):**
 - `JobManager` interface - `internal/jobs/manager/interfaces.go`
-  - Implementations: `CrawlerManager`, `DatabaseMaintenanceManager`, `AgentManager` (ARCH-004)
+  - Implementations (6 total):
+    - `CrawlerManager` (ARCH-004)
+    - `DatabaseMaintenanceManager` (ARCH-004)
+    - `AgentManager` (ARCH-004)
+    - `TransformManager` (ARCH-009)
+    - `ReindexManager` (ARCH-009)
+    - `PlacesSearchManager` (ARCH-009)
 - `JobWorker` interface - `internal/jobs/worker/interfaces.go`
-  - Implementations: `CrawlerWorker` (ARCH-005)
+  - Implementations (3 total):
+    - `CrawlerWorker` (ARCH-005)
+    - `AgentWorker` (ARCH-006)
+    - `DatabaseMaintenanceWorker` (ARCH-008)
 - `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+  - Implementation: `ParentJobOrchestrator` (monitors parent job progress)
+- `JobDefinitionOrchestrator` - `internal/jobs/job_definition_orchestrator.go` (ARCH-009)
+  - Routes job definition steps to registered managers
 
-**Old Architecture (deprecated, will be removed in ARCH-008):**
-- `JobManager` interface - `internal/jobs/executor/interfaces.go` (duplicate)
-  - Remaining implementations: `TransformStepExecutor`, `ReindexStepExecutor`, `PlacesSearchStepExecutor`
-- `JobWorker` interface - `internal/interfaces/job_executor.go` (duplicate)
-  - Remaining implementations: `AgentExecutor`, `DatabaseMaintenanceExecutor` (in processor/executor directories)
+**Core Components:**
+- `JobProcessor` - `internal/jobs/worker/job_processor.go` (ARCH-006)
+  - Routes jobs from queue to registered workers
+  - Manages worker pool lifecycle (Start/Stop)
 
 **Core Components:**
 
@@ -281,7 +292,7 @@ max_receive = 3
 
 **Important Distinction:**
 
-- **Job Definition Orchestration** (`internal/services/jobs/executor.go`):
+- **Job Definition Orchestration** (`internal/jobs/job_definition_orchestrator.go`):
   - Orchestrates multi-step workflows defined by users (JobDefinitions)
   - Executes steps sequentially with retry logic and error handling
   - Uses managers (e.g., CrawlerManager) to create parent jobs
@@ -289,7 +300,7 @@ max_receive = 3
   - Publishes progress events for UI updates
   - Supports error strategies: fail, continue, retry
 
-- **Queue-Based Execution** (`internal/jobs/processor/`, `internal/jobs/worker/`):
+- **Queue-Based Execution** (`internal/jobs/worker/`):
   - Workers handle individual task execution (CrawlerWorker, AgentWorker, etc.)
   - Process URLs, generate summaries, extract keywords
   - Orchestrators monitor parent job progress
@@ -473,14 +484,14 @@ The agent framework enables intelligent document analysis and enrichment through
 - Implemented by: `KeywordExtractor`, future agent types
 - Agents receive pre-initialized ADK model, input parameters, and return structured results
 
-**AgentWorker** (`internal/jobs/processor/agent_executor.go` → will be renamed to `agent_worker.go`):
+**AgentWorker** (`internal/jobs/worker/agent_worker.go`):
 - Queue-based job worker for individual agent jobs
 - Job type: `"agent"`
 - Workflow: Load document → Execute agent → Update metadata → Publish event
 - Real-time logging via `publishAgentJobLog()`
 - Handles document querying, agent execution, and metadata persistence
 
-**AgentManager** (`internal/jobs/executor/agent_step_executor.go` → will be renamed to `agent_manager.go`):
+**AgentManager** (`internal/jobs/manager/agent_manager.go`):
 - Job definition manager for orchestrating agent workflows
 - Step action: `"agent"`
 - Creates agent jobs for documents matching filter

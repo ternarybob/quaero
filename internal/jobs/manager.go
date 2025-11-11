@@ -1684,7 +1684,7 @@ type ChildJobStats struct {
 }
 
 // GetChildJobStats retrieves child job statistics for a single parent job
-// This is used by the ParentJobExecutor to monitor child job progress
+// This is used by the ParentJobOrchestrator to monitor child job progress
 func (m *Manager) GetChildJobStats(ctx context.Context, parentJobID string) (*ChildJobStats, error) {
 	var stats ChildJobStats
 
