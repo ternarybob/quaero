@@ -26,6 +26,9 @@ type AgentWorker struct {
 	eventService    interfaces.EventService
 }
 
+// Compile-time assertion: AgentWorker implements JobWorker interface
+var _ interfaces.JobWorker = (*AgentWorker)(nil)
+
 // NewAgentWorker creates a new agent worker for processing individual agent jobs from the queue
 func NewAgentWorker(
 	agentService interfaces.AgentService,

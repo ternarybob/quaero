@@ -41,6 +41,9 @@ type CrawlerWorker struct {
 	contentProcessor *crawler.ContentProcessor
 }
 
+// Compile-time assertion: CrawlerWorker implements JobWorker interface
+var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
+
 // NewCrawlerWorker creates a new crawler worker for processing individual crawler jobs from the queue
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,

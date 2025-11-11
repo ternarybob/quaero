@@ -7,49 +7,34 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// JobManager interface is defined locally to avoid import cycle with manager package.
-// Canonical interface: internal/jobs/manager/interfaces.go
-// Manager implementations automatically satisfy this interface via duck typing.
-type JobManager interface {
-	CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
-	GetManagerType() string
-}
-
-// ParentJobOrchestrator interface is defined locally to avoid import cycle with orchestrator package.
-// Canonical interface: internal/jobs/orchestrator/interfaces.go
-// Orchestrator implementations automatically satisfy this interface via duck typing.
-type ParentJobOrchestrator interface {
-	StartMonitoring(ctx context.Context, job *models.JobModel)
-	SubscribeToChildStatusChanges()
-}
-
-// JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate JobManagers and managing parent-child hierarchy
+// JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate StepManagers and managing parent-child hierarchy
 type JobDefinitionOrchestrator struct {
-	stepExecutors         map[string]JobManager         // Job managers keyed by action type
+	stepExecutors         map[string]interfaces.StepManager         // Step managers keyed by action type
 	jobManager            *Manager
-	parentJobOrchestrator ParentJobOrchestrator
+	parentJobOrchestrator interfaces.ParentJobOrchestrator
 	logger                arbor.ILogger
 }
 
 // NewJobDefinitionOrchestrator creates a new job definition orchestrator for routing job definition steps to managers
-func NewJobDefinitionOrchestrator(jobManager *Manager, parentJobOrchestrator ParentJobOrchestrator, logger arbor.ILogger) *JobDefinitionOrchestrator {
+func NewJobDefinitionOrchestrator(jobManager *Manager, parentJobOrchestrator interfaces.ParentJobOrchestrator, logger arbor.ILogger) *JobDefinitionOrchestrator {
 	return &JobDefinitionOrchestrator{
-		stepExecutors:         make(map[string]JobManager), // Initialize job manager map
+		stepExecutors:         make(map[string]interfaces.StepManager), // Initialize step manager map
 		jobManager:            jobManager,
 		parentJobOrchestrator: parentJobOrchestrator,
 		logger:                logger,
 	}
 }
 
-// RegisterStepExecutor registers a job manager for an action type
-func (o *JobDefinitionOrchestrator) RegisterStepExecutor(mgr JobManager) {
+// RegisterStepExecutor registers a step manager for an action type
+func (o *JobDefinitionOrchestrator) RegisterStepExecutor(mgr interfaces.StepManager) {
 	o.stepExecutors[mgr.GetManagerType()] = mgr
 	o.logger.Info().
 		Str("action_type", mgr.GetManagerType()).
-		Msg("Job manager registered")
+		Msg("Step manager registered")
 }
 
 // Execute executes a job definition sequentially

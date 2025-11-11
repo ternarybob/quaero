@@ -17,6 +17,9 @@ type CrawlerManager struct {
 	logger         arbor.ILogger
 }
 
+// Compile-time assertion: CrawlerManager implements StepManager interface
+var _ interfaces.StepManager = (*CrawlerManager)(nil)
+
 // NewCrawlerManager creates a new crawler manager
 func NewCrawlerManager(
 	crawlerService interfaces.CrawlerService,

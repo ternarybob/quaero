@@ -190,8 +190,8 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
 
 #### Interfaces
 
-**Architecture (ARCH-003+, Completed ARCH-009):**
-- `JobManager` interface - `internal/jobs/manager/interfaces.go`
+**Architecture (ARCH-003+, Completed ARCH-009, Consolidated in refactor-job-interfaces):**
+- `StepManager` interface - `internal/interfaces/job_interfaces.go` (centralized)
   - Implementations (6 total):
     - `CrawlerManager` (ARCH-004)
     - `DatabaseMaintenanceManager` (ARCH-004)
@@ -199,13 +199,15 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
     - `TransformManager` (ARCH-009)
     - `ReindexManager` (ARCH-009)
     - `PlacesSearchManager` (ARCH-009)
-- `JobWorker` interface - `internal/jobs/worker/interfaces.go`
+- `JobWorker` interface - `internal/interfaces/job_interfaces.go` (centralized)
   - Implementations (3 total):
     - `CrawlerWorker` (ARCH-005)
     - `AgentWorker` (ARCH-006)
     - `DatabaseMaintenanceWorker` (ARCH-008)
-- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+- `ParentJobOrchestrator` interface - `internal/interfaces/job_interfaces.go` (centralized)
   - Implementation: `ParentJobOrchestrator` (monitors parent job progress)
+- `JobSpawner` interface - `internal/interfaces/job_interfaces.go` (centralized)
+  - Supports workers that spawn child jobs during execution
 - `JobDefinitionOrchestrator` - `internal/jobs/job_definition_orchestrator.go` (ARCH-009)
   - Routes job definition steps to registered managers
 

@@ -20,6 +20,9 @@ type PlacesSearchManager struct {
 	logger          arbor.ILogger
 }
 
+// Compile-time assertion: PlacesSearchManager implements StepManager interface
+var _ interfaces.StepManager = (*PlacesSearchManager)(nil)
+
 // NewPlacesSearchManager creates a new places search manager for orchestrating Google Places API searches
 func NewPlacesSearchManager(
 	placesService interfaces.PlacesService,

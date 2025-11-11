@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
-	"github.com/ternarybob/quaero/internal/jobs/orchestrator"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
@@ -22,12 +22,15 @@ import (
 type DatabaseMaintenanceManager struct {
 	jobManager            *jobs.Manager
 	queueMgr              *queue.Manager
-	parentJobOrchestrator orchestrator.ParentJobOrchestrator
+	parentJobOrchestrator interfaces.ParentJobOrchestrator
 	logger                arbor.ILogger
 }
 
+// Compile-time assertion: DatabaseMaintenanceManager implements StepManager interface
+var _ interfaces.StepManager = (*DatabaseMaintenanceManager)(nil)
+
 // NewDatabaseMaintenanceManager creates a new database maintenance manager
-func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, parentJobOrchestrator orchestrator.ParentJobOrchestrator, logger arbor.ILogger) *DatabaseMaintenanceManager {
+func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, parentJobOrchestrator interfaces.ParentJobOrchestrator, logger arbor.ILogger) *DatabaseMaintenanceManager {
 	return &DatabaseMaintenanceManager{
 		jobManager:            jobManager,
 		queueMgr:              queueMgr,

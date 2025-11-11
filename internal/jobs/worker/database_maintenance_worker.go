@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -20,6 +21,9 @@ type DatabaseMaintenanceWorker struct {
 	jobMgr *jobs.Manager
 	logger arbor.ILogger
 }
+
+// Compile-time assertion: DatabaseMaintenanceWorker implements JobWorker interface
+var _ interfaces.JobWorker = (*DatabaseMaintenanceWorker)(nil)
 
 // NewDatabaseMaintenanceWorker creates a new database maintenance worker
 func NewDatabaseMaintenanceWorker(

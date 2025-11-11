@@ -45,20 +45,23 @@ graph TB
 
 | Component | Layer | Responsibility |
 |-----------|-------|----------------|
-| **CrawlerManager** | Manager (Orchestration) | Creates parent jobs, defines seed URLs, initiates crawls |
-| **CrawlerWorker** | Worker (Execution) | Renders pages, extracts content, spawns child jobs for links |
-| **ParentJobOrchestrator** | Orchestration (Monitoring) | Tracks child job progress, aggregates statistics, determines completion |
+| **CrawlerManager** | Manager (Orchestration) | Implements StepManager - Creates parent jobs, defines seed URLs, initiates crawls |
+| **CrawlerWorker** | Worker (Execution) | Implements JobWorker - Renders pages, extracts content, spawns child jobs for links |
+| **ParentJobOrchestrator** | Orchestration (Monitoring) | Implements ParentJobOrchestrator interface - Tracks child job progress, aggregates statistics, determines completion |
 | **JobProcessor** | Queue (Routing) | Routes queued jobs to registered workers based on job type |
 
 ## Manager vs Worker Distinction
 
-### JobManager Interface (Orchestration)
+### StepManager Interface (Orchestration)
 
-**File:** `internal/jobs/manager/interfaces.go`
+**File:** `internal/interfaces/job_interfaces.go` (centralized)
 
 ```go
-// JobManager orchestrates workflows by creating parent jobs
-type JobManager interface {
+// StepManager creates parent jobs, enqueues child jobs to the queue, and manages job orchestration
+// for a specific action type (job definition step). Different implementations handle different action
+// types (crawl, agent, database_maintenance, transform, reindex, places_search).
+// This is distinct from interfaces.JobManager which handles job CRUD operations.
+type StepManager interface {
     // CreateParentJob creates a parent job and spawns initial child jobs
     CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
 
@@ -99,7 +102,7 @@ func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobSte
 
 ### JobWorker Interface (Execution)
 
-**File:** `internal/jobs/worker/interfaces.go`
+**File:** `internal/interfaces/job_interfaces.go` (centralized)
 
 ```go
 // JobWorker executes individual jobs pulled from queue
@@ -300,20 +303,33 @@ sequenceDiagram
 
 ## Interface Definitions
 
-### Current Interfaces (Migration Complete - ARCH-009)
+### Current Interfaces (Migration Complete - ARCH-009, Centralized in refactor-job-interfaces)
+
+**File:** `internal/interfaces/job_interfaces.go` (centralized location)
 
 ```go
-// internal/jobs/manager/interfaces.go
-type JobManager interface {
+// StepManager creates parent jobs and orchestrates job definition steps
+// Renamed from JobManager to avoid conflict with interfaces.JobManager (job CRUD)
+type StepManager interface {
     CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
     GetManagerType() string
 }
 
-// internal/jobs/worker/interfaces.go
+// JobWorker executes individual jobs from the queue
 type JobWorker interface {
     Execute(ctx context.Context, job *models.JobModel) error
-    GetWorkerType() string
+    GetJobType() string
     Validate(job *models.JobModel) error
+}
+
+// ParentJobOrchestrator monitors parent job progress
+type ParentJobOrchestrator interface {
+    StartMonitoring(ctx context.Context, job *models.JobModel) error
+}
+
+// JobSpawner supports workers that spawn child jobs
+type JobSpawner interface {
+    SpawnChildJob(ctx context.Context, parentJob *models.JobModel, childConfig map[string]interface{}) error
 }
 ```
 
@@ -341,25 +357,30 @@ type JobWorker interface {
 ### Migration Complete (ARCH-009)
 
 **Final Directory Structure:**
-- ✅ `internal/jobs/manager/` - 6 managers (orchestration)
+- ✅ `internal/interfaces/` - Centralized interface definitions (refactor-job-interfaces)
+  - ✅ `job_interfaces.go` - StepManager, JobWorker, ParentJobOrchestrator, JobSpawner
+- ✅ `internal/jobs/manager/` - 6 managers (orchestration, implement StepManager)
   - ✅ `crawler_manager.go` - Web crawling orchestration
   - ✅ `database_maintenance_manager.go` - Database maintenance orchestration
   - ✅ `agent_manager.go` - AI agent orchestration
   - ✅ `transform_manager.go` - HTML→markdown transformation
   - ✅ `reindex_manager.go` - FTS5 index rebuild
   - ✅ `places_search_manager.go` - Google Places API search
-- ✅ `internal/jobs/worker/` - 3 workers (execution)
+- ✅ `internal/jobs/worker/` - 3 workers (execution, implement JobWorker)
   - ✅ `crawler_worker.go` - URL crawling execution
   - ✅ `database_maintenance_worker.go` - Database maintenance execution
   - ✅ `agent_worker.go` - AI agent execution
 - ✅ `internal/jobs/orchestrator/` - Parent job monitoring
-  - ✅ `parent_job_orchestrator.go` - Child job progress tracking
+  - ✅ `parent_job_orchestrator.go` - Child job progress tracking (implements ParentJobOrchestrator)
 - ✅ `internal/jobs/` - Job definition routing
   - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers
 
-**Deleted Directories (ARCH-009):**
-- ❌ `internal/jobs/executor/` - 9 files deleted (migrated to manager/ + jobs/)
-- ❌ `internal/interfaces/job_executor.go` - Duplicate interface removed
+**Deleted Directories/Files:**
+- ❌ `internal/jobs/executor/` - 9 files deleted (migrated to manager/ + jobs/) [ARCH-009]
+- ❌ `internal/interfaces/job_executor.go` - Duplicate interface removed [ARCH-009]
+- ❌ `internal/jobs/manager/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
+- ❌ `internal/jobs/orchestrator/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
+- ❌ `internal/jobs/worker/interfaces.go` - Consolidated into centralized location [refactor-job-interfaces]
 
 **Migration Timeline:**
 - Phase ARCH-001: ✅ Documentation created
@@ -387,8 +408,8 @@ type JobWorker interface {
 9. `internal/jobs/executor/interfaces.go` → Duplicate interface definitions
 10. `internal/interfaces/job_executor.go` → Duplicate of JobWorker interface
 
-**Import Cycle Resolution:**
-JobDefinitionOrchestrator defines JobManager and ParentJobOrchestrator interfaces locally to avoid import cycle with manager/ and orchestrator/ packages. This is intentional - implementations automatically satisfy these interfaces via Go's duck typing.
+**Interface Consolidation (refactor-job-interfaces):**
+All job-related interfaces (StepManager, JobWorker, ParentJobOrchestrator, JobSpawner) are now centralized in `internal/interfaces/job_interfaces.go`. This eliminates import cycles and follows the project's clean architecture pattern. The `JobDefinitionOrchestrator` imports interfaces from the central location. Note: StepManager was renamed from JobManager to avoid naming conflict with the existing interfaces.JobManager (job CRUD operations).
 
 ### Manager Migration Pattern (ARCH-004 + ARCH-009)
 

@@ -18,6 +18,9 @@ type ReindexManager struct {
 	logger          arbor.ILogger
 }
 
+// Compile-time assertion: ReindexManager implements StepManager interface
+var _ interfaces.StepManager = (*ReindexManager)(nil)
+
 // NewReindexManager creates a new reindex manager for orchestrating FTS5 index rebuilding
 func NewReindexManager(documentStorage interfaces.DocumentStorage, jobManager *jobs.Manager, logger arbor.ILogger) *ReindexManager {
 	return &ReindexManager{

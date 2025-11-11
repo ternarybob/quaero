@@ -26,7 +26,7 @@ func NewParentJobOrchestrator(
 	jobMgr *jobs.Manager,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
-) ParentJobOrchestrator {
+) interfaces.ParentJobOrchestrator {
 	orchestrator := &parentJobOrchestrator{
 		jobMgr:       jobMgr,
 		eventService: eventService,

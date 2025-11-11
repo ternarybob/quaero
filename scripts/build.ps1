@@ -9,7 +9,8 @@
 
 param (
     [switch]$Run,
-    [switch]$Deploy
+    [switch]$Deploy,
+    [switch]$Web
 )
 
 <#
@@ -19,10 +20,11 @@ param (
 .DESCRIPTION
     This script builds Quaero for local development and testing.
 
-    Three operations supported:
+    Four operations supported:
     1. Default build (no parameters) - Builds executable silently, no deployment
     2. -Deploy - Builds and deploys all files to bin directory (stops service if running)
     3. -Run - Builds, deploys, and starts application in new terminal
+    4. -Web - Deploys only pages directory and restarts application (no build, no version update)
 
 .PARAMETER Deploy
     Deploy all required files to bin directory after building (config, pages, Chrome extension, job definitions)
@@ -31,6 +33,11 @@ param (
 .PARAMETER Run
     Build, deploy, and run the application in a new terminal
     Automatically triggers deployment before starting the service
+
+.PARAMETER Web
+    Deploy only the pages directory and restart the application
+    Does not build or update version - for rapid frontend development
+    Stops service, copies pages, restarts service
 
 .EXAMPLE
     .\build.ps1
@@ -43,6 +50,10 @@ param (
 .EXAMPLE
     .\build.ps1 -Run
     Build, deploy, and start the application in a new terminal
+
+.EXAMPLE
+    .\build.ps1 -Web
+    Deploy only pages directory and restart application (for rapid frontend iteration)
 
 .NOTES
     Default build operation does NOT increment version number, only updates build timestamp.
@@ -87,6 +98,103 @@ Limit-LogFiles -LogDirectory $logDir -MaxLogs 10
 Start-Transcript -Path $logFile -Append
 
 try {
+
+# Handle -Web parameter early (skip build, version update, and most deployment)
+if ($Web) {
+    Write-Host "Quaero Web Deployment" -ForegroundColor Cyan
+    Write-Host "=====================" -ForegroundColor Cyan
+    Write-Host "Deploying pages directory and restarting application..." -ForegroundColor Yellow
+
+    # Setup paths
+    $scriptDir = $PSScriptRoot
+    $projectRoot = Split-Path -Parent $scriptDir
+    $binDir = Join-Path -Path $projectRoot -ChildPath "bin"
+    $outputPath = Join-Path -Path $binDir -ChildPath "quaero.exe"
+    $configPath = Join-Path -Path $binDir -ChildPath "quaero.toml"
+
+    # Verify executable exists
+    if (-not (Test-Path $outputPath)) {
+        Write-Error "Quaero executable not found: $outputPath. Run .\build.ps1 first to create it."
+        Stop-Transcript
+        exit 1
+    }
+
+    # Get server port from config
+    $serverPort = 8085  # Default
+    if (Test-Path $configPath) {
+        $configContent = Get-Content $configPath
+        foreach ($line in $configContent) {
+            if ($line -match '^port\s*=\s*(\d+)') {
+                $serverPort = [int]$matches[1]
+                break
+            }
+        }
+    }
+
+    # Stop Quaero service
+    Write-Host "Stopping Quaero service..." -ForegroundColor Yellow
+    try {
+        $processName = "quaero"
+        $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
+
+        if ($processes) {
+            # Try HTTP shutdown
+            try {
+                $response = Invoke-WebRequest -Uri "http://localhost:$serverPort/api/shutdown" -Method POST -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    Write-Host "  Graceful shutdown requested" -ForegroundColor Gray
+                    Start-Sleep -Seconds 2
+                }
+            }
+            catch {
+                Write-Host "  HTTP shutdown not available, using force stop" -ForegroundColor Gray
+            }
+
+            # Force stop if still running
+            $remainingProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+            if ($remainingProcesses) {
+                Stop-Process -Name $processName -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 500
+            }
+
+            Write-Host "  Service stopped" -ForegroundColor Green
+        } else {
+            Write-Host "  No running process found" -ForegroundColor Gray
+        }
+    }
+    catch {
+        Write-Warning "Could not stop service: $($_.Exception.Message)"
+    }
+
+    # Deploy pages directory only
+    Write-Host "Deploying pages directory..." -ForegroundColor Yellow
+    $pagesSourcePath = Join-Path -Path $projectRoot -ChildPath "pages"
+    $pagesDestPath = Join-Path -Path $binDir -ChildPath "pages"
+
+    if (Test-Path $pagesSourcePath) {
+        if (Test-Path $pagesDestPath) {
+            Remove-Item -Path $pagesDestPath -Recurse -Force
+        }
+        Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
+        Write-Host "  Pages deployed successfully" -ForegroundColor Green
+    } else {
+        Write-Error "Pages directory not found: $pagesSourcePath"
+        Stop-Transcript
+        exit 1
+    }
+
+    # Restart application
+    Write-Host "Starting application..." -ForegroundColor Yellow
+    $startCommand = "cd /d `"$binDir`" && `"$outputPath`" -c `"$configPath`""
+    Start-Process cmd -ArgumentList "/c", $startCommand
+
+    Write-Host "`n==== Web Deployment Complete ====" -ForegroundColor Green
+    Write-Host "Pages deployed and application restarted" -ForegroundColor Cyan
+    Write-Host "No build or version update performed" -ForegroundColor Gray
+
+    Stop-Transcript
+    exit 0
+}
 
 # ========== HELPER FUNCTIONS ==========
 

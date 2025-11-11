@@ -19,6 +19,9 @@ type TransformManager struct {
 	logger           arbor.ILogger
 }
 
+// Compile-time assertion: TransformManager implements StepManager interface
+var _ interfaces.StepManager = (*TransformManager)(nil)
+
 // NewTransformManager creates a new transform manager for orchestrating document transformation workflows
 func NewTransformManager(transformService interfaces.TransformService, jobManager *jobs.Manager, logger arbor.ILogger) *TransformManager {
 	return &TransformManager{

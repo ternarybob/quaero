@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -21,7 +22,7 @@ import (
 type JobProcessor struct {
 	queueMgr  *queue.Manager
 	jobMgr    *jobs.Manager
-	executors map[string]JobWorker // Job workers keyed by job type
+	executors map[string]interfaces.JobWorker // Job workers keyed by job type
 	logger    arbor.ILogger
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -37,7 +38,7 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 	return &JobProcessor{
 		queueMgr:  queueMgr,
 		jobMgr:    jobMgr,
-		executors: make(map[string]JobWorker), // Initialize job worker map
+		executors: make(map[string]interfaces.JobWorker), // Initialize job worker map
 		logger:    logger,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -47,7 +48,7 @@ func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor
 
 // RegisterExecutor registers a job worker for a job type.
 // The worker must implement the JobWorker interface.
-func (jp *JobProcessor) RegisterExecutor(worker JobWorker) {
+func (jp *JobProcessor) RegisterExecutor(worker interfaces.JobWorker) {
 	jobType := worker.GetWorkerType()
 	jp.executors[jobType] = worker
 	jp.logger.Info().

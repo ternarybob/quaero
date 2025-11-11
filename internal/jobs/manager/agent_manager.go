@@ -20,6 +20,9 @@ type AgentManager struct {
 	logger        arbor.ILogger
 }
 
+// Compile-time assertion: AgentManager implements StepManager interface
+var _ interfaces.StepManager = (*AgentManager)(nil)
+
 // NewAgentManager creates a new agent manager
 func NewAgentManager(
 	jobMgr *jobs.Manager,
