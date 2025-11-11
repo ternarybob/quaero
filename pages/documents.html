@@ -41,12 +41,8 @@
                             <p class="h2" id="stat-total">-</p>
                         </div>
                         <div class="column text-center">
-                            <p class="text-small text-gray">JIRA DOCUMENTS</p>
-                            <p class="h2" id="stat-jira">-</p>
-                        </div>
-                        <div class="column text-center">
-                            <p class="text-small text-gray">CONFLUENCE DOCUMENTS</p>
-                            <p class="h2" id="stat-confluence">-</p>
+                            <p class="text-small text-gray">UNIQUE TAGS</p>
+                            <p class="h2" id="stat-tags">-</p>
                         </div>
                     </div>
 
@@ -73,11 +69,18 @@
                     <!-- Filter Controls -->
                     <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                         <input type="search" id="search-box" class="form-input" placeholder="Search documents...">
-                        <select class="form-select" id="source-filter" onchange="filterDocuments()">
-                            <option value="">All Sources</option>
-                            <option value="jira">Jira</option>
-                            <option value="confluence">Confluence</option>
-                        </select>
+                        <div style="position: relative;">
+                            <input type="text" id="tag-filter-input" class="form-input" placeholder="Filter by tags..." onfocus="showTagDropdown()" oninput="filterTagDropdown()" autocomplete="off">
+                            <div id="tag-dropdown"
+                                style="display: none; position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; border-radius: 4px; max-height: 200px; overflow-y: auto; width: 100%; margin-top: 2px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                <!-- Tag options will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Selected Tags Row (full width below search) -->
+                    <div id="selected-tags" style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+                        <!-- Selected tags will appear here -->
                     </div>
 
                     <!-- Documents Table -->
@@ -89,12 +92,13 @@
                                 </th>
                                 <th>SOURCE</th>
                                 <th>DETAILS</th>
+                                <th>TAGS</th>
                                 <th>UPDATED</th>
                             </tr>
                         </thead>
                         <tbody id="documents-table-body">
                             <tr>
-                                <td colspan="4" class="text-center">
+                                <td colspan="5" class="text-center">
                                     Loading documents...
                                 </td>
                             </tr>
@@ -149,6 +153,8 @@
         let currentPage = 1;
         let totalDocuments = 0; // Total documents from API
         const pageSize = 50; // Server-side pagination page size
+        let availableTags = []; // All tags available in the system
+        let selectedTags = new Set(); // Currently selected tags for filtering
 
         // Load document statistics
         async function loadStats(button) {
@@ -180,14 +186,21 @@
                 const stats = await response.json();
 
                 document.getElementById('stat-total').textContent = stats.total_documents || 0;
-                document.getElementById('stat-jira').textContent = stats.jira_documents || 0;
-                document.getElementById('stat-confluence').textContent = stats.confluence_documents || 0;
+
+                // Load tags count
+                const tagsResponse = await fetch('/api/documents/tags');
+                if (tagsResponse.ok) {
+                    const tagsData = await tagsResponse.json();
+                    availableTags = tagsData.tags || [];
+                    document.getElementById('stat-tags').textContent = availableTags.length;
+                } else {
+                    document.getElementById('stat-tags').textContent = '0';
+                }
 
             } catch (error) {
                 console.error('Error loading stats:', error);
                 document.getElementById('stat-total').textContent = 'Error';
-                document.getElementById('stat-jira').textContent = 'Error';
-                document.getElementById('stat-confluence').textContent = 'Error';
+                document.getElementById('stat-tags').textContent = 'Error';
             } finally {
                 if (statsBtn) {
                     statsBtn.disabled = false;
@@ -202,7 +215,6 @@
         // Load documents with server-side pagination
         async function loadDocuments() {
             const tbody = document.getElementById('documents-table-body');
-            const sourceFilter = document.getElementById('source-filter').value;
 
             try {
                 // Build query parameters for server-side pagination
@@ -210,8 +222,9 @@
                 params.append('limit', pageSize);
                 params.append('offset', (currentPage - 1) * pageSize);
 
-                if (sourceFilter) {
-                    params.append('sourceType', sourceFilter);
+                // Add tags filter if any tags are selected
+                if (selectedTags.size > 0) {
+                    params.append('tags', Array.from(selectedTags).join(','));
                 }
 
                 const response = await fetch(`/api/documents?${params.toString()}`);
@@ -276,7 +289,7 @@
             if (!filteredDocuments || filteredDocuments.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="4" class="text-center">
+                        <td colspan="5" class="text-center">
                             No documents found matching the current filters.
                         </td>
                     </tr>
@@ -299,6 +312,12 @@
                     ? `<a href="${sourceId}" target="_blank" style="color: var(--primary-color); text-decoration: none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" onclick="event.stopPropagation()">${displaySourceId}</a>`
                     : displaySourceId;
 
+                // Format tags as badges using standard Bulma CSS
+                const tags = doc.tags || [];
+                const tagsHtml = tags.length > 0
+                    ? tags.map(tag => `<span class="label">${tag}</span>`).join('')
+                    : '<span class="text-gray">-</span>';
+
                 return `
                     <tr class="${isSelected ? 'bg-gray' : ''}">
                         <td style="text-align: center;">
@@ -312,6 +331,7 @@
                             <div class="text-small" title="${sourceId}" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${sourceIdHtml}</div>
                             <div class="text-small" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${doc.title || 'Untitled'}</div>
                         </td>
+                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${tagsHtml}</td>
                         <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
                     </tr>
                 `;
@@ -535,8 +555,96 @@
             }
         }
 
+        // Tag filter dropdown functions
+        function showTagDropdown() {
+            const dropdown = document.getElementById('tag-dropdown');
+            renderTagDropdown();
+            dropdown.style.display = 'block';
+        }
+
+        function hideTagDropdown() {
+            setTimeout(() => {
+                const dropdown = document.getElementById('tag-dropdown');
+                dropdown.style.display = 'none';
+            }, 200);
+        }
+
+        function filterTagDropdown() {
+            renderTagDropdown();
+        }
+
+        function renderTagDropdown() {
+            const dropdown = document.getElementById('tag-dropdown');
+            const input = document.getElementById('tag-filter-input');
+            const searchTerm = input.value.toLowerCase();
+
+            // Show all tags matching search, mark selected ones with checkmark
+            const filteredTags = availableTags.filter(tag =>
+                tag.toLowerCase().includes(searchTerm)
+            );
+
+            if (filteredTags.length === 0) {
+                dropdown.innerHTML = '<div style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">No tags found</div>';
+                return;
+            }
+
+            dropdown.innerHTML = filteredTags.map(tag => {
+                const isSelected = selectedTags.has(tag);
+                const checkmark = isSelected ? '<span style="margin-right: 0.25rem;">✓</span>' : '';
+                const fontWeight = isSelected ? 'bold' : 'normal';
+
+                return `
+                    <div style="padding: 0.5rem; cursor: pointer; font-weight: ${fontWeight};"
+                         onmouseover="this.style.backgroundColor='#f0f0f0'"
+                         onmouseout="this.style.backgroundColor='white'"
+                         onclick="${isSelected ? `removeTag('${tag}')` : `selectTag('${tag}')`}; event.stopPropagation();">
+                        ${checkmark}${tag}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectTag(tag) {
+            selectedTags.add(tag);
+            renderSelectedTags();
+            renderTagDropdown(); // Update dropdown to show checkmark
+            document.getElementById('tag-filter-input').value = ''; // Clear search
+            filterDocuments();
+        }
+
+        function removeTag(tag) {
+            selectedTags.delete(tag);
+            renderSelectedTags();
+            renderTagDropdown(); // Update dropdown to remove checkmark
+            filterDocuments();
+        }
+
+        function renderSelectedTags() {
+            const container = document.getElementById('selected-tags');
+            if (selectedTags.size === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = Array.from(selectedTags).map(tag => `
+                <span class="chip">
+                    ${tag}
+                    <button class="btn btn-clear" onclick="removeTag('${tag}')" aria-label="Close"></button>
+                </span>
+            `).join('');
+        }
+
         // Search box event listener - client-side search within current page
         document.getElementById('search-box').addEventListener('input', searchDocuments);
+
+        // Close tag dropdown when clicking outside
+        document.addEventListener('click', function (event) {
+            const tagInput = document.getElementById('tag-filter-input');
+            const tagDropdown = document.getElementById('tag-dropdown');
+            if (!tagInput.contains(event.target) && !tagDropdown.contains(event.target)) {
+                hideTagDropdown();
+            }
+        });
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function () {

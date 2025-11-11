@@ -50,6 +50,7 @@ type DocumentStorage interface {
 	CountDocumentsBySource(sourceType string) (int, error)
 	// NOTE: Phase 5 - CountVectorized removed (no longer using embeddings)
 	GetStats() (*models.DocumentStats, error)
+	GetAllTags() ([]string, error)
 
 	// NOTE: Phase 5 - Chunk operations removed (no longer using chunking for embeddings)
 

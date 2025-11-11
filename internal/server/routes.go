@@ -49,6 +49,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
+	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler)                    // GET - all unique tags
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents

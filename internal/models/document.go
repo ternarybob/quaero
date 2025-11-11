@@ -62,7 +62,8 @@ type Document struct {
 	// Metadata (source-specific data + extracted keywords stored as JSON)
 	// Example: {"project": "PROJ-123", "assignee": "alice", "keywords": ["bug", "urgent"]}
 	Metadata map[string]interface{} `json:"metadata"`
-	URL      string                 `json:"url"` // Link to original
+	URL      string                 `json:"url"`  // Link to original
+	Tags     []string               `json:"tags"` // User-defined tags from job definitions for categorization and filtering
 
 	// Sync tracking
 	LastSynced       *time.Time `json:"last_synced,omitempty"`        // When document was last synced from source

@@ -73,6 +73,7 @@ const (
 // ListOptions for listing documents
 type ListOptions struct {
 	SourceType    string
+	Tags          []string // Filter by tags (OR logic - match any tag)
 	Limit         int
 	Offset        int
 	OrderBy       string  // created_at, updated_at, title

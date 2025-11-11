@@ -47,6 +47,25 @@ func (h *DocumentHandler) StatsHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
+// TagsHandler returns all unique tags across all documents
+func (h *DocumentHandler) TagsHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	tags, err := h.documentStorage.GetAllTags()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to get document tags")
+		http.Error(w, "Failed to get tags", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tags": tags,
+	})
+}
+
 // ListHandler returns paginated list of documents with filtering
 func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, http.MethodGet) {
@@ -59,6 +78,7 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 	sourceType := r.URL.Query().Get("sourceType")
+	tagsParam := r.URL.Query().Get("tags")
 
 	// Set defaults
 	limit := 50
@@ -76,8 +96,19 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Parse tags (comma-separated list)
+	var tags []string
+	if tagsParam != "" {
+		tags = strings.Split(tagsParam, ",")
+		// Trim whitespace from each tag
+		for i := range tags {
+			tags[i] = strings.TrimSpace(tags[i])
+		}
+	}
+
 	opts := &interfaces.ListOptions{
 		SourceType: sourceType,
+		Tags:       tags,
 		Limit:      limit,
 		Offset:     offset,
 	}

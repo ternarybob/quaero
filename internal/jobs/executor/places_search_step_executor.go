@@ -138,7 +138,7 @@ func (e *PlacesSearchStepExecutor) ExecuteStep(ctx context.Context, step models.
 		Msg("Places search step completed successfully")
 
 	// Convert search result to document for storage
-	doc, err := e.convertPlacesResultToDocument(result, parentJobID)
+	doc, err := e.convertPlacesResultToDocument(result, parentJobID, jobDef.Tags)
 	if err != nil {
 		return "", fmt.Errorf("failed to convert places result to document: %w", err)
 	}
@@ -195,7 +195,7 @@ func (e *PlacesSearchStepExecutor) GetStepType() string {
 }
 
 // convertPlacesResultToDocument converts a PlacesSearchResult to a Document for storage
-func (e *PlacesSearchStepExecutor) convertPlacesResultToDocument(result *models.PlacesSearchResult, jobID string) (*models.Document, error) {
+func (e *PlacesSearchStepExecutor) convertPlacesResultToDocument(result *models.PlacesSearchResult, jobID string, tags []string) (*models.Document, error) {
 	// Generate document ID from job ID and timestamp
 	docID := fmt.Sprintf("doc_places_%s", jobID)
 
@@ -257,6 +257,7 @@ func (e *PlacesSearchStepExecutor) convertPlacesResultToDocument(result *models.
 		DetailLevel:     models.DetailLevelFull,
 		Metadata:        metadata,
 		URL:             "",
+		Tags:            tags,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}

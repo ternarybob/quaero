@@ -170,6 +170,7 @@ type CrawlConfig struct {
 	ExcludePatterns []string      `json:"exclude_patterns"` // URL patterns to exclude (regex)
 	FollowLinks     bool          `json:"follow_links"`     // Whether to follow discovered links
 	DetailLevel     string        `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
+	Tags            []string      `json:"tags"`             // Tags to apply to all documents created by this crawl
 }
 
 // CrawlProgress tracks crawl job progress

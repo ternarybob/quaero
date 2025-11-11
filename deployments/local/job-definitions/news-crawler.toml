@@ -9,6 +9,9 @@ job_type = "user"
 source_type = "web"  # For generic web crawling. Options: web, jira, confluence, github
 description = "Crawler job that crawls a news website and filters for specific content"
 
+# Tags to apply to all documents created by this job (for filtering/categorization)
+tags = ["news", "australia", "web-content"]
+
 # Cron schedule (empty = manual execution only)
 # Examples:
 #   "*/5 * * * *"  = Every 5 minutes

@@ -36,6 +36,7 @@ type JobDefinitionFile struct {
 	PreJobs        []string               `toml:"pre_jobs" json:"pre_jobs"`             // Optional
 	PostJobs       []string               `toml:"post_jobs" json:"post_jobs"`           // Optional
 	ErrorTolerance *models.ErrorTolerance `toml:"error_tolerance" json:"error_tolerance"` // Optional
+	Tags           []string               `toml:"tags" json:"tags"`                     // Tags to apply to documents created by this job
 }
 
 // ToJobDefinition converts the file format to a full JobDefinition model
@@ -64,6 +65,7 @@ func (j *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		PreJobs:        j.PreJobs,
 		PostJobs:       j.PostJobs,
 		ErrorTolerance: j.ErrorTolerance,
+		Tags:           j.Tags,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}

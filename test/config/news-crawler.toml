@@ -34,3 +34,10 @@ max_depth = 1       # Maximum depth to follow links
 max_pages = 1       # Maximum number of pages to crawl
 concurrency = 5     # Number of concurrent workers
 follow_links = true # Whether to follow discovered links
+
+# Job steps (required)
+[[steps]]
+name = "crawl_news"
+action = "crawl"
+config = { max_pages = 1, max_depth = 1 }
+on_error = "continue"

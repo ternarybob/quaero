@@ -46,6 +46,12 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	// Serialize tags
+	tagsJSON, err := json.Marshal(doc.Tags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %w", err)
+	}
+
 	// NOTE: Phase 5 - Removed embedding serialization code
 
 	var lastSyncedUnix *int64
@@ -58,9 +64,9 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 	query := `
 		INSERT INTO documents (
 			id, source_type, source_id, title, content_markdown, detail_level,
-			metadata, url, created_at, updated_at,
+			metadata, url, tags, created_at, updated_at,
 			last_synced, source_version, force_sync_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content_markdown = CASE
@@ -74,6 +80,7 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
+			tags = excluded.tags,
 			updated_at = excluded.updated_at,
 			last_synced = excluded.last_synced,
 			source_version = excluded.source_version,
@@ -94,6 +101,7 @@ func (d *DocumentStorage) SaveDocument(doc *models.Document) error {
 		detailLevel,
 		string(metadataJSON),
 		doc.URL,
+		string(tagsJSON),
 		doc.CreatedAt.Unix(),
 		doc.UpdatedAt.Unix(),
 		lastSyncedUnix,
@@ -120,9 +128,9 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO documents (
 			id, source_type, source_id, title, content_markdown, detail_level,
-			metadata, url, created_at, updated_at,
+			metadata, url, tags, created_at, updated_at,
 			last_synced, source_version, force_sync_pending
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(source_type, source_id) DO UPDATE SET
 			title = excluded.title,
 			content_markdown = CASE
@@ -136,6 +144,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			END,
 			metadata = excluded.metadata,
 			url = excluded.url,
+			tags = excluded.tags,
 			updated_at = excluded.updated_at,
 			last_synced = excluded.last_synced,
 			source_version = excluded.source_version,
@@ -150,6 +159,11 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 		metadataJSON, err := json.Marshal(doc.Metadata)
 		if err != nil {
 			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+
+		tagsJSON, err := json.Marshal(doc.Tags)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tags: %w", err)
 		}
 
 		// NOTE: Phase 5 - Removed embedding serialization code
@@ -174,6 +188,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 			detailLevel,
 			string(metadataJSON),
 			doc.URL,
+			string(tagsJSON),
 			doc.CreatedAt.Unix(),
 			doc.UpdatedAt.Unix(),
 			lastSyncedUnix,
@@ -192,7 +207,7 @@ func (d *DocumentStorage) SaveDocuments(docs []*models.Document) error {
 func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content_markdown, detail_level,
-			   metadata, url, created_at, updated_at,
+			   metadata, url, tags, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE id = ?
@@ -206,7 +221,7 @@ func (d *DocumentStorage) GetDocument(id string) (*models.Document, error) {
 func (d *DocumentStorage) GetDocumentBySource(sourceType, sourceID string) (*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content_markdown, detail_level,
-			   metadata, url, created_at, updated_at,
+			   metadata, url, tags, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE source_type = ? AND source_id = ?
@@ -223,6 +238,11 @@ func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	tagsJSON, err := json.Marshal(doc.Tags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %w", err)
+	}
+
 	// NOTE: Phase 5 - Removed embedding serialization code
 
 	query := `
@@ -231,6 +251,7 @@ func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {
 			content_markdown = ?,
 			metadata = ?,
 			url = ?,
+			tags = ?,
 			updated_at = ?
 		WHERE id = ?
 	`
@@ -240,6 +261,7 @@ func (d *DocumentStorage) UpdateDocument(doc *models.Document) error {
 		doc.ContentMarkdown,
 		string(metadataJSON),
 		doc.URL,
+		string(tagsJSON),
 		time.Now().Unix(),
 		doc.ID,
 	)
@@ -257,7 +279,7 @@ func (d *DocumentStorage) DeleteDocument(id string) error {
 func (d *DocumentStorage) FullTextSearch(query string, limit int) ([]*models.Document, error) {
 	sqlQuery := `
 		SELECT d.id, d.source_type, d.source_id, d.title, d.content_markdown, d.detail_level,
-			   d.metadata, d.url, d.created_at, d.updated_at,
+			   d.metadata, d.url, d.tags, d.created_at, d.updated_at,
 			   d.last_synced, d.source_version, d.force_sync_pending
 		FROM documents d
 		INNER JOIN documents_fts fts ON d.rowid = fts.rowid
@@ -327,7 +349,7 @@ func (d *DocumentStorage) SearchByIdentifier(identifier string, excludeSources [
 
 	query := fmt.Sprintf(`
 		SELECT id, source_type, source_id, title, content_markdown, detail_level,
-			   metadata, url, created_at, updated_at,
+			   metadata, url, tags, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE (
@@ -398,7 +420,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 		orderDir = "ASC"
 	}
 
-	query := "SELECT id, source_type, source_id, title, content_markdown, detail_level, metadata, url, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
+	query := "SELECT id, source_type, source_id, title, content_markdown, detail_level, metadata, url, tags, created_at, updated_at, last_synced, source_version, force_sync_pending FROM documents"
 	args := []interface{}{}
 
 	// Build WHERE clauses for filtering
@@ -408,6 +430,20 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 	if opts.SourceType != "" {
 		whereClauses = append(whereClauses, "source_type = ?")
 		args = append(args, opts.SourceType)
+	}
+
+	// Filter by tags (OR logic - match any tag)
+	if len(opts.Tags) > 0 {
+		tagConditions := []string{}
+		for _, tag := range opts.Tags {
+			tagConditions = append(tagConditions, "json_extract(tags, '$') LIKE ?")
+			args = append(args, "%\""+tag+"\"%")
+		}
+		whereClauses = append(whereClauses, "("+fmt.Sprintf("%s", tagConditions[0]))
+		for i := 1; i < len(tagConditions); i++ {
+			whereClauses[len(whereClauses)-1] += " OR " + tagConditions[i]
+		}
+		whereClauses[len(whereClauses)-1] += ")"
 	}
 
 	// Filter by created_at range
@@ -459,7 +495,7 @@ func (d *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models
 func (d *DocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content_markdown, detail_level,
-			   metadata, url, created_at, updated_at,
+			   metadata, url, tags, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE source_type = ?
@@ -579,7 +615,7 @@ func (d *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
 func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 	query := `
 		SELECT id, source_type, source_id, title, content_markdown, detail_level,
-			   metadata, url, created_at, updated_at,
+			   metadata, url, tags, created_at, updated_at,
 			   last_synced, source_version, force_sync_pending
 		FROM documents
 		WHERE force_sync_pending = 1
@@ -597,11 +633,38 @@ func (d *DocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
 // NOTE: Phase 5 - Removed GetDocumentsForceEmbed method (force_embed_pending field removed)
 // NOTE: Phase 5 - Removed GetUnvectorizedDocuments method (embeddings no longer tracked)
 
+// GetAllTags retrieves all unique tags across all documents
+func (d *DocumentStorage) GetAllTags() ([]string, error) {
+	query := `
+		SELECT DISTINCT json_each.value as tag
+		FROM documents, json_each(documents.tags)
+		WHERE json_each.value IS NOT NULL AND json_each.value != ''
+		ORDER BY tag
+	`
+
+	rows, err := d.db.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all tags: %w", err)
+	}
+	defer rows.Close()
+
+	tags := []string{}
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("failed to scan tag: %w", err)
+		}
+		tags = append(tags, tag)
+	}
+
+	return tags, nil
+}
+
 // Helper functions
 
 func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 	var doc models.Document
-	var metadataJSON string
+	var metadataJSON, tagsJSON string
 	var createdAt, updatedAt int64
 	var lastSynced sql.NullInt64
 	var contentMarkdown, url, sourceVersion, detailLevel sql.NullString
@@ -618,6 +681,7 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		&detailLevel,
 		&metadataJSON,
 		&url,
+		&tagsJSON,
 		&createdAt,
 		&updatedAt,
 		&lastSynced,
@@ -660,6 +724,16 @@ func (d *DocumentStorage) scanDocument(row *sql.Row) (*models.Document, error) {
 		}
 	}
 
+	// Parse tags
+	if tagsJSON != "" && tagsJSON != "[]" {
+		if err := json.Unmarshal([]byte(tagsJSON), &doc.Tags); err != nil {
+			d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to unmarshal tags")
+			doc.Tags = []string{}
+		}
+	} else {
+		doc.Tags = []string{}
+	}
+
 	doc.CreatedAt = time.Unix(createdAt, 0)
 	doc.UpdatedAt = time.Unix(updatedAt, 0)
 
@@ -671,7 +745,7 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 
 	for rows.Next() {
 		var doc models.Document
-		var metadataJSON string
+		var metadataJSON, tagsJSON string
 		var createdAt, updatedAt int64
 		var lastSynced sql.NullInt64
 		var contentMarkdown, url, sourceVersion, detailLevel sql.NullString
@@ -688,6 +762,7 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			&detailLevel,
 			&metadataJSON,
 			&url,
+			&tagsJSON,
 			&createdAt,
 			&updatedAt,
 			&lastSynced,
@@ -729,6 +804,16 @@ func (d *DocumentStorage) scanDocuments(rows *sql.Rows) ([]*models.Document, err
 			}
 		} else {
 			doc.Metadata = make(map[string]interface{})
+		}
+
+		// Parse tags
+		if tagsJSON != "" && tagsJSON != "[]" {
+			if err := json.Unmarshal([]byte(tagsJSON), &doc.Tags); err != nil {
+				d.logger.Warn().Err(err).Str("doc_id", doc.ID).Msg("Failed to unmarshal tags")
+				doc.Tags = []string{}
+			}
+		} else {
+			doc.Tags = []string{}
 		}
 
 		doc.CreatedAt = time.Unix(createdAt, 0)

@@ -115,6 +115,7 @@ type JobDefinition struct {
 	PreJobs          []string               `json:"pre_jobs"`           // Array of job definition IDs to execute before main steps (validation, pre-checks)
 	PostJobs         []string               `json:"post_jobs"`          // Array of job IDs to execute after this job completes
 	ErrorTolerance   *ErrorTolerance        `json:"error_tolerance"`    // Optional error tolerance configuration for child job failure management
+	Tags             []string               `json:"tags"`               // Tags to apply to all documents created by this job
 	ValidationStatus string                 `json:"validation_status"`  // TOML validation status: "valid", "invalid", "unknown"
 	ValidationError  string                 `json:"validation_error"`   // TOML validation error message (if invalid)
 	ValidatedAt      *time.Time             `json:"validated_at"`       // Timestamp of last validation (nil if never validated)
@@ -341,6 +342,30 @@ func (j *JobDefinition) UnmarshalErrorTolerance(data string) error {
 		return fmt.Errorf("failed to unmarshal error_tolerance: %w", err)
 	}
 	j.ErrorTolerance = &et
+	return nil
+}
+
+// MarshalTags serializes the tags array to JSON string for database storage
+func (j *JobDefinition) MarshalTags() (string, error) {
+	if j.Tags == nil || len(j.Tags) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(j.Tags)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal tags: %w", err)
+	}
+	return string(data), nil
+}
+
+// UnmarshalTags deserializes the tags JSON string from database
+func (j *JobDefinition) UnmarshalTags(data string) error {
+	if data == "" || data == "[]" {
+		j.Tags = []string{}
+		return nil
+	}
+	if err := json.Unmarshal([]byte(data), &j.Tags); err != nil {
+		return fmt.Errorf("failed to unmarshal tags: %w", err)
+	}
 	return nil
 }
 

@@ -33,6 +33,9 @@ type CrawledDocument struct {
 	// Crawler-specific metadata
 	CrawlerMetadata *CrawlerDocumentMetadata `json:"crawler_metadata,omitempty"`
 
+	// Tags for categorization and filtering
+	Tags []string `json:"tags,omitempty"` // Tags from job definition
+
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -68,7 +71,7 @@ type CrawlerDocumentMetadata struct {
 }
 
 // NewCrawledDocument creates a new crawled document from processed content
-func NewCrawledDocument(jobID, parentJobID, sourceURL string, processedContent *ProcessedContent) *CrawledDocument {
+func NewCrawledDocument(jobID, parentJobID, sourceURL string, processedContent *ProcessedContent, tags []string) *CrawledDocument {
 	doc := &CrawledDocument{
 		ID:              fmt.Sprintf("crawl_%s", uuid.New().String()),
 		JobID:           jobID,
@@ -80,6 +83,7 @@ func NewCrawledDocument(jobID, parentJobID, sourceURL string, processedContent *
 		ContentSize:     processedContent.ContentSize,
 		ProcessTime:     processedContent.ProcessTime,
 		Metadata:        processedContent.Metadata,
+		Tags:            tags, // Apply tags from crawler config/job definition
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
@@ -148,6 +152,7 @@ func (cd *CrawledDocument) ToDocument() *models.Document {
 		DetailLevel:     models.DetailLevelFull, // Crawler always provides full content
 		Metadata:        metadata,
 		URL:             cd.SourceURL,
+		Tags:            cd.Tags, // Copy tags from crawled document
 		CreatedAt:       cd.CreatedAt,
 		UpdatedAt:       cd.UpdatedAt,
 	}

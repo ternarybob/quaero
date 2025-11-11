@@ -56,6 +56,9 @@ func (e *CrawlerStepExecutor) ExecuteStep(ctx context.Context, step models.JobSt
 	// Build CrawlConfig struct from map with proper defaults
 	crawlConfig := e.buildCrawlConfig(stepConfig)
 
+	// Apply tags from job definition to all documents created by this crawl
+	crawlConfig.Tags = jobDef.Tags
+
 	// Build seed URLs - prioritize start_urls from step config, fallback to source type
 	var seedURLs []string
 	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {

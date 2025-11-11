@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Enhanced Crawler Executor - Authentication Cookie Injection
+// Crawler Executor - Authentication Cookie Injection
 // -----------------------------------------------------------------------
 
 package processor
@@ -21,7 +21,7 @@ import (
 )
 
 // injectAuthCookies loads authentication credentials from storage and injects cookies into ChromeDP browser
-func (e *EnhancedCrawlerExecutor) injectAuthCookies(ctx context.Context, browserCtx context.Context, parentJobID, targetURL string, logger arbor.ILogger) error {
+func (e *CrawlerExecutor) injectAuthCookies(ctx context.Context, browserCtx context.Context, parentJobID, targetURL string, logger arbor.ILogger) error {
 	logger.Debug().
 		Str("parent_job_id", parentJobID).
 		Str("target_url", targetURL).

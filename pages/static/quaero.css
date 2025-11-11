@@ -217,13 +217,17 @@ h2 {
 }
 
 
-
 /* 3. SPECTRE CSS LABEL (BADGE) OVERRIDES
    ========================================================================== */
 .label {
     border-radius: var(--border-radius);
     padding-left: 0.5rem;
     padding-right: 0.5rem;
+    margin-right: 0.25rem;
+
+    &:last-child {
+        margin-right: 0;
+    }
 }
 
 .label-success {

@@ -288,8 +288,8 @@ func (a *App) initServices() error {
 
 	// 6.6. Register job executors with job processor
 
-	// Register enhanced crawler_url executor (new interface with ChromeDP and content processing)
-	enhancedCrawlerExecutor := processor.NewEnhancedCrawlerExecutor(
+	// Register crawler_url executor (ChromeDP rendering and content processing)
+	crawlerExecutor := processor.NewCrawlerExecutor(
 		a.CrawlerService,
 		jobMgr,
 		queueMgr,
@@ -299,8 +299,8 @@ func (a *App) initServices() error {
 		a.Logger,
 		a.EventService,
 	)
-	jobProcessor.RegisterExecutor(enhancedCrawlerExecutor)
-	a.Logger.Info().Msg("Enhanced crawler URL executor registered for job type: crawler_url")
+	jobProcessor.RegisterExecutor(crawlerExecutor)
+	a.Logger.Info().Msg("Crawler URL executor registered for job type: crawler_url")
 
 	// Create parent job executor for managing parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
