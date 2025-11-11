@@ -1,39 +1,39 @@
 # Manager/Worker Architecture
 
-**Version:** 1.1
-**Last Updated:** 2025-01-15
+**Version:** 1.2
+**Last Updated:** 2025-01-16
 **Replaces:** JOB_EXECUTOR_ARCHITECTURE.md, JOB_QUEUE_MANAGEMENT.md, QUEUE_ARCHITECTURE.md
 
 ## Executive Summary
 
 Quaero's job system implements a **Manager/Worker pattern** for clear separation between orchestration and execution:
 
-- **Managers** (`StepManager` interface) - Orchestrate workflows by creating parent jobs and spawning child job hierarchies
+- **Managers** (`StepManager` interface) - Orchestrate workflows by creating jobs and defining execution strategies
 - **Workers** (`JobWorker` interface) - Execute individual jobs pulled from the queue
-- **Orchestrator** (`JobOrchestrator`) - Monitors parent job progress and aggregates child job statistics
+- **Orchestrator** (`JobOrchestrator`) - Monitors job progress and aggregates execution statistics
 
 This architecture provides:
 - Clear responsibility separation between coordination and execution
 - Scalable job processing with queue-based worker pools
 - Real-time progress tracking and WebSocket updates
-- Flexible job hierarchies (parent → children)
+- Flexible job hierarchies and dependencies
 
 ## Architecture Overview
 
 ```mermaid
 graph TB
     UI[Web UI] -->|Trigger Job| Manager[Job Manager]
-    Manager -->|Create Parent Job| DB[(SQLite Jobs DB)]
-    Manager -->|CreateParentJob| StepExecutor[Crawler Manager]
-    StepExecutor -->|Create Child Jobs| Queue[goqite Queue]
+    Manager -->|Create Job Record| DB[(SQLite Jobs DB)]
+    Manager -->|CreateJob| StepMgr[Step Manager]
+    StepMgr -->|Enqueue Tasks| Queue[goqite Queue]
 
     Queue -->|Dequeue| Processor[Job Processor]
-    Processor -->|Route by Type| Worker[Crawler Worker]
-    Worker -->|Execute| ChromeDP[ChromeDP Browser]
-    Worker -->|Save Document| DocStore[Document Storage]
-    Worker -->|Spawn More Children| Queue
+    Processor -->|Route by Type| Worker[Job Worker]
+    Worker -->|Execute Task| Service[External Service]
+    Worker -->|Save Results| Storage[Data Storage]
+    Worker -->|Spawn Subtasks| Queue
 
-    Orchestrator[Parent Job Orchestrator] -->|Monitor Progress| DB
+    Orchestrator[Job Orchestrator] -->|Monitor Progress| DB
     Orchestrator -->|Publish Events| WS[WebSocket]
     WS -->|Real-time Updates| UI
 
@@ -45,9 +45,9 @@ graph TB
 
 | Component | Layer | Responsibility |
 |-----------|-------|----------------|
-| **CrawlerManager** | Manager (Orchestration) | Implements StepManager - Creates parent jobs, defines seed URLs, initiates crawls |
-| **CrawlerWorker** | Worker (Execution) | Implements JobWorker - Renders pages, extracts content, spawns child jobs for links |
-| **JobOrchestrator** | Orchestration (Monitoring) | Implements JobOrchestrator interface - Tracks child job progress, aggregates statistics, determines completion |
+| **StepManager** | Manager (Orchestration) | Implements StepManager - Creates jobs, defines execution strategy, initiates workflows |
+| **JobWorker** | Worker (Execution) | Implements JobWorker - Executes tasks, processes data, spawns subtasks for discovered work |
+| **JobOrchestrator** | Orchestration (Monitoring) | Implements JobOrchestrator interface - Tracks job progress, aggregates statistics, determines completion |
 | **JobProcessor** | Queue (Routing) | Routes queued jobs to registered workers based on job type |
 
 ## Manager vs Worker Distinction
@@ -72,33 +72,35 @@ type StepManager interface {
 
 **Responsibilities:**
 - Create parent job records in database
-- Define seed URLs and crawl configuration
+- Define work items and execution configuration
 - Spawn initial child jobs into queue
 - NO direct execution - delegates to workers
 
-**Example Implementation:** `CrawlerManager`
+**Example Implementation:** Generic Manager
 
 ```go
-// CrawlerManager orchestrates web crawling workflows
-type CrawlerManager struct {
-    crawlerService interfaces.CrawlerService
-    logger         arbor.ILogger
+// ExampleManager orchestrates a specific workflow type
+type ExampleManager struct {
+    workflowService interfaces.WorkflowService
+    logger          arbor.ILogger
 }
 
-func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
-    // 1. Build seed URLs from job definition
-    seedURLs := m.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+func (m *ExampleManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+    // 1. Extract configuration from job definition
+    config := m.buildConfiguration(jobDef.Config)
 
-    // 2. Create parent job via crawler service
-    // This internally spawns child jobs for each seed URL
-    jobID, err := m.crawlerService.StartCrawl(
-        sourceType, entityType, seedURLs, crawlConfig,
-        jobDef.AuthID, false, nil, nil, parentJobID,
+    // 2. Create parent job via workflow service
+    // This internally spawns child jobs for each work item
+    jobID, err := m.workflowService.StartWorkflow(
+        jobDef.SourceType, config.WorkItems, config.Options,
+        jobDef.AuthID, parentJobID,
     )
 
     return jobID, err
 }
 ```
+
+**Concrete Implementations:** The codebase includes 6 manager implementations (CrawlerManager, AgentManager, DatabaseMaintenanceManager, TransformManager, ReindexManager, PlacesSearchManager), each following this pattern for their specific domain.
 
 **Other Manager Implementations:**
 
@@ -132,41 +134,44 @@ type JobWorker interface {
 
 **Responsibilities:**
 - Execute single job from queue
-- Perform actual work (e.g., render page, process content)
+- Perform actual work (e.g., process data, call external services)
 - Update job status (running, completed, failed)
-- Spawn child jobs for discovered work (e.g., links)
+- Spawn child jobs for discovered work (e.g., additional items)
 - Save results to storage
 
-**Example Implementation:** `CrawlerWorker`
+**Example Implementation:** Generic Worker
 
 ```go
-// CrawlerWorker executes individual URL crawling jobs
-type CrawlerWorker struct {
-    crawlerService   *crawler.Service
-    documentStorage  interfaces.DocumentStorage
-    jobMgr           *jobs.Manager
-    queueMgr         *queue.Manager
-    logger           arbor.ILogger
+// ExampleWorker executes individual job tasks
+type ExampleWorker struct {
+    taskService     interfaces.TaskService
+    dataStorage     interfaces.DataStorage
+    jobMgr          *jobs.Manager
+    queueMgr        *queue.Manager
+    logger          arbor.ILogger
 }
 
-func (w *CrawlerWorker) Execute(ctx context.Context, job *models.JobModel) error {
-    // 1. Extract URL from job config
-    seedURL, _ := job.GetConfigString("seed_url")
+func (w *ExampleWorker) Execute(ctx context.Context, job *models.JobModel) error {
+    // 1. Extract task parameters from job config
+    taskParams, _ := job.GetConfigString("task_params")
 
-    // 2. Render page with ChromeDP
-    htmlContent, statusCode, err := w.renderPageWithChromeDp(ctx, browserCtx, seedURL, logger)
+    // 2. Execute task via external service
+    result, err := w.taskService.ExecuteTask(ctx, taskParams)
+    if err != nil {
+        return fmt.Errorf("task execution failed: %w", err)
+    }
 
-    // 3. Process HTML and convert to markdown
-    processedContent, err := w.contentProcessor.ProcessHTML(htmlContent, seedURL)
+    // 3. Process results
+    processedData := w.processResults(result)
 
-    // 4. Save document to storage
-    crawledDoc := crawler.NewCrawledDocument(job.ID, parentJobID, seedURL, processedContent, tags)
-    docPersister.SaveCrawledDocument(crawledDoc)
+    // 4. Save results to storage
+    dataRecord := NewDataRecord(job.ID, job.ParentID, processedData)
+    w.dataStorage.Save(ctx, dataRecord)
 
-    // 5. Discover links and spawn child jobs
-    if crawlConfig.FollowLinks && job.Depth < crawlConfig.MaxDepth {
-        for _, link := range processedContent.Links {
-            w.spawnChildJob(ctx, job, link, crawlConfig, sourceType, entityType, i, logger)
+    // 5. Discover additional work and spawn subtasks
+    if shouldSpawnSubtasks(job, result) {
+        for _, subtask := range result.DiscoveredWork {
+            w.spawnChildJob(ctx, job, subtask)
         }
     }
 
@@ -174,20 +179,22 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.JobModel) error
 }
 ```
 
+**Concrete Implementations:** The codebase includes 3 worker implementations (CrawlerWorker, AgentWorker, DatabaseMaintenanceWorker), each following this pattern for their specific execution logic.
+
 ## Orchestrator Responsibilities
 
 ### JobOrchestrator
 
 **File:** `internal/jobs/orchestrator/job_orchestrator.go`
 
-The orchestrator runs in a **separate goroutine** (NOT via queue) to avoid blocking queue workers with long-running monitoring loops.
+The orchestrator runs in a **separate goroutine** for non-blocking monitoring of job execution.
 
 **Responsibilities:**
-1. **Monitor Child Progress** - Poll database every 5 seconds for child job status
-2. **Aggregate Statistics** - Calculate total, completed, failed, running, pending counts
-3. **Determine Completion** - Mark parent as completed when all children reach terminal state
+1. **Monitor Job Progress** - Poll database every 5 seconds for job status
+2. **Aggregate Execution Statistics** - Calculate total, completed, failed, running, pending counts
+3. **Determine Workflow Completion** - Mark parent as completed when all subtasks reach terminal state
 4. **Real-Time Updates** - Publish WebSocket events for UI progress tracking
-5. **Document Counting** - Track documents saved across all child jobs
+5. **Result Counting** - Track results saved across all subtasks
 
 **Lifecycle:**
 
@@ -220,16 +227,16 @@ func (o *JobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobM
 The orchestrator subscribes to system events for real-time updates:
 
 ```go
-// Subscribe to child status changes
+// Subscribe to job status changes
 eventService.Subscribe(EventJobStatusChange, func(ctx context.Context, event Event) error {
     // Increment progress counters in real-time
     stats := jobMgr.GetChildJobStats(ctx, parentID)
     publishProgressUpdate(ctx, parentID, stats)
 })
 
-// Subscribe to document saves
+// Subscribe to result saves
 eventService.Subscribe(EventDocumentSaved, func(ctx context.Context, event Event) error {
-    // Increment document count for parent job
+    // Increment result count for parent job
     jobMgr.IncrementDocumentCount(ctx, parentJobID)
 })
 ```
@@ -240,23 +247,23 @@ eventService.Subscribe(EventDocumentSaved, func(ctx context.Context, event Event
 sequenceDiagram
     participant UI as Web UI
     participant Handler as Job Handler
-    participant Manager as Crawler Manager
-    participant Service as Crawler Service
+    participant Manager as Step Manager
+    participant Service as Workflow Service
     participant DB as SQLite DB
     participant Queue as goqite Queue
     participant Processor as Job Processor
-    participant Worker as Crawler Worker
-    participant Orchestrator as Parent Job Orchestrator
+    participant Worker as Job Worker
+    participant Orchestrator as Job Orchestrator
     participant WS as WebSocket
 
     %% Phase 1: Job Creation (Orchestration Layer)
     UI->>Handler: POST /api/jobs/definitions/{id}/execute
     Handler->>Manager: CreateParentJob(step, jobDef, parentJobID)
-    Manager->>Service: StartCrawl(sourceType, entityType, seedURLs, config)
+    Manager->>Service: StartWorkflow(config, workItems)
     Service->>DB: INSERT parent job (type=parent, status=pending)
-    Service->>Queue: ENQUEUE child jobs (type=crawler_url)
+    Service->>Queue: ENQUEUE child jobs (type=task)
     Service->>Orchestrator: StartMonitoring(parentJobModel)
-    Orchestrator-->>WS: parent_job_progress event
+    Orchestrator-->>WS: job_progress event
     Service-->>Handler: parentJobID
     Handler-->>UI: 200 OK {job_id}
 
@@ -264,12 +271,12 @@ sequenceDiagram
     loop For each child job
         Queue->>Processor: Receive() -> Message
         Processor->>Worker: Execute(jobModel)
-        Worker->>Worker: Render page (ChromeDP)
-        Worker->>Worker: Process HTML → Markdown
-        Worker->>DB: INSERT document
-        Worker-->>WS: document_saved event
-        Worker->>Worker: Discover links
-        Worker->>Queue: ENQUEUE child jobs (depth+1)
+        Worker->>Worker: Execute task via external service
+        Worker->>Worker: Process results
+        Worker->>DB: INSERT result data
+        Worker-->>WS: result_saved event
+        Worker->>Worker: Discover additional work
+        Worker->>Queue: ENQUEUE subtasks (depth+1)
         Worker->>DB: UPDATE job status=completed
         Worker-->>WS: job_status_change event
     end
@@ -277,10 +284,10 @@ sequenceDiagram
     %% Phase 3: Progress Monitoring (Orchestration Layer)
     loop Every 5 seconds
         Orchestrator->>DB: SELECT child job statistics
-        Orchestrator-->>WS: parent_job_progress event
+        Orchestrator-->>WS: job_progress event
         alt All children complete
             Orchestrator->>DB: UPDATE parent status=completed
-            Orchestrator-->>WS: parent_job_progress (completed)
+            Orchestrator-->>WS: job_progress (completed)
         end
     end
 ```
@@ -289,27 +296,27 @@ sequenceDiagram
 
 #### Phase 1: Job Creation (Manager Layer)
 1. User clicks "Execute" in Web UI
-2. Handler calls `CrawlerManager.CreateParentJob()`
-3. Manager calls `CrawlerService.StartCrawl()` with seed URLs
+2. Handler calls `StepManager.CreateParentJob()`
+3. Manager calls `WorkflowService.StartWorkflow()` with configuration
 4. Service creates parent job in database (type=`parent`)
-5. Service spawns child jobs (type=`crawler_url`) and enqueues them
+5. Service spawns child jobs (type=`task`) and enqueues them
 6. Service starts `JobOrchestrator` in separate goroutine
 7. Handler returns parent job ID to UI
 
 #### Phase 2: Job Execution (Worker Layer)
 8. `JobProcessor` dequeues message from goqite
-9. Processor routes to `CrawlerWorker` based on job type
-10. Worker renders page with ChromeDP
-11. Worker processes HTML → Markdown
-12. Worker saves document to storage (publishes `document_saved` event)
-13. Worker discovers links and spawns child jobs (if depth < max_depth)
+9. Processor routes to appropriate `JobWorker` based on job type
+10. Worker executes task via external service
+11. Worker processes task results
+12. Worker saves results to storage (publishes `result_saved` event)
+13. Worker discovers additional work and spawns subtasks (if depth < max_depth)
 14. Worker updates job status to completed (publishes `job_status_change` event)
 
 #### Phase 3: Progress Monitoring (Orchestrator Layer)
-15. Orchestrator polls child job statistics every 5 seconds
-16. Orchestrator publishes `parent_job_progress` events via WebSocket
-17. When all children reach terminal state (completed/failed/cancelled):
-    - Orchestrator updates parent job status to completed
+15. Orchestrator polls job execution statistics every 5 seconds
+16. Orchestrator publishes `job_progress` events via WebSocket
+17. When all subtasks reach terminal state (completed/failed/cancelled):
+    - Orchestrator updates workflow status to completed
     - Orchestrator publishes final progress event
     - Monitoring loop exits
 
@@ -350,7 +357,9 @@ type JobSpawner interface {
 
 ### Implementations
 
-**Managers (Orchestration):**
+The Manager/Worker pattern is implemented across multiple domains in Quaero. Each implementation follows the same architectural pattern but handles domain-specific logic:
+
+**Example Manager Implementations:**
 - ✅ `CrawlerManager` (internal/jobs/manager/crawler_manager.go)
 - ✅ `DatabaseMaintenanceManager` (internal/jobs/manager/database_maintenance_manager.go)
 - ✅ `AgentManager` (internal/jobs/manager/agent_manager.go)
@@ -358,10 +367,14 @@ type JobSpawner interface {
 - ✅ `ReindexManager` (internal/jobs/manager/reindex_manager.go)
 - ✅ `PlacesSearchManager` (internal/jobs/manager/places_search_manager.go)
 
-**Workers (Execution):**
+Each manager implements the `StepManager` interface and follows the orchestration pattern shown above.
+
+**Example Worker Implementations:**
 - ✅ `CrawlerWorker` (internal/jobs/worker/crawler_worker.go)
 - ✅ `DatabaseMaintenanceWorker` (internal/jobs/worker/database_maintenance_worker.go)
 - ✅ `AgentWorker` (internal/jobs/worker/agent_worker.go)
+
+Each worker implements the `JobWorker` interface and follows the execution pattern shown above.
 
 **Orchestrators (Monitoring):**
 - ✅ `JobOrchestrator` (internal/jobs/orchestrator/job_orchestrator.go)
@@ -576,22 +589,30 @@ visibility_timeout = "30m"  # Message visibility timeout
 Job definitions stored in `job-definitions/` directory:
 
 ```yaml
-# job-definitions/jira-crawler.yaml
-name: "Jira Crawler"
-source_type: "jira"
-base_url: "https://jira.example.com"
+# job-definitions/example-workflow.yaml
+name: "Example Workflow"
+source_type: "api"  # or "web", "database", etc.
+base_url: "https://api.example.com"
 auth_id: "auth_source_123"
-tags: ["jira", "issues"]
+tags: ["example", "workflow"]
 
 steps:
-  - name: "crawl_issues"
-    action: "crawl"
+  - name: "process_items"
+    action: "task_type"  # e.g., "crawl", "agent", "transform"
     config:
-      entity_type: "issues"
+      entity_type: "items"
       max_depth: 2
-      max_pages: 100
-      follow_links: true
+      max_items: 100
+      follow_references: true
 ```
+
+**Concrete Examples:** The `job-definitions/` directory contains real-world examples including:
+- `jira-crawler.yaml` - Web crawling workflow for Jira issues
+- `confluence-crawler.yaml` - Web crawling workflow for Confluence pages
+- `keyword-extraction.yaml` - AI agent workflow for document processing
+- `database-maintenance.yaml` - Database optimization workflow
+
+Each follows this structure but with domain-specific configuration.
 
 ## API Endpoints
 
@@ -626,64 +647,63 @@ GET /api/queue/stats               # Queue statistics (pending, processing)
 
 ### WebSocket Events
 
-All real-time updates published via WebSocket at `/ws`:
+The system publishes various event types via WebSocket for real-time UI updates. Event payloads vary by job type but follow consistent patterns:
 
-#### 1. Parent Job Progress
+#### 1. Job Progress
 
 ```json
 {
-  "type": "parent_job_progress",
+  "type": "job_progress",
   "payload": {
     "job_id": "job_abc123",
     "status": "running",
-    "total_children": 150,
-    "pending_children": 66,
-    "running_children": 1,
-    "completed_children": 83,
-    "failed_children": 0,
-    "cancelled_children": 0,
+    "total_subtasks": 150,
+    "pending_subtasks": 66,
+    "running_subtasks": 1,
+    "completed_subtasks": 83,
+    "failed_subtasks": 0,
+    "cancelled_subtasks": 0,
     "progress_text": "66 pending, 1 running, 83 completed, 0 failed",
-    "document_count": 83,
+    "result_count": 83,
     "timestamp": "2025-11-11T10:30:45Z"
   }
 }
 ```
 
-#### 2. Crawler Job Progress
+#### 2. Task Progress
 
 ```json
 {
-  "type": "crawler_job_progress",
+  "type": "task_progress",
   "payload": {
     "job_id": "job_xyz789",
     "parent_id": "job_abc123",
     "status": "running",
-    "job_type": "crawler_url",
-    "current_url": "https://example.com/page",
-    "current_activity": "Processing HTML content and converting to markdown",
+    "job_type": "task",
+    "current_item": "item_123",
+    "current_activity": "Processing task data",
     "depth": 1,
-    "source_type": "web",
     "timestamp": "2025-11-11T10:30:46Z"
   }
 }
 ```
 
-#### 3. Crawler Job Log
+#### 3. Job Log
 
 ```json
 {
-  "type": "crawler_job_log",
+  "type": "job_log",
   "payload": {
     "job_id": "job_abc123",
     "level": "info",
-    "message": "Document saved: Example Page (12345 bytes)",
+    "message": "Result saved: Processed Item (12345 bytes)",
     "timestamp": "2025-11-11T10:30:47Z",
     "metadata": {
-      "url": "https://example.com/page",
+      "item_id": "item_123",
       "depth": 1,
-      "document_id": "doc_123456",
-      "title": "Example Page",
-      "content_size": 12345,
+      "result_id": "res_123456",
+      "title": "Processed Item",
+      "result_size": 12345,
       "child_id": "job_xyz789"
     }
   }
@@ -699,23 +719,23 @@ All real-time updates published via WebSocket at `/ws`:
     "job_id": "job_xyz789",
     "parent_id": "job_abc123",
     "status": "completed",
-    "job_type": "crawler_url",
+    "job_type": "task",
     "timestamp": "2025-11-11T10:30:48Z"
   }
 }
 ```
 
-#### 5. Document Saved
+#### 5. Result Saved
 
 ```json
 {
-  "type": "document_saved",
+  "type": "result_saved",
   "payload": {
-    "document_id": "doc_123456",
+    "result_id": "res_123456",
     "job_id": "job_xyz789",
     "parent_job_id": "job_abc123",
-    "title": "Example Page",
-    "url": "https://example.com/page",
+    "title": "Processed Item",
+    "item_reference": "item_123",
     "timestamp": "2025-11-11T10:30:47Z"
   }
 }
@@ -730,13 +750,15 @@ All real-time updates published via WebSocket at `/ws`:
     "parent_job_id": "job_abc123",
     "discovered_by": "job_xyz789",
     "child_job_id": "job_new456",
-    "job_type": "crawler_url",
-    "url": "https://example.com/child-page",
+    "job_type": "task",
+    "item_reference": "item_456",
     "depth": 2,
     "timestamp": "2025-11-11T10:30:49Z"
   }
 }
 ```
+
+**Implementation Note:** Actual event payloads vary by job type. Crawler jobs include URLs and HTML metadata, agent jobs include AI model responses, maintenance jobs include database statistics, etc.
 
 ### WebSocket Client Usage
 
@@ -744,19 +766,19 @@ All real-time updates published via WebSocket at `/ws`:
 // Connect to WebSocket
 const ws = new WebSocket('ws://localhost:8085/ws');
 
-// Subscribe to parent job progress
+// Subscribe to job progress
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
   switch (data.type) {
-    case 'parent_job_progress':
+    case 'job_progress':
       updateJobProgress(data.payload);
       break;
-    case 'crawler_job_log':
+    case 'job_log':
       appendLogMessage(data.payload);
       break;
-    case 'document_saved':
-      incrementDocumentCount(data.payload);
+    case 'result_saved':
+      incrementResultCount(data.payload);
       break;
   }
 };
@@ -767,9 +789,9 @@ ws.onmessage = (event) => {
 ### Manager Design Guidelines
 
 1. **Keep Managers Lightweight** - Managers should only orchestrate, not execute
-2. **Use Crawler Service** - Delegate job creation to `CrawlerService.StartCrawl()`
+2. **Use Domain Service** - Delegate job creation to appropriate service (e.g., CrawlerService, AgentService, MaintenanceService)
 3. **No Direct Database Access** - Use service layer abstractions
-4. **Configuration-Driven** - Build seed URLs from job definition config
+4. **Configuration-Driven** - Extract work items from job definition config
 5. **Validate Early** - Validate job definitions before creating jobs
 
 ### Worker Design Guidelines
@@ -779,7 +801,7 @@ ws.onmessage = (event) => {
 3. **Update Job Status** - Always update status to running/completed/failed
 4. **Publish Events** - Emit WebSocket events for real-time updates
 5. **Handle Failures Gracefully** - Log errors, update job status, don't panic
-6. **Spawn Children Carefully** - Respect depth limits and max_pages config
+6. **Spawn Subtasks Carefully** - Respect depth limits and max_items config
 
 ### Orchestrator Design Guidelines
 
@@ -787,7 +809,7 @@ ws.onmessage = (event) => {
 2. **Poll Every 5 Seconds** - Balance responsiveness vs database load
 3. **Subscribe to Events** - Use event subscriptions for real-time updates
 4. **Handle Timeouts** - Enforce max wait time (30 minutes default)
-5. **Calculate Status Correctly** - Aggregate child statuses accurately
+5. **Aggregate Statistics Correctly** - Aggregate subtask statuses accurately
 
 ## Troubleshooting
 
@@ -805,28 +827,28 @@ ws.onmessage = (event) => {
 # Check job processor status
 curl http://localhost:8085/api/queue/stats
 
-# Check registered executors in logs
-grep "Job executor registered" logs/quaero.log
+# Check registered workers in logs
+grep "Job worker registered" logs/quaero.log
 
 # Verify queue configuration
 cat bin/quaero.toml
 ```
 
-### Parent Jobs Never Complete
+### Jobs Never Complete
 
-**Symptoms:** Parent jobs stuck in `running` status even when all children are done
+**Symptoms:** Jobs stuck in `running` status even when all subtasks are done
 
 **Possible Causes:**
-1. Orchestrator not monitoring parent job
-2. Child jobs not updating status correctly
+1. Orchestrator not monitoring job
+2. Subtasks not updating status correctly
 3. Database query returning incorrect stats
 
 **Solution:**
 ```bash
 # Check orchestrator logs
-grep "Parent job monitoring" logs/quaero.log
+grep "Job monitoring" logs/quaero.log
 
-# Query child job statistics
+# Query subtask statistics
 sqlite3 bin/quaero.db "SELECT status, COUNT(*) FROM jobs WHERE parent_id='job_abc123' GROUP BY status;""
 
 # Check if finished_at timestamp is set
@@ -856,28 +878,30 @@ ws.onmessage = (event) => {
 grep "EventService" logs/quaero.log
 ```
 
-### Crawler Workers Not Finding Pages
+### Workers Not Processing Items
 
-**Symptoms:** Crawler jobs complete but no documents saved
+**Symptoms:** Jobs complete but no results saved
 
 **Possible Causes:**
-1. ChromeDP not rendering JavaScript
-2. Authentication cookies not injected
-3. URL patterns exclude all pages
+1. External service not responding
+2. Authentication not configured
+3. Filter patterns exclude all items
 
 **Solution:**
 ```bash
-# Check ChromeDP rendering logs
-grep "ChromeDP" logs/quaero.log
+# Check worker execution logs
+grep "Worker execution" logs/quaero.log
 
-# Verify authentication cookies
+# Verify authentication configuration
 grep "🔐" logs/quaero.log
 
-# Check URL pattern filtering
-grep "Link filtering" logs/quaero.log
+# Check item filtering
+grep "Item filtering" logs/quaero.log
 ```
 
-## Comparison Table: Old vs New Architecture
+## Comparison Table: Executor Pattern vs Manager/Worker Pattern
+
+This table shows the architectural evolution from the original executor-based design to the current Manager/Worker pattern:
 
 | Aspect | Old (Executor) | New (Manager/Worker) |
 |--------|----------------|----------------------|
@@ -910,9 +934,9 @@ The Manager/Worker architecture provides:
 
 ### Next Steps
 
-1. Complete migration phases 2-8 (interface rename through validation)
-2. Update all tests to use new terminology
-3. Verify no functional regressions
+1. Apply pattern to new job types
+2. Implement domain-specific managers and workers
+3. Test job orchestration and execution
 4. Update developer documentation and onboarding guides
 5. Monitor production deployments for issues
 
