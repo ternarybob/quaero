@@ -38,6 +38,45 @@ import (
 //	}
 type KeywordExtractor struct{}
 
+// validateInput validates and extracts parameters from the input map.
+// Returns document_id, content, max_keywords (clamped to [5, 15]), and error if validation fails.
+func validateInput(input map[string]interface{}) (string, string, int, error) {
+	// Validate document_id
+	documentID, ok := input["document_id"].(string)
+	if !ok || documentID == "" {
+		return "", "", 0, fmt.Errorf("document_id is required and must be a non-empty string")
+	}
+
+	// Validate content
+	content, ok := input["content"].(string)
+	if !ok || content == "" {
+		return "", "", 0, fmt.Errorf("content is required and must be a non-empty string")
+	}
+
+	// Parse and clamp max_keywords to [5, 15] range
+	maxKeywords := 10 // Default
+	if mkVal, exists := input["max_keywords"]; exists {
+		switch v := mkVal.(type) {
+		case int:
+			maxKeywords = v
+		case float64:
+			maxKeywords = int(v)
+		case string:
+			if parsed, err := strconv.Atoi(v); err == nil {
+				maxKeywords = parsed
+			}
+		}
+	}
+	// Clamp to [5, 15] range per requirements
+	if maxKeywords < 5 {
+		maxKeywords = 5
+	} else if maxKeywords > 15 {
+		maxKeywords = 15
+	}
+
+	return documentID, content, maxKeywords, nil
+}
+
 // Execute runs the keyword extraction agent.
 //
 // The agent analyzes document content and extracts the most semantically relevant keywords.
@@ -58,36 +97,10 @@ type KeywordExtractor struct{}
 //   - Agent execution failure
 //   - Malformed agent response
 func (k *KeywordExtractor) Execute(ctx context.Context, llmModel model.LLM, input map[string]interface{}) (map[string]interface{}, error) {
-	// Validate required input fields
-	documentID, ok := input["document_id"].(string)
-	if !ok || documentID == "" {
-		return nil, fmt.Errorf("document_id is required and must be a non-empty string")
-	}
-
-	content, ok := input["content"].(string)
-	if !ok || content == "" {
-		return nil, fmt.Errorf("content is required and must be a non-empty string")
-	}
-
-	// Comment 5: Parse max_keywords robustly and clamp to [5, 15]
-	maxKeywords := 10 // Default
-	if mkVal, exists := input["max_keywords"]; exists {
-		switch v := mkVal.(type) {
-		case int:
-			maxKeywords = v
-		case float64:
-			maxKeywords = int(v)
-		case string:
-			if parsed, err := strconv.Atoi(v); err == nil {
-				maxKeywords = parsed
-			}
-		}
-	}
-	// Clamp to [5, 15] range per requirements
-	if maxKeywords < 5 {
-		maxKeywords = 5
-	} else if maxKeywords > 15 {
-		maxKeywords = 15
+	// Validate input and extract parameters
+	documentID, content, maxKeywords, err := validateInput(input)
+	if err != nil {
+		return nil, err
 	}
 
 	// Comment 3: Build prompt requesting JSON array or object with keywords/confidence
@@ -254,4 +267,24 @@ func parseKeywordResponse(response string, maxKeywords int) ([]string, map[strin
 // GetType returns the agent type identifier for registration.
 func (k *KeywordExtractor) GetType() string {
 	return "keyword_extractor"
+}
+
+// Test helpers - Expose internal functions for unit testing
+
+// TestParseKeywordResponse is a test helper that exposes parseKeywordResponse for testing.
+// This allows unit tests to verify response parsing logic without invoking the full agent.
+func TestParseKeywordResponse(response string, maxKeywords int) ([]string, map[string]float64, error) {
+	return parseKeywordResponse(response, maxKeywords)
+}
+
+// TestCleanMarkdownFences is a test helper that exposes cleanMarkdownFences for testing.
+// This allows unit tests to verify markdown fence removal logic independently.
+func TestCleanMarkdownFences(s string) string {
+	return cleanMarkdownFences(s)
+}
+
+// TestValidateInput is a test helper that exposes validateInput for testing.
+// This allows unit tests to verify input validation logic independently.
+func TestValidateInput(input map[string]interface{}) (string, string, int, error) {
+	return validateInput(input)
 }

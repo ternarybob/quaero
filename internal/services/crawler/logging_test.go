@@ -733,6 +733,10 @@ func (m *MockDocumentStorage) RebuildFTS5Index() error {
 	return nil
 }
 
+func (m *MockDocumentStorage) GetAllTags() ([]string, error) {
+	return []string{}, nil
+}
+
 // mockQueueManager implements interfaces.QueueManager for testing
 type mockQueueManager struct{}
 

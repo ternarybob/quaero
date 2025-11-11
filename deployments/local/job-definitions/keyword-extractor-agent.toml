@@ -1,122 +1,76 @@
-# ============================================================================
-# Keyword Extraction Agent Job Definition
-# ============================================================================
-# This job definition demonstrates how to use the Google Gemini-powered
-# agent framework to extract keywords from documents.
-#
-# The agent analyzes document content and identifies semantically relevant
-# keywords with confidence scores, storing results in Document.Metadata.
-#
-# Prerequisites:
-#   - Valid Google API key configured (QUAERO_AGENT_GOOGLE_API_KEY)
-#   - Documents crawled and stored in the database
-#
-# Job Flow:
-#   1. Query documents by source type
-#   2. For each document, create an agent job
-#   3. Agent analyzes content and extracts keywords
-#   4. Results stored in Document.Metadata["keyword_extractor"]
-# ============================================================================
+# Keyword Extractor Agent Job Definition
+# This file demonstrates keyword extraction agent with document processing
+# Place .toml files in job-definitions/ directory to auto-load at startup
 
-# Job metadata
-name = "Keyword Extraction Demo"
+id = "keyword-extractor-agent"
+name = "Keyword Extractor Agent"
 type = "agent"
-description = "Extracts keywords from crawled documents using Google Gemini"
-enabled = false  # Set to true to enable automatic execution
+job_type = "user"
+source_type = "agent"
+description = "Extracts keywords from documents using Google Gemini ADK"
 
-# Optional: Schedule for automatic execution
-# schedule = "0 0 * * *"  # Run daily at midnight
+# Tags to apply to all documents processed by this agent (for filtering/categorization)
+tags = ["agent", "keywords", "nlp"]
 
-# Optional: Tags for categorization
-tags = ["agent", "keyword-extraction", "nlp"]
+# Cron schedule (empty = manual execution only)
+schedule = ""
 
-# ============================================================================
-# Job Steps
-# ============================================================================
+# Maximum execution time (e.g., "10m", "30m", "1h")
+timeout = "10m"
 
+# Whether this job is enabled
+enabled = true
+
+# Whether to auto-start when scheduler initializes
+auto_start = false
+
+# Job steps definition
 [[steps]]
-name = "Extract Keywords from Confluence Pages"
+name = "extract_keywords"
 action = "agent"
+on_error = "fail"
 
-# Step configuration
 [steps.config]
-# Agent type to execute (registered in agent service)
+# Agent type (must match KeywordExtractor.GetType())
 agent_type = "keyword_extractor"
 
-# Optional: Maximum number of keywords to extract per document
-# max_keywords = 10
-
-# Optional: Filter documents to process
+# Filter documents to process
+# This step processes all documents matching the filter criteria
+# Available filters: source_type, limit, created_after, updated_after
 [steps.config.document_filter]
-# Limit number of documents to process
-limit = 100
+source_type = "crawler"  # Process documents from crawler jobs
 
-# Optional: Filter by tags (if documents have tags)
-# tags = ["important", "technical"]
+# Optional: Maximum keywords to extract (default: 10, range: 5-15)
+max_keywords = 10
 
-# ============================================================================
-# Example: Multi-Step Agent Pipeline
-# ============================================================================
-# Uncomment to enable a multi-step workflow that processes documents
-# in sequence (e.g., crawl → extract keywords → summarize)
-
+# Example: Chain keyword extraction with summarization (future agent)
 # [[steps]]
-# name = "Crawl Confluence Pages"
-# action = "crawl"
-#
-# [steps.config]
-# start_urls = ["https://confluence.example.com/display/TEAM"]
-# max_depth = 2
-# max_pages = 50
-# follow_links = true
-
-# [[steps]]
-# name = "Extract Keywords"
+# name = "generate_summary"
 # action = "agent"
+# on_error = "fail"
 #
 # [steps.config]
-# agent_type = "keyword_extractor"
-# max_keywords = 15
+# agent_type = "summarizer"  # Future agent type
 #
 # [steps.config.document_filter]
-# limit = 50
+# source_type = "crawler"
+#
+# # Use keywords from previous step
+# # Each agent stores results in document.Metadata[agentType]
+# # Next agent can access previous results via metadata
+# # Example: Summarizer reads metadata["keyword_extractor"]["keywords"]
+# use_keywords = true
 
-# ============================================================================
-# Usage Instructions
-# ============================================================================
-#
-# 1. Configure Google API Key:
-#    export QUAERO_AGENT_GOOGLE_API_KEY="your-api-key-here"
-#    OR set agent.google_api_key in quaero.toml
-#
-# 2. Enable the job:
-#    - Set enabled = true in this file
-#    - OR enable via UI at http://localhost:8085/job-definitions
-#
-# 3. Run manually via UI:
-#    - Navigate to Job Definitions page
-#    - Click "Run" button for this job
-#
-# 4. View results:
-#    - Navigate to Documents page
-#    - Check Document.Metadata["keyword_extractor"] for results
-#    - Results include "keywords" array and "confidence" scores
-#
-# 5. Monitor execution:
-#    - Check Jobs page for real-time progress
-#    - View logs for detailed execution information
-#
-# ============================================================================
-# Result Format
-# ============================================================================
-# Agent results are stored in Document.Metadata under the agent type key:
-#
-# Document.Metadata["keyword_extractor"] = {
-#   "keywords": ["microservices", "api design", "scalability"],
-#   "confidence": {
-#     "microservices": 0.95,
-#     "api design": 0.87,
-#     "scalability": 0.82
+# Usage Notes:
+# - This job definition processes existing documents (requires documents in database)
+# - To test: First run a crawler job to populate documents, then run this agent job
+# - Agent requires Google API key configured in quaero.toml under [agent] section
+# - Results stored in document metadata under "keyword_extractor" key
+# - View results via GET /api/documents/{id} endpoint
+# - Metadata structure:
+#   {
+#     "keyword_extractor": {
+#       "keywords": ["keyword1", "keyword2", ...],
+#       "confidence": {"keyword1": 0.95, "keyword2": 0.87, ...}
+#     }
 #   }
-# }
-# ============================================================================
