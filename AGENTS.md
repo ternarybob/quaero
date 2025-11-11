@@ -155,6 +155,54 @@ Quaero uses a Manager/Worker pattern for job orchestration and execution:
 
 The queue-based architecture uses goqite (SQLite-backed message queue) for distributed job processing:
 
+#### Directory Structure (In Transition - ARCH-005)
+
+Quaero is migrating to a Manager/Worker/Orchestrator architecture. The new structure is:
+
+**New Directories:**
+- `internal/jobs/manager/` - Job managers (orchestration layer)
+  - ✅ `interfaces.go` (ARCH-003)
+  - ✅ `crawler_manager.go` (ARCH-004)
+  - ✅ `database_maintenance_manager.go` (ARCH-004)
+  - ✅ `agent_manager.go` (ARCH-004)
+  - ⏳ `transform_manager.go` (pending)
+  - ⏳ `reindex_manager.go` (pending)
+  - ⏳ `places_search_manager.go` (pending)
+- `internal/jobs/worker/` - Job workers (execution layer)
+  - ✅ `interfaces.go` (ARCH-003)
+  - ✅ `crawler_worker.go` (ARCH-005) - Merged from crawler_executor.go + crawler_executor_auth.go
+  - ⏳ `agent_worker.go` (pending - ARCH-006)
+  - ⏳ `database_maintenance_worker.go` (pending - ARCH-007)
+  - ⏳ `job_processor.go` (pending - ARCH-006)
+- `internal/jobs/orchestrator/` - Parent job orchestrator (monitoring layer) with `interfaces.go`
+
+**Old Directories (Still Active - Will be removed in ARCH-008):**
+- `internal/jobs/executor/` - Old manager implementations (6 remaining files)
+- `internal/jobs/processor/` - Old worker implementations (4 remaining files: agent_executor.go, processor.go, parent_job_executor.go, database_maintenance_executor.go)
+
+**Migration Progress:**
+- Phase ARCH-003: ✅ Directory structure created
+- Phase ARCH-004: ✅ 3 managers migrated (crawler, database_maintenance, agent)
+- Phase ARCH-005: ✅ Crawler worker migrated (merged crawler_executor.go + crawler_executor_auth.go) (YOU ARE HERE)
+- Phase ARCH-006: ⏳ Remaining worker files migration (pending)
+
+See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.md) for complete details.
+
+#### Interfaces
+
+**New Architecture (ARCH-003+):**
+- `JobManager` interface - `internal/jobs/manager/interfaces.go`
+  - Implementations: `CrawlerManager`, `DatabaseMaintenanceManager`, `AgentManager` (ARCH-004)
+- `JobWorker` interface - `internal/jobs/worker/interfaces.go`
+  - Implementations: `CrawlerWorker` (ARCH-005)
+- `ParentJobOrchestrator` interface - `internal/jobs/orchestrator/interfaces.go`
+
+**Old Architecture (deprecated, will be removed in ARCH-008):**
+- `JobManager` interface - `internal/jobs/executor/interfaces.go` (duplicate)
+  - Remaining implementations: `TransformStepExecutor`, `ReindexStepExecutor`, `PlacesSearchStepExecutor`
+- `JobWorker` interface - `internal/interfaces/job_executor.go` (duplicate)
+  - Remaining implementations: `AgentExecutor`, `DatabaseMaintenanceExecutor` (in processor/executor directories)
+
 **Core Components:**
 
 1. **QueueManager** (`internal/queue/manager.go`)

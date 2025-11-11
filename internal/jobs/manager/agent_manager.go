@@ -1,8 +1,4 @@
-package executor
-
-// DEPRECATED: This file has been migrated to internal/jobs/manager/agent_manager.go (ARCH-004).
-// This file is kept temporarily for backward compatibility and will be removed in ARCH-008.
-// New code should import from internal/jobs/manager and use AgentManager instead.
+package manager
 
 import (
 	"context"
@@ -17,21 +13,21 @@ import (
 )
 
 // AgentManager creates parent agent jobs and orchestrates AI-powered document processing workflows
-type AgentStepExecutor struct {
+type AgentManager struct {
 	jobMgr        *jobs.Manager
 	queueMgr      *queue.Manager
 	searchService interfaces.SearchService
 	logger        arbor.ILogger
 }
 
-// NewAgentStepExecutor creates a new agent step executor
-func NewAgentStepExecutor(
+// NewAgentManager creates a new agent manager
+func NewAgentManager(
 	jobMgr *jobs.Manager,
 	queueMgr *queue.Manager,
 	searchService interfaces.SearchService,
 	logger arbor.ILogger,
-) *AgentStepExecutor {
-	return &AgentStepExecutor{
+) *AgentManager {
+	return &AgentManager{
 		jobMgr:        jobMgr,
 		queueMgr:      queueMgr,
 		searchService: searchService,
@@ -41,7 +37,7 @@ func NewAgentStepExecutor(
 
 // CreateParentJob creates a parent agent job, queries documents matching the filter, and enqueues
 // individual agent jobs for each document. Returns the parent job ID for tracking.
-func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	// Parse step config
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -61,27 +57,27 @@ func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.Job
 		documentFilter = filter
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Str("parent_job_id", parentJobID).
 		Msg("Creating parent agent job")
 
 	// Query documents to process
-	documents, err := e.queryDocuments(ctx, jobDef, documentFilter)
+	documents, err := m.queryDocuments(ctx, jobDef, documentFilter)
 	if err != nil {
 		return "", fmt.Errorf("failed to query documents for agent processing: %w", err)
 	}
 
 	if len(documents) == 0 {
-		e.logger.Warn().
+		m.logger.Warn().
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Msg("No documents found for agent processing")
 		return parentJobID, nil // No documents to process, but not an error
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(documents)).
@@ -90,9 +86,9 @@ func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.Job
 	// Create and enqueue agent jobs for each document
 	jobIDs := make([]string, 0, len(documents))
 	for _, doc := range documents {
-		jobID, err := e.createAgentJob(ctx, agentType, doc.ID, stepConfig, parentJobID)
+		jobID, err := m.createAgentJob(ctx, agentType, doc.ID, stepConfig, parentJobID)
 		if err != nil {
-			e.logger.Warn().
+			m.logger.Warn().
 				Err(err).
 				Str("document_id", doc.ID).
 				Str("agent_type", agentType).
@@ -106,18 +102,18 @@ func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.Job
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_created", len(jobIDs)).
 		Msg("Agent jobs created and enqueued")
 
 	// Poll for job completion (wait for all agent jobs to complete)
-	if err := e.pollJobCompletion(ctx, jobIDs); err != nil {
+	if err := m.pollJobCompletion(ctx, jobIDs); err != nil {
 		return "", fmt.Errorf("agent jobs did not complete successfully: %w", err)
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
@@ -128,12 +124,12 @@ func (e *AgentStepExecutor) CreateParentJob(ctx context.Context, step models.Job
 }
 
 // GetManagerType returns "agent" - the action type this manager handles
-func (e *AgentStepExecutor) GetManagerType() string {
+func (m *AgentManager) GetManagerType() string {
 	return "agent"
 }
 
 // queryDocuments queries documents to process based on job definition and filter
-func (e *AgentStepExecutor) queryDocuments(ctx context.Context, jobDef *models.JobDefinition, filter map[string]interface{}) ([]*models.Document, error) {
+func (m *AgentManager) queryDocuments(ctx context.Context, jobDef *models.JobDefinition, filter map[string]interface{}) ([]*models.Document, error) {
 	// Build search options based on job definition and filter
 	opts := interfaces.SearchOptions{
 		SourceTypes: []string{jobDef.SourceType},
@@ -151,7 +147,7 @@ func (e *AgentStepExecutor) queryDocuments(ctx context.Context, jobDef *models.J
 	}
 
 	// Search documents (empty query returns all documents matching filters)
-	results, err := e.searchService.Search(ctx, "", opts)
+	results, err := m.searchService.Search(ctx, "", opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search documents: %w", err)
 	}
@@ -160,7 +156,7 @@ func (e *AgentStepExecutor) queryDocuments(ctx context.Context, jobDef *models.J
 }
 
 // createAgentJob creates and enqueues an agent job for a document
-func (e *AgentStepExecutor) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string) (string, error) {
+func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string) (string, error) {
 	// Build job config
 	jobConfig := map[string]interface{}{
 		"agent_type":  agentType,
@@ -194,7 +190,7 @@ func (e *AgentStepExecutor) createAgentJob(ctx context.Context, agentType, docum
 	}
 
 	// Create job record in database
-	if err := e.jobMgr.CreateJobRecord(ctx, &jobs.Job{
+	if err := m.jobMgr.CreateJobRecord(ctx, &jobs.Job{
 		ID:              jobModel.ID,
 		ParentID:        jobModel.ParentID,
 		Type:            jobModel.Type,
@@ -216,11 +212,11 @@ func (e *AgentStepExecutor) createAgentJob(ctx context.Context, agentType, docum
 		Payload: payloadBytes,
 	}
 
-	if err := e.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+	if err := m.queueMgr.Enqueue(ctx, queueMsg); err != nil {
 		return "", fmt.Errorf("failed to enqueue job: %w", err)
 	}
 
-	e.logger.Debug().
+	m.logger.Debug().
 		Str("job_id", jobModel.ID).
 		Str("parent_job_id", parentJobID).
 		Str("agent_type", agentType).
@@ -231,12 +227,12 @@ func (e *AgentStepExecutor) createAgentJob(ctx context.Context, agentType, docum
 }
 
 // pollJobCompletion polls for job completion with timeout
-func (e *AgentStepExecutor) pollJobCompletion(ctx context.Context, jobIDs []string) error {
+func (m *AgentManager) pollJobCompletion(ctx context.Context, jobIDs []string) error {
 	timeout := time.After(10 * time.Minute) // 10 minute timeout for agent jobs
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	e.logger.Debug().
+	m.logger.Debug().
 		Int("job_count", len(jobIDs)).
 		Msg("Polling for agent job completion")
 
@@ -251,21 +247,21 @@ func (e *AgentStepExecutor) pollJobCompletion(ctx context.Context, jobIDs []stri
 			allCompleted := true
 			anyFailed := false
 			for _, jobID := range jobIDs {
-				jobInterface, err := e.jobMgr.GetJob(ctx, jobID)
+				jobInterface, err := m.jobMgr.GetJob(ctx, jobID)
 				if err != nil {
-					e.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get job status")
+					m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get job status")
 					continue
 				}
 
 				// Type assert to *jobs.Job
 				job, ok := jobInterface.(*jobs.Job)
 				if !ok {
-					e.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job")
+					m.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job")
 					continue
 				}
 
 				if job.Status == "failed" {
-					e.logger.Error().Str("job_id", jobID).Msg("Agent job failed")
+					m.logger.Error().Str("job_id", jobID).Msg("Agent job failed")
 					anyFailed = true
 				}
 
@@ -279,7 +275,7 @@ func (e *AgentStepExecutor) pollJobCompletion(ctx context.Context, jobIDs []stri
 			}
 
 			if allCompleted {
-				e.logger.Debug().
+				m.logger.Debug().
 					Int("job_count", len(jobIDs)).
 					Msg("All agent jobs completed successfully")
 				return nil

@@ -1,12 +1,8 @@
 // -----------------------------------------------------------------------
-// Database Maintenance Step Executor - Handles "database_maintenance" action in job definitions
+// Database Maintenance Manager - Handles "database_maintenance" action in job definitions
 // -----------------------------------------------------------------------
 
-// DEPRECATED: This file has been migrated to internal/jobs/manager/database_maintenance_manager.go (ARCH-004).
-// This file is kept temporarily for backward compatibility and will be removed in ARCH-008.
-// New code should import from internal/jobs/manager and use DatabaseMaintenanceManager instead.
-
-package executor
+package manager
 
 import (
 	"context"
@@ -22,15 +18,15 @@ import (
 
 // DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
-type DatabaseMaintenanceStepExecutor struct {
+type DatabaseMaintenanceManager struct {
 	jobManager *jobs.Manager
 	queueMgr   *queue.Manager
 	logger     arbor.ILogger
 }
 
-// NewDatabaseMaintenanceStepExecutor creates a new database maintenance step executor
-func NewDatabaseMaintenanceStepExecutor(jobManager *jobs.Manager, queueMgr *queue.Manager, logger arbor.ILogger) *DatabaseMaintenanceStepExecutor {
-	return &DatabaseMaintenanceStepExecutor{
+// NewDatabaseMaintenanceManager creates a new database maintenance manager
+func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, logger arbor.ILogger) *DatabaseMaintenanceManager {
+	return &DatabaseMaintenanceManager{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,
 		logger:     logger,
@@ -39,8 +35,8 @@ func NewDatabaseMaintenanceStepExecutor(jobManager *jobs.Manager, queueMgr *queu
 
 // CreateParentJob creates a parent database maintenance job and enqueues it to the queue for processing.
 // The job will execute database optimization operations based on the configuration.
-func (e *DatabaseMaintenanceStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
-	e.logger.Info().
+func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("action", step.Action).
 		Str("parent_job_id", parentJobID).
@@ -97,11 +93,11 @@ func (e *DatabaseMaintenanceStepExecutor) CreateParentJob(ctx context.Context, s
 		Status:   "pending",
 	}
 
-	if err := e.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
+	if err := m.jobManager.CreateJobRecord(ctx, dbJob); err != nil {
 		return "", fmt.Errorf("failed to create job record: %w", err)
 	}
 
-	e.logger.Debug().
+	m.logger.Debug().
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
 		Msg("Job record created in database")
@@ -120,11 +116,11 @@ func (e *DatabaseMaintenanceStepExecutor) CreateParentJob(ctx context.Context, s
 	}
 
 	// Enqueue job
-	if err := e.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+	if err := m.queueMgr.Enqueue(ctx, queueMsg); err != nil {
 		return "", fmt.Errorf("failed to enqueue job: %w", err)
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
@@ -135,6 +131,6 @@ func (e *DatabaseMaintenanceStepExecutor) CreateParentJob(ctx context.Context, s
 }
 
 // GetManagerType returns "database_maintenance" - the action type this manager handles
-func (e *DatabaseMaintenanceStepExecutor) GetManagerType() string {
+func (m *DatabaseMaintenanceManager) GetManagerType() string {
 	return "database_maintenance"
 }

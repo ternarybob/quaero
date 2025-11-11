@@ -2,6 +2,17 @@
 // Crawler Executor - Authentication Cookie Injection
 // -----------------------------------------------------------------------
 
+// DEPRECATED: This file has been merged into internal/jobs/worker/crawler_worker.go (ARCH-005).
+// The injectAuthCookies() method is now a private method in CrawlerWorker.
+// This file is kept temporarily for backward compatibility and will be removed in ARCH-008.
+// New code should import from internal/jobs/worker and use CrawlerWorker instead.
+//
+// Migration Details:
+// - Method moved: injectAuthCookies() now in crawler_worker.go as private method
+// - Receiver updated: func (e *CrawlerExecutor) → func (w *CrawlerWorker)
+// - All auth logic preserved: conditional authStorage check, three-phase injection, extensive logging
+// - Package changed: processor → worker
+
 package processor
 
 import (

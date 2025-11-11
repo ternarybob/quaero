@@ -127,11 +127,16 @@ func (e *PlacesSearchStepExecutor) CreateParentJob(ctx context.Context, step mod
 		return "", fmt.Errorf("failed to search places: %w", err)
 	}
 
-	// Marshal result to JSON for storage in job progress
+	// Marshal result to JSON for logging purposes
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal places result: %w", err)
 	}
+
+	e.logger.Debug().
+		Str("step_name", step.Name).
+		Str("result_json", string(resultJSON)).
+		Msg("Places search result marshaled")
 
 	e.logger.Info().
 		Str("step_name", step.Name).
@@ -187,8 +192,8 @@ func (e *PlacesSearchStepExecutor) CreateParentJob(ctx context.Context, step mod
 		}()
 	}
 
-	// Return JSON string to be stored in job progress
-	return string(resultJSON), nil
+	// Return parent job ID as placeholder since this is a synchronous operation
+	return parentJobID, nil
 }
 
 // GetManagerType returns "places_search" - the action type this manager handles

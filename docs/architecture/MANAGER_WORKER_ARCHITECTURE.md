@@ -24,7 +24,7 @@ This architecture provides:
 graph TB
     UI[Web UI] -->|Trigger Job| Manager[Job Manager]
     Manager -->|Create Parent Job| DB[(SQLite Jobs DB)]
-    Manager -->|ExecuteStep| StepExecutor[Crawler Manager]
+    Manager -->|CreateParentJob| StepExecutor[Crawler Manager]
     StepExecutor -->|Create Child Jobs| Queue[goqite Queue]
 
     Queue -->|Dequeue| Processor[Job Processor]
@@ -60,11 +60,11 @@ graph TB
 ```go
 // JobManager orchestrates workflows by creating parent jobs
 type JobManager interface {
-    // ExecuteStep creates a parent job and spawns initial child jobs
-    ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
+    // CreateParentJob creates a parent job and spawns initial child jobs
+    CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
 
-    // GetStepType returns the action type this manager handles (e.g., "crawl")
-    GetStepType() string
+    // GetManagerType returns the action type this manager handles (e.g., "crawl")
+    GetManagerType() string
 }
 ```
 
@@ -83,7 +83,7 @@ type CrawlerManager struct {
     logger         arbor.ILogger
 }
 
-func (m *CrawlerManager) ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
     // 1. Build seed URLs from job definition
     seedURLs := m.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
 
@@ -239,7 +239,7 @@ sequenceDiagram
 
     %% Phase 1: Job Creation (Orchestration Layer)
     UI->>Handler: POST /api/jobs/definitions/{id}/execute
-    Handler->>Manager: ExecuteStep(step, jobDef, parentJobID)
+    Handler->>Manager: CreateParentJob(step, jobDef, parentJobID)
     Manager->>Service: StartCrawl(sourceType, entityType, seedURLs, config)
     Service->>DB: INSERT parent job (type=parent, status=pending)
     Service->>Queue: ENQUEUE child jobs (type=crawler_url)
@@ -277,7 +277,7 @@ sequenceDiagram
 
 #### Phase 1: Job Creation (Manager Layer)
 1. User clicks "Execute" in Web UI
-2. Handler calls `CrawlerManager.ExecuteStep()`
+2. Handler calls `CrawlerManager.CreateParentJob()`
 3. Manager calls `CrawlerService.StartCrawl()` with seed URLs
 4. Service creates parent job in database (type=`parent`)
 5. Service spawns child jobs (type=`crawler_url`) and enqueues them
@@ -325,14 +325,14 @@ type JobExecutor interface {
 ```go
 // internal/jobs/manager/interfaces.go
 type JobManager interface {
-    ExecuteStep(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
-    GetStepType() string
+    CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (jobID string, err error)
+    GetManagerType() string
 }
 
-// internal/interfaces/job_worker.go
+// internal/jobs/worker/interfaces.go
 type JobWorker interface {
     Execute(ctx context.Context, job *models.JobModel) error
-    GetJobType() string
+    GetWorkerType() string
     Validate(job *models.JobModel) error
 }
 ```
@@ -358,6 +358,92 @@ type JobWorker interface {
 - `ParentJobOrchestrator` (internal/orchestrator/parent_job_orchestrator.go)
 
 ## File Structure Changes
+
+### Current Status (After ARCH-004)
+
+**New Directories Created:**
+- ✅ `internal/jobs/manager/` - Created with interfaces.go (ARCH-003)
+  - ✅ `crawler_manager.go` - Migrated from executor/ (ARCH-004)
+  - ✅ `database_maintenance_manager.go` - Migrated from executor/ (ARCH-004)
+  - ✅ `agent_manager.go` - Migrated from executor/ (ARCH-004)
+- ✅ `internal/jobs/worker/` - Created with interfaces.go (ARCH-003)
+- ✅ `internal/jobs/orchestrator/` - Created with interfaces.go (ARCH-003)
+
+**Old Directories (Still Active):**
+- `internal/jobs/executor/` - Contains 6 remaining implementation files:
+  - `transform_step_executor.go` (pending migration)
+  - `reindex_step_executor.go` (pending migration)
+  - `places_search_step_executor.go` (pending migration)
+  - `job_executor.go` (orchestrator - will be refactored separately)
+  - `base_executor.go` (shared utilities - will be refactored separately)
+  - `database_maintenance_executor.go` (old worker - will be deleted in ARCH-007)
+- `internal/jobs/processor/` - Contains 5 implementation files (will be migrated in ARCH-005/ARCH-006)
+
+**Migration Status:**
+- Phase ARCH-001: ✅ Documentation created
+- Phase ARCH-002: ✅ Interfaces renamed
+- Phase ARCH-003: ✅ Directory structure created
+- Phase ARCH-004: ✅ Manager files migrated (crawler, database_maintenance, agent)
+- Phase ARCH-005: ✅ Crawler worker migrated and merged (crawler_executor.go + crawler_executor_auth.go → crawler_worker.go) **(YOU ARE HERE)**
+- Phase ARCH-006: ⏳ Remaining worker files migration (pending)
+- Phase ARCH-007: ⏳ Parent job orchestrator migration (pending)
+- Phase ARCH-008: ⏳ Database maintenance worker split (pending)
+- Phase ARCH-009: ⏳ Import path updates and cleanup (pending)
+- Phase ARCH-010: ⏳ End-to-end validation (pending)
+
+### Interface Duplication (Temporary)
+
+During the migration (ARCH-003 through ARCH-008), interfaces are temporarily duplicated:
+
+**JobManager Interface:**
+- Original: `internal/jobs/executor/interfaces.go` (used by old implementations)
+- New: `internal/jobs/manager/interfaces.go` (used by new implementations)
+- Resolution: Original deleted in ARCH-008
+
+**JobWorker Interface:**
+- Original: `internal/interfaces/job_executor.go` (used by old implementations)
+- New: `internal/jobs/worker/interfaces.go` (used by new implementations)
+- Resolution: Original deleted in ARCH-008
+
+**ParentJobOrchestrator Interface:**
+- New: `internal/jobs/orchestrator/interfaces.go` (created in ARCH-003)
+- No duplication - this is a new interface (ParentJobExecutor had no interface before)
+
+This duplication is intentional and allows gradual migration without breaking existing code.
+
+### Manager Files Migrated (ARCH-004)
+
+**Files Moved from executor/ to manager/:**
+
+1. **CrawlerManager** (`crawler_manager.go`)
+   - Old: `internal/jobs/executor/crawler_step_executor.go`
+   - New: `internal/jobs/manager/crawler_manager.go`
+   - Struct: `CrawlerStepExecutor` → `CrawlerManager`
+   - Constructor: `NewCrawlerStepExecutor()` → `NewCrawlerManager()`
+   - Dependencies: CrawlerService, Logger
+
+2. **DatabaseMaintenanceManager** (`database_maintenance_manager.go`)
+   - Old: `internal/jobs/executor/database_maintenance_step_executor.go`
+   - New: `internal/jobs/manager/database_maintenance_manager.go`
+   - Struct: `DatabaseMaintenanceStepExecutor` → `DatabaseMaintenanceManager`
+   - Constructor: `NewDatabaseMaintenanceStepExecutor()` → `NewDatabaseMaintenanceManager()`
+   - Dependencies: JobManager, QueueManager, Logger
+
+3. **AgentManager** (`agent_manager.go`)
+   - Old: `internal/jobs/executor/agent_step_executor.go`
+   - New: `internal/jobs/manager/agent_manager.go`
+   - Struct: `AgentStepExecutor` → `AgentManager`
+   - Constructor: `NewAgentStepExecutor()` → `NewAgentManager()`
+   - Dependencies: JobManager, QueueManager, SearchService, Logger
+
+**Import Path Updates:**
+- `internal/app/app.go` - Updated to import and use new manager package
+- `internal/handlers/job_definition_handler.go` - Added manager import for future use
+
+**Backward Compatibility:**
+- Old files remain in `internal/jobs/executor/` until ARCH-008
+- Dual import strategy allows gradual transition
+- No breaking changes to external APIs
 
 ### Current Structure (Confusing)
 

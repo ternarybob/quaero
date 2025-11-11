@@ -18,7 +18,9 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/jobs/executor"
+	"github.com/ternarybob/quaero/internal/jobs/manager"
 	"github.com/ternarybob/quaero/internal/jobs/processor"
+	"github.com/ternarybob/quaero/internal/jobs/worker"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
@@ -292,8 +294,8 @@ func (a *App) initServices() error {
 
 	// 6.6. Register job executors with job processor
 
-	// Register crawler_url executor (ChromeDP rendering and content processing)
-	crawlerExecutor := processor.NewCrawlerExecutor(
+	// Register crawler_url worker (ChromeDP rendering and content processing)
+	crawlerWorker := worker.NewCrawlerWorker(
 		a.CrawlerService,
 		jobMgr,
 		queueMgr,
@@ -303,8 +305,8 @@ func (a *App) initServices() error {
 		a.Logger,
 		a.EventService,
 	)
-	jobProcessor.RegisterExecutor(crawlerExecutor)
-	a.Logger.Info().Msg("Crawler URL executor registered for job type: crawler_url")
+	jobProcessor.RegisterExecutor(crawlerWorker)
+	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
 
 	// Create parent job executor for managing parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
@@ -326,7 +328,7 @@ func (a *App) initServices() error {
 			a.EventService,
 		)
 		jobProcessor.RegisterExecutor(agentExecutor)
-		a.Logger.Info().Msg("Agent executor registered for job type: agent")
+		a.Logger.Info().Msg("Agent worker registered for job type: agent")
 	}
 
 	// Register database maintenance executor (new interface)
@@ -339,7 +341,7 @@ func (a *App) initServices() error {
 		a.WSHandler,
 	)
 	jobProcessor.RegisterExecutor(dbMaintenanceExecutor)
-	a.Logger.Info().Msg("Database maintenance executor registered")
+	a.Logger.Info().Msg("Database maintenance worker registered")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -375,34 +377,34 @@ func (a *App) initServices() error {
 	a.JobExecutor = executor.NewJobExecutor(jobMgr, parentJobExecutor, a.Logger)
 
 	// Register step executors
-	crawlerStepExecutor := executor.NewCrawlerStepExecutor(a.CrawlerService, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(crawlerStepExecutor)
-	a.Logger.Info().Msg("Crawler step executor registered")
+	crawlerManager := manager.NewCrawlerManager(a.CrawlerService, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(crawlerManager)
+	a.Logger.Info().Msg("Crawler manager registered")
 
 	transformStepExecutor := executor.NewTransformStepExecutor(a.TransformService, a.JobManager, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(transformStepExecutor)
-	a.Logger.Info().Msg("Transform step executor registered")
+	a.Logger.Info().Msg("Transform manager registered")
 
 	reindexStepExecutor := executor.NewReindexStepExecutor(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(reindexStepExecutor)
-	a.Logger.Info().Msg("Reindex step executor registered")
+	a.Logger.Info().Msg("Reindex manager registered")
 
-	dbMaintenanceStepExecutor := executor.NewDatabaseMaintenanceStepExecutor(a.JobManager, queueMgr, a.Logger)
-	a.JobExecutor.RegisterStepExecutor(dbMaintenanceStepExecutor)
-	a.Logger.Info().Msg("Database maintenance step executor registered")
+	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, a.Logger)
+	a.JobExecutor.RegisterStepExecutor(dbMaintenanceManager)
+	a.Logger.Info().Msg("Database maintenance manager registered")
 
 	placesSearchStepExecutor := executor.NewPlacesSearchStepExecutor(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
 	a.JobExecutor.RegisterStepExecutor(placesSearchStepExecutor)
-	a.Logger.Info().Msg("Places search step executor registered")
+	a.Logger.Info().Msg("Places search manager registered")
 
 	// Register agent step executor (if agent service is available)
 	if a.AgentService != nil {
-		agentStepExecutor := executor.NewAgentStepExecutor(jobMgr, queueMgr, a.SearchService, a.Logger)
-		a.JobExecutor.RegisterStepExecutor(agentStepExecutor)
-		a.Logger.Info().Msg("Agent step executor registered")
+		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.Logger)
+		a.JobExecutor.RegisterStepExecutor(agentManager)
+		a.Logger.Info().Msg("Agent manager registered")
 	}
 
-	a.Logger.Info().Msg("JobExecutor initialized with all step executors")
+	a.Logger.Info().Msg("JobExecutor initialized with all managers")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 

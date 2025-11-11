@@ -1,8 +1,4 @@
-package executor
-
-// DEPRECATED: This file has been migrated to internal/jobs/manager/crawler_manager.go (ARCH-004).
-// This file is kept temporarily for backward compatibility and will be removed in ARCH-008.
-// New code should import from internal/jobs/manager and use CrawlerManager instead.
+package manager
 
 import (
 	"context"
@@ -16,17 +12,17 @@ import (
 )
 
 // CrawlerManager creates parent crawler jobs and orchestrates URL crawling workflows
-type CrawlerStepExecutor struct {
+type CrawlerManager struct {
 	crawlerService interfaces.CrawlerService
 	logger         arbor.ILogger
 }
 
-// NewCrawlerStepExecutor creates a new crawler step executor
-func NewCrawlerStepExecutor(
+// NewCrawlerManager creates a new crawler manager
+func NewCrawlerManager(
 	crawlerService interfaces.CrawlerService,
 	logger arbor.ILogger,
-) *CrawlerStepExecutor {
-	return &CrawlerStepExecutor{
+) *CrawlerManager {
+	return &CrawlerManager{
 		crawlerService: crawlerService,
 		logger:         logger,
 	}
@@ -34,7 +30,7 @@ func NewCrawlerStepExecutor(
 
 // CreateParentJob creates a parent crawler job and triggers the crawler service to start crawling.
 // The crawler service will create child jobs for each URL discovered.
-func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
 	// No source type validation needed - crawler is agnostic
 	// BaseURL validation removed - crawler uses start_urls from step config
 
@@ -59,7 +55,7 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 	}
 
 	// Build CrawlConfig struct from map with proper defaults
-	crawlConfig := e.buildCrawlConfig(stepConfig)
+	crawlConfig := m.buildCrawlConfig(stepConfig)
 
 	// Apply tags from job definition to all documents created by this crawl
 	crawlConfig.Tags = jobDef.Tags
@@ -73,21 +69,21 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 				seedURLs = append(seedURLs, urlStr)
 			}
 		}
-		e.logger.Info().
+		m.logger.Info().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
 			Msg("Using start_urls from job definition config")
 	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
 		// Handle case where start_urls is already []string
 		seedURLs = startURLsStr
-		e.logger.Info().
+		m.logger.Info().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
 			Msg("Using start_urls from job definition config")
 	} else {
 		// Fallback to building URLs based on source type and entity type
-		seedURLs = e.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
-		e.logger.Info().
+		seedURLs = m.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+		m.logger.Info().
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Str("base_url", jobDef.BaseURL).
@@ -100,12 +96,12 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 	sourceType := jobDef.SourceType
 	if sourceType == "" {
 		sourceType = "web"
-		e.logger.Info().
+		m.logger.Info().
 			Str("step_name", step.Name).
 			Msg("No source_type specified, defaulting to 'web' for generic web crawling")
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("source_type", sourceType).
 		Str("base_url", jobDef.BaseURL).
@@ -116,7 +112,7 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 		Msg("Creating parent crawler job")
 
 	// Start crawl job with properly typed config
-	jobID, err := e.crawlerService.StartCrawl(
+	jobID, err := m.crawlerService.StartCrawl(
 		sourceType,
 		entityType,
 		seedURLs,
@@ -132,7 +128,7 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
 	}
 
-	e.logger.Info().
+	m.logger.Info().
 		Str("step_name", step.Name).
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
@@ -142,12 +138,12 @@ func (e *CrawlerStepExecutor) CreateParentJob(ctx context.Context, step models.J
 }
 
 // GetManagerType returns "crawl" - the action type this manager handles
-func (e *CrawlerStepExecutor) GetManagerType() string {
+func (m *CrawlerManager) GetManagerType() string {
 	return "crawl"
 }
 
 // buildCrawlConfig constructs a CrawlConfig struct from a config map
-func (e *CrawlerStepExecutor) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
+func (m *CrawlerManager) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
 	config := crawler.CrawlConfig{
 		MaxDepth:      2,
 		MaxPages:      100,
@@ -232,7 +228,7 @@ func (e *CrawlerStepExecutor) buildCrawlConfig(configMap map[string]interface{})
 }
 
 // buildSeedURLs constructs seed URLs based on source type and entity type
-func (e *CrawlerStepExecutor) buildSeedURLs(baseURL, sourceType, entityType string) []string {
+func (m *CrawlerManager) buildSeedURLs(baseURL, sourceType, entityType string) []string {
 	switch sourceType {
 	case "jira":
 		switch entityType {
