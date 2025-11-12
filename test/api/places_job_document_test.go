@@ -122,7 +122,7 @@ done:
 	}
 
 	// 4. Verify document_count in job metadata
-	// This is set by the event-driven JobOrchestrator when EventDocumentSaved is published
+	// This is set by the event-driven JobMonitor when EventDocumentSaved is published
 	metadataStr, ok := finalJob["metadata_json"].(string)
 	if !ok || metadataStr == "" {
 		t.Error("Job should have metadata_json")

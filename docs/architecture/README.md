@@ -15,8 +15,8 @@ The Manager/Worker Architecture document provides the definitive guide to unders
 - Worker responsibilities: Execute individual jobs, process content, save results
 - Orchestrator responsibilities: Monitor parent job progress, aggregate statistics
 - Complete job execution flow with sequence diagrams
-- Interface definitions (JobManager, JobWorker, JobOrchestrator)
-- File structure organization (manager/, worker/, orchestrator/)
+- Interface definitions (JobManager, JobWorker, JobMonitor)
+- File structure organization (manager/, worker/, monitor/)
 - Database schema (jobs table, job_logs table, queue table)
 - Real-time WebSocket events for progress tracking
 - Configuration examples and API endpoints
@@ -26,7 +26,7 @@ The Manager/Worker Architecture document provides the definitive guide to unders
 **When to Read:**
 - Understanding Quaero's job system architecture
 - Working with crawler jobs, agent jobs, or any async workflows
-- Implementing new job types (managers or workers)
+- Implementing new job types (managers, workers, or monitors)
 - Debugging job execution issues
 - Learning about parent-child job hierarchies
 - Understanding real-time progress tracking
@@ -60,7 +60,7 @@ This document explains Quaero's canonical format strategy for storing content fr
 ## Navigation Guide
 
 **If you want to understand:**
-- **Job orchestration and execution** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md)
+- **Job monitoring and execution** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md)
 - **Document storage and search** → Read [Markdown + Metadata Architecture](architecture.md)
 - **How crawler jobs work** → Read both documents (Manager/Worker for job flow, Markdown+Metadata for content processing)
 - **Real-time progress tracking** → Read [Manager/Worker Architecture](MANAGER_WORKER_ARCHITECTURE.md) WebSocket section

@@ -151,13 +151,13 @@ Quaero follows a clean architecture pattern with clear separation of concerns:
 Quaero uses a Manager/Worker pattern for job orchestration and execution:
 - **Managers** create parent jobs and define workflows
 - **Workers** execute individual jobs from the queue
-- **Orchestrators** monitor parent job progress and aggregate child statistics
+- **Monitors** monitor parent job progress and aggregate child statistics
 
 The queue-based architecture uses goqite (SQLite-backed message queue) for distributed job processing:
 
 #### Directory Structure (Migration Complete - ARCH-009)
 
-Quaero uses a Manager/Worker/Orchestrator architecture for job orchestration and execution:
+Quaero uses a Manager/Worker/Monitor architecture for job orchestration and execution:
 
 **Directories:**
 - `internal/jobs/manager/` - Job managers (orchestration layer)
@@ -174,7 +174,7 @@ Quaero uses a Manager/Worker/Orchestrator architecture for job orchestration and
   - ✅ `agent_worker.go` (ARCH-006)
   - ✅ `job_processor.go` (ARCH-006) - Routes jobs to workers
   - ✅ `database_maintenance_worker.go` (ARCH-008)
-- `internal/jobs/orchestrator/` - Parent job orchestrator (monitoring layer) with `interfaces.go`
+- `internal/jobs/monitor/` - Parent job monitor (monitoring layer) with `interfaces.go`
 - `internal/jobs/` root - Job definition orchestrator
   - ✅ `job_definition_orchestrator.go` (ARCH-009) - Routes job definition steps to managers
 
@@ -204,8 +204,8 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
     - `CrawlerWorker` (ARCH-005)
     - `AgentWorker` (ARCH-006)
     - `DatabaseMaintenanceWorker` (ARCH-008)
-- `JobOrchestrator` interface - `internal/interfaces/job_interfaces.go` (centralized)
-  - Implementation: `JobOrchestrator` (monitors parent job progress)
+- `JobMonitor` interface - `internal/interfaces/job_interfaces.go` (centralized)
+  - Implementation: `JobMonitor` (monitors parent job progress)
 - `JobSpawner` interface - `internal/interfaces/job_interfaces.go` (centralized)
   - Supports workers that spawn child jobs during execution
 - `JobDefinitionOrchestrator` - `internal/jobs/job_definition_orchestrator.go` (ARCH-009)
@@ -305,7 +305,7 @@ max_receive = 3
 - **Queue-Based Execution** (`internal/jobs/worker/`):
   - Workers handle individual task execution (CrawlerWorker, AgentWorker, etc.)
   - Process URLs, generate summaries, extract keywords
-  - Orchestrators monitor parent job progress
+  - Monitors monitor parent job progress
   - Persistent queue with worker pool
   - Enable job spawning and depth tracking
 
@@ -313,7 +313,7 @@ max_receive = 3
 - JobDefinitions can trigger jobs via action steps (e.g., "crawl", "agent")
 - Managers create parent jobs that spawn child jobs into the queue
 - Workers execute individual jobs pulled from the queue
-- Orchestrators monitor parent job progress until all children complete
+- Monitors monitor parent job progress until all children complete
 
 ### Service Initialization Flow
 

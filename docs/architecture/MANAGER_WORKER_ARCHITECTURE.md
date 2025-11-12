@@ -10,7 +10,7 @@ Quaero's job system implements a **Manager/Worker pattern** for clear separation
 
 - **Managers** (`StepManager` interface) - Orchestrate workflows by creating jobs and defining execution strategies
 - **Workers** (`JobWorker` interface) - Execute individual jobs pulled from the queue
-- **Orchestrator** (`JobOrchestrator`) - Monitors job progress and aggregates execution statistics
+- **Monitor** (`JobMonitor`) - Monitors job progress and aggregates execution statistics
 
 This architecture provides:
 - Clear responsibility separation between coordination and execution
@@ -33,8 +33,8 @@ graph TB
     Worker -->|Save Results| Storage[Data Storage]
     Worker -->|Spawn Subtasks| Queue
 
-    Orchestrator[Job Orchestrator] -->|Monitor Progress| DB
-    Orchestrator -->|Publish Events| WS[WebSocket]
+    Monitor[Job Monitor] -->|Monitor Progress| DB
+    Monitor -->|Publish Events| WS[WebSocket]
     WS -->|Real-time Updates| UI
 
     Worker -->|Update Status| DB
@@ -47,7 +47,7 @@ graph TB
 |-----------|-------|----------------|
 | **StepManager** | Manager (Orchestration) | Implements StepManager - Creates jobs, defines execution strategy, initiates workflows |
 | **JobWorker** | Worker (Execution) | Implements JobWorker - Executes tasks, processes data, spawns subtasks for discovered work |
-| **JobOrchestrator** | Orchestration (Monitoring) | Implements JobOrchestrator interface - Tracks job progress, aggregates statistics, determines completion |
+| **JobMonitor** | Monitoring | Implements JobMonitor interface - Tracks job progress, aggregates statistics, determines completion |
 | **JobProcessor** | Queue (Routing) | Routes queued jobs to registered workers based on job type |
 
 ## Manager vs Worker Distinction
@@ -183,11 +183,11 @@ func (w *ExampleWorker) Execute(ctx context.Context, job *models.JobModel) error
 
 ## Orchestrator Responsibilities
 
-### JobOrchestrator
+### JobMonitor
 
-**File:** `internal/jobs/orchestrator/job_orchestrator.go`
+**File:** `internal/jobs/monitor/job_monitor.go`
 
-The orchestrator runs in a **separate goroutine** for non-blocking monitoring of job execution.
+The monitor runs in a **separate goroutine** for non-blocking monitoring of job execution.
 
 **Responsibilities:**
 1. **Monitor Job Progress** - Poll database every 5 seconds for job status
@@ -200,10 +200,10 @@ The orchestrator runs in a **separate goroutine** for non-blocking monitoring of
 
 ```go
 // Started in separate goroutine (NOT enqueued)
-orchestrator.StartMonitoring(ctx, parentJobModel)
+monitor.StartMonitoring(ctx, parentJobModel)
 
 // Monitoring loop (runs until all children complete or timeout)
-func (o *JobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
+func (m *JobMonitor) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
     ticker := time.NewTicker(5 * time.Second)
 
     for {
@@ -224,7 +224,7 @@ func (o *JobOrchestrator) monitorChildJobs(ctx context.Context, job *models.JobM
 
 **Event Subscriptions:**
 
-The orchestrator subscribes to system events for real-time updates:
+The monitor subscribes to system events for real-time updates:
 
 ```go
 // Subscribe to job status changes
@@ -253,7 +253,7 @@ sequenceDiagram
     participant Queue as goqite Queue
     participant Processor as Job Processor
     participant Worker as Job Worker
-    participant Orchestrator as Job Orchestrator
+    participant Monitor as Job Monitor
     participant WS as WebSocket
 
     %% Phase 1: Job Creation (Orchestration Layer)
@@ -262,8 +262,8 @@ sequenceDiagram
     Manager->>Service: StartWorkflow(config, workItems)
     Service->>DB: INSERT parent job (type=parent, status=pending)
     Service->>Queue: ENQUEUE child jobs (type=task)
-    Service->>Orchestrator: StartMonitoring(parentJobModel)
-    Orchestrator-->>WS: job_progress event
+    Service->>Monitor: StartMonitoring(parentJobModel)
+    Monitor-->>WS: job_progress event
     Service-->>Handler: parentJobID
     Handler-->>UI: 200 OK {job_id}
 
@@ -281,13 +281,13 @@ sequenceDiagram
         Worker-->>WS: job_status_change event
     end
 
-    %% Phase 3: Progress Monitoring (Orchestration Layer)
+    %% Phase 3: Progress Monitoring (Monitor Layer)
     loop Every 5 seconds
-        Orchestrator->>DB: SELECT child job statistics
-        Orchestrator-->>WS: job_progress event
+        Monitor->>DB: SELECT child job statistics
+        Monitor-->>WS: job_progress event
         alt All children complete
-            Orchestrator->>DB: UPDATE parent status=completed
-            Orchestrator-->>WS: job_progress (completed)
+            Monitor->>DB: UPDATE parent status=completed
+            Monitor-->>WS: job_progress (completed)
         end
     end
 ```
@@ -300,7 +300,7 @@ sequenceDiagram
 3. Manager calls `WorkflowService.StartWorkflow()` with configuration
 4. Service creates parent job in database (type=`parent`)
 5. Service spawns child jobs (type=`task`) and enqueues them
-6. Service starts `JobOrchestrator` in separate goroutine
+6. Service starts `JobMonitor` in separate goroutine
 7. Handler returns parent job ID to UI
 
 #### Phase 2: Job Execution (Worker Layer)
@@ -312,12 +312,12 @@ sequenceDiagram
 13. Worker discovers additional work and spawns subtasks (if depth < max_depth)
 14. Worker updates job status to completed (publishes `job_status_change` event)
 
-#### Phase 3: Progress Monitoring (Orchestrator Layer)
-15. Orchestrator polls job execution statistics every 5 seconds
-16. Orchestrator publishes `job_progress` events via WebSocket
+#### Phase 3: Progress Monitoring (Monitor Layer)
+15. Monitor polls job execution statistics every 5 seconds
+16. Monitor publishes `job_progress` events via WebSocket
 17. When all subtasks reach terminal state (completed/failed/cancelled):
-    - Orchestrator updates workflow status to completed
-    - Orchestrator publishes final progress event
+    - Monitor updates workflow status to completed
+    - Monitor publishes final progress event
     - Monitoring loop exits
 
 ## Interface Definitions
@@ -341,8 +341,8 @@ type JobWorker interface {
     Validate(job *models.JobModel) error
 }
 
-// JobOrchestrator monitors parent job progress
-type JobOrchestrator interface {
+// JobMonitor monitors parent job progress
+type JobMonitor interface {
     StartMonitoring(ctx context.Context, job *models.JobModel)
     SubscribeToChildStatusChanges()
 }
@@ -376,8 +376,8 @@ Each manager implements the `StepManager` interface and follows the orchestratio
 
 Each worker implements the `JobWorker` interface and follows the execution pattern shown above.
 
-**Orchestrators (Monitoring):**
-- ✅ `JobOrchestrator` (internal/jobs/orchestrator/job_orchestrator.go)
+**Monitors (Monitoring):**
+- ✅ `JobMonitor` (internal/jobs/monitor/job_monitor.go)
 - ✅ `JobDefinitionOrchestrator` (internal/jobs/job_definition_orchestrator.go)
 
 ## File Structure Changes
@@ -399,8 +399,8 @@ Each worker implements the `JobWorker` interface and follows the execution patte
   - ✅ `database_maintenance_worker.go` - Database maintenance execution
   - ✅ `agent_worker.go` - AI agent execution
   - ✅ `job_processor.go` - Routes jobs to workers
-- ✅ `internal/jobs/orchestrator/` - Parent job monitoring
-  - ✅ `job_orchestrator.go` - Child job progress tracking (implements JobOrchestrator)
+- ✅ `internal/jobs/monitor/` - Parent job monitoring
+  - ✅ `job_monitor.go` - Child job progress tracking (implements JobMonitor)
 - ✅ `internal/jobs/` - Job definition routing
   - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers
 
@@ -482,7 +482,7 @@ All managers followed the standardized transformation pattern:
 ```
 internal/
 ├── interfaces/
-│   └── job_interfaces.go                 # StepManager, JobWorker, JobOrchestrator, JobSpawner
+│   └── job_interfaces.go                 # StepManager, JobWorker, JobMonitor, JobSpawner
 ├── jobs/
 │   ├── manager/                          # Managers (orchestration)
 │   │   ├── crawler_manager.go            # Web crawling workflows
@@ -496,8 +496,8 @@ internal/
 │   │   ├── database_maintenance_worker.go # Database maintenance execution
 │   │   ├── agent_worker.go               # AI agent execution
 │   │   └── job_processor.go              # Routes jobs to workers
-│   ├── orchestrator/                     # Orchestrators (monitoring)
-│   │   └── job_orchestrator.go    # Child job progress tracking
+│   ├── monitor/                          # Monitors (monitoring)
+│   │   └── job_monitor.go                # Child job progress tracking
 │   └── job_definition_orchestrator.go    # Routes job definition steps to managers
 ```
 
@@ -506,7 +506,7 @@ internal/
 1. **Clear Separation of Concerns:**
    - Managers (6) - Orchestrate workflows, create parent jobs, spawn children
    - Workers (3) - Execute individual jobs from queue
-   - Orchestrators (2) - Monitor progress, route job definitions
+   - Monitors (2) - Monitor progress, route job definitions
 
 2. **Improved Maintainability:**
    - Eliminated duplicate files (10 files deleted)
@@ -514,12 +514,12 @@ internal/
    - Single source of truth for each interface
 
 3. **Better Performance:**
-   - JobOrchestrator runs in separate goroutine (non-blocking)
+   - JobMonitor runs in separate goroutine (non-blocking)
    - Queue-based worker pool scales with load
    - Real-time WebSocket updates without polling overhead
 
 4. **Developer Experience:**
-   - Intuitive naming (Manager/Worker/Orchestrator)
+   - Intuitive naming (Manager/Worker/Monitor)
    - Clear file organization by responsibility
    - Import cycle resolution via local interfaces
 
@@ -803,7 +803,7 @@ ws.onmessage = (event) => {
 5. **Handle Failures Gracefully** - Log errors, update job status, don't panic
 6. **Spawn Subtasks Carefully** - Respect depth limits and max_items config
 
-### Orchestrator Design Guidelines
+### Monitor Design Guidelines
 
 1. **Run in Separate Goroutine** - Never block queue workers
 2. **Poll Every 5 Seconds** - Balance responsiveness vs database load
@@ -839,13 +839,13 @@ cat bin/quaero.toml
 **Symptoms:** Jobs stuck in `running` status even when all subtasks are done
 
 **Possible Causes:**
-1. Orchestrator not monitoring job
+1. Monitor not monitoring job
 2. Subtasks not updating status correctly
 3. Database query returning incorrect stats
 
 **Solution:**
 ```bash
-# Check orchestrator logs
+# Check monitor logs
 grep "Job monitoring" logs/quaero.log
 
 # Query subtask statistics
@@ -919,8 +919,8 @@ This table shows the architectural evolution from the original executor-based de
 
 The Manager/Worker architecture provides:
 
-1. **Clear Separation of Concerns** - Orchestration (managers) vs Execution (workers) vs Monitoring (orchestrators)
-2. **Intuitive Naming** - "Manager" creates jobs, "Worker" executes jobs, "Orchestrator" monitors progress
+1. **Clear Separation of Concerns** - Orchestration (managers) vs Execution (workers) vs Monitoring (monitors)
+2. **Intuitive Naming** - "Manager" creates jobs, "Worker" executes jobs, "Monitor" monitors progress
 3. **Scalable Design** - Queue-based worker pools handle concurrent execution
 4. **Real-Time Visibility** - WebSocket events provide live progress tracking
 5. **Maintainable Code** - Organized file structure with single responsibilities

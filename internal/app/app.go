@@ -18,7 +18,7 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/jobs/manager"
-	"github.com/ternarybob/quaero/internal/jobs/orchestrator"
+	"github.com/ternarybob/quaero/internal/jobs/monitor"
 	"github.com/ternarybob/quaero/internal/jobs/worker"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -307,15 +307,15 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(crawlerWorker)
 	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
 
-	// Create job orchestrator for monitoring parent job lifecycle
+	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 	// to avoid blocking queue workers with long-running monitoring loops
-	jobOrchestrator := orchestrator.NewJobOrchestrator(
+	jobMonitor := monitor.NewJobMonitor(
 		jobMgr,
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Job orchestrator created (runs in background goroutines, not via queue)")
+	a.Logger.Info().Msg("Job monitor created (runs in background goroutines, not via queue)")
 
 	// Register agent worker (if agent service is available)
 	if a.AgentService != nil {
@@ -369,8 +369,8 @@ func (a *App) initServices() error {
 	}
 
 	// 6.9. Initialize JobDefinitionOrchestrator for job definition execution (ARCH-009)
-	// Pass jobOrchestrator so it can start monitoring goroutines for crawler jobs
-	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobOrchestrator, a.Logger)
+	// Pass jobMonitor so it can start monitoring goroutines for crawler jobs
+	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobMonitor, a.Logger)
 
 	// Register managers for job definition steps
 	crawlerManager := manager.NewCrawlerManager(a.CrawlerService, a.Logger)
@@ -385,7 +385,7 @@ func (a *App) initServices() error {
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(reindexManager)
 	a.Logger.Info().Msg("Reindex manager registered")
 
-	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobOrchestrator, a.Logger)
+	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
