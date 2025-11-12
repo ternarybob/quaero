@@ -17,6 +17,9 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
+// Job type constant for database maintenance child jobs
+const jobTypeDatabaseMaintenanceOperation = "database_maintenance_operation"
+
 // DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceManager struct {
@@ -66,11 +69,19 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		}
 	}
 
+	// Guard against empty operations - use defaults if none specified
+	if len(operations) == 0 {
+		operations = []string{"vacuum", "analyze", "reindex"}
+		m.logger.Info().
+			Str("parent_job_id", dbMaintenanceParentJobID).
+			Msg("No operations specified, using default operations: vacuum, analyze, reindex")
+	}
+
 	// Create parent job record for orchestration tracking
 	parentJob := &jobs.Job{
 		ID:       dbMaintenanceParentJobID,
 		ParentID: &parentJobID, // Reference to job definition parent
-		Type:     "database_maintenance_parent",
+		Type:     string(models.JobTypeParent),
 		Name:     "Database Maintenance",
 		Phase:    "orchestration",
 		Status:   "running",
@@ -92,7 +103,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		// Create child job model
 		childJob := models.NewChildJobModel(
 			dbMaintenanceParentJobID,
-			"database_maintenance_operation",
+			jobTypeDatabaseMaintenanceOperation,
 			operation, // Use operation as name
 			map[string]interface{}{
 				"operation": operation, // Single operation
@@ -113,7 +124,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		dbJob := &jobs.Job{
 			ID:       childJobID,
 			ParentID: &dbMaintenanceParentJobID,
-			Type:     "database_maintenance_operation",
+			Type:     jobTypeDatabaseMaintenanceOperation,
 			Name:     fmt.Sprintf("Database Maintenance: %s", operation),
 			Phase:    "execution",
 			Status:   "pending",
@@ -132,7 +143,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		// Create queue message
 		queueMsg := queue.Message{
 			JobID:   childJobID,
-			Type:    "database_maintenance_operation",
+			Type:    jobTypeDatabaseMaintenanceOperation,
 			Payload: json.RawMessage(payloadBytes),
 		}
 
@@ -151,7 +162,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 	parentJobModel := &models.JobModel{
 		ID:       dbMaintenanceParentJobID,
 		ParentID: &parentJobID,
-		Type:     "database_maintenance_parent",
+		Type:     string(models.JobTypeParent),
 		Name:     "Database Maintenance",
 		Config: map[string]interface{}{
 			"source_type": "database",
