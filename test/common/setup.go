@@ -65,16 +65,21 @@ type TestConfig struct {
 	Output struct {
 		ResultsBaseDir string `toml:"results_base_dir"`
 	} `toml:"output"`
+
+	// ServiceConfigFiles holds the list of service config files to pass to quaero binary
+	// First file is base config, subsequent files are overrides
+	ServiceConfigFiles []string
 }
 
 // TestEnvironment represents a running test environment
 type TestEnvironment struct {
-	Config     *TestConfig
-	Cmd        *exec.Cmd
-	ResultsDir string
-	LogFile    *os.File // Service log output
-	TestLog    *os.File // Test execution log
-	Port       int
+	Config         *TestConfig
+	Cmd            *exec.Cmd
+	ResultsDir     string
+	LogFile        *os.File // Service log output
+	TestLog        *os.File // Test execution log
+	Port           int
+	ConfigFilePath string // Path to config file used (for copying to bin/)
 
 	// Output capture for test console
 	outputCapture *OutputCapture
@@ -140,9 +145,11 @@ func getOrCreateSuiteDirectory(suiteName string, baseDir string) (string, error)
 	return suiteDir, nil
 }
 
-// LoadTestConfig loads the test configuration from test/config/setup.toml
+// LoadTestConfig loads the test harness configuration from test/config/setup.toml
 // Automatically overrides port based on current directory (18085 for UI, 19085 for API)
-func LoadTestConfig() (*TestConfig, error) {
+// Optionally accepts additional config paths to override base config (relative to test/ui or test/api directory)
+// Example: LoadTestConfig("../config/quaero-no-ai.toml") - disables agent service
+func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 	// Determine test type based on working directory
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -156,30 +163,56 @@ func LoadTestConfig() (*TestConfig, error) {
 		return nil, fmt.Errorf("LoadTestConfig must be called from test/ui or test/api directory, current: %s", cwd)
 	}
 
-	// Load shared config file
-	configFile := "../config/setup.toml"
-	data, err := os.ReadFile(configFile)
+	// Load test harness config (build, service lifecycle, output)
+	harnessConfigFile := "../config/setup.toml"
+	harnessData, err := os.ReadFile(harnessConfigFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file %s: %w", configFile, err)
+		return nil, fmt.Errorf("failed to read harness config %s: %w", harnessConfigFile, err)
 	}
 
 	var config TestConfig
-	if err := toml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
+	if err := toml.Unmarshal(harnessData, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse harness config: %w", err)
 	}
+
+	// Build list of service config files (base + overrides)
+	serviceConfigFiles := []string{"../config/test-quaero.toml"} // Base config
+	serviceConfigFiles = append(serviceConfigFiles, additionalConfigPaths...)
+
+	// Validate all service config files exist and are valid TOML
+	for _, serviceConfigFile := range serviceConfigFiles {
+		if serviceConfigFile == "" {
+			continue
+		}
+
+		serviceData, err := os.ReadFile(serviceConfigFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read service config %s: %w", serviceConfigFile, err)
+		}
+
+		// Validate service config is valid TOML
+		var serviceConfigCheck map[string]any
+		if err := toml.Unmarshal(serviceData, &serviceConfigCheck); err != nil {
+			return nil, fmt.Errorf("failed to parse service config %s: %w", serviceConfigFile, err)
+		}
+	}
+
+	// Store config file paths for later use (will be passed to quaero binary)
+	config.ServiceConfigFiles = serviceConfigFiles
 
 	// Override port based on test type
 	if isAPITest {
 		config.Service.Port = 19085 // API tests use port 19085
 	}
-	// UI tests use default port from config (18085)
+	// UI tests use default port from harness config (18085)
 
 	return &config, nil
 }
 
 // SetupTestEnvironment starts the Quaero service and prepares the test environment
-func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
-	config, err := LoadTestConfig()
+// Optionally accepts a custom config path (relative to test/ui or test/api directory)
+func SetupTestEnvironment(testName string, customConfigPath ...string) (*TestEnvironment, error) {
+	config, err := LoadTestConfig(customConfigPath...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load test config: %w", err)
 	}
@@ -226,12 +259,19 @@ func SetupTestEnvironment(testName string) (*TestEnvironment, error) {
 		return nil, fmt.Errorf("failed to create test log file: %w", err)
 	}
 
+	// Determine config file path for copying to bin/
+	configFilePath := "../config/test-config.toml" // Default
+	if len(customConfigPath) > 0 && customConfigPath[0] != "" {
+		configFilePath = customConfigPath[0]
+	}
+
 	env := &TestEnvironment{
-		Config:     config,
-		ResultsDir: resultsDir,
-		LogFile:    logFile,
-		TestLog:    testLogFile,
-		Port:       config.Service.Port,
+		Config:         config,
+		ResultsDir:     resultsDir,
+		LogFile:        logFile,
+		TestLog:        testLogFile,
+		Port:           config.Service.Port,
+		ConfigFilePath: configFilePath,
 	}
 
 	// Initialize output capture
@@ -451,15 +491,17 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Build successful: %s\n", binaryOutput)
 
-	// Copy test-config.toml to bin/quaero.toml
-	testConfigPath := "../config/test-config.toml"
+	// Merge service config files and write to bin/quaero.toml
 	binConfigPath := filepath.Join(filepath.Dir(binaryOutput), "quaero.toml")
 
-	if err := env.copyFile(testConfigPath, binConfigPath); err != nil {
-		return fmt.Errorf("failed to copy config to bin directory: %w", err)
+	if err := env.mergeConfigFiles(binConfigPath); err != nil {
+		return fmt.Errorf("failed to merge config files to bin directory: %w", err)
 	}
 
-	fmt.Fprintf(env.LogFile, "Config copied from %s to: %s\n", testConfigPath, binConfigPath)
+	fmt.Fprintf(env.LogFile, "Config files merged to: %s\n", binConfigPath)
+	for i, configPath := range env.Config.ServiceConfigFiles {
+		fmt.Fprintf(env.LogFile, "  [%d] %s\n", i+1, configPath)
+	}
 
 	// Copy pages directory to bin/pages
 	pagesSourcePath, err := filepath.Abs("../../pages")
@@ -505,6 +547,66 @@ func (env *TestEnvironment) buildService() error {
 	}
 
 	fmt.Fprintf(env.LogFile, "Chrome extension copied from %s to: %s\n", extensionSourcePath, extensionDestPath)
+
+	// Copy job-definitions directory to bin/job-definitions
+	jobDefsSourcePath, err := filepath.Abs("../config/job-definitions")
+	if err != nil {
+		return fmt.Errorf("failed to resolve job-definitions source path: %w", err)
+	}
+
+	jobDefsDestPath := filepath.Join(binDir, "job-definitions")
+
+	// Remove existing job-definitions directory if it exists
+	if _, err := os.Stat(jobDefsDestPath); err == nil {
+		if err := os.RemoveAll(jobDefsDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing job-definitions directory: %w", err)
+		}
+	}
+
+	// Copy job-definitions directory
+	if err := env.copyDir(jobDefsSourcePath, jobDefsDestPath); err != nil {
+		return fmt.Errorf("failed to copy job-definitions directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
+
+	return nil
+}
+
+// mergeConfigFiles merges multiple service config files and writes the result to dst
+// Later files override earlier files (same behavior as LoadFromFiles)
+func (env *TestEnvironment) mergeConfigFiles(dst string) error {
+	// Start with empty config map
+	mergedConfig := make(map[string]any)
+
+	// Load and merge each config file in order
+	for _, configPath := range env.Config.ServiceConfigFiles {
+		absPath, err := filepath.Abs(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve config path %s: %w", configPath, err)
+		}
+
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("failed to read config file %s: %w", absPath, err)
+		}
+
+		// Unmarshal into merged config (later values override earlier ones)
+		if err := toml.Unmarshal(data, &mergedConfig); err != nil {
+			return fmt.Errorf("failed to parse config file %s: %w", absPath, err)
+		}
+	}
+
+	// Marshal merged config back to TOML
+	mergedData, err := toml.Marshal(mergedConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal merged config: %w", err)
+	}
+
+	// Write to destination
+	if err := os.WriteFile(dst, mergedData, 0644); err != nil {
+		return fmt.Errorf("failed to write merged config: %w", err)
+	}
 
 	return nil
 }
@@ -791,46 +893,32 @@ func (env *TestEnvironment) LoadJobDefinitionFile(filePath string) error {
 	return nil
 }
 
-// LoadTestJobDefinitions loads required and optional job definition files for tests
-func (env *TestEnvironment) LoadTestJobDefinitions() error {
-	// Define required job configs (must exist and load successfully)
-	requiredConfigs := []string{
-		"../config/news-crawler.toml",
-	}
-
-	// Define optional job configs (warn if missing but continue)
-	optionalConfigs := []string{
-		"../config/my-custom-crawler.toml",
+// LoadTestJobDefinitions loads job definition files for tests
+// Accepts variadic list of job definition file paths (relative to test/ui or test/api directory)
+// Example: env.LoadTestJobDefinitions("../config/test-agent-job.toml")
+func (env *TestEnvironment) LoadTestJobDefinitions(jobDefPaths ...string) error {
+	if len(jobDefPaths) == 0 {
+		// No job definitions to load
+		return nil
 	}
 
 	fmt.Fprintf(env.LogFile, "\n=== LOADING TEST JOB DEFINITIONS ===\n")
 
-	// Load required configs
-	for _, configPath := range requiredConfigs {
+	// Load each job definition file
+	for _, configPath := range jobDefPaths {
 		absPath, err := filepath.Abs(configPath)
 		if err != nil {
-			return fmt.Errorf("failed to resolve path for required config %s: %w", configPath, err)
+			return fmt.Errorf("failed to resolve path for job definition %s: %w", configPath, err)
 		}
 
 		if err := env.LoadJobDefinitionFile(absPath); err != nil {
-			return fmt.Errorf("failed to load required config %s: %w", configPath, err)
+			return fmt.Errorf("failed to load job definition %s: %w", configPath, err)
 		}
+
+		fmt.Fprintf(env.LogFile, "✓ Loaded job definition: %s\n", configPath)
 	}
 
-	// Load optional configs
-	for _, configPath := range optionalConfigs {
-		absPath, err := filepath.Abs(configPath)
-		if err != nil {
-			fmt.Fprintf(env.LogFile, "⚠  Warning: Could not resolve path for optional config %s: %v\n", configPath, err)
-			continue
-		}
-
-		if err := env.LoadJobDefinitionFile(absPath); err != nil {
-			fmt.Fprintf(env.LogFile, "⚠  Warning: Could not load optional config %s: %v\n", configPath, err)
-		}
-	}
-
-	fmt.Fprintf(env.LogFile, "✓ Test job definitions loaded successfully\n")
+	fmt.Fprintf(env.LogFile, "✓ All test job definitions loaded successfully\n")
 	return nil
 }
 

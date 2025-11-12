@@ -77,12 +77,12 @@
                             <h3>Job Queue</h3>
                         </section>
                         <section class="navbar-section">
-                            <button class="btn btn-sm" onclick="event.preventDefault(); window.dispatchEvent(new CustomEvent('jobList:load'))" title="Refresh Jobs">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
                             <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none; margin-left: 0.5rem;">
                                 <i class="fa-solid fa-trash"></i>
                                 <span id="delete-selected-text">Delete Selected</span>
+                            </button>
+                            <button class="btn btn-sm" onclick="event.preventDefault(); window.dispatchEvent(new CustomEvent('jobList:load'))" title="Refresh Jobs">
+                                <i class="fa-solid fa-rotate-right"></i>
                             </button>
                         </section>
                     </header>
@@ -140,6 +140,7 @@
                             <div>
                                 <!-- Loading indicator for expanding parents -->
                                 <template x-if="item.type === 'loading'">
+
                                     <div class="loading-children" style="margin-left: 2rem; margin-bottom: 0.8rem; padding: 0.5rem; color: #888;">
                                         <i class="fas fa-spinner fa-pulse"></i>
                                         <span>Loading children...</span>
@@ -148,6 +149,7 @@
 
                                 <!-- Job card -->
                                 <template x-if="item.type !== 'loading'">
+
                                     <div class="card job-card-clickable" :class="{
                                             'bg-gray': selectedJob && selectedJob.id === item.job.id,
                                             'job-card-parent': item.type === 'parent',
@@ -354,16 +356,13 @@
                                                 </div>
 
                                                 <!-- Right side: Actions -->
-                                                <div class="column col-2 text-right" style="flex-shrink: 0;" @click.stop>
+                                                <div class="column col-auto align-right" @click.stop>
                                                     <!-- Refresh button for parent jobs -->
                                                     <template x-if="item.type === 'parent'">
                                                         <button class="btn btn-sm" @click="refreshParentJob(item.job.id)" title="Refresh Job Stats">
                                                             <i class="fa-solid fa-sync"></i>
                                                         </button>
                                                     </template>
-                                                    <button class="btn btn-sm" @click="openJobLogsModal(item.job.id)" title="View Logs">
-                                                        <i class="fa-solid fa-file-lines"></i>
-                                                    </button>
                                                     <template x-if="item.job.status !== 'running'">
                                                         <button class="btn btn-sm" @click="window.rerunJob(item.job.id, $event)" title="Copy Job and Add to Queue">
                                                             <i class="fa-solid fa-rotate-right"></i>
@@ -501,84 +500,6 @@
         </div>
     </div>
 
-    <!-- Job Logs Modal -->
-    <div id="job-logs-modal" class="modal" x-data="jobLogsModal" x-init="init(); return () => destroy()">
-        <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
-        <div class="modal-container" role="dialog" aria-modal="true" style="max-width: 900px;">
-            <div class="modal-header">
-                <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
-                <div class="modal-title h5">Job Logs - <span x-text="currentJobId ? currentJobId.substring(0, 8) : 'N/A'"></span>
-                    <span x-show="isStreaming" class="label label-success" style="margin-left: 0.5rem;">
-                        <i class="fas fa-circle" style="animation: pulse 2s infinite;"></i> Live
-                    </span>
-                </div>
-            </div>
-            <div class="modal-body">
-                <div class="content">
-                    <!-- Log Controls -->
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                        <select class="form-select select-sm log-level-filter" x-model="selectedLogLevel" @change="loadLogs()" title="Filter by log level">
-                            <option value="all">All Levels</option>
-                            <option value="error">Error</option>
-                            <option value="warning">Warning</option>
-                            <option value="info">Info</option>
-                            <option value="debug">Debug</option>
-                        </select>
-                        <label class="form-checkbox">
-                            <input type="checkbox" x-model="includeChildren" @change="loadLogs()">
-                            <i class="form-icon"></i> Include Child Jobs
-                        </label>
-                        <button class="btn btn-sm" :class="selectedLogLevel === 'error' ? 'btn-error' : ''" @click="toggleErrorsOnly()" title="Toggle error logs only">
-                            <i class="fas fa-exclamation-triangle"></i> Errors Only
-                        </button>
-                        <button class="btn btn-sm" @click="loadLogs()" title="Refresh Logs">
-                            <i class="fa-solid fa-rotate-right"></i>
-                        </button>
-                        <button class="btn btn-sm" :class="autoScroll ? 'btn-primary' : ''" @click="toggleAutoScroll()" title="Toggle auto-scroll">
-                            <i class="fas fa-arrow-down"></i> Auto-Scroll
-                        </button>
-                        <button class="btn btn-sm" @click="clearLogs()" title="Clear displayed logs">
-                            <i class="fas fa-trash"></i> Clear
-                        </button>
-                        <button class="btn btn-sm" @click="downloadLogs()" title="Download logs as text file">
-                            <i class="fas fa-download"></i> Download
-                        </button>
-                    </div>
-
-                    <!-- Logs Terminal -->
-                    <template x-if="loading">
-                        <div class="text-center" style="padding: 2rem;">
-                            <div class="loading loading-lg"></div>
-                            <p class="text-secondary" style="margin-top: 1rem;">Loading logs...</p>
-                        </div>
-                    </template>
-
-                    <template x-if="!loading">
-                        <div class="terminal" x-ref="logContainer" @scroll="handleScroll()" style="max-height: 500px; overflow-y: auto;">
-                            <template x-if="logs.length === 0">
-                                <div style="text-align: center; color: var(--text-secondary); padding: 2rem;">
-                                    No logs available for this job
-                                </div>
-                            </template>
-                            <template x-for="log in logs" :key="log.timestamp + log.message">
-                                <div class="terminal-line">
-                                    <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
-                                    <span :class="log.levelClass" x-text="`[${log.level.toUpperCase()}]`"></span>
-                                    <span x-show="log.job_name" class="terminal-job-context" x-text="`[${log.job_name}]`"></span>
-                                    <span x-text="log.message"></span>
-                                </div>
-                            </template>
-                        </div>
-                    </template>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <span class="text-secondary" style="margin-right: auto;" x-text="`${logs.length} logs displayed`"></span>
-                <button type="button" class="btn" @click="closeModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Delete Confirmation Modal -->
     <div id="delete-confirm-modal" class="modal" x-data="deleteConfirmModal" x-init="init()">
         <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="closeModal()"></a>
@@ -661,11 +582,16 @@
                 <a href="#close" class="btn btn-clear float-right" aria-label="Close" @click.prevent="closeModal()"></a>
                 <div class="modal-title h5">Error Details</div>
             </div>
+
             <div class="modal-body">
+
                 <div class="content">
+
                     <!-- Job Context -->
                     <div class="form-group">
+
                         <label class="form-label"><strong>Job Information</strong></label>
+
                         <div style="padding: 0.75rem; background-color: #f5f5f5; border-radius: 4px; margin-bottom: 1rem;">
                             <div style="margin-bottom: 0.5rem;">
                                 <strong>Job ID:</strong>
@@ -707,12 +633,17 @@
                             No error details available
                         </div>
                     </div>
+
                 </div>
+
             </div>
+
             <div class="modal-footer">
                 <button type="button" class="btn" @click="closeModal()">Close</button>
             </div>
+
         </div>
+
     </div>
 
     <script>
@@ -1002,10 +933,6 @@
                 window.dispatchEvent(new CustomEvent('queueStats:update', {
                     detail: { connected: true, reconnecting: false }
                 }));
-                // Notify job logs modal that streaming is available
-                window.dispatchEvent(new CustomEvent('jobLogs:streamingStateChange', {
-                    detail: { isStreaming: true }
-                }));
                 console.log('[Queue] WebSocket reconnected successfully after', wsReconnectAttempts, 'attempts');
             };
 
@@ -1096,15 +1023,6 @@
                             }
                         }));
                     }
-
-                    // Handle log events for job logs modal
-                    if (message.type === 'log' && message.payload) {
-                        const logData = message.payload;
-                        // Dispatch to job logs modal if open
-                        window.dispatchEvent(new CustomEvent('jobLogs:newLog', {
-                            detail: logData
-                        }));
-                    }
                 } catch (error) {
                     console.error('[Queue] Error parsing WebSocket message:', error);
                 }
@@ -1125,10 +1043,6 @@
                 // Update queue stats header to show disconnected
                 window.dispatchEvent(new CustomEvent('queueStats:update', {
                     detail: { connected: false, reconnecting: true }
-                }));
-                // Notify job logs modal that streaming is unavailable
-                window.dispatchEvent(new CustomEvent('jobLogs:streamingStateChange', {
-                    detail: { isStreaming: false }
                 }));
 
                 // Calculate exponential backoff delay
@@ -2774,384 +2688,6 @@
                 }
             }));
 
-            // Register jobLogsModal component
-            Alpine.data('jobLogsModal', () => ({
-                currentJobId: null,
-                logs: [],
-                loading: false,
-                selectedLogLevel: 'all',
-                includeChildren: true,
-                autoScroll: true,
-                isStreaming: false,
-                logBuffer: [],
-                flushTimer: null,
-                flushBufferSize: 50, // Flush buffer when it reaches 50 entries
-                maxLogs: 1000,
-                childJobIds: new Set(),
-                wsEventListener: null,
-                wsStateListener: null,
-                openListener: null,
-                unloadListener: null,
-
-                init() {
-                    // Listen for external modal open requests
-                    this.openListener = (e) => this.openModal(e.detail.jobId);
-                    window.addEventListener('jobLogsModal:open', this.openListener);
-
-                    // Add WebSocket log event listener
-                    this.wsEventListener = (e) => this.handleWebSocketLog(e.detail);
-                    window.addEventListener('jobLogs:newLog', this.wsEventListener);
-
-                    // Listen for streaming state changes
-                    this.wsStateListener = (e) => {
-                        this.isStreaming = e.detail.isStreaming;
-                    };
-                    window.addEventListener('jobLogs:streamingStateChange', this.wsStateListener);
-
-                    // Add page unload safety net to clean up listeners
-                    this.unloadListener = () => this.destroy();
-                    window.addEventListener('beforeunload', this.unloadListener);
-                },
-
-                destroy() {
-                    // Remove all event listeners
-                    if (this.openListener) {
-                        window.removeEventListener('jobLogsModal:open', this.openListener);
-                        this.openListener = null;
-                    }
-                    if (this.wsEventListener) {
-                        window.removeEventListener('jobLogs:newLog', this.wsEventListener);
-                        this.wsEventListener = null;
-                    }
-                    if (this.wsStateListener) {
-                        window.removeEventListener('jobLogs:streamingStateChange', this.wsStateListener);
-                        this.wsStateListener = null;
-                    }
-                    if (this.unloadListener) {
-                        window.removeEventListener('beforeunload', this.unloadListener);
-                        this.unloadListener = null;
-                    }
-                },
-
-                async openModal(jobId) {
-                    this.currentJobId = jobId;
-                    this.includeChildren = true;
-                    this.autoScroll = true;
-                    this.isStreaming = wsConnected;
-                    this.childJobIds.clear();
-
-                    // Auto-filter to error level if job is failed
-                    // Fetch job status to determine initial log level
-                    this.selectedLogLevel = 'all';
-                    try {
-                        const response = await fetch(`/api/jobs/${jobId}`);
-                        if (response.ok) {
-                            const job = await response.json();
-                            if (job.status === 'failed') {
-                                this.selectedLogLevel = 'error';
-                            }
-                        }
-                    } catch (error) {
-                        console.warn('Failed to fetch job status:', error);
-                        this.selectedLogLevel = 'all';
-                    }
-
-                    const modal = document.getElementById('job-logs-modal');
-                    modal.classList.add('active');
-                    document.body.classList.add('modal-open');
-                    await this.loadLogs();
-                },
-
-                closeModal() {
-                    // Remove WebSocket state listener to minimize live listeners while closed
-                    if (this.wsStateListener) {
-                        window.removeEventListener('jobLogs:streamingStateChange', this.wsStateListener);
-                        this.wsStateListener = null;
-                    }
-
-                    const modal = document.getElementById('job-logs-modal');
-                    modal.classList.remove('active');
-                    document.body.classList.remove('modal-open');
-                    this.currentJobId = null;
-                    this.logs = [];
-                    this.isStreaming = false;
-                    this.clearLogBuffer();
-                    this.childJobIds.clear();
-                },
-
-                // Normalize log level to canonical lowercase form
-                normalizeLevel(str, forFilter = false) {
-                    if (!str) return '';
-                    let normalized = String(str).toLowerCase().trim();
-
-                    // Special case: preserve 'all' for filter comparisons
-                    if (forFilter && normalized === 'all') {
-                        return 'all';
-                    }
-
-                    // Map warn -> warning
-                    if (normalized === 'warn') {
-                        normalized = 'warning';
-                    }
-                    // Validate known levels
-                    const validLevels = ['error', 'warning', 'info', 'debug'];
-                    if (!validLevels.includes(normalized)) {
-                        console.debug('Unknown log level:', str, 'defaulting to info');
-                        return 'info';
-                    }
-                    return normalized;
-                },
-
-                async loadLogs() {
-                    if (!this.currentJobId) return;
-
-                    this.loading = true;
-                    try {
-                        // First, fetch metadata to get child job IDs
-                        // Clear childJobIds before rebuilding to reset scope
-                        this.childJobIds.clear();
-
-                        const metadataParams = new URLSearchParams();
-                        metadataParams.append('include_children', String(this.includeChildren));
-                        metadataParams.append('metadata_only', 'true');
-
-                        const metadataResponse = await fetch(`/api/jobs/${this.currentJobId}/logs/aggregated?${metadataParams.toString()}`);
-                        if (metadataResponse.ok) {
-                            const metadataData = await metadataResponse.json();
-                            // Rebuild childJobIds from metadata based on current includeChildren setting
-                            if (metadataData.metadata) {
-                                Object.keys(metadataData.metadata).forEach(id => this.childJobIds.add(id));
-                            }
-                        }
-
-                        // Build query string with level and include_children parameters
-                        const params = new URLSearchParams();
-                        if (this.selectedLogLevel !== 'all') {
-                            params.append('level', this.selectedLogLevel);
-                        }
-                        params.append('include_children', this.includeChildren);
-                        params.append('order', 'asc');
-
-                        const response = await fetch(`/api/jobs/${this.currentJobId}/logs/aggregated?${params.toString()}`);
-                        if (!response.ok) {
-                            throw new Error('Failed to fetch job logs');
-                        }
-
-                        const data = await response.json();
-                        const rawLogs = data.logs || [];
-
-                        // Parse logs into flat array
-                        this.logs = rawLogs.map(log => this._parseEnrichedLogEntry(log));
-
-                        // Scroll to bottom if auto-scroll is enabled
-                        if (this.autoScroll) {
-                            this.scrollToBottom();
-                        }
-                    } catch (error) {
-                        console.error('Error loading job logs:', error);
-                        window.showNotification('Failed to load logs: ' + error.message, 'error');
-                        this.logs = [];
-                    } finally {
-                        this.loading = false;
-                    }
-                },
-
-                handleWebSocketLog(logData) {
-                    // Filter by job: check if log matches current job
-                    if (logData.job_id !== this.currentJobId) {
-                        // Only check child jobs if includeChildren is enabled
-                        if (!this.includeChildren || !this.childJobIds.has(logData.job_id)) {
-                            return;
-                        }
-                    }
-
-                    // Apply level filter using normalized levels
-                    // Use forFilter=true to preserve 'all' during filtering
-                    const sel = this.normalizeLevel(this.selectedLogLevel, true);
-                    const lvl = this.normalizeLevel(logData.level);
-                    if (sel !== 'all' && lvl !== sel) {
-                        return;
-                    }
-
-                    // Parse and add to buffer
-                    const entry = this._parseLogEntry(logData);
-                    this.logBuffer.push(entry);
-
-                    // Flush immediately if buffer exceeds size threshold
-                    if (this.logBuffer.length >= this.flushBufferSize) {
-                        this.flushLogBuffer();
-                    } else if (!this.flushTimer) {
-                        // Schedule flush if not already scheduled
-                        this.scheduleFlush();
-                    }
-                },
-
-                scheduleFlush() {
-                    this.flushTimer = setTimeout(() => this.flushLogBuffer(), 500);
-                },
-
-                flushLogBuffer() {
-                    if (this.logBuffer.length === 0) {
-                        this.flushTimer = null;
-                        return;
-                    }
-
-                    // Append buffer to logs
-                    this.logs.push(...this.logBuffer);
-                    this.logBuffer = [];
-
-                    // Clear timer
-                    this.flushTimer = null;
-
-                    // Trim logs if exceeds maxLogs
-                    if (this.logs.length > this.maxLogs) {
-                        this.logs = this.logs.slice(-this.maxLogs);
-                    }
-
-                    // Auto-scroll if enabled
-                    if (this.autoScroll) {
-                        this.scrollToBottom();
-                    }
-                },
-
-                clearLogBuffer() {
-                    this.logBuffer = [];
-                    if (this.flushTimer) {
-                        clearTimeout(this.flushTimer);
-                        this.flushTimer = null;
-                    }
-                },
-
-                scrollToBottom() {
-                    this.$nextTick(() => {
-                        const container = this.$refs.logContainer;
-                        if (container) {
-                            container.scrollTop = container.scrollHeight;
-                        }
-                    });
-                },
-
-                handleScroll() {
-                    const container = this.$refs.logContainer;
-                    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
-                    this.autoScroll = isAtBottom;
-                },
-
-                toggleAutoScroll() {
-                    this.autoScroll = !this.autoScroll;
-                    if (this.autoScroll) {
-                        this.scrollToBottom();
-                    }
-                },
-
-                clearLogs() {
-                    this.logs = [];
-                    this.clearLogBuffer();
-                    window.showNotification('Logs cleared', 'info');
-                },
-
-                downloadLogs() {
-                    const content = this.logs.map(log => {
-                        const jobContext = log.job_name ? `[${log.job_name}] ` : '';
-                        return `[${log.timestamp}] [${log.level}] ${jobContext}${log.message}`;
-                    }).join('\n');
-
-                    const blob = new Blob([content], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const filename = `job-logs-${this.currentJobId.substring(0, 8)}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-
-                    window.showNotification('Logs downloaded', 'success');
-                },
-
-                _parseEnrichedLogEntry(logData) {
-                    const timestamp = logData.timestamp || logData.time || new Date().toISOString();
-                    const level = (logData.level || 'INFO').toUpperCase();
-                    const message = logData.message || logData.msg || '';
-                    // Store canonical lowercase level for downstream logic
-                    const canonicalLevel = this.normalizeLevel(logData.level);
-
-                    return {
-                        timestamp: this._formatLogTime(timestamp),
-                        full_timestamp: timestamp,
-                        level: canonicalLevel,
-                        levelClass: this._getLevelClass(level.toUpperCase()),
-                        message: message,
-                        job_id: logData.job_id,
-                        job_name: logData.job_name,
-                        job_url: logData.job_url,
-                        job_depth: logData.job_depth,
-                        job_type: logData.job_type,
-                        parent_id: logData.parent_id
-                    };
-                },
-
-                _parseLogEntry(logData) {
-                    const timestamp = logData.timestamp || logData.time || new Date().toISOString();
-                    const level = (logData.level || 'INFO').toUpperCase();
-                    const message = logData.message || logData.msg || '';
-                    // Store canonical lowercase level for downstream logic
-                    const canonicalLevel = this.normalizeLevel(logData.level);
-
-                    return {
-                        timestamp: this._formatLogTime(timestamp),
-                        full_timestamp: timestamp,
-                        level: canonicalLevel,
-                        levelClass: this._getLevelClass(level.toUpperCase()),
-                        message: message,
-                        job_id: logData.job_id,
-                        job_name: logData.job_name,
-                        job_url: logData.job_url,
-                        job_depth: logData.job_depth,
-                        job_type: logData.job_type,
-                        parent_id: logData.parent_id
-                    };
-                },
-
-                _formatLogTime(timestamp) {
-                    // If timestamp is already formatted as HH:MM:SS, return as-is
-                    if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
-                        return timestamp;
-                    }
-
-                    // Otherwise try to parse as date
-                    const date = new Date(timestamp);
-                    if (isNaN(date.getTime())) {
-                        return timestamp; // Return original if can't parse
-                    }
-
-                    return date.toLocaleTimeString('en-US', {
-                        hour12: false,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit'
-                    });
-                },
-
-                _getLevelClass(level) {
-                    const levelMap = {
-                        'ERROR': 'terminal-error',
-                        'WARN': 'terminal-warning',
-                        'WARNING': 'terminal-warning',
-                        'INFO': 'terminal-info',
-                        'DEBUG': 'terminal-time'
-                    };
-                    return levelMap[level] || 'terminal-info';
-                },
-
-                toggleErrorsOnly() {
-                    this.selectedLogLevel = this.selectedLogLevel.toLowerCase() === 'error' ? 'all' : 'error';
-                    this.loadLogs();
-                }
-            }));
-
             // Register deleteConfirmModal component
             Alpine.data('deleteConfirmModal', () => ({
                 jobs: [],
@@ -3330,13 +2866,6 @@
                     detail: { jobDetails: jobDetails, totalChildren: totalChildren, resolverId: resolverId }
                 }));
             });
-        }
-
-        // Global function to open job logs modal
-        function openJobLogsModal(jobId) {
-            window.dispatchEvent(new CustomEvent('jobLogsModal:open', {
-                detail: { jobId: jobId }
-            }));
         }
 
         // Initialize highlight.js - only for job detail

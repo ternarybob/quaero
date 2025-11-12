@@ -31,6 +31,7 @@ type JobDefinitionHandler struct {
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
 	authStorage               interfaces.AuthStorage
 	validationService         *validation.TOMLValidationService
+	agentService              interfaces.AgentService // Optional: nil if agent service unavailable
 	db                        *sql.DB
 	logger                    arbor.ILogger
 }
@@ -41,6 +42,7 @@ func NewJobDefinitionHandler(
 	jobStorage interfaces.JobStorage,
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator,
 	authStorage interfaces.AuthStorage,
+	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
 	db *sql.DB,
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
@@ -71,6 +73,7 @@ func NewJobDefinitionHandler(
 		jobDefinitionOrchestrator: jobDefinitionOrchestrator,
 		authStorage:               authStorage,
 		validationService:         validation.NewTOMLValidationService(logger),
+		agentService:              agentService, // Can be nil
 		db:                        db,
 		logger:                    logger,
 	}
@@ -266,6 +269,11 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 	// Ensure we return an empty array instead of null
 	if jobDefs == nil {
 		jobDefs = []*models.JobDefinition{}
+	}
+
+	// Validate runtime dependencies for each job definition
+	for _, jobDef := range jobDefs {
+		h.validateRuntimeDependencies(jobDef)
 	}
 
 	h.logger.Info().Int("count", len(jobDefs)).Int("total", totalCount).Msg("Listed job definitions")
@@ -522,6 +530,34 @@ func (h *JobDefinitionHandler) validateStepActions(jobType models.JobDefinitionT
 	// 	}
 	// }
 	// return nil
+}
+
+// validateRuntimeDependencies checks if a job definition can execute based on available services
+// This is separate from TOML validation - it checks runtime service availability
+func (h *JobDefinitionHandler) validateRuntimeDependencies(jobDef *models.JobDefinition) {
+	// Default to ready
+	jobDef.RuntimeStatus = "ready"
+	jobDef.RuntimeError = ""
+
+	// Check each step for dependencies
+	for _, step := range jobDef.Steps {
+		switch step.Action {
+		case "agent":
+			// Agent steps require agent service
+			if h.agentService == nil {
+				jobDef.RuntimeStatus = "disabled"
+				jobDef.RuntimeError = "Google API key is required for agent service (set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config)"
+				return
+			}
+			// Add more action types here as needed
+			// case "places_search":
+			//     if h.placesService == nil {
+			//         jobDef.RuntimeStatus = "disabled"
+			//         jobDef.RuntimeError = "Google Places API key required"
+			//         return
+			//     }
+		}
+	}
 }
 
 // extractJobDefinitionID extracts the job definition ID from the URL path
@@ -959,10 +995,10 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 
 	// Build crawler job definition with steps
 	crawlStepConfig := map[string]interface{}{
-		"start_urls": []interface{}{req.URL},
-		"max_depth":  maxDepth,
-		"max_pages":  maxPages,
-		"concurrency": 5,
+		"start_urls":   []interface{}{req.URL},
+		"max_depth":    maxDepth,
+		"max_pages":    maxPages,
+		"concurrency":  5,
 		"follow_links": true,
 	}
 
@@ -1001,7 +1037,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 				OnError: models.ErrorStrategyFail,
 			},
 		},
-		Config: make(map[string]interface{}),
+		Config:    make(map[string]interface{}),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -1049,13 +1085,13 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 
 	// Return response
 	response := map[string]interface{}{
-		"job_id":        jobDef.ID,
-		"job_name":      jobDef.Name,
-		"status":        "running",
-		"message":       "Quick crawl job created and started",
-		"url":           req.URL,
-		"max_depth":     maxDepth,
-		"max_pages":     maxPages,
+		"job_id":    jobDef.ID,
+		"job_name":  jobDef.Name,
+		"status":    "running",
+		"message":   "Quick crawl job created and started",
+		"url":       req.URL,
+		"max_depth": maxDepth,
+		"max_pages": maxPages,
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)

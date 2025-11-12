@@ -4,9 +4,9 @@
 
 ## Overview
 
-Enterprise knowledge is locked behind authenticated web applications (Confluence, Jira, documentation sites) where traditional RAG tools cannot access or safely store sensitive data. Quaero solves this by running entirely locally on your machine, capturing your authenticated browser sessions via a Chrome extension, and crawling pages to normalize them into markdown with metadata. All data is stored in a local SQLite database with scheduled recrawls and LLM-powered summarization keeping your private knowledge base current - without any data ever leaving your machine.
+Enterprise knowledge is locked behind authenticated web applications (Confluence, Jira, documentation sites) where traditional RAG tools cannot access or safely store sensitive data. Quaero solves this by running entirely locally on your machine, capturing your authenticated browser sessions via a Chrome extension, and crawling pages to normalize them into markdown with metadata. All data is stored in a local SQLite database with scheduled recrawls and LLM-powered summarization keeping your private knowledge base current using Google ADK with Gemini models.
 
-Quaero is a local service (Windows, Linux, macOS) that provides fast full-text and semantic search, along with chat capabilities through integrated language models.
+Quaero is a local service (Windows, Linux, macOS) that provides fast full-text and semantic search, along with chat capabilities through integrated language models via Google ADK.
 
 ### Key Features
 
@@ -135,19 +135,18 @@ type = "sqlite"
 path = "./data/quaero.db"
 enable_fts5 = true           # Full-text search
 enable_vector = true         # Vector embeddings for semantic search
-embedding_dimension = 768    # Matches nomic-embed-text model output
+embedding_dimension = 768    # Matches Gemini embedding model output
 cache_size_mb = 64          # SQLite cache size
 wal_mode = true             # Write-ahead logging for better concurrency
 busy_timeout_ms = 5000      # Busy timeout in milliseconds
 
 # LLM configuration
 [llm]
-mode = "offline"  # "offline" (local, secure) or "cloud" (external API)
-
-[llm.offline]
-model_dir = "./models"
-embed_model = "nomic-embed-text-v1.5-q8.gguf"
-chat_model = "qwen2.5-7b-instruct-q4.gguf"
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for Google ADK
+embed_model_name = "gemini-embedding-001"      # Default embedding model
+chat_model_name = "gemini-2.0-flash"           # Default chat model
+timeout = "5m"                                  # Operation timeout
+embed_dimension = 768                           # Must match SQLite config
 
 [llm.audit]
 enabled = true      # Enable audit logging
@@ -206,103 +205,58 @@ docker-compose -f deployments/docker/docker-compose.yml up
 4. Select the `cmd/quaero-chrome-extension/` directory
 5. **Configure server URL** in extension settings if not using default `http://localhost:8080`
 
-## LLM Setup (Offline Mode)
+## LLM Setup (Google ADK)
 
-**Security & Privacy**: Offline mode is the default and recommended configuration for Quaero. All LLM processing happens locally on your machine with no network calls or data transmission.
+**Google ADK Integration**: Quaero uses Google ADK (Agent Development Kit) with Gemini models for embeddings and chat. All LLM processing happens through Google's cloud APIs.
 
-⚠️ **Important**: If the `llama-server` binary is not found during startup, the service will automatically fall back to **MOCK mode**, which provides fake responses for testing only. Real embeddings and chat will not function in mock mode.
+⚠️ **Important**: A valid Google API key is required for LLM functionality. Without an API key, the service will fail to initialize and LLM features will be unavailable.
 
 ### Prerequisites
 
-To run Quaero in offline mode, you need:
-- The `llama-server` binary from llama.cpp
-- Two model files: one for embeddings, one for chat completions
-- Sufficient RAM (4-16GB depending on model size)
+To use Quaero's LLM capabilities, you need:
+- A Google Gemini API key
+- Internet connection for API calls
+- No local model files or binaries required
 
 ### Quick Start
 
-#### 1. Download llama-server Binary
+#### 1. Get Google Gemini API Key
 
-**Option A: Prebuilt Binaries (Recommended)**
+1. Visit Google AI Studio: https://aistudio.google.com/app/apikey
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the generated API key
 
-Download from the official llama.cpp releases page: https://github.com/ggml-org/llama.cpp/releases
+**Free Tier Limits** (as of 2024):
+- 15 requests per minute
+- 1500 requests per day
+- Sufficient for personal knowledge base use
 
-Choose the appropriate binary for your platform:
-- **Windows**: `llama-b6922-bin-win-cpu-x64.zip` (CPU) or CUDA/ROCm variants
-- **macOS**: `llama-b6922-bin-macos-arm64.zip` (Apple Silicon) or x64 (Intel)
-- **Linux**: `llama-b6922-bin-ubuntu-x64.zip` (CPU) or Vulkan variant
+#### 2. Configure Quaero
 
-Extract and place in `./llama/` directory:
-```powershell
-# Windows PowerShell
-New-Item -ItemType Directory -Force -Path "./llama"
-Expand-Archive -Path "llama-b6922-bin-win-cpu-x64.zip" -DestinationPath "./llama"
+Add the API key to your `quaero.toml` configuration:
+
+```toml
+[llm]
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"
+embed_model_name = "gemini-embedding-001"  # 768-dimension embeddings
+chat_model_name = "gemini-2.0-flash"       # Fast, cost-effective chat
+timeout = "5m"                             # Operation timeout
+embed_dimension = 768                      # Must match SQLite config
 ```
+
+#### 3. Environment Variable Override (Optional)
+
+You can also set the API key via environment variable (takes precedence):
 
 ```bash
-# Linux/macOS
-mkdir -p ./llama
-unzip llama-b6922-bin-ubuntu-x64.zip -d ./llama
+export QUAERO_LLM_GOOGLE_API_KEY="YOUR_GOOGLE_GEMINI_API_KEY"
 ```
 
-**Option B: Package Managers**
-
-```bash
-# macOS/Linux (Homebrew)
-brew install llama.cpp
-
-# Windows (winget)
-winget install llama.cpp
-
-# MacPorts (macOS)
-sudo port install llama.cpp
-
-# Nix (macOS/Linux)
-nix profile install nixpkgs#llama-cpp
-```
-
-**Option C: Build from Source**
-
-See detailed instructions in `internal/services/llm/offline/README.md`
-
-#### 2. Download Models
-
-Create the models directory and download the recommended models:
-
-```bash
-# Create models directory
-mkdir -p models
-
-# Download embedding model (~137 MB)
-wget https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf \
-  -O models/nomic-embed-text-v1.5-q8.gguf
-
-# Download chat model (~4.3 GB) - choose ONE
-wget https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_0.gguf \
-  -O models/qwen2.5-7b-instruct-q4.gguf
-
-# OR smaller option (~2.1 GB)
-wget https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_0.gguf \
-  -O models/qwen2.5-3b-instruct-q4.gguf
-```
-
-#### 3. Binary Placement
-
-The service searches for `llama-server` in the following locations (in order):
-1. `./llama/llama-server` (or `.exe` on Windows)
-2. `./bin/llama-server` (or `.exe`)
-3. `./llama-server` (or `.exe`)
-4. System PATH
-
-**Recommended placement**: `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
-
-```powershell
-# Windows
-# Place llama-server.exe in the ./llama directory
-
-# Linux/macOS
-chmod +x ./llama/llama-server
-```
+Other environment variables:
+- `QUAERO_LLM_EMBED_MODEL_NAME` - Override embedding model
+- `QUAERO_LLM_CHAT_MODEL_NAME` - Override chat model
+- `QUAERO_LLM_TIMEOUT` - Override timeout
 
 #### 4. Verification
 
@@ -310,54 +264,61 @@ Start Quaero and check the startup logs:
 
 **✅ Success** - Look for this message:
 ```
-LLM service initialized in offline mode
+LLM service initialized with Google ADK
+Agent service initialized with Google ADK
 ```
 
-**❌ Failure** - If you see this message, the binary or models are missing:
+**❌ Failure** - If you see this message, the API key is missing or invalid:
 ```
-Failed to create offline LLM service, falling back to MOCK mode
-```
-
-Verify binary exists:
-```powershell
-# Windows
-where llama-server
-# Or check manually
-Test-Path .\llama\llama-server.exe
-
-# Linux/macOS
-which llama-server
-# Or check manually
-ls -la ./llama/llama-server
+Failed to initialize LLM service - agent features will be unavailable
 ```
 
-Verify models exist:
-```bash
-ls -lh models/
-# Should show:
-# nomic-embed-text-v1.5-q8.gguf
-# qwen2.5-7b-instruct-q4.gguf (or your chosen model)
-```
+#### 5. Test LLM Functionality
+
+1. Start Quaero: `.\scripts\build.ps1 -Run`
+2. Navigate to the Chat page in the web UI
+3. Send a test message to verify chat functionality works
+4. Create a crawl job to test embedding generation
+
+### Model Details
+
+**Embedding Model**: `gemini-embedding-001`
+- Output dimensions: 768 (matches database schema)
+- Optimized for semantic search and RAG
+- Supports multilingual content
+
+**Chat Model**: `gemini-2.0-flash`
+- Fast response times
+- Cost-effective for regular use
+- Suitable for document summarization and chat
 
 ### Troubleshooting
 
-**Binary Not Found**: Ensure `llama-server` is in one of the search paths listed above.
+**API Key Not Found**:
+- Ensure `google_api_key` is set in `quaero.toml`
+- Or set `QUAERO_LLM_GOOGLE_API_KEY` environment variable
+- Get API key from: https://aistudio.google.com/app/apikey
 
-**Models Not Found**: Check that model files exist in the `model_dir` configured in your quaero.toml (default: `./models`).
+**API Rate Limits**:
+- Free tier: 15 requests/minute, 1500/day
+- Reduce concurrency in `[queue]` configuration
+- Consider upgrading to paid tier for higher limits
 
-**Out of Memory**: Use smaller models (3B instead of 7B) or reduce `context_size` in configuration.
+**Timeout Errors**:
+- Increase timeout in config: `timeout = "10m"`
+- Large documents may take longer to process
+- Check Gemini API status: https://status.ai.google.dev/
 
-**Slow Performance**: Adjust `thread_count` to match your CPU cores, or enable GPU layers if available.
+**Embedding Dimension Mismatch**:
+- Ensure `embed_dimension = 768` in both `[llm]` and `[storage.sqlite]`
+- Database schema requires 768-dimension embeddings
 
-See `internal/services/llm/offline/README.md` for detailed troubleshooting and AGENTS.md for developer-focused debug steps.
+**No Embeddings Generated**:
+- Check that scheduler is running (logs every 5 minutes)
+- Verify API key is valid and not rate-limited
+- Check for `EventEmbeddingTriggered` events in logs
 
-### Mode Comparison
-
-| Mode | Security | Performance | Requirements | Use Case |
-|------|----------|-------------|--------------|----------|
-| **offline** | ✅ 100% local | 🐌 CPU, ⚡ GPU | llama-server + models | Production, sensitive data |
-| **mock** | ✅ 100% local | ⚡ Instant | None | Testing, development |
-| **cloud** | ⚠️ External APIs | ⚡ Fast | API keys | Development, non-sensitive data |
+See AGENTS.md for developer-focused debug steps and agent-specific troubleshooting.
 
 ### Using Quaero
 
@@ -495,7 +456,7 @@ quaero/
 │   │   ├── llm/                     # LLM abstraction layer
 │   │   │   ├── factory.go           # LLM service factory
 │   │   │   ├── audit.go             # Audit logging
-│   │   │   └── offline/             # Offline llama.cpp implementation
+│   │   │   └── gemini_service.go    # Google ADK Gemini implementation
 │   │   ├── documents/               # Document service
 │   │   ├── chat/                    # Chat service (RAG)
 │   │   ├── search/                  # Search service (FTS5)
@@ -592,32 +553,40 @@ quaero version
 
 ## Security & Privacy
 
-### Local-Only Operation (Offline Mode)
+### Cloud-Based LLM Processing (Google ADK)
 
-**Default Configuration:** Quaero runs in `offline` mode by default, ensuring:
-- ✅ **All data stays local** - No network egress for crawled content
-- ✅ **Local LLM inference** - Uses llama.cpp with local model files
-- ✅ **SQLite storage** - Database files remain on your machine
-- ✅ **No telemetry** - No usage data collection or phone-home
+**Current Configuration:** Quaero uses Google ADK with Gemini models for LLM processing, ensuring:
+- ✅ **Efficient Cloud Processing** - Leverages Google's infrastructure for fast, scalable LLM operations
+- ✅ **No Model Management** - No local model files or binary management required
+- ✅ **SQLite Storage** - All crawled content and metadata stored locally
+- ✅ **No Telemetry** - No usage data collection from Quaero itself
 
-### Cloud Mode Risks
+### API Security
 
-⚠️ **WARNING:** Cloud mode sends data to external APIs. Only enable if you understand the implications:
+**Google Gemini API:**
+- API keys required for LLM functionality
+- Data sent to Google's servers for processing
+- Subject to Google's AI privacy policy and data handling practices
+- Not suitable for highly sensitive or classified data
 
 ```toml
 [llm]
-mode = "cloud"  # ⚠️ SENDS DATA TO EXTERNAL APIS
-
-[llm.cloud]
-provider = "gemini"  # Data sent to Google/OpenAI/Anthropic
-api_key = "${QUAERO_LLM_CLOUD_API_KEY}"
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
 ```
 
-**Cloud Mode Implications:**
-- Document content sent to third-party APIs
-- Query text transmitted externally
-- Subject to provider's data policies
-- Not suitable for sensitive/classified data
+**API Key Security:**
+- Store API keys in environment variables when possible
+- Use least-privilege principles
+- Monitor API usage in Google AI Studio
+- Rotate keys regularly
+
+**Data Handling:**
+- Document content transmitted to Google for embedding and chat
+- Query text sent to Gemini API for processing
+- Local SQLite database contains all crawled content
+- Review Google's AI privacy policy for data retention details
+
+⚠️ **Important**: If you require 100% local processing, this configuration is not suitable. Consider alternative solutions with local LLM inference.
 
 ### Audit Logging
 
@@ -742,7 +711,7 @@ The search service (`internal/services/search/`) provides multiple search modes:
 - Case-sensitive search with multiplier (fetches 3x results, caps at 1000)
 - SQLite FTS5 indexing on title + content
 - Vector search support when enabled (`storage.sqlite.enable_vector=true`)
-- Configurable embedding dimensions (768 for nomic-embed-text)
+- Configurable embedding dimensions (768 for Gemini embedding model)
 - Hybrid search combining keyword and semantic results
 
 #### 5. Scheduler Service
@@ -1272,7 +1241,6 @@ QUAERO_LOG_MIN_EVENT_LEVEL=info  # Filter logs for real-time UI events
 [server]
 host = "localhost"
 port = 8085
-llama_dir = "./llama"
 
 # NOTE: Source-specific configuration sections ([sources.*]) have been removed.
 # Data collection is now managed exclusively through Crawler Jobs.
@@ -1281,16 +1249,11 @@ llama_dir = "./llama"
 # Legacy sections removed: [sources.jira], [sources.confluence], [sources.github]
 
 [llm]
-mode = "offline"  # "offline", "cloud", or "mock"
-
-[llm.offline]
-model_dir = "./models"
-embed_model = "nomic-embed-text-v1.5.Q8_0.gguf"
-chat_model = "qwen2.5-7b-instruct-q4_k_m.gguf"
-context_size = 2048
-thread_count = 4
-gpu_layers = 0
-mock_mode = true  # Set to false to use actual models
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
+embed_model_name = "gemini-embedding-001"       # Default embedding model
+chat_model_name = "gemini-2.0-flash"            # Default chat model
+timeout = "5m"                                   # Operation timeout
+embed_dimension = 768                            # Must match SQLite config
 
 [llm.audit]
 enabled = true
@@ -1378,7 +1341,7 @@ type quaero.toml
 - URL filtering (include/exclude regex patterns)
 - Job management UI (create, monitor, execute)
 - Scheduled jobs with cron expressions
-- LLM-powered document summarization (offline/cloud modes)
+- LLM-powered document summarization (Google ADK/Gemini)
 - Advanced search with Google-style query parser
 - Chat interface with RAG support
 - Real-time job logs and status updates

@@ -23,6 +23,8 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
+	"github.com/ternarybob/quaero/internal/services/chat"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
@@ -84,6 +86,12 @@ type App struct {
 
 	// Agent service
 	AgentService interfaces.AgentService
+
+	// LLM service (Google ADK)
+	LLMService interfaces.LLMService
+
+	// Chat service (agent-based)
+	ChatService interfaces.ChatService
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -246,6 +254,21 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize search service: %w", err)
 	}
 
+	// 3.6. Initialize LLM service (Google ADK with Gemini)
+	a.LLMService, err = llm.NewGeminiService(a.Config, a.Logger)
+	if err != nil {
+		a.LLMService = nil // Explicitly set to nil on error
+		a.Logger.Warn().Err(err).Msg("Failed to initialize LLM service - chat features will be unavailable")
+		a.Logger.Info().Msg("To enable LLM features, set QUAERO_LLM_GOOGLE_API_KEY or llm.google_api_key in config")
+	} else {
+		// Perform health check to validate API key and connectivity
+		if err := a.LLMService.HealthCheck(context.Background()); err != nil {
+			a.Logger.Warn().Err(err).Msg("LLM service health check failed - API key may be invalid")
+		} else {
+			a.Logger.Info().Msg("LLM service initialized and health check passed")
+		}
+	}
+
 	// Initialize event service (already created in New() before LogService setup)
 
 	// 5.5. Initialize status service
@@ -351,12 +374,32 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Places service initialized")
 
-	// 6.8.2. Initialize Agent service (Google ADK with Gemini)
+	// 6.8.2. Initialize Chat service (depends on LLM service)
+	if a.LLMService != nil {
+		a.ChatService = chat.NewChatService(
+			a.LLMService,
+			a.StorageManager.DocumentStorage(),
+			a.SearchService,
+			a.Logger,
+		)
+		// Perform health check to validate service is operational
+		if err := a.ChatService.HealthCheck(context.Background()); err != nil {
+			a.Logger.Warn().Err(err).Msg("Chat service health check failed")
+		} else {
+			a.Logger.Info().Msg("Chat service initialized and health check passed")
+		}
+	} else {
+		a.ChatService = nil
+		a.Logger.Info().Msg("Chat service not initialized (LLM service unavailable)")
+	}
+
+	// 6.8.3. Initialize Agent service (Google ADK with Gemini)
 	a.AgentService, err = agents.NewService(
 		&a.Config.Agent,
 		a.Logger,
 	)
 	if err != nil {
+		a.AgentService = nil // Explicitly set to nil on error
 		a.Logger.Warn().Err(err).Msg("Failed to initialize agent service - agent features will be unavailable")
 		a.Logger.Info().Msg("To enable agents, set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config")
 	} else {
@@ -527,7 +570,8 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobStorage(),
 		a.JobDefinitionOrchestrator,
 		a.StorageManager.AuthStorage(),
-		db, // Pass *sql.DB for validation service
+		a.AgentService, // Pass agent service for runtime validation (can be nil)
+		db,             // Pass *sql.DB for validation service
 		a.Logger,
 	)
 
@@ -714,6 +758,18 @@ func (a *App) Close() error {
 			a.Logger.Warn().Err(err).Msg("Failed to close agent service")
 		}
 	}
+
+	// Close LLM service
+	if a.LLMService != nil {
+		if err := a.LLMService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close LLM service")
+		} else {
+			a.Logger.Info().Msg("LLM service closed")
+		}
+	}
+
+	// Close chat service (no explicit Close method, just nil reference)
+	a.ChatService = nil
 
 	// Close event service
 	if a.EventService != nil {

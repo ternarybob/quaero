@@ -3,8 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -78,57 +76,38 @@ func (s *ChatService) HealthCheck(ctx context.Context) error {
 func (s *ChatService) GetServiceStatus(ctx context.Context) map[string]interface{} {
 	status := make(map[string]interface{})
 
-	// Get LLM mode
+	// Get LLM mode from service
 	mode := string(s.llmService.GetMode())
 	status["mode"] = mode
 
-	// Default values for mock mode
-	status["embed_server"] = "N/A (mock mode)"
-	status["chat_server"] = "N/A (mock mode)"
-	status["model_loaded"] = true
-	status["last_check_time"] = "N/A"
+	// Perform health check on LLM service
+	healthErr := s.llmService.HealthCheck(ctx)
+	status["healthy"] = healthErr == nil
 
-	// For offline mode, check if servers are running
-	if mode == "offline" {
-		// Check embed server (port 8086)
-		embedStatus := checkServerHealth("http://127.0.0.1:8086/health")
-		if embedStatus {
-			status["embed_server"] = "active"
-		} else {
-			status["embed_server"] = "inactive"
-		}
+	// Set service type to indicate Google ADK provider
+	status["service_type"] = "google_adk"
 
-		// Check chat server (port 8087)
-		chatStatus := checkServerHealth("http://127.0.0.1:8087/health")
-		if chatStatus {
-			status["chat_server"] = "active"
-		} else {
-			status["chat_server"] = "inactive"
-		}
+	// Set timestamp of status check
+	status["last_check_time"] = time.Now().Format(time.RFC3339)
 
-		status["model_loaded"] = embedStatus && chatStatus
+	// Add offline-compatible fields for UI compatibility
+	// These provide sensible defaults when mode isn't offline
+	status["embed_server"] = "N/A (cloud mode)"
+	status["chat_server"] = "N/A (cloud mode)"
+	status["model_loaded"] = healthErr == nil // True if healthy, false otherwise
+
+	// Log health check result at debug level
+	if healthErr != nil {
+		s.logger.Debug().
+			Err(healthErr).
+			Str("mode", mode).
+			Msg("LLM service health check failed")
+	} else {
+		s.logger.Debug().
+			Str("mode", mode).
+			Bool("healthy", true).
+			Msg("LLM service health check passed")
 	}
 
 	return status
-}
-
-// checkServerHealth checks if a server port is listening
-func checkServerHealth(url string) bool {
-	// Extract host:port from URL
-	var address string
-	if strings.HasPrefix(url, "http://127.0.0.1:8086") {
-		address = "127.0.0.1:8086"
-	} else if strings.HasPrefix(url, "http://127.0.0.1:8087") {
-		address = "127.0.0.1:8087"
-	} else {
-		return false
-	}
-
-	// Simple TCP connection check with 500ms timeout
-	conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
 }

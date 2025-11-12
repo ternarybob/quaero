@@ -97,30 +97,32 @@ type ErrorTolerance struct {
 
 // JobDefinition represents a configurable job definition
 type JobDefinition struct {
-	ID             string                 `json:"id"`              // Unique identifier for the job definition
-	Name           string                 `json:"name"`            // Human-readable job name
-	Type           JobDefinitionType      `json:"type"`            // Type of job definition (crawler, summarizer, custom)
-	JobType        JobOwnerType           `json:"job_type"`        // Job owner type (system or user)
-	Description    string                 `json:"description"`     // Job description
-	TOML           string                 `json:"toml" db:"toml"`  // Raw TOML content from which this job definition was loaded (optional)
-	SourceType     string                 `json:"source_type"`     // Source type: "jira", "confluence", "github"
-	BaseURL        string                 `json:"base_url"`        // Base URL for the source (e.g., "https://company.atlassian.net")
-	AuthID         string                 `json:"auth_id"`         // Reference to auth_credentials.id for authentication
-	Steps          []JobStep              `json:"steps"`           // Ordered array of execution steps
-	Schedule       string                 `json:"schedule"`        // Cron expression for scheduling
-	Timeout        string                 `json:"timeout"`         // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
-	Enabled        bool                   `json:"enabled"`         // Whether the job is enabled
-	AutoStart      bool                   `json:"auto_start"`      // Whether to auto-start on scheduler initialization
-	Config         map[string]interface{} `json:"config"`          // Job-specific configuration
-	PreJobs          []string               `json:"pre_jobs"`           // Array of job definition IDs to execute before main steps (validation, pre-checks)
-	PostJobs         []string               `json:"post_jobs"`          // Array of job IDs to execute after this job completes
-	ErrorTolerance   *ErrorTolerance        `json:"error_tolerance"`    // Optional error tolerance configuration for child job failure management
-	Tags             []string               `json:"tags"`               // Tags to apply to all documents created by this job
-	ValidationStatus string                 `json:"validation_status"`  // TOML validation status: "valid", "invalid", "unknown"
-	ValidationError  string                 `json:"validation_error"`   // TOML validation error message (if invalid)
-	ValidatedAt      *time.Time             `json:"validated_at"`       // Timestamp of last validation (nil if never validated)
-	CreatedAt        time.Time              `json:"created_at"`         // Creation timestamp
-	UpdatedAt        time.Time              `json:"updated_at"`         // Last update timestamp
+	ID               string                 `json:"id"`                // Unique identifier for the job definition
+	Name             string                 `json:"name"`              // Human-readable job name
+	Type             JobDefinitionType      `json:"type"`              // Type of job definition (crawler, summarizer, custom)
+	JobType          JobOwnerType           `json:"job_type"`          // Job owner type (system or user)
+	Description      string                 `json:"description"`       // Job description
+	TOML             string                 `json:"toml" db:"toml"`    // Raw TOML content from which this job definition was loaded (optional)
+	SourceType       string                 `json:"source_type"`       // Source type: "jira", "confluence", "github"
+	BaseURL          string                 `json:"base_url"`          // Base URL for the source (e.g., "https://company.atlassian.net")
+	AuthID           string                 `json:"auth_id"`           // Reference to auth_credentials.id for authentication
+	Steps            []JobStep              `json:"steps"`             // Ordered array of execution steps
+	Schedule         string                 `json:"schedule"`          // Cron expression for scheduling
+	Timeout          string                 `json:"timeout"`           // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
+	Enabled          bool                   `json:"enabled"`           // Whether the job is enabled
+	AutoStart        bool                   `json:"auto_start"`        // Whether to auto-start on scheduler initialization
+	Config           map[string]interface{} `json:"config"`            // Job-specific configuration
+	PreJobs          []string               `json:"pre_jobs"`          // Array of job definition IDs to execute before main steps (validation, pre-checks)
+	PostJobs         []string               `json:"post_jobs"`         // Array of job IDs to execute after this job completes
+	ErrorTolerance   *ErrorTolerance        `json:"error_tolerance"`   // Optional error tolerance configuration for child job failure management
+	Tags             []string               `json:"tags"`              // Tags to apply to all documents created by this job
+	ValidationStatus string                 `json:"validation_status"` // TOML validation status: "valid", "invalid", "unknown"
+	ValidationError  string                 `json:"validation_error"`  // TOML validation error message (if invalid)
+	ValidatedAt      *time.Time             `json:"validated_at"`      // Timestamp of last validation (nil if never validated)
+	RuntimeStatus    string                 `json:"runtime_status"`    // Runtime validation status: "ready", "disabled", "unknown" (not persisted to DB)
+	RuntimeError     string                 `json:"runtime_error"`     // Runtime validation error message (e.g., missing API key) (not persisted to DB)
+	CreatedAt        time.Time              `json:"created_at"`        // Creation timestamp
+	UpdatedAt        time.Time              `json:"updated_at"`        // Last update timestamp
 }
 
 // Validate validates the job definition

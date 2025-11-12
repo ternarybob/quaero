@@ -22,46 +22,40 @@
 # Default: development (allows test URLs)
 # Env vars: QUAERO_ENV, GO_ENV (highest priority)
 
-environment = "development"  # "development" or "production"
+environment = "development" # "development" or "production"
 
 # =============================================================================
 # Server Configuration
 # =============================================================================
-# Defaults: port=8080, host="localhost", llama_dir="./llama"
+# Defaults: port=8080, host="localhost"
 # CLI flags: --port, --host (highest priority)
-# Env vars: QUAERO_SERVER_PORT, QUAERO_SERVER_HOST, QUAERO_SERVER_LLAMA_DIR
+# Env vars: QUAERO_SERVER_PORT, QUAERO_SERVER_HOST
 
-[server]
-# port = 8080         # Default: 8080
-# host = "localhost"  # Default: localhost
-# llama_dir = "./llama"  # Directory containing llama-server binary
+# [server]
+# port = 8080  # Uncomment to override default
 
 # =============================================================================
 # Storage Configuration
 # =============================================================================
-# Defaults: path="./data/quaero.db"
+# Defaults: path="./data/quaero.db", images="./data/images", attachments="./data/attachments"
 # Env vars: QUAERO_SQLITE_PATH
 
-[storage.sqlite]
-# path = "./data/quaero.db"  # Default: ./data/quaero.db
+# [storage.sqlite]
+# path = "./data/quaero.db"  # Uncomment to override default
 
-[storage.filesystem]
-# images = "./data/images"           # Default: ./data/images
-# attachments = "./data/attachments" # Default: ./data/attachments
+# [storage.filesystem]
+# images = "./data/images"  # Uncomment to override default
 
 # =============================================================================
 # Google Places API Configuration
 # =============================================================================
 # Configure Google Places API for location-based search functionality.
 # Get your API key from: https://console.cloud.google.com/apis/credentials
-#
+# Defaults: max_results_per_search=20, request_timeout=30s, rate_limit=1s
 # Env var: QUAERO_PLACES_API_KEY
 
-[places_api]
+# [places_api]
 # api_key = "YOUR_GOOGLE_PLACES_API_KEY"  # Required for places search jobs
-# max_results_per_search = 20              # Maximum results per API call (default: 20)
-# request_timeout = "10s"                  # API request timeout (default: 10s)
-# rate_limit = "100ms"                     # Minimum time between API calls (default: 100ms)
 
 # =============================================================================
 # Agent Configuration (Google ADK with Gemini)
@@ -72,14 +66,33 @@ environment = "development"  # "development" or "production"
 # IMPORTANT: Agents require a valid API key. No offline fallback is available.
 # If the API key is missing or invalid, agent jobs will fail immediately.
 #
+# Defaults: model_name="gemini-2.0-flash", max_turns=10, timeout="5m"
 # Env vars: QUAERO_AGENT_GOOGLE_API_KEY, QUAERO_AGENT_MODEL_NAME,
 #           QUAERO_AGENT_MAX_TURNS, QUAERO_AGENT_TIMEOUT
 
-[agent]
+# [agent]
 # google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for agent operations
-# model_name = "gemini-2.0-flash"                 # Gemini model (default: gemini-2.0-flash)
-# max_turns = 10                                   # Maximum agent conversation turns (default: 10)
-# timeout = "5m"                                   # Agent execution timeout (default: 5m)
+
+# =============================================================================
+# LLM Configuration (Google ADK with Gemini)
+# =============================================================================
+# Configure LLM service for embeddings and chat using Google ADK with Gemini models.
+# Requires Google Gemini API key from: https://aistudio.google.com/app/apikey
+#
+# IMPORTANT: LLM service requires a valid API key. No offline fallback is available.
+# If the API key is missing or invalid, LLM operations will fail.
+#
+# Defaults: embed_model_name="gemini-embedding-001", chat_model_name="gemini-2.0-flash",
+#           timeout="5m", embed_dimension=768
+# Env vars: QUAERO_LLM_GOOGLE_API_KEY, QUAERO_LLM_EMBED_MODEL_NAME,
+#           QUAERO_LLM_CHAT_MODEL_NAME, QUAERO_LLM_TIMEOUT, QUAERO_LLM_EMBED_DIMENSION
+
+# [llm]
+# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for LLM operations
+# embed_model_name = "gemini-embedding-001"       # Embedding model (768 dimensions)
+# chat_model_name = "gemini-2.0-flash"            # Chat model
+# timeout = "5m"                                   # Operation timeout
+# embed_dimension = 768                            # Must match database schema
 
 # =============================================================================
 # Job Definitions Configuration
@@ -90,41 +103,29 @@ environment = "development"  # "development" or "production"
 # Supported job types:
 # - crawler: Web crawling jobs (scrape websites, follow links, extract content)
 # - places: Google Places API search jobs (find locations, get details)
-# - summarizer: Document summarization jobs (analyze content, generate summaries)
+# - agent: AI agent jobs (keyword extraction, summarization, classification)
 # - custom: Custom workflow jobs (multi-step orchestration)
 #
-# Defaults: definitions_dir="./job-definitions"
+# Default: definitions_dir="./job-definitions"
 # Env var: QUAERO_JOBS_DEFINITIONS_DIR
 
-[jobs]
-definitions_dir = "./job-definitions"  # Directory containing job definition TOML/JSON files
+# [jobs]
+# definitions_dir = "./job-definitions"  # Uncomment to override default
 
 # =============================================================================
 # Crawler Configuration (Firecrawl-style HTML Scraping)
 # =============================================================================
 # Configure HTML scraping behavior for web page crawling.
 # Follows Firecrawl architecture: scrape pages, convert to markdown, extract metadata.
-# Technical parameters have sensible defaults hardcoded in the application.
-# Only uncomment settings you want to override from defaults.
 #
 # Defaults: user_agent="Quaero/1.0 (Web Crawler)", max_concurrency=3,
-#           request_delay=1s, random_delay=500ms, output_format="markdown"
+#           request_delay=1s, random_delay=500ms, request_timeout=30s,
+#           max_body_size=10MB, max_depth=5, output_format="markdown"
 # Env vars: QUAERO_CRAWLER_USER_AGENT, QUAERO_CRAWLER_MAX_CONCURRENCY, etc.
 
 # [crawler]
-# user_agent = "Quaero/1.0 (Web Crawler)"  # Default: Quaero/1.0 (Web Crawler)
-# user_agent_rotation = true                # Default: true
-# max_concurrency = 3                       # Default: 3
-# request_delay = "1s"                      # Default: 1s
-# random_delay = "500ms"                    # Default: 500ms
-# request_timeout = "30s"                   # Default: 30s
-# max_body_size = 10485760                  # Default: 10MB
-# max_depth = 5                             # Default: 5
-# follow_robots_txt = true                  # Default: true
-# output_format = "markdown"                # Default: markdown (options: markdown, html, both)
-# only_main_content = true                  # Default: true
-# include_links = true                      # Default: true
-# include_metadata = true                   # Default: true
+# user_agent = "Quaero/1.0 (Web Crawler)"  # Uncomment to override default
+# max_concurrency = 3                       # Uncomment to override default
 
 # =============================================================================
 # Logging Configuration
@@ -142,16 +143,12 @@ definitions_dir = "./job-definitions"  # Directory containing job definition TOM
 # Only logs >= min_event_level are published as events to the UI.
 # All logs (regardless of level) are saved to the database for auditing.
 #
-# Defaults: level="info", format="text", min_event_level="info"
+# Defaults: level="info", format="text", output=["stdout","file"], min_event_level="info"
 # Env vars: QUAERO_LOG_LEVEL, QUAERO_LOG_FORMAT, QUAERO_LOG_MIN_EVENT_LEVEL
 
 # [logging]
-# level = "info"            # Application log level: debug, info, warn, error (default: info)
-# format = "text"           # Log format: text or json (default: text)
-# output = ["stdout", "file"]  # Log destinations (default: ["stdout", "file"])
+# level = "info"            # Uncomment to override default (debug, info, warn, error)
 # min_event_level = "info"  # Minimum log level to publish as real-time events to UI
-#                           # Logs below this level go to database only, not to UI
-#                           # Options: "debug", "info", "warn", "error"
 #                           # Example: Set to "warn" to only show warnings/errors in UI
 #                           # Example: Set to "debug" to show all logs in UI (verbose)
 
@@ -161,24 +158,15 @@ definitions_dir = "./job-definitions"  # Directory containing job definition TOM
 # Configure server-side filtering for real-time event broadcasting to browser UI.
 # Events are filtered before broadcasting to reduce client load and network traffic.
 #
-# Defaults: allowed_events=[] (all), throttle_intervals={crawl_progress:1s, job_spawn:500ms}
-# Env vars: QUAERO_WEBSOCKET_ALLOWED_EVENTS, QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS, QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN
+# Defaults: allowed_events=[] (all events), min_level="info",
+#           throttle_intervals={crawl_progress:1s, job_spawn:500ms}
+# Env vars: QUAERO_WEBSOCKET_ALLOWED_EVENTS, QUAERO_WEBSOCKET_THROTTLE_CRAWL_PROGRESS,
+#           QUAERO_WEBSOCKET_THROTTLE_JOB_SPAWN
 
 # [websocket]
-# Event Filtering - Control which events are broadcast to WebSocket clients
 # allowed_events = []  # Empty list allows all events (default)
-# allowed_events = [   # Whitelist specific events (example)
-#     "job_created",
-#     "job_started",
-#     "job_completed",
-#     "job_failed",
-#     "job_cancelled",
-#     "crawl_progress",
-#     "job_spawn",
-#     "log_event",     # Real-time log streaming (filtered by logging.min_event_level)
-# ]
+# min_level = "info"   # Minimum log level for WebSocket events (default: info)
 
-# Event Throttling - Rate limit high-frequency events to prevent WebSocket flooding
 # [websocket.throttle_intervals]
-# crawl_progress = "1s"   # Max 1 crawl progress update per second per job (default)
-# job_spawn = "500ms"     # Max 2 job spawn events per second (default)
+# crawl_progress = "1s"   # Uncomment to override default
+# job_spawn = "500ms"     # Uncomment to override default

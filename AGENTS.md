@@ -70,7 +70,7 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 - 📊 **Real-time Updates** - WebSocket-based live log streaming
 - 💾 **SQLite Storage** - Local database with full-text search
 - 🌐 **Web Interface** - Browser-based UI for collection and browsing
-- 🤖 **Local LLM** - Offline inference with llama.cpp
+- 🤖 **Cloud LLM** - Google ADK with Gemini models for embeddings and chat
 - 🔍 **Vector Search** - 768-dimension embeddings for semantic search
 - ⚡ **Fast Collection** - Efficient scraping and storage
 - ⏰ **Scheduled Jobs** - Automated crawling and document summarization
@@ -80,7 +80,7 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 - **Language:** Go 1.25+
 - **Storage:** SQLite with FTS5 (full-text search)
 - **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
-- **LLM:** llama.cpp (offline mode), Mock mode (testing)
+- **LLM:** Google ADK with Gemini API (cloud-based embeddings and chat)
 - **Authentication:** Chrome extension → HTTP service
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
@@ -320,7 +320,7 @@ max_receive = 3
 The app initialization sequence in `internal/app/app.go` is critical:
 
 1. **Storage Layer** - SQLite
-2. **LLM Service** - Required for embeddings (offline/mock mode)
+2. **LLM Service** - Google ADK-based embeddings and chat (cloud mode)
 3. **Embedding Service** - Uses LLM service
 4. **Document Service** - Uses embedding service
 5. **Chat Service** - RAG-enabled chat with LLM
@@ -353,53 +353,37 @@ The app initialization sequence in `internal/app/app.go` is critical:
 
 ### LLM Service Architecture
 
-The LLM service provides a unified interface for embeddings and chat:
+The LLM service provides embeddings and chat using Google ADK (Agent Development Kit) with Gemini models.
 
-**Modes:**
-- **Offline** - Local llama.cpp inference (production default)
-- **Mock** - Fake responses for testing (no models required)
-- **Cloud** - Future: OpenAI/Anthropic APIs
+**Implementation:** `internal/services/llm/gemini_service.go` - Google ADK integration
 
-**Current Implementation:**
-- `internal/services/llm/offline/llama.go` - llama.cpp integration
-- Uses `llama-server` subprocess with HTTP API
-- Embedding model: nomic-embed-text-v1.5 (768 dimensions)
-- Chat model: qwen2.5-7b-instruct-q4
+**Embedding Model:** `gemini-embedding-001` with 768-dimension output (matches database schema)
 
-**Binary Search Order:**
+**Chat Model:** `gemini-2.0-flash` (fast, cost-effective, same as agent service)
 
-The service searches for `llama-server` in this order:
-1. `{llamaDir}/llama-server` (or `.exe` on Windows) - llamaDir defaults to `./llama`
-2. `./bin/llama-server` (or `.exe`)
-3. `./llama-server` (or `.exe`)
-4. `llama-server` in system PATH
+**No Offline Mode:** Requires Google Gemini API key - no local inference or mock mode available
 
-You can override the llama directory via:
-- Configuration file: `config.Server.LlamaDir`
-- Environment variable: `QUAERO_SERVER_LLAMA_DIR`
+**Graceful Degradation:** If API key is missing, LLM service initialization fails with warning but application continues without chat/embedding features
 
-**Example configuration:**
+**Configuration example:**
 ```toml
 [llm]
-mode = "offline"  # or "mock"
-
-[server]
-llama_dir = "./llama"  # Default: searches ./llama, ./bin, and PATH
-# Or override with environment variable
-# QUAERO_SERVER_LLAMA_DIR="C:/llama.cpp"  # Windows example
-# QUAERO_SERVER_LLAMA_DIR="/usr/local/llama"  # Unix example
-
-[llm.offline]
-model_dir = "./models"
-embed_model = "nomic-embed-text-v1.5-q8.gguf"
-chat_model = "qwen2.5-7b-instruct-q4.gguf"
-context_size = 2048
-thread_count = 4
-gpu_layers = 0
-mock_mode = false  # Set to true for testing
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required
+embed_model_name = "gemini-embedding-001"      # Default
+chat_model_name = "gemini-2.0-flash"           # Default
+timeout = "5m"                                  # Operation timeout
+embed_dimension = 768                           # Must match SQLite config
 ```
 
-**See main README.md 'LLM Setup' section for quick start guide and `internal/services/llm/offline/README.md` for detailed technical documentation.**
+**Environment variable overrides:**
+- `QUAERO_LLM_GOOGLE_API_KEY` - API key
+- `QUAERO_LLM_EMBED_MODEL_NAME` - Embedding model
+- `QUAERO_LLM_CHAT_MODEL_NAME` - Chat model
+- `QUAERO_LLM_TIMEOUT` - Timeout duration
+
+**API key setup:** Get API key from: https://aistudio.google.com/app/apikey
+
+**Note:** Free tier available with rate limits (15 requests/minute, 1500/day as of 2024)
 
 ### Storage Schema
 
@@ -552,7 +536,7 @@ Update document.Metadata[agent_type] → Publish event
 - Error message: "Google API key is required for agent service"
 - Agent features unavailable if service initialization fails
 - Graceful degradation: Service logs warning, application continues without agents
-- Unlike LLM service (which has offline/mock modes), agents require cloud API
+- Both LLM service and agent service require Google API keys - no offline fallback for either
 
 **Agent Types:**
 
@@ -1006,11 +990,13 @@ The Go-native test infrastructure (`test/run_tests.go` and `test/main_test.go`):
 
 **Important:** LLM service is abstracted via `internal/interfaces/llm_service.go`
 
+**Note:** Only cloud mode (Google ADK) is currently supported.
+
 To change embedding/chat behavior:
-1. Modify implementation in `internal/services/llm/offline/`
-2. Ensure interface compliance
+1. Modify implementation in `internal/services/llm/gemini_service.go`
+2. Ensure interface compliance with `internal/interfaces/llm_service.go`
 3. Update tests in `test/unit/`
-4. Consider mock mode for testing
+4. Behavior is controlled via `[llm]` config and `QUAERO_LLM_*` environment variables
 
 ## Important Implementation Notes
 
@@ -1063,22 +1049,13 @@ RAGConfig{
 
 ## Security & Data Privacy
 
-**Critical:** Quaero is designed for local-only operation:
+**Current Architecture:**
 - All data stored locally in SQLite
-- LLM inference runs locally (offline mode)
-- No external API calls in offline mode
+- Storage, crawling, and search operations are local
+- LLM features require Google ADK (cloud) and send data to Google's API
 - Audit logging for compliance
 
-**Offline Mode Guarantees:**
-- Data never leaves the machine
-- Network isolation verifiable
-- Suitable for government/healthcare/confidential data
-
-**Future Cloud Mode:**
-- Explicit warnings required
-- Risk acknowledgment in config
-- API call audit logging
-- NOT for sensitive data
+**Important:** LLM processing (embeddings and chat) requires Google Gemini API and sends data to Google's servers. This is not suitable for highly sensitive or classified data. All other operations (crawling, storage, search) remain local to your machine.
 
 ## Version Management
 
@@ -1112,76 +1089,11 @@ Check:
 ### Embeddings Not Generated
 
 Check:
-1. LLM service mode (offline/mock)
-2. Model files exist if offline mode
+1. LLM service initialized with Google ADK
+2. Valid Google API key configured
 3. Scheduler is running (logs every 5 minutes)
 4. Documents have `force_embed_pending=true` flag
 5. Embedding coordinator started successfully
-
-### llama-server Issues
-
-Check:
-0. Check startup logs for 'LLM service initialized in offline mode' vs 'falling back to MOCK mode'
-1. `llama-server` binary exists in configured llama_dir:
-   - Windows: `where llama-server` or `Test-Path .\llama\llama-server.exe`
-   - Unix: `which llama-server` or `ls -la ./llama/llama-server`
-2. Binary has execute permissions (Unix/macOS only): `chmod +x ./llama/llama-server`
-3. Model files exist:
-   - `ls -lh ./models/nomic-embed-text-v1.5-q8.gguf`
-   - `ls -lh ./models/qwen2.5-7b-instruct-q4.gguf`
-4. Sufficient RAM available (8-16GB)
-5. Check llama-server version compatibility: `./llama/llama-server --version`
-6. Check logs for subprocess errors
-7. Try mock_mode=true for testing without models
-
-**See `internal/services/llm/offline/README.md` for detailed installation and troubleshooting.**
-
-### Installing llama-server Binary
-
-**Quick Reference for Installation Methods:**
-
-**Prebuilt Binaries:**
-- Download from https://github.com/ggml-org/llama.cpp/releases
-- Windows: `llama-b6922-bin-win-cpu-x64.zip` (CPU) or CUDA/ROCm variants
-- macOS: `llama-b6922-bin-macos-arm64.zip` (Apple Silicon) or x64 (Intel)
-- Linux: `llama-b6922-bin-ubuntu-x64.zip` (CPU) or Vulkan variant
-- Extract to `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
-
-**Package Managers:**
-- Homebrew (macOS/Linux): `brew install llama.cpp`
-- winget (Windows): `winget install llama.cpp`
-- MacPorts (macOS): `sudo port install llama.cpp`
-- Nix (macOS/Linux): `nix profile install nixpkgs#llama-cpp` (Unix)
-
-**Build from Source:**
-- See detailed instructions in `internal/services/llm/offline/README.md`
-
-**Recommended placement:** `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix)
-
-**Note:** If installed via package manager, llama-server will be in PATH and automatically found.
-
-### Verifying Offline Mode
-
-**Expected startup log output:**
-
-✅ **Success:**
-```
-LLM service initialized in offline mode
-```
-
-❌ **Failure:**
-```
-Failed to create offline LLM service, falling back to MOCK mode
-```
-
-**Explanation:** Mock mode provides fake responses for testing. Embeddings and chat will not work properly.
-
-**Health check endpoint:**
-```bash
-curl http://localhost:8085/api/health
-```
-
-**Note:** Adjust port if configured differently in your quaero.toml.
 
 ### Agent Service Issues
 

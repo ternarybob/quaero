@@ -369,42 +369,13 @@
                     // Mode indicator
                     statusHTML += `<span><strong>Mode:</strong> ${data.mode}</span>`;
 
-                    // For offline mode, show server statuses
-                    if (data.mode === 'offline') {
-                        // Embed server status
-                        const embedActive = data.embed_server === 'active';
-                        const embedColor = embedActive ? 'var(--color-success)' : 'var(--color-danger)';
-                        const embedIcon = embedActive ? 'fa-circle' : 'fa-circle';
-                        statusHTML += `<span style="display: flex; align-items: center; gap: 0.25rem;">
-                    <i class="fas ${embedIcon}" style="color: ${embedColor};"></i>
-                    <span><strong>Embed:</strong> ${data.embed_server}</span>
-                </span>`;
-
-                        // Chat server status
-                        const chatActive = data.chat_server === 'active';
-                        const chatColor = chatActive ? 'var(--color-success)' : 'var(--color-danger)';
-                        const chatIcon = chatActive ? 'fa-circle' : 'fa-circle';
-                        statusHTML += `<span style="display: flex; align-items: center; gap: 0.25rem;">
-                    <i class="fas ${chatIcon}" style="color: ${chatColor};"></i>
-                    <span><strong>Chat:</strong> ${data.chat_server}</span>
-                </span>`;
-
-                        // Model loaded indicator
-                        const modelColor = data.model_loaded ? 'var(--color-success)' : 'var(--color-warning)';
-                        const modelIcon = data.model_loaded ? 'fa-check-circle' : 'fa-exclamation-triangle';
-                        statusHTML += `<span style="display: flex; align-items: center; gap: 0.25rem;">
-                    <i class="fas ${modelIcon}" style="color: ${modelColor};"></i>
-                    <span><strong>Models:</strong> ${data.model_loaded ? 'loaded' : 'not loaded'}</span>
-                </span>`;
-                    } else {
-                        // For mock/online mode, just show health
-                        const healthColor = data.healthy ? 'var(--color-success)' : 'var(--color-danger)';
-                        const healthIcon = data.healthy ? 'fa-check-circle' : 'fa-times-circle';
-                        statusHTML += `<span style="display: flex; align-items: center; gap: 0.25rem;">
+                    // Cloud mode status display
+                    const healthColor = data.healthy ? 'var(--color-success)' : 'var(--color-danger)';
+                    const healthIcon = data.healthy ? 'fa-check-circle' : 'fa-times-circle';
+                    statusHTML += `<span style="display: flex; align-items: center; gap: 0.25rem;">
                     <i class="fas ${healthIcon}" style="color: ${healthColor};"></i>
                     <span><strong>Status:</strong> ${data.healthy ? 'healthy' : 'unhealthy'}</span>
                 </span>`;
-                    }
 
                     statusHTML += '</span>';
                     liveStatusDiv.innerHTML = statusHTML;

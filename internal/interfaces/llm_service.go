@@ -8,13 +8,15 @@ import (
 type LLMMode string
 
 const (
-	// LLMModeCloud indicates the service uses cloud-based LLM APIs
+	// LLMModeCloud indicates the service uses cloud-based LLM APIs (Google ADK)
 	LLMModeCloud LLMMode = "cloud"
 
-	// LLMModeOffline indicates the service uses local/offline LLM models
+	// LLMModeOffline (DEPRECATED): Indicates local/offline LLM models
+	// No longer supported - use LLMModeCloud instead
 	LLMModeOffline LLMMode = "offline"
 
-	// LLMModeMock indicates the service uses mock responses for testing
+	// LLMModeMock (DEPRECATED): Indicates mock responses for testing
+	// No longer supported - tests should use actual Google ADK API
 	LLMModeMock LLMMode = "mock"
 )
 
@@ -28,8 +30,8 @@ type Message struct {
 }
 
 // LLMService defines the interface for language model operations including
-// embeddings generation and chat completions. Implementations may use either
-// cloud-based APIs (OpenAI, Anthropic) or offline models (Ollama, local).
+// embeddings generation and chat completions. Current implementation uses
+// Google ADK (cloud-based) via Gemini API.
 type LLMService interface {
 	// Embed generates a 768-dimension embedding vector for the given text.
 	// The embedding can be used for semantic search, similarity comparison,
@@ -69,10 +71,10 @@ type LLMService interface {
 	HealthCheck(ctx context.Context) error
 
 	// GetMode returns the current operational mode of the LLM service.
-	// This indicates whether the service is using cloud APIs or offline models.
+	// Current implementation returns LLMModeCloud (Google ADK).
 	//
 	// Returns:
-	//   - LLMMode: Current mode (LLMModeCloud, LLMModeOffline, or LLMModeMock)
+	//   - LLMMode: Current mode (LLMModeCloud)
 	GetMode() LLMMode
 
 	// Close releases resources and performs cleanup operations.

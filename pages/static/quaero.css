@@ -31,7 +31,8 @@
     --font-sans: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     /* --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"; */
     /* --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; */
-    font-style: normal; */
+    font-style: normal;
+    */
 }
 
 /* Body Styling */
@@ -790,7 +791,24 @@ body.modal-open {
 }
 
 /* 10. UTILITY CLASSES
-   ========================================================================== */
+========================================================================== */
+
+/* Alignment Utilities */
+.align-right {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: flex-start;
+    align-self: flex-start;
+}
+
+/* Adds consistent spacing between buttons */
+/* .btn {
+        flex-shrink: 0;
+    }
+    */
+
+
 
 /* Display Utilities */
 .hide {

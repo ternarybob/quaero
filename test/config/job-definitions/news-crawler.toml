@@ -19,25 +19,24 @@ timeout = "30m"
 # Whether this job is enabled
 enabled = true
 
-# Whether to auto-start when scheduler initializes
+# Whether to start automatically on service startup
 auto_start = false
 
-# URL filtering patterns (regex)
-# Only URLs matching these patterns will be crawled
-include_patterns = ["article", "news", "post"]
+# URL patterns to include (regex patterns)
+include_patterns = [
+    "abc\\.net\\.au/news",
+]
 
-# URLs matching these patterns will be excluded
-exclude_patterns = ["login", "logout", "admin"]
+# URL patterns to exclude (regex patterns)
+exclude_patterns = [
+    "/video/",
+    "/audio/",
+    "/live-blog/",
+]
 
 # Crawler behavior
-max_depth = 1       # Maximum depth to follow links
-max_pages = 1       # Maximum number of pages to crawl
+max_depth = 2       # Maximum depth to follow links
+max_pages = 1       # Maximum number of pages to crawl (set to 1 for testing)
 concurrency = 5     # Number of concurrent workers
 follow_links = true # Whether to follow discovered links
 
-# Job steps (required)
-[[steps]]
-name = "crawl_news"
-action = "crawl"
-config = { max_pages = 1, max_depth = 1 }
-on_error = "continue"

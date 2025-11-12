@@ -1,0 +1,13 @@
+# =============================================================================
+# Override Configuration: Disable Agent Service
+# =============================================================================
+# This config file disables the agent service by clearing the Google API key.
+# Use with base config: -config test-quaero.toml -config quaero-no-ai.toml
+#
+# Purpose: Test that agent job definitions appear in UI with "disabled" status
+# =============================================================================
+
+[agent]
+google_api_key = ""  # Explicitly disable agent service
+model_name = ""      # Clear model name
+

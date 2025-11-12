@@ -16,8 +16,8 @@ type Config struct {
 	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
 	Server      ServerConfig     `toml:"server"`
 	Queue       QueueConfig      `toml:"queue"`
-	Storage    StorageConfig    `toml:"storage"`
-	Processing ProcessingConfig `toml:"processing"`
+	Storage     StorageConfig    `toml:"storage"`
+	Processing  ProcessingConfig `toml:"processing"`
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
 	Crawler     CrawlerConfig    `toml:"crawler"`
@@ -25,6 +25,7 @@ type Config struct {
 	WebSocket   WebSocketConfig  `toml:"websocket"`
 	PlacesAPI   PlacesAPIConfig  `toml:"places_api"`
 	Agent       AgentConfig      `toml:"agent"`
+	LLM         LLMConfig        `toml:"llm"`
 }
 
 type ServerConfig struct {
@@ -69,7 +70,7 @@ type FilesystemConfig struct {
 	Attachments string `toml:"attachments"`
 }
 
-type ProcessingConfig struct{
+type ProcessingConfig struct {
 	Enabled  bool   `toml:"enabled"`
 	Schedule string `toml:"schedule"` // Cron schedule format
 	Limit    int    `toml:"limit"`    // Max documents to process per embedding run
@@ -147,6 +148,16 @@ type AgentConfig struct {
 	Timeout      string `toml:"timeout"`        // Agent execution timeout as duration string (default: "5m")
 }
 
+// LLMConfig contains Google ADK LLM service configuration
+type LLMConfig struct {
+	GoogleAPIKey   string  `toml:"google_api_key"`   // Google Gemini API key for LLM operations
+	EmbedModelName string  `toml:"embed_model_name"` // Gemini embedding model identifier (default: "text-embedding-004")
+	ChatModelName  string  `toml:"chat_model_name"`  // Gemini chat model identifier (default: "gemini-2.0-flash")
+	Timeout        string  `toml:"timeout"`          // LLM operation timeout as duration string (default: "5m")
+	EmbedDimension int     `toml:"embed_dimension"`  // Embedding vector dimension (default: 768, must match SQLite config)
+	Temperature    float32 `toml:"temperature"`      // Chat completion temperature (default: 0.7)
+}
+
 // NewDefaultConfig creates a configuration with default values
 // Technical parameters are hardcoded here for production stability.
 // Only user-facing settings should be exposed in quaero.toml.
@@ -168,12 +179,12 @@ func NewDefaultConfig() *Config {
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
 				Path:               "./data/quaero.db",
-				EnableFTS5:         true,         // Full-text search for keyword queries
-				EnableVector:       true,         // Vector embeddings for semantic search
-				EmbeddingDimension: 768,          // Matches nomic-embed-text model output
-				CacheSizeMB:        64,           // Balanced performance for typical workloads
-				WALMode:            true,         // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS:      10000,        // 10 seconds for high-concurrency job processing
+				EnableFTS5:         true,          // Full-text search for keyword queries
+				EnableVector:       true,          // Vector embeddings for semantic search
+				EmbeddingDimension: 768,           // Matches nomic-embed-text model output
+				CacheSizeMB:        64,            // Balanced performance for typical workloads
+				WALMode:            true,          // Write-Ahead Logging for better concurrency
+				BusyTimeoutMS:      10000,         // 10 seconds for high-concurrency job processing
 				Environment:        "development", // Default to development mode
 			},
 			Filesystem: FilesystemConfig{
@@ -247,10 +258,18 @@ func NewDefaultConfig() *Config {
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
 		Agent: AgentConfig{
-			GoogleAPIKey: "",                  // User must provide API key (no fallback)
-			ModelName:    "gemini-2.0-flash",  // Fast, cost-effective Gemini model
-			MaxTurns:     10,                  // Reasonable limit for agent loops
-			Timeout:      "5m",                // 5 minutes for agent execution
+			GoogleAPIKey: "",                 // User must provide API key (no fallback)
+			ModelName:    "gemini-2.0-flash", // Fast, cost-effective Gemini model
+			MaxTurns:     10,                 // Reasonable limit for agent loops
+			Timeout:      "5m",               // 5 minutes for agent execution
+		},
+		LLM: LLMConfig{
+			GoogleAPIKey:    "",                 // User must provide API key (no fallback)
+			EmbedModelName:  "text-embedding-004", // Current recommended embedding model
+			ChatModelName:   "gemini-2.0-flash",    // Fast, cost-effective chat model (same as agent service)
+			Timeout:         "5m",                    // 5 minutes for LLM operations
+			EmbedDimension:  768,                     // Matches SQLite embedding dimension (line 173)
+			Temperature:     0.7,                     // Default temperature for chat completions
 		},
 	}
 }
@@ -258,23 +277,38 @@ func NewDefaultConfig() *Config {
 // LoadFromFile loads configuration with priority: default -> file -> env -> CLI
 // Priority system: CLI flags > Environment variables > Config file > Defaults
 func LoadFromFile(path string) (*Config, error) {
+	if path == "" {
+		return LoadFromFiles()
+	}
+	return LoadFromFiles(path)
+}
+
+// LoadFromFiles loads configuration from multiple files with priority: default -> file1 -> file2 -> ... -> env -> CLI
+// Later files override earlier files. Priority system: CLI flags > Environment variables > Last config file > ... > First config file > Defaults
+// Example: LoadFromFiles("base.toml", "override.toml") - override.toml settings take precedence over base.toml
+func LoadFromFiles(paths ...string) (*Config, error) {
 	// Start with defaults
 	config := NewDefaultConfig()
 
-	// Load from file if exists (overrides defaults)
-	if path != "" {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+	// Load and merge each config file in order (later files override earlier files)
+	for i, path := range paths {
+		if path == "" {
+			continue
 		}
 
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
+		}
+
+		// Unmarshal into config (merges with existing values, later values override)
 		err = toml.Unmarshal(data, config)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse config file: %w", err)
+			return nil, fmt.Errorf("failed to parse config file %s (file %d of %d): %w", path, i+1, len(paths), err)
 		}
 	}
 
-	// Apply environment variables (overrides file config)
+	// Apply environment variables (overrides all file configs)
 	applyEnvOverrides(config)
 
 	return config, nil
@@ -510,6 +544,30 @@ func applyEnvOverrides(config *Config) {
 	}
 	if timeout := os.Getenv("QUAERO_AGENT_TIMEOUT"); timeout != "" {
 		config.Agent.Timeout = timeout
+	}
+
+	// LLM configuration
+	if apiKey := os.Getenv("QUAERO_LLM_GOOGLE_API_KEY"); apiKey != "" {
+		config.LLM.GoogleAPIKey = apiKey
+	}
+	if embedModelName := os.Getenv("QUAERO_LLM_EMBED_MODEL_NAME"); embedModelName != "" {
+		config.LLM.EmbedModelName = embedModelName
+	}
+	if chatModelName := os.Getenv("QUAERO_LLM_CHAT_MODEL_NAME"); chatModelName != "" {
+		config.LLM.ChatModelName = chatModelName
+	}
+	if timeout := os.Getenv("QUAERO_LLM_TIMEOUT"); timeout != "" {
+		config.LLM.Timeout = timeout
+	}
+	if embedDimension := os.Getenv("QUAERO_LLM_EMBED_DIMENSION"); embedDimension != "" {
+		if ed, err := strconv.Atoi(embedDimension); err == nil {
+			config.LLM.EmbedDimension = ed
+		}
+	}
+	if temperature := os.Getenv("QUAERO_LLM_TEMPERATURE"); temperature != "" {
+		if t, err := strconv.ParseFloat(temperature, 32); err == nil {
+			config.LLM.Temperature = float32(t)
+		}
 	}
 }
 

@@ -27,7 +27,7 @@ type ChatResponse struct {
 	// Model used
 	Model string `json:"model"`
 
-	// Mode (online/offline/mock)
+	// Mode (cloud - Google ADK)
 	Mode LLMMode `json:"mode"`
 }
 
@@ -43,7 +43,8 @@ type ChatService interface {
 	// Chat sends a message and receives a response using the agent
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
 
-	// GetMode returns the current LLM mode (online/offline/mock)
+	// GetMode returns the current LLM mode (cloud - Google ADK)
+	// Note: Other modes (offline/mock) are deprecated and not used
 	GetMode() LLMMode
 
 	// HealthCheck verifies the chat service is operational

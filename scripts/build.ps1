@@ -299,44 +299,6 @@ function Stop-QuaeroService {
     }
 }
 
-# Function to stop all llama-server processes
-function Stop-LlamaServers {
-    try {
-        Write-Host "Checking for llama-server processes..." -ForegroundColor Yellow
-        $llamaProcesses = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
-
-        if ($llamaProcesses) {
-            Write-Host "  Found $($llamaProcesses.Count) llama-server process(es), stopping..." -ForegroundColor Gray
-
-            foreach ($proc in $llamaProcesses) {
-                try {
-                    $proc.Kill()
-                    Write-Host "  Stopped llama-server (PID: $($proc.Id))" -ForegroundColor Gray
-                }
-                catch {
-                    Write-Warning "  Failed to stop llama-server (PID: $($proc.Id)): $($_.Exception.Message)"
-                }
-            }
-
-            # Wait briefly for processes to exit
-            Start-Sleep -Milliseconds 500
-
-            # Verify cleanup
-            $remainingLlama = Get-Process -Name "llama-server" -ErrorAction SilentlyContinue
-            if ($remainingLlama) {
-                Write-Warning "Some llama-server processes may still be running"
-            } else {
-                Write-Host "  All llama-server processes stopped successfully" -ForegroundColor Green
-            }
-        } else {
-            Write-Host "  No llama-server processes found" -ForegroundColor Gray
-        }
-    }
-    catch {
-        Write-Warning "Could not check/stop llama-server processes: $($_.Exception.Message)"
-    }
-}
-
 # Function to deploy files to bin directory
 function Deploy-Files {
     param(
@@ -513,7 +475,6 @@ if (-not (Test-Path $binDir)) {
 # Stop services if running (using helper functions)
 $serverPort = Get-ServerPort -BinDirectory $binDir
 Stop-QuaeroService -Port $serverPort
-Stop-LlamaServers
 
 # Tidy and download dependencies
 Write-Host "Tidying dependencies..." -ForegroundColor Yellow

@@ -11,15 +11,15 @@ This Chrome extension captures authentication data and instantly starts crawling
 5. Click "Load unpacked"
 6. Select the `bin/quaero-chrome-extension` directory
 
-## LLM Setup (Offline Mode)
+## LLM Setup (Google ADK)
 
-**Important**: Quaero requires the `llama-server` binary and model files for offline mode functionality.
+**Important**: Quaero requires a Google Gemini API key for LLM functionality (embeddings and chat).
 
-For complete installation instructions, see the main `README.md` "LLM Setup (Offline Mode)" section.
+For complete installation instructions, see the main `README.md` "LLM Setup (Google ADK)" section.
 
 **Quick Summary:**
-- Binary location: `./llama/llama-server.exe` (Windows) or `./llama/llama-server` (Unix), or in system PATH
-- Models location: `./models/` directory
+- API key from: https://aistudio.google.com/app/apikey
+- No local model files or binaries required
 - Default server port: 8085 (change in extension settings if customized)
 
 ## Usage

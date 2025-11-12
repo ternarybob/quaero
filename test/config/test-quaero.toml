@@ -1,0 +1,52 @@
+# =============================================================================
+# Base Test Configuration for Quaero Service
+# =============================================================================
+# This is the base configuration for all automated tests.
+# Override specific settings using additional config files:
+#   -config test-quaero.toml -config quaero-no-ai.toml
+#
+# Priority: Later config files override earlier ones
+# =============================================================================
+
+# =============================================================================
+# Environment Configuration
+# =============================================================================
+environment = "development"
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+[server]
+port = 18085  # Test port (UI tests), API tests override to 19085
+
+# =============================================================================
+# Storage Configuration
+# =============================================================================
+[storage.sqlite]
+reset_on_startup = true  # Delete database on startup for clean test runs
+
+# =============================================================================
+# Agent Configuration (Google ADK with Gemini)
+# =============================================================================
+[agent]
+google_api_key = ""  # Disabled by default (override with custom config if needed)
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+[logging]
+level = "debug"           # Debug level for detailed test logs
+min_event_level = "debug" # Publish all logs to UI for test visibility
+
+# =============================================================================
+# LLM Configuration
+# =============================================================================
+[llm]
+google_api_key = ""  # Disabled by default (tests run without LLM features)
+embed_model_name = "gemini-embedding-001"
+chat_model_name = "gemini-2.0-flash"
+timeout = "5m"
+embed_dimension = 768
+
+[llm.audit]
+enabled = false  # Disable audit logging for tests

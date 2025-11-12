@@ -22,10 +22,21 @@ import (
 	"github.com/ternarybob/quaero/internal/server"
 )
 
+// configPaths is a custom flag type that allows multiple -config flags
+type configPaths []string
+
+func (c *configPaths) String() string {
+	return fmt.Sprintf("%v", *c)
+}
+
+func (c *configPaths) Set(value string) error {
+	*c = append(*c, value)
+	return nil
+}
+
 var (
 	// Command-line flags
-	configPath   = flag.String("config", "", "Configuration file path")
-	configPathC  = flag.String("c", "", "Configuration file path (shorthand)")
+	configFiles  configPaths // Multiple -config flags supported
 	serverPort   = flag.Int("port", 0, "Server port (overrides config)")
 	serverPortP  = flag.Int("p", 0, "Server port (shorthand, overrides config)")
 	serverHost   = flag.String("host", "", "Server host (overrides config)")
@@ -37,6 +48,12 @@ var (
 	logger arbor.ILogger
 )
 
+func init() {
+	// Register custom flag for multiple config files
+	flag.Var(&configFiles, "config", "Configuration file path (can be specified multiple times, later files override earlier ones)")
+	flag.Var(&configFiles, "c", "Configuration file path (shorthand)")
+}
+
 func main() {
 	// Parse command-line flags
 	flag.Parse()
@@ -47,44 +64,40 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Merge shorthand flags with full flags (shorthand takes precedence)
-	finalConfigPath := *configPath
-	if *configPathC != "" {
-		finalConfigPath = *configPathC
-	}
-
+	// Merge port flags (shorthand takes precedence)
 	finalPort := *serverPort
 	if *serverPortP != 0 {
 		finalPort = *serverPortP
 	}
 
 	// Startup sequence (REQUIRED ORDER):
-	// 1. Load config (defaults -> file -> env)
+	// 1. Load config (defaults -> file1 -> file2 -> ... -> env)
 	// 2. Apply CLI overrides (highest priority)
 	// 3. Initialize logger
 	// 4. Print banner
 	var err error
 
 	// Auto-discover config file if not specified
-	if finalConfigPath == "" {
+	if len(configFiles) == 0 {
 		// Check current directory first
 		if _, err := os.Stat("quaero.toml"); err == nil {
-			finalConfigPath = "quaero.toml"
+			configFiles = append(configFiles, "quaero.toml")
 		} else if _, err := os.Stat("deployments/local/quaero.toml"); err == nil {
 			// Fallback: check deployments/local for users running from project root
-			finalConfigPath = "deployments/local/quaero.toml"
+			configFiles = append(configFiles, "deployments/local/quaero.toml")
 		}
 	}
 
-	// 1. Load configuration (default -> file -> env -> CLI)
-	config, err = common.LoadFromFile(finalConfigPath)
+	// 1. Load configuration (default -> file1 -> file2 -> ... -> env -> CLI)
+	// Later config files override earlier ones
+	config, err = common.LoadFromFiles(configFiles...)
 	if err != nil {
 		// Use temporary logger for startup errors
 		tempLogger := arbor.NewLogger()
-		if finalConfigPath == "" {
+		if len(configFiles) == 0 {
 			tempLogger.Fatal().Err(err).Msg("Failed to load configuration: no config file found")
 		} else {
-			tempLogger.Fatal().Str("path", finalConfigPath).Err(err).Msg("Failed to load configuration file")
+			tempLogger.Fatal().Strs("paths", configFiles).Err(err).Msg("Failed to load configuration files")
 		}
 		os.Exit(1)
 	}
@@ -199,7 +212,7 @@ func main() {
 
 	// Log initialization complete
 	logger.Info().
-		Str("config_path", finalConfigPath).
+		Strs("config_files", configFiles).
 		Int("port", config.Server.Port).
 		Str("host", config.Server.Host).
 		Msg("Application configuration loaded")
