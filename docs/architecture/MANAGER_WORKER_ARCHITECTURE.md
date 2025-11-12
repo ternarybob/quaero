@@ -49,6 +49,7 @@ graph TB
 | **JobWorker** | Worker (Execution) | Implements JobWorker - Executes tasks, processes data, spawns subtasks for discovered work |
 | **JobMonitor** | Monitoring | Implements JobMonitor interface - Tracks job progress, aggregates statistics, determines completion |
 | **JobProcessor** | Queue (Routing) | Routes queued jobs to registered workers based on job type |
+| **JobDefinitionOrchestrator** | Coordination (Workflow) | Routes job definition steps to StepManagers - Handles multi-step workflows, error strategies, parent job creation |
 
 ## Manager vs Worker Distinction
 
@@ -113,6 +114,67 @@ All 6 managers follow the same pattern, implementing the `StepManager` interface
 - **PlacesSearchManager** (`internal/jobs/manager/places_search_manager.go`) - Orchestrates Google Places API searches and document creation
 
 Each manager creates a parent job and spawns child jobs specific to its domain.
+
+### JobDefinitionOrchestrator (Workflow Coordination)
+
+**File:** `internal/jobs/job_definition_orchestrator.go`
+
+The JobDefinitionOrchestrator is the **entry point coordinator** for job definition execution. It sits above the Manager layer and routes multi-step workflows to appropriate StepManagers.
+
+**Responsibilities:**
+- Parse job definitions and execute steps sequentially
+- Route each step to the appropriate StepManager based on action type (e.g., "crawl" → CrawlerManager)
+- Create parent job records for workflow tracking
+- Handle error strategies (fail, continue, retry) per step
+- Manage error tolerance thresholds across child jobs
+- Integrate with JobMonitor for crawler job progress tracking
+- Persist job metadata (auth_id, job_definition_id) for child job access
+
+**Key Methods:**
+- `Execute(ctx, jobDef)` - Executes a job definition with all its steps
+- `RegisterStepExecutor(mgr)` - Registers a StepManager for an action type
+
+**Integration Points:**
+- **Handlers** call `Execute()` when user triggers job definition
+- **StepManagers** registered via `RegisterStepExecutor()` during app initialization
+- **JobMonitor** started for crawler jobs to track child progress
+- **JobManager** used for job CRUD operations (create, update status, add logs)
+
+**Example Flow:**
+```go
+// 1. Handler receives job definition execution request
+parentJobID, err := orchestrator.Execute(ctx, jobDef)
+
+// 2. Orchestrator creates parent job record
+parentJob := &Job{ID: parentJobID, Type: "parent", Status: "pending"}
+
+// 3. Orchestrator executes each step sequentially
+for _, step := range jobDef.Steps {
+    // Route to appropriate manager
+    mgr := orchestrator.stepExecutors[step.Action]
+    childJobID, err := mgr.CreateParentJob(ctx, step, jobDef, parentJobID)
+
+    // Handle errors based on step.OnError strategy
+}
+
+// 4. For crawler jobs, start monitoring
+if isCrawlerJob {
+    orchestrator.jobMonitor.StartMonitoring(ctx, parentJobModel)
+}
+```
+
+**Distinction from StepManagers:**
+- **JobDefinitionOrchestrator** - Routes steps across multiple domains (multi-step workflows)
+- **StepManagers** - Orchestrate single domain (e.g., CrawlerManager handles only crawl steps)
+
+**Registered StepManagers:**
+During app initialization in `internal/app/app.go`, all 6 managers are registered:
+- `"crawl"` → CrawlerManager
+- `"agent"` → AgentManager
+- `"database_maintenance"` → DatabaseMaintenanceManager
+- `"transform"` → TransformManager
+- `"reindex"` → ReindexManager
+- `"places_search"` → PlacesSearchManager
 
 ### JobWorker Interface (Execution)
 
@@ -247,6 +309,7 @@ eventService.Subscribe(EventDocumentSaved, func(ctx context.Context, event Event
 sequenceDiagram
     participant UI as Web UI
     participant Handler as Job Handler
+    participant Orchestrator as JobDefinitionOrchestrator
     participant Manager as Step Manager
     participant Service as Workflow Service
     participant DB as SQLite DB
@@ -258,16 +321,25 @@ sequenceDiagram
 
     %% Phase 1: Job Creation (Orchestration Layer)
     UI->>Handler: POST /api/jobs/definitions/{id}/execute
-    Handler->>Manager: CreateParentJob(step, jobDef, parentJobID)
-    Manager->>Service: StartWorkflow(config, workItems)
-    Service->>DB: INSERT parent job (type=parent, status=pending)
-    Service->>Queue: ENQUEUE child jobs (type=task)
-    Service->>Monitor: StartMonitoring(parentJobModel)
-    Monitor-->>WS: job_progress event
-    Service-->>Handler: parentJobID
+    Handler->>Orchestrator: Execute(jobDef)
+    Note over Orchestrator: Create parent job record<br/>Route steps to managers
+
+    loop For each step in jobDef.Steps
+        Orchestrator->>Manager: CreateParentJob(step, jobDef, parentJobID)
+        Manager->>Service: StartWorkflow(config, workItems)
+        Service->>DB: INSERT parent job (type=parent, status=pending)
+        Service->>Queue: ENQUEUE child jobs (type=task)
+        Service->>Monitor: StartMonitoring(parentJobModel)
+        Monitor-->>WS: job_progress event
+        Service-->>Manager: childJobID
+        Manager-->>Orchestrator: childJobID
+    end
+
+    Orchestrator-->>Handler: parentJobID
     Handler-->>UI: 200 OK {job_id}
 
     %% Phase 2: Job Execution (Worker Layer)
+    Note over Queue,Processor: Dequeue via Receive() for job processing
     loop For each child job
         Queue->>Processor: Receive() -> Message
         Processor->>Worker: Execute(jobModel)
@@ -294,28 +366,32 @@ sequenceDiagram
 
 ### Flow Phases
 
-#### Phase 1: Job Creation (Manager Layer)
+#### Phase 1: Job Creation (Orchestration Layer)
 1. User clicks "Execute" in Web UI
-2. Handler calls `StepManager.CreateParentJob()`
-3. Manager calls `WorkflowService.StartWorkflow()` with configuration
-4. Service creates parent job in database (type=`parent`)
-5. Service spawns child jobs (type=`task`) and enqueues them
-6. Service starts `JobMonitor` in separate goroutine
-7. Handler returns parent job ID to UI
+2. Handler calls `JobDefinitionOrchestrator.Execute(jobDef)`
+3. Orchestrator creates parent job record in database
+4. Orchestrator iterates through job definition steps sequentially
+5. For each step, orchestrator routes to appropriate `StepManager.CreateParentJob()`
+6. Manager calls `WorkflowService.StartWorkflow()` with configuration
+7. Service creates parent job in database (type=`parent`)
+8. Service spawns child jobs (type=`task`) and enqueues them
+9. Service starts `JobMonitor` in separate goroutine (for crawler jobs)
+10. Orchestrator returns parent job ID to handler
+11. Handler returns parent job ID to UI
 
 #### Phase 2: Job Execution (Worker Layer)
-8. `JobProcessor` dequeues message from goqite
-9. Processor routes to appropriate `JobWorker` based on job type
-10. Worker executes task via external service
-11. Worker processes task results
-12. Worker saves results to storage (publishes `result_saved` event)
-13. Worker discovers additional work and spawns subtasks (if depth < max_depth)
-14. Worker updates job status to completed (publishes `job_status_change` event)
+12. `JobProcessor` dequeues message from goqite via `Receive()` method (polling-based)
+13. Processor routes to appropriate `JobWorker` based on job type
+14. Worker executes task via external service
+15. Worker processes task results
+16. Worker saves results to storage (publishes `result_saved` event)
+17. Worker discovers additional work and spawns subtasks (if depth < max_depth)
+18. Worker updates job status to completed (publishes `job_status_change` event)
 
 #### Phase 3: Progress Monitoring (Monitor Layer)
-15. Monitor polls job execution statistics every 5 seconds
-16. Monitor publishes `job_progress` events via WebSocket
-17. When all subtasks reach terminal state (completed/failed/cancelled):
+19. Monitor polls job execution statistics every 5 seconds
+20. Monitor publishes `job_progress` events via WebSocket
+21. When all subtasks reach terminal state (completed/failed/cancelled):
     - Monitor updates workflow status to completed
     - Monitor publishes final progress event
     - Monitoring loop exits
@@ -376,9 +452,11 @@ Each manager implements the `StepManager` interface and follows the orchestratio
 
 Each worker implements the `JobWorker` interface and follows the execution pattern shown above.
 
-**Monitors (Monitoring):**
-- ✅ `JobMonitor` (internal/jobs/monitor/job_monitor.go)
-- ✅ `JobDefinitionOrchestrator` (internal/jobs/job_definition_orchestrator.go)
+**Coordinators (Workflow Orchestration):**
+- ✅ `JobDefinitionOrchestrator` (internal/jobs/job_definition_orchestrator.go) - Routes job definition steps to managers
+
+**Monitors (Progress Tracking):**
+- ✅ `JobMonitor` (internal/jobs/monitor/job_monitor.go) - Tracks child job progress and aggregates statistics
 
 ## File Structure Changes
 
@@ -399,10 +477,10 @@ Each worker implements the `JobWorker` interface and follows the execution patte
   - ✅ `database_maintenance_worker.go` - Database maintenance execution
   - ✅ `agent_worker.go` - AI agent execution
   - ✅ `job_processor.go` - Routes jobs to workers
-- ✅ `internal/jobs/monitor/` - Parent job monitoring
+- ✅ `internal/jobs/monitor/` - Job progress monitoring
   - ✅ `job_monitor.go` - Child job progress tracking (implements JobMonitor)
-- ✅ `internal/jobs/` - Job definition routing
-  - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers
+- ✅ `internal/jobs/` - Workflow coordination
+  - ✅ `job_definition_orchestrator.go` - Routes job definition steps to managers (workflow coordinator)
 
 **Deleted Directories/Files:**
 - ❌ `internal/jobs/executor/` - 9 files deleted (migrated to manager/ + jobs/) [ARCH-009]
@@ -504,9 +582,10 @@ internal/
 ### Architecture Benefits Achieved
 
 1. **Clear Separation of Concerns:**
-   - Managers (6) - Orchestrate workflows, create parent jobs, spawn children
+   - Coordinators (1) - Route multi-step workflows to managers
+   - Managers (6) - Orchestrate domain-specific workflows, create parent jobs, spawn children
    - Workers (3) - Execute individual jobs from queue
-   - Monitors (2) - Monitor progress, route job definitions
+   - Monitors (1) - Track progress, aggregate statistics
 
 2. **Improved Maintainability:**
    - Eliminated duplicate files (10 files deleted)
