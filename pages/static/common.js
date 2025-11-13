@@ -90,7 +90,7 @@ document.addEventListener('alpine:init', () => {
                 if (checkbox) {
                     checkbox.checked = true;
                     // Determine the partial URL based on section ID
-                    const partialUrl = `/partials/settings-${sectionId}.html`;
+                    const partialUrl = `/settings/${sectionId}.html`;
                     this.loadContent(sectionId, partialUrl, true);
                 }
             });

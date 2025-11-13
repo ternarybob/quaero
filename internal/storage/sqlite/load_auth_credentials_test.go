@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ternarybob/arbor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ternarybob/arbor"
 )
 
 func TestLoadAuthCredsFromTOML_WithSections(t *testing.T) {
@@ -17,12 +17,12 @@ func TestLoadAuthCredsFromTOML_WithSections(t *testing.T) {
 
 	// Create test TOML file with sections
 	testTOML := `[google-places-key]
-api_key = "AIzaSyCwXVa0E5aCDmCg9FlhPeX8ct83E9EADFg"
+api_key = "AIzaTest_FakeKey1234567890ABCDEFGHIJKLMNO"
 service_type = "google-places"
 description = "Google Places API key for location search functionality"
 
 [gemini-llm-key]
-api_key = "AIzaSyD1234567890abcdefghijklmnopqrstuv"
+api_key = "AIzaTest_FakeKey0987654321ZYXWVUTSRQPONML"
 service_type = "gemini-llm"
 description = "Google Gemini API key for LLM features"
 `
@@ -50,14 +50,14 @@ description = "Google Gemini API key for LLM features"
 	// Verify google-places-key section
 	googlePlaces, ok := sections["google-places-key"]
 	require.True(t, ok, "google-places-key section should exist")
-	assert.Equal(t, "AIzaSyCwXVa0E5aCDmCg9FlhPeX8ct83E9EADFg", googlePlaces.APIKey)
+	assert.Equal(t, "AIzaTest_FakeKey1234567890ABCDEFGHIJKLMNO", googlePlaces.APIKey)
 	assert.Equal(t, "google-places", googlePlaces.ServiceType)
 	assert.Equal(t, "Google Places API key for location search functionality", googlePlaces.Description)
 
 	// Verify gemini-llm-key section
 	geminiLLM, ok := sections["gemini-llm-key"]
 	require.True(t, ok, "gemini-llm-key section should exist")
-	assert.Equal(t, "AIzaSyD1234567890abcdefghijklmnopqrstuv", geminiLLM.APIKey)
+	assert.Equal(t, "AIzaTest_FakeKey0987654321ZYXWVUTSRQPONML", geminiLLM.APIKey)
 	assert.Equal(t, "gemini-llm", geminiLLM.ServiceType)
 	assert.Equal(t, "Google Gemini API key for LLM features", geminiLLM.Description)
 }
@@ -232,4 +232,3 @@ func TestValidateAuthCredentialFile(t *testing.T) {
 		})
 	}
 }
-

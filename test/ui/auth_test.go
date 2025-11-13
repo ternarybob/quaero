@@ -38,7 +38,7 @@ func TestAuthPageLoad(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := env.GetBaseURL() + "/auth"
+	url := env.GetBaseURL() + "/settings?a=auth-apikeys,auth-cookies"
 	var title string
 
 	err = chromedp.Run(ctx,
@@ -50,7 +50,7 @@ func TestAuthPageLoad(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Fatalf("Failed to load auth page: %v", err)
+		t.Fatalf("Failed to load settings page: %v", err)
 	}
 
 	// Take screenshot
@@ -58,38 +58,38 @@ func TestAuthPageLoad(t *testing.T) {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
-	expectedTitle := "Authentication Management - Quaero"
+	expectedTitle := "Settings - Quaero"
 	if title != expectedTitle {
-		t.Errorf("Expected title '%s', got '%s' - routing issue: /auth should serve auth.html", expectedTitle, title)
+		t.Errorf("Expected title '%s', got '%s' - routing issue: /settings should serve settings.html", expectedTitle, title)
 	}
 
-	// Verify we're on the authentication management page by checking for "Authentication Management" heading
-	var hasAuthManagement bool
+	// Verify we're on the settings page by checking for "Settings" heading
+	var hasSettingsHeading bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.body.textContent.includes('Authentication Management')`, &hasAuthManagement),
+		chromedp.Evaluate(`document.body.textContent.includes('Settings')`, &hasSettingsHeading),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check page content: %v", err)
 	}
 
-	if !hasAuthManagement {
-		t.Error("Page does not contain 'Authentication Management' - wrong page loaded (check routes.go)")
+	if !hasSettingsHeading {
+		t.Error("Page does not contain 'Settings' - wrong page loaded (check routes.go)")
 	}
 
-	// Verify auth section exists
-	var hasAuthSection bool
+	// Verify accordion sections are expanded (auth-apikeys and auth-cookies)
+	var hasAccordionItems bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.body.textContent.includes('Authentication')`, &hasAuthSection),
+		chromedp.Evaluate(`document.querySelector('.accordion-item') !== null`, &hasAccordionItems),
 	)
 	if err != nil {
-		t.Fatalf("Failed to check auth section: %v", err)
+		t.Fatalf("Failed to check accordion: %v", err)
 	}
 
-	if !hasAuthSection {
-		t.Error("Page does not contain 'Authentication' section")
+	if !hasAccordionItems {
+		t.Error("Page does not contain accordion structure")
 	}
 
-	t.Log("✓ Auth page (auth.html) loads correctly")
+	t.Log("✓ Settings page with auth accordions loads correctly")
 }
 
 func TestAuthPageElements(t *testing.T) {
@@ -106,15 +106,15 @@ func TestAuthPageElements(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := env.GetBaseURL() + "/auth"
+	url := env.GetBaseURL() + "/settings?a=auth-apikeys,auth-cookies"
 
-	// Check for presence of key elements on auth.html (dedicated auth page)
+	// Check for presence of key elements on settings page with auth accordions
 	tests := []struct {
 		name     string
 		selector string
 	}{
 		{"Page title", ".page-title"},
-		{"Authentication card", ".card"},
+		{"Accordion items", ".accordion-item"},
 		{"Refresh button", "button[title='Refresh Authentications']"},
 	}
 
@@ -155,7 +155,7 @@ func TestAuthNavbar(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := env.GetBaseURL() + "/auth"
+	url := env.GetBaseURL() + "/settings?a=auth-apikeys,auth-cookies"
 
 	var navbarVisible bool
 	var menuItems []string
@@ -177,8 +177,8 @@ func TestAuthNavbar(t *testing.T) {
 		t.Error("Navbar not found on page")
 	}
 
-	// Check for expected menu items (auth page has dedicated AUTH menu item)
-	expectedItems := []string{"HOME", "JOBS", "AUTH", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
+	// Check for expected menu items (AUTH removed, authentication now in settings)
+	expectedItems := []string{"HOME", "JOBS", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
 	for _, expected := range expectedItems {
 		found := false
 		for _, item := range menuItems {
@@ -193,19 +193,19 @@ func TestAuthNavbar(t *testing.T) {
 		}
 	}
 
-	// Verify AUTH item is active on auth page
-	var authActive bool
+	// Verify SETTINGS item is active on settings page
+	var settingsActive bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('nav a[href="/auth"].active') !== null`, &authActive),
+		chromedp.Evaluate(`document.querySelector('nav a[href="/settings"].active') !== null`, &settingsActive),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check active menu item: %v", err)
 	}
-	if !authActive {
-		t.Errorf("AUTH menu item should be active on auth page")
+	if !settingsActive {
+		t.Errorf("SETTINGS menu item should be active on settings page")
 	}
 
-	t.Log("✓ Navbar displays correctly with AUTH item active")
+	t.Log("✓ Navbar displays correctly with SETTINGS item active")
 }
 
 func TestAuthCookieInjection(t *testing.T) {
@@ -273,8 +273,8 @@ func TestAuthCookieInjection(t *testing.T) {
 
 	t.Log("✓ Test cookies posted to server")
 
-	// Navigate to auth page and verify
-	url := env.GetBaseURL() + "/auth"
+	// Navigate to settings page with auth accordions and verify
+	url := env.GetBaseURL() + "/settings?a=auth-apikeys,auth-cookies"
 	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
@@ -283,11 +283,11 @@ func TestAuthCookieInjection(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Fatalf("Failed to load auth page: %v", err)
+		t.Fatalf("Failed to load settings page: %v", err)
 	}
 
 	// Take screenshot
-	if err := env.TakeScreenshot(ctx, "auth-page-with-cookies"); err != nil {
+	if err := env.TakeScreenshot(ctx, "settings-page-with-auth-cookies"); err != nil {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 

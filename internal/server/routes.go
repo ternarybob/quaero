@@ -16,8 +16,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
-	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))        // Authentication management page
-	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))        // Jobs page
+	// Auth redirect handler - handles both /auth and /auth/ with query parameter preservation
+	mux.HandleFunc("/auth", s.handleAuthRedirect)
+	mux.HandleFunc("/auth/", s.handleAuthRedirect)
+	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs")) // Jobs page
 	mux.HandleFunc("/jobs/add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
 	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs"))  // Legacy route (backwards compat)
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
@@ -316,4 +318,27 @@ func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {
 // handleSearchRoute delegates to SearchHandler (method enforcement happens at handler level)
 func (s *Server) handleSearchRoute(w http.ResponseWriter, r *http.Request) {
 	s.app.SearchHandler.SearchHandler(w, r)
+}
+
+// handleAuthRedirect redirects /auth and /auth/ to settings page with auth accordions expanded
+// Preserves any existing query parameters and uses 308 to maintain HTTP method
+func (s *Server) handleAuthRedirect(w http.ResponseWriter, r *http.Request) {
+	// Start with existing query parameters
+	params := r.URL.Query()
+
+	// Set or append the accordion parameter
+	// If 'a' parameter exists, append our auth sections; otherwise set it
+	existingA := params.Get("a")
+	if existingA != "" {
+		// Merge existing accordion sections with auth sections
+		params.Set("a", existingA+",auth-apikeys,auth-cookies")
+	} else {
+		params.Set("a", "auth-apikeys,auth-cookies")
+	}
+
+	// Build redirect URL
+	redirectURL := "/settings?" + params.Encode()
+
+	// Use 308 Permanent Redirect to preserve HTTP method
+	http.Redirect(w, r, redirectURL, http.StatusPermanentRedirect)
 }

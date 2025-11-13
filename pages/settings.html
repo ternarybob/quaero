@@ -19,21 +19,18 @@
         </div>
 
         <!-- Settings Accordion (Dynamic Loading) -->
-        <section x-data="settingsAccordion">
+        <div x-data="settingsAccordion" class="accordion">
 
             <!-- API Keys Accordion -->
             <div class="accordion-item">
-                <input type="checkbox" id="accordion-auth-apikeys" class="accordion-checkbox" @change="loadContent('auth-apikeys', '/partials/settings-auth-apikeys.html', $event.target.checked)">
+                <input type="checkbox" id="accordion-auth-apikeys" name="accordion-checkbox" hidden @change="loadContent('auth-apikeys', '/settings/auth-apikeys.html', $event.target.checked)">
                 <label for="accordion-auth-apikeys" class="accordion-header">
-                    <i class="fas fa-key"></i>
-                    <span>API Keys</span>
+                    <i class="icon icon-arrow-right mr-1"></i>API Keys
                 </label>
                 <div class="accordion-body">
-                    <div x-show="loading['auth-apikeys']" class="text-center p-5">
-                        <span class="icon">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-3">Loading API keys...</p>
+                    <div x-show="loading['auth-apikeys']" class="text-center" style="padding: 2rem;">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;">Loading API keys...</p>
                     </div>
                     <div x-show="!loading['auth-apikeys']" x-html="content['auth-apikeys']"></div>
                 </div>
@@ -41,17 +38,14 @@
 
             <!-- Authentication Cookies Accordion -->
             <div class="accordion-item">
-                <input type="checkbox" id="accordion-auth-cookies" class="accordion-checkbox" @change="loadContent('auth-cookies', '/partials/settings-auth-cookies.html', $event.target.checked)">
+                <input type="checkbox" id="accordion-auth-cookies" name="accordion-checkbox" hidden @change="loadContent('auth-cookies', '/settings/auth-cookies.html', $event.target.checked)">
                 <label for="accordion-auth-cookies" class="accordion-header">
-                    <i class="fas fa-lock"></i>
-                    <span>Authentication</span>
+                    <i class="icon icon-arrow-right mr-1"></i>Authentication
                 </label>
                 <div class="accordion-body">
-                    <div x-show="loading['auth-cookies']" class="text-center p-5">
-                        <span class="icon">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-3">Loading authentication...</p>
+                    <div x-show="loading['auth-cookies']" class="text-center" style="padding: 2rem;">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;">Loading authentication...</p>
                     </div>
                     <div x-show="!loading['auth-cookies']" x-html="content['auth-cookies']"></div>
                 </div>
@@ -59,17 +53,14 @@
 
             <!-- Configuration Accordion -->
             <div class="accordion-item">
-                <input type="checkbox" id="accordion-config" class="accordion-checkbox" @change="loadContent('config', '/partials/settings-config.html', $event.target.checked)">
+                <input type="checkbox" id="accordion-config" name="accordion-checkbox" hidden @change="loadContent('config', '/settings/config.html', $event.target.checked)">
                 <label for="accordion-config" class="accordion-header">
-                    <i class="fas fa-cog"></i>
-                    <span>Configuration</span>
+                    <i class="icon icon-arrow-right mr-1"></i>Configuration
                 </label>
                 <div class="accordion-body">
-                    <div x-show="loading['config']" class="text-center p-5">
-                        <span class="icon">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-3">Loading configuration...</p>
+                    <div x-show="loading['config']" class="text-center" style="padding: 2rem;">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;">Loading configuration...</p>
                     </div>
                     <div x-show="!loading['config']" x-html="content['config']"></div>
                 </div>
@@ -77,17 +68,14 @@
 
             <!-- Danger Zone Accordion -->
             <div class="accordion-item">
-                <input type="checkbox" id="accordion-danger" class="accordion-checkbox" @change="loadContent('danger', '/partials/settings-danger.html', $event.target.checked)">
+                <input type="checkbox" id="accordion-danger" name="accordion-checkbox" hidden @change="loadContent('danger', '/settings/danger.html', $event.target.checked)">
                 <label for="accordion-danger" class="accordion-header">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <span>Danger Zone</span>
+                    <i class="icon icon-arrow-right mr-1"></i>Danger Zone
                 </label>
                 <div class="accordion-body">
-                    <div x-show="loading['danger']" class="text-center p-5">
-                        <span class="icon">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-3">Loading danger zone...</p>
+                    <div x-show="loading['danger']" class="text-center" style="padding: 2rem;">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;">Loading danger zone...</p>
                     </div>
                     <div x-show="!loading['danger']" x-html="content['danger']"></div>
                 </div>
@@ -95,23 +83,20 @@
 
             <!-- Service Status Accordion -->
             <div class="accordion-item">
-                <input type="checkbox" id="accordion-status" class="accordion-checkbox" @change="loadContent('status', '/partials/settings-status.html', $event.target.checked)">
+                <input type="checkbox" id="accordion-status" name="accordion-checkbox" hidden @change="loadContent('status', '/settings/status.html', $event.target.checked)">
                 <label for="accordion-status" class="accordion-header">
-                    <i class="fas fa-server"></i>
-                    <span>Service Status</span>
+                    <i class="icon icon-arrow-right mr-1"></i>Service Status
                 </label>
                 <div class="accordion-body">
-                    <div x-show="loading['status']" class="text-center p-5">
-                        <span class="icon">
-                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                        </span>
-                        <p class="mt-3">Loading service status...</p>
+                    <div x-show="loading['status']" class="text-center" style="padding: 2rem;">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;">Loading service status...</p>
                     </div>
                     <div x-show="!loading['status']" x-html="content['status']"></div>
                 </div>
             </div>
 
-        </section>
+        </div>
 
         <!-- Service Logs -->
         <section style="margin-top: 1.5rem;">
