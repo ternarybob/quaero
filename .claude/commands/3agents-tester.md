@@ -5,8 +5,22 @@ description: read 3agents output (folder), m, review if api and ui tets eixts, u
 
 Test implementation from: $ARGUMENTS
 
+## INPUT HANDLING
+
+**If $ARGUMENTS is a folder path (e.g., `docs/fixes/01-plan-xxx/`):**
+- Read from that folder directly
+
+**If $ARGUMENTS is a file path (e.g., `docs/fixes/01-plan-v1-xxx.md`):**
+1. Extract filename without extension (e.g., `01-plan-v1-xxx`)
+2. Create short folder name: `{number}-plan-{short-desc}` (e.g., `01-plan-xxx`)
+3. Read from working folder in same directory: `docs/fixes/01-plan-xxx/`
+
+**If $ARGUMENTS is a task description:**
+- Read from: `docs/features/{lowercase-hyphenated}/`
+
+**Working Folder:** All test results and reports go into the same folder where 3agents output was read from.
+
 ## RULES
-**Read from:** `docs/features/{task}/`
 **Create tests:** Use @test-writer in `/test/api` or `/test/ui`
 **Run tests:** Execute both test suites
 **Report:** Simple pass/fail with issues
@@ -16,7 +30,7 @@ Test implementation from: $ARGUMENTS
 ## PROCESS
 
 ### 1. Read 3agents Output
-From `docs/features/{task}/`:
+From the working folder determined above:
 - `plan.md` - what was planned
 - `progress.md` - what was done
 - `summary.md` - completion status
@@ -47,7 +61,8 @@ cd /test/api && go test -v
 
 ### 5. Report
 
-`test-results.md`:
+Create `test-results.md` in the working folder:
+
 ```markdown
 # Test Results: {task}
 
@@ -68,10 +83,11 @@ cd /test/api && go test -v
 ✅ Implementation validated - ready to use
 
 {IF FAIL:}
-❌ Issues found - run: `3agents "Fix test failures from docs/features/{task}/test-results.md"`
+❌ Issues found - run: `3agents "Fix test failures from {working-folder}/test-results.md"`
 ```
 
-If failures, also create `fixes-needed.md`:
+If failures, also create `fixes-needed.md` in the working folder:
+
 ```markdown
 # Fixes Needed
 
@@ -91,5 +107,7 @@ If failures, also create `fixes-needed.md`:
 
 ---
 
-**Task:** $ARGUMENTS  
+**Task:** $ARGUMENTS
 **Mode:** Fast test and report
+
+**Working Folder:** Determined from $ARGUMENTS (folder path, file path, or task description)

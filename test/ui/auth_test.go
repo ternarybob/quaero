@@ -58,22 +58,22 @@ func TestAuthPageLoad(t *testing.T) {
 		t.Logf("Warning: Failed to take screenshot: %v", err)
 	}
 
-	expectedTitle := "Job Management - Quaero"
+	expectedTitle := "Authentication Management - Quaero"
 	if title != expectedTitle {
-		t.Errorf("Expected title '%s', got '%s' - routing issue: /auth should serve jobs.html", expectedTitle, title)
+		t.Errorf("Expected title '%s', got '%s' - routing issue: /auth should serve auth.html", expectedTitle, title)
 	}
 
-	// Verify we're on the jobs page with auth section by checking for "Job Management" heading
-	var hasJobManagement bool
+	// Verify we're on the authentication management page by checking for "Authentication Management" heading
+	var hasAuthManagement bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.body.textContent.includes('Job Management')`, &hasJobManagement),
+		chromedp.Evaluate(`document.body.textContent.includes('Authentication Management')`, &hasAuthManagement),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check page content: %v", err)
 	}
 
-	if !hasJobManagement {
-		t.Error("Page does not contain 'Job Management' - wrong page loaded (check routes.go)")
+	if !hasAuthManagement {
+		t.Error("Page does not contain 'Authentication Management' - wrong page loaded (check routes.go)")
 	}
 
 	// Verify auth section exists
@@ -89,7 +89,7 @@ func TestAuthPageLoad(t *testing.T) {
 		t.Error("Page does not contain 'Authentication' section")
 	}
 
-	t.Log("✓ Auth page (jobs.html with auth section) loads correctly")
+	t.Log("✓ Auth page (auth.html) loads correctly")
 }
 
 func TestAuthPageElements(t *testing.T) {
@@ -108,7 +108,7 @@ func TestAuthPageElements(t *testing.T) {
 
 	url := env.GetBaseURL() + "/auth"
 
-	// Check for presence of key elements on jobs.html (auth section)
+	// Check for presence of key elements on auth.html (dedicated auth page)
 	tests := []struct {
 		name     string
 		selector string
@@ -177,8 +177,8 @@ func TestAuthNavbar(t *testing.T) {
 		t.Error("Navbar not found on page")
 	}
 
-	// Check for expected menu items (auth page is under JOBS menu)
-	expectedItems := []string{"HOME", "JOBS", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
+	// Check for expected menu items (auth page has dedicated AUTH menu item)
+	expectedItems := []string{"HOME", "JOBS", "AUTH", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
 	for _, expected := range expectedItems {
 		found := false
 		for _, item := range menuItems {
@@ -193,19 +193,19 @@ func TestAuthNavbar(t *testing.T) {
 		}
 	}
 
-	// Verify JOBS item is active on auth page (auth is grouped under jobs menu)
-	var jobsActive bool
+	// Verify AUTH item is active on auth page
+	var authActive bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('nav a[href="/jobs"].active') !== null`, &jobsActive),
+		chromedp.Evaluate(`document.querySelector('nav a[href="/auth"].active') !== null`, &authActive),
 	)
 	if err != nil {
 		t.Fatalf("Failed to check active menu item: %v", err)
 	}
-	if !jobsActive {
-		t.Logf("Warning: JOBS menu item may not be marked as active on auth page (this is non-critical)")
+	if !authActive {
+		t.Errorf("AUTH menu item should be active on auth page")
 	}
 
-	t.Log("✓ Navbar displays correctly with expected menu items")
+	t.Log("✓ Navbar displays correctly with AUTH item active")
 }
 
 func TestAuthCookieInjection(t *testing.T) {

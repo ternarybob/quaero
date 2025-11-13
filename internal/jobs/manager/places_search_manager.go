@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -17,6 +18,7 @@ type PlacesSearchManager struct {
 	placesService   interfaces.PlacesService
 	documentService interfaces.DocumentService
 	eventService    interfaces.EventService
+	authStorage     interfaces.AuthStorage
 	logger          arbor.ILogger
 }
 
@@ -28,12 +30,14 @@ func NewPlacesSearchManager(
 	placesService interfaces.PlacesService,
 	documentService interfaces.DocumentService,
 	eventService interfaces.EventService,
+	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *PlacesSearchManager {
 	return &PlacesSearchManager{
 		placesService:   placesService,
 		documentService: documentService,
 		eventService:    eventService,
+		authStorage:     authStorage,
 		logger:          logger,
 	}
 }
@@ -62,6 +66,19 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 	// Validate search_type
 	if searchType != "text_search" && searchType != "nearby_search" {
 		return "", fmt.Errorf("search_type must be one of: text_search, nearby_search")
+	}
+
+	// Check for API key in step config and resolve it from storage
+	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.authStorage, apiKeyName, "")
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", apiKeyName, err)
+		}
+		m.logger.Info().
+			Str("step_name", step.Name).
+			Str("api_key_name", apiKeyName).
+			Msg("Resolved API key from storage for places search execution")
+		stepConfig["resolved_api_key"] = resolvedAPIKey
 	}
 
 	// Build search request

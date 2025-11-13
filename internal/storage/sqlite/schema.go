@@ -15,19 +15,24 @@ const schemaSQL = `
 CREATE TABLE IF NOT EXISTS auth_credentials (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
-	site_domain TEXT NOT NULL,
+	site_domain TEXT,
 	service_type TEXT NOT NULL,
 	data TEXT,
 	cookies TEXT,
 	tokens TEXT NOT NULL,
+	api_key TEXT,
+	auth_type TEXT NOT NULL DEFAULT 'cookie',
 	base_url TEXT NOT NULL,
 	user_agent TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
+	updated_at INTEGER NOT NULL,
+	-- Check constraint for auth_type values: 'cookie' for cookie-based auth, 'api_key' for API key storage
+ CHECK (auth_type IN ('cookie', 'api_key'))
 );
 
 -- Indexes for efficient lookup
-CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_site_domain ON auth_credentials(site_domain);
+-- Unique index on (name, auth_type) ensures unique API key names while allowing duplicate names across auth types
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_name_type ON auth_credentials(name, auth_type);
 CREATE INDEX IF NOT EXISTS idx_auth_service_type ON auth_credentials(service_type, site_domain);
 
 -- Documents table (normalized from all sources)

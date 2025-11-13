@@ -7,6 +7,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/genai"
@@ -35,13 +36,14 @@ type Service struct {
 // NewService creates a new agent service with Google ADK integration.
 //
 // The service performs the following initialization:
-//  1. Validates configuration (API key required, model name set)
+//  1. Resolves Google API key from auth storage with config fallback
 //  2. Initializes ADK Gemini model
 //  3. Registers built-in agent types (keyword extractor)
 //  4. Parses timeout duration
 //
 // Parameters:
 //   - config: Agent configuration (must have valid Google API key)
+//   - authStorage: Auth storage interface for API key resolution
 //   - logger: Structured logger for service operations
 //
 // Returns:
@@ -49,14 +51,16 @@ type Service struct {
 //   - error: nil on success, error with details on failure
 //
 // Errors:
-//   - Missing or empty Google API key
+//   - Missing or empty Google API key (from storage or config)
 //   - Invalid model name
 //   - Failed to initialize ADK model (network, auth, etc.)
 //   - Invalid timeout duration
-func NewService(config *common.AgentConfig, logger arbor.ILogger) (*Service, error) {
-	// Validate configuration
-	if config.GoogleAPIKey == "" {
-		return nil, fmt.Errorf("Google API key is required for agent service (set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config)")
+func NewService(config *common.AgentConfig, authStorage interfaces.AuthStorage, logger arbor.ILogger) (*Service, error) {
+	// Resolve API key from auth storage with config fallback
+	ctx := context.Background()
+	apiKey, err := common.ResolveAPIKey(ctx, authStorage, "gemini-agent", config.GoogleAPIKey)
+	if err != nil {
+		return nil, fmt.Errorf("Google API key is required for agent service (set via auth storage, QUAERO_AGENT_GOOGLE_API_KEY, or agent.google_api_key in config): %w", err)
 	}
 
 	if config.ModelName == "" {
@@ -70,9 +74,8 @@ func NewService(config *common.AgentConfig, logger arbor.ILogger) (*Service, err
 	}
 
 	// Initialize ADK Gemini model
-	ctx := context.Background()
 	geminiModel, err := gemini.NewModel(ctx, config.ModelName, &genai.ClientConfig{
-		APIKey:  config.GoogleAPIKey,
+		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {

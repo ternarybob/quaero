@@ -215,6 +215,17 @@ func (a *App) initDatabase() error {
 		}
 	}
 
+	// Load auth credentials from files (after job definitions)
+	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
+		ctx := context.Background()
+		if err := sqliteMgr.LoadAuthCredentialsFromFiles(ctx, a.Config.Auth.CredentialsDir); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load auth credentials from files")
+			// Don't fail startup - auth files are optional
+		} else {
+			a.Logger.Info().Str("dir", a.Config.Auth.CredentialsDir).Msg("Auth credentials loaded from files")
+		}
+	}
+
 	return nil
 }
 
@@ -255,7 +266,7 @@ func (a *App) initServices() error {
 	}
 
 	// 3.6. Initialize LLM service (Google ADK with Gemini)
-	a.LLMService, err = llm.NewGeminiService(a.Config, a.Logger)
+	a.LLMService, err = llm.NewGeminiService(a.Config, a.StorageManager.AuthStorage(), a.Logger)
 	if err != nil {
 		a.LLMService = nil // Explicitly set to nil on error
 		a.Logger.Warn().Err(err).Msg("Failed to initialize LLM service - chat features will be unavailable")
@@ -369,6 +380,7 @@ func (a *App) initServices() error {
 	// 6.8.1. Initialize Places service (Google Places API integration)
 	a.PlacesService = places.NewService(
 		&a.Config.PlacesAPI,
+		a.StorageManager.AuthStorage(),
 		a.EventService,
 		a.Logger,
 	)
@@ -396,6 +408,7 @@ func (a *App) initServices() error {
 	// 6.8.3. Initialize Agent service (Google ADK with Gemini)
 	a.AgentService, err = agents.NewService(
 		&a.Config.Agent,
+		a.StorageManager.AuthStorage(),
 		a.Logger,
 	)
 	if err != nil {
@@ -432,13 +445,13 @@ func (a *App) initServices() error {
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
-	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.Logger)
+	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.AuthStorage(), a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
 	// Register agent manager (if agent service is available)
 	if a.AgentService != nil {
-		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.Logger)
+		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.AuthStorage(), a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered")
 	}

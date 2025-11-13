@@ -1,0 +1,6 @@
+# Ignore all API key files by default
+*.toml
+
+# Exception: allow example files
+!example-api-keys.toml
+!README.md

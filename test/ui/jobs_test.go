@@ -156,7 +156,6 @@ func TestJobsPageElements(t *testing.T) {
 		name     string
 		selector string
 	}{
-		{"Authentication section", `[x-data*="authPage"]`},
 		{"Job Definitions section", `[x-data*="jobDefinitionsManagement"]`},
 		{"Card elements", ".card"},
 		{"Add Job button", `button.btn-primary`}, // Primary button in job definitions section
@@ -257,7 +256,7 @@ func TestJobsNavbar(t *testing.T) {
 	}
 
 	// Check for menu items (aligned with current navbar structure)
-	expectedItems := []string{"HOME", "JOBS", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
+	expectedItems := []string{"HOME", "JOBS", "AUTH", "QUEUE", "DOCUMENTS", "SEARCH", "CHAT", "SETTINGS"}
 	env.LogTest(t, "Checking for menu items: %v", expectedItems)
 	for _, expected := range expectedItems {
 		found := false
@@ -293,72 +292,6 @@ func TestJobsNavbar(t *testing.T) {
 
 	env.TakeScreenshot(ctx, "jobs-navbar")
 	env.LogTest(t, "✅ Navbar displays correctly with JOBS item")
-}
-
-// TestJobsAuthenticationSection verifies the authentication section displays correctly
-func TestJobsAuthenticationSection(t *testing.T) {
-	env, err := common.SetupTestEnvironment("TestJobsAuthenticationSection")
-	if err != nil {
-		t.Fatalf("Failed to setup test environment: %v", err)
-	}
-	defer env.Cleanup()
-
-	startTime := time.Now()
-	env.LogTest(t, "=== RUN TestJobsAuthenticationSection")
-	defer func() {
-		elapsed := time.Since(startTime)
-		if t.Failed() {
-			env.LogTest(t, "--- FAIL: TestJobsAuthenticationSection (%.2fs)", elapsed.Seconds())
-		} else {
-			env.LogTest(t, "--- PASS: TestJobsAuthenticationSection (%.2fs)", elapsed.Seconds())
-		}
-	}()
-
-	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
-
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	url := env.GetBaseURL() + "/jobs"
-
-	env.LogTest(t, "Navigating to jobs page: %s", url)
-	err = chromedp.Run(ctx,
-		chromedp.EmulateViewport(1920, 1080),
-		chromedp.Navigate(url),
-		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		chromedp.Sleep(2*time.Second), // Wait for Alpine.js
-	)
-
-	if err != nil {
-		env.LogTest(t, "ERROR: Failed to load jobs page: %v", err)
-		env.TakeScreenshot(ctx, "jobs-page-load-failed")
-		t.Fatalf("Failed to load jobs page: %v", err)
-	}
-
-	// Check for authentication section
-	var authSectionExists bool
-	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('[x-data="authPage()"]') !== null`, &authSectionExists),
-	)
-
-	if err != nil {
-		env.LogTest(t, "ERROR: Failed to check authentication section: %v", err)
-		t.Fatalf("Failed to check authentication section: %v", err)
-	}
-
-	if !authSectionExists {
-		env.LogTest(t, "ERROR: Authentication section not found")
-		env.TakeScreenshot(ctx, "auth-section-not-found")
-		t.Error("Authentication section not found on page")
-	} else {
-		env.LogTest(t, "✓ Authentication section found")
-	}
-
-	env.TakeScreenshot(ctx, "jobs-authentication-section")
-	env.LogTest(t, "✅ Authentication section displays correctly")
 }
 
 // TestJobsSourcesSection verifies the sources section has been removed

@@ -20,6 +20,7 @@ type Service struct {
 	config       *common.PlacesAPIConfig
 	eventService interfaces.EventService
 	logger       arbor.ILogger
+	apiKey       string
 	httpClient   *http.Client
 	lastRequest  time.Time // For rate limiting
 }
@@ -27,13 +28,24 @@ type Service struct {
 // NewService creates a new Places service instance
 func NewService(
 	config *common.PlacesAPIConfig,
+	authStorage interfaces.AuthStorage,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) interfaces.PlacesService {
+	// Resolve API key from auth storage with config fallback
+	ctx := context.Background()
+	apiKey, err := common.ResolveAPIKey(ctx, authStorage, "google-places", config.APIKey)
+	if err != nil {
+		// If resolution fails, fall back to config value (for backward compatibility)
+		apiKey = config.APIKey
+		logger.Warn().Err(err).Msg("Failed to resolve API key from auth storage, using config value")
+	}
+
 	return &Service{
 		config:       config,
 		eventService: eventService,
 		logger:       logger,
+		apiKey:       apiKey,
 		httpClient: &http.Client{
 			Timeout: config.RequestTimeout,
 		},
@@ -122,7 +134,7 @@ func (s *Service) textSearch(ctx context.Context, req *models.PlacesSearchReques
 	apiURL := "https://maps.googleapis.com/maps/api/place/textsearch/json"
 	params := url.Values{}
 	params.Set("query", req.SearchQuery)
-	params.Set("key", s.config.APIKey)
+	params.Set("key", s.apiKey)
 
 	fullURL := fmt.Sprintf("%s?%s", apiURL, params.Encode())
 
@@ -202,7 +214,7 @@ func (s *Service) nearbySearch(ctx context.Context, req *models.PlacesSearchRequ
 		}
 	}
 
-	params.Set("key", s.config.APIKey)
+	params.Set("key", s.apiKey)
 
 	fullURL := fmt.Sprintf("%s?%s", apiURL, params.Encode())
 

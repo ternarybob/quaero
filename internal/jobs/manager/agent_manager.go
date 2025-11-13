@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
@@ -17,6 +18,7 @@ type AgentManager struct {
 	jobMgr        *jobs.Manager
 	queueMgr      *queue.Manager
 	searchService interfaces.SearchService
+	authStorage   interfaces.AuthStorage
 	logger        arbor.ILogger
 }
 
@@ -28,12 +30,14 @@ func NewAgentManager(
 	jobMgr *jobs.Manager,
 	queueMgr *queue.Manager,
 	searchService interfaces.SearchService,
+	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *AgentManager {
 	return &AgentManager{
 		jobMgr:        jobMgr,
 		queueMgr:      queueMgr,
 		searchService: searchService,
+		authStorage:   authStorage,
 		logger:        logger,
 	}
 }
@@ -51,6 +55,19 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 	agentType, ok := stepConfig["agent_type"].(string)
 	if !ok || agentType == "" {
 		return "", fmt.Errorf("missing required config field: agent_type")
+	}
+
+	// Check for API key in step config and resolve it from storage
+	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.authStorage, apiKeyName, "")
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", apiKeyName, err)
+		}
+		m.logger.Info().
+			Str("step_name", step.Name).
+			Str("api_key_name", apiKeyName).
+			Msg("Resolved API key from storage for agent execution")
+		stepConfig["resolved_api_key"] = resolvedAPIKey
 	}
 
 	// Extract document filter from step config (optional)

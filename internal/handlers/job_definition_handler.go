@@ -15,6 +15,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
@@ -539,6 +540,13 @@ func (h *JobDefinitionHandler) validateRuntimeDependencies(jobDef *models.JobDef
 	jobDef.RuntimeStatus = "ready"
 	jobDef.RuntimeError = ""
 
+	// Validate API keys referenced in job definition steps
+	h.validateAPIKeys(jobDef)
+	if jobDef.RuntimeStatus != "ready" {
+		// validateAPIKeys set an error status, return early
+		return
+	}
+
 	// Check each step for dependencies
 	for _, step := range jobDef.Steps {
 		switch step.Action {
@@ -556,6 +564,32 @@ func (h *JobDefinitionHandler) validateRuntimeDependencies(jobDef *models.JobDef
 			//         jobDef.RuntimeError = "Google Places API key required"
 			//         return
 			//     }
+		}
+	}
+}
+
+// validateAPIKeys validates that API keys referenced in job definition steps exist in storage
+func (h *JobDefinitionHandler) validateAPIKeys(jobDef *models.JobDefinition) {
+	ctx := context.Background()
+
+	// Check all steps for api_key field
+	for _, step := range jobDef.Steps {
+		if step.Config != nil {
+			if apiKeyName, ok := step.Config["api_key"].(string); ok && apiKeyName != "" {
+				// Try to resolve the API key from storage
+				_, err := common.ResolveAPIKey(ctx, h.authStorage, apiKeyName, "")
+				if err != nil {
+					// API key not found or invalid
+					jobDef.RuntimeStatus = "error"
+					jobDef.RuntimeError = fmt.Sprintf("API key '%s' not found", apiKeyName)
+					h.logger.Warn().
+						Str("job_def_id", jobDef.ID).
+						Str("api_key_name", apiKeyName).
+						Str("error", err.Error()).
+						Msg("API key validation failed for job definition")
+					return // Return immediately on first error
+				}
+			}
 		}
 	}
 }

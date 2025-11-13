@@ -113,6 +113,31 @@ environment = "development" # "development" or "production"
 # definitions_dir = "./job-definitions"  # Uncomment to override default
 
 # =============================================================================
+# Authentication Storage Configuration
+# =============================================================================
+# Configure authentication credential storage for cookies and API keys.
+# Supports two types of credentials:
+#   1. Cookie-based authentication (captured from browsers)
+#   2. API keys (stored in TOML files)
+#
+# API KEY FILE STORAGE:
+#   - API keys are loaded from TOML files in credentials_dir at startup
+#   - Each file contains one API key credential (name, api_key, service_type)
+#   - Example: See deployments/local/auth/example-api-keys.toml
+#   - Security: All .toml files in credentials_dir are gitignored by default
+#
+# API KEY USAGE:
+#   - Reference by name in job definitions: api_key = "google-places-key"
+#   - View and manage in UI: /auth page
+#   - Masked in logs and UI for security
+#
+# Default: credentials_dir="./auth"
+# Env var: QUAERO_AUTH_CREDENTIALS_DIR
+
+# [auth]
+# credentials_dir = "./auth"  # Uncomment to override default
+
+# =============================================================================
 # Crawler Configuration (Firecrawl-style HTML Scraping)
 # =============================================================================
 # Configure HTML scraping behavior for web page crawling.

@@ -16,7 +16,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
-	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("jobs.html", "auth"))       // Jobs page (auth section)
+	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))       // Authentication management page
 	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Jobs page
 	mux.HandleFunc("/jobs/add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
 	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Legacy route (backwards compat)
@@ -179,6 +179,36 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 
 	// Skip if path is /api/auth/status or /api/auth/list (already handled)
 	if path == "/api/auth/status" || path == "/api/auth/list" {
+		return
+	}
+
+	// Handle /api/auth/api-key endpoints
+	if strings.HasPrefix(path, "/api/auth/api-key") {
+		// POST /api/auth/api-key - Create API key
+		if r.Method == "POST" && path == "/api/auth/api-key" {
+			s.app.AuthHandler.CreateAPIKeyHandler(w, r)
+			return
+		}
+
+		// GET /api/auth/api-key/{id} - Get API key by ID
+		if r.Method == "GET" && len(path) > len("/api/auth/api-key/") {
+			s.app.AuthHandler.GetAPIKeyHandler(w, r)
+			return
+		}
+
+		// PUT /api/auth/api-key/{id} - Update API key
+		if r.Method == "PUT" && len(path) > len("/api/auth/api-key/") {
+			s.app.AuthHandler.UpdateAPIKeyHandler(w, r)
+			return
+		}
+
+		// DELETE /api/auth/api-key/{id} - Delete API key
+		if r.Method == "DELETE" && len(path) > len("/api/auth/api-key/") {
+			s.app.AuthHandler.DeleteAPIKeyHandler(w, r)
+			return
+		}
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 

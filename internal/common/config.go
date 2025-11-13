@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/robfig/cron/v3"
+
+	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
 // Config represents the application configuration
@@ -20,6 +23,7 @@ type Config struct {
 	Processing  ProcessingConfig `toml:"processing"`
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
+	Auth        AuthDirConfig    `toml:"auth"`
 	Crawler     CrawlerConfig    `toml:"crawler"`
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
@@ -87,6 +91,11 @@ type LoggingConfig struct {
 // JobsConfig contains configuration for job definitions
 type JobsConfig struct {
 	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
+}
+
+// AuthDirConfig contains configuration for authentication file loading
+type AuthDirConfig struct {
+	CredentialsDir string `toml:"credentials_dir"` // Directory containing auth credential files (TOML)
 }
 
 // CrawlerConfig contains Firecrawl-inspired HTML scraping configuration
@@ -205,6 +214,9 @@ func NewDefaultConfig() *Config {
 		},
 		Jobs: JobsConfig{
 			DefinitionsDir: "./job-definitions", // Default directory for user-defined job files
+		},
+		Auth: AuthDirConfig{
+			CredentialsDir: "./auth", // Default directory for auth files
 		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Quaero/1.0 (Web Crawler)",
@@ -569,6 +581,11 @@ func applyEnvOverrides(config *Config) {
 			config.LLM.Temperature = float32(t)
 		}
 	}
+
+	// Auth configuration
+	if authDir := os.Getenv("QUAERO_AUTH_CREDENTIALS_DIR"); authDir != "" {
+		config.Auth.CredentialsDir = authDir
+	}
 }
 
 // ApplyFlagOverrides applies command-line flag overrides to config
@@ -580,6 +597,30 @@ func ApplyFlagOverrides(config *Config, port int, host string) {
 	if host != "" {
 		config.Server.Host = host
 	}
+}
+
+// ResolveAPIKey resolves an API key by name with fallback to config value
+// Resolution order: auth storage by name → config fallback → error
+// Returns the resolved API key string or error if not found
+func ResolveAPIKey(ctx context.Context, authStorage interfaces.AuthStorage, name string, configFallback string) (string, error) {
+	// Try to resolve from auth storage first
+	if authStorage != nil {
+		apiKey, err := authStorage.GetAPIKeyByName(ctx, name)
+		if err == nil && apiKey != "" {
+			// Successfully resolved from auth storage
+			return apiKey, nil
+		}
+		// Log debug message for troubleshooting (but don't fail)
+		// authStorage.GetAPIKeyByName returns an error if not found, which is expected
+	}
+
+	// Fallback to config value
+	if configFallback != "" {
+		return configFallback, nil
+	}
+
+	// Neither auth storage nor config provided the key
+	return "", fmt.Errorf("API key '%s' not found in auth storage or config", name)
 }
 
 // Helper functions for string manipulation

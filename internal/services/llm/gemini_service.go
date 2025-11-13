@@ -81,7 +81,7 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 // NewGeminiService creates a new Gemini LLM service instance.
 //
 // The service initialization includes:
-//  1. Validating the Google API key configuration
+//  1. Resolving Google API key from auth storage with config fallback
 //  2. Setting default model names if not specified
 //  3. Validating that EmbedDimension matches SQLite.EmbeddingDimension
 //  4. Parsing timeout duration from configuration
@@ -89,6 +89,7 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 //
 // Parameters:
 //   - config: Full application configuration to access storage settings
+//   - authStorage: Auth storage interface for API key resolution
 //   - logger: Structured logger for service operations
 //
 // Returns:
@@ -96,14 +97,16 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 //   - error: nil on success, error with details on failure
 //
 // Errors:
-//   - Missing or empty Google API key
+//   - Missing or empty Google API key (from storage or config)
 //   - EmbedDimension mismatch with SQLite configuration
 //   - Invalid model names or timeout duration
 //   - Failed to initialize ADK models (network, auth, etc.)
-func NewGeminiService(config *common.Config, logger arbor.ILogger) (*GeminiService, error) {
-	// Validate configuration
-	if config.LLM.GoogleAPIKey == "" {
-		return nil, fmt.Errorf("Google API key is required for LLM service (set QUAERO_LLM_GOOGLE_API_KEY or llm.google_api_key in config)")
+func NewGeminiService(config *common.Config, authStorage interfaces.AuthStorage, logger arbor.ILogger) (*GeminiService, error) {
+	// Resolve API key from auth storage with config fallback
+	ctx := context.Background()
+	apiKey, err := common.ResolveAPIKey(ctx, authStorage, "gemini-llm", config.LLM.GoogleAPIKey)
+	if err != nil {
+		return nil, fmt.Errorf("Google API key is required for LLM service (set via auth storage, QUAERO_LLM_GOOGLE_API_KEY, or llm.google_api_key in config): %w", err)
 	}
 
 	// Validate that EmbedDimension matches SQLite.EmbeddingDimension
@@ -126,9 +129,8 @@ func NewGeminiService(config *common.Config, logger arbor.ILogger) (*GeminiServi
 	}
 
 	// Initialize genai client
-	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  config.LLM.GoogleAPIKey,
+		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {

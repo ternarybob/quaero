@@ -5,8 +5,20 @@ description: Three-agent workflow - plan, implement, validate. Only stops for us
 
 Execute workflow for: $ARGUMENTS
 
+## INPUT HANDLING
+
+**If $ARGUMENTS is a file path (e.g., `docs/fixes/01-plan-v1-xxx.md`):**
+1. Extract filename without extension (e.g., `01-plan-v1-xxx`)
+2. Create short folder name: `{number}-plan-{short-desc}` (e.g., `01-plan-xxx`)
+3. Create working folder in same directory as the file: `docs/fixes/01-plan-xxx/`
+
+**If $ARGUMENTS is a task description:**
+1. Create lowercase-hyphenated folder name
+2. Create working folder: `docs/features/{task-name}/`
+
+**Output Location:** All markdown files (plan.md, step-*.md, progress.md, summary.md) go into the working folder determined above.
+
 ## RULES
-**Files:** Output markdown in `docs/features/{folder-name}/`
 **Tests:** Only `/test/api` and `/test/ui`
 **Binaries:** Never in root - use `go build -o /tmp/` or `go run`
 **Beta mode:** Breaking changes allowed
@@ -31,7 +43,12 @@ skills:
 ```
 
 ## SETUP
-Create `docs/features/{lowercase-hyphenated-task}/`
+
+**Determine working folder from $ARGUMENTS:**
+- If file path: Extract directory and create short folder name (e.g., `docs/fixes/01-plan-xxx/`)
+- If task description: Create `docs/features/{lowercase-hyphenated-task}/`
+
+**Create the working folder** and output all files there.
 
 ---
 
@@ -268,9 +285,14 @@ Step 4: {description} - In progress
 ## WORKFLOW
 
 ```
-Create docs/features/{task}/ folder
+# Determine working folder from $ARGUMENTS
+IF $ARGUMENTS is file path:
+  Extract directory and filename
+  Create short folder: {dir}/{number}-plan-{short}/
+ELSE:
+  Create folder: docs/features/{lowercase-hyphenated}/
 
-Agent 1: Create plan.md
+Agent 1: Create plan.md in working folder
 
 FOR each step in plan:
   
@@ -404,10 +426,10 @@ Reply with: "Option {N}" or provide your direction
 2. {any other recommendations}
 
 ## Documentation
-All step details available in:
-- `docs/features/{task}/plan.md`
-- `docs/features/{task}/step-{1..N}.md`
-- `docs/features/{task}/progress.md`
+All step details available in working folder:
+- `plan.md`
+- `step-{1..N}.md`
+- `progress.md`
 
 **Completed:** {ISO8601}
 ```
@@ -473,6 +495,7 @@ Tests: ✅ All pass
 
 ---
 
-**Task:** $ARGUMENTS  
-**Docs:** `docs/features/{folder-name}/`  
+**Task:** $ARGUMENTS
 **Mode:** Run to completion with Agent 2/3 iteration per step, stop only for user decisions
+
+**Working Folder:** Determined from $ARGUMENTS (file path or task description)
