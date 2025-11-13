@@ -1,0 +1,25 @@
+<div class="card" x-data="settingsStatus">
+
+    <div class="card-header">
+        <header class="navbar">
+            <section class="navbar-section">
+                <h2>Service Status</h2>
+            </section>
+            <section class="navbar-section">
+                <button class="btn btn-sm" @click="loadConfig()">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+                <span :class="'label ' + (isOnline ? 'label-success' : 'label-error')">
+                    <span x-text="isOnline ? 'Online' : 'Offline'"></span>
+                </span>
+            </section>
+        </header>
+    </div>
+
+    <div class="card-body">
+        <p><strong>Version:</strong> <span x-text="version"></span></p>
+        <p><strong>Build:</strong> <span x-text="build"></span></p>
+        <p><strong>Port:</strong> <span x-text="port"></span></p>
+        <p><strong>Host:</strong> <span x-text="host"></span></p>
+    </div>
+</div>

@@ -1,0 +1,22 @@
+<div class="card" x-data="settingsDanger">
+    <div class="card-header">
+        <h2 style="color: var(--color-danger);">Danger Zone</h2>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+            <div>
+                <p style="font-weight: bold;">Clear All Documents</p>
+                <p>
+                    Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
+                    Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
+                </p>
+            </div>
+            <div>
+                <button class="btn btn-sm btn-error" @click="confirmDeleteAllDocuments()">
+                    <i class="fas fa-trash"></i>
+                    <span>CLEAR ALL</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

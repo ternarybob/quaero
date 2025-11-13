@@ -21,8 +21,175 @@ window.debugError = function (component, message, error) {
     }
 };
 
+// Shared date formatting utility
+// Eliminates duplication across components and provides consistent date formatting
+window.formatDate = function (timestamp) {
+    if (!timestamp) return '-';
+
+    let date;
+    try {
+        // Handle different timestamp formats
+        if (typeof timestamp === 'string') {
+            // ISO string or other string format
+            date = new Date(timestamp);
+        } else if (typeof timestamp === 'number') {
+            // Determine if timestamp is in seconds or milliseconds
+            // Timestamps in seconds are typically < 10^11 (year 5138)
+            // Timestamps in milliseconds are typically >= 10^11
+            if (timestamp < 10000000000) {
+                // Assume seconds, multiply by 1000
+                date = new Date(timestamp * 1000);
+            } else {
+                // Assume milliseconds
+                date = new Date(timestamp);
+            }
+        } else {
+            return '-';
+        }
+
+        // Check if date is valid
+        if (isNaN(date.getTime())) return '-';
+
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+        if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    } catch (error) {
+        console.error('Error formatting date:', error);
+        return '-';
+    }
+};
+
 document.addEventListener('alpine:init', () => {
     window.debugLog('Common', 'Alpine.js init event started');
+
+    // Settings Accordion Component
+    Alpine.data('settingsAccordion', () => ({
+        content: {},
+        loading: {},
+        loadedSections: new Set(),
+
+        init() {
+            window.debugLog('SettingsAccordion', 'Initializing component');
+            // Parse URL parameter 'a' to get open accordions
+            const openAccordions = this.getOpenAccordions();
+            window.debugLog('SettingsAccordion', 'Open accordions from URL:', openAccordions);
+
+            // Open and load content for each accordion in URL
+            openAccordions.forEach(sectionId => {
+                // Check the checkbox to expand the accordion
+                const checkbox = document.getElementById(`accordion-${sectionId}`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    // Determine the partial URL based on section ID
+                    const partialUrl = `/partials/settings-${sectionId}.html`;
+                    this.loadContent(sectionId, partialUrl, true);
+                }
+            });
+        },
+
+        async loadContent(sectionId, partialUrl, isChecked) {
+            window.debugLog('SettingsAccordion', `loadContent called: ${sectionId}, ${partialUrl}, ${isChecked}`);
+
+            // If closing accordion, just update URL and return
+            if (!isChecked) {
+                this.updateUrl(sectionId, false);
+                return;
+            }
+
+            // If already loaded, just update URL and return
+            if (this.loadedSections.has(sectionId)) {
+                window.debugLog('SettingsAccordion', `Section ${sectionId} already loaded, skipping fetch`);
+                this.updateUrl(sectionId, true);
+                return;
+            }
+
+            // Set loading state
+            this.loading[sectionId] = true;
+
+            try {
+                window.debugLog('SettingsAccordion', `Fetching partial: ${partialUrl}`);
+                const response = await fetch(partialUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const html = await response.text();
+                window.debugLog('SettingsAccordion', `Loaded ${html.length} bytes for ${sectionId}`);
+
+                // Store content and mark as loaded
+                this.content[sectionId] = html;
+                this.loadedSections.add(sectionId);
+                this.loading[sectionId] = false;
+
+                // Update URL
+                this.updateUrl(sectionId, true);
+
+            } catch (error) {
+                window.debugError('SettingsAccordion', `Error loading ${sectionId}:`, error);
+                this.loading[sectionId] = false;
+
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification(`Failed to load ${sectionId}: ${error.message}`, 'error');
+                }
+            }
+        },
+
+        updateUrl(sectionId, isOpen) {
+            const url = new URL(window.location);
+            const params = new URLSearchParams(url.search);
+
+            // Get current accordion list
+            let accordions = this.getOpenAccordions();
+
+            if (isOpen) {
+                // Add section if not already in list
+                if (!accordions.includes(sectionId)) {
+                    accordions.push(sectionId);
+                }
+            } else {
+                // Remove section from list
+                accordions = accordions.filter(id => id !== sectionId);
+            }
+
+            // Sort alphabetically for consistent URLs
+            accordions.sort();
+
+            // Update or remove 'a' parameter
+            if (accordions.length > 0) {
+                params.set('a', accordions.join(','));
+            } else {
+                params.delete('a');
+            }
+
+            // Update URL without page reload
+            url.search = params.toString();
+            window.history.replaceState({}, '', url);
+
+            window.debugLog('SettingsAccordion', `URL updated: ${url.search}`);
+        },
+
+        getOpenAccordions() {
+            const params = new URLSearchParams(window.location.search);
+            const accordionParam = params.get('a');
+
+            if (!accordionParam) {
+                return [];
+            }
+
+            return accordionParam.split(',').filter(id => id.trim() !== '');
+        }
+    }));
+
     // Service Logs Component
     Alpine.data('serviceLogs', () => ({
         logs: [],
@@ -813,6 +980,7 @@ document.addEventListener('alpine:init', () => {
             this.notifications = [];
         }
     }));
+
 });
 
 // Global notification function using custom toast system

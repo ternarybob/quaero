@@ -1664,6 +1664,62 @@ body.modal-open {
     scroll-behavior: smooth;
 }
 
+/* Accordion Styles for Settings Page */
+.accordion-item {
+    margin-bottom: 0.5rem;
+}
+
+.accordion-checkbox {
+    display: none;
+}
+
+.accordion-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 1rem;
+    color: var(--text-primary);
+    transition: background-color 0.2s, border-color 0.2s;
+    user-select: none;
+}
+
+.accordion-header:hover {
+    background-color: var(--page-bg);
+    border-color: var(--color-primary);
+}
+
+.accordion-header i {
+    color: var(--color-primary);
+    font-size: 1.1rem;
+}
+
+.accordion-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+}
+
+.accordion-checkbox:checked~.accordion-body {
+    max-height: 5000px;
+    transition: max-height 0.5s ease-in;
+}
+
+.accordion-checkbox:checked~.accordion-header {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: transparent;
+}
+
+.accordion-body>div {
+    padding: 0;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .job-card-parent {
@@ -1681,5 +1737,10 @@ body.modal-open {
 
     .terminal-job-context {
         display: none;
+    }
+
+    .accordion-header {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
     }
 }

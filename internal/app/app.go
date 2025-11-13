@@ -23,14 +23,14 @@ import (
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
-	"github.com/ternarybob/quaero/internal/services/chat"
-	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/auth"
+	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
+	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/places"
 	"github.com/ternarybob/quaero/internal/services/scheduler"
@@ -173,10 +173,8 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	app.JobProcessor.Start()
 	app.Logger.Info().Msg("Job processor started")
 
-	// Load stored authentication if available
-	if _, err := app.AuthService.LoadAuth(); err == nil {
-		logger.Info().Msg("Loaded stored authentication credentials")
-	}
+	// Authentication will be loaded on-demand when needed (e.g., when crawler service uses it)
+	// This prevents noisy debug logs during startup when no credentials exist
 
 	// Start WebSocket background tasks for real-time UI updates
 	app.WSHandler.StartStatusBroadcaster()

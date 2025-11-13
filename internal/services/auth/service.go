@@ -42,9 +42,8 @@ func NewAtlassianAuthService(authStorage interfaces.AuthStorage, logger arbor.IL
 		logger:      logger,
 	}
 
-	if err := service.loadStoredAuth(); err != nil {
-		logger.Debug().Str("error", err.Error()).Msg("No stored authentication found")
-	}
+	// Don't load stored auth during initialization - it will be loaded on-demand
+	// This prevents noisy debug logs during startup when no credentials exist
 
 	return service, nil
 }

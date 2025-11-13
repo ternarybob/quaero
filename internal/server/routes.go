@@ -16,19 +16,23 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// UI Page routes (HTML templates)
 	mux.HandleFunc("/", s.app.PageHandler.ServePage("index.html", "home"))
-	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))       // Authentication management page
-	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))       // Jobs page
+	mux.HandleFunc("/auth", s.app.PageHandler.ServePage("auth.html", "auth"))        // Authentication management page
+	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))        // Jobs page
 	mux.HandleFunc("/jobs/add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
-	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Legacy route (backwards compat)
+	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs"))  // Legacy route (backwards compat)
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
 	mux.HandleFunc("/job", s.app.PageHandler.ServePage("job.html", "job")) // Job details page (uses ?id= query param)
 	mux.HandleFunc("/documents", s.app.PageHandler.ServePage("documents.html", "documents"))
 	mux.HandleFunc("/search", s.app.PageHandler.ServePage("search.html", "search"))
 	mux.HandleFunc("/chat", s.app.PageHandler.ServePage("chat.html", "chat"))
 	mux.HandleFunc("/settings", s.app.PageHandler.ServePage("settings.html", "settings"))
+	mux.HandleFunc("/settings/", s.app.PageHandler.ServePartial) // Serve partial HTML fragments
 
 	// Static files (CSS, JS, images)
 	mux.HandleFunc("/static/", s.app.PageHandler.StaticFileHandler)
+
+	// Partial files (for AJAX loading)
+	mux.HandleFunc("/partials/", s.app.PageHandler.PartialFileHandler)
 
 	// WebSocket route
 	mux.HandleFunc("/ws", s.app.WSHandler.HandleWebSocket)
@@ -49,7 +53,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
-	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler)                    // GET - all unique tags
+	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler) // GET - all unique tags
 	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents

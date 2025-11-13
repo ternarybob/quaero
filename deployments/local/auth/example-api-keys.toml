@@ -4,6 +4,9 @@
 #
 # IMPORTANT: This file is only an example and should not be loaded as-is.
 # Copy it to a new file with a descriptive name and add your real API keys.
+#
+# Format: Each API key is defined in a TOML section [section-name]
+# The section name becomes the credential name used in job definitions
 
 # =============================================================================
 # Google Places API Key
@@ -12,7 +15,7 @@
 # Get your API key from: https://console.cloud.google.com/apis/credentials
 # Enable the "Places API" in Google Cloud Console
 
-# name = "google-places-key"
+# [google-places-key]
 # api_key = "YOUR_GOOGLE_PLACES_API_KEY_HERE"
 # service_type = "google-places"
 # description = "Google Places API key for location search functionality"
@@ -24,7 +27,7 @@
 # Get your API key from: https://console.cloud.google.com/apis/credentials
 # Enable the "Gemini API" in Google Cloud Console
 
-# name = "gemini-llm-key"
+# [gemini-llm-key]
 # api_key = "YOUR_GEMINI_API_KEY_HERE"
 # service_type = "gemini-llm"
 # description = "Google Gemini API key for LLM features"
@@ -36,8 +39,7 @@
 # Get your API key from: https://console.cloud.google.com/apis/credentials
 # Enable required APIs in Google Cloud Console
 
-# name = "agent-google-key"
+# [agent-google-key]
 # api_key = "YOUR_AGENT_API_KEY_HERE"
 # service_type = "gemini-agent"
 # description = "Google API key for agent-based web interaction"
-

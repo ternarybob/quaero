@@ -18,68 +18,99 @@
             <p>System configuration, status, and operational controls</p>
         </div>
 
-        <!-- Service Status and Configuration (Alpine Component) -->
-        <section x-data="settingsPage()">
-            <!-- Service Status -->
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h2>Service Status</h2>
-                        </section>
-                        <section class="navbar-section">
-                            <button class="btn btn-sm" @click="loadConfig()">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                            <span :class="'label ' + (isOnline ? 'label-success' : 'label-error')">
-                                <span x-text="isOnline ? 'Online' : 'Offline'"></span>
-                            </span>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <p><strong>Version:</strong> <span x-text="version"></span></p>
-                    <p><strong>Build:</strong> <span x-text="build"></span></p>
-                    <p><strong>Port:</strong> <span x-text="port"></span></p>
-                    <p><strong>Host:</strong> <span x-text="host"></span></p>
-                </div>
-            </div>
+        <!-- Settings Accordion (Dynamic Loading) -->
+        <section x-data="settingsAccordion">
 
-            <!-- Configuration Details -->
-            <div class="card" style="margin-top: 1.5rem;">
-                <div class="card-header">
-                    <h2>Configuration Details</h2>
-                </div>
-                <div class="card-body">
-                    <pre class="code-block" style="max-height: 400px; overflow: auto;"><code x-text="formatConfig(config)"></code></pre>
-                </div>
-            </div>
-        </section>
-
-        <!-- Danger Zone -->
-        <section style="margin-top: 1.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <h2 style="color: var(--color-danger);">Danger Zone</h2>
-                </div>
-                <div class="card-body">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
-                        <div>
-                            <p style="font-weight: bold;">Clear All Documents</p>
-                            <p>
-                                Deletes ALL documents from the collection database. This will remove all indexed content from Jira and Confluence.
-                                Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.
-                            </p>
-                        </div>
-                        <div>
-                            <button class="btn btn-sm btn-error" onclick="confirmDeleteAllDocuments()">
-                                <i class="fas fa-trash"></i>
-                                <span>CLEAR ALL</span>
-                            </button>
-                        </div>
+            <!-- API Keys Accordion -->
+            <div class="accordion-item">
+                <input type="checkbox" id="accordion-auth-apikeys" class="accordion-checkbox" @change="loadContent('auth-apikeys', '/partials/settings-auth-apikeys.html', $event.target.checked)">
+                <label for="accordion-auth-apikeys" class="accordion-header">
+                    <i class="fas fa-key"></i>
+                    <span>API Keys</span>
+                </label>
+                <div class="accordion-body">
+                    <div x-show="loading['auth-apikeys']" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading API keys...</p>
                     </div>
+                    <div x-show="!loading['auth-apikeys']" x-html="content['auth-apikeys']"></div>
                 </div>
             </div>
+
+            <!-- Authentication Cookies Accordion -->
+            <div class="accordion-item">
+                <input type="checkbox" id="accordion-auth-cookies" class="accordion-checkbox" @change="loadContent('auth-cookies', '/partials/settings-auth-cookies.html', $event.target.checked)">
+                <label for="accordion-auth-cookies" class="accordion-header">
+                    <i class="fas fa-lock"></i>
+                    <span>Authentication</span>
+                </label>
+                <div class="accordion-body">
+                    <div x-show="loading['auth-cookies']" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading authentication...</p>
+                    </div>
+                    <div x-show="!loading['auth-cookies']" x-html="content['auth-cookies']"></div>
+                </div>
+            </div>
+
+            <!-- Configuration Accordion -->
+            <div class="accordion-item">
+                <input type="checkbox" id="accordion-config" class="accordion-checkbox" @change="loadContent('config', '/partials/settings-config.html', $event.target.checked)">
+                <label for="accordion-config" class="accordion-header">
+                    <i class="fas fa-cog"></i>
+                    <span>Configuration</span>
+                </label>
+                <div class="accordion-body">
+                    <div x-show="loading['config']" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading configuration...</p>
+                    </div>
+                    <div x-show="!loading['config']" x-html="content['config']"></div>
+                </div>
+            </div>
+
+            <!-- Danger Zone Accordion -->
+            <div class="accordion-item">
+                <input type="checkbox" id="accordion-danger" class="accordion-checkbox" @change="loadContent('danger', '/partials/settings-danger.html', $event.target.checked)">
+                <label for="accordion-danger" class="accordion-header">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>Danger Zone</span>
+                </label>
+                <div class="accordion-body">
+                    <div x-show="loading['danger']" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading danger zone...</p>
+                    </div>
+                    <div x-show="!loading['danger']" x-html="content['danger']"></div>
+                </div>
+            </div>
+
+            <!-- Service Status Accordion -->
+            <div class="accordion-item">
+                <input type="checkbox" id="accordion-status" class="accordion-checkbox" @change="loadContent('status', '/partials/settings-status.html', $event.target.checked)">
+                <label for="accordion-status" class="accordion-header">
+                    <i class="fas fa-server"></i>
+                    <span>Service Status</span>
+                </label>
+                <div class="accordion-body">
+                    <div x-show="loading['status']" class="text-center p-5">
+                        <span class="icon">
+                            <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        </span>
+                        <p class="mt-3">Loading service status...</p>
+                    </div>
+                    <div x-show="!loading['status']" x-html="content['status']"></div>
+                </div>
+            </div>
+
         </section>
 
         <!-- Service Logs -->
@@ -93,78 +124,7 @@
 
     {{template "snackbar.html" .}}
 
-    <script>
-        // Alpine.js component for settings page
-        function settingsPage() {
-            return {
-                isOnline: false,
-                version: 'unknown',
-                build: 'unknown',
-                port: 0,
-                host: '',
-                config: null,
-
-                init() {
-                    this.loadConfig();
-                },
-
-                async loadConfig() {
-                    try {
-                        const response = await fetch('/api/config');
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        const data = await response.json();
-
-                        this.isOnline = true;
-                        this.version = data.version || 'unknown';
-                        this.build = data.build || 'unknown';
-                        this.port = data.port || 0;
-                        this.host = data.host || '';
-                        this.config = data.config || {};
-
-                    } catch (error) {
-                        console.error('Failed to load configuration:', error);
-                        this.isOnline = false;
-                    }
-                },
-
-                formatConfig(cfg) {
-                    if (!cfg) return 'No configuration loaded';
-                    return JSON.stringify(cfg, null, 2);
-                }
-            }
-        }
-
-        // Confirm and delete all documents
-        async function confirmDeleteAllDocuments() {
-            const confirmed = confirm(
-                '⚠ WARNING: This will delete ALL documents from the collection database.\n\n' +
-                'This will remove all indexed content from Jira and Confluence.\n' +
-                'Source data (Jira projects/issues and Confluence spaces/pages) will remain and can be re-synced.\n\n' +
-                'Continue?'
-            );
-
-            if (!confirmed) return;
-
-            try {
-                const response = await fetch('/api/documents/clear-all', {
-                    method: 'DELETE'
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ error: 'Failed to clear documents' }));
-                    throw new Error(errorData.error || 'Failed to clear documents');
-                }
-
-                const result = await response.json();
-                showNotification(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`, 'success');
-            } catch (error) {
-                console.error('Error clearing documents:', error);
-                showNotification('Failed to clear documents: ' + error.message, 'error');
-            }
-        }
-    </script>
+    <script src="/static/settings-components.js"></script>
 </body>
 
 </html>
