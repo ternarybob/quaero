@@ -1,0 +1,41 @@
+{
+  "baseUrl": "https://test.atlassian.net",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+  "timestamp": 1699999999,
+  "cookies": [
+    {
+      "name": "cloud.session.token",
+      "value": "test-session-token-12345",
+      "domain": ".atlassian.net",
+      "path": "/",
+      "expires": 1731622799,
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "JSESSIONID",
+      "value": "test-jsessionid-67890",
+      "domain": ".atlassian.net",
+      "path": "/",
+      "expires": 1731622799,
+      "secure": true,
+      "httpOnly": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "atl.xsrf.token",
+      "value": "test-xsrf-token-abcdef",
+      "domain": ".atlassian.net",
+      "path": "/",
+      "expires": 1731622799,
+      "secure": true,
+      "httpOnly": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "tokens": {
+    "cloudId": "test-cloud-id-xyz123",
+    "atlToken": "test-atl-token-abc456"
+  }
+}

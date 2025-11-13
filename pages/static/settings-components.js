@@ -17,11 +17,6 @@
  */
 
 // Ensure dependencies are available
-if (typeof Alpine === 'undefined') {
-    console.error('Settings Components: Alpine.js is required but not loaded');
-    return;
-}
-
 if (typeof window.showNotification === 'undefined') {
     console.warn('Settings Components: window.showNotification function not found. Notifications may not work properly.');
 }
@@ -34,6 +29,15 @@ document.addEventListener('alpine:init', () => {
     };
 
     logger.debug('Bootstrap', 'Settings components initialization started');
+
+    // === GLOBAL COMPONENT STATE CACHE ===
+    // Prevents duplicate API calls when components are re-initialized by Alpine
+    // when accordion content is re-rendered via x-html
+    const componentStateCache = {
+        authCookies: { hasLoaded: false, data: [] },
+        authApiKeys: { hasLoaded: false, data: [] },
+        config: { hasLoaded: false, data: null }
+    };
 
     // === UTILITY MIXINS AND HELPERS ===
 
@@ -349,109 +353,62 @@ document.addEventListener('alpine:init', () => {
         }
     }));
 
-    // Configuration Details Component - Enhanced with better error handling
+    // Configuration Details Component - Simplified to display config as JSON
     Alpine.data('settingsConfig', () => ({
-        // State management
         config: null,
         isLoading: false,
-        error: null,
-        lastUpdated: null,
 
-        /**
-         * Component initialization
-         */
         init() {
+            // Check global cache to prevent duplicate API calls
+            if (componentStateCache.config.hasLoaded) {
+                logger.debug('Config', 'Loading from cache, skipping API call');
+                this.config = componentStateCache.config.data;
+                this.isLoading = false;
+                return;
+            }
+
+            // First load - fetch from API
             this.loadConfig();
         },
 
-        /**
-         * Enhanced configuration loading with better error handling
-         */
         async loadConfig() {
-            if (this.isLoading) return; // Prevent concurrent requests
+            if (this.isLoading) return;
 
             this.isLoading = true;
-            this.error = null;
 
             try {
-                logger.debug('Config', 'Loading detailed configuration');
+                logger.debug('Config', 'Fetching configuration from /api/config');
 
                 const response = await fetch('/api/config');
                 if (!response.ok) {
-                    throw new Error(`Configuration request failed: ${response.status} ${response.statusText}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
 
-                // Enhanced data validation and parsing
-                this.config = this.sanitizeConfigData(data.config || data);
-                this.lastUpdated = new Date();
+                // Store the entire response data for display
+                this.config = data;
+
+                // Store in global cache
+                componentStateCache.config.hasLoaded = true;
+                componentStateCache.config.data = data;
 
                 logger.debug('Config', 'Configuration loaded successfully', {
-                    configKeys: this.config ? Object.keys(this.config) : []
+                    keys: Object.keys(data)
                 });
-
             } catch (error) {
-                this.error = error.message;
                 logger.error('Config', 'Failed to load configuration', error);
                 this.config = null;
+
+                // Show notification if available
+                if (window.showNotification) {
+                    window.showNotification('Failed to load configuration', 'error');
+                }
             } finally {
                 this.isLoading = false;
             }
         },
 
-        /**
-         * Sanitize and validate configuration data
-         */
-        sanitizeConfigData(config) {
-            if (!config || typeof config !== 'object') {
-                return null;
-            }
-
-            // Create a safe copy with filtered sensitive data
-            const sanitized = {};
-            for (const [key, value] of Object.entries(config)) {
-                // Skip sensitive keys
-                if (this.isSensitiveKey(key)) {
-                    sanitized[key] = '[REDACTED]';
-                    continue;
-                }
-
-                // Recursively sanitize nested objects
-                if (typeof value === 'object' && value !== null) {
-                    sanitized[key] = this.sanitizeConfigData(value);
-                } else if (typeof value === 'string') {
-                    sanitized[key] = this.sanitizeString(value);
-                } else {
-                    sanitized[key] = value;
-                }
-            }
-
-            return sanitized;
-        },
-
-        /**
-         * Check if a config key contains sensitive information
-         */
-        isSensitiveKey(key) {
-            const sensitiveKeys = [
-                'password', 'secret', 'key', 'token', 'auth',
-                'credential', 'private', 'api_key', 'access_token'
-            ];
-            return sensitiveKeys.some(sensitive => key.toLowerCase().includes(sensitive));
-        },
-
-        /**
-         * Sanitize string values to prevent XSS
-         */
-        sanitizeString(value) {
-            if (typeof value !== 'string') return '';
-            return value.replace(/[<>"'`]/g, '');
-        },
-
-        /**
-         * Enhanced configuration formatting with error handling
-         */
         formatConfig(cfg) {
             if (!cfg) {
                 return 'No configuration loaded';
@@ -463,13 +420,6 @@ document.addEventListener('alpine:init', () => {
                 logger.error('Config', 'Failed to format configuration', error);
                 return 'Error formatting configuration';
             }
-        },
-
-        /**
-         * Manual refresh configuration
-         */
-        async refresh() {
-            await this.loadConfig();
         }
     }));
 
@@ -486,6 +436,14 @@ document.addEventListener('alpine:init', () => {
          * Component initialization
          */
         init() {
+            // Check global cache to prevent duplicate API calls when component re-initializes
+            if (componentStateCache.authCookies.hasLoaded) {
+                logger.debug('AuthCookies', 'Loading from cache, skipping API call');
+                this.authentications = componentStateCache.authCookies.data;
+                return;
+            }
+
+            // First load - fetch from API
             this.loadAuthentications();
         },
 
@@ -518,6 +476,10 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 this.lastUpdated = new Date();
+
+                // Store in global cache to prevent duplicate API calls on re-initialization
+                componentStateCache.authCookies.hasLoaded = true;
+                componentStateCache.authCookies.data = this.authentications;
 
                 logger.debug('AuthCookies', 'Authentication data loaded successfully', {
                     count: this.authentications.length
@@ -647,6 +609,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         init() {
+            // Check global cache to prevent duplicate API calls when component re-initializes
+            if (componentStateCache.authApiKeys.hasLoaded) {
+                logger.debug('AuthApiKeys', 'Loading from cache, skipping API call');
+                this.apiKeys = componentStateCache.authApiKeys.data;
+                this.loading = false;
+                return;
+            }
+
+            // First load - fetch from API
             this.loadApiKeys();
         },
 
@@ -671,6 +642,10 @@ document.addEventListener('alpine:init', () => {
                 } else {
                     this.apiKeys = [];
                 }
+
+                // Store in global cache to prevent duplicate API calls on re-initialization
+                componentStateCache.authApiKeys.hasLoaded = true;
+                componentStateCache.authApiKeys.data = this.apiKeys;
             } catch (error) {
                 console.error('Failed to load API keys:', error);
                 window.showNotification('Failed to load API keys', 'error');

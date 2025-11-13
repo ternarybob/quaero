@@ -13,7 +13,7 @@
     </div>
     <div class="card-body">
         <!-- Loading State -->
-        <div x-show="loading" class="text-center p-5">
+        <div x-show="isLoading" class="text-center p-5">
             <span class="icon">
                 <i class="fas fa-spinner fa-pulse fa-2x"></i>
             </span>
@@ -21,7 +21,7 @@
         </div>
 
         <!-- Empty State -->
-        <div x-show="!loading && authentications.length === 0" class="text-center p-5">
+        <div x-show="!isLoading && authentications.length === 0" class="text-center p-5">
             <span class="icon text-muted">
                 <i class="fas fa-lock fa-3x"></i>
             </span>
@@ -30,7 +30,7 @@
         </div>
 
         <!-- Authentication Table -->
-        <div x-show="!loading && authentications.length > 0">
+        <div x-show="!isLoading && authentications.length > 0">
             <table class="table striped border">
                 <thead>
                     <tr>

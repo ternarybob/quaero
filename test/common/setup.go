@@ -570,6 +570,28 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
+	// Copy auth directory to bin/auth
+	authSourcePath, err := filepath.Abs("../config/auth")
+	if err != nil {
+		return fmt.Errorf("failed to resolve auth source path: %w", err)
+	}
+
+	authDestPath := filepath.Join(binDir, "auth")
+
+	// Remove existing auth directory if it exists
+	if _, err := os.Stat(authDestPath); err == nil {
+		if err := os.RemoveAll(authDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing auth directory: %w", err)
+		}
+	}
+
+	// Copy auth directory
+	if err := env.copyDir(authSourcePath, authDestPath); err != nil {
+		return fmt.Errorf("failed to copy auth directory: %w", err)
+	}
+
+	fmt.Fprintf(env.LogFile, "Auth configs copied from %s to: %s\n", authSourcePath, authDestPath)
+
 	return nil
 }
 

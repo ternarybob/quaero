@@ -1,0 +1,7 @@
+# Test API Key Configuration
+# This file is used by tests to verify API key loading functionality
+
+[test-google-places-key]
+api_key = "AIzaSyTest1234567890ABCDEFGHIJKLMNOPQRS"
+service_type = "google-places"
+description = "Test Google Places API key for automated testing"
