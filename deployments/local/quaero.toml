@@ -115,27 +115,38 @@ environment = "development" # "development" or "production"
 # =============================================================================
 # Authentication Storage Configuration
 # =============================================================================
-# Configure authentication credential storage for cookies and API keys.
-# Supports two types of credentials:
-#   1. Cookie-based authentication (captured from browsers)
-#   2. API keys (stored in TOML files)
-#
-# API KEY FILE STORAGE:
-#   - API keys are loaded from TOML files in credentials_dir at startup
-#   - Each file contains one API key credential (name, api_key, service_type)
-#   - Example: See deployments/local/auth/example-api-keys.toml
-#   - Security: All .toml files in credentials_dir are gitignored by default
-#
-# API KEY USAGE:
-#   - Reference by name in job definitions: api_key = "google-places-key"
-#   - View and manage in UI: /auth page
-#   - Masked in logs and UI for security
+# Configure cookie-based authentication credential storage.
+# Used for browser authentication tokens captured via Chrome extension.
 #
 # Default: credentials_dir="./auth"
 # Env var: QUAERO_AUTH_CREDENTIALS_DIR
 
 # [auth]
 # credentials_dir = "./auth"  # Uncomment to override default
+
+# =============================================================================
+# Key/Value Storage Configuration
+# =============================================================================
+# Configure key/value pair storage for API keys, secrets, and configuration values.
+# Keys are loaded from TOML files in the keys directory at startup.
+#
+# TOML FILE FORMAT:
+#   [key-name]
+#   value = "your-secret-value"      # Required
+#   description = "Optional description"  # Optional
+#
+# USAGE:
+#   - Keys can be referenced in config: {key-name}
+#   - View and manage in UI: /settings?a=auth-apikeys
+#   - Values are masked in logs and UI for security
+#
+# Example: See bin/keys/example-keys.toml
+#
+# Default: dir="./keys"
+# Env var: QUAERO_KEYS_DIR
+
+# [keys]
+# dir = "./keys"  # Uncomment to override default
 
 # =============================================================================
 # Crawler Configuration (Firecrawl-style HTML Scraping)

@@ -290,7 +290,7 @@ document.addEventListener('alpine:init', () => {
         content: {},
         loading: {},
         loadedSections: new Set(),
-        activeSection: null,
+        activeSection: 'auth-apikeys',
         defaultSection: 'auth-apikeys',
         validSections: ['auth-apikeys', 'auth-cookies', 'config', 'danger', 'status'],
 

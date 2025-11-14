@@ -1,0 +1,24 @@
+# Test configuration for API keys loading test
+# Extends base test-quaero.toml configuration
+
+environment = "development"
+
+[server]
+port = 18085  # Test port (UI tests)
+
+[storage.sqlite]
+reset_on_startup = true  # Delete database on startup for clean test runs
+
+# Configure keys directory to use test keys
+[keys]
+dir = "./test/config/keys"  # Use test keys directory with test-keys.toml
+
+[logging]
+level = "debug"
+min_event_level = "debug"
+
+[agent]
+google_api_key = ""  # Disabled for tests
+
+[llm]
+google_api_key = ""  # Disabled for tests
