@@ -18,6 +18,7 @@ type AgentManager struct {
 	jobMgr        *jobs.Manager
 	queueMgr      *queue.Manager
 	searchService interfaces.SearchService
+	kvStorage     interfaces.KeyValueStorage
 	authStorage   interfaces.AuthStorage
 	logger        arbor.ILogger
 }
@@ -30,6 +31,7 @@ func NewAgentManager(
 	jobMgr *jobs.Manager,
 	queueMgr *queue.Manager,
 	searchService interfaces.SearchService,
+	kvStorage interfaces.KeyValueStorage,
 	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *AgentManager {
@@ -37,6 +39,7 @@ func NewAgentManager(
 		jobMgr:        jobMgr,
 		queueMgr:      queueMgr,
 		searchService: searchService,
+		kvStorage:     kvStorage,
 		authStorage:   authStorage,
 		logger:        logger,
 	}
@@ -57,9 +60,9 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		return "", fmt.Errorf("missing required config field: agent_type")
 	}
 
-	// Check for API key in step config and resolve it from storage
+	// Check for API key in step config and resolve it from KV store
 	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.authStorage, apiKeyName, "")
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, apiKeyName, "")
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", apiKeyName, err)
 		}

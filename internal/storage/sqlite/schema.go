@@ -11,7 +11,7 @@ import (
 
 const schemaSQL = `
 -- Authentication table
--- Site-based authentication for multiple service instances
+-- Site-based authentication for cookie-based web services
 CREATE TABLE IF NOT EXISTS auth_credentials (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -20,20 +20,27 @@ CREATE TABLE IF NOT EXISTS auth_credentials (
 	data TEXT,
 	cookies TEXT,
 	tokens TEXT NOT NULL,
-	api_key TEXT,
-	auth_type TEXT NOT NULL DEFAULT 'cookie',
 	base_url TEXT NOT NULL,
 	user_agent TEXT NOT NULL,
 	created_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL,
-	-- Check constraint for auth_type values: 'cookie' for cookie-based auth, 'api_key' for API key storage
- CHECK (auth_type IN ('cookie', 'api_key'))
+	updated_at INTEGER NOT NULL
 );
 
 -- Indexes for efficient lookup
--- Unique index on (name, auth_type) ensures unique API key names while allowing duplicate names across auth types
-CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_name_type ON auth_credentials(name, auth_type);
 CREATE INDEX IF NOT EXISTS idx_auth_service_type ON auth_credentials(service_type, site_domain);
+
+-- Key/Value store table for generic key/value storage
+-- Provides simple string-based storage with optional descriptions
+CREATE TABLE IF NOT EXISTS key_value_store (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	description TEXT,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+-- Index for efficient listing by recency
+CREATE INDEX IF NOT EXISTS idx_kv_updated ON key_value_store(updated_at DESC);
 
 -- Documents table (normalized from all sources)
 -- Supports Firecrawl-style layered crawling with detail_level

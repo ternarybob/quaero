@@ -599,12 +599,11 @@ document.addEventListener('alpine:init', () => {
         showPassword: false,
         showCreateModal: false,
         showEditModal: false,
-        editingId: null,
-        showFullById: {},  // Track show/hide state per API key
+        editingKey: null,
+        showFullByKey: {},  // Track show/hide state per API key
         formData: {
-            name: '',
-            apiKey: '',
-            serviceType: '',
+            key: '',
+            value: '',
             description: ''
         },
 
@@ -624,21 +623,14 @@ document.addEventListener('alpine:init', () => {
         async loadApiKeys() {
             this.loading = true;
             try {
-                const response = await fetch('/api/auth/list');
+                const response = await fetch('/api/kv');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                // Defensive filtering: include items that are API keys OR have api_key field
+                // Store key/value pairs
                 if (Array.isArray(data)) {
-                    this.apiKeys = data.filter(auth => {
-                        // Log unknown shapes for diagnostics if debug is enabled
-                        if (window.QUAERO_DEBUG && !('auth_type' in auth) && !('api_key' in auth)) {
-                            console.log('Auth item without auth_type or api_key field:', auth);
-                        }
-                        // Include if it's an API key type OR has api_key field
-                        return auth.auth_type === 'api_key' || !!auth.api_key;
-                    });
+                    this.apiKeys = data;
                 } else {
                     this.apiKeys = [];
                 }
@@ -654,14 +646,14 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async deleteApiKey(id, name) {
-            if (!confirm(`Are you sure you want to delete API key "${name}"?\n\nAny job definitions using this API key will fail.`)) {
+        async deleteApiKey(key, displayName) {
+            if (!confirm(`Are you sure you want to delete key "${displayName}"?\n\nAny job definitions using this key will fail.`)) {
                 return;
             }
 
-            this.deleting = id;
+            this.deleting = key;
             try {
-                const response = await fetch(`/api/auth/api-key/${id}`, {
+                const response = await fetch(`/api/kv/${encodeURIComponent(key)}`, {
                     method: 'DELETE'
                 });
 
@@ -670,23 +662,22 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 // Remove from local array
-                this.apiKeys = this.apiKeys.filter(key => key.id !== id);
-                window.showNotification('API key deleted successfully', 'success');
+                this.apiKeys = this.apiKeys.filter(item => item.key !== key);
+                window.showNotification('Key deleted successfully', 'success');
             } catch (error) {
-                console.error('Failed to delete API key:', error);
-                window.showNotification('Failed to delete API key', 'error');
+                console.error('Failed to delete key:', error);
+                window.showNotification('Failed to delete key', 'error');
             } finally {
                 this.deleting = null;
             }
         },
 
         editApiKey(apiKey) {
-            this.editingId = apiKey.id;
+            this.editingKey = apiKey.key;
             this.formData = {
-                name: apiKey.name,
-                apiKey: '', // Don't prefill for security
-                serviceType: apiKey.service_type,
-                description: this.getDescription(apiKey)
+                key: apiKey.key,
+                value: '', // Don't prefill for security
+                description: apiKey.description || ''
             };
             this.showEditModal = true;
         },
@@ -695,19 +686,18 @@ document.addEventListener('alpine:init', () => {
             this.saving = true;
             try {
                 const isEdit = this.showEditModal;
-                const url = isEdit ? `/api/auth/api-key/${this.editingId}` : '/api/auth/api-key';
+                const url = isEdit ? `/api/kv/${encodeURIComponent(this.formData.key)}` : '/api/kv';
                 const method = isEdit ? 'PUT' : 'POST';
 
                 // Prepare request body
                 const body = {
-                    name: this.formData.name,
-                    service_type: this.formData.serviceType,
-                    description: this.formData.description
+                    value: this.formData.value,
+                    description: this.formData.description || ''
                 };
 
-                // Only include API key if provided (for create or update)
-                if (this.formData.apiKey) {
-                    body.api_key = this.formData.apiKey;
+                // Include key for create
+                if (!isEdit) {
+                    body.key = this.formData.key;
                 }
 
                 const response = await fetch(url, {
@@ -720,7 +710,7 @@ document.addEventListener('alpine:init', () => {
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                 }
 
                 // Reload API keys from server
@@ -728,13 +718,13 @@ document.addEventListener('alpine:init', () => {
                 this.closeModals();
 
                 window.showNotification(
-                    `API key ${isEdit ? 'updated' : 'created'} successfully`,
+                    `Key ${isEdit ? 'updated' : 'created'} successfully`,
                     'success'
                 );
             } catch (error) {
-                console.error('Failed to save API key:', error);
+                console.error('Failed to save key:', error);
                 window.showNotification(
-                    error.message || `Failed to ${this.showEditModal ? 'update' : 'create'} API key`,
+                    error.message || `Failed to ${this.showEditModal ? 'update' : 'create'} key`,
                     'error'
                 );
             } finally {
@@ -745,37 +735,32 @@ document.addEventListener('alpine:init', () => {
         closeModals() {
             this.showCreateModal = false;
             this.showEditModal = false;
-            this.editingId = null;
+            this.editingKey = null;
             this.formData = {
-                name: '',
-                apiKey: '',
-                serviceType: '',
+                key: '',
+                value: '',
                 description: ''
             };
             this.showPassword = false;  // Reset password visibility
         },
 
         getDescription(apiKey) {
-            // Try to get description from data object
-            if (apiKey.data && apiKey.data.description) {
-                return apiKey.data.description;
-            }
-            return '-';
+            return apiKey.description || '-';
         },
 
-        toggleApiKeyVisibility(id) {
-            this.showFullById[id] = !this.showFullById[id];
+        toggleApiKeyVisibility(key) {
+            this.showFullByKey[key] = !this.showFullByKey[key];
         },
 
-        getShowFull(id) {
-            return this.showFullById[id] || false;
+        getShowFull(key) {
+            return this.showFullByKey[key] || false;
         },
 
         getMaskedApiKey(apiKey) {
             // If show full is enabled for this key, show the masked string
             // Otherwise show fully masked version
-            const isShown = this.getShowFull(apiKey.id);
-            const maskedString = apiKey.api_key || '***MASKED***';
+            const isShown = this.getShowFull(apiKey.key);
+            const maskedString = apiKey.value || '***MASKED***';
 
             if (!isShown) {
                 // Fully masked - don't reveal pattern

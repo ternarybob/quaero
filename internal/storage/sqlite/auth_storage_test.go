@@ -10,211 +10,78 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStoreCredentials_WithAPIKey(t *testing.T) {
+func TestStoreCredentials_CookieBased(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	logger := arbor.NewLogger()
 	storage := NewAuthStorage(db, logger)
 
-	// Test storing API key credentials
+	// Test storing cookie-based credentials with site domain
 	creds := &models.AuthCredentials{
-		Name:        "test-api-key",
-		SiteDomain:  "", // Empty site domain for API keys
-		ServiceType: "google-places",
-		APIKey:      "test-api-key-value",
-		AuthType:    "api_key",
-		Data:        map[string]interface{}{"description": "Test API key"},
-	}
-
-	err := storage.StoreCredentials(context.Background(), creds)
-	require.NoError(t, err)
-
-	// Retrieve by ID
-	stored, err := storage.GetCredentialsByID(context.Background(), creds.ID)
-	require.NoError(t, err)
-	assert.NotNil(t, stored)
-	assert.Equal(t, "test-api-key", stored.Name)
-	assert.Equal(t, "api_key", stored.AuthType)
-	assert.Equal(t, "test-api-key-value", stored.APIKey)
-	assert.Empty(t, stored.SiteDomain) // Should be empty for API keys
-	assert.Empty(t, stored.BaseURL)    // Should be empty when not provided
-
-	// Test storing with site domain - should auto-generate BaseURL
-	creds2 := &models.AuthCredentials{
 		Name:        "test-with-domain",
 		SiteDomain:  "example.com",
 		ServiceType: "atlassian",
-		AuthType:    "cookie",
-		Data:        map[string]interface{}{},
+		Data:        map[string]interface{}{"description": "Test credentials"},
 	}
 
-	err = storage.StoreCredentials(context.Background(), creds2)
+	err := storage.StoreCredentials(context.Background(), creds)
 	require.NoError(t, err)
 
 	// Retrieve and verify BaseURL was auto-generated
-	stored2, err := storage.GetCredentialsByID(context.Background(), creds2.ID)
+	stored, err := storage.GetCredentialsByID(context.Background(), creds.ID)
 	require.NoError(t, err)
-	assert.NotNil(t, stored2)
-	assert.Equal(t, "example.com", stored2.SiteDomain)
-	assert.Equal(t, "https://example.com", stored2.BaseURL) // Should be auto-generated
+	assert.NotNil(t, stored)
+	assert.Equal(t, "example.com", stored.SiteDomain)
+	assert.Equal(t, "https://example.com", stored.BaseURL) // Should be auto-generated
+	assert.Equal(t, "test-with-domain", stored.Name)
 }
 
-func TestGetCredentialsByName_WithAuthType(t *testing.T) {
+func TestStoreCredentials_WithBaseURL(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	logger := arbor.NewLogger()
 	storage := NewAuthStorage(db, logger)
 
-	// Create cookie credential
-	cookieCreds := &models.AuthCredentials{
-		Name:        "my-site",
-		SiteDomain:  "example.com",
-		ServiceType: "atlassian",
-		AuthType:    "cookie",
-		Data:        map[string]interface{}{},
-	}
-
-	err := storage.StoreCredentials(context.Background(), cookieCreds)
-	require.NoError(t, err)
-
-	// Create API key credential with same name
-	apiKeyCreds := &models.AuthCredentials{
-		Name:        "my-api-key",
-		SiteDomain:  "",
-		ServiceType: "google-places",
-		APIKey:      "api-key-value",
-		AuthType:    "api_key",
-		Data:        map[string]interface{}{},
-	}
-
-	err = storage.StoreCredentials(context.Background(), apiKeyCreds)
-	require.NoError(t, err)
-
-	// Test retrieving cookie credential by name
-	cookieRetrieved, err := storage.GetCredentialsByName(context.Background(), "my-site")
-	require.NoError(t, err)
-	assert.NotNil(t, cookieRetrieved)
-	assert.Equal(t, "cookie", cookieRetrieved.AuthType)
-	assert.Empty(t, cookieRetrieved.APIKey)
-
-	// Test retrieving API key credential by name
-	apiKeyRetrieved, err := storage.GetCredentialsByName(context.Background(), "my-api-key")
-	require.NoError(t, err)
-	assert.NotNil(t, apiKeyRetrieved)
-	assert.Equal(t, "api_key", apiKeyRetrieved.AuthType)
-	assert.Equal(t, "api-key-value", apiKeyRetrieved.APIKey)
-}
-
-func TestGetAPIKeyByName(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	logger := arbor.NewLogger()
-	storage := NewAuthStorage(db, logger)
-
-	// Create API key credential
+	// Test storing credentials with explicit BaseURL
 	creds := &models.AuthCredentials{
-		Name:        "test-key",
-		SiteDomain:  "",
-		ServiceType: "google-places",
-		APIKey:      "secret-api-key",
-		AuthType:    "api_key",
+		Name:        "test-with-baseurl",
+		BaseURL:     "https://mysite.example.com",
+		ServiceType: "atlassian",
 		Data:        map[string]interface{}{},
 	}
 
 	err := storage.StoreCredentials(context.Background(), creds)
 	require.NoError(t, err)
 
-	// Retrieve API key
-	apiKey, err := storage.GetAPIKeyByName(context.Background(), "test-key")
+	// Retrieve and verify SiteDomain was extracted from BaseURL
+	stored, err := storage.GetCredentialsByID(context.Background(), creds.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "secret-api-key", apiKey)
-
-	// Test with non-existent key
-	_, err = storage.GetAPIKeyByName(context.Background(), "non-existent")
-	assert.Error(t, err)
-
-	// Create cookie credential with same name but different site domain
-	cookieCreds := &models.AuthCredentials{
-		Name:        "test-key-cookie", // Use different name to avoid ambiguity
-		SiteDomain:  "example.com",
-		ServiceType: "atlassian",
-		AuthType:    "cookie",
-		Data:        map[string]interface{}{},
-	}
-
-	err = storage.StoreCredentials(context.Background(), cookieCreds)
-	require.NoError(t, err)
-
-	// Test that we can still retrieve API key by name even after creating cookie credential with different name
-	_, err = storage.GetAPIKeyByName(context.Background(), "test-key")
-	assert.NoError(t, err) // Should succeed because there's an API key with this name
-
-	// Test that we can't retrieve cookie credential as API key
-	_, err = storage.GetAPIKeyByName(context.Background(), "test-key-cookie")
-	assert.Error(t, err) // Should fail because it's not an API key entry
+	assert.NotNil(t, stored)
+	assert.Equal(t, "mysite.example.com", stored.SiteDomain) // Should be extracted
+	assert.Equal(t, "https://mysite.example.com", stored.BaseURL)
 }
 
-func TestResolveAPIKey(t *testing.T) {
+func TestListCredentials(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
 	logger := arbor.NewLogger()
 	storage := NewAuthStorage(db, logger)
 
-	// Create API key credential
-	creds := &models.AuthCredentials{
-		Name:        "google-places-key",
-		SiteDomain:  "",
-		ServiceType: "google-places",
-		APIKey:      "resolved-api-key",
-		AuthType:    "api_key",
-		Data:        map[string]interface{}{},
-	}
-
-	err := storage.StoreCredentials(context.Background(), creds)
-	require.NoError(t, err)
-
-	// Test ResolveAPIKey helper
-	// This would be called through common.ResolveAPIKey in production
-	// but we test it through the storage layer
-	apiKey, err := storage.GetAPIKeyByName(context.Background(), "google-places-key")
-	require.NoError(t, err)
-	assert.Equal(t, "resolved-api-key", apiKey)
-}
-
-func TestListCredentials_IncludesAuthType(t *testing.T) {
-	db, cleanup := setupTestDB(t)
-	defer cleanup()
-
-	logger := arbor.NewLogger()
-	storage := NewAuthStorage(db, logger)
-
-	// Create multiple credentials with different auth types
+	// Create multiple cookie-based credentials
 	credentials := []*models.AuthCredentials{
 		{
 			Name:        "cookie-1",
 			SiteDomain:  "example.com",
 			ServiceType: "atlassian",
-			AuthType:    "cookie",
 			Data:        map[string]interface{}{},
 		},
 		{
-			Name:        "api-key-1",
-			SiteDomain:  "",
-			ServiceType: "google-places",
-			APIKey:      "key1",
-			AuthType:    "api_key",
-			Data:        map[string]interface{}{},
-		},
-		{
-			Name:        "api-key-2",
-			SiteDomain:  "",
-			ServiceType: "gemini-llm",
-			APIKey:      "key2",
-			AuthType:    "api_key",
+			Name:        "cookie-2",
+			SiteDomain:  "test.com",
+			ServiceType: "github",
 			Data:        map[string]interface{}{},
 		},
 	}
@@ -227,10 +94,65 @@ func TestListCredentials_IncludesAuthType(t *testing.T) {
 	// List all credentials
 	all, err := storage.ListCredentials(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, all, 3)
+	assert.Len(t, all, 2)
 
-	// Verify all have auth_type set
+	// Verify all are cookie-based
 	for _, cred := range all {
-		assert.NotEmpty(t, cred.AuthType, "auth_type should be set for all credentials")
+		assert.NotEmpty(t, cred.SiteDomain, "site_domain should be set for cookie-based credentials")
+		assert.NotEmpty(t, cred.Name, "name should be set")
 	}
+}
+
+func TestGetCredentialsBySiteDomain(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	logger := arbor.NewLogger()
+	storage := NewAuthStorage(db, logger)
+
+	// Create cookie credential
+	creds := &models.AuthCredentials{
+		Name:        "my-site",
+		SiteDomain:  "example.com",
+		ServiceType: "atlassian",
+		Data:        map[string]interface{}{},
+	}
+
+	err := storage.StoreCredentials(context.Background(), creds)
+	require.NoError(t, err)
+
+	// Test retrieving by site domain
+	retrieved, err := storage.GetCredentialsBySiteDomain(context.Background(), "example.com")
+	require.NoError(t, err)
+	assert.NotNil(t, retrieved)
+	assert.Equal(t, "my-site", retrieved.Name)
+	assert.Equal(t, "example.com", retrieved.SiteDomain)
+}
+
+func TestDeleteCredentials(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	logger := arbor.NewLogger()
+	storage := NewAuthStorage(db, logger)
+
+	// Create credential
+	creds := &models.AuthCredentials{
+		Name:        "to-delete",
+		SiteDomain:  "example.com",
+		ServiceType: "atlassian",
+		Data:        map[string]interface{}{},
+	}
+
+	err := storage.StoreCredentials(context.Background(), creds)
+	require.NoError(t, err)
+
+	// Delete it
+	err = storage.DeleteCredentials(context.Background(), creds.ID)
+	require.NoError(t, err)
+
+	// Verify it's gone
+	retrieved, err := storage.GetCredentialsByID(context.Background(), creds.ID)
+	require.NoError(t, err)
+	assert.Nil(t, retrieved)
 }

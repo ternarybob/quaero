@@ -90,7 +90,9 @@ func main() {
 
 	// 1. Load configuration (default -> file1 -> file2 -> ... -> env -> CLI)
 	// Later config files override earlier ones
-	config, err = common.LoadFromFiles(configFiles...)
+	// Phase 1: Load config without KV replacement (storage not initialized yet)
+	// Phase 2: Replacement happens in app.New() after storage initialization
+	config, err = common.LoadFromFiles(nil, configFiles...)
 	if err != nil {
 		// Use temporary logger for startup errors
 		tempLogger := arbor.NewLogger()

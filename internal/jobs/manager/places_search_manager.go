@@ -18,6 +18,7 @@ type PlacesSearchManager struct {
 	placesService   interfaces.PlacesService
 	documentService interfaces.DocumentService
 	eventService    interfaces.EventService
+	kvStorage       interfaces.KeyValueStorage
 	authStorage     interfaces.AuthStorage
 	logger          arbor.ILogger
 }
@@ -30,6 +31,7 @@ func NewPlacesSearchManager(
 	placesService interfaces.PlacesService,
 	documentService interfaces.DocumentService,
 	eventService interfaces.EventService,
+	kvStorage interfaces.KeyValueStorage,
 	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
 ) *PlacesSearchManager {
@@ -37,6 +39,7 @@ func NewPlacesSearchManager(
 		placesService:   placesService,
 		documentService: documentService,
 		eventService:    eventService,
+		kvStorage:       kvStorage,
 		authStorage:     authStorage,
 		logger:          logger,
 	}
@@ -68,9 +71,9 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		return "", fmt.Errorf("search_type must be one of: text_search, nearby_search")
 	}
 
-	// Check for API key in step config and resolve it from storage
+	// Check for API key in step config and resolve it from KV store
 	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.authStorage, apiKeyName, "")
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, apiKeyName, "")
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", apiKeyName, err)
 		}

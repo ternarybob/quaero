@@ -36,14 +36,14 @@ type Service struct {
 // NewService creates a new agent service with Google ADK integration.
 //
 // The service performs the following initialization:
-//  1. Resolves Google API key from auth storage with config fallback
+//  1. Resolves Google API key from KV store with config fallback
 //  2. Initializes ADK Gemini model
 //  3. Registers built-in agent types (keyword extractor)
 //  4. Parses timeout duration
 //
 // Parameters:
 //   - config: Agent configuration (must have valid Google API key)
-//   - authStorage: Auth storage interface for API key resolution
+//   - storageManager: Storage manager interface for KV and auth storage access
 //   - logger: Structured logger for service operations
 //
 // Returns:
@@ -51,16 +51,16 @@ type Service struct {
 //   - error: nil on success, error with details on failure
 //
 // Errors:
-//   - Missing or empty Google API key (from storage or config)
+//   - Missing or empty Google API key (from KV store or config)
 //   - Invalid model name
 //   - Failed to initialize ADK model (network, auth, etc.)
 //   - Invalid timeout duration
-func NewService(config *common.AgentConfig, authStorage interfaces.AuthStorage, logger arbor.ILogger) (*Service, error) {
-	// Resolve API key from auth storage with config fallback
+func NewService(config *common.AgentConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*Service, error) {
+	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, authStorage, "gemini-agent", config.GoogleAPIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "gemini-agent", config.GoogleAPIKey)
 	if err != nil {
-		return nil, fmt.Errorf("Google API key is required for agent service (set via auth storage, QUAERO_AGENT_GOOGLE_API_KEY, or agent.google_api_key in config): %w", err)
+		return nil, fmt.Errorf("Google API key is required for agent service (set via KV store, QUAERO_AGENT_GOOGLE_API_KEY, or agent.google_api_key in config): %w", err)
 	}
 
 	if config.ModelName == "" {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/robfig/cron/v3"
+	"github.com/ternarybob/arbor"
 
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
@@ -24,6 +25,7 @@ type Config struct {
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
 	Auth        AuthDirConfig    `toml:"auth"`
+	Keys        KeysDirConfig    `toml:"keys"` // Keys directory configuration for key/value file loading
 	Crawler     CrawlerConfig    `toml:"crawler"`
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
@@ -218,6 +220,9 @@ func NewDefaultConfig() *Config {
 		Auth: AuthDirConfig{
 			CredentialsDir: "./auth", // Default directory for auth files
 		},
+		Keys: KeysDirConfig{
+			Dir: "./keys", // Default directory for key/value files
+		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Quaero/1.0 (Web Crawler)",
 			UserAgentRotation:         true,
@@ -288,17 +293,19 @@ func NewDefaultConfig() *Config {
 
 // LoadFromFile loads configuration with priority: default -> file -> env -> CLI
 // Priority system: CLI flags > Environment variables > Config file > Defaults
-func LoadFromFile(path string) (*Config, error) {
+// kvStorage can be nil for backward compatibility (replacement will be skipped)
+func LoadFromFile(kvStorage interfaces.KeyValueStorage, path string) (*Config, error) {
 	if path == "" {
-		return LoadFromFiles()
+		return LoadFromFiles(kvStorage)
 	}
-	return LoadFromFiles(path)
+	return LoadFromFiles(kvStorage, path)
 }
 
 // LoadFromFiles loads configuration from multiple files with priority: default -> file1 -> file2 -> ... -> env -> CLI
 // Later files override earlier files. Priority system: CLI flags > Environment variables > Last config file > ... > First config file > Defaults
-// Example: LoadFromFiles("base.toml", "override.toml") - override.toml settings take precedence over base.toml
-func LoadFromFiles(paths ...string) (*Config, error) {
+// Example: LoadFromFiles(kvStorage, "base.toml", "override.toml") - override.toml settings take precedence over base.toml
+// kvStorage can be nil for backward compatibility (replacement will be skipped)
+func LoadFromFiles(kvStorage interfaces.KeyValueStorage, paths ...string) (*Config, error) {
 	// Start with defaults
 	config := NewDefaultConfig()
 
@@ -320,7 +327,26 @@ func LoadFromFiles(paths ...string) (*Config, error) {
 		}
 	}
 
-	// Apply environment variables (overrides all file configs)
+	// Perform {key-name} replacement if KV storage is available
+	if kvStorage != nil {
+		ctx := context.Background()
+		kvMap, err := kvStorage.GetAll(ctx)
+		if err != nil {
+			// Log warning and skip replacement (graceful degradation)
+			logger := arbor.NewLogger()
+			logger.Warn().Err(err).Msg("Failed to fetch KV map for config replacement, skipping replacement")
+		} else {
+			// Replace in config struct
+			logger := arbor.NewLogger()
+			if err := ReplaceInStruct(config, kvMap, logger); err != nil {
+				logger.Warn().Err(err).Msg("Failed to replace key references in config")
+			} else {
+				logger.Info().Int("keys", len(kvMap)).Msg("Applied key/value replacements to config")
+			}
+		}
+	}
+
+	// Apply environment variables (overrides all file configs and replacements)
 	applyEnvOverrides(config)
 
 	return config, nil
@@ -586,6 +612,11 @@ func applyEnvOverrides(config *Config) {
 	if authDir := os.Getenv("QUAERO_AUTH_CREDENTIALS_DIR"); authDir != "" {
 		config.Auth.CredentialsDir = authDir
 	}
+
+	// Keys configuration
+	if keysDir := os.Getenv("QUAERO_KEYS_DIR"); keysDir != "" {
+		config.Keys.Dir = keysDir
+	}
 }
 
 // ApplyFlagOverrides applies command-line flag overrides to config
@@ -600,27 +631,26 @@ func ApplyFlagOverrides(config *Config, port int, host string) {
 }
 
 // ResolveAPIKey resolves an API key by name with fallback to config value
-// Resolution order: auth storage by name → config fallback → error
+// Resolution order: KV store → config fallback → error
 // Returns the resolved API key string or error if not found
-func ResolveAPIKey(ctx context.Context, authStorage interfaces.AuthStorage, name string, configFallback string) (string, error) {
-	// Try to resolve from auth storage first
-	if authStorage != nil {
-		apiKey, err := authStorage.GetAPIKeyByName(ctx, name)
+func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, name string, configFallback string) (string, error) {
+	// Try to resolve from KV store first (primary source for API keys)
+	if kvStorage != nil {
+		apiKey, err := kvStorage.Get(ctx, name)
 		if err == nil && apiKey != "" {
-			// Successfully resolved from auth storage
+			// Successfully resolved from KV store
 			return apiKey, nil
 		}
-		// Log debug message for troubleshooting (but don't fail)
-		// authStorage.GetAPIKeyByName returns an error if not found, which is expected
+		// KV store lookup failed or key not found - continue to config fallback
 	}
 
-	// Fallback to config value
+	// Fallback to config value (lowest priority)
 	if configFallback != "" {
 		return configFallback, nil
 	}
 
-	// Neither auth storage nor config provided the key
-	return "", fmt.Errorf("API key '%s' not found in auth storage or config", name)
+	// None of the sources provided the key
+	return "", fmt.Errorf("API key '%s' not found in KV store or config", name)
 }
 
 // Helper functions for string manipulation

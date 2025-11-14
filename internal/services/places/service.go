@@ -28,17 +28,17 @@ type Service struct {
 // NewService creates a new Places service instance
 func NewService(
 	config *common.PlacesAPIConfig,
-	authStorage interfaces.AuthStorage,
+	storageManager interfaces.StorageManager,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) interfaces.PlacesService {
-	// Resolve API key from auth storage with config fallback
+	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, authStorage, "google-places", config.APIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google-places", config.APIKey)
 	if err != nil {
 		// If resolution fails, fall back to config value (for backward compatibility)
 		apiKey = config.APIKey
-		logger.Warn().Err(err).Msg("Failed to resolve API key from auth storage, using config value")
+		logger.Warn().Err(err).Msg("Failed to resolve API key from KV store, using config value")
 	}
 
 	return &Service{

@@ -17,8 +17,6 @@ type AuthStorage interface {
 	StoreCredentials(ctx context.Context, credentials *models.AuthCredentials) error
 	GetCredentialsByID(ctx context.Context, id string) (*models.AuthCredentials, error)
 	GetCredentialsBySiteDomain(ctx context.Context, siteDomain string) (*models.AuthCredentials, error)
-	GetCredentialsByName(ctx context.Context, name string) (*models.AuthCredentials, error)
-	GetAPIKeyByName(ctx context.Context, name string) (string, error)
 	DeleteCredentials(ctx context.Context, id string) error
 	ListCredentials(ctx context.Context) ([]*models.AuthCredentials, error)
 
@@ -164,6 +162,11 @@ type StorageManager interface {
 	JobStorage() JobStorage
 	JobLogStorage() JobLogStorage
 	JobDefinitionStorage() JobDefinitionStorage
+	KeyValueStorage() KeyValueStorage
 	DB() interface{}
 	Close() error
+
+	// MigrateAPIKeysToKVStore migrates API keys from auth_credentials table to key_value_store
+	// This is idempotent and safe to call multiple times
+	MigrateAPIKeysToKVStore(ctx context.Context) error
 }

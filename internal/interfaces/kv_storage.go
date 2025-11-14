@@ -1,0 +1,38 @@
+// -----------------------------------------------------------------------
+// Last Modified: Thursday, 14th November 2025 12:00:00 pm
+// Modified By: Bob McAllan
+// -----------------------------------------------------------------------
+
+package interfaces
+
+import (
+	"context"
+	"time"
+)
+
+// KeyValuePair represents a single key/value pair with metadata
+type KeyValuePair struct {
+	Key         string    `json:"key"`
+	Value       string    `json:"value"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// KeyValueStorage defines operations for generic key/value storage
+type KeyValueStorage interface {
+	// Get retrieves a value by key, returns error if not found
+	Get(ctx context.Context, key string) (string, error)
+
+	// Set inserts or updates a key/value pair with optional description
+	Set(ctx context.Context, key string, value string, description string) error
+
+	// Delete removes a key/value pair, returns error if not found
+	Delete(ctx context.Context, key string) error
+
+	// List returns all key/value pairs ordered by updated_at DESC
+	List(ctx context.Context) ([]KeyValuePair, error)
+
+	// GetAll returns all key/value pairs as a map (useful for bulk operations)
+	GetAll(ctx context.Context) (map[string]string, error)
+}

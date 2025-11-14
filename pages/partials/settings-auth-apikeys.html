@@ -29,8 +29,8 @@
             <span class="icon text-muted">
                 <i class="fas fa-key fa-3x"></i>
             </span>
-            <p class="mt-3 text-muted">No API keys stored</p>
-            <p class="text-muted">Add API keys for services like Google Places, LLM, and more</p>
+            <p class="mt-3 text-muted">No keys stored</p>
+            <p class="text-muted">Add keys for API keys, tokens, and other configuration values</p>
         </div>
 
         <!-- API Keys Table -->
@@ -38,37 +38,33 @@
             <table class="table striped border">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Service Type</th>
-                        <th>API Key</th>
+                        <th>Key</th>
+                        <th>Value</th>
                         <th>Description</th>
                         <th>Last Updated</th>
                         <th class="text-right">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <template x-for="apiKey in apiKeys" :key="apiKey.id">
+                    <template x-for="apiKey in apiKeys" :key="apiKey.key">
                         <tr>
-                            <td><strong x-text="apiKey.name"></strong></td>
-                            <td>
-                                <span class="label label-secondary" x-text="(apiKey.service_type || 'unknown').toUpperCase()"></span>
-                            </td>
+                            <td><strong x-text="apiKey.key"></strong></td>
                             <td>
                                 <div class="input-group">
                                     <code class="form-input" x-text="getMaskedApiKey(apiKey)" style="flex: 1;"></code>
-                                    <button type="button" class="btn btn-sm" @click="toggleApiKeyVisibility(apiKey.id)" :title="getShowFull(apiKey.id) ? 'Hide' : 'Show'">
-                                        <i class="fas" :class="getShowFull(apiKey.id) ? 'fa-eye-slash' : 'fa-eye'"></i>
+                                    <button type="button" class="btn btn-sm" @click="toggleApiKeyVisibility(apiKey.key)" :title="getShowFull(apiKey.key) ? 'Hide' : 'Show'">
+                                        <i class="fas" :class="getShowFull(apiKey.key) ? 'fa-eye-slash' : 'fa-eye'"></i>
                                     </button>
                                 </div>
                             </td>
                             <td x-text="getDescription(apiKey)"></td>
                             <td x-text="window.formatDate ? window.formatDate(apiKey.updated_at) : apiKey.updated_at"> </td>
                             <td class="text-right">
-                                <button class="btn btn-sm btn-primary mr-1" @click="editApiKey(apiKey)" title="Edit API Key">
+                                <button class="btn btn-sm btn-primary mr-1" @click="editApiKey(apiKey)" title="Edit Key">
                                     <i class="fas fa-edit"></i>
                                 </button>
-                                <button class="btn btn-sm btn-error" @click="deleteApiKey(apiKey.id, apiKey.name)" :disabled="deleting === apiKey.id" title="Delete API Key">
-                                    <i class="fas" :class="deleting === apiKey.id ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
+                                <button class="btn btn-sm btn-error" @click="deleteApiKey(apiKey.key, apiKey.key)" :disabled="deleting === apiKey.key" title="Delete Key">
+                                    <i class="fas" :class="deleting === apiKey.key ? 'fa-spinner fa-pulse' : 'fa-trash'"></i>
                                 </button>
                             </td>
                         </tr>
@@ -90,27 +86,15 @@
                 <div class="content">
                     <form @submit.prevent="submitApiKey()">
                         <div class="form-group">
-                            <label class="form-label" for="name">Name *</label>
-                            <input class="form-input" type="text" id="name" x-model="formData.name" placeholder="e.g., google-places-key" required>
-                            <p class="form-input-hint">Used to reference this API key in job definitions</p>
+                            <label class="form-label" for="key">Key *</label>
+                            <input class="form-input" type="text" id="key" x-model="formData.key" placeholder="e.g., gemini-llm-key or google-places-api-key" :disabled="showEditModal" required>
+                            <p class="form-input-hint">Unique identifier for this key/value pair (used in job definitions)</p>
                         </div>
 
                         <div class="form-group">
-                            <label class="form-label" for="serviceType">Service Type *</label>
-                            <select class="form-input" id="serviceType" x-model="formData.serviceType" required>
-                                <option value="">Select a service type...</option>
-                                <option value="gemini-llm">gemini-llm</option>
-                                <option value="gemini-agent">gemini-agent</option>
-                                <option value="google-places">google-places</option>
-                                <option value="other">other</option>
-                            </select>
-                            <p class="form-input-hint">Identifier for the service</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label" for="apiKey">API Key *</label>
+                            <label class="form-label" for="value">Value *</label>
                             <div class="input-group">
-                                <input class="form-input" :type="showPassword ? 'text' : 'password'" id="apiKey" x-model="formData.apiKey" placeholder="Enter API key value" required>
+                                <input class="form-input" :type="showPassword ? 'text' : 'password'" id="value" x-model="formData.value" placeholder="Enter value (API key, token, or secret)" required>
                                 <button type="button" class="btn btn-sm" @click="showPassword = !showPassword" :title="showPassword ? 'Hide' : 'Show'">
                                     <i class="fas" :class="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
                                 </button>
@@ -119,7 +103,7 @@
 
                         <div class="form-group">
                             <label class="form-label" for="description">Description</label>
-                            <textarea class="form-input" id="description" x-model="formData.description" rows="3" placeholder="Optional description of this API key"></textarea>
+                            <textarea class="form-input" id="description" x-model="formData.description" rows="3" placeholder="Optional description (e.g., 'Google Gemini API key for LLM service')"></textarea>
                         </div>
 
                         <div class="form-actions">

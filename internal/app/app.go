@@ -30,6 +30,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/events"
 	"github.com/ternarybob/quaero/internal/services/identifiers"
 	jobsvc "github.com/ternarybob/quaero/internal/services/jobs"
+	"github.com/ternarybob/quaero/internal/services/kv"
 	"github.com/ternarybob/quaero/internal/services/llm"
 	"github.com/ternarybob/quaero/internal/services/mcp"
 	"github.com/ternarybob/quaero/internal/services/places"
@@ -93,9 +94,13 @@ type App struct {
 	// Chat service (agent-based)
 	ChatService interfaces.ChatService
 
+	// Key/Value service
+	KVService *kv.Service
+
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
+	KVHandler            *handlers.KVHandler
 	WSHandler            *handlers.WebSocketHandler
 	CollectionHandler    *handlers.CollectionHandler
 	DocumentHandler      *handlers.DocumentHandler
@@ -213,15 +218,52 @@ func (a *App) initDatabase() error {
 		}
 	}
 
-	// Load auth credentials from files (after job definitions)
+	// Load cookie-based auth credentials from files (after job definitions)
+	// Note: This is for cookie-based authentication only (captured via Chrome extension or manual TOML files)
+	// API keys are loaded separately via LoadKeysFromFiles() below
 	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
 		ctx := context.Background()
 		if err := sqliteMgr.LoadAuthCredentialsFromFiles(ctx, a.Config.Auth.CredentialsDir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load auth credentials from files")
+			a.Logger.Warn().Err(err).Msg("Failed to load cookie-based auth credentials from files")
 			// Don't fail startup - auth files are optional
 		} else {
-			a.Logger.Info().Str("dir", a.Config.Auth.CredentialsDir).Msg("Auth credentials loaded from files")
+			a.Logger.Info().Str("dir", a.Config.Auth.CredentialsDir).Msg("Cookie-based auth credentials loaded from files")
 		}
+
+		// Load key/value pairs from files (after auth credentials)
+		// This is separate from auth - auth is for cookies, keys are for API keys and generic secrets
+		if err := sqliteMgr.LoadKeysFromFiles(ctx, a.Config.Keys.Dir); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load key/value pairs from files")
+			// Don't fail startup - key files are optional
+		} else {
+			a.Logger.Info().Str("dir", a.Config.Keys.Dir).Msg("Key/value pairs loaded from files")
+		}
+
+		// Migrate API keys from auth_credentials to key_value_store (idempotent)
+		// This separates concerns: auth_credentials for cookie auth, key_value_store for API keys
+		if err := sqliteMgr.MigrateAPIKeysToKVStore(ctx); err != nil {
+			a.Logger.Warn().Err(err).Msg("API key migration to KV store failed")
+			// Don't fail startup - migration is not critical (backward compatibility maintained)
+		} else {
+			a.Logger.Info().Msg("API key migration to KV store completed successfully")
+		}
+	}
+
+	// Phase 2: Perform {key-name} replacement in config after storage initialization
+	// This replaces any {key-name} references in config values with actual KV store values
+	// Must happen BEFORE services (LLM, Agent, Places) are initialized
+	ctx := context.Background()
+	kvMap, err := a.StorageManager.KeyValueStorage().GetAll(ctx)
+	if err != nil {
+		a.Logger.Warn().Err(err).Msg("Failed to fetch KV map for config replacement, skipping replacement")
+	} else if len(kvMap) > 0 {
+		if err := common.ReplaceInStruct(a.Config, kvMap, a.Logger); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to replace key references in config")
+		} else {
+			a.Logger.Info().Int("keys", len(kvMap)).Msg("Applied key/value replacements to config")
+		}
+	} else {
+		a.Logger.Debug().Msg("No key/value pairs found, skipping config replacement")
 	}
 
 	return nil
@@ -264,7 +306,7 @@ func (a *App) initServices() error {
 	}
 
 	// 3.6. Initialize LLM service (Google ADK with Gemini)
-	a.LLMService, err = llm.NewGeminiService(a.Config, a.StorageManager.AuthStorage(), a.Logger)
+	a.LLMService, err = llm.NewGeminiService(a.Config, a.StorageManager, a.Logger)
 	if err != nil {
 		a.LLMService = nil // Explicitly set to nil on error
 		a.Logger.Warn().Err(err).Msg("Failed to initialize LLM service - chat features will be unavailable")
@@ -306,6 +348,13 @@ func (a *App) initServices() error {
 	// 5.10. Initialize job service for high-level job operations
 	a.JobService = jobsvc.NewService(jobMgr, queueMgr, a.Logger)
 	a.Logger.Info().Msg("Job service initialized")
+
+	// 5.11. Initialize key/value service
+	a.KVService = kv.NewService(
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Key/value service initialized")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -378,7 +427,7 @@ func (a *App) initServices() error {
 	// 6.8.1. Initialize Places service (Google Places API integration)
 	a.PlacesService = places.NewService(
 		&a.Config.PlacesAPI,
-		a.StorageManager.AuthStorage(),
+		a.StorageManager,
 		a.EventService,
 		a.Logger,
 	)
@@ -406,7 +455,7 @@ func (a *App) initServices() error {
 	// 6.8.3. Initialize Agent service (Google ADK with Gemini)
 	a.AgentService, err = agents.NewService(
 		&a.Config.Agent,
-		a.StorageManager.AuthStorage(),
+		a.StorageManager,
 		a.Logger,
 	)
 	if err != nil {
@@ -443,13 +492,13 @@ func (a *App) initServices() error {
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
-	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.AuthStorage(), a.Logger)
+	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
 	// Register agent manager (if agent service is available)
 	if a.AgentService != nil {
-		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.AuthStorage(), a.Logger)
+		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered")
 	}
@@ -529,6 +578,9 @@ func (a *App) initHandlers() error {
 
 	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.StorageManager.AuthStorage(), a.WSHandler, a.Logger)
 
+	a.KVHandler = handlers.NewKVHandler(a.KVService, a.Logger)
+	a.Logger.Info().Msg("KV handler initialized")
+
 	a.CollectionHandler = handlers.NewCollectionHandler(
 		a.EventService,
 		a.Logger,
@@ -581,8 +633,9 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobStorage(),
 		a.JobDefinitionOrchestrator,
 		a.StorageManager.AuthStorage(),
-		a.AgentService, // Pass agent service for runtime validation (can be nil)
-		db,             // Pass *sql.DB for validation service
+		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
+		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
+		db,                                 // Pass *sql.DB for validation service
 		a.Logger,
 	)
 

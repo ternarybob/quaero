@@ -31,6 +31,7 @@ type JobDefinitionHandler struct {
 	jobStorage                interfaces.JobStorage
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
 	authStorage               interfaces.AuthStorage
+	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService         *validation.TOMLValidationService
 	agentService              interfaces.AgentService // Optional: nil if agent service unavailable
 	db                        *sql.DB
@@ -43,6 +44,7 @@ func NewJobDefinitionHandler(
 	jobStorage interfaces.JobStorage,
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator,
 	authStorage interfaces.AuthStorage,
+	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
 	db *sql.DB,
 	logger arbor.ILogger,
@@ -59,6 +61,9 @@ func NewJobDefinitionHandler(
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
 	}
+	if kvStorage == nil {
+		panic("kvStorage cannot be nil")
+	}
 	if db == nil {
 		panic("db cannot be nil")
 	}
@@ -73,6 +78,7 @@ func NewJobDefinitionHandler(
 		jobStorage:                jobStorage,
 		jobDefinitionOrchestrator: jobDefinitionOrchestrator,
 		authStorage:               authStorage,
+		kvStorage:                 kvStorage,
 		validationService:         validation.NewTOMLValidationService(logger),
 		agentService:              agentService, // Can be nil
 		db:                        db,
@@ -576,8 +582,8 @@ func (h *JobDefinitionHandler) validateAPIKeys(jobDef *models.JobDefinition) {
 	for _, step := range jobDef.Steps {
 		if step.Config != nil {
 			if apiKeyName, ok := step.Config["api_key"].(string); ok && apiKeyName != "" {
-				// Try to resolve the API key from storage
-				_, err := common.ResolveAPIKey(ctx, h.authStorage, apiKeyName, "")
+				// Try to resolve the API key from KV store
+				_, err := common.ResolveAPIKey(ctx, h.kvStorage, apiKeyName, "")
 				if err != nil {
 					// API key not found or invalid
 					jobDef.RuntimeStatus = "error"
@@ -821,7 +827,7 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	}
 
 	// Convert to full JobDefinition model
-	jobDef := jobFile.ToJobDefinition()
+	jobDef := jobFile.ToJobDefinition(h.kvStorage, h.logger)
 
 	// Store raw TOML content
 	jobDef.TOML = string(tomlContent)

@@ -85,6 +85,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/job-definitions", s.handleJobDefinitionsRoute)
 	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes)
 
+	// API routes - Key/Value Store
+	mux.HandleFunc("/api/kv", s.handleKVRoute)     // GET (list), POST (create)
+	mux.HandleFunc("/api/kv/", s.handleKVRoutes)   // GET/PUT/DELETE /{key}
+
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
@@ -188,35 +192,7 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle /api/auth/api-key endpoints
-	if strings.HasPrefix(path, "/api/auth/api-key") {
-		// POST /api/auth/api-key - Create API key
-		if r.Method == "POST" && path == "/api/auth/api-key" {
-			s.app.AuthHandler.CreateAPIKeyHandler(w, r)
-			return
-		}
-
-		// GET /api/auth/api-key/{id} - Get API key by ID
-		if r.Method == "GET" && len(path) > len("/api/auth/api-key/") {
-			s.app.AuthHandler.GetAPIKeyHandler(w, r)
-			return
-		}
-
-		// PUT /api/auth/api-key/{id} - Update API key
-		if r.Method == "PUT" && len(path) > len("/api/auth/api-key/") {
-			s.app.AuthHandler.UpdateAPIKeyHandler(w, r)
-			return
-		}
-
-		// DELETE /api/auth/api-key/{id} - Delete API key
-		if r.Method == "DELETE" && len(path) > len("/api/auth/api-key/") {
-			s.app.AuthHandler.DeleteAPIKeyHandler(w, r)
-			return
-		}
-
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	// API key routes removed - API keys are now managed via /api/kv endpoints (Phase 4 cleanup)
 
 	// Handle /api/auth/{id}
 	if len(path) > len("/api/auth/") {
@@ -229,6 +205,23 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Not found", http.StatusNotFound)
+}
+
+// handleKVRoute routes /api/kv requests (list and create)
+func (s *Server) handleKVRoute(w http.ResponseWriter, r *http.Request) {
+	RouteResourceCollection(w, r,
+		s.app.KVHandler.ListKVHandler,
+		s.app.KVHandler.CreateKVHandler,
+	)
+}
+
+// handleKVRoutes routes /api/kv/{key} requests
+func (s *Server) handleKVRoutes(w http.ResponseWriter, r *http.Request) {
+	RouteResourceItem(w, r,
+		s.app.KVHandler.GetKVHandler,
+		s.app.KVHandler.UpdateKVHandler,
+		s.app.KVHandler.DeleteKVHandler,
+	)
 }
 
 // handleJobDefinitionsRoute routes /api/job-definitions requests (list and create)

@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -40,7 +43,8 @@ type JobDefinitionFile struct {
 }
 
 // ToJobDefinition converts the file format to a full JobDefinition model
-func (j *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
+// Performs {key-name} replacement using the provided KV storage
+func (j *JobDefinitionFile) ToJobDefinition(kvStorage interfaces.KeyValueStorage, logger arbor.ILogger) *models.JobDefinition {
 	// Default to 'user' if job_type is not specified
 	jobType := models.JobOwnerTypeUser
 	if j.JobType != "" {
@@ -73,6 +77,34 @@ func (j *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 	// Initialize empty maps if nil
 	if jobDef.Config == nil {
 		jobDef.Config = make(map[string]interface{})
+	}
+
+	// Perform {key-name} replacement if KV storage is available
+	if kvStorage != nil {
+		ctx := context.Background()
+		kvMap, err := kvStorage.GetAll(ctx)
+		if err != nil {
+			logger.Warn().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to fetch KV map for replacement, skipping replacement (graceful degradation)")
+		} else {
+			// Replace in job-level config map
+			if err := common.ReplaceInMap(jobDef.Config, kvMap, logger); err != nil {
+				logger.Warn().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to replace in job config")
+			}
+
+			// Replace in each step's config map
+			for i := range jobDef.Steps {
+				if jobDef.Steps[i].Config != nil {
+					if err := common.ReplaceInMap(jobDef.Steps[i].Config, kvMap, logger); err != nil {
+						logger.Warn().Err(err).Str("job_def_id", jobDef.ID).Int("step_index", i).Msg("Failed to replace in step config")
+					}
+				}
+			}
+
+			// Replace in string fields
+			jobDef.BaseURL = common.ReplaceKeyReferences(jobDef.BaseURL, kvMap, logger)
+			jobDef.AuthID = common.ReplaceKeyReferences(jobDef.AuthID, kvMap, logger)
+			jobDef.SourceType = common.ReplaceKeyReferences(jobDef.SourceType, kvMap, logger)
+		}
 	}
 
 	return jobDef
@@ -128,7 +160,7 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 		}
 
 		// Convert to full JobDefinition model
-		jobDef := jobFile.ToJobDefinition()
+		jobDef := jobFile.ToJobDefinition(m.kv, m.logger)
 
 		// Validate full job definition
 		if err := jobDef.Validate(); err != nil {

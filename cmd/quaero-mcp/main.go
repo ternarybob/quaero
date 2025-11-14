@@ -19,7 +19,9 @@ func main() {
 		configPath = "quaero.toml"
 	}
 
-	config, err := common.LoadFromFile(configPath)
+	// Phase 1: Load config without KV replacement (storage not initialized yet)
+	// Note: MCP server doesn't use KV storage, so nil is appropriate here
+	config, err := common.LoadFromFile(nil, configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)

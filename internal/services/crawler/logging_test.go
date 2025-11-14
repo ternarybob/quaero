@@ -317,24 +317,6 @@ func (m *MockAuthStorage) GetCredentialsBySiteDomain(ctx context.Context, siteDo
 	return nil, errNotFound
 }
 
-func (m *MockAuthStorage) GetCredentialsByName(ctx context.Context, name string) (*models.AuthCredentials, error) {
-	for _, cred := range m.credentials {
-		if cred.Name == name {
-			return cred, nil
-		}
-	}
-	return nil, errNotFound
-}
-
-func (m *MockAuthStorage) GetAPIKeyByName(ctx context.Context, name string) (string, error) {
-	for _, cred := range m.credentials {
-		if cred.Name == name && cred.AuthType == "api_key" && cred.APIKey != "" {
-			return cred.APIKey, nil
-		}
-	}
-	return "", errNotFound
-}
-
 func (m *MockAuthStorage) DeleteCredentials(ctx context.Context, id string) error {
 	delete(m.credentials, id)
 	return nil
