@@ -38,13 +38,33 @@ func (s *KVStorage) Get(ctx context.Context, key string) (string, error) {
 
 	err := s.db.db.QueryRowContext(ctx, query, key).Scan(&value)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("key '%s' not found", key)
+		return "", interfaces.ErrKeyNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to get key: %w", err)
 	}
 
 	return value, nil
+}
+
+// GetPair retrieves a full KeyValuePair by key
+func (s *KVStorage) GetPair(ctx context.Context, key string) (*interfaces.KeyValuePair, error) {
+	var pair interfaces.KeyValuePair
+	var createdAt, updatedAt int64
+	query := `SELECT key, value, description, created_at, updated_at FROM key_value_store WHERE key = ?`
+
+	err := s.db.db.QueryRowContext(ctx, query, key).Scan(&pair.Key, &pair.Value, &pair.Description, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, interfaces.ErrKeyNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get key/value pair: %w", err)
+	}
+
+	pair.CreatedAt = time.Unix(createdAt, 0)
+	pair.UpdatedAt = time.Unix(updatedAt, 0)
+
+	return &pair, nil
 }
 
 // Set inserts or updates a key/value pair
@@ -85,7 +105,7 @@ func (s *KVStorage) Delete(ctx context.Context, key string) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("key '%s' not found", key)
+		return interfaces.ErrKeyNotFound
 	}
 
 	return nil

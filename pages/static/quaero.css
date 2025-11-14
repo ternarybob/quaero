@@ -1692,3 +1692,130 @@ body.modal-open {
         display: none;
     }
 }
+/* 16. SETTINGS PAGE TWO-COLUMN LAYOUT
+   ========================================================================== */
+
+/* Settings Layout Container - Grid Layout with High Specificity */
+.settings-layout {
+    display: grid !important;
+    grid-template-columns: 250px 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+    min-height: 600px;
+    align-items: start;
+}
+
+/* Settings Sidebar - Left Column with Increased Specificity */
+.settings-layout .settings-sidebar {
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    align-self: start;
+    position: sticky;
+    top: 80px;
+    max-width: 250px;
+}
+
+/* Settings Menu - Vertical List with Strong Override */
+.settings-sidebar .settings-menu {
+    display: flex !important;
+    flex-direction: column !important;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+}
+
+/* Settings Menu Item - Button Styling with High Specificity */
+.settings-menu .settings-menu-item {
+    display: flex !important;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0.75rem 1rem;
+    border: none;
+    border-radius: var(--border-radius);
+    background-color: transparent;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+/* Icon Spacing in Menu Items */
+.settings-menu .settings-menu-item .icon,
+.settings-menu .settings-menu-item i {
+    margin-right: 0.75rem;
+    width: 1.25rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* Menu Item Hover State with Specificity */
+.settings-menu .settings-menu-item:hover {
+    background-color: rgba(7, 87, 186, 0.05);
+    transform: translateX(2px);
+}
+
+/* Menu Item Active State with Specificity */
+.settings-menu .settings-menu-item.active {
+    background-color: var(--color-primary);
+    color: white;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Settings Content Panel - Right Column with Increased Specificity */
+.settings-layout .settings-content {
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    min-height: 400px;
+    overflow-y: auto;
+    transition: opacity 0.2s ease;
+    flex: 1;
+}
+
+/* Content Loading State */
+.settings-layout .settings-content .loading-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-secondary);
+}
+
+/* Responsive Design - Mobile/Tablet with Maintained Specificity */
+@media (max-width: 768px) {
+    /* Stack layout vertically on small screens */
+    .settings-layout {
+        grid-template-columns: 1fr !important;
+        gap: 1rem;
+    }
+
+    /* Remove sticky positioning on mobile */
+    .settings-layout .settings-sidebar {
+        position: static;
+        max-width: none;
+    }
+
+    /* Keep vertical menu on mobile with maintained specificity */
+    .settings-sidebar .settings-menu {
+        gap: 0.25rem;
+    }
+
+    .settings-menu .settings-menu-item {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.85rem;
+    }
+
+    .settings-menu .settings-menu-item .icon,
+    .settings-menu .settings-menu-item i {
+        margin-right: 0.5rem;
+    }
+}

@@ -2,6 +2,6 @@
 # This file is used by tests to verify API key loading functionality
 
 [test-google-places-key]
-api_key = "AIzaSyTest1234567890ABCDEFGHIJKLMNOPQRS"
-service_type = "google-places"
+value = "AIzaSyTest1234567890ABCDEFGHIJKLMNOPQRS"
 description = "Test Google Places API key for automated testing"
+

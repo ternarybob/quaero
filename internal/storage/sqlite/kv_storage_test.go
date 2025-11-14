@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
+	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
 // setupTestDB creates a test database and returns cleanup function
@@ -119,8 +120,34 @@ func TestKVStorage_GetNotFound(t *testing.T) {
 	// Attempt to get non-existent key
 	_, err := storage.Get(ctx, "non-existent-key")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-existent-key")
-	assert.Contains(t, err.Error(), "not found")
+	assert.ErrorIs(t, err, interfaces.ErrKeyNotFound)
+}
+
+func TestKVStorage_GetPair(t *testing.T) {
+	db, cleanup := setupKVTestDB(t)
+	defer cleanup()
+
+	logger := arbor.NewLogger()
+	storage := NewKVStorage(db, logger)
+	ctx := context.Background()
+
+	// Set a key with description
+	err := storage.Set(ctx, "test-key", "test-value", "Test description")
+	require.NoError(t, err)
+
+	// Get full pair
+	pair, err := storage.GetPair(ctx, "test-key")
+	require.NoError(t, err)
+	assert.Equal(t, "test-key", pair.Key)
+	assert.Equal(t, "test-value", pair.Value)
+	assert.Equal(t, "Test description", pair.Description)
+	assert.NotZero(t, pair.CreatedAt)
+	assert.NotZero(t, pair.UpdatedAt)
+
+	// Attempt to get non-existent key
+	_, err = storage.GetPair(ctx, "non-existent-key")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, interfaces.ErrKeyNotFound)
 }
 
 func TestKVStorage_Delete(t *testing.T) {
@@ -142,12 +169,12 @@ func TestKVStorage_Delete(t *testing.T) {
 	// Verify it's gone
 	_, err = storage.Get(ctx, "delete-key")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.ErrorIs(t, err, interfaces.ErrKeyNotFound)
 
 	// Verify Delete on non-existent key returns error
 	err = storage.Delete(ctx, "delete-key")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.ErrorIs(t, err, interfaces.ErrKeyNotFound)
 }
 
 func TestKVStorage_List(t *testing.T) {

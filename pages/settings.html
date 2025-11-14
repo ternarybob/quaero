@@ -4,8 +4,8 @@
 <head>
     {{template "head.html" .}}
     <title>Settings - Quaero</title>
-    <!-- Load settings components with defer to execute after Alpine.js -->
-    <script defer src="/static/settings-components.js"></script>
+    <!-- Load settings components BEFORE Alpine.js (no defer) -->
+    <script src="/static/settings-components.js"></script>
 </head>
 
 <body>
@@ -20,83 +20,61 @@
             <p>System configuration, status, and operational controls</p>
         </div>
 
-        <!-- Settings Accordion (Dynamic Loading) -->
-        <div x-data="settingsAccordion" class="accordion">
+        <!-- Settings Two-Column Layout (Dynamic Loading) -->
+        <div x-data="settingsNavigation" class="settings-layout">
 
-            <!-- API Keys Accordion -->
-            <div class="accordion-item">
-                <input type="checkbox" id="accordion-auth-apikeys" name="accordion-checkbox" hidden @change="loadContent('auth-apikeys', '/settings/auth-apikeys.html', $event.target.checked)">
-                <label for="accordion-auth-apikeys" class="accordion-header">
-                    <i class="icon icon-arrow-right mr-1"></i>API Keys
-                </label>
-                <div class="accordion-body">
-                    <div x-show="loading['auth-apikeys']" class="text-center" style="padding: 2rem;">
-                        <div class="loading loading-lg"></div>
-                        <p style="margin-top: 1rem;">Loading API keys...</p>
-                    </div>
-                    <div x-show="!loading['auth-apikeys']" x-html="content['auth-apikeys']"></div>
-                </div>
-            </div>
+            <!-- Left Sidebar: Vertical Menu -->
+            <aside class="settings-sidebar">
+                <nav class="settings-menu">
+                    <button
+                        class="settings-menu-item"
+                        @click="selectSection('auth-apikeys')"
+                        :class="{ 'active': activeSection === 'auth-apikeys' }">
+                        <i class="icon icon-people"></i>
+                        API Keys
+                    </button>
+                    <button
+                        class="settings-menu-item"
+                        @click="selectSection('auth-cookies')"
+                        :class="{ 'active': activeSection === 'auth-cookies' }">
+                        <i class="icon icon-people"></i>
+                        Authentication
+                    </button>
+                    <button
+                        class="settings-menu-item"
+                        @click="selectSection('config')"
+                        :class="{ 'active': activeSection === 'config' }">
+                        <i class="icon icon-apps"></i>
+                        Configuration
+                    </button>
+                    <button
+                        class="settings-menu-item"
+                        @click="selectSection('danger')"
+                        :class="{ 'active': activeSection === 'danger' }">
+                        <i class="icon icon-stop"></i>
+                        Danger Zone
+                    </button>
+                    <button
+                        class="settings-menu-item"
+                        @click="selectSection('status')"
+                        :class="{ 'active': activeSection === 'status' }">
+                        <i class="icon icon-flag"></i>
+                        Service Status
+                    </button>
+                </nav>
+            </aside>
 
-            <!-- Authentication Cookies Accordion -->
-            <div class="accordion-item">
-                <input type="checkbox" id="accordion-auth-cookies" name="accordion-checkbox" hidden @change="loadContent('auth-cookies', '/settings/auth-cookies.html', $event.target.checked)">
-                <label for="accordion-auth-cookies" class="accordion-header">
-                    <i class="icon icon-arrow-right mr-1"></i>Authentication
-                </label>
-                <div class="accordion-body">
-                    <div x-show="loading['auth-cookies']" class="text-center" style="padding: 2rem;">
-                        <div class="loading loading-lg"></div>
-                        <p style="margin-top: 1rem;">Loading authentication...</p>
-                    </div>
-                    <div x-show="!loading['auth-cookies']" x-html="content['auth-cookies']"></div>
+            <!-- Right Content Panel -->
+            <main class="settings-content">
+                <!-- Loading State -->
+                <div x-show="loading[activeSection]" class="text-center loading-state">
+                    <div class="loading loading-lg"></div>
+                    <p style="margin-top: 1rem;" x-text="'Loading ' + activeSection.replace('-', ' ') + '...'"></p>
                 </div>
-            </div>
 
-            <!-- Configuration Accordion -->
-            <div class="accordion-item">
-                <input type="checkbox" id="accordion-config" name="accordion-checkbox" hidden @change="loadContent('config', '/settings/config.html', $event.target.checked)">
-                <label for="accordion-config" class="accordion-header">
-                    <i class="icon icon-arrow-right mr-1"></i>Configuration
-                </label>
-                <div class="accordion-body">
-                    <div x-show="loading['config']" class="text-center" style="padding: 2rem;">
-                        <div class="loading loading-lg"></div>
-                        <p style="margin-top: 1rem;">Loading configuration...</p>
-                    </div>
-                    <div x-show="!loading['config']" x-html="content['config']"></div>
-                </div>
-            </div>
-
-            <!-- Danger Zone Accordion -->
-            <div class="accordion-item">
-                <input type="checkbox" id="accordion-danger" name="accordion-checkbox" hidden @change="loadContent('danger', '/settings/danger.html', $event.target.checked)">
-                <label for="accordion-danger" class="accordion-header">
-                    <i class="icon icon-arrow-right mr-1"></i>Danger Zone
-                </label>
-                <div class="accordion-body">
-                    <div x-show="loading['danger']" class="text-center" style="padding: 2rem;">
-                        <div class="loading loading-lg"></div>
-                        <p style="margin-top: 1rem;">Loading danger zone...</p>
-                    </div>
-                    <div x-show="!loading['danger']" x-html="content['danger']"></div>
-                </div>
-            </div>
-
-            <!-- Service Status Accordion -->
-            <div class="accordion-item">
-                <input type="checkbox" id="accordion-status" name="accordion-checkbox" hidden @change="loadContent('status', '/settings/status.html', $event.target.checked)">
-                <label for="accordion-status" class="accordion-header">
-                    <i class="icon icon-arrow-right mr-1"></i>Service Status
-                </label>
-                <div class="accordion-body">
-                    <div x-show="loading['status']" class="text-center" style="padding: 2rem;">
-                        <div class="loading loading-lg"></div>
-                        <p style="margin-top: 1rem;">Loading service status...</p>
-                    </div>
-                    <div x-show="!loading['status']" x-html="content['status']"></div>
-                </div>
-            </div>
+                <!-- Dynamic Content -->
+                <div x-show="!loading[activeSection]" x-html="content[activeSection]"></div>
+            </main>
 
         </div>
 
@@ -110,8 +88,6 @@
     {{template "footer.html" .}}
 
     {{template "snackbar.html" .}}
-
-    <script src="/static/settings-components.js"></script>
 </body>
 
 </html>

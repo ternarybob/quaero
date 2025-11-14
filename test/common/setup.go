@@ -570,27 +570,27 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
-	// Copy auth directory to bin/auth
-	authSourcePath, err := filepath.Abs("../config/auth")
+	// Copy keys directory to bin/keys (for API keys and key/value storage)
+	keysSourcePath, err := filepath.Abs("../config/keys")
 	if err != nil {
-		return fmt.Errorf("failed to resolve auth source path: %w", err)
+		return fmt.Errorf("failed to resolve keys source path: %w", err)
 	}
 
-	authDestPath := filepath.Join(binDir, "auth")
+	keysDestPath := filepath.Join(binDir, "keys")
 
-	// Remove existing auth directory if it exists
-	if _, err := os.Stat(authDestPath); err == nil {
-		if err := os.RemoveAll(authDestPath); err != nil {
-			return fmt.Errorf("failed to remove existing auth directory: %w", err)
+	// Remove existing keys directory if it exists
+	if _, err := os.Stat(keysDestPath); err == nil {
+		if err := os.RemoveAll(keysDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing keys directory: %w", err)
 		}
 	}
 
-	// Copy auth directory
-	if err := env.copyDir(authSourcePath, authDestPath); err != nil {
-		return fmt.Errorf("failed to copy auth directory: %w", err)
+	// Copy keys directory
+	if err := env.copyDir(keysSourcePath, keysDestPath); err != nil {
+		return fmt.Errorf("failed to copy keys directory: %w", err)
 	}
 
-	fmt.Fprintf(env.LogFile, "Auth configs copied from %s to: %s\n", authSourcePath, authDestPath)
+	fmt.Fprintf(env.LogFile, "Keys directory copied from %s to: %s\n", keysSourcePath, keysDestPath)
 
 	return nil
 }

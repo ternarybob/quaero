@@ -39,6 +39,18 @@ func (s *Service) Get(ctx context.Context, key string) (string, error) {
 	return value, nil
 }
 
+// GetPair retrieves a full KeyValuePair by key
+func (s *Service) GetPair(ctx context.Context, key string) (*interfaces.KeyValuePair, error) {
+	pair, err := s.storage.GetPair(ctx, key)
+	if err != nil {
+		s.logger.Error().Err(err).Str("key", key).Msg("Failed to get key/value pair")
+		return nil, err
+	}
+
+	s.logger.Debug().Str("key", key).Msg("Retrieved key/value pair with metadata")
+	return pair, nil
+}
+
 // Set stores or updates a key/value pair
 func (s *Service) Set(ctx context.Context, key string, value string, description string) error {
 	if key == "" {

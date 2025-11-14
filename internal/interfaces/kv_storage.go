@@ -7,8 +7,12 @@ package interfaces
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrKeyNotFound is returned when a key is not found in the key/value store
+var ErrKeyNotFound = errors.New("key not found")
 
 // KeyValuePair represents a single key/value pair with metadata
 type KeyValuePair struct {
@@ -23,6 +27,9 @@ type KeyValuePair struct {
 type KeyValueStorage interface {
 	// Get retrieves a value by key, returns error if not found
 	Get(ctx context.Context, key string) (string, error)
+
+	// GetPair retrieves a full KeyValuePair by key, returns error if not found
+	GetPair(ctx context.Context, key string) (*KeyValuePair, error)
 
 	// Set inserts or updates a key/value pair with optional description
 	Set(ctx context.Context, key string, value string, description string) error

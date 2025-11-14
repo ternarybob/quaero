@@ -3,8 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
+	"net/url"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -13,6 +14,7 @@ import (
 // KVServiceInterface defines the methods needed from the KV service
 type KVServiceInterface interface {
 	Get(ctx context.Context, key string) (string, error)
+	GetPair(ctx context.Context, key string) (*interfaces.KeyValuePair, error)
 	Set(ctx context.Context, key string, value string, description string) error
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context) ([]interfaces.KeyValuePair, error)
@@ -70,16 +72,25 @@ func (h *KVHandler) GetKVHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Extract key from path: /api/kv/{key}
 	path := r.URL.Path
-	key := path[len("/api/kv/"):]
+	encodedKey := path[len("/api/kv/"):]
+
+	// URL-decode the key to handle special characters
+	key, err := url.QueryUnescape(encodedKey)
+	if err != nil {
+		h.logger.Error().Err(err).Str("encoded_key", encodedKey).Msg("Failed to decode key")
+		WriteError(w, http.StatusBadRequest, "Invalid key encoding")
+		return
+	}
 
 	if key == "" {
 		WriteError(w, http.StatusBadRequest, "Missing key parameter")
 		return
 	}
 
-	value, err := h.kvService.Get(r.Context(), key)
+	// Get full key/value pair with metadata
+	pair, err := h.kvService.GetPair(r.Context(), key)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, interfaces.ErrKeyNotFound) {
 			WriteError(w, http.StatusNotFound, "Key not found")
 			return
 		}
@@ -88,10 +99,13 @@ func (h *KVHandler) GetKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return masked value with metadata
+	// Return masked value with full metadata (consistent with ListKVHandler)
 	response := map[string]interface{}{
-		"key":   key,
-		"value": h.maskValue(value),
+		"key":         pair.Key,
+		"value":       h.maskValue(pair.Value),
+		"description": pair.Description,
+		"created_at":  pair.CreatedAt,
+		"updated_at":  pair.UpdatedAt,
 	}
 
 	h.logger.Debug().Str("key", key).Msg("Retrieved key/value pair")
@@ -145,6 +159,7 @@ func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateKVHandler handles PUT /api/kv/{key} - updates an existing key/value pair
+// Supports full replacement (value + description) or description-only updates
 func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "PUT") {
 		return
@@ -152,7 +167,15 @@ func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Extract key from path: /api/kv/{key}
 	path := r.URL.Path
-	key := path[len("/api/kv/"):]
+	encodedKey := path[len("/api/kv/"):]
+
+	// URL-decode the key to handle special characters
+	key, err := url.QueryUnescape(encodedKey)
+	if err != nil {
+		h.logger.Error().Err(err).Str("encoded_key", encodedKey).Msg("Failed to decode key")
+		WriteError(w, http.StatusBadRequest, "Invalid key encoding")
+		return
+	}
 
 	if key == "" {
 		WriteError(w, http.StatusBadRequest, "Missing key parameter")
@@ -171,14 +194,25 @@ func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate value is provided
-	if req.Value == "" {
-		WriteError(w, http.StatusBadRequest, "Value is required")
-		return
+	// If value is empty, fetch current value for description-only update
+	valueToSet := req.Value
+	if valueToSet == "" {
+		currentPair, err := h.kvService.GetPair(r.Context(), key)
+		if err != nil {
+			if errors.Is(err, interfaces.ErrKeyNotFound) {
+				WriteError(w, http.StatusNotFound, "Key not found - cannot update description for non-existent key")
+				return
+			}
+			h.logger.Error().Err(err).Str("key", key).Msg("Failed to get current value for description-only update")
+			WriteError(w, http.StatusInternalServerError, "Failed to retrieve current value")
+			return
+		}
+		valueToSet = currentPair.Value
+		h.logger.Debug().Str("key", key).Msg("Description-only update - preserving existing value")
 	}
 
 	// Update the key/value pair (Set handles upsert)
-	if err := h.kvService.Set(r.Context(), key, req.Value, req.Description); err != nil {
+	if err := h.kvService.Set(r.Context(), key, valueToSet, req.Description); err != nil {
 		h.logger.Error().Err(err).Str("key", key).Msg("Failed to update key/value pair")
 		WriteError(w, http.StatusInternalServerError, "Failed to update key/value pair")
 		return
@@ -201,7 +235,15 @@ func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Extract key from path: /api/kv/{key}
 	path := r.URL.Path
-	key := path[len("/api/kv/"):]
+	encodedKey := path[len("/api/kv/"):]
+
+	// URL-decode the key to handle special characters
+	key, err := url.QueryUnescape(encodedKey)
+	if err != nil {
+		h.logger.Error().Err(err).Str("encoded_key", encodedKey).Msg("Failed to decode key")
+		WriteError(w, http.StatusBadRequest, "Invalid key encoding")
+		return
+	}
 
 	if key == "" {
 		WriteError(w, http.StatusBadRequest, "Missing key parameter")
@@ -210,7 +252,7 @@ func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Delete the key/value pair
 	if err := h.kvService.Delete(r.Context(), key); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, interfaces.ErrKeyNotFound) {
 			WriteError(w, http.StatusNotFound, "Key not found")
 			return
 		}

@@ -394,6 +394,44 @@ function Deploy-Files {
         }
 
     }
+
+    # Deploy auth directory (only new files, no override)
+    $authSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\auth"
+    $authDestPath = Join-Path -Path $BinDirectory -ChildPath "auth"
+
+    if (Test-Path $authSourcePath) {
+        if (-not (Test-Path $authDestPath)) {
+            New-Item -ItemType Directory -Path $authDestPath -Force | Out-Null
+        }
+
+        # Copy files without overriding existing ones
+        $sourceFiles = Get-ChildItem -Path $authSourcePath -File
+        foreach ($file in $sourceFiles) {
+            $destFile = Join-Path -Path $authDestPath -ChildPath $file.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $file.FullName -Destination $destFile
+            }
+        }
+    }
+
+    # Deploy keys directory (only new files, no override)
+    $keysSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\keys"
+    $keysDestPath = Join-Path -Path $BinDirectory -ChildPath "keys"
+
+    if (Test-Path $keysSourcePath) {
+        if (-not (Test-Path $keysDestPath)) {
+            New-Item -ItemType Directory -Path $keysDestPath -Force | Out-Null
+        }
+
+        # Copy files without overriding existing ones
+        $sourceFiles = Get-ChildItem -Path $keysSourcePath -File
+        foreach ($file in $sourceFiles) {
+            $destFile = Join-Path -Path $keysDestPath -ChildPath $file.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $file.FullName -Destination $destFile
+            }
+        }
+    }
 }
 
 # ========== END HELPER FUNCTIONS ==========

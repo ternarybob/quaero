@@ -5,6 +5,7 @@
  * extracted from common.js to improve code organization and maintainability.
  *
  * Components:
+ * - settingsNavigation: Two-column layout navigation component
  * - settingsStatus: Service status and configuration display
  * - settingsConfig: Configuration details viewer
  * - authCookies: Authentication cookies management
@@ -283,6 +284,123 @@ document.addEventListener('alpine:init', () => {
     });
 
     // === COMPONENT DEFINITIONS WITH ENHANCED MODULARITY ===
+
+    // Settings Navigation Component (Two-Column Layout)
+    Alpine.data('settingsNavigation', () => ({
+        content: {},
+        loading: {},
+        loadedSections: new Set(),
+        activeSection: null,
+        defaultSection: 'auth-apikeys',
+        validSections: ['auth-apikeys', 'auth-cookies', 'config', 'danger', 'status'],
+
+        init() {
+            window.debugLog('SettingsNavigation', 'Initializing component');
+            // Parse URL parameter 'a' to get active section (single value)
+            const urlSection = this.getActiveSection();
+            window.debugLog('SettingsNavigation', 'Active section from URL:', urlSection);
+
+            // Set active section (from URL or use default), with validation
+            this.activeSection = this.validateSectionId(urlSection) || this.defaultSection;
+
+            // Load the active section
+            this.selectSection(this.activeSection);
+        },
+
+        validateSectionId(sectionId) {
+            // Validate section ID against whitelist
+            if (!sectionId || !this.validSections.includes(sectionId)) {
+                window.debugLog('SettingsNavigation', `Invalid section ID: ${sectionId}, falling back to default`);
+                return null;
+            }
+            return sectionId;
+        },
+
+        selectSection(sectionId) {
+            // Validate section ID before using
+            const validSectionId = this.validateSectionId(sectionId);
+            if (!validSectionId) {
+                window.debugLog('SettingsNavigation', `Invalid section: ${sectionId}, using default`);
+                sectionId = this.defaultSection;
+            }
+
+            window.debugLog('SettingsNavigation', `selectSection called: ${sectionId}`);
+
+            // Set as active section
+            this.activeSection = sectionId;
+
+            // Determine the partial URL based on section ID
+            const partialUrl = `/settings/${sectionId}.html`;
+
+            // Load content if not already loaded
+            this.loadContent(sectionId, partialUrl);
+
+            // Update URL
+            this.updateUrl(sectionId);
+        },
+
+        async loadContent(sectionId, partialUrl) {
+            // If already loaded, just return (use cache)
+            if (this.loadedSections.has(sectionId)) {
+                window.debugLog('SettingsNavigation', `Section ${sectionId} already loaded, using cache`);
+                return;
+            }
+
+            // Set loading state
+            this.loading[sectionId] = true;
+
+            try {
+                window.debugLog('SettingsNavigation', `Fetching partial: ${partialUrl}`);
+                const response = await fetch(partialUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const html = await response.text();
+                window.debugLog('SettingsNavigation', `Loaded ${html.length} bytes for ${sectionId}`);
+
+                // Store content and mark as loaded
+                this.content[sectionId] = html;
+                this.loadedSections.add(sectionId);
+                this.loading[sectionId] = false;
+
+            } catch (error) {
+                window.debugError('SettingsNavigation', `Error loading ${sectionId}:`, error);
+                this.loading[sectionId] = false;
+
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification(`Failed to load ${sectionId}: ${error.message}`, 'error');
+                }
+            }
+        },
+
+        updateUrl(sectionId) {
+            const url = new URL(window.location);
+            const params = new URLSearchParams(url.search);
+
+            // Set 'a' parameter to single active section
+            params.set('a', sectionId);
+
+            // Update URL without page reload
+            url.search = params.toString();
+            window.history.replaceState({}, '', url);
+
+            window.debugLog('SettingsNavigation', `URL updated: ${url.search}`);
+        },
+
+        getActiveSection() {
+            const params = new URLSearchParams(window.location.search);
+            const sectionParam = params.get('a');
+
+            if (!sectionParam || sectionParam.trim() === '') {
+                return null;
+            }
+
+            // Return the single section ID
+            return sectionParam.trim();
+        }
+    }));
 
     // Service Status Component - Enhanced with mixin patterns
     Alpine.data('settingsStatus', () => ({
