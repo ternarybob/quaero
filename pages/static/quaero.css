@@ -822,14 +822,6 @@ body.modal-open {
     align-self: flex-start;
 }
 
-/* Adds consistent spacing between buttons */
-/* .btn {
-        flex-shrink: 0;
-    }
-    */
-
-
-
 /* Display Utilities */
 .hide {
     display: none !important;
@@ -1692,6 +1684,25 @@ body.modal-open {
 .accordion .accordion-header .icon {
     transition: transform 0.2s ease;
 }
+
+/* MENU STYLES
+   ========================================================================== */
+
+.column {
+    &.menu-sidebar {
+        min-height: 50vh;
+        /* min-width: 180px; */
+        border-right: 1px solid var(--border-color);
+        /* margin-right: 1rem; */
+
+        .nav-item a {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
+}
+
 
 /* Responsive Design */
 @media (max-width: 768px) {

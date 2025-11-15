@@ -22,10 +22,10 @@
 
         <!-- Settings Layout: Standard Spectre Grid -->
         <div x-data="settingsNavigation" class="container">
-            <div class="columns col-gapless">
+            <div class="columns">
 
                 <!-- Left Sidebar: Standard Spectre Nav (Auto-sized) -->
-                <div class="column col-2">
+                <div class="column col-2 menu-sidebar">
                     <ul class="nav">
                         <li class="nav-item" :class="{ 'active': activeSection === 'auth-apikeys' }">
                             <a href="#" @click.prevent="selectSection('auth-apikeys')">
@@ -61,7 +61,7 @@
                 </div>
 
                 <!-- Right Content Panel: Standard Column -->
-                <div class="column col-10">
+                <div class="column col-10" style="min-height: 50vh;">
                     <!-- Loading State -->
                     <div x-show="loading[activeSection]" class="text-center loading-state">
                         <div class="loading loading-lg"></div>
