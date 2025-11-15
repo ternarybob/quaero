@@ -114,10 +114,10 @@ func TestSettingsPageLoad(t *testing.T) {
 		env.LogTest(t, "✓ No console errors detected")
 	}
 
-	// Verify settings menu structure exists
+	// Verify settings menu structure exists (standard Spectre nav)
 	var hasSettingsMenu bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('.settings-menu') !== null`, &hasSettingsMenu),
+		chromedp.Evaluate(`document.querySelector('.nav') !== null`, &hasSettingsMenu),
 	)
 	if err != nil {
 		env.LogTest(t, "ERROR: Failed to check settings menu: %v", err)
@@ -214,10 +214,10 @@ func TestSettingsMenuClick(t *testing.T) {
 	}
 	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("settings-before-apikeys-click"))
 
-	// Find and click the first menu item (API Keys)
+	// Find and click the first menu item (API Keys) - updated for standard Spectre nav
 	env.LogTest(t, "Clicking API Keys menu item...")
 	err = chromedp.Run(ctx,
-		chromedp.Click(`.settings-menu-item:first-child`, chromedp.ByQuery),
+		chromedp.Click(`.nav-item:first-child a`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second), // Wait for content to load
 	)
 
@@ -235,10 +235,10 @@ func TestSettingsMenuClick(t *testing.T) {
 	}
 	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("settings-after-apikeys-click"))
 
-	// Verify menu item is active
+	// Verify menu item is active (standard Spectre nav-item)
 	var isActive bool
 	err = chromedp.Run(ctx,
-		chromedp.Evaluate(`document.querySelector('.settings-menu-item:first-child').classList.contains('active')`, &isActive),
+		chromedp.Evaluate(`document.querySelector('.nav-item:first-child').classList.contains('active')`, &isActive),
 	)
 
 	if err != nil {
@@ -267,12 +267,12 @@ func TestSettingsMenuClick(t *testing.T) {
 		env.LogTest(t, "✓ No console errors detected after accordion interaction")
 	}
 
-	// Verify API Keys content is visible in the content panel
+	// Verify API Keys content is visible in the content panel (standard column)
 	var contentVisible bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const loadingState = contentPanel.querySelector('.loading-state');
 				const hasContent = contentPanel.querySelector('[x-data*="authApiKeys"]') !== null;
@@ -380,7 +380,7 @@ func TestSettingsAuthenticationMenu(t *testing.T) {
 	// Find and click the Authentication menu item (2nd menu item for auth-cookies)
 	env.LogTest(t, "Clicking Authentication menu item...")
 	err = chromedp.Run(ctx,
-		chromedp.Click(`.settings-menu-item:nth-child(2)`, chromedp.ByQuery),
+		chromedp.Click(`.nav-item:nth-child(2) a`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second), // Wait for content to load
 	)
 
@@ -435,7 +435,7 @@ func TestSettingsAuthenticationMenu(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const hasContent = contentPanel.querySelector('[x-data*="authCookies"]') !== null;
 				const loadingState = contentPanel.querySelector('.loading-state');
@@ -541,7 +541,7 @@ func TestSettingsMenuPersistence(t *testing.T) {
 
 	// Click first menu item (API Keys)
 	err = chromedp.Run(ctx,
-		chromedp.Click(`.settings-menu-item:first-child`, chromedp.ByQuery),
+		chromedp.Click(`.nav-item:first-child`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	)
 
@@ -641,7 +641,7 @@ func TestSettingsMenuPersistence(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const hasContent = contentPanel.querySelector('[x-data*="authApiKeys"]') !== null;
 				const loadingState = contentPanel.querySelector('.loading-state');
@@ -904,7 +904,7 @@ func TestSettingsAuthenticationMenuLoadsAndStops(t *testing.T) {
 	// Click Authentication menu item (2nd menu item for auth-cookies)
 	env.LogTest(t, "Clicking Authentication menu item...")
 	err = chromedp.Run(ctx,
-		chromedp.Click(`.settings-menu-item:nth-child(2)`, chromedp.ByQuery),
+		chromedp.Click(`.nav-item:nth-child(2) a`, chromedp.ByQuery),
 		chromedp.Sleep(3*time.Second), // Give it time to load
 	)
 
@@ -925,7 +925,7 @@ func TestSettingsAuthenticationMenuLoadsAndStops(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const loadingState = contentPanel.querySelector('.loading-state');
 				if (!loadingState) return false;
@@ -955,7 +955,7 @@ func TestSettingsAuthenticationMenuLoadsAndStops(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				// Check if content loaded (not loading spinner)
 				const hasAuthContent = contentPanel.querySelector('[x-data*="authCookies"]') !== null;
@@ -1033,7 +1033,7 @@ func TestSettingsConfigurationMenuLoads(t *testing.T) {
 	// Click Configuration menu item (3rd menu item for config)
 	env.LogTest(t, "Clicking Configuration menu item...")
 	err = chromedp.Run(ctx,
-		chromedp.Click(`.settings-menu-item:nth-child(3)`, chromedp.ByQuery),
+		chromedp.Click(`.nav-item:nth-child(3) a`, chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Give it time to load
 	)
 
@@ -1054,7 +1054,7 @@ func TestSettingsConfigurationMenuLoads(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const errorText = Array.from(contentPanel.querySelectorAll('p, div'))
 					.find(el => el.textContent.includes('No configuration loaded'));
@@ -1082,7 +1082,7 @@ func TestSettingsConfigurationMenuLoads(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
+				const contentPanel = document.querySelector('.column.col-9, .column.col-sm-12');
 				if (!contentPanel) return false;
 				const configPanel = contentPanel.querySelector('.config-panel, [x-data*="settingsConfig"], pre, code');
 				return configPanel !== null;

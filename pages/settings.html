@@ -12,7 +12,7 @@
 
     {{template "navbar.html" .}}
 
-    <main class="page-container">
+    <main class="container">
 
         <!-- Page Title -->
         <div class="page-title">
@@ -20,62 +20,59 @@
             <p>System configuration, status, and operational controls</p>
         </div>
 
-        <!-- Settings Two-Column Layout (Dynamic Loading) -->
-        <div x-data="settingsNavigation" class="settings-layout">
+        <!-- Settings Layout: Standard Spectre Grid -->
+        <div x-data="settingsNavigation" class="container">
+            <div class="columns col-gapless">
 
-            <!-- Left Sidebar: Vertical Menu -->
-            <aside class="settings-sidebar">
-                <nav class="settings-menu">
-                    <button
-                        class="settings-menu-item"
-                        @click="selectSection('auth-apikeys')"
-                        :class="{ 'active': activeSection === 'auth-apikeys' }">
-                        <i class="icon icon-people"></i>
-                        API Keys
-                    </button>
-                    <button
-                        class="settings-menu-item"
-                        @click="selectSection('auth-cookies')"
-                        :class="{ 'active': activeSection === 'auth-cookies' }">
-                        <i class="icon icon-people"></i>
-                        Authentication
-                    </button>
-                    <button
-                        class="settings-menu-item"
-                        @click="selectSection('config')"
-                        :class="{ 'active': activeSection === 'config' }">
-                        <i class="icon icon-apps"></i>
-                        Configuration
-                    </button>
-                    <button
-                        class="settings-menu-item"
-                        @click="selectSection('danger')"
-                        :class="{ 'active': activeSection === 'danger' }">
-                        <i class="icon icon-stop"></i>
-                        Danger Zone
-                    </button>
-                    <button
-                        class="settings-menu-item"
-                        @click="selectSection('status')"
-                        :class="{ 'active': activeSection === 'status' }">
-                        <i class="icon icon-flag"></i>
-                        Service Status
-                    </button>
-                </nav>
-            </aside>
-
-            <!-- Right Content Panel -->
-            <main class="settings-content">
-                <!-- Loading State -->
-                <div x-show="loading[activeSection]" class="text-center loading-state">
-                    <div class="loading loading-lg"></div>
-                    <p style="margin-top: 1rem;" x-text="'Loading ' + activeSection.replace('-', ' ') + '...'"></p>
+                <!-- Left Sidebar: Standard Spectre Nav (Auto-sized) -->
+                <div class="column col-2">
+                    <ul class="nav">
+                        <li class="nav-item" :class="{ 'active': activeSection === 'auth-apikeys' }">
+                            <a href="#" @click.prevent="selectSection('auth-apikeys')">
+                                <i class="icon icon-people"></i>
+                                API Keys
+                            </a>
+                        </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'auth-cookies' }">
+                            <a href="#" @click.prevent="selectSection('auth-cookies')">
+                                <i class="icon icon-people"></i>
+                                Authentication
+                            </a>
+                        </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'config' }">
+                            <a href="#" @click.prevent="selectSection('config')">
+                                <i class="icon icon-apps"></i>
+                                Configuration
+                            </a>
+                        </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'danger' }">
+                            <a href="#" @click.prevent="selectSection('danger')">
+                                <i class="icon icon-stop"></i>
+                                Danger Zone
+                            </a>
+                        </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'status' }">
+                            <a href="#" @click.prevent="selectSection('status')">
+                                <i class="icon icon-flag"></i>
+                                Service Status
+                            </a>
+                        </li>
+                    </ul>
                 </div>
 
-                <!-- Dynamic Content -->
-                <div x-show="!loading[activeSection]" x-html="content[activeSection]"></div>
-            </main>
+                <!-- Right Content Panel: Standard Column -->
+                <div class="column col-10">
+                    <!-- Loading State -->
+                    <div x-show="loading[activeSection]" class="text-center loading-state">
+                        <div class="loading loading-lg"></div>
+                        <p style="margin-top: 1rem;" x-text="'Loading ' + activeSection.replace('-', ' ') + '...'"></p>
+                    </div>
 
+                    <!-- Dynamic Content -->
+                    <div x-show="!loading[activeSection]" x-html="content[activeSection]"></div>
+                </div>
+
+            </div>
         </div>
 
         <!-- Service Logs -->
