@@ -25,6 +25,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
+	"github.com/ternarybob/quaero/internal/services/config"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
@@ -96,6 +97,9 @@ type App struct {
 
 	// Key/Value service
 	KVService *kv.Service
+
+	// Config service
+	ConfigService interfaces.ConfigService
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -349,12 +353,25 @@ func (a *App) initServices() error {
 	a.JobService = jobsvc.NewService(jobMgr, queueMgr, a.Logger)
 	a.Logger.Info().Msg("Job service initialized")
 
-	// 5.11. Initialize key/value service
+	// 5.11. Initialize key/value service with event publishing
 	a.KVService = kv.NewService(
 		a.StorageManager.KeyValueStorage(),
+		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Key/value service initialized")
+	a.Logger.Info().Msg("Key/value service initialized with event publishing")
+
+	// 5.12. Initialize config service with event-driven cache invalidation
+	a.ConfigService, err = config.NewService(
+		a.Config,
+		a.StorageManager.KeyValueStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize config service: %w", err)
+	}
+	a.Logger.Info().Msg("Config service initialized with dynamic key injection")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -616,8 +633,8 @@ func (a *App) initHandlers() error {
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
 
-	// Initialize config handler
-	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config)
+	// Initialize config handler with ConfigService for dynamic key injection
+	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)
 
 	// Initialize page handler for serving HTML templates
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)
@@ -834,6 +851,15 @@ func (a *App) Close() error {
 
 	// Close chat service (no explicit Close method, just nil reference)
 	a.ChatService = nil
+
+	// Close config service
+	if a.ConfigService != nil {
+		if err := a.ConfigService.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close config service")
+		} else {
+			a.Logger.Info().Msg("Config service closed")
+		}
+	}
 
 	// Close event service
 	if a.EventService != nil {

@@ -182,6 +182,16 @@ const (
 	//   - source_url: string (document URL)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventDocumentSaved EventType = "document_saved"
+
+	// EventKeyUpdated is published when a key/value pair is updated in KV storage.
+	// Published from KV storage handlers after successful Set() operations.
+	// Used by ConfigService to invalidate cache and re-inject latest key values.
+	// Payload structure: map[string]interface{} with keys:
+	//   - key_name: string (name of the updated key, e.g., "google-places-key")
+	//   - old_value: string (previous value, may be empty for new keys)
+	//   - new_value: string (new value after update)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventKeyUpdated EventType = "key_updated"
 )
 
 // Event represents a system event

@@ -8,6 +8,7 @@ package kv
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -15,15 +16,18 @@ import (
 
 // Service provides business logic for key/value operations
 type Service struct {
-	storage interfaces.KeyValueStorage
-	logger  arbor.ILogger
+	storage   interfaces.KeyValueStorage
+	eventSvc  interfaces.EventService
+	logger    arbor.ILogger
 }
 
 // NewService creates a new key/value service
-func NewService(storage interfaces.KeyValueStorage, logger arbor.ILogger) *Service {
+// If eventSvc is nil, event publishing is skipped (graceful degradation)
+func NewService(storage interfaces.KeyValueStorage, eventSvc interfaces.EventService, logger arbor.ILogger) *Service {
 	return &Service{
-		storage: storage,
-		logger:  logger,
+		storage:  storage,
+		eventSvc: eventSvc,
+		logger:   logger,
 	}
 }
 
@@ -51,12 +55,16 @@ func (s *Service) GetPair(ctx context.Context, key string) (*interfaces.KeyValue
 	return pair, nil
 }
 
-// Set stores or updates a key/value pair
+// Set stores or updates a key/value pair and publishes EventKeyUpdated
 func (s *Service) Set(ctx context.Context, key string, value string, description string) error {
 	if key == "" {
 		return fmt.Errorf("key cannot be empty")
 	}
 
+	// Get old value for event payload (if exists)
+	oldValue, _ := s.storage.Get(ctx, key)
+
+	// Store the key/value pair
 	err := s.storage.Set(ctx, key, value, description)
 	if err != nil {
 		s.logger.Error().Err(err).Str("key", key).Msg("Failed to store key/value pair")
@@ -64,6 +72,28 @@ func (s *Service) Set(ctx context.Context, key string, value string, description
 	}
 
 	s.logger.Info().Str("key", key).Msg("Stored key/value pair")
+
+	// Publish EventKeyUpdated if event service is available
+	if s.eventSvc != nil {
+		event := interfaces.Event{
+			Type: interfaces.EventKeyUpdated,
+			Payload: map[string]interface{}{
+				"key_name":  key,
+				"old_value": oldValue,
+				"new_value": value,
+				"timestamp": time.Now().Format(time.RFC3339),
+			},
+		}
+
+		// Publish asynchronously to avoid blocking the Set operation
+		if err := s.eventSvc.Publish(ctx, event); err != nil {
+			s.logger.Warn().Err(err).Str("key", key).Msg("Failed to publish EventKeyUpdated")
+			// Don't fail the Set operation if event publishing fails
+		} else {
+			s.logger.Debug().Str("key", key).Msg("Published EventKeyUpdated")
+		}
+	}
+
 	return nil
 }
 

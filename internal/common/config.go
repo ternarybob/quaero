@@ -726,3 +726,44 @@ func (c *Config) IsProduction() bool {
 func (c *Config) AllowTestURLs() bool {
 	return !c.IsProduction()
 }
+
+// DeepCloneConfig creates a deep copy of the Config struct
+// This is used by ConfigService to prevent mutations of the original config
+func DeepCloneConfig(c *Config) *Config {
+	if c == nil {
+		return nil
+	}
+
+	// Clone the config struct (shallow copy first)
+	clone := *c
+
+	// Deep clone slice fields to prevent shared memory
+	if len(c.Logging.Output) > 0 {
+		clone.Logging.Output = make([]string, len(c.Logging.Output))
+		copy(clone.Logging.Output, c.Logging.Output)
+	}
+
+	if len(c.Crawler.AllowedContentTypes) > 0 {
+		clone.Crawler.AllowedContentTypes = make([]string, len(c.Crawler.AllowedContentTypes))
+		copy(clone.Crawler.AllowedContentTypes, c.Crawler.AllowedContentTypes)
+	}
+
+	if len(c.WebSocket.ExcludePatterns) > 0 {
+		clone.WebSocket.ExcludePatterns = make([]string, len(c.WebSocket.ExcludePatterns))
+		copy(clone.WebSocket.ExcludePatterns, c.WebSocket.ExcludePatterns)
+	}
+
+	if len(c.WebSocket.AllowedEvents) > 0 {
+		clone.WebSocket.AllowedEvents = make([]string, len(c.WebSocket.AllowedEvents))
+		copy(clone.WebSocket.AllowedEvents, c.WebSocket.AllowedEvents)
+	}
+
+	if len(c.WebSocket.ThrottleIntervals) > 0 {
+		clone.WebSocket.ThrottleIntervals = make(map[string]string, len(c.WebSocket.ThrottleIntervals))
+		for k, v := range c.WebSocket.ThrottleIntervals {
+			clone.WebSocket.ThrottleIntervals[k] = v
+		}
+	}
+
+	return &clone
+}
