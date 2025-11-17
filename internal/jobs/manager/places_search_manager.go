@@ -167,53 +167,68 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		Str("parent_job_id", parentJobID).
 		Msg("Places search orchestration completed successfully")
 
-	// Convert search result to document for storage
-	doc, err := m.convertPlacesResultToDocument(result, parentJobID, jobDef.Tags)
+	// Create individual documents for each place
+	docs, err := m.createPlaceDocuments(result, parentJobID, jobDef.Tags)
 	if err != nil {
-		return "", fmt.Errorf("failed to convert places result to document: %w", err)
+		return "", fmt.Errorf("failed to create place documents: %w", err)
 	}
 
-	// Save document to database
-	if err := m.documentService.SaveDocument(ctx, doc); err != nil {
-		return "", fmt.Errorf("failed to save places document: %w", err)
+	// Save each document to database and publish events
+	savedCount := 0
+	for _, doc := range docs {
+		if err := m.documentService.SaveDocument(ctx, doc); err != nil {
+			m.logger.Warn().
+				Err(err).
+				Str("document_id", doc.ID).
+				Str("place_name", doc.Title).
+				Msg("Failed to save place document")
+			continue // Continue with other documents even if one fails
+		}
+
+		savedCount++
+
+		m.logger.Debug().
+			Str("document_id", doc.ID).
+			Str("place_name", doc.Title).
+			Msg("Place document saved successfully")
+
+		// Publish document_saved event for each document
+		// This is a generic, job-type agnostic event that ANY manager can publish
+		if m.eventService != nil && parentJobID != "" {
+			docID := doc.ID // Capture for goroutine
+			payload := map[string]interface{}{
+				"job_id":        parentJobID, // For places jobs, the parent job is the job itself
+				"parent_job_id": parentJobID,
+				"document_id":   docID,
+				"source_type":   "places",
+				"timestamp":     time.Now().Format(time.RFC3339),
+			}
+			event := interfaces.Event{
+				Type:    interfaces.EventDocumentSaved,
+				Payload: payload,
+			}
+			// Publish asynchronously to not block document save
+			go func() {
+				if err := m.eventService.Publish(context.Background(), event); err != nil {
+					m.logger.Warn().
+						Err(err).
+						Str("document_id", docID).
+						Str("parent_job_id", parentJobID).
+						Msg("Failed to publish document_saved event")
+				} else {
+					m.logger.Debug().
+						Str("document_id", docID).
+						Str("parent_job_id", parentJobID).
+						Msg("Published document_saved event for parent job document count")
+				}
+			}()
+		}
 	}
 
 	m.logger.Info().
-		Str("document_id", doc.ID).
-		Str("document_title", doc.Title).
-		Int("places_count", result.TotalResults).
-		Msg("Places search result saved as document")
-
-	// Publish document_saved event for parent job document count tracking
-	// This is a generic, job-type agnostic event that ANY manager can publish
-	if m.eventService != nil && parentJobID != "" {
-		payload := map[string]interface{}{
-			"job_id":        parentJobID, // For places jobs, the parent job is the job itself
-			"parent_job_id": parentJobID,
-			"document_id":   doc.ID,
-			"source_type":   "places",
-			"timestamp":     time.Now().Format(time.RFC3339),
-		}
-		event := interfaces.Event{
-			Type:    interfaces.EventDocumentSaved,
-			Payload: payload,
-		}
-		// Publish asynchronously to not block document save
-		go func() {
-			if err := m.eventService.Publish(context.Background(), event); err != nil {
-				m.logger.Warn().
-					Err(err).
-					Str("document_id", doc.ID).
-					Str("parent_job_id", parentJobID).
-					Msg("Failed to publish document_saved event")
-			} else {
-				m.logger.Debug().
-					Str("document_id", doc.ID).
-					Str("parent_job_id", parentJobID).
-					Msg("Published document_saved event for parent job document count")
-			}
-		}()
-	}
+		Int("documents_created", savedCount).
+		Int("total_results", result.TotalResults).
+		Msg("Places search results saved as individual documents")
 
 	// Return parent job ID as placeholder since this is a synchronous operation
 	return parentJobID, nil
@@ -224,20 +239,18 @@ func (m *PlacesSearchManager) GetManagerType() string {
 	return "places_search"
 }
 
-// convertPlacesResultToDocument converts a PlacesSearchResult to a Document for storage
-func (m *PlacesSearchManager) convertPlacesResultToDocument(result *models.PlacesSearchResult, jobID string, tags []string) (*models.Document, error) {
-	// Generate document ID from job ID and timestamp
-	docID := fmt.Sprintf("doc_places_%s", jobID)
+// createPlaceDocuments creates individual documents for each place in the search results
+func (m *PlacesSearchManager) createPlaceDocuments(result *models.PlacesSearchResult, jobID string, tags []string) ([]*models.Document, error) {
+	docs := make([]*models.Document, 0, len(result.Places))
+	now := time.Now()
 
-	// Build markdown content with formatted places list
-	var contentBuilder strings.Builder
-	contentBuilder.WriteString(fmt.Sprintf("# Places Search Results: %s\n\n", result.SearchQuery))
-	contentBuilder.WriteString(fmt.Sprintf("**Search Type:** %s\n", result.SearchType))
-	contentBuilder.WriteString(fmt.Sprintf("**Total Results:** %d\n\n", result.TotalResults))
-	contentBuilder.WriteString("## Places\n\n")
+	for _, place := range result.Places {
+		// Generate unique document ID using place_id
+		docID := fmt.Sprintf("doc_place_%s", place.PlaceID)
 
-	for i, place := range result.Places {
-		contentBuilder.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, place.Name))
+		// Build markdown content for this individual place
+		var contentBuilder strings.Builder
+		contentBuilder.WriteString(fmt.Sprintf("# %s\n\n", place.Name))
 
 		if place.FormattedAddress != "" {
 			contentBuilder.WriteString(fmt.Sprintf("**Address:** %s\n\n", place.FormattedAddress))
@@ -264,33 +277,41 @@ func (m *PlacesSearchManager) convertPlacesResultToDocument(result *models.Place
 		}
 
 		contentBuilder.WriteString(fmt.Sprintf("**Place ID:** %s\n\n", place.PlaceID))
-		contentBuilder.WriteString("---\n\n")
+
+		// Convert place to metadata map
+		placeMetadata := map[string]interface{}{
+			"place_id":           place.PlaceID,
+			"name":               place.Name,
+			"formatted_address":  place.FormattedAddress,
+			"rating":             place.Rating,
+			"user_ratings_total": place.UserRatingsTotal,
+			"website":            place.Website,
+			"phone_number":       place.PhoneNumber,
+			"types":              place.Types,
+			"latitude":           place.Latitude,
+			"longitude":          place.Longitude,
+			"search_query":       result.SearchQuery,
+			"search_type":        result.SearchType,
+			"job_id":             jobID, // Track which job created this document
+		}
+
+		// Create document for this place
+		doc := &models.Document{
+			ID:              docID,
+			SourceType:      "places",
+			SourceID:        place.PlaceID, // Use place_id as source_id for uniqueness
+			Title:           place.Name,
+			ContentMarkdown: contentBuilder.String(),
+			DetailLevel:     models.DetailLevelFull,
+			Metadata:        placeMetadata,
+			URL:             place.Website, // Use website as URL if available
+			Tags:            tags,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		docs = append(docs, doc)
 	}
 
-	// Convert result to metadata map
-	metadataBytes, err := json.Marshal(result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal places result to metadata: %w", err)
-	}
-	var metadata map[string]interface{}
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal places metadata: %w", err)
-	}
-
-	now := time.Now()
-	doc := &models.Document{
-		ID:              docID,
-		SourceType:      "places",
-		SourceID:        jobID,
-		Title:           fmt.Sprintf("Places Search: %s", result.SearchQuery),
-		ContentMarkdown: contentBuilder.String(),
-		DetailLevel:     models.DetailLevelFull,
-		Metadata:        metadata,
-		URL:             "",
-		Tags:            tags,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-
-	return doc, nil
+	return docs, nil
 }

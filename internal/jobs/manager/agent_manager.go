@@ -20,6 +20,7 @@ type AgentManager struct {
 	searchService interfaces.SearchService
 	kvStorage     interfaces.KeyValueStorage
 	authStorage   interfaces.AuthStorage
+	eventService  interfaces.EventService
 	logger        arbor.ILogger
 }
 
@@ -33,6 +34,7 @@ func NewAgentManager(
 	searchService interfaces.SearchService,
 	kvStorage interfaces.KeyValueStorage,
 	authStorage interfaces.AuthStorage,
+	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) *AgentManager {
 	return &AgentManager{
@@ -41,6 +43,7 @@ func NewAgentManager(
 		searchService: searchService,
 		kvStorage:     kvStorage,
 		authStorage:   authStorage,
+		eventService:  eventService,
 		logger:        logger,
 	}
 }
@@ -122,6 +125,13 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 	}
 
 	if len(jobIDs) == 0 {
+		errMsg := fmt.Sprintf("Failed to create any agent jobs for step %s", step.Name)
+
+		// Publish error event for real-time display
+		if m.eventService != nil {
+			m.publishJobError(ctx, parentJobID, errMsg)
+		}
+
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
 	}
 
@@ -155,8 +165,13 @@ func (m *AgentManager) GetManagerType() string {
 func (m *AgentManager) queryDocuments(ctx context.Context, jobDef *models.JobDefinition, filter map[string]interface{}) ([]*models.Document, error) {
 	// Build search options based on job definition and filter
 	opts := interfaces.SearchOptions{
-		SourceTypes: []string{jobDef.SourceType},
-		Limit:       1000, // Process up to 1000 documents per step
+		Limit: 1000, // Process up to 1000 documents per step
+	}
+
+	// Only filter by source type if specified in job definition
+	// This allows agent jobs to process ALL documents when source_type is not specified
+	if jobDef.SourceType != "" {
+		opts.SourceTypes = []string{jobDef.SourceType}
 	}
 
 	// Apply additional filters if specified
@@ -305,4 +320,30 @@ func (m *AgentManager) pollJobCompletion(ctx context.Context, jobIDs []string) e
 			}
 		}
 	}
+}
+
+// publishJobError publishes a job error event for real-time display
+func (m *AgentManager) publishJobError(ctx context.Context, jobID, errorMessage string) {
+	if m.eventService == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"job_id":        jobID,
+		"parent_job_id": jobID, // For parent jobs, parent_job_id is same as job_id
+		"error_message": errorMessage,
+		"timestamp":     time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    interfaces.EventJobError,
+		Payload: payload,
+	}
+
+	// Publish asynchronously to avoid blocking
+	go func() {
+		if err := m.eventService.Publish(ctx, event); err != nil {
+			m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job error event")
+		}
+	}()
 }

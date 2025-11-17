@@ -13,6 +13,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 type DocumentHandler struct {
@@ -246,6 +247,74 @@ func (h *DocumentHandler) DeleteAllDocumentsHandler(w http.ResponseWriter, r *ht
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":            "All documents deleted successfully",
 		"documents_affected": documentsAffected,
+	})
+}
+
+// CreateDocumentHandler handles POST /api/documents
+// Creates a new document in the database
+func (h *DocumentHandler) CreateDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse request body
+	var docReq map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&docReq); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to decode document request")
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Extract required fields
+	id, _ := docReq["id"].(string)
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "Document ID is required")
+		return
+	}
+
+	sourceType, _ := docReq["source_type"].(string)
+	if sourceType == "" {
+		WriteError(w, http.StatusBadRequest, "Source type is required")
+		return
+	}
+
+	title, _ := docReq["title"].(string)
+	contentMarkdown, _ := docReq["content_markdown"].(string)
+	url, _ := docReq["url"].(string)
+	sourceID, _ := docReq["source_id"].(string)
+
+	// Extract optional metadata
+	metadata, _ := docReq["metadata"].(map[string]interface{})
+
+	// Create document model
+	doc := &models.Document{
+		ID:              id,
+		SourceType:      sourceType,
+		SourceID:        sourceID,
+		Title:           title,
+		ContentMarkdown: contentMarkdown,
+		URL:             url,
+		Metadata:        metadata,
+	}
+
+	// Save document
+	if err := h.documentService.SaveDocument(ctx, doc); err != nil {
+		h.logger.Error().Err(err).Str("doc_id", id).Msg("Failed to save document")
+		WriteError(w, http.StatusInternalServerError, "Failed to save document")
+		return
+	}
+
+	h.logger.Info().Str("doc_id", id).Str("source_type", sourceType).Msg("Document created")
+
+	// Return created document
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":          doc.ID,
+		"source_type": doc.SourceType,
+		"title":       doc.Title,
 	})
 }
 

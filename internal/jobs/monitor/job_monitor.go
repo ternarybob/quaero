@@ -409,7 +409,119 @@ func (m *jobMonitor) SubscribeToChildStatusChanges() {
 		return
 	}
 
-	m.logger.Info().Msg("JobMonitor subscribed to child job status changes and document_saved events")
+	// Subscribe to document_updated events for real-time document update count tracking
+	if err := m.eventService.Subscribe(interfaces.EventDocumentUpdated, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			m.logger.Warn().Msg("Invalid document_updated payload type")
+			return nil
+		}
+
+		// Extract parent job ID from payload
+		parentJobID := getStringFromPayload(payload, "parent_job_id")
+		if parentJobID == "" {
+			return nil // No parent job, ignore
+		}
+
+		// Extract additional fields for logging
+		documentID := getStringFromPayload(payload, "document_id")
+		jobID := getStringFromPayload(payload, "job_id")
+
+		// Increment document count in parent job metadata (async operation)
+		go func() {
+			if err := m.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
+				m.logger.Error().Err(err).
+					Str("parent_job_id", parentJobID).
+					Str("document_id", documentID).
+					Str("job_id", jobID).
+					Msg("Failed to increment document count for parent job")
+				return
+			}
+
+			m.logger.Debug().
+				Str("parent_job_id", parentJobID).
+				Str("document_id", documentID).
+				Str("job_id", jobID).
+				Msg("Incremented document count for parent job (document updated)")
+		}()
+
+		return nil
+	}); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to subscribe to EventDocumentUpdated")
+		return
+	}
+
+	// Subscribe to job error events for real-time error tracking
+	if err := m.eventService.Subscribe(interfaces.EventJobError, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			m.logger.Warn().Msg("Invalid job_error payload type")
+			return nil
+		}
+
+		// Extract event data
+		jobID := getStringFromPayload(payload, "job_id")
+		parentJobID := getStringFromPayload(payload, "parent_job_id")
+		errorMessage := getStringFromPayload(payload, "error_message")
+
+		// If this is a parent job error, track it directly
+		if parentJobID == jobID || parentJobID == "" {
+			// Add error to parent job's status_report
+			if err := m.jobMgr.AddJobError(context.Background(), jobID, errorMessage); err != nil {
+				m.logger.Error().Err(err).
+					Str("job_id", jobID).
+					Str("error_message", errorMessage).
+					Msg("Failed to add error to job status_report")
+			}
+
+			m.logger.Debug().
+				Str("job_id", jobID).
+				Str("error_message", errorMessage).
+				Msg("Added error to job status_report")
+		}
+
+		return nil
+	}); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to subscribe to EventJobError")
+		return
+	}
+
+	// Subscribe to job warning events for real-time warning tracking
+	if err := m.eventService.Subscribe(interfaces.EventJobWarning, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			m.logger.Warn().Msg("Invalid job_warning payload type")
+			return nil
+		}
+
+		// Extract event data
+		jobID := getStringFromPayload(payload, "job_id")
+		parentJobID := getStringFromPayload(payload, "parent_job_id")
+		warningMessage := getStringFromPayload(payload, "warning_message")
+
+		// If this is a parent job warning, track it directly
+		if parentJobID == jobID || parentJobID == "" {
+			// Add warning to parent job's status_report
+			if err := m.jobMgr.AddJobWarning(context.Background(), jobID, warningMessage); err != nil {
+				m.logger.Error().Err(err).
+					Str("job_id", jobID).
+					Str("warning_message", warningMessage).
+					Msg("Failed to add warning to job status_report")
+			}
+
+			m.logger.Debug().
+				Str("job_id", jobID).
+				Str("warning_message", warningMessage).
+				Msg("Added warning to job status_report")
+		}
+
+		return nil
+	}); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to subscribe to EventJobWarning")
+		return
+	}
+
+	m.logger.Info().Msg("JobMonitor subscribed to child job status changes, document events, error events, and warning events")
 }
 
 // formatProgressText generates the required progress format
@@ -446,6 +558,9 @@ func (m *jobMonitor) publishParentJobProgressUpdate(
 		documentCount = 0
 	}
 
+	// Get errors and warnings from job metadata (for real-time UI display)
+	errors, warnings := m.getJobErrorsAndWarnings(ctx, parentJobID)
+
 	payload := map[string]interface{}{
 		"job_id":             parentJobID,
 		"status":             overallStatus,
@@ -457,6 +572,8 @@ func (m *jobMonitor) publishParentJobProgressUpdate(
 		"cancelled_children": stats.CancelledChildren,
 		"progress_text":      progressText,  // "X pending, Y running, Z completed, W failed"
 		"document_count":     documentCount, // Real-time document count from metadata
+		"errors":             errors,        // Error messages from status_report
+		"warnings":           warnings,      // Warning messages from status_report
 		"timestamp":          time.Now().Format(time.RFC3339),
 	}
 
@@ -516,4 +633,55 @@ func getStringFromPayload(payload map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// getJobErrorsAndWarnings extracts errors and warnings from job metadata status_report
+// Returns empty arrays if no errors/warnings exist or if metadata cannot be read
+func (m *jobMonitor) getJobErrorsAndWarnings(ctx context.Context, jobID string) ([]string, []string) {
+	// Get job to access metadata
+	jobInterface, err := m.jobMgr.GetJob(ctx, jobID)
+	if err != nil {
+		m.logger.Debug().Err(err).
+			Str("job_id", jobID).
+			Msg("Failed to get job for errors/warnings extraction")
+		return []string{}, []string{}
+	}
+
+	// Type assert to *models.Job
+	job, ok := jobInterface.(*models.Job)
+	if !ok {
+		m.logger.Debug().
+			Str("job_id", jobID).
+			Msg("Failed to type assert job for errors/warnings extraction")
+		return []string{}, []string{}
+	}
+
+	// Extract status_report from metadata
+	statusReport, ok := job.Metadata["status_report"].(map[string]interface{})
+	if !ok {
+		// No status_report yet, return empty arrays
+		return []string{}, []string{}
+	}
+
+	// Extract errors array
+	var errors []string
+	if errorsInterface, ok := statusReport["errors"].([]interface{}); ok {
+		for _, errInterface := range errorsInterface {
+			if errStr, ok := errInterface.(string); ok {
+				errors = append(errors, errStr)
+			}
+		}
+	}
+
+	// Extract warnings array
+	var warnings []string
+	if warningsInterface, ok := statusReport["warnings"].([]interface{}); ok {
+		for _, warnInterface := range warningsInterface {
+			if warnStr, ok := warnInterface.(string); ok {
+				warnings = append(warnings, warnStr)
+			}
+		}
+	}
+
+	return errors, warnings
 }

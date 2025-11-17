@@ -223,10 +223,10 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.JobModel) error {
 	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Agent processing completed: %s (document: %s)",
 		agentType, documentID))
 
-	// Step 5: Publish DocumentSaved event (reusing existing event type)
+	// Step 5: Publish DocumentUpdated event (agent jobs update existing documents)
 	if w.eventService != nil {
 		event := interfaces.Event{
-			Type: interfaces.EventDocumentSaved,
+			Type: interfaces.EventDocumentUpdated,
 			Payload: map[string]interface{}{
 				"job_id":        job.ID,
 				"parent_job_id": parentID,
@@ -238,7 +238,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.JobModel) error {
 
 		go func() {
 			if err := w.eventService.Publish(context.Background(), event); err != nil {
-				jobLogger.Warn().Err(err).Msg("Failed to publish DocumentSaved event")
+				jobLogger.Warn().Err(err).Msg("Failed to publish DocumentUpdated event")
 			}
 		}()
 	}

@@ -56,7 +56,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler) // GET - all unique tags
-	mux.HandleFunc("/api/documents", s.app.DocumentHandler.ListHandler)
+	mux.HandleFunc("/api/documents", s.handleDocumentsRoute)                 // GET (list) and POST (create)
 	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents
 	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes)                                   // Handles /api/documents/{id} and subpaths
@@ -285,6 +285,14 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 }
 
 // NOTE: handleDataRoute and handleDataRoutes removed - DataHandler deleted during Stage 2.4 cleanup
+
+// handleDocumentsRoute routes /api/documents requests (list and create)
+func (s *Server) handleDocumentsRoute(w http.ResponseWriter, r *http.Request) {
+	RouteResourceCollection(w, r,
+		s.app.DocumentHandler.ListHandler,
+		s.app.DocumentHandler.CreateDocumentHandler,
+	)
+}
 
 // handleDocumentRoutes routes document-related requests to the appropriate handler
 func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {

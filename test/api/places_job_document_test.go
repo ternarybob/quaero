@@ -109,16 +109,18 @@ done:
 		t.Fatal("Failed to get final job status")
 	}
 
-	// 3. Verify result_count is at least 1 (we created 1 document)
+	// 3. Verify result_count matches expected documents (max_results or actual places found)
+	// We requested max_results=3, so we expect at least 3 documents (one per place)
+	expectedMinDocs := 3
 	resultCount := 0
 	if rc, ok := finalJob["result_count"].(float64); ok {
 		resultCount = int(rc)
 	}
 
-	if resultCount < 1 {
-		t.Errorf("Job result_count should be at least 1 (created 1 document), got: %d", resultCount)
+	if resultCount < expectedMinDocs {
+		t.Errorf("Job result_count should be at least %d (one document per place), got: %d", expectedMinDocs, resultCount)
 	} else {
-		t.Logf("✓ Job result_count: %d", resultCount)
+		t.Logf("✓ Job result_count: %d (expected at least %d)", resultCount, expectedMinDocs)
 	}
 
 	// 4. Verify document_count in job metadata
@@ -136,10 +138,10 @@ done:
 				documentCount = int(dc)
 			}
 
-			if documentCount < 1 {
-				t.Errorf("Job metadata document_count should be at least 1, got: %d. This indicates EventDocumentSaved was not published or processed", documentCount)
+			if documentCount < expectedMinDocs {
+				t.Errorf("Job metadata document_count should be at least %d (one per place), got: %d. This indicates EventDocumentSaved was not published for all documents", expectedMinDocs, documentCount)
 			} else {
-				t.Logf("✓ Job metadata document_count: %d (event-driven tracking working)", documentCount)
+				t.Logf("✓ Job metadata document_count: %d (event-driven tracking working, expected at least %d)", documentCount, expectedMinDocs)
 			}
 		}
 	}
@@ -252,7 +254,7 @@ done:
 	defer h.DELETE("/api/jobs/" + parentJobID)
 	t.Logf("✓ Places job completed: %s", parentJobID)
 
-	// 4. Fetch document created by places job
+	// 4. Fetch documents created by places job
 	docsResp, err := h.GET("/api/documents")
 	if err != nil {
 		t.Fatalf("Failed to fetch documents: %v", err)
@@ -266,51 +268,73 @@ done:
 		t.Fatalf("Failed to parse documents response: %v", err)
 	}
 
-	// Find places document for this job
-	var placesDoc map[string]interface{}
+	// Find ALL places documents for this job (should be one per place)
+	// NOTE: source_id is now place_id, so we check job_id in metadata
+	var placesDocs []map[string]interface{}
 	for _, doc := range docsResult.Documents {
 		sourceType, _ := doc["source_type"].(string)
-		sourceID, _ := doc["source_id"].(string)
+		if sourceType != "places" {
+			continue
+		}
 
-		if sourceType == "places" && sourceID == parentJobID {
-			placesDoc = doc
-			break
+		// Check job_id in metadata to find documents from this job
+		metadataStr, ok := doc["metadata"].(string)
+		if !ok || metadataStr == "" {
+			continue
+		}
+
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+			continue
+		}
+
+		jobIDInMetadata, _ := metadata["job_id"].(string)
+		if jobIDInMetadata == parentJobID {
+			placesDocs = append(placesDocs, doc)
 		}
 	}
 
-	if placesDoc == nil {
-		t.Fatalf("No document with source_type='places' and source_id='%s' found", parentJobID)
+	if len(placesDocs) == 0 {
+		t.Fatalf("No documents with source_type='places' and metadata.job_id='%s' found", parentJobID)
 	}
 
-	t.Logf("✓ Document found: %s", placesDoc["id"])
+	t.Logf("✓ Found %d place documents for job %s", len(placesDocs), parentJobID)
 
-	// 5. VERIFY TAGS ARE PRESENT
-	tagsStr, ok := placesDoc["tags"].(string)
-	if !ok || tagsStr == "" {
-		t.Fatal("Document should have tags field")
-	}
+	// 5. VERIFY TAGS ARE PRESENT ON ALL DOCUMENTS
+	for i, placesDoc := range placesDocs {
+		docID := placesDoc["id"].(string)
 
-	var actualTags []string
-	if err := json.Unmarshal([]byte(tagsStr), &actualTags); err != nil {
-		t.Fatalf("Failed to parse tags JSON: %v", err)
-	}
-
-	// Verify tags match job definition tags
-	if len(actualTags) != len(expectedTags) {
-		t.Errorf("Expected %d tags, got %d. Expected: %v, Got: %v", len(expectedTags), len(actualTags), expectedTags, actualTags)
-	}
-
-	tagMap := make(map[string]bool)
-	for _, tag := range actualTags {
-		tagMap[tag] = true
-	}
-
-	for _, expectedTag := range expectedTags {
-		if !tagMap[expectedTag] {
-			t.Errorf("Expected tag '%s' not found in document tags: %v", expectedTag, actualTags)
+		tagsStr, ok := placesDoc["tags"].(string)
+		if !ok || tagsStr == "" {
+			t.Errorf("Document %d (%s) should have tags field", i+1, docID)
+			continue
 		}
+
+		var actualTags []string
+		if err := json.Unmarshal([]byte(tagsStr), &actualTags); err != nil {
+			t.Errorf("Document %d (%s): Failed to parse tags JSON: %v", i+1, docID, err)
+			continue
+		}
+
+		// Verify tags match job definition tags
+		if len(actualTags) != len(expectedTags) {
+			t.Errorf("Document %d (%s): Expected %d tags, got %d. Expected: %v, Got: %v", i+1, docID, len(expectedTags), len(actualTags), expectedTags, actualTags)
+			continue
+		}
+
+		tagMap := make(map[string]bool)
+		for _, tag := range actualTags {
+			tagMap[tag] = true
+		}
+
+		for _, expectedTag := range expectedTags {
+			if !tagMap[expectedTag] {
+				t.Errorf("Document %d (%s): Expected tag '%s' not found in document tags: %v", i+1, docID, expectedTag, actualTags)
+			}
+		}
+
+		t.Logf("✓ Document %d (%s): Tags verified - %v", i+1, docID, actualTags)
 	}
 
-	t.Logf("✓ Tags verified - Expected: %v, Got: %v", expectedTags, actualTags)
-	t.Log("✓ Places job documents correctly inherit tags from job definition")
+	t.Logf("✓ All %d place documents correctly inherit tags from job definition", len(placesDocs))
 }

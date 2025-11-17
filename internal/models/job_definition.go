@@ -125,6 +125,12 @@ type JobDefinition struct {
 	UpdatedAt        time.Time              `json:"updated_at"`        // Last update timestamp
 }
 
+// isPlaceholder checks if a string value contains placeholder syntax {key-name}
+// Used to skip validation for values that will be replaced at runtime
+func isPlaceholder(value string) bool {
+	return len(value) > 2 && value[0] == '{' && value[len(value)-1] == '}'
+}
+
 // Validate validates the job definition
 // Note: Schedule is optional. When empty, the job can only be triggered manually.
 func (j *JobDefinition) Validate() error {
@@ -155,8 +161,8 @@ func (j *JobDefinition) Validate() error {
 	// Validate source fields for crawler jobs
 	// Note: source_type is optional for file-based crawler definitions that don't require source integration
 	if j.Type == JobDefinitionTypeCrawler {
-		// Validate source type only if provided
-		if j.SourceType != "" {
+		// Validate source type only if provided and not a placeholder
+		if j.SourceType != "" && !isPlaceholder(j.SourceType) {
 			validTypes := map[string]bool{
 				"jira":       true,
 				"confluence": true,
@@ -213,11 +219,14 @@ func (j *JobDefinition) Validate() error {
 		if j.ErrorTolerance.MaxChildFailures < 0 {
 			return errors.New("error_tolerance.max_child_failures must be >= 0")
 		}
-		switch j.ErrorTolerance.FailureAction {
-		case "stop_all", "continue", "mark_warning":
-			// Valid failure action
-		default:
-			return fmt.Errorf("invalid error_tolerance.failure_action: %s (must be one of: stop_all, continue, mark_warning)", j.ErrorTolerance.FailureAction)
+		// Skip validation for placeholder values
+		if !isPlaceholder(j.ErrorTolerance.FailureAction) {
+			switch j.ErrorTolerance.FailureAction {
+			case "stop_all", "continue", "mark_warning":
+				// Valid failure action
+			default:
+				return fmt.Errorf("invalid error_tolerance.failure_action: %s (must be one of: stop_all, continue, mark_warning)", j.ErrorTolerance.FailureAction)
+			}
 		}
 	}
 

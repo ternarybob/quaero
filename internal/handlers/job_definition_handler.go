@@ -560,7 +560,7 @@ func (h *JobDefinitionHandler) validateRuntimeDependencies(jobDef *models.JobDef
 			// Agent steps require agent service
 			if h.agentService == nil {
 				jobDef.RuntimeStatus = "disabled"
-				jobDef.RuntimeError = "Google API key is required for agent service (set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config)"
+				jobDef.RuntimeError = "Google API key is required for agent service (set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config)"
 				return
 			}
 			// Add more action types here as needed

@@ -507,7 +507,7 @@ func (a *App) initServices() error {
 
 	// Register agent manager (if agent service is available)
 	if a.AgentService != nil {
-		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
+		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered")
 	}

@@ -182,6 +182,17 @@ const (
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventDocumentSaved EventType = "document_saved"
 
+	// EventDocumentUpdated is published when an agent job successfully updates a document's metadata.
+	// Published from AgentWorker.Execute after successful document metadata update.
+	// Used by JobMonitor to track document update count for parent jobs in real-time.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (child agent job ID that updated the document)
+	//   - parent_job_id: string (parent job ID to update)
+	//   - document_id: string (updated document ID)
+	//   - source_url: string (document URL)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventDocumentUpdated EventType = "document_updated"
+
 	// EventKeyUpdated is published when a key/value pair is updated in KV storage.
 	// Published from KV storage handlers after successful Set() operations.
 	// Used by ConfigService to invalidate cache and re-inject latest key values.
@@ -191,6 +202,26 @@ const (
 	//   - new_value: string (new value after update)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventKeyUpdated EventType = "key_updated"
+
+	// EventJobError is published when a job encounters a fatal error.
+	// Published from job workers when critical errors occur (e.g., failed to create child jobs).
+	// Used by JobMonitor to collect and display errors to users in real-time.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (ID of the job that encountered the error)
+	//   - parent_job_id: string (parent job ID if this is a child job)
+	//   - error_message: string (error message to display)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobError EventType = "job_error"
+
+	// EventJobWarning is published when a job encounters a non-fatal warning.
+	// Published from job workers when warnings occur (e.g., partial failures).
+	// Used by JobMonitor to collect and display warnings to users in real-time.
+	// Payload structure: map[string]interface{} with keys:
+	//   - job_id: string (ID of the job that generated the warning)
+	//   - parent_job_id: string (parent job ID if this is a child job)
+	//   - warning_message: string (warning message to display)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobWarning EventType = "job_warning"
 )
 
 // Event represents a system event

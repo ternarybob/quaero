@@ -1751,3 +1751,119 @@ func (m *Manager) GetDocumentCount(ctx context.Context, jobID string) (int, erro
 	// document_count not found in metadata, return 0
 	return 0, nil
 }
+
+// AddJobError adds an error message to the job's status_report
+// This is used to track and display errors in the UI
+func (m *Manager) AddJobError(ctx context.Context, jobID, errorMessage string) error {
+	// Read current metadata
+	var metadataStr string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT metadata_json FROM jobs WHERE id = ?
+	`, jobID).Scan(&metadataStr)
+	if err != nil {
+		return fmt.Errorf("failed to get job metadata: %w", err)
+	}
+
+	// Parse metadata
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		return fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	// Get or create status_report object
+	var statusReport map[string]interface{}
+	if sr, ok := metadata["status_report"].(map[string]interface{}); ok {
+		statusReport = sr
+	} else {
+		statusReport = make(map[string]interface{})
+	}
+
+	// Get or create errors array
+	var errors []interface{}
+	if e, ok := statusReport["errors"].([]interface{}); ok {
+		errors = e
+	} else {
+		errors = make([]interface{}, 0)
+	}
+
+	// Append new error message
+	errors = append(errors, errorMessage)
+	statusReport["errors"] = errors
+
+	// Update metadata with status_report
+	metadata["status_report"] = statusReport
+
+	// Save updated metadata
+	updatedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Use retry logic for write contention
+	err = retryOnBusy(ctx, func() error {
+		_, err := m.db.ExecContext(ctx, `
+			UPDATE jobs SET metadata_json = ? WHERE id = ?
+		`, string(updatedMetadata), jobID)
+		return err
+	})
+
+	return err
+}
+
+// AddJobWarning adds a warning message to the job's status_report
+// This is used to track and display warnings in the UI
+func (m *Manager) AddJobWarning(ctx context.Context, jobID, warningMessage string) error {
+	// Read current metadata
+	var metadataStr string
+	err := m.db.QueryRowContext(ctx, `
+		SELECT metadata_json FROM jobs WHERE id = ?
+	`, jobID).Scan(&metadataStr)
+	if err != nil {
+		return fmt.Errorf("failed to get job metadata: %w", err)
+	}
+
+	// Parse metadata
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+		return fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	// Get or create status_report object
+	var statusReport map[string]interface{}
+	if sr, ok := metadata["status_report"].(map[string]interface{}); ok {
+		statusReport = sr
+	} else {
+		statusReport = make(map[string]interface{})
+	}
+
+	// Get or create warnings array
+	var warnings []interface{}
+	if w, ok := statusReport["warnings"].([]interface{}); ok {
+		warnings = w
+	} else {
+		warnings = make([]interface{}, 0)
+	}
+
+	// Append new warning message
+	warnings = append(warnings, warningMessage)
+	statusReport["warnings"] = warnings
+
+	// Update metadata with status_report
+	metadata["status_report"] = statusReport
+
+	// Save updated metadata
+	updatedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Use retry logic for write contention
+	err = retryOnBusy(ctx, func() error {
+		_, err := m.db.ExecContext(ctx, `
+			UPDATE jobs SET metadata_json = ? WHERE id = ?
+		`, string(updatedMetadata), jobID)
+		return err
+	})
+
+	return err
+}
