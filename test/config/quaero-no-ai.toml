@@ -7,7 +7,8 @@
 # Purpose: Test that agent job definitions appear in UI with "disabled" status
 # =============================================================================
 
-[agent]
-google_api_key = ""  # Explicitly disable agent service
-model_name = ""      # Clear model name
+[gemini]
+google_api_key = ""  # Explicitly disable Gemini service
+agent_model = ""     # Clear agent model name
+chat_model = ""      # Clear chat model name
 

@@ -30,8 +30,7 @@ type Config struct {
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
 	PlacesAPI   PlacesAPIConfig  `toml:"places_api"`
-	Agent       AgentConfig      `toml:"agent"`
-	LLM         LLMConfig        `toml:"llm"`
+	Gemini      GeminiConfig     `toml:"gemini"`
 }
 
 type ServerConfig struct {
@@ -55,15 +54,13 @@ type StorageConfig struct {
 }
 
 type SQLiteConfig struct {
-	Path               string `toml:"path"`                // Database file path
-	EnableFTS5         bool   `toml:"enable_fts5"`         // Enable full-text search
-	EnableVector       bool   `toml:"enable_vector"`       // Enable sqlite-vec extension
-	EmbeddingDimension int    `toml:"embedding_dimension"` // Vector dimension for embeddings
-	CacheSizeMB        int    `toml:"cache_size_mb"`       // Cache size in MB
-	WALMode            bool   `toml:"wal_mode"`            // Enable WAL mode for better concurrency
-	BusyTimeoutMS      int    `toml:"busy_timeout_ms"`     // Busy timeout in milliseconds
-	ResetOnStartup     bool   `toml:"reset_on_startup"`    // Delete database on startup (development only)
-	Environment        string `toml:"environment"`         // Environment setting for SQLite operations ("development" or "production")
+	Path           string `toml:"path"`             // Database file path
+	EnableFTS5     bool   `toml:"enable_fts5"`      // Enable full-text search
+	CacheSizeMB    int    `toml:"cache_size_mb"`    // Cache size in MB
+	WALMode        bool   `toml:"wal_mode"`         // Enable WAL mode for better concurrency
+	BusyTimeoutMS  int    `toml:"busy_timeout_ms"`  // Busy timeout in milliseconds
+	ResetOnStartup bool   `toml:"reset_on_startup"` // Delete database on startup (development only)
+	Environment    string `toml:"environment"`      // Environment setting for SQLite operations ("development" or "production")
 }
 
 type RavenDBConfig struct {
@@ -151,22 +148,14 @@ type PlacesAPIConfig struct {
 	MaxResultsPerSearch int           `toml:"max_results_per_search"` // Google Places API limit per request
 }
 
-// AgentConfig contains Google ADK agent configuration
-type AgentConfig struct {
-	GoogleAPIKey string `toml:"google_api_key"` // Google Gemini API key for agent operations
-	ModelName    string `toml:"model_name"`     // Gemini model identifier (default: "gemini-2.0-flash")
-	MaxTurns     int    `toml:"max_turns"`      // Maximum agent conversation turns (default: 10)
-	Timeout      string `toml:"timeout"`        // Agent execution timeout as duration string (default: "5m")
-}
-
-// LLMConfig contains Google ADK LLM service configuration
-type LLMConfig struct {
-	GoogleAPIKey   string  `toml:"google_api_key"`   // Google Gemini API key for LLM operations
-	EmbedModelName string  `toml:"embed_model_name"` // Gemini embedding model identifier (default: "text-embedding-004")
-	ChatModelName  string  `toml:"chat_model_name"`  // Gemini chat model identifier (default: "gemini-2.0-flash")
-	Timeout        string  `toml:"timeout"`          // LLM operation timeout as duration string (default: "5m")
-	EmbedDimension int     `toml:"embed_dimension"`  // Embedding vector dimension (default: 768, must match SQLite config)
-	Temperature    float32 `toml:"temperature"`      // Chat completion temperature (default: 0.7)
+// GeminiConfig contains unified Google Gemini API configuration for all AI services
+type GeminiConfig struct {
+	GoogleAPIKey string  `toml:"google_api_key"` // Google Gemini API key for all AI operations
+	AgentModel   string  `toml:"agent_model"`    // Gemini model for agent operations (default: "gemini-2.0-flash")
+	ChatModel    string  `toml:"chat_model"`     // Gemini model for chat operations (default: "gemini-2.0-flash")
+	MaxTurns     int     `toml:"max_turns"`      // Maximum agent conversation turns (default: 10)
+	Timeout      string  `toml:"timeout"`        // Operation timeout as duration string (default: "5m")
+	Temperature  float32 `toml:"temperature"`    // Chat completion temperature (default: 0.7)
 }
 
 // NewDefaultConfig creates a configuration with default values
@@ -189,14 +178,12 @@ func NewDefaultConfig() *Config {
 		Storage: StorageConfig{
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
-				Path:               "./data/quaero.db",
-				EnableFTS5:         true,          // Full-text search for keyword queries
-				EnableVector:       true,          // Vector embeddings for semantic search
-				EmbeddingDimension: 768,           // Matches nomic-embed-text model output
-				CacheSizeMB:        64,            // Balanced performance for typical workloads
-				WALMode:            true,          // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS:      10000,         // 10 seconds for high-concurrency job processing
-				Environment:        "development", // Default to development mode
+				Path:           "./data/quaero.db",
+				EnableFTS5:     true,          // Full-text search for keyword queries
+				CacheSizeMB:    64,            // Balanced performance for typical workloads
+				WALMode:        true,          // Write-Ahead Logging for better concurrency
+				BusyTimeoutMS:  10000,         // 10 seconds for high-concurrency job processing
+				Environment:    "development", // Default to development mode
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",
@@ -274,19 +261,13 @@ func NewDefaultConfig() *Config {
 			RequestTimeout:      30 * time.Second,
 			MaxResultsPerSearch: 20, // Google Places API default limit
 		},
-		Agent: AgentConfig{
+		Gemini: GeminiConfig{
 			GoogleAPIKey: "",                 // User must provide API key (no fallback)
-			ModelName:    "gemini-2.0-flash", // Fast, cost-effective Gemini model
+			AgentModel:   "gemini-2.0-flash", // Fast, cost-effective model for agents
+			ChatModel:    "gemini-2.0-flash", // Fast, cost-effective model for chat
 			MaxTurns:     10,                 // Reasonable limit for agent loops
-			Timeout:      "5m",               // 5 minutes for agent execution
-		},
-		LLM: LLMConfig{
-			GoogleAPIKey:    "",                 // User must provide API key (no fallback)
-			EmbedModelName:  "text-embedding-004", // Current recommended embedding model
-			ChatModelName:   "gemini-2.0-flash",    // Fast, cost-effective chat model (same as agent service)
-			Timeout:         "5m",                    // 5 minutes for LLM operations
-			EmbedDimension:  768,                     // Matches SQLite embedding dimension (line 173)
-			Temperature:     0.7,                     // Default temperature for chat completions
+			Timeout:      "5m",               // 5 minutes for operations
+			Temperature:  0.7,                // Default temperature for chat completions
 		},
 	}
 }
@@ -568,43 +549,27 @@ func applyEnvOverrides(config *Config) {
 		config.PlacesAPI.APIKey = apiKey
 	}
 
-	// Agent configuration
-	if apiKey := os.Getenv("QUAERO_AGENT_GOOGLE_API_KEY"); apiKey != "" {
-		config.Agent.GoogleAPIKey = apiKey
+	// Gemini configuration
+	if apiKey := os.Getenv("QUAERO_GEMINI_GOOGLE_API_KEY"); apiKey != "" {
+		config.Gemini.GoogleAPIKey = apiKey
 	}
-	if modelName := os.Getenv("QUAERO_AGENT_MODEL_NAME"); modelName != "" {
-		config.Agent.ModelName = modelName
+	if agentModel := os.Getenv("QUAERO_GEMINI_AGENT_MODEL"); agentModel != "" {
+		config.Gemini.AgentModel = agentModel
 	}
-	if maxTurns := os.Getenv("QUAERO_AGENT_MAX_TURNS"); maxTurns != "" {
+	if chatModel := os.Getenv("QUAERO_GEMINI_CHAT_MODEL"); chatModel != "" {
+		config.Gemini.ChatModel = chatModel
+	}
+	if maxTurns := os.Getenv("QUAERO_GEMINI_MAX_TURNS"); maxTurns != "" {
 		if mt, err := strconv.Atoi(maxTurns); err == nil {
-			config.Agent.MaxTurns = mt
+			config.Gemini.MaxTurns = mt
 		}
 	}
-	if timeout := os.Getenv("QUAERO_AGENT_TIMEOUT"); timeout != "" {
-		config.Agent.Timeout = timeout
+	if timeout := os.Getenv("QUAERO_GEMINI_TIMEOUT"); timeout != "" {
+		config.Gemini.Timeout = timeout
 	}
-
-	// LLM configuration
-	if apiKey := os.Getenv("QUAERO_LLM_GOOGLE_API_KEY"); apiKey != "" {
-		config.LLM.GoogleAPIKey = apiKey
-	}
-	if embedModelName := os.Getenv("QUAERO_LLM_EMBED_MODEL_NAME"); embedModelName != "" {
-		config.LLM.EmbedModelName = embedModelName
-	}
-	if chatModelName := os.Getenv("QUAERO_LLM_CHAT_MODEL_NAME"); chatModelName != "" {
-		config.LLM.ChatModelName = chatModelName
-	}
-	if timeout := os.Getenv("QUAERO_LLM_TIMEOUT"); timeout != "" {
-		config.LLM.Timeout = timeout
-	}
-	if embedDimension := os.Getenv("QUAERO_LLM_EMBED_DIMENSION"); embedDimension != "" {
-		if ed, err := strconv.Atoi(embedDimension); err == nil {
-			config.LLM.EmbedDimension = ed
-		}
-	}
-	if temperature := os.Getenv("QUAERO_LLM_TEMPERATURE"); temperature != "" {
+	if temperature := os.Getenv("QUAERO_GEMINI_TEMPERATURE"); temperature != "" {
 		if t, err := strconv.ParseFloat(temperature, 32); err == nil {
-			config.LLM.Temperature = float32(t)
+			config.Gemini.Temperature = float32(t)
 		}
 	}
 

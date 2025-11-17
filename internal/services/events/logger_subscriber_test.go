@@ -77,7 +77,6 @@ func TestSubscribeLoggerToAllEvents(t *testing.T) {
 	// Test all event types
 	eventTypes := []interfaces.EventType{
 		interfaces.EventCollectionTriggered,
-		interfaces.EventEmbeddingTriggered,
 		interfaces.EventDocumentForceSync,
 		interfaces.EventCrawlProgress,
 		interfaces.EventStatusChanged,

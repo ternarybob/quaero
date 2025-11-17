@@ -30,22 +30,8 @@ type Message struct {
 }
 
 // LLMService defines the interface for language model operations including
-// embeddings generation and chat completions. Current implementation uses
-// Google ADK (cloud-based) via Gemini API.
+// chat completions. Current implementation uses Google ADK (cloud-based) via Gemini API.
 type LLMService interface {
-	// Embed generates a 768-dimension embedding vector for the given text.
-	// The embedding can be used for semantic search, similarity comparison,
-	// and vector storage operations.
-	//
-	// Parameters:
-	//   - ctx: Context for cancellation and timeout control
-	//   - text: Input text to generate embedding for
-	//
-	// Returns:
-	//   - []float32: 768-dimension embedding vector
-	//   - error: Error if embedding generation fails
-	Embed(ctx context.Context, text string) ([]float32, error)
-
 	// Chat generates a completion response based on the conversation history.
 	// The messages slice should contain the full conversation context including
 	// system prompts, user messages, and previous assistant responses.

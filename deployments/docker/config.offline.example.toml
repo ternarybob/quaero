@@ -1,12 +1,15 @@
 # Quaero Production Configuration (Docker)
 # ==========================================
 #
+# ⚠️  DEPRECATED: This configuration file is deprecated and no longer supported.
+# ⚠️  Offline LLM mode and embeddings have been removed from Quaero.
+# ⚠️  Use cloud-based Google Gemini API instead (see deployments/local/quaero.toml).
+#
 # This is a full example configuration for production deployment with Docker.
 # Copy this file to config.toml and customize for your environment.
 #
 # Key Production Settings:
 # - environment = "production" (rejects test URLs like localhost)
-# - llm.mode = "offline" (secure, no external API calls)
 # - Proper resource limits and timeouts
 #
 # Configuration Load Order (priority from lowest to highest):
@@ -60,8 +63,7 @@ type = "sqlite"
 [storage.sqlite]
 path = "/data/quaero.db"  # Docker volume mount point
 enable_fts5 = true         # Full-text search
-enable_vector = true       # Vector embeddings
-embedding_dimension = 768  # nomic-embed-text dimension
+# DEPRECATED: enable_vector and embedding_dimension removed (embeddings no longer supported)
 cache_size_mb = 128        # Production cache size
 wal_mode = true            # Write-Ahead Logging
 busy_timeout_ms = 10000    # 10 seconds for production
@@ -71,41 +73,26 @@ images = "/data/images"
 attachments = "/data/attachments"
 
 # =============================================================================
-# LLM Configuration
+# Gemini Configuration (Google ADK - Unified for Agents and Chat)
 # =============================================================================
-# Offline mode for production (100% local, secure)
-[llm]
-mode = "offline"  # Secure by default - no data leaves the container
-
-[llm.offline]
-model_dir = "/models"                           # Docker volume mount
-embed_model = "nomic-embed-text-v1.5-q8.gguf"  # Embedding model
-chat_model = "qwen2.5-7b-instruct-q4.gguf"     # Chat model
-context_size = 24000                            # Large context for RAG
-thread_count = 8                                # Production CPU threads
-gpu_layers = 0                                  # CPU-only (adjust if GPU available)
-mock_mode = false                               # Disable mock mode in production
-
-# Audit Logging - Compliance and security
-[llm.audit]
-enabled = true      # Enable audit logging
-log_queries = false # Don't log query text (PII protection)
+# ⚠️  DEPRECATED NOTICE: Offline LLM mode has been removed.
+# Use Google Gemini API for all AI operations (agents and chat).
+#
+# [gemini]
+# google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all AI operations
+# agent_model = "gemini-2.0-flash"                # Model for agent operations
+# chat_model = "gemini-2.0-flash"                 # Model for chat operations
+# max_turns = 10                                   # Maximum agent conversation turns
+# timeout = "5m"                                   # Operation timeout
+# temperature = 0.7                                # Chat completion temperature
 
 # =============================================================================
-# RAG Configuration
+# DEPRECATED: The following sections are no longer supported
 # =============================================================================
-[rag]
-max_documents = 20    # Retrieve up to 20 documents
-min_similarity = 0.6  # Minimum similarity threshold
-search_mode = "vector" # Semantic vector search
-
-# =============================================================================
-# Embeddings Configuration
-# =============================================================================
-[embeddings]
-enabled = true
-dimension = 768    # nomic-embed-text dimension
-batch_size = 20    # Production batch size
+# - [llm] and [llm.offline]: Offline LLM mode removed
+# - [llm.audit]: Audit logging removed with offline mode
+# - [rag]: RAG configuration moved to application code
+# - [embeddings]: Embeddings functionality removed (using FTS5 search only)
 
 # =============================================================================
 # Processing Configuration

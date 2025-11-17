@@ -7,7 +7,6 @@ type EventType string
 
 const (
 	EventCollectionTriggered EventType = "collection_triggered"
-	EventEmbeddingTriggered  EventType = "embedding_triggered"
 	EventDocumentForceSync   EventType = "document_force_sync"
 	// EventCrawlProgress is published periodically during crawl jobs with detailed progress updates.
 	// Payload structure: map[string]interface{} with keys:

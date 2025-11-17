@@ -12,7 +12,7 @@ reset_on_startup = true  # Delete database on startup for clean test runs
 # Configure variables directory to use test variables
 # Variables are user-defined key-value pairs stored in TOML files (./variables/*.toml)
 [variables]
-dir = "./variables"  # Use test variables directory (copied to bin/variables during test setup)
+dir = "./variables-no-variables"  # Use test variables directory (copied to bin/variables during test setup)
 
 [logging]
 level = "debug"

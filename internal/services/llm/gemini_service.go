@@ -13,12 +13,12 @@ import (
 )
 
 // GeminiService implements the LLMService interface using Google ADK.
-// It provides embedding and chat completions using Gemini models.
+// It provides chat completions using Gemini models.
 type GeminiService struct {
-	config   *common.LLMConfig
-	logger   arbor.ILogger
-	client   *genai.Client
-	timeout  time.Duration
+	config  *common.GeminiConfig
+	logger  arbor.ILogger
+	client  *genai.Client
+	timeout time.Duration
 }
 
 // convertMessagesToGemini converts []interfaces.Message to Gemini Content format.
@@ -82,13 +82,12 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 //
 // The service initialization includes:
 //  1. Resolving Google API key from KV store with config fallback
-//  2. Setting default model names if not specified
-//  3. Validating that EmbedDimension matches SQLite.EmbeddingDimension
-//  4. Parsing timeout duration from configuration
-//  5. Initializing both embedding and chat models with Google ADK
+//  2. Setting default model name if not specified
+//  3. Parsing timeout duration from configuration
+//  4. Initializing chat model with Google ADK
 //
 // Parameters:
-//   - config: Full application configuration to access storage settings
+//   - geminiConfig: Gemini configuration with API key and model settings
 //   - storageManager: Storage manager interface for KV and auth storage access
 //   - logger: Structured logger for service operations
 //
@@ -98,34 +97,25 @@ func convertMessagesToGemini(messages []interfaces.Message) ([]*genai.Content, s
 //
 // Errors:
 //   - Missing or empty Google API key (from KV store or config)
-//   - EmbedDimension mismatch with SQLite configuration
-//   - Invalid model names or timeout duration
+//   - Invalid model name or timeout duration
 //   - Failed to initialize ADK models (network, auth, etc.)
-func NewGeminiService(config *common.Config, storageManager interfaces.StorageManager, logger arbor.ILogger) (*GeminiService, error) {
+func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*GeminiService, error) {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "gemini-llm", config.LLM.GoogleAPIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google_api_key", geminiConfig.GoogleAPIKey)
 	if err != nil {
-		return nil, fmt.Errorf("Google API key is required for LLM service (set via KV store, QUAERO_LLM_GOOGLE_API_KEY, or llm.google_api_key in config): %w", err)
+		return nil, fmt.Errorf("Google API key is required for LLM service (set via KV store, QUAERO_GEMINI_GOOGLE_API_KEY, or gemini.google_api_key in config): %w", err)
 	}
 
-	// Validate that EmbedDimension matches SQLite.EmbeddingDimension
-	if config.LLM.EmbedDimension != config.Storage.SQLite.EmbeddingDimension {
-		return nil, fmt.Errorf("LLM.EmbedDimension (%d) must match SQLite.EmbeddingDimension (%d): embedding dimension mismatch will cause database storage errors", config.LLM.EmbedDimension, config.Storage.SQLite.EmbeddingDimension)
-	}
-
-	// Set default model names if not specified
-	if config.LLM.EmbedModelName == "" {
-		config.LLM.EmbedModelName = "gemini-embedding-001"
-	}
-	if config.LLM.ChatModelName == "" {
-		config.LLM.ChatModelName = "gemini-2.0-flash"
+	// Set default model name if not specified
+	if geminiConfig.ChatModel == "" {
+		geminiConfig.ChatModel = "gemini-2.0-flash"
 	}
 
 	// Parse timeout duration
-	timeout, err := time.ParseDuration(config.LLM.Timeout)
+	timeout, err := time.ParseDuration(geminiConfig.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("invalid timeout duration '%s': %w", config.LLM.Timeout, err)
+		return nil, fmt.Errorf("invalid timeout duration '%s': %w", geminiConfig.Timeout, err)
 	}
 
 	// Initialize genai client
@@ -139,77 +129,19 @@ func NewGeminiService(config *common.Config, storageManager interfaces.StorageMa
 
 	// Create service instance
 	service := &GeminiService{
-		config:  &config.LLM, // Store only the LLM config part
+		config:  geminiConfig,
 		logger:  logger,
 		client:  client,
 		timeout: timeout,
 	}
 
 	logger.Info().
-		Str("embed_model", config.LLM.EmbedModelName).
-		Str("chat_model", config.LLM.ChatModelName).
-		Int("embed_dimension", config.LLM.EmbedDimension).
-		Int("sqlite_embedding_dimension", config.Storage.SQLite.EmbeddingDimension).
+		Str("chat_model", geminiConfig.ChatModel).
 		Dur("timeout", timeout).
+		Float32("temperature", geminiConfig.Temperature).
 		Msg("Gemini LLM service initialized successfully")
 
 	return service, nil
-}
-
-// Embed generates a 768-dimension embedding vector for the given text.
-//
-// This method uses the gemini-embedding-001 model with 768 output dimensionality
-// to maintain compatibility with the existing database schema. The embedding
-// vector can be used for semantic search, similarity comparison, and vector
-// storage operations.
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout control
-//   - text: Input text to generate embedding for
-//
-// Returns:
-//   - []float32: 768-dimension embedding vector
-//   - error: nil on success, error with details on failure
-//
-// Errors:
-//   - Context cancellation or timeout
-//   - Empty or invalid input text
-//   - API communication errors
-//   - Invalid response format from Google ADK
-func (s *GeminiService) Embed(ctx context.Context, text string) ([]float32, error) {
-	if text == "" {
-		return nil, fmt.Errorf("text cannot be empty for embedding generation")
-	}
-
-	// Create timeout context
-	timeoutCtx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-
-	startTime := time.Now()
-	s.logger.Debug().
-		Int("text_length", len(text)).
-		Msg("Starting embedding generation")
-
-	// Generate embedding using Google ADK
-	// Note: The exact method name may vary based on the Google ADK API
-	// This is a placeholder implementation following the established pattern
-	embedding, err := s.generateEmbedding(timeoutCtx, text)
-	if err != nil {
-		s.logger.Error().
-			Err(err).
-			Int("text_length", len(text)).
-			Msg("Embedding generation failed")
-		return nil, fmt.Errorf("embedding generation failed: %w", err)
-	}
-
-	duration := time.Since(startTime)
-	s.logger.Info().
-		Int("text_length", len(text)).
-		Int("embedding_dim", len(embedding)).
-		Dur("duration", duration).
-		Msg("Embedding generation completed successfully")
-
-	return embedding, nil
 }
 
 // Chat generates a completion response based on the conversation history.
@@ -270,7 +202,7 @@ func (s *GeminiService) Chat(ctx context.Context, messages []interfaces.Message)
 //
 // The health check validates that the genai client is properly initialized
 // and accessible. For cloud services, this includes lightweight connectivity
-// probes to exercise both models with short timeouts.
+// probes to exercise the chat model with short timeouts.
 //
 // Parameters:
 //   - ctx: Context for cancellation control
@@ -286,14 +218,7 @@ func (s *GeminiService) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("genai client is not initialized")
 	}
 
-	// Perform lightweight connectivity probes with short timeouts
-	if err := s.performEmbeddingHealthCheck(ctx); err != nil {
-		s.logger.Error().
-			Err(err).
-			Msg("Embedding model health check failed")
-		return fmt.Errorf("embedding model health check failed: %w", err)
-	}
-
+	// Perform lightweight connectivity probe with short timeout
 	if err := s.performChatHealthCheck(ctx); err != nil {
 		s.logger.Error().
 			Err(err).
@@ -302,37 +227,8 @@ func (s *GeminiService) HealthCheck(ctx context.Context) error {
 	}
 
 	s.logger.Info().
-		Str("embed_model", s.config.EmbedModelName).
-		Str("chat_model", s.config.ChatModelName).
+		Str("chat_model", s.config.ChatModel).
 		Msg("Gemini LLM service health check passed")
-
-	return nil
-}
-
-// performEmbeddingHealthCheck exercises the embedding model with a lightweight probe.
-// Uses a longer timeout to avoid false negatives and logs detailed failures.
-func (s *GeminiService) performEmbeddingHealthCheck(ctx context.Context) error {
-	// Create timeout context for health check (increased to 5s to avoid false negatives)
-	healthCheckCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	// Use a simple, static string for the probe
-	testText := "health check probe"
-
-	// Generate embedding and immediately discard the result
-	embedding, err := s.generateEmbedding(healthCheckCtx, testText)
-	if err != nil {
-		return fmt.Errorf("embedding probe failed: %w", err)
-	}
-
-	// Validate that we got a non-empty embedding vector
-	if len(embedding) == 0 {
-		return fmt.Errorf("embedding probe returned empty vector")
-	}
-
-	s.logger.Debug().
-		Int("embedding_dim", len(embedding)).
-		Msg("Embedding model health check passed")
 
 	return nil
 }
@@ -398,48 +294,6 @@ func (s *GeminiService) Close() error {
 	return nil
 }
 
-// generateEmbedding is a helper method that encapsulates the Google ADK
-// embedding generation logic using gemini-embedding-001 with the specified
-// output dimensionality.
-//
-// Parameters:
-//   - ctx: Context for timeout and cancellation
-//   - text: Text to generate embedding for
-//
-// Returns:
-//   - []float32: embedding vector with configured dimensionality
-//   - error: nil on success, error on failure
-func (s *GeminiService) generateEmbedding(ctx context.Context, text string) ([]float32, error) {
-	// Configure embedding with output dimensionality
-	outputDim := int32(s.config.EmbedDimension)
-	embeddingConfig := &genai.EmbedContentConfig{
-		OutputDimensionality: &outputDim,
-	}
-
-	// Generate embedding using the genai client
-	result, err := s.client.Models.EmbedContent(ctx, s.config.EmbedModelName, []*genai.Content{genai.NewContentFromText(text, genai.RoleUser)}, embeddingConfig)
-	if err != nil {
-		return nil, fmt.Errorf("embedding generation failed: %w", err)
-	}
-
-	// Extract embedding vector from response
-	var embedding []float32
-	if result != nil && len(result.Embeddings) > 0 {
-		embedding = result.Embeddings[0].Values
-	}
-
-	if embedding == nil {
-		return nil, fmt.Errorf("no embedding returned from API")
-	}
-
-	// Validate embedding dimension
-	if len(embedding) != s.config.EmbedDimension {
-		return nil, fmt.Errorf("embedding dimension mismatch: expected %d, got %d", s.config.EmbedDimension, len(embedding))
-	}
-
-	return embedding, nil
-}
-
 // generateCompletion is a helper method that encapsulates the Google ADK
 // chat completion logic using the agent/runner pattern with Gemini models.
 //
@@ -468,7 +322,7 @@ func (s *GeminiService) generateCompletion(ctx context.Context, messages []inter
 	}
 
 	// Generate completion using direct GenerateContent call
-	resp, err := s.client.Models.GenerateContent(ctx, s.config.ChatModelName, geminiContents, config)
+	resp, err := s.client.Models.GenerateContent(ctx, s.config.ChatModel, geminiContents, config)
 	if err != nil {
 		return "", fmt.Errorf("chat generation failed: %w", err)
 	}

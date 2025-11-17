@@ -52,7 +52,6 @@ func SubscribeLoggerToAllEvents(eventService interfaces.EventService, logger arb
 	// Subscribe to all event types
 	eventTypes := []interfaces.EventType{
 		interfaces.EventCollectionTriggered,
-		interfaces.EventEmbeddingTriggered,
 		interfaces.EventDocumentForceSync,
 		interfaces.EventCrawlProgress,
 		interfaces.EventStatusChanged,

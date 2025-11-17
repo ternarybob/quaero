@@ -26,7 +26,7 @@ type AgentExecutor interface {
 // Service manages ADK agent lifecycle and execution.
 // It maintains a registry of agent types and routes execution requests to the appropriate agent.
 type Service struct {
-	config  *common.AgentConfig
+	config  *common.GeminiConfig
 	logger  arbor.ILogger
 	model   model.LLM
 	agents  map[string]AgentExecutor
@@ -55,16 +55,16 @@ type Service struct {
 //   - Invalid model name
 //   - Failed to initialize ADK model (network, auth, etc.)
 //   - Invalid timeout duration
-func NewService(config *common.AgentConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*Service, error) {
+func NewService(config *common.GeminiConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*Service, error) {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "gemini-agent", config.GoogleAPIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google_api_key", config.GoogleAPIKey)
 	if err != nil {
-		return nil, fmt.Errorf("Google API key is required for agent service (set via KV store, QUAERO_AGENT_GOOGLE_API_KEY, or agent.google_api_key in config): %w", err)
+		return nil, fmt.Errorf("Google API key is required for agent service (set via KV store, QUAERO_GEMINI_GOOGLE_API_KEY, or gemini.google_api_key in config): %w", err)
 	}
 
-	if config.ModelName == "" {
-		config.ModelName = "gemini-2.0-flash" // Default to fast model
+	if config.AgentModel == "" {
+		config.AgentModel = "gemini-2.0-flash" // Default to fast model
 	}
 
 	// Parse timeout duration
@@ -74,7 +74,7 @@ func NewService(config *common.AgentConfig, storageManager interfaces.StorageMan
 	}
 
 	// Initialize ADK Gemini model
-	geminiModel, err := gemini.NewModel(ctx, config.ModelName, &genai.ClientConfig{
+	geminiModel, err := gemini.NewModel(ctx, config.AgentModel, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
@@ -96,7 +96,7 @@ func NewService(config *common.AgentConfig, storageManager interfaces.StorageMan
 	service.RegisterAgent(keywordExtractor)
 
 	logger.Info().
-		Str("model", config.ModelName).
+		Str("model", config.AgentModel).
 		Int("max_turns", config.MaxTurns).
 		Dur("timeout", timeout).
 		Int("registered_agents", len(service.agents)).

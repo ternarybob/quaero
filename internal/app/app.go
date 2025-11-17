@@ -211,7 +211,6 @@ func (a *App) initDatabase() error {
 		Str("type", a.Config.Storage.Type).
 		Str("path", a.Config.Storage.SQLite.Path).
 		Str("fts5_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableFTS5)).
-		Str("vector_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableVector)).
 		Msg("Storage layer initialized")
 
 	// Load user-defined job definitions from TOML/JSON files
@@ -297,15 +296,18 @@ func (a *App) initServices() error {
 	}
 
 	// 3.6. Initialize LLM service (Google ADK with Gemini)
-	a.LLMService, err = llm.NewGeminiService(a.Config, a.StorageManager, a.Logger)
+	a.LLMService, err = llm.NewGeminiService(&a.Config.Gemini, a.StorageManager, a.Logger)
 	if err != nil {
 		a.LLMService = nil // Explicitly set to nil on error
 		a.Logger.Warn().Err(err).Msg("Failed to initialize LLM service - chat features will be unavailable")
-		a.Logger.Info().Msg("To enable LLM features, set QUAERO_LLM_GOOGLE_API_KEY or llm.google_api_key in config")
+		a.Logger.Info().Msg("To enable LLM features, set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config")
 	} else {
 		// Perform health check to validate API key and connectivity
 		if err := a.LLMService.HealthCheck(context.Background()); err != nil {
-			a.Logger.Warn().Err(err).Msg("LLM service health check failed - API key may be invalid")
+			// Set to nil if health check fails (invalid/placeholder API key)
+			a.LLMService = nil
+			a.Logger.Warn().Err(err).Msg("LLM service health check failed - service disabled")
+			a.Logger.Info().Msg("To enable LLM features, provide a valid Google Gemini API key")
 		} else {
 			a.Logger.Info().Msg("LLM service initialized and health check passed")
 		}
@@ -458,18 +460,21 @@ func (a *App) initServices() error {
 
 	// 6.8.3. Initialize Agent service (Google ADK with Gemini)
 	a.AgentService, err = agents.NewService(
-		&a.Config.Agent,
+		&a.Config.Gemini,
 		a.StorageManager,
 		a.Logger,
 	)
 	if err != nil {
 		a.AgentService = nil // Explicitly set to nil on error
 		a.Logger.Warn().Err(err).Msg("Failed to initialize agent service - agent features will be unavailable")
-		a.Logger.Info().Msg("To enable agents, set QUAERO_AGENT_GOOGLE_API_KEY or agent.google_api_key in config")
+		a.Logger.Info().Msg("To enable agents, set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config")
 	} else {
 		// Perform health check to validate API key and connectivity
 		if err := a.AgentService.HealthCheck(context.Background()); err != nil {
-			a.Logger.Warn().Err(err).Msg("Agent service health check failed - API key may be invalid")
+			// Set to nil if health check fails (invalid/placeholder API key)
+			a.AgentService = nil
+			a.Logger.Warn().Err(err).Msg("Agent service health check failed - service disabled")
+			a.Logger.Info().Msg("To enable agents, provide a valid Google Gemini API key")
 		} else {
 			a.Logger.Info().Msg("Agent service initialized and health check passed")
 		}
@@ -534,7 +539,6 @@ func (a *App) initServices() error {
 
 	// NOTE: Scheduler triggers event-driven processing:
 	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
-	// - EventEmbeddingTriggered: Generates embeddings for unembedded documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
 	// Start scheduler BEFORE loading job settings to ensure job definitions are loaded first
 	a.Logger.Info().Msg("Calling SchedulerService.Start()")
