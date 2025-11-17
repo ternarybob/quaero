@@ -25,7 +25,7 @@ type Config struct {
 	Logging     LoggingConfig    `toml:"logging"`
 	Jobs        JobsConfig       `toml:"jobs"`
 	Auth        AuthDirConfig    `toml:"auth"`
-	Keys        KeysDirConfig    `toml:"keys"` // Keys directory configuration for key/value file loading
+	Variables   KeysDirConfig    `toml:"variables"` // Variables directory configuration (./keys/*.toml) for key/value pairs
 	Crawler     CrawlerConfig    `toml:"crawler"`
 	Search      SearchConfig     `toml:"search"`
 	WebSocket   WebSocketConfig  `toml:"websocket"`
@@ -220,8 +220,8 @@ func NewDefaultConfig() *Config {
 		Auth: AuthDirConfig{
 			CredentialsDir: "./auth", // Default directory for auth files
 		},
-		Keys: KeysDirConfig{
-			Dir: "./keys", // Default directory for key/value files
+		Variables: KeysDirConfig{
+			Dir: "./variables", // Default directory for variables files (./variables/*.toml)
 		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Quaero/1.0 (Web Crawler)",
@@ -613,9 +613,9 @@ func applyEnvOverrides(config *Config) {
 		config.Auth.CredentialsDir = authDir
 	}
 
-	// Keys configuration
-	if keysDir := os.Getenv("QUAERO_KEYS_DIR"); keysDir != "" {
-		config.Keys.Dir = keysDir
+	// Variables configuration
+	if variablesDir := os.Getenv("QUAERO_VARIABLES_DIR"); variablesDir != "" {
+		config.Variables.Dir = variablesDir
 	}
 }
 

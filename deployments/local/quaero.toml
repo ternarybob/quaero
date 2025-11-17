@@ -113,40 +113,30 @@ environment = "development" # "development" or "production"
 # definitions_dir = "./job-definitions"  # Uncomment to override default
 
 # =============================================================================
-# Authentication Storage Configuration
+# Variables Configuration
 # =============================================================================
-# Configure cookie-based authentication credential storage.
-# Used for browser authentication tokens captured via Chrome extension.
+# Configure storage for user-defined variables (API keys, secrets, configuration values).
+# Variables are loaded from TOML files in the variables directory at startup.
 #
-# Default: credentials_dir="./auth"
-# Env var: QUAERO_AUTH_CREDENTIALS_DIR
-
-# [auth]
-# credentials_dir = "./auth"  # Uncomment to override default
-
-# =============================================================================
-# Key/Value Storage Configuration
-# =============================================================================
-# Configure key/value pair storage for API keys, secrets, and configuration values.
-# Keys are loaded from TOML files in the keys directory at startup.
-#
-# TOML FILE FORMAT:
-#   [key-name]
+# TOML FILE FORMAT (stored in ./variables/*.toml):
+#   [[keys]]
+#   key = "variable-name"
 #   value = "your-secret-value"      # Required
 #   description = "Optional description"  # Optional
 #
 # USAGE:
-#   - Keys can be referenced in config: {key-name}
+#   - Variables can be referenced in config using placeholder syntax: {variable-name}
 #   - View and manage in UI: /settings?a=auth-apikeys
 #   - Values are masked in logs and UI for security
 #
-# Example: See bin/keys/example-keys.toml
+# Example: See bin/variables/example-variables.toml
 #
-# Default: dir="./keys"
-# Env var: QUAERO_KEYS_DIR
+# Default storage location: ./variables/ directory
+# File format: Any *.toml file in the variables directory
+# Env var: QUAERO_VARIABLES_DIR
 
-# [keys]
-# dir = "./keys"  # Uncomment to override default
+# [variables]
+# dir = "./variables"  # Uncomment to override default
 
 # =============================================================================
 # Crawler Configuration (Firecrawl-style HTML Scraping)

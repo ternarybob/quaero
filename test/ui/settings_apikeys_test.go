@@ -1,4 +1,4 @@
-// Package ui contains UI integration tests for settings page API keys functionality.
+// Package ui contains UI integration tests for settings page variables functionality.
 package ui
 
 import (
@@ -11,9 +11,9 @@ import (
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// TestSettingsAPIKeysLoad tests that API keys are loaded from test-keys.toml and displayed
+// TestSettingsAPIKeysLoad tests that variables are loaded from test-keys.toml and displayed
 func TestSettingsAPIKeysLoad(t *testing.T) {
-	// Setup test environment with custom config that uses test keys directory
+	// Setup test environment with custom config that uses test variables directory
 	env, err := common.SetupTestEnvironment("SettingsAPIKeysLoad", "../config/test-quaero-apikeys.toml")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -33,7 +33,7 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 
 	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
 	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
-	env.LogTest(t, "Using test keys from: test/config/keys/test-keys.toml")
+	env.LogTest(t, "Using test variables from: test/config/variables/test-keys.toml")
 
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
@@ -70,17 +70,17 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 		}
 	})
 
-	env.LogTest(t, "Navigating to settings API Keys page: %s", url)
+	env.LogTest(t, "Navigating to settings Variables page: %s", url)
 	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		chromedp.Sleep(2*time.Second), // Wait for API keys to load
+		chromedp.Sleep(2*time.Second), // Wait for variables to load
 	)
 
 	if err != nil {
-		env.LogTest(t, "ERROR: Failed to load settings API Keys page: %v", err)
-		t.Fatalf("Failed to load settings API Keys page: %v", err)
+		env.LogTest(t, "ERROR: Failed to load settings Variables page: %v", err)
+		t.Fatalf("Failed to load settings Variables page: %v", err)
 	}
 
 	env.LogTest(t, "Page loaded successfully")
@@ -103,39 +103,40 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 		env.LogTest(t, "✓ No console errors detected")
 	}
 
-	// Verify API Keys component is visible
+	// Verify Variables component is visible (dynamically loaded via x-html)
 	var hasAPIKeysContent bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
-				if (!contentPanel) return false;
-				const hasContent = contentPanel.querySelector('[x-data*="authApiKeys"]') !== null;
+				// The content is dynamically loaded into the column with x-html attribute
+				const contentColumn = document.querySelector('.column.col-10');
+				if (!contentColumn) return false;
+				// Check for the authApiKeys component within the dynamic content
+				const hasContent = contentColumn.querySelector('[x-data="authApiKeys"]') !== null;
 				return hasContent;
 			})()
 		`, &hasAPIKeysContent),
 	)
 
 	if err != nil {
-		env.LogTest(t, "ERROR: Failed to check API Keys content visibility: %v", err)
-		t.Fatalf("Failed to check API Keys content visibility: %v", err)
+		env.LogTest(t, "ERROR: Failed to check Variables content visibility: %v", err)
+		t.Fatalf("Failed to check Variables content visibility: %v", err)
 	}
 
 	if !hasAPIKeysContent {
-		env.LogTest(t, "ERROR: API Keys content not visible in content panel")
-		t.Error("API Keys content should be visible")
+		env.LogTest(t, "ERROR: Variables content not visible in content panel")
+		t.Error("Variables content should be visible")
 	} else {
-		env.LogTest(t, "✓ API Keys content is visible")
+		env.LogTest(t, "✓ Variables content is visible")
 	}
 
-	// Verify loading has finished
+	// Verify loading has finished (check if the loading spinner is visible)
 	var isLoadingVisible bool
 	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
-				const contentPanel = document.querySelector('.settings-content');
-				if (!contentPanel) return false;
-				const loadingState = contentPanel.querySelector('.loading-state');
+				// Check if the loading state div is visible (it uses x-show so will have display:none when hidden)
+				const loadingState = document.querySelector('.loading-state');
 				if (!loadingState) return false;
 				const computedStyle = window.getComputedStyle(loadingState);
 				return computedStyle.display !== 'none';
@@ -149,10 +150,10 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 	}
 
 	if isLoadingVisible {
-		env.LogTest(t, "ERROR: API Keys still loading")
-		t.Error("API Keys should have finished loading")
+		env.LogTest(t, "ERROR: Variables still loading")
+		t.Error("Variables should have finished loading")
 	} else {
-		env.LogTest(t, "✓ API Keys loading finished")
+		env.LogTest(t, "✓ Variables loading finished")
 	}
 
 	// CRITICAL TEST: Verify test-google-places-key is present in the list
@@ -173,10 +174,10 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 	}
 
 	if !hasTestKey {
-		env.LogTest(t, "ERROR: test-google-places-key not found in API Keys list")
-		t.Error("Expected test-google-places-key from test/config/keys/test-keys.toml to be displayed")
+		env.LogTest(t, "ERROR: test-google-places-key not found in Variables list")
+		t.Error("Expected test-google-places-key from test/config/variables/test-keys.toml to be displayed")
 	} else {
-		env.LogTest(t, "✓ test-google-places-key found in API Keys list")
+		env.LogTest(t, "✓ test-google-places-key found in Variables list")
 	}
 
 	// Verify masked value is displayed (should show dots or masked format)
@@ -213,12 +214,12 @@ func TestSettingsAPIKeysLoad(t *testing.T) {
 	}
 	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("settings-apikeys-final"))
 
-	env.LogTest(t, "✓ API Keys loaded successfully from test-keys.toml and displayed")
+	env.LogTest(t, "✓ Variables loaded successfully from test-keys.toml and displayed")
 }
 
-// TestSettingsAPIKeysShowToggle tests the "Show Full" toggle functionality
+// TestSettingsAPIKeysShowToggle tests the "Show Full" toggle functionality for variables
 func TestSettingsAPIKeysShowToggle(t *testing.T) {
-	// Setup test environment with custom config that uses test keys directory
+	// Setup test environment with custom config that uses test variables directory
 	env, err := common.SetupTestEnvironment("SettingsAPIKeysShowToggle", "../config/test-quaero-apikeys.toml")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
@@ -247,17 +248,17 @@ func TestSettingsAPIKeysShowToggle(t *testing.T) {
 
 	url := env.GetBaseURL() + "/settings?a=auth-apikeys"
 
-	env.LogTest(t, "Navigating to settings API Keys page: %s", url)
+	env.LogTest(t, "Navigating to settings Variables page: %s", url)
 	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		chromedp.Sleep(2*time.Second), // Wait for API keys to load
+		chromedp.Sleep(2*time.Second), // Wait for variables to load
 	)
 
 	if err != nil {
-		env.LogTest(t, "ERROR: Failed to load settings API Keys page: %v", err)
-		t.Fatalf("Failed to load settings API Keys page: %v", err)
+		env.LogTest(t, "ERROR: Failed to load settings Variables page: %v", err)
+		t.Fatalf("Failed to load settings Variables page: %v", err)
 	}
 
 	// Take screenshot before toggle

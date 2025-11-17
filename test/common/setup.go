@@ -570,27 +570,27 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Job definitions copied from %s to: %s\n", jobDefsSourcePath, jobDefsDestPath)
 
-	// Copy keys directory to bin/keys (for API keys and key/value storage)
-	keysSourcePath, err := filepath.Abs("../config/keys")
+	// Copy variables directory to bin/variables (for variables and key/value storage)
+	variablesSourcePath, err := filepath.Abs("../config/variables")
 	if err != nil {
-		return fmt.Errorf("failed to resolve keys source path: %w", err)
+		return fmt.Errorf("failed to resolve variables source path: %w", err)
 	}
 
-	keysDestPath := filepath.Join(binDir, "keys")
+	variablesDestPath := filepath.Join(binDir, "variables")
 
-	// Remove existing keys directory if it exists
-	if _, err := os.Stat(keysDestPath); err == nil {
-		if err := os.RemoveAll(keysDestPath); err != nil {
-			return fmt.Errorf("failed to remove existing keys directory: %w", err)
+	// Remove existing variables directory if it exists
+	if _, err := os.Stat(variablesDestPath); err == nil {
+		if err := os.RemoveAll(variablesDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing variables directory: %w", err)
 		}
 	}
 
-	// Copy keys directory
-	if err := env.copyDir(keysSourcePath, keysDestPath); err != nil {
-		return fmt.Errorf("failed to copy keys directory: %w", err)
+	// Copy variables directory
+	if err := env.copyDir(variablesSourcePath, variablesDestPath); err != nil {
+		return fmt.Errorf("failed to copy variables directory: %w", err)
 	}
 
-	fmt.Fprintf(env.LogFile, "Keys directory copied from %s to: %s\n", keysSourcePath, keysDestPath)
+	fmt.Fprintf(env.LogFile, "Variables directory copied from %s to: %s\n", variablesSourcePath, variablesDestPath)
 
 	return nil
 }

@@ -1,10 +1,13 @@
 // -----------------------------------------------------------------------
-// Load Key/Value Pairs from Files - TOML configuration files
+// Load Variables (Key/Value Pairs) from Files - TOML configuration files
 // -----------------------------------------------------------------------
 //
-// This file loads generic key/value pairs from TOML files and stores them
-// in the KV store. This is separate from auth credentials loading (which
-// handles cookie-based authentication for web scraping).
+// This file loads user-defined variables (generic key/value pairs) from TOML files
+// and stores them in the KV store. This is separate from auth credentials loading
+// (which handles cookie-based authentication for web scraping).
+//
+// Default storage location: ./variables/ directory
+// File format: Any *.toml file in the variables directory
 //
 // TOML file format:
 //   [section-name]
@@ -35,16 +38,17 @@ type KeyValueFile struct {
 	Description string `toml:"description" json:"description"` // Optional: Human-readable description
 }
 
-// LoadKeysFromFiles loads key/value pairs from TOML files in the specified directory
+// LoadKeysFromFiles loads variables (key/value pairs) from TOML files in the specified directory
 // and stores them in the KV store. This is called during startup to seed configuration values.
 //
 // This function is separate from LoadAuthCredentialsFromFiles():
 // - Auth credentials: Cookie-based authentication for web scraping
-// - Key/value pairs: Generic secrets and configuration values (API keys, tokens, etc.)
+// - Variables: Generic secrets and configuration values (API keys, tokens, etc.)
 //
+// Default storage location: ./variables/ directory
 // The function is idempotent - uses Set() which has ON CONFLICT UPDATE behavior.
 func (m *Manager) LoadKeysFromFiles(ctx context.Context, dirPath string) error {
-	m.logger.Info().Str("path", dirPath).Msg("Loading key/value pairs from files")
+	m.logger.Info().Str("path", dirPath).Msg("Loading variables from files")
 
 	// Check if directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {

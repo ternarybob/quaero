@@ -414,19 +414,19 @@ function Deploy-Files {
         }
     }
 
-    # Deploy keys directory (only new files, no override)
-    $keysSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\keys"
-    $keysDestPath = Join-Path -Path $BinDirectory -ChildPath "keys"
+    # Deploy variables directory (only new files, no override)
+    $variablesSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\variables"
+    $variablesDestPath = Join-Path -Path $BinDirectory -ChildPath "variables"
 
-    if (Test-Path $keysSourcePath) {
-        if (-not (Test-Path $keysDestPath)) {
-            New-Item -ItemType Directory -Path $keysDestPath -Force | Out-Null
+    if (Test-Path $variablesSourcePath) {
+        if (-not (Test-Path $variablesDestPath)) {
+            New-Item -ItemType Directory -Path $variablesDestPath -Force | Out-Null
         }
 
         # Copy files without overriding existing ones
-        $sourceFiles = Get-ChildItem -Path $keysSourcePath -File
+        $sourceFiles = Get-ChildItem -Path $variablesSourcePath -File
         foreach ($file in $sourceFiles) {
-            $destFile = Join-Path -Path $keysDestPath -ChildPath $file.Name
+            $destFile = Join-Path -Path $variablesDestPath -ChildPath $file.Name
             if (-not (Test-Path $destFile)) {
                 Copy-Item -Path $file.FullName -Destination $destFile
             }

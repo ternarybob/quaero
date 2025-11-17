@@ -8,7 +8,7 @@ import (
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// TestAuthConfigLoading tests that API keys are loaded to KV store from test/config/auth directory (Phase 4)
+// TestAuthConfigLoading tests that variables are loaded to KV store from test/config/auth directory (Phase 4)
 // NOTE: This test requires /api/kv endpoints to be implemented
 func TestAuthConfigLoading(t *testing.T) {
 	t.Skip("Skipping until /api/kv endpoints are implemented - see Phase 4 cleanup")
@@ -71,7 +71,7 @@ func TestAuthConfigLoading(t *testing.T) {
 	}
 }
 
-// TestAuthConfigAPIKeyEndpoint tests the KV store CRUD endpoints for API keys (Phase 4)
+// TestAuthConfigAPIKeyEndpoint tests the KV store CRUD endpoints for variables (Phase 4)
 // NOTE: This test requires /api/kv endpoints to be implemented
 func TestAuthConfigAPIKeyEndpoint(t *testing.T) {
 	t.Skip("Skipping until /api/kv endpoints are implemented - see Phase 4 cleanup")

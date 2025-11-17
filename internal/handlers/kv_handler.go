@@ -21,13 +21,13 @@ type KVServiceInterface interface {
 	GetAll(ctx context.Context) (map[string]string, error)
 }
 
-// KVHandler handles key/value storage HTTP requests
+// KVHandler handles variables (key/value) storage HTTP requests
 type KVHandler struct {
 	kvService KVServiceInterface
 	logger    arbor.ILogger
 }
 
-// NewKVHandler creates a new KV handler
+// NewKVHandler creates a new KV handler for managing variables
 func NewKVHandler(kvService KVServiceInterface, logger arbor.ILogger) *KVHandler {
 	return &KVHandler{
 		kvService: kvService,
@@ -35,7 +35,7 @@ func NewKVHandler(kvService KVServiceInterface, logger arbor.ILogger) *KVHandler
 	}
 }
 
-// ListKVHandler handles GET /api/kv - lists all key/value pairs
+// ListKVHandler handles GET /api/kv - lists all variables (key/value pairs)
 func (h *KVHandler) ListKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "GET") {
 		return
@@ -64,7 +64,7 @@ func (h *KVHandler) ListKVHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, sanitized)
 }
 
-// GetKVHandler handles GET /api/kv/{key} - retrieves a specific key/value pair
+// GetKVHandler handles GET /api/kv/{key} - retrieves a specific variable (key/value pair)
 func (h *KVHandler) GetKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "GET") {
 		return
@@ -99,10 +99,11 @@ func (h *KVHandler) GetKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return masked value with full metadata (consistent with ListKVHandler)
+	// Return full value (unmasked) for editing purposes
+	// Note: ListKVHandler returns masked values for security, but GET specific key returns full value
 	response := map[string]interface{}{
 		"key":         pair.Key,
-		"value":       h.maskValue(pair.Value),
+		"value":       pair.Value, // Return full value for editing
 		"description": pair.Description,
 		"created_at":  pair.CreatedAt,
 		"updated_at":  pair.UpdatedAt,
@@ -112,7 +113,7 @@ func (h *KVHandler) GetKVHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, response)
 }
 
-// CreateKVHandler handles POST /api/kv - creates a new key/value pair
+// CreateKVHandler handles POST /api/kv - creates a new variable (key/value pair)
 func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "POST") {
 		return
@@ -158,7 +159,7 @@ func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateKVHandler handles PUT /api/kv/{key} - updates an existing key/value pair
+// UpdateKVHandler handles PUT /api/kv/{key} - updates an existing variable (key/value pair)
 // Supports full replacement (value + description) or description-only updates
 func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "PUT") {
@@ -227,7 +228,7 @@ func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DeleteKVHandler handles DELETE /api/kv/{key} - deletes a key/value pair
+// DeleteKVHandler handles DELETE /api/kv/{key} - deletes a variable (key/value pair)
 func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "DELETE") {
 		return
@@ -269,7 +270,7 @@ func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// maskValue masks sensitive values for API responses
+// maskValue masks sensitive variable values for API responses
 // If length < 8: returns "••••••••"
 // Otherwise: returns first 4 chars + "..." + last 4 chars (e.g., "sk-1...xyz9")
 func (h *KVHandler) maskValue(value string) string {

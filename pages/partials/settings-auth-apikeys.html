@@ -39,7 +39,6 @@
                 <thead>
                     <tr>
                         <th>Key</th>
-                        <th>Value</th>
                         <th>Description</th>
                         <th>Last Updated</th>
                         <th class="text-right">Actions</th>
@@ -49,14 +48,6 @@
                     <template x-for="apiKey in apiKeys" :key="apiKey.key">
                         <tr>
                             <td><strong x-text="apiKey.key"></strong></td>
-                            <td>
-                                <div class="input-group">
-                                    <code class="form-input" x-text="getMaskedApiKey(apiKey)" style="flex: 1;"></code>
-                                    <button type="button" class="btn btn-sm" @click="toggleApiKeyVisibility(apiKey.key)" :title="getShowFull(apiKey.key) ? 'Hide' : 'Show'">
-                                        <i class="fas" :class="getShowFull(apiKey.key) ? 'fa-eye-slash' : 'fa-eye'"></i>
-                                    </button>
-                                </div>
-                            </td>
                             <td x-text="getDescription(apiKey)"></td>
                             <td x-text="window.formatDate ? window.formatDate(apiKey.updated_at) : apiKey.updated_at"> </td>
                             <td class="text-right">
@@ -93,12 +84,7 @@
 
                         <div class="form-group">
                             <label class="form-label" for="value">Value *</label>
-                            <div class="input-group">
-                                <input class="form-input" :type="showPassword ? 'text' : 'password'" id="value" x-model="formData.value" placeholder="Enter value (API key, token, or secret)" required>
-                                <button type="button" class="btn btn-sm" @click="showPassword = !showPassword" :title="showPassword ? 'Hide' : 'Show'">
-                                    <i class="fas" :class="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
-                                </button>
-                            </div>
+                            <input class="form-input" type="text" id="value" x-model="formData.value" placeholder="Enter value (API key, token, or secret)" required>
                         </div>
 
                         <div class="form-group">

@@ -1,4 +1,4 @@
-# Test configuration for API keys loading test
+# Test configuration for variables loading test
 # Extends base test-quaero.toml configuration
 
 environment = "development"
@@ -9,9 +9,10 @@ port = 18085  # Test port (UI tests)
 [storage.sqlite]
 reset_on_startup = true  # Delete database on startup for clean test runs
 
-# Configure keys directory to use test keys
-[keys]
-dir = "./test/config/keys"  # Use test keys directory with test-keys.toml
+# Configure variables directory to use test variables
+# Variables are user-defined key-value pairs stored in TOML files (./variables/*.toml)
+[variables]
+dir = "./variables"  # Use test variables directory (copied to bin/variables during test setup)
 
 [logging]
 level = "debug"

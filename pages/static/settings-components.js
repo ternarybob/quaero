@@ -714,11 +714,9 @@ document.addEventListener('alpine:init', () => {
         loading: true,
         deleting: null,
         saving: false,
-        showPassword: false,
         showCreateModal: false,
         showEditModal: false,
         editingKey: null,
-        showFullByKey: {},  // Track show/hide state per API key
         formData: {
             key: '',
             value: '',
@@ -790,13 +788,26 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        editApiKey(apiKey) {
+        async editApiKey(apiKey) {
             this.editingKey = apiKey.key;
             this.formData = {
                 key: apiKey.key,
-                value: '', // Don't prefill for security
+                value: '', // Will be fetched from API
                 description: apiKey.description || ''
             };
+
+            // Fetch the full (unmasked) value from the API
+            try {
+                const response = await fetch(`/api/kv/${encodeURIComponent(apiKey.key)}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.formData.value = data.value || '';
+                }
+            } catch (error) {
+                console.error('Failed to fetch API key value:', error);
+                window.showNotification('Failed to load key value', 'error');
+            }
+
             this.showEditModal = true;
         },
 
@@ -859,34 +870,10 @@ document.addEventListener('alpine:init', () => {
                 value: '',
                 description: ''
             };
-            this.showPassword = false;  // Reset password visibility
         },
 
         getDescription(apiKey) {
             return apiKey.description || '-';
-        },
-
-        toggleApiKeyVisibility(key) {
-            this.showFullByKey[key] = !this.showFullByKey[key];
-        },
-
-        getShowFull(key) {
-            return this.showFullByKey[key] || false;
-        },
-
-        getMaskedApiKey(apiKey) {
-            // If show full is enabled for this key, show the masked string
-            // Otherwise show fully masked version
-            const isShown = this.getShowFull(apiKey.key);
-            const maskedString = apiKey.value || '***MASKED***';
-
-            if (!isShown) {
-                // Fully masked - don't reveal pattern
-                return '••••••••';
-            }
-
-            // Use the masked string from server (first-4 + last-4)
-            return maskedString;
         }
     }));
 

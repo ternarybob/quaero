@@ -95,7 +95,7 @@ type App struct {
 	// Chat service (agent-based)
 	ChatService interfaces.ChatService
 
-	// Key/Value service
+	// Variables service (key/value storage)
 	KVService *kv.Service
 
 	// Config service
@@ -220,27 +220,14 @@ func (a *App) initDatabase() error {
 		if err := sqliteMgr.LoadJobDefinitionsFromFiles(ctx, a.Config.Jobs.DefinitionsDir); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to load job definitions from files")
 		}
-	}
 
-	// Load cookie-based auth credentials from files (after job definitions)
-	// Note: This is for cookie-based authentication only (captured via Chrome extension or manual TOML files)
-	// API keys are loaded separately via LoadKeysFromFiles() below
-	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
-		ctx := context.Background()
-		if err := sqliteMgr.LoadAuthCredentialsFromFiles(ctx, a.Config.Auth.CredentialsDir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load cookie-based auth credentials from files")
-			// Don't fail startup - auth files are optional
+		// Load variables from files
+		// This is separate from auth - auth is for cookies, variables are for API keys and generic secrets
+		if err := sqliteMgr.LoadKeysFromFiles(ctx, a.Config.Variables.Dir); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load variables from files")
+			// Don't fail startup - variable files are optional
 		} else {
-			a.Logger.Info().Str("dir", a.Config.Auth.CredentialsDir).Msg("Cookie-based auth credentials loaded from files")
-		}
-
-		// Load key/value pairs from files (after auth credentials)
-		// This is separate from auth - auth is for cookies, keys are for API keys and generic secrets
-		if err := sqliteMgr.LoadKeysFromFiles(ctx, a.Config.Keys.Dir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load key/value pairs from files")
-			// Don't fail startup - key files are optional
-		} else {
-			a.Logger.Info().Str("dir", a.Config.Keys.Dir).Msg("Key/value pairs loaded from files")
+			a.Logger.Info().Str("dir", a.Config.Variables.Dir).Msg("Variables loaded from files")
 		}
 
 		// Migrate API keys from auth_credentials to key_value_store (idempotent)
@@ -353,13 +340,13 @@ func (a *App) initServices() error {
 	a.JobService = jobsvc.NewService(jobMgr, queueMgr, a.Logger)
 	a.Logger.Info().Msg("Job service initialized")
 
-	// 5.11. Initialize key/value service with event publishing
+	// 5.11. Initialize variables service with event publishing
 	a.KVService = kv.NewService(
 		a.StorageManager.KeyValueStorage(),
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Key/value service initialized with event publishing")
+	a.Logger.Info().Msg("Variables service initialized with event publishing")
 
 	// 5.12. Initialize config service with event-driven cache invalidation
 	a.ConfigService, err = config.NewService(
