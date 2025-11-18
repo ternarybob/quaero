@@ -212,8 +212,8 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 		"agent",
 		fmt.Sprintf("Agent: %s (document: %s)", agentType, documentID),
 		jobConfig,
-		nil,   // metadata
-		0,     // depth (not used for agent jobs)
+		map[string]interface{}{}, // metadata (must be non-nil)
+		0,                        // depth (not used for agent jobs)
 	)
 
 	// Validate job model

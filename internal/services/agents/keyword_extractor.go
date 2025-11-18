@@ -8,15 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"google.golang.org/adk/agent"
-	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/runner"
 	"google.golang.org/genai"
 )
 
 // KeywordExtractor implements the AgentExecutor interface for extracting keywords from documents.
-// It uses Google ADK's model to analyze document content and identify the most relevant keywords.
+// It uses Google Gemini API to analyze document content and identify the most relevant keywords.
 //
 // Input Format:
 //
@@ -84,7 +80,8 @@ func validateInput(input map[string]interface{}) (string, string, int, error) {
 //
 // Parameters:
 //   - ctx: Context for cancellation control
-//   - llmModel: ADK model to use for extraction
+//   - client: genai client for API calls
+//   - modelName: Model name to use (e.g., "gemini-2.0-flash")
 //   - input: Map containing document_id, content, and max_keywords
 //
 // Returns:
@@ -94,16 +91,16 @@ func validateInput(input map[string]interface{}) (string, string, int, error) {
 // Errors:
 //   - Missing required input fields (document_id, content)
 //   - Invalid input types
-//   - Agent execution failure
-//   - Malformed agent response
-func (k *KeywordExtractor) Execute(ctx context.Context, llmModel model.LLM, input map[string]interface{}) (map[string]interface{}, error) {
+//   - API execution failure
+//   - Malformed API response
+func (k *KeywordExtractor) Execute(ctx context.Context, client *genai.Client, modelName string, input map[string]interface{}) (map[string]interface{}, error) {
 	// Validate input and extract parameters
 	documentID, content, maxKeywords, err := validateInput(input)
 	if err != nil {
 		return nil, err
 	}
 
-	// Comment 3: Build prompt requesting JSON array or object with keywords/confidence
+	// Build prompt requesting JSON response with keywords
 	instruction := fmt.Sprintf(`You are a keyword extraction specialist.
 
 Task: Extract exactly %d of the most semantically relevant keywords from the document.
@@ -114,73 +111,42 @@ Rules:
 - No stop words (the, is, and, etc.)
 - Extract exactly %d keywords (no more, no less)
 
-Output Format Options (JSON only, no markdown fences):
-1. Simple array: ["keyword1", "keyword2", "keyword3", ...]
-2. Object with confidence: {"keywords": ["keyword1", "keyword2"], "confidence": {"keyword1": 0.95, "keyword2": 0.87}}
+Output Format (JSON only, no markdown fences):
+{"keywords": ["keyword1", "keyword2"], "confidence": {"keyword1": 0.95, "keyword2": 0.87}}
 
-Choose option 2 if you can assign meaningful confidence scores (0.0-1.0), otherwise use option 1.
+If you cannot assign meaningful confidence scores, use simple array: ["keyword1", "keyword2"]
 
 Document:
 %s`, maxKeywords, maxKeywords, content)
 
-	// Comment 1: Use ADK llmagent agent loop instead of direct GenerateContent
-	// Create llmagent with instruction
-	agentConfig := llmagent.Config{
-		Name:        "keyword_extractor",
-		Description: "Extracts keywords from documents",
-		Model:       llmModel,
-		Instruction: instruction,
-		GenerateContentConfig: &genai.GenerateContentConfig{
-			Temperature: genai.Ptr(float32(0.3)),
+	// Generate content with direct API call
+	config := &genai.GenerateContentConfig{
+		Temperature: genai.Ptr(float32(0.3)),
+	}
+
+	genaiResponse, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				genai.NewPartFromText(instruction),
+			},
 		},
-	}
+	}, config)
 
-	llmAgent, err := llmagent.New(agentConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create llmagent for document %s: %w", documentID, err)
+		return nil, fmt.Errorf("failed to generate content for document %s (model: %s): %w", documentID, modelName, err)
 	}
 
-	// Create runner to execute agent
-	runnerConfig := runner.Config{
-		Agent: llmAgent,
-	}
-	agentRunner, err := runner.New(runnerConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create runner for document %s: %w", documentID, err)
-	}
-
-	// Run agent with initial message
-	userMsg := genai.NewPartFromText("Extract keywords from the document provided in the instruction.")
-	initialContent := &genai.Content{
-		Role:  "user",
-		Parts: []*genai.Part{userMsg},
-	}
-
-	// Comment 2: Use correct ADK consumption pattern with iter.Seq2
-	var response string
-	for event, err := range agentRunner.Run(ctx, "user", "session_"+documentID, initialContent, agent.RunConfig{}) {
-		if err != nil {
-			return nil, fmt.Errorf("agent execution error for document %s: %w", documentID, err)
-		}
-
-		// Collect text from final response events
-		if event != nil && event.IsFinalResponse() && event.Content != nil {
-			for _, part := range event.Content.Parts {
-				if part.Text != "" {
-					response += part.Text
-				}
-			}
-		}
-	}
-
+	// Extract text from response using convenience method
+	response := genaiResponse.Text()
 	if response == "" {
-		return nil, fmt.Errorf("no response from agent for document %s", documentID)
+		return nil, fmt.Errorf("no response from API for document %s", documentID)
 	}
 
-	// Comment 6: Robust markdown fence removal
+	// Robust markdown fence removal
 	response = cleanMarkdownFences(response)
 
-	// Comment 4: Flexible parsing - try array first, then object
+	// Flexible parsing - try array first, then object
 	keywords, confidence, err := parseKeywordResponse(response, maxKeywords)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse agent response for document %s: %w (response: %s)", documentID, err, response)
@@ -203,7 +169,6 @@ Document:
 }
 
 // cleanMarkdownFences robustly removes markdown code fences from response
-// Comment 6: Enhanced cleanup for markdown fences
 func cleanMarkdownFences(s string) string {
 	// Trim leading/trailing whitespace
 	s = strings.TrimSpace(s)
@@ -225,12 +190,12 @@ func cleanMarkdownFences(s string) string {
 }
 
 // parseKeywordResponse flexibly parses JSON response
-// Comment 4: Support both array-only and object formats
+// Supports both array-only and object formats
 func parseKeywordResponse(response string, maxKeywords int) ([]string, map[string]float64, error) {
 	// Try parsing as simple array first
 	var keywords []string
 	if err := json.Unmarshal([]byte(response), &keywords); err == nil {
-		// Comment 5: Enforce max_keywords upper bound by truncating
+		// Enforce max_keywords upper bound by truncating
 		if len(keywords) > maxKeywords {
 			keywords = keywords[:maxKeywords]
 		}
@@ -246,7 +211,7 @@ func parseKeywordResponse(response string, maxKeywords int) ([]string, map[strin
 		return nil, nil, fmt.Errorf("failed to parse as array or object: %w", err)
 	}
 
-	// Comment 5: Enforce max_keywords upper bound
+	// Enforce max_keywords upper bound
 	if len(result.Keywords) > maxKeywords {
 		result.Keywords = result.Keywords[:maxKeywords]
 		// Also trim confidence map to match truncated keywords

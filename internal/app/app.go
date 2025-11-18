@@ -222,6 +222,7 @@ func (a *App) initDatabase() error {
 
 		// Load variables from files
 		// This is separate from auth - auth is for cookies, variables are for API keys and generic secrets
+		// Environment variables are checked at runtime via ResolveAPIKey() in config.go
 		if err := sqliteMgr.LoadKeysFromFiles(ctx, a.Config.Variables.Dir); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to load variables from files")
 			// Don't fail startup - variable files are optional
@@ -404,19 +405,6 @@ func (a *App) initServices() error {
 	)
 	a.Logger.Info().Msg("Job monitor created (runs in background goroutines, not via queue)")
 
-	// Register agent worker (if agent service is available)
-	if a.AgentService != nil {
-		agentWorker := worker.NewAgentWorker(
-			a.AgentService,
-			jobMgr,
-			a.StorageManager.DocumentStorage(),
-			a.Logger,
-			a.EventService,
-		)
-		jobProcessor.RegisterExecutor(agentWorker)
-		a.Logger.Info().Msg("Agent worker registered for job type: agent")
-	}
-
 	// Register database maintenance worker (ARCH-008)
 	dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
 		a.StorageManager.DB().(*sql.DB),
@@ -477,6 +465,17 @@ func (a *App) initServices() error {
 			a.Logger.Info().Msg("To enable agents, provide a valid Google Gemini API key")
 		} else {
 			a.Logger.Info().Msg("Agent service initialized and health check passed")
+
+			// Register agent worker immediately after successful initialization
+			agentWorker := worker.NewAgentWorker(
+				a.AgentService,
+				jobMgr,
+				a.StorageManager.DocumentStorage(),
+				a.Logger,
+				a.EventService,
+			)
+			jobProcessor.RegisterExecutor(agentWorker)
+			a.Logger.Info().Msg("Agent worker registered for job type: agent")
 		}
 	}
 

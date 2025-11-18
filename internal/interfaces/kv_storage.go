@@ -34,6 +34,10 @@ type KeyValueStorage interface {
 	// Set inserts or updates a key/value pair with optional description
 	Set(ctx context.Context, key string, value string, description string) error
 
+	// Upsert inserts or updates a key/value pair with explicit logging of the operation
+	// Returns true if a new key was created, false if an existing key was updated
+	Upsert(ctx context.Context, key string, value string, description string) (bool, error)
+
 	// Delete removes a key/value pair, returns error if not found
 	Delete(ctx context.Context, key string) error
 

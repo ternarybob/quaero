@@ -8,7 +8,6 @@ This directory contains configuration files for automated tests.
 test/config/
 ├── setup.toml                    # Test harness config (build, service, output)
 ├── test-quaero.toml              # Base service config for all tests
-├── quaero-no-ai.toml             # Override: Disable agent service
 ├── job-definitions/              # Job definitions (copied to bin/job-definitions/)
 │   ├── news-crawler.toml         # Example news crawler job
 │   ├── my-custom-crawler.toml    # Example custom crawler job
@@ -49,7 +48,7 @@ Contains test infrastructure settings:
 - Mock LLM mode, database reset, debug logging
 
 **Override Configs:**
-- `quaero-no-ai.toml` - Disables agent service (clears Google API key)
+- `test-quaero-no-variables.toml` - Disables agent service (clears Google API key)
 
 **Job Definitions:**
 - `job-definitions/` - Directory of job definitions (copied to `bin/job-definitions/`, auto-loaded by service)
@@ -65,12 +64,12 @@ Contains test infrastructure settings:
 // Use base config only (test-quaero.toml)
 env, err := common.SetupTestEnvironment("TestName")
 
-// Use base + override (test-quaero.toml + quaero-no-ai.toml)
-env, err := common.SetupTestEnvironment("TestName", "../config/quaero-no-ai.toml")
+// Use base + override (test-quaero.toml + test-quaero-no-variables.toml)
+env, err := common.SetupTestEnvironment("TestName", "../config/test-quaero-no-variables.toml")
 
 // Use base + multiple overrides (if you create additional override files)
 env, err := common.SetupTestEnvironment("TestName",
-    "../config/quaero-no-ai.toml",
+    "../config/test-quaero-no-variables.toml",
     "../config/custom-override.toml")
 ```
 
@@ -109,7 +108,7 @@ google_api_key = ""
 model_name = "gemini-2.0-flash"
 ```
 
-**Override config** (`quaero-no-ai.toml`):
+**Override config** (`test-quaero-no-variables.toml`):
 ```toml
 [agent]
 google_api_key = ""  # Explicitly disable

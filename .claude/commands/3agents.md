@@ -8,13 +8,16 @@ Execute workflow for: $ARGUMENTS
 ## INPUT HANDLING
 
 **If $ARGUMENTS is a file path (e.g., `docs/fixes/01-plan-v1-xxx.md`):**
-1. Extract filename without extension (e.g., `01-plan-v1-xxx`)
-2. Create short folder name: `{number}-plan-{short-desc}` (e.g., `01-plan-xxx`)
-3. Create working folder in same directory as the file: `docs/fixes/01-plan-xxx/`
+1. Extract directory path (e.g., `docs/fixes/`)
+2. Extract filename without extension (e.g., `01-plan-v1-xxx`)
+3. Generate timestamp for working folder
+4. Create short folder name: `{timestamp}-{number}-plan-{short-desc}` (e.g., `{timestamp}-01-plan-xxx`)
+5. Create working folder in same directory as the file: `docs/fixes/{timestamp}-01-plan-xxx/`
 
 **If $ARGUMENTS is a task description:**
-1. Create lowercase-hyphenated folder name
-2. Create working folder: `docs/features/{task-name}/`
+1. Generate timestamp
+2. Create lowercase-hyphenated folder name
+3. Create working folder: `docs/features/{timestamp}-{task-name}/`
 
 **Output Location:** All markdown files (plan.md, step-*.md, progress.md, summary.md) go into the working folder determined above.
 

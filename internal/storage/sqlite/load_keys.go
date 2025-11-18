@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -47,6 +48,7 @@ type KeyValueFile struct {
 //
 // Default storage location: ./variables/ directory
 // The function is idempotent - uses Set() which has ON CONFLICT UPDATE behavior.
+// Duplicate keys (case-insensitive) are detected and logged with warnings.
 func (m *Manager) LoadKeysFromFiles(ctx context.Context, dirPath string) error {
 	m.logger.Info().Str("path", dirPath).Msg("Loading variables from files")
 
@@ -64,6 +66,14 @@ func (m *Manager) LoadKeysFromFiles(ctx context.Context, dirPath string) error {
 
 	loadedCount := 0
 	skippedCount := 0
+	duplicateCount := 0
+
+	// Track keys loaded so far (case-insensitive) with their source file
+	// Map: normalized_key -> {file: "filename.toml", original_key: "ORIGINAL_KEY"}
+	seenKeys := make(map[string]struct {
+		file        string
+		originalKey string
+	})
 
 	// Process each file
 	for _, entry := range entries {
@@ -98,31 +108,83 @@ func (m *Manager) LoadKeysFromFiles(ctx context.Context, dirPath string) error {
 				continue
 			}
 
+			// Normalize key for duplicate detection (case-insensitive)
+			normalizedKey := m.normalizeKeyForTracking(sectionName)
+
+			// Check for duplicate keys across files
+			if previousEntry, exists := seenKeys[normalizedKey]; exists {
+				m.logger.Warn().
+					Str("key", sectionName).
+					Str("normalized_key", normalizedKey).
+					Str("current_file", entry.Name()).
+					Str("previous_file", previousEntry.file).
+					Str("previous_key", previousEntry.originalKey).
+					Msg("Duplicate key detected (case-insensitive) - will overwrite previous value")
+				duplicateCount++
+			}
+
 			// Use provided description or default
 			description := kvFile.Description
 			if description == "" {
 				description = "Loaded from file"
 			}
 
-			// Save key/value to KV store (idempotent - uses ON CONFLICT to update existing)
-			if err := m.kv.Set(ctx, sectionName, kvFile.Value, description); err != nil {
-				m.logger.Error().Err(err).Str("file", entry.Name()).Str("section", sectionName).Msg("Failed to save key/value to KV store")
+			// Check if this key already exists in database (not just in current load)
+			_, existsErr := m.kv.Get(ctx, sectionName)
+			existsInDB := existsErr == nil
+
+			// Upsert key/value to KV store with explicit create/update detection
+			isNewKey, err := m.kv.Upsert(ctx, sectionName, kvFile.Value, description)
+			if err != nil {
+				m.logger.Error().Err(err).Str("file", entry.Name()).Str("section", sectionName).Msg("Failed to upsert key/value to KV store")
 				skippedCount++
 				continue
 			}
 
-			m.logger.Info().
-				Str("key", sectionName).
-				Str("file", entry.Name()).
-				Msg("Loaded key/value pair from file")
+			// Track this key for duplicate detection
+			seenKeys[normalizedKey] = struct {
+				file        string
+				originalKey string
+			}{
+				file:        entry.Name(),
+				originalKey: sectionName,
+			}
+
+			// Log based on operation type
+			if isNewKey {
+				m.logger.Info().
+					Str("key", sectionName).
+					Str("file", entry.Name()).
+					Msg("Created new key/value pair from file")
+			} else if existsInDB {
+				// Key existed in database and is being updated
+				m.logger.Warn().
+					Str("key", sectionName).
+					Str("file", entry.Name()).
+					Msg("Updated existing key/value pair from file (database value overwritten)")
+			} else {
+				// Key was created by earlier file in this load and is being updated
+				m.logger.Info().
+					Str("key", sectionName).
+					Str("file", entry.Name()).
+					Msg("Updated key/value pair from file (overriding earlier file in same load)")
+			}
 
 			loadedCount++
 		}
 	}
 
+	// Log summary with duplicate warnings
+	if duplicateCount > 0 {
+		m.logger.Warn().
+			Int("duplicates", duplicateCount).
+			Msg("Duplicate keys detected during file loading - later files override earlier files")
+	}
+
 	m.logger.Info().
 		Int("loaded", loadedCount).
 		Int("skipped", skippedCount).
+		Int("duplicates", duplicateCount).
 		Str("dir", dirPath).
 		Msg("Finished loading key/value pairs from files")
 
@@ -165,4 +227,10 @@ func (m *Manager) validateKeyValueFile(kvFile *KeyValueFile, sectionName string)
 	}
 	// Description is optional - no validation needed
 	return nil
+}
+
+// normalizeKeyForTracking normalizes a key for duplicate detection (case-insensitive comparison)
+// This matches the normalization logic used in KVStorage to ensure consistency
+func (m *Manager) normalizeKeyForTracking(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -16,6 +18,7 @@ type KVServiceInterface interface {
 	Get(ctx context.Context, key string) (string, error)
 	GetPair(ctx context.Context, key string) (*interfaces.KeyValuePair, error)
 	Set(ctx context.Context, key string, value string, description string) error
+	Upsert(ctx context.Context, key string, value string, description string) (bool, error)
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context) ([]interfaces.KeyValuePair, error)
 	GetAll(ctx context.Context) (map[string]string, error)
@@ -143,6 +146,13 @@ func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for duplicate keys (case-insensitive)
+	if err := h.checkDuplicateKey(r.Context(), req.Key); err != nil {
+		h.logger.Warn().Err(err).Str("key", req.Key).Msg("Duplicate key detected")
+		WriteError(w, http.StatusConflict, err.Error())
+		return
+	}
+
 	// Store the key/value pair
 	if err := h.kvService.Set(r.Context(), req.Key, req.Value, req.Description); err != nil {
 		h.logger.Error().Err(err).Str("key", req.Key).Msg("Failed to create key/value pair")
@@ -159,8 +169,8 @@ func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateKVHandler handles PUT /api/kv/{key} - updates an existing variable (key/value pair)
-// Supports full replacement (value + description) or description-only updates
+// UpdateKVHandler handles PUT /api/kv/{key} - upserts a variable (key/value pair)
+// Creates new key or updates existing one. Supports full replacement or description-only updates.
 func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "PUT") {
 		return
@@ -212,19 +222,32 @@ func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Debug().Str("key", key).Msg("Description-only update - preserving existing value")
 	}
 
-	// Update the key/value pair (Set handles upsert)
-	if err := h.kvService.Set(r.Context(), key, valueToSet, req.Description); err != nil {
-		h.logger.Error().Err(err).Str("key", key).Msg("Failed to update key/value pair")
-		WriteError(w, http.StatusInternalServerError, "Failed to update key/value pair")
+	// Upsert the key/value pair (explicit insert or update with logging)
+	isNewKey, err := h.kvService.Upsert(r.Context(), key, valueToSet, req.Description)
+	if err != nil {
+		h.logger.Error().Err(err).Str("key", key).Msg("Failed to upsert key/value pair")
+		WriteError(w, http.StatusInternalServerError, "Failed to upsert key/value pair")
 		return
 	}
 
-	h.logger.Info().Str("key", key).Msg("Updated key/value pair")
+	// Log and respond based on operation
+	var statusCode int
+	var message string
+	if isNewKey {
+		statusCode = http.StatusCreated
+		message = "Key/value pair created successfully"
+		h.logger.Info().Str("key", key).Msg("Created new key/value pair via PUT")
+	} else {
+		statusCode = http.StatusOK
+		message = "Key/value pair updated successfully"
+		h.logger.Info().Str("key", key).Msg("Updated existing key/value pair via PUT")
+	}
 
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
+	WriteJSON(w, statusCode, map[string]interface{}{
 		"status":  "success",
-		"message": "Key/value pair updated successfully",
+		"message": message,
 		"key":     key,
+		"created": isNewKey,
 	})
 }
 
@@ -268,6 +291,29 @@ func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Key/value pair deleted successfully",
 	})
+}
+
+// checkDuplicateKey checks if a key already exists (case-insensitive)
+// Returns an error if a duplicate is found
+func (h *KVHandler) checkDuplicateKey(ctx context.Context, newKey string) error {
+	// Get all existing keys
+	pairs, err := h.kvService.List(ctx)
+	if err != nil {
+		// If we can't list keys, allow the operation to proceed
+		// The underlying storage will handle the actual duplicate check
+		h.logger.Warn().Err(err).Msg("Failed to list keys for duplicate check")
+		return nil
+	}
+
+	// Check for case-insensitive duplicates
+	newKeyLower := strings.ToLower(newKey)
+	for _, pair := range pairs {
+		if strings.ToLower(pair.Key) == newKeyLower {
+			return fmt.Errorf("A key with name '%s' already exists. Key names are case-insensitive.", pair.Key)
+		}
+	}
+
+	return nil
 }
 
 // maskValue masks sensitive variable values for API responses

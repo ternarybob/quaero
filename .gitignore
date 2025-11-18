@@ -10,6 +10,7 @@ bin/
 *.out
 coverage.html
 
+
 # Go workspace file
 go.work
 
@@ -39,6 +40,7 @@ node_modules/
 
 # Config with secrets (use config.yaml.example instead)
 config.yaml
+.env.test
 
 # Temporary and Test Output files
 *.tmp

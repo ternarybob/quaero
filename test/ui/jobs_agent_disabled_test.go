@@ -16,8 +16,8 @@ import (
 // The job should be displayed with a "Disabled" badge and error message.
 func TestJobsAgentDisabled(t *testing.T) {
 	// Use base config + override to disable agent service
-	// Priority: test-quaero.toml (base) -> quaero-no-ai.toml (override)
-	env, err := common.SetupTestEnvironment("TestJobsAgentDisabled", "../config/quaero-no-ai.toml")
+	// Priority: test-quaero.toml (base) -> test-quaero-no-variables.toml (override)
+	env, err := common.SetupTestEnvironment("TestJobsAgentDisabled", "../config/test-quaero-no-variables.toml")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}

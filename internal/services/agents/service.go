@@ -8,8 +8,6 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"google.golang.org/adk/model"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/genai"
 )
 
@@ -17,27 +15,28 @@ import (
 // Each agent type (keyword extractor, summarizer, etc.) implements this interface
 // and is registered with the service for dynamic dispatch.
 type AgentExecutor interface {
-	// Execute runs the agent with the given ADK model and input
-	Execute(ctx context.Context, model model.LLM, input map[string]interface{}) (map[string]interface{}, error)
+	// Execute runs the agent with the given genai client and input
+	Execute(ctx context.Context, client *genai.Client, modelName string, input map[string]interface{}) (map[string]interface{}, error)
 	// GetType returns the agent type identifier (e.g., "keyword_extractor")
 	GetType() string
 }
 
-// Service manages ADK agent lifecycle and execution.
+// Service manages agent lifecycle and execution using direct genai API.
 // It maintains a registry of agent types and routes execution requests to the appropriate agent.
 type Service struct {
-	config  *common.GeminiConfig
-	logger  arbor.ILogger
-	model   model.LLM
-	agents  map[string]AgentExecutor
-	timeout time.Duration
+	config    *common.GeminiConfig
+	logger    arbor.ILogger
+	client    *genai.Client
+	modelName string
+	agents    map[string]AgentExecutor
+	timeout   time.Duration
 }
 
-// NewService creates a new agent service with Google ADK integration.
+// NewService creates a new agent service with Google Gemini API integration.
 //
 // The service performs the following initialization:
 //  1. Resolves Google API key from KV store with config fallback
-//  2. Initializes ADK Gemini model
+//  2. Initializes direct genai client
 //  3. Registers built-in agent types (keyword extractor)
 //  4. Parses timeout duration
 //
@@ -53,7 +52,7 @@ type Service struct {
 // Errors:
 //   - Missing or empty Google API key (from KV store or config)
 //   - Invalid model name
-//   - Failed to initialize ADK model (network, auth, etc.)
+//   - Failed to initialize genai client (network, auth, etc.)
 //   - Invalid timeout duration
 func NewService(config *common.GeminiConfig, storageManager interfaces.StorageManager, logger arbor.ILogger) (*Service, error) {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
@@ -62,6 +61,19 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	if err != nil {
 		return nil, fmt.Errorf("Google API key is required for agent service (set via KV store, QUAERO_GEMINI_GOOGLE_API_KEY, or gemini.google_api_key in config): %w", err)
 	}
+
+	// Debug logging: Log API key details (masked for security)
+	maskedKey := ""
+	if len(apiKey) > 12 {
+		maskedKey = apiKey[:8] + "..." + apiKey[len(apiKey)-4:]
+	} else {
+		maskedKey = "***"
+	}
+	logger.Debug().
+		Str("api_key_masked", maskedKey).
+		Int("api_key_length", len(apiKey)).
+		Bool("api_key_empty", apiKey == "").
+		Msg("Agent service: Resolved Google API key")
 
 	if config.AgentModel == "" {
 		config.AgentModel = "gemini-2.0-flash" // Default to fast model
@@ -73,22 +85,34 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		return nil, fmt.Errorf("invalid timeout duration '%s': %w", config.Timeout, err)
 	}
 
-	// Initialize ADK Gemini model
-	geminiModel, err := gemini.NewModel(ctx, config.AgentModel, &genai.ClientConfig{
+	// Initialize direct genai client
+	logger.Debug().
+		Str("backend", "GeminiAPI").
+		Str("model", config.AgentModel).
+		Msg("Agent service: Initializing genai client")
+
+	genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize ADK Gemini model: %w", err)
+		logger.Error().
+			Err(err).
+			Str("api_key_masked", maskedKey).
+			Msg("Agent service: Failed to initialize genai client")
+		return nil, fmt.Errorf("failed to initialize genai client: %w", err)
 	}
+
+	logger.Debug().Msg("Agent service: genai client initialized successfully")
 
 	// Create service instance
 	service := &Service{
-		config:  config,
-		logger:  logger,
-		model:   geminiModel,
-		agents:  make(map[string]AgentExecutor),
-		timeout: timeout,
+		config:    config,
+		logger:    logger,
+		client:    genaiClient,
+		modelName: config.AgentModel,
+		agents:    make(map[string]AgentExecutor),
+		timeout:   timeout,
 	}
 
 	// Register built-in agents
@@ -100,7 +124,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		Int("max_turns", config.MaxTurns).
 		Dur("timeout", timeout).
 		Int("registered_agents", len(service.agents)).
-		Msg("Agent service initialized with Google ADK")
+		Msg("Agent service initialized with Google Gemini API")
 
 	return service, nil
 }
@@ -157,7 +181,7 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 		Str("agent_type", agentType).
 		Msg("Starting agent execution")
 
-	output, err := agent.Execute(timeoutCtx, s.model, input)
+	output, err := agent.Execute(timeoutCtx, s.client, s.modelName, input)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -180,7 +204,7 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 // HealthCheck verifies the agent service is operational.
 //
 // The health check validates:
-//   - The ADK model is accessible
+//   - The genai client is accessible
 //   - The model name is set correctly
 //
 // This should be called during service initialization to fail fast if there are issues.
@@ -194,19 +218,18 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 func (s *Service) HealthCheck(ctx context.Context) error {
 	s.logger.Debug().Msg("Running agent service health check")
 
-	// Verify ADK model is initialized
-	if s.model == nil {
-		return fmt.Errorf("agent service model is not initialized")
+	// Verify genai client is initialized
+	if s.client == nil {
+		return fmt.Errorf("agent service client is not initialized")
 	}
 
 	// Verify model name is set
-	modelName := s.model.Name()
-	if modelName == "" {
-		return fmt.Errorf("ADK model name is empty")
+	if s.modelName == "" {
+		return fmt.Errorf("model name is not set")
 	}
 
 	s.logger.Info().
-		Str("model", modelName).
+		Str("model", s.modelName).
 		Msg("Agent service health check passed")
 	return nil
 }
@@ -220,8 +243,8 @@ func (s *Service) HealthCheck(ctx context.Context) error {
 func (s *Service) Close() error {
 	s.logger.Info().Msg("Closing agent service")
 
-	// ADK model doesn't require explicit Close
-	s.model = nil
+	// genai client doesn't require explicit Close
+	s.client = nil
 	s.agents = nil
 
 	return nil

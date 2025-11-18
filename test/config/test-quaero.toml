@@ -3,7 +3,7 @@
 # =============================================================================
 # This is the base configuration for all automated tests.
 # Override specific settings using additional config files:
-#   -config test-quaero.toml -config quaero-no-ai.toml
+#   -config test-quaero.toml -config test-quaero-no-variables.toml
 #
 # Priority: Later config files override earlier ones
 # =============================================================================

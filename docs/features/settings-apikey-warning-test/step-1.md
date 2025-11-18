@@ -28,7 +28,7 @@ Analyzed existing test patterns and configuration setup to understand how to pro
 
 2. **Test Pattern from `jobs_agent_disabled_test.go`:**
    - Tests the "Configuration Required" warning display
-   - Uses `quaero-no-ai.toml` config to disable agent service
+   - Uses `test-quaero-no-variables.toml` config to disable agent service
    - Loads test job definition: `env.LoadJobDefinitionFile("../config/job-definitions/test-agent-job.toml")`
    - Navigates to `/jobs` page
    - Uses JavaScript evaluation to extract job card details:

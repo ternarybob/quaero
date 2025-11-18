@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,12 +32,19 @@ func NewKVStorage(db *SQLiteDB, logger arbor.ILogger) interfaces.KeyValueStorage
 	}
 }
 
-// Get retrieves a value by key
+// normalizeKey converts a key to lowercase for case-insensitive storage
+// This ensures that "GOOGLE_API_KEY", "google_api_key", and "Google_Api_Key" all resolve to the same entry
+func (s *KVStorage) normalizeKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
+}
+
+// Get retrieves a value by key (case-insensitive)
 func (s *KVStorage) Get(ctx context.Context, key string) (string, error) {
+	normalizedKey := s.normalizeKey(key)
 	var value string
 	query := `SELECT value FROM key_value_store WHERE key = ?`
 
-	err := s.db.db.QueryRowContext(ctx, query, key).Scan(&value)
+	err := s.db.db.QueryRowContext(ctx, query, normalizedKey).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", interfaces.ErrKeyNotFound
 	}
@@ -47,13 +55,14 @@ func (s *KVStorage) Get(ctx context.Context, key string) (string, error) {
 	return value, nil
 }
 
-// GetPair retrieves a full KeyValuePair by key
+// GetPair retrieves a full KeyValuePair by key (case-insensitive)
 func (s *KVStorage) GetPair(ctx context.Context, key string) (*interfaces.KeyValuePair, error) {
+	normalizedKey := s.normalizeKey(key)
 	var pair interfaces.KeyValuePair
 	var createdAt, updatedAt int64
 	query := `SELECT key, value, description, created_at, updated_at FROM key_value_store WHERE key = ?`
 
-	err := s.db.db.QueryRowContext(ctx, query, key).Scan(&pair.Key, &pair.Value, &pair.Description, &createdAt, &updatedAt)
+	err := s.db.db.QueryRowContext(ctx, query, normalizedKey).Scan(&pair.Key, &pair.Value, &pair.Description, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, interfaces.ErrKeyNotFound
 	}
@@ -67,11 +76,12 @@ func (s *KVStorage) GetPair(ctx context.Context, key string) (*interfaces.KeyVal
 	return &pair, nil
 }
 
-// Set inserts or updates a key/value pair
+// Set inserts or updates a key/value pair (case-insensitive)
 func (s *KVStorage) Set(ctx context.Context, key string, value string, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	normalizedKey := s.normalizeKey(key)
 	now := time.Now().Unix()
 	query := `
 		INSERT INTO key_value_store (key, value, description, created_at, updated_at)
@@ -82,7 +92,7 @@ func (s *KVStorage) Set(ctx context.Context, key string, value string, descripti
 			updated_at = excluded.updated_at
 	`
 
-	_, err := s.db.db.ExecContext(ctx, query, key, value, description, now, now)
+	_, err := s.db.db.ExecContext(ctx, query, normalizedKey, value, description, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to set key/value: %w", err)
 	}
@@ -90,11 +100,49 @@ func (s *KVStorage) Set(ctx context.Context, key string, value string, descripti
 	return nil
 }
 
-// Delete removes a key/value pair
+// Upsert inserts or updates a key/value pair with explicit operation detection (case-insensitive)
+// Returns true if a new key was created, false if an existing key was updated
+func (s *KVStorage) Upsert(ctx context.Context, key string, value string, description string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizedKey := s.normalizeKey(key)
+
+	// Check if key exists before upsert
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM key_value_store WHERE key = ?)`
+	err := s.db.db.QueryRowContext(ctx, checkQuery, normalizedKey).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check key existence: %w", err)
+	}
+
+	// Perform upsert
+	now := time.Now().Unix()
+	query := `
+		INSERT INTO key_value_store (key, value, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			description = excluded.description,
+			updated_at = excluded.updated_at
+	`
+
+	_, err = s.db.db.ExecContext(ctx, query, normalizedKey, value, description, now, now)
+	if err != nil {
+		return false, fmt.Errorf("failed to upsert key/value: %w", err)
+	}
+
+	// Return true if key was newly created, false if updated
+	isNewKey := !exists
+	return isNewKey, nil
+}
+
+// Delete removes a key/value pair (case-insensitive)
 func (s *KVStorage) Delete(ctx context.Context, key string) error {
+	normalizedKey := s.normalizeKey(key)
 	query := `DELETE FROM key_value_store WHERE key = ?`
 
-	result, err := s.db.db.ExecContext(ctx, query, key)
+	result, err := s.db.db.ExecContext(ctx, query, normalizedKey)
 	if err != nil {
 		return fmt.Errorf("failed to delete key: %w", err)
 	}

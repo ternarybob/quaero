@@ -83,6 +83,9 @@ type TestEnvironment struct {
 
 	// Output capture for test console
 	outputCapture *OutputCapture
+
+	// Environment variables loaded from .env.test file
+	EnvVars map[string]string
 }
 
 // extractSuiteName extracts the test suite name from a test name
@@ -145,10 +148,56 @@ func getOrCreateSuiteDirectory(suiteName string, baseDir string) (string, error)
 	return suiteDir, nil
 }
 
+// loadEnvFile loads environment variables from a .env file into a map
+// Supports KEY=value and KEY="value" formats
+// Ignores comments (lines starting with #) and empty lines
+func loadEnvFile(path string) (map[string]string, error) {
+	envVars := make(map[string]string)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// .env file is optional, return empty map if not found
+		if os.IsNotExist(err) {
+			return envVars, nil
+		}
+		return nil, fmt.Errorf("failed to read .env file: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		// Trim whitespace
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse KEY=VALUE format
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid format at line %d: %s", i+1, line)
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Remove surrounding quotes if present
+		if len(value) >= 2 && ((value[0] == '"' && value[len(value)-1] == '"') ||
+			(value[0] == '\'' && value[len(value)-1] == '\'')) {
+			value = value[1 : len(value)-1]
+		}
+
+		envVars[key] = value
+	}
+
+	return envVars, nil
+}
+
 // LoadTestConfig loads the test harness configuration from test/config/setup.toml
 // Automatically overrides port based on current directory (18085 for UI, 19085 for API)
 // Optionally accepts additional config paths to override base config (relative to test/ui or test/api directory)
-// Example: LoadTestConfig("../config/quaero-no-ai.toml") - disables agent service
+// Example: LoadTestConfig("../config/quaero-test.toml") - disables agent service
 func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 	// Determine test type based on working directory
 	cwd, err := os.Getwd()
@@ -211,7 +260,19 @@ func LoadTestConfig(additionalConfigPaths ...string) (*TestConfig, error) {
 
 // SetupTestEnvironment starts the Quaero service and prepares the test environment
 // Optionally accepts a custom config path (relative to test/ui or test/api directory)
+// By default, environment variables from .env.test are loaded and passed to the service
 func SetupTestEnvironment(testName string, customConfigPath ...string) (*TestEnvironment, error) {
+	return setupTestEnvironmentInternal(testName, true, customConfigPath...)
+}
+
+// SetupTestEnvironmentWithoutEnv starts the Quaero service without loading .env.test variables
+// Use this for tests that don't need environment variable injection
+func SetupTestEnvironmentWithoutEnv(testName string, customConfigPath ...string) (*TestEnvironment, error) {
+	return setupTestEnvironmentInternal(testName, false, customConfigPath...)
+}
+
+// setupTestEnvironmentInternal is the internal implementation that handles environment setup
+func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfigPath ...string) (*TestEnvironment, error) {
 	config, err := LoadTestConfig(customConfigPath...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load test config: %w", err)
@@ -272,6 +333,29 @@ func SetupTestEnvironment(testName string, customConfigPath ...string) (*TestEnv
 		TestLog:        testLogFile,
 		Port:           config.Service.Port,
 		ConfigFilePath: configFilePath,
+		EnvVars:        make(map[string]string), // Initialize empty map
+	}
+
+	// Load environment variables from .env.test file (if includeEnv is true)
+	if includeEnv {
+		envFilePath := "../config/.env.test"
+		envVars, err := loadEnvFile(envFilePath)
+		if err != nil {
+			logFile.Close()
+			testLogFile.Close()
+			return nil, fmt.Errorf("failed to load .env file: %w", err)
+		}
+		env.EnvVars = envVars
+
+		// Log loaded environment variables (keys only, not values for security)
+		if len(envVars) > 0 {
+			fmt.Fprintf(logFile, "Loaded %d environment variable(s) from %s\n", len(envVars), envFilePath)
+			for key := range envVars {
+				fmt.Fprintf(logFile, "  - %s\n", key)
+			}
+		}
+	} else {
+		fmt.Fprintf(logFile, "Environment variable loading disabled (includeEnv=false)\n")
 	}
 
 	// Initialize output capture
@@ -734,6 +818,27 @@ func (env *TestEnvironment) startService() error {
 	cmd.Stderr = env.LogFile
 	// Override port via environment variable (takes precedence over config file)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("QUAERO_SERVER_PORT=%d", env.Config.Service.Port))
+
+	// Pass .env.test variables to service process
+	// Map generic environment variable names to service-specific names
+	envMappings := map[string][]string{
+		"GOOGLE_API_KEY": {"QUAERO_PLACES_API_KEY", "QUAERO_GEMINI_GOOGLE_API_KEY"},
+	}
+
+	for envKey, envValue := range env.EnvVars {
+		// Check if this env var needs to be mapped to multiple service env vars
+		if targetEnvVars, ok := envMappings[envKey]; ok {
+			// Map to all target environment variables
+			for _, targetEnvVar := range targetEnvVars {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", targetEnvVar, envValue))
+				fmt.Fprintf(env.LogFile, "  Env: %s=***REDACTED*** (mapped from %s)\n", targetEnvVar, envKey)
+			}
+		} else {
+			// No mapping - use as-is
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", envKey, envValue))
+			fmt.Fprintf(env.LogFile, "  Env: %s=***REDACTED***\n", envKey)
+		}
+	}
 
 	fmt.Fprintf(env.LogFile, "Starting service process...\n")
 	if err := cmd.Start(); err != nil {

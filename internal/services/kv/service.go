@@ -97,6 +97,55 @@ func (s *Service) Set(ctx context.Context, key string, value string, description
 	return nil
 }
 
+// Upsert inserts or updates a key/value pair with explicit logging and event publishing
+// Returns true if a new key was created, false if an existing key was updated
+func (s *Service) Upsert(ctx context.Context, key string, value string, description string) (bool, error) {
+	if key == "" {
+		return false, fmt.Errorf("key cannot be empty")
+	}
+
+	// Get old value for event payload (if exists)
+	oldValue, _ := s.storage.Get(ctx, key)
+
+	// Perform upsert operation
+	isNewKey, err := s.storage.Upsert(ctx, key, value, description)
+	if err != nil {
+		s.logger.Error().Err(err).Str("key", key).Msg("Failed to upsert key/value pair")
+		return false, err
+	}
+
+	// Log based on operation type
+	if isNewKey {
+		s.logger.Info().Str("key", key).Msg("Created new key/value pair")
+	} else {
+		s.logger.Info().Str("key", key).Msg("Updated existing key/value pair")
+	}
+
+	// Publish EventKeyUpdated if event service is available
+	if s.eventSvc != nil {
+		event := interfaces.Event{
+			Type: interfaces.EventKeyUpdated,
+			Payload: map[string]interface{}{
+				"key_name":  key,
+				"old_value": oldValue,
+				"new_value": value,
+				"is_new":    isNewKey,
+				"timestamp": time.Now().Format(time.RFC3339),
+			},
+		}
+
+		// Publish asynchronously to avoid blocking the Upsert operation
+		if err := s.eventSvc.Publish(ctx, event); err != nil {
+			s.logger.Warn().Err(err).Str("key", key).Msg("Failed to publish EventKeyUpdated")
+			// Don't fail the Upsert operation if event publishing fails
+		} else {
+			s.logger.Debug().Str("key", key).Msg("Published EventKeyUpdated")
+		}
+	}
+
+	return isNewKey, nil
+}
+
 // Delete removes a key/value pair
 func (s *Service) Delete(ctx context.Context, key string) error {
 	err := s.storage.Delete(ctx, key)

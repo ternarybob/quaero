@@ -595,18 +595,32 @@ func ApplyFlagOverrides(config *Config, port int, host string) {
 	}
 }
 
-// ResolveAPIKey resolves an API key by name with fallback to config value
-// Resolution order: KV store → config fallback → error
-// Returns the resolved API key string or error if not found
+// ResolveAPIKey resolves an API key by name with environment variable priority
+// Resolution order: environment variables → KV store → config fallback → error
+// This ensures QUAERO_* environment variables always take precedence
 func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, name string, configFallback string) (string, error) {
-	// Try to resolve from KV store first (primary source for API keys)
+	// Map of KV store key names to environment variable names
+	// Environment variables have highest priority
+	keyToEnvMapping := map[string]string{
+		"google_api_key": "QUAERO_GEMINI_GOOGLE_API_KEY",
+		// Add more mappings as needed
+		// "places_api_key": "QUAERO_PLACES_API_KEY", // If we move this to KV store
+	}
+
+	// Check environment variable first (highest priority)
+	if envVarName, hasMappedEnv := keyToEnvMapping[name]; hasMappedEnv {
+		if envValue := os.Getenv(envVarName); envValue != "" {
+			// Environment variable takes priority over everything
+			return envValue, nil
+		}
+	}
+
+	// Try to resolve from KV store (medium priority - file-based variables)
 	if kvStorage != nil {
 		apiKey, err := kvStorage.Get(ctx, name)
 		if err == nil && apiKey != "" {
-			// Successfully resolved from KV store
 			return apiKey, nil
 		}
-		// KV store lookup failed or key not found - continue to config fallback
 	}
 
 	// Fallback to config value (lowest priority)
@@ -614,8 +628,7 @@ func ResolveAPIKey(ctx context.Context, kvStorage interfaces.KeyValueStorage, na
 		return configFallback, nil
 	}
 
-	// None of the sources provided the key
-	return "", fmt.Errorf("API key '%s' not found in KV store or config", name)
+	return "", fmt.Errorf("API key '%s' not found in environment, KV store, or config", name)
 }
 
 // Helper functions for string manipulation

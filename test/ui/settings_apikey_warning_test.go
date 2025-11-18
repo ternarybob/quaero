@@ -478,8 +478,8 @@ func TestSettingsAPIKeyWarning_AddKey(t *testing.T) {
 // TestSettingsAPIKeyWarning_KeySet verifies that "Configuration Required" warning
 // is NOT displayed on the jobs page when google_api_key IS set in TOML config
 func TestSettingsAPIKeyWarning_KeySet(t *testing.T) {
-	// Use config WITH API key set
-	env, err := common.SetupTestEnvironment("SettingsAPIKeyWarning_KeySet", "../config/test-quaero-with-apikey.toml")
+	// Use default config (includes google_api_key variable)
+	env, err := common.SetupTestEnvironment("SettingsAPIKeyWarning_KeySet")
 	if err != nil {
 		t.Fatalf("Failed to setup test environment: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestSettingsAPIKeyWarning_KeySet(t *testing.T) {
 	}()
 
 	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
-	env.LogTest(t, "Using config: test-quaero-with-apikey.toml (google_api_key IS set)")
+	env.LogTest(t, "Using default config: test-quaero.toml (google_api_key variable IS set)")
 
 	// Load test agent job definition
 	env.LogTest(t, "Loading test agent job definition...")
