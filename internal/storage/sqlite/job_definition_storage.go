@@ -674,8 +674,8 @@ func (s *JobDefinitionStorage) CreateDefaultJobDefinitions(ctx context.Context) 
 func (s *JobDefinitionStorage) scanJobDefinition(row *sql.Row) (*models.JobDefinition, error) {
 	var (
 		id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, tagsJSON, toml string
-		enabled, autoStart                                                                                                                                                                          int
-		createdAt, updatedAt                                                                                                                                                                        int64
+		enabled, autoStart                                                                                                                                                                    int
+		createdAt, updatedAt                                                                                                                                                                  int64
 	)
 
 	err := row.Scan(
@@ -769,8 +769,8 @@ func (s *JobDefinitionStorage) scanJobDefinitions(rows *sql.Rows) ([]*models.Job
 	for rows.Next() {
 		var (
 			id, name, jobDefType, jobOwnerType, description, sourceType, baseURL, authID, stepsJSON, schedule, timeout, configJSON, preJobsJSON, postJobsJSON, errorToleranceJSON, tagsJSON, toml string
-			enabled, autoStart                                                                                                                                                                          int
-			createdAt, updatedAt                                                                                                                                                                        int64
+			enabled, autoStart                                                                                                                                                                    int
+			createdAt, updatedAt                                                                                                                                                                  int64
 		)
 
 		err := rows.Scan(

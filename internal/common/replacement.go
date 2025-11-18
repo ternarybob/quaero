@@ -10,9 +10,10 @@
 // values from the store.
 //
 // Example:
-//   Input:  "api_key = {google-api-key}"
-//   KV Map: {"google-api-key": "sk-12345"}
-//   Output: "api_key = sk-12345"
+//
+//	Input:  "api_key = {google-api-key}"
+//	KV Map: {"google-api-key": "sk-12345"}
+//	Output: "api_key = sk-12345"
 //
 // Replacement is case-sensitive. Missing keys are logged as warnings but not
 // treated as errors, allowing graceful degradation.
@@ -35,8 +36,9 @@ var keyRefPattern = regexp.MustCompile(`\{([a-zA-Z0-9_-]+)\}`)
 // is left unchanged and a warning is logged.
 //
 // Example:
-//   ReplaceKeyReferences("api_key = {google-api-key}", map[string]string{"google-api-key": "sk-123"})
-//   Returns: "api_key = sk-123"
+//
+//	ReplaceKeyReferences("api_key = {google-api-key}", map[string]string{"google-api-key": "sk-123"})
+//	Returns: "api_key = sk-123"
 func ReplaceKeyReferences(input string, kvMap map[string]string, logger arbor.ILogger) string {
 	if input == "" {
 		return input
@@ -128,7 +130,7 @@ func ReplaceInMap(m map[string]interface{}, kvMap map[string]string, logger arbo
 				}
 			}
 
-		// Other types (int, bool, float, etc.) - skip, no replacement needed
+			// Other types (int, bool, float, etc.) - skip, no replacement needed
 		}
 	}
 

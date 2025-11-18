@@ -169,7 +169,7 @@ func (m *mockAdvancedDocumentStorage) GetUnvectorizedDocuments(limit int) ([]*mo
 func (m *mockAdvancedDocumentStorage) ClearAllEmbeddings() (int, error) { return 0, nil }
 func (m *mockAdvancedDocumentStorage) ClearAll() error                  { return nil }
 func (m *mockAdvancedDocumentStorage) RebuildFTS5Index() error          { return nil }
-func (m *mockAdvancedDocumentStorage) GetAllTags() ([]string, error)   { return []string{}, nil }
+func (m *mockAdvancedDocumentStorage) GetAllTags() ([]string, error)    { return []string{}, nil }
 
 // Test data
 func getTestDocuments() []*models.Document {

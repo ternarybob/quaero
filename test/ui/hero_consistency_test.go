@@ -1,9 +1,9 @@
 package ui
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"context"
 	"fmt"
+	"github.com/ternarybob/quaero/test/common"
 	"os"
 	"strings"
 	"testing"

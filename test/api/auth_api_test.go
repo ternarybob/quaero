@@ -2,8 +2,8 @@
 package api
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"encoding/json"
+	"github.com/ternarybob/quaero/test/common"
 	"net/http"
 	"testing"
 )

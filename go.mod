@@ -17,7 +17,6 @@ require (
 	github.com/ternarybob/arbor v1.4.53
 	github.com/ternarybob/banner v0.0.5
 	golang.org/x/time v0.14.0
-	google.golang.org/adk v0.1.0
 	google.golang.org/genai v1.34.0
 	maragu.dev/goqite v0.3.1
 	modernc.org/sqlite v1.40.0
@@ -61,7 +60,6 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
@@ -75,6 +73,4 @@ require (
 	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	rsc.io/omap v1.2.0 // indirect
-	rsc.io/ordered v1.1.1 // indirect
 )

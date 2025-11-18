@@ -31,9 +31,10 @@ import (
 //
 // TOML sections: [section-name] with value (required) and description (optional) fields
 // Example:
-//   [google-api-key]
-//   value = "AIzaSyABC123..."
-//   description = "Google API key for Gemini"
+//
+//	[google-api-key]
+//	value = "AIzaSyABC123..."
+//	description = "Google API key for Gemini"
 type KeyValueFile struct {
 	Value       string `toml:"value" json:"value"`             // Required: The secret value
 	Description string `toml:"description" json:"description"` // Optional: Human-readable description

@@ -318,8 +318,8 @@ func TestNewsCrawlerJobExecution(t *testing.T) {
 
 		// Check for parent job progress format: "X pending, Y running, Z completed"
 		if strings.Contains(progressLower, "pending") &&
-		   strings.Contains(progressLower, "running") &&
-		   strings.Contains(progressLower, "completed") {
+			strings.Contains(progressLower, "running") &&
+			strings.Contains(progressLower, "completed") {
 			hasExpectedFormat = true
 			env.LogTest(t, "  ✓ Progress text contains expected keywords: pending, running, completed")
 		}

@@ -257,8 +257,8 @@ func TestAuthenticatedCrawlWithAuthID(t *testing.T) {
 
 		// Check for auth-related logs
 		if strings.Contains(message, "🔐") ||
-		   strings.Contains(message, "auth_id found in job metadata") ||
-		   strings.Contains(message, "Cookies injected successfully") {
+			strings.Contains(message, "auth_id found in job metadata") ||
+			strings.Contains(message, "Cookies injected successfully") {
 			foundAuthLogs = true
 			t.Logf("Found auth log: %s", message)
 		}
@@ -270,7 +270,7 @@ func TestAuthenticatedCrawlWithAuthID(t *testing.T) {
 
 		// Check for skip warnings (should not be present)
 		if strings.Contains(message, "auth_id NOT found") ||
-		   strings.Contains(message, "SKIP: No auth_id") {
+			strings.Contains(message, "SKIP: No auth_id") {
 			foundSkipWarnings = true
 			t.Logf("Found skip warning: %s", message)
 		}

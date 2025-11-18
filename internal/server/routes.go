@@ -19,7 +19,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// Auth redirect handler - handles both /auth and /auth/ with query parameter preservation
 	mux.HandleFunc("/auth", s.handleAuthRedirect)
 	mux.HandleFunc("/auth/", s.handleAuthRedirect)
-	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs")) // Jobs page
+	mux.HandleFunc("/jobs", s.app.PageHandler.ServePage("jobs.html", "jobs"))        // Jobs page
 	mux.HandleFunc("/jobs/add", s.app.PageHandler.ServePage("job_add.html", "jobs")) // Add job page
 	mux.HandleFunc("/job_add", s.app.PageHandler.ServePage("job_add.html", "jobs"))  // Legacy route (backwards compat)
 	mux.HandleFunc("/queue", s.app.PageHandler.ServePage("queue.html", "queue"))
@@ -86,8 +86,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/job-definitions/", s.handleJobDefinitionRoutes)
 
 	// API routes - Key/Value Store
-	mux.HandleFunc("/api/kv", s.handleKVRoute)     // GET (list), POST (create)
-	mux.HandleFunc("/api/kv/", s.handleKVRoutes)   // GET/PUT/DELETE /{key}
+	mux.HandleFunc("/api/kv", s.handleKVRoute)   // GET (list), POST (create)
+	mux.HandleFunc("/api/kv/", s.handleKVRoutes) // GET/PUT/DELETE /{key}
 
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)

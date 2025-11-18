@@ -28,14 +28,14 @@ import (
 // extracting content, and spawning child jobs for discovered links
 type CrawlerWorker struct {
 	// Core dependencies
-	crawlerService   *crawler.Service
-	jobMgr           *jobs.Manager
-	queueMgr         *queue.Manager
-	documentStorage  interfaces.DocumentStorage
-	authStorage      interfaces.AuthStorage
-	jobDefStorage    interfaces.JobDefinitionStorage
-	logger           arbor.ILogger
-	eventService     interfaces.EventService
+	crawlerService  *crawler.Service
+	jobMgr          *jobs.Manager
+	queueMgr        *queue.Manager
+	documentStorage interfaces.DocumentStorage
+	authStorage     interfaces.AuthStorage
+	jobDefStorage   interfaces.JobDefinitionStorage
+	logger          arbor.ILogger
+	eventService    interfaces.EventService
 
 	// Content processing components
 	contentProcessor *crawler.ContentProcessor

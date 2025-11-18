@@ -218,8 +218,8 @@ func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
 			Name: "Parent Job",
 			Type: "crawler",
 			Config: map[string]interface{}{
-				"max_depth":  3,
-				"seed_urls":  []interface{}{"https://example.com"},
+				"max_depth": 3,
+				"seed_urls": []interface{}{"https://example.com"},
 			},
 		},
 	}

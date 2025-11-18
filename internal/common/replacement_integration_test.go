@@ -15,14 +15,14 @@ import (
 func TestJobDefinitionReplacement_Integration(t *testing.T) {
 	logger := arbor.NewLogger()
 	kvMap := map[string]string{
-		"test-api-url":    "https://api.example.com/v1",
-		"test-auth-id":    "auth-12345",
-		"test-api-key":    "sk_test_abc123",
-		"test-endpoint":   "/data",
-		"test-step-url":   "https://step.example.com",
-		"test-headers":    "Bearer token-xyz",
-		"test-job-id":     "job-abc",
-		"test-post-job":   "cleanup-job",
+		"test-api-url":  "https://api.example.com/v1",
+		"test-auth-id":  "auth-12345",
+		"test-api-key":  "sk_test_abc123",
+		"test-endpoint": "/data",
+		"test-step-url": "https://step.example.com",
+		"test-headers":  "Bearer token-xyz",
+		"test-job-id":   "job-abc",
+		"test-post-job": "cleanup-job",
 	}
 
 	// Mock job definition file structure (simplified version)
@@ -112,16 +112,16 @@ func TestJobDefinitionReplacement_Integration(t *testing.T) {
 func TestConfigReplacement_Integration(t *testing.T) {
 	logger := arbor.NewLogger()
 	kvMap := map[string]string{
-		"gemini-api-key":  "sk-gemini-12345",
-		"agent-api-key":   "sk-agent-67890",
-		"places-api-key":  "sk-places-abcde",
-		"db-path":         "/data/quaero.db",
-		"queue-name":      "custom_queue",
+		"gemini-api-key": "sk-gemini-12345",
+		"agent-api-key":  "sk-agent-67890",
+		"places-api-key": "sk-places-abcde",
+		"db-path":        "/data/quaero.db",
+		"queue-name":     "custom_queue",
 	}
 
 	// Create a config structure similar to common.Config
 	type LLMConfig struct {
-		GoogleAPIKey string
+		GoogleAPIKey  string
 		ChatModelName string
 	}
 
@@ -256,12 +256,12 @@ func TestReplaceInStruct_SliceOfStrings(t *testing.T) {
 func TestReplaceInStruct_RealJobDefinition(t *testing.T) {
 	logger := arbor.NewLogger()
 	kvMap := map[string]string{
-		"api-url":     "https://api.prod.com",
-		"auth-id":     "auth-prod-123",
-		"api-key":     "sk-prod-xyz",
-		"pre-job":     "pre-job-id",
-		"post-job":    "post-job-id",
-		"test-tag":    "production",
+		"api-url":  "https://api.prod.com",
+		"auth-id":  "auth-prod-123",
+		"api-key":  "sk-prod-xyz",
+		"pre-job":  "pre-job-id",
+		"post-job": "post-job-id",
+		"test-tag": "production",
 	}
 
 	jobDef := &models.JobDefinition{

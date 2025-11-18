@@ -23,10 +23,10 @@ const jobTypeDatabaseMaintenanceOperation = "database_maintenance_operation"
 // DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceManager struct {
-	jobManager  *jobs.Manager
-	queueMgr    *queue.Manager
-	jobMonitor  interfaces.JobMonitor
-	logger      arbor.ILogger
+	jobManager *jobs.Manager
+	queueMgr   *queue.Manager
+	jobMonitor interfaces.JobMonitor
+	logger     arbor.ILogger
 }
 
 // Compile-time assertion: DatabaseMaintenanceManager implements StepManager interface
@@ -35,10 +35,10 @@ var _ interfaces.StepManager = (*DatabaseMaintenanceManager)(nil)
 // NewDatabaseMaintenanceManager creates a new database maintenance manager
 func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *DatabaseMaintenanceManager {
 	return &DatabaseMaintenanceManager{
-		jobManager:  jobManager,
-		queueMgr:    queueMgr,
-		jobMonitor:  jobMonitor,
-		logger:      logger,
+		jobManager: jobManager,
+		queueMgr:   queueMgr,
+		jobMonitor: jobMonitor,
+		logger:     logger,
 	}
 }
 

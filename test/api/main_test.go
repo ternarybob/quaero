@@ -85,4 +85,3 @@ func verifyServiceConnectivity() error {
 
 	return nil
 }
-

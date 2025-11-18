@@ -1037,4 +1037,3 @@ func TestGoogleAPIKeyFromEnv(t *testing.T) {
 
 	env.LogTest(t, "✓ Test completed successfully - google_api_key loaded from ENV and accessible on both settings pages")
 }
-

@@ -178,12 +178,12 @@ func NewDefaultConfig() *Config {
 		Storage: StorageConfig{
 			Type: "sqlite",
 			SQLite: SQLiteConfig{
-				Path:           "./data/quaero.db",
-				EnableFTS5:     true,          // Full-text search for keyword queries
-				CacheSizeMB:    64,            // Balanced performance for typical workloads
-				WALMode:        true,          // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS:  10000,         // 10 seconds for high-concurrency job processing
-				Environment:    "development", // Default to development mode
+				Path:          "./data/quaero.db",
+				EnableFTS5:    true,          // Full-text search for keyword queries
+				CacheSizeMB:   64,            // Balanced performance for typical workloads
+				WALMode:       true,          // Write-Ahead Logging for better concurrency
+				BusyTimeoutMS: 10000,         // 10 seconds for high-concurrency job processing
+				Environment:   "development", // Default to development mode
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",

@@ -16,9 +16,9 @@ import (
 
 // Service provides business logic for key/value operations
 type Service struct {
-	storage   interfaces.KeyValueStorage
-	eventSvc  interfaces.EventService
-	logger    arbor.ILogger
+	storage  interfaces.KeyValueStorage
+	eventSvc interfaces.EventService
+	logger   arbor.ILogger
 }
 
 // NewService creates a new key/value service

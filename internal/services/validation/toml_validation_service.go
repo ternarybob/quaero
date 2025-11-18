@@ -22,9 +22,9 @@ type TOMLValidationService struct {
 
 // ValidationResult contains the result of TOML validation
 type ValidationResult struct {
-	Valid   bool      `json:"valid"`
-	Error   string    `json:"error,omitempty"`
-	Message string    `json:"message"`
+	Valid   bool                  `json:"valid"`
+	Error   string                `json:"error,omitempty"`
+	Message string                `json:"message"`
 	JobDef  *models.JobDefinition `json:"job_definition,omitempty"`
 }
 
@@ -38,16 +38,16 @@ func NewTOMLValidationService(logger arbor.ILogger) *TOMLValidationService {
 // CrawlerJobDefinitionFile represents the simplified crawler job file format
 // This is duplicated here to avoid circular dependency with storage/sqlite
 type CrawlerJobDefinitionFile struct {
-	ID             string   `toml:"id" json:"id"`
-	Name           string   `toml:"name" json:"name"`
-	JobType        string   `toml:"job_type" json:"job_type"`
-	Description    string   `toml:"description" json:"description"`
-	StartURLs      []string `toml:"start_urls" json:"start_urls"`
-	Schedule       string   `toml:"schedule" json:"schedule"`
-	Timeout        string   `toml:"timeout" json:"timeout"`
-	Enabled        bool     `toml:"enabled" json:"enabled"`
-	AutoStart      bool     `toml:"auto_start" json:"auto_start"`
-	Authentication string   `toml:"authentication" json:"authentication"`
+	ID              string   `toml:"id" json:"id"`
+	Name            string   `toml:"name" json:"name"`
+	JobType         string   `toml:"job_type" json:"job_type"`
+	Description     string   `toml:"description" json:"description"`
+	StartURLs       []string `toml:"start_urls" json:"start_urls"`
+	Schedule        string   `toml:"schedule" json:"schedule"`
+	Timeout         string   `toml:"timeout" json:"timeout"`
+	Enabled         bool     `toml:"enabled" json:"enabled"`
+	AutoStart       bool     `toml:"auto_start" json:"auto_start"`
+	Authentication  string   `toml:"authentication" json:"authentication"`
 	IncludePatterns []string `toml:"include_patterns" json:"include_patterns"`
 	ExcludePatterns []string `toml:"exclude_patterns" json:"exclude_patterns"`
 	MaxDepth        int      `toml:"max_depth" json:"max_depth"`

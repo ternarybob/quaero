@@ -27,18 +27,18 @@ type PlacesSearchResult struct {
 
 // PlaceItem represents an individual place from Google Places API
 type PlaceItem struct {
-	PlaceID                  string  `json:"place_id"`
-	Name                     string  `json:"name"`
-	FormattedAddress         string  `json:"formatted_address,omitempty"`
-	PhoneNumber              string  `json:"phone_number,omitempty"`
-	InternationalPhoneNumber string  `json:"international_phone_number,omitempty"`
-	Website                  string  `json:"website,omitempty"`
-	Rating                   float64 `json:"rating,omitempty"`
-	UserRatingsTotal         int     `json:"user_ratings_total,omitempty"`
-	PriceLevel               int     `json:"price_level,omitempty"`
-	Latitude                 float64 `json:"latitude,omitempty"`
-	Longitude                float64 `json:"longitude,omitempty"`
-	Types                    []string `json:"types,omitempty"`
-	OpeningHours             interface{} `json:"opening_hours,omitempty"`
+	PlaceID                  string        `json:"place_id"`
+	Name                     string        `json:"name"`
+	FormattedAddress         string        `json:"formatted_address,omitempty"`
+	PhoneNumber              string        `json:"phone_number,omitempty"`
+	InternationalPhoneNumber string        `json:"international_phone_number,omitempty"`
+	Website                  string        `json:"website,omitempty"`
+	Rating                   float64       `json:"rating,omitempty"`
+	UserRatingsTotal         int           `json:"user_ratings_total,omitempty"`
+	PriceLevel               int           `json:"price_level,omitempty"`
+	Latitude                 float64       `json:"latitude,omitempty"`
+	Longitude                float64       `json:"longitude,omitempty"`
+	Types                    []string      `json:"types,omitempty"`
+	OpeningHours             interface{}   `json:"opening_hours,omitempty"`
 	Photos                   []interface{} `json:"photos,omitempty"`
 }

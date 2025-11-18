@@ -20,29 +20,29 @@ type PlacesNearbySearchResponse struct {
 
 // PlaceResult represents a single place result from Google Places API
 type PlaceResult struct {
-	BusinessStatus       string         `json:"business_status,omitempty"`
-	FormattedAddress     string         `json:"formatted_address,omitempty"`
-	Geometry             *Geometry      `json:"geometry,omitempty"`
-	Icon                 string         `json:"icon,omitempty"`
-	IconBackgroundColor  string         `json:"icon_background_color,omitempty"`
-	IconMaskBaseURI      string         `json:"icon_mask_base_uri,omitempty"`
-	Name                 string         `json:"name"`
-	OpeningHours         *OpeningHours  `json:"opening_hours,omitempty"`
-	Photos               []Photo        `json:"photos,omitempty"`
-	PlaceID              string         `json:"place_id"`
-	PlusCode             *PlusCode      `json:"plus_code,omitempty"`
-	PriceLevel           int            `json:"price_level,omitempty"`
-	Rating               float64        `json:"rating,omitempty"`
-	Reference            string         `json:"reference,omitempty"`
-	Types                []string       `json:"types,omitempty"`
-	UserRatingsTotal     int            `json:"user_ratings_total,omitempty"`
-	Vicinity             string         `json:"vicinity,omitempty"`
+	BusinessStatus      string        `json:"business_status,omitempty"`
+	FormattedAddress    string        `json:"formatted_address,omitempty"`
+	Geometry            *Geometry     `json:"geometry,omitempty"`
+	Icon                string        `json:"icon,omitempty"`
+	IconBackgroundColor string        `json:"icon_background_color,omitempty"`
+	IconMaskBaseURI     string        `json:"icon_mask_base_uri,omitempty"`
+	Name                string        `json:"name"`
+	OpeningHours        *OpeningHours `json:"opening_hours,omitempty"`
+	Photos              []Photo       `json:"photos,omitempty"`
+	PlaceID             string        `json:"place_id"`
+	PlusCode            *PlusCode     `json:"plus_code,omitempty"`
+	PriceLevel          int           `json:"price_level,omitempty"`
+	Rating              float64       `json:"rating,omitempty"`
+	Reference           string        `json:"reference,omitempty"`
+	Types               []string      `json:"types,omitempty"`
+	UserRatingsTotal    int           `json:"user_ratings_total,omitempty"`
+	Vicinity            string        `json:"vicinity,omitempty"`
 }
 
 // Geometry represents the geometry information of a place
 type Geometry struct {
-	Location     *LatLng  `json:"location,omitempty"`
-	Viewport     *Bounds  `json:"viewport,omitempty"`
+	Location *LatLng `json:"location,omitempty"`
+	Viewport *Bounds `json:"viewport,omitempty"`
 }
 
 // LatLng represents a geographic coordinate

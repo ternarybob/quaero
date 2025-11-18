@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 func TestStoreCredentials_CookieBased(t *testing.T) {

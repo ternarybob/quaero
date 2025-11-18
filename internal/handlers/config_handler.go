@@ -10,9 +10,9 @@ import (
 )
 
 type ConfigHandler struct {
-	logger      arbor.ILogger
-	config      *common.Config // Original config (fallback)
-	configSvc   interfaces.ConfigService
+	logger    arbor.ILogger
+	config    *common.Config // Original config (fallback)
+	configSvc interfaces.ConfigService
 }
 
 func NewConfigHandler(logger arbor.ILogger, config *common.Config, configSvc interfaces.ConfigService) *ConfigHandler {

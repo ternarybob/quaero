@@ -81,10 +81,10 @@ func TestQuickCrawlEndpoint(t *testing.T) {
 	t.Run("QuickCrawlWithCustomParams", func(t *testing.T) {
 		// Build request with custom parameters
 		payload := map[string]interface{}{
-			"url":       "https://example.com/docs",
-			"name":      "Custom Quick Crawl",
-			"max_depth": 3,
-			"max_pages": 20,
+			"url":              "https://example.com/docs",
+			"name":             "Custom Quick Crawl",
+			"max_depth":        3,
+			"max_pages":        20,
 			"include_patterns": []string{".*\\.html$"},
 			"exclude_patterns": []string{".*/api/.*"},
 		}

@@ -12,13 +12,13 @@ import (
 
 // Service manages configuration with dynamic key injection and caching
 type Service struct {
-	config      *common.Config
-	kvStorage   interfaces.KeyValueStorage
-	eventSvc    interfaces.EventService
-	logger      arbor.ILogger
-	mu          sync.RWMutex
+	config       *common.Config
+	kvStorage    interfaces.KeyValueStorage
+	eventSvc     interfaces.EventService
+	logger       arbor.ILogger
+	mu           sync.RWMutex
 	cachedConfig *common.Config
-	cacheValid  bool
+	cacheValid   bool
 }
 
 // NewService creates a new config service with event-driven cache invalidation
@@ -37,11 +37,11 @@ func NewService(
 	}
 
 	service := &Service{
-		config:      config,
-		kvStorage:   kvStorage,
-		eventSvc:    eventSvc,
-		logger:      logger,
-		cacheValid:  false,
+		config:     config,
+		kvStorage:  kvStorage,
+		eventSvc:   eventSvc,
+		logger:     logger,
+		cacheValid: false,
 	}
 
 	// Subscribe to key update events if event service is available

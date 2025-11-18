@@ -24,22 +24,22 @@ import (
 type JobDefinitionFile struct {
 	ID             string                 `toml:"id" json:"id"`
 	Name           string                 `toml:"name" json:"name"`
-	Type           string                 `toml:"type" json:"type"`                     // Job type: crawler, summarizer, custom, places
-	JobType        string                 `toml:"job_type" json:"job_type"`             // Owner type: system, user
+	Type           string                 `toml:"type" json:"type"`         // Job type: crawler, summarizer, custom, places
+	JobType        string                 `toml:"job_type" json:"job_type"` // Owner type: system, user
 	Description    string                 `toml:"description" json:"description"`
-	SourceType     string                 `toml:"source_type" json:"source_type"`       // Optional for some job types
-	BaseURL        string                 `toml:"base_url" json:"base_url"`             // Optional
-	AuthID         string                 `toml:"auth_id" json:"auth_id"`               // Optional
-	Steps          []models.JobStep       `toml:"steps" json:"steps"`                   // Required
-	Schedule       string                 `toml:"schedule" json:"schedule"`             // Cron or empty
-	Timeout        string                 `toml:"timeout" json:"timeout"`               // Duration string
+	SourceType     string                 `toml:"source_type" json:"source_type"` // Optional for some job types
+	BaseURL        string                 `toml:"base_url" json:"base_url"`       // Optional
+	AuthID         string                 `toml:"auth_id" json:"auth_id"`         // Optional
+	Steps          []models.JobStep       `toml:"steps" json:"steps"`             // Required
+	Schedule       string                 `toml:"schedule" json:"schedule"`       // Cron or empty
+	Timeout        string                 `toml:"timeout" json:"timeout"`         // Duration string
 	Enabled        bool                   `toml:"enabled" json:"enabled"`
 	AutoStart      bool                   `toml:"auto_start" json:"auto_start"`
-	Config         map[string]interface{} `toml:"config" json:"config"`                 // Optional job-level config
-	PreJobs        []string               `toml:"pre_jobs" json:"pre_jobs"`             // Optional
-	PostJobs       []string               `toml:"post_jobs" json:"post_jobs"`           // Optional
+	Config         map[string]interface{} `toml:"config" json:"config"`                   // Optional job-level config
+	PreJobs        []string               `toml:"pre_jobs" json:"pre_jobs"`               // Optional
+	PostJobs       []string               `toml:"post_jobs" json:"post_jobs"`             // Optional
 	ErrorTolerance *models.ErrorTolerance `toml:"error_tolerance" json:"error_tolerance"` // Optional
-	Tags           []string               `toml:"tags" json:"tags"`                     // Tags to apply to documents created by this job
+	Tags           []string               `toml:"tags" json:"tags"`                       // Tags to apply to documents created by this job
 }
 
 // ToJobDefinition converts the file format to a full JobDefinition model

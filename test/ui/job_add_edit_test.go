@@ -82,7 +82,7 @@ func TestJobAddAndEdit(t *testing.T) {
 	if loadExampleBtnExists {
 		if err := chromedp.Run(ctx,
 			chromedp.Click(`button`, chromedp.ByQuery), // Click first button with "Load Example" text
-			chromedp.Sleep(1*time.Second), // Wait for TOML to load
+			chromedp.Sleep(1*time.Second),              // Wait for TOML to load
 		); err != nil {
 			env.LogTest(t, "Warning: Could not click Load Example button: %v", err)
 		}

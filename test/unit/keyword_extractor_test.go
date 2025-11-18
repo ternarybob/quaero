@@ -28,9 +28,9 @@ func TestKeywordExtractor_ParseKeywordResponse(t *testing.T) {
 			expectKeywords: []string{"keyword1", "keyword2", "keyword3"},
 		},
 		{
-			name:        "Object with confidence",
-			response:    `{"keywords": ["kw1", "kw2"], "confidence": {"kw1": 0.95, "kw2": 0.87}}`,
-			maxKeywords: 10,
+			name:           "Object with confidence",
+			response:       `{"keywords": ["kw1", "kw2"], "confidence": {"kw1": 0.95, "kw2": 0.87}}`,
+			maxKeywords:    10,
 			expectKeywords: []string{"kw1", "kw2"},
 			expectConfidence: map[string]float64{
 				"kw1": 0.95,
@@ -44,9 +44,9 @@ func TestKeywordExtractor_ParseKeywordResponse(t *testing.T) {
 			expectKeywords: []string{"kw1", "kw2", "kw3"},
 		},
 		{
-			name:        "Object exceeding max",
-			response:    `{"keywords": ["kw1", "kw2", "kw3"], "confidence": {"kw1": 0.9, "kw2": 0.8, "kw3": 0.7}}`,
-			maxKeywords: 2,
+			name:           "Object exceeding max",
+			response:       `{"keywords": ["kw1", "kw2", "kw3"], "confidence": {"kw1": 0.9, "kw2": 0.8, "kw3": 0.7}}`,
+			maxKeywords:    2,
 			expectKeywords: []string{"kw1", "kw2"},
 			expectConfidence: map[string]float64{
 				"kw1": 0.9,
@@ -173,13 +173,13 @@ func TestKeywordExtractor_CleanMarkdownFences(t *testing.T) {
 // TestKeywordExtractor_InputValidation tests input validation logic via the validation helper
 func TestKeywordExtractor_InputValidation(t *testing.T) {
 	tests := []struct {
-		name             string
-		input            map[string]interface{}
-		expectDocID      string
-		expectContent    string
-		expectMaxKw      int
-		expectError      bool
-		errorContains    string
+		name          string
+		input         map[string]interface{}
+		expectDocID   string
+		expectContent string
+		expectMaxKw   int
+		expectError   bool
+		errorContains string
 	}{
 		{
 			name: "Missing document_id",
@@ -229,8 +229,8 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		{
 			name: "Valid with max_keywords (int)",
 			input: map[string]interface{}{
-				"document_id": "doc1",
-				"content":     "test",
+				"document_id":  "doc1",
+				"content":      "test",
 				"max_keywords": 15,
 			},
 			expectDocID:   "doc1",
@@ -241,8 +241,8 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		{
 			name: "Valid with max_keywords (float64)",
 			input: map[string]interface{}{
-				"document_id": "doc1",
-				"content":     "test",
+				"document_id":  "doc1",
+				"content":      "test",
 				"max_keywords": 12.5,
 			},
 			expectDocID:   "doc1",
@@ -253,8 +253,8 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		{
 			name: "Valid with max_keywords (string)",
 			input: map[string]interface{}{
-				"document_id": "doc1",
-				"content":     "test",
+				"document_id":  "doc1",
+				"content":      "test",
 				"max_keywords": "8",
 			},
 			expectDocID:   "doc1",
@@ -265,8 +265,8 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		{
 			name: "max_keywords below minimum",
 			input: map[string]interface{}{
-				"document_id": "doc1",
-				"content":     "test",
+				"document_id":  "doc1",
+				"content":      "test",
 				"max_keywords": 2,
 			},
 			expectDocID:   "doc1",
@@ -277,8 +277,8 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		{
 			name: "max_keywords above maximum",
 			input: map[string]interface{}{
-				"document_id": "doc1",
-				"content":     "test",
+				"document_id":  "doc1",
+				"content":      "test",
 				"max_keywords": 20,
 			},
 			expectDocID:   "doc1",
@@ -332,7 +332,6 @@ func TestKeywordExtractor_InputValidation(t *testing.T) {
 		})
 	}
 }
-
 
 // TestKeywordExtractor_MaxKeywordsClamp tests max_keywords clamping to [5, 15] range
 // This test verifies that the parsing logic correctly handles different numeric types
@@ -423,7 +422,6 @@ func TestKeywordExtractor_MaxKeywordsClamp(t *testing.T) {
 		})
 	}
 }
-
 
 // TestKeywordExtractor_GetType verifies the agent type identifier
 func TestKeywordExtractor_GetType(t *testing.T) {

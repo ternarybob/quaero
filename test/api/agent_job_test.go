@@ -19,9 +19,9 @@ func TestAgentJobExecution_KeywordExtraction(t *testing.T) {
 
 	// 1. Create test document
 	document := map[string]interface{}{
-		"id":               "test-doc-agent-1",
-		"source_type":      "test",
-		"title":            "Test Document for Keyword Extraction",
+		"id":          "test-doc-agent-1",
+		"source_type": "test",
+		"title":       "Test Document for Keyword Extraction",
 		"content_markdown": `# Advanced AI and Machine Learning Technologies
 
 This document explores the latest developments in artificial intelligence and machine learning.

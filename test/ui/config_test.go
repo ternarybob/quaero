@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/ternarybob/quaero/test/common"
 	"context"
+	"github.com/ternarybob/quaero/test/common"
 	"strings"
 	"testing"
 	"time"

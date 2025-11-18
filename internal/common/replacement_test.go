@@ -16,17 +16,17 @@ func createTestLogger() arbor.ILogger {
 // createTestKVMap returns a standard test KV map
 func createTestKVMap() map[string]string {
 	return map[string]string{
-		"google-api-key":  "sk-12345",
-		"agent-key":       "sk-agent-789",
-		"llm-key":         "sk-llm-111",
-		"url1":            "http://example1.com",
-		"url2":            "http://example2.com",
-		"key1":            "val1",
-		"key2":            "val2",
-		"key3":            "val3",
-		"action":          "stop_all",
-		"database-url":    "postgres://localhost/db",
-		"secret-token":    "token-abc-xyz",
+		"google-api-key": "sk-12345",
+		"agent-key":      "sk-agent-789",
+		"llm-key":        "sk-llm-111",
+		"url1":           "http://example1.com",
+		"url2":           "http://example2.com",
+		"key1":           "val1",
+		"key2":           "val2",
+		"key3":           "val3",
+		"action":         "stop_all",
+		"database-url":   "postgres://localhost/db",
+		"secret-token":   "token-abc-xyz",
 	}
 }
 
@@ -468,10 +468,10 @@ func TestReplaceKeyReferences_PartialMatch(t *testing.T) {
 func TestReplaceKeyReferences_NumbersInKeyName(t *testing.T) {
 	logger := createTestLogger()
 	kvMap := map[string]string{
-		"key123":     "value1",
-		"123key":     "value2",
-		"key-123":    "value3",
-		"key_123":    "value4",
+		"key123":  "value1",
+		"123key":  "value2",
+		"key-123": "value3",
+		"key_123": "value4",
 	}
 
 	input := "{key123} {123key} {key-123} {key_123}"
