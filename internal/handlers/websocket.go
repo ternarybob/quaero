@@ -504,17 +504,17 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 				timestamp = time.Now().Format("15:04:05")
 			}
 
-			// Map level
-			level := "info"
+			// Map level to 3-letter format for consistency
+			level := "INF" // Default
 			switch levelStr {
 			case "ERR", "ERROR", "FATAL", "PANIC":
-				level = "error"
+				level = "ERR"
 			case "WRN", "WARN":
-				level = "warn"
+				level = "WRN"
 			case "INF", "INFO":
-				level = "info"
+				level = "INF"
 			case "DBG", "DEBUG":
-				level = "debug"
+				level = "DBG"
 			}
 
 			entry := interfaces.LogEntry{

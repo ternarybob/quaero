@@ -58,6 +58,26 @@ func parseLogLevel(levelStr string) arbor.LogLevel {
 	}
 }
 
+// convertTo3Letter converts full level names to 3-letter codes
+func convertTo3Letter(level string) string {
+	switch strings.ToUpper(level) {
+	case "INFO":
+		return "INF"
+	case "WARN", "WARNING":
+		return "WRN"
+	case "ERROR":
+		return "ERR"
+	case "DEBUG":
+		return "DBG"
+	default:
+		// If already 3 letters, return as-is (uppercase)
+		if len(level) == 3 {
+			return strings.ToUpper(level)
+		}
+		return "INF"
+	}
+}
+
 // GetChannel returns the channel for arbor to send log batches to
 func (c *Consumer) GetChannel() chan []arbormodels.LogEvent {
 	return c.channel
@@ -202,8 +222,8 @@ func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 	// Also store RFC3339 format for accurate sorting
 	fullTimestamp := event.Timestamp.Format(time.RFC3339)
 
-	// Convert level to lowercase for consistent storage and filtering
-	levelStr := strings.ToLower(event.Level.String())
+	// Convert level to 3-letter format for consistent display
+	levelStr := convertTo3Letter(event.Level.String())
 
 	// Build message with fields if present
 	message := event.Message

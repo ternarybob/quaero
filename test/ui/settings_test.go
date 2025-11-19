@@ -75,7 +75,14 @@ func TestSettingsPageLoad(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
-		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		// Check for Refresh button in header
+		chromedp.WaitVisible(`//button[@title='Refresh Logs']`, chromedp.BySearch),
+		// Check for File Select in body
+		chromedp.WaitVisible(`//select[@x-model="selectedFile"]`, chromedp.BySearch),
+		// Check for Filter dropdown
+		chromedp.WaitVisible(`//a[contains(., 'Filter')]`, chromedp.BySearch),
+		// Check for terminal
+		chromedp.WaitVisible(`//div[contains(@class, 'terminal')]`, chromedp.BySearch),
 		chromedp.Sleep(500*time.Millisecond), // Wait for page to fully load
 		chromedp.Title(&title),
 	)
@@ -458,6 +465,381 @@ func TestSettingsAuthenticationMenu(t *testing.T) {
 	}
 
 	env.LogTest(t, "✓ Authentication menu item clicked and content loaded without errors")
+}
+
+// TestSettingsLogsMenu tests clicking the System Logs menu item and verifies no console errors
+func TestSettingsLogsMenu(t *testing.T) {
+	// Setup test environment with test name
+	env, err := common.SetupTestEnvironment("SettingsLogsMenu")
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+	defer env.Cleanup()
+
+	startTime := time.Now()
+	env.LogTest(t, "=== RUN TestSettingsLogsMenu")
+	defer func() {
+		elapsed := time.Since(startTime)
+		if t.Failed() {
+			env.LogTest(t, "--- FAIL: TestSettingsLogsMenu (%.2fs)", elapsed.Seconds())
+		} else {
+			env.LogTest(t, "--- PASS: TestSettingsLogsMenu (%.2fs)", elapsed.Seconds())
+		}
+	}()
+
+	env.LogTest(t, "Test environment ready, service running at: %s", env.GetBaseURL())
+	env.LogTest(t, "Results directory: %s", env.GetResultsDir())
+
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	url := env.GetBaseURL() + "/settings"
+	var consoleErrors []string
+
+	// Listen for ALL console messages (errors, warnings, and exceptions)
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		// Capture exception errors
+		if consoleEvent, ok := ev.(*runtime.EventExceptionThrown); ok {
+			if consoleEvent.ExceptionDetails != nil && consoleEvent.ExceptionDetails.Exception != nil {
+				errorMsg := consoleEvent.ExceptionDetails.Exception.Description
+				if errorMsg == "" && consoleEvent.ExceptionDetails.Text != "" {
+					errorMsg = consoleEvent.ExceptionDetails.Text
+				}
+				consoleErrors = append(consoleErrors, "[Exception] "+errorMsg)
+			}
+		}
+		// Capture console.error and console.warn messages
+		if consoleAPI, ok := ev.(*runtime.EventConsoleAPICalled); ok {
+			if consoleAPI.Type == runtime.APITypeError || consoleAPI.Type == runtime.APITypeWarning {
+				var msg string
+				for _, arg := range consoleAPI.Args {
+					if arg.Value != nil {
+						msg += string(arg.Value) + " "
+					}
+				}
+				consoleErrors = append(consoleErrors, "["+string(consoleAPI.Type)+"] "+msg)
+			}
+		}
+	})
+
+	env.LogTest(t, "Navigating to settings page: %s", url)
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(url),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to load settings page: %v", err)
+		t.Fatalf("Failed to load settings page: %v", err)
+	}
+
+	env.LogTest(t, "Page loaded successfully")
+
+	// Take screenshot before clicking
+	if err := env.TakeScreenshot(ctx, "settings-before-logs-click"); err != nil {
+		env.LogTest(t, "ERROR: Failed to take screenshot before click: %v", err)
+		t.Fatalf("Failed to take screenshot before click: %v", err)
+	}
+	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("settings-before-logs-click"))
+
+	// Find and click the System Logs menu item
+	env.LogTest(t, "Clicking System Logs menu item...")
+	err = chromedp.Run(ctx,
+		chromedp.Click(`//a[contains(., 'System Logs')]`, chromedp.BySearch),
+		chromedp.Sleep(1*time.Second), // Wait for content to load
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to click System Logs menu item: %v", err)
+		t.Fatalf("Failed to click System Logs menu item: %v", err)
+	}
+
+	env.LogTest(t, "✓ Clicked System Logs menu item")
+
+	// Take screenshot after clicking
+	if err := env.TakeScreenshot(ctx, "settings-after-logs-click"); err != nil {
+		env.LogTest(t, "ERROR: Failed to take screenshot after click: %v", err)
+		t.Fatalf("Failed to take screenshot after click: %v", err)
+	}
+	env.LogTest(t, "Screenshot saved: %s", env.GetScreenshotPath("settings-after-logs-click"))
+
+	// Verify menu item is active
+	var isActive bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const link = document.evaluate("//a[contains(., 'System Logs')]", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+				if (!link) return false;
+				const li = link.closest('.nav-item');
+				return li && li.classList.contains('active');
+			})()
+		`, &isActive),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check menu item state: %v", err)
+		t.Fatalf("Failed to check menu item state: %v", err)
+	}
+
+	if !isActive {
+		env.LogTest(t, "ERROR: System Logs menu item not active after click")
+		t.Error("System Logs menu item should be active after click")
+	} else {
+		env.LogTest(t, "✓ System Logs menu item is active")
+	}
+
+	// Wait a bit more for any async content loading
+	chromedp.Sleep(1 * time.Second).Do(ctx)
+
+	// Check for console errors after menu interaction
+	if len(consoleErrors) > 0 {
+		env.LogTest(t, "ERROR: Found %d console errors after clicking menu:", len(consoleErrors))
+		for i, errMsg := range consoleErrors {
+			env.LogTest(t, "  Console error %d: %s", i+1, errMsg)
+		}
+		t.Errorf("Menu interaction caused %d console errors", len(consoleErrors))
+	} else {
+		env.LogTest(t, "✓ No console errors detected after menu interaction")
+	}
+
+	// Verify Logs content is visible in the content panel
+	var isVisible bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const terminal = document.querySelector('.terminal');
+				if (!terminal) return false;
+				
+				// Check if we have the "no logs" message
+				const hasNoLogsMsg = terminal.textContent.includes('No logs found');
+				if (hasNoLogsMsg) return false; // Fail if we see "No logs found"
+
+				// Check if we have actual log lines
+				const hasLogs = terminal.querySelectorAll('.terminal-line').length > 0;
+				return hasLogs;
+			})()
+		`, &isVisible),
+	)
+
+	if err != nil {
+		t.Fatalf("System Logs content verification failed: %v", err)
+	}
+	if !isVisible {
+		t.Fatal("System Logs content not visible or 'No logs found' message displayed")
+	}
+	env.LogTest(t, "✓ System Logs content is visible and populated")
+
+	// Verify log level color coding
+	var hasColorCoding bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const terminal = document.querySelector('.terminal');
+				if (!terminal) return false;
+				
+				// Check if any log lines have color-coded level classes
+				const logLines = terminal.querySelectorAll('.terminal-line');
+				if (logLines.length === 0) return false;
+				
+				// Look for text-* color classes (text-error, text-warning, text-primary, text-gray)
+				let foundColorClass = false;
+				logLines.forEach(line => {
+					const spans = line.querySelectorAll('span');
+					spans.forEach(span => {
+						const classes = span.className;
+						if (classes.includes('text-error') || 
+						    classes.includes('text-warning') || 
+						    classes.includes('text-primary') || 
+						    classes.includes('text-gray')) {
+							foundColorClass = true;
+						}
+					});
+				});
+				
+				return foundColorClass;
+			})()
+		`, &hasColorCoding),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to check log level color coding: %v", err)
+	} else if !hasColorCoding {
+		env.LogTest(t, "WARNING: Log level color coding not detected")
+	} else {
+		env.LogTest(t, "✓ Log level color coding is applied")
+	}
+
+	// Verify terminal is scrollable
+	var scrollInfo map[string]interface{}
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const terminal = document.querySelector('.terminal');
+				if (!terminal) return { error: 'Terminal not found' };
+				
+				const computedStyle = window.getComputedStyle(terminal);
+				const overflowY = computedStyle.overflowY;
+				const scrollHeight = terminal.scrollHeight;
+				const clientHeight = terminal.clientHeight;
+				const isScrollable = scrollHeight > clientHeight;
+				
+				return {
+					overflowY: overflowY,
+					scrollHeight: scrollHeight,
+					clientHeight: clientHeight,
+					isScrollable: isScrollable,
+					hasOverflowAuto: overflowY === 'auto' || overflowY === 'scroll'
+				};
+			})()
+		`, &scrollInfo),
+	)
+
+	if err != nil {
+		env.LogTest(t, "WARNING: Failed to check terminal scrollability: %v", err)
+	} else if scrollInfo["error"] != nil {
+		env.LogTest(t, "WARNING: Terminal scroll check error: %v", scrollInfo["error"])
+	} else {
+		hasOverflow := scrollInfo["hasOverflowAuto"].(bool)
+		if !hasOverflow {
+			env.LogTest(t, "WARNING: Terminal does not have overflow-y: auto/scroll (found: %v)", scrollInfo["overflowY"])
+		} else {
+			env.LogTest(t, "✓ Terminal is configured for scrolling (overflow-y: %v)", scrollInfo["overflowY"])
+		}
+
+		// Log scroll dimensions for debugging
+		env.LogTest(t, "  Terminal dimensions: scrollHeight=%v, clientHeight=%v, isScrollable=%v",
+			scrollInfo["scrollHeight"], scrollInfo["clientHeight"], scrollInfo["isScrollable"])
+	}
+
+	// Verify System Logs use 3-letter format (INF, WRN, ERR, DBG)
+	var systemLogLevels map[string]interface{}
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const terminal = document.querySelector('.terminal');
+				if (!terminal) return { error: 'Terminal not found' };
+				
+				const logLines = terminal.querySelectorAll('.terminal-line');
+				const levels = [];
+				const invalidLevels = [];
+				
+				logLines.forEach(line => {
+					// Extract level from log line text - format is [HH:MM:SS] [LEVEL] message
+					const text = line.textContent;
+					const levelMatch = text.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([A-Z]+)\]/);
+					if (levelMatch) {
+						const level = levelMatch[2];
+						levels.push(level);
+						// Check if it's a 3-letter code
+						if (level.length !== 3 || !['INF', 'WRN', 'ERR', 'DBG'].includes(level)) {
+							invalidLevels.push(level);
+						}
+					}
+				});
+				
+				return {
+					totalLogs: logLines.length,
+					levels: levels,
+					invalidLevels: invalidLevels,
+					hasInvalidLevels: invalidLevels.length > 0
+				};
+			})()
+		`, &systemLogLevels),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check System Log level format: %v", err)
+		t.Errorf("Failed to check System Log level format: %v", err)
+	} else if systemLogLevels["error"] != nil {
+		env.LogTest(t, "ERROR: System Log level check error: %v", systemLogLevels["error"])
+		t.Errorf("System Log level check error: %v", systemLogLevels["error"])
+	} else {
+		totalLogs := int(systemLogLevels["totalLogs"].(float64))
+		hasInvalidLevels := systemLogLevels["hasInvalidLevels"].(bool)
+
+		if hasInvalidLevels {
+			invalidLevels := systemLogLevels["invalidLevels"].([]interface{})
+			env.LogTest(t, "ERROR: System Logs contain invalid level formats: %v", invalidLevels)
+			t.Errorf("System Logs should use 3-letter format (INF, WRN, ERR, DBG), found: %v", invalidLevels)
+		} else {
+			env.LogTest(t, "✓ All %d System Log entries use 3-letter format", totalLogs)
+		}
+	}
+
+	// Navigate to home page to check Service Logs
+	env.LogTest(t, "Navigating to home page to check Service Logs...")
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(env.GetBaseURL()+"/"),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to navigate to home page: %v", err)
+		t.Fatalf("Failed to navigate to home page: %v", err)
+	}
+
+	// Verify Service Logs use 3-letter format (INF, WRN, ERR, DBG)
+	var serviceLogLevels map[string]interface{}
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const terminal = document.querySelector('[x-data="serviceLogs"] .terminal');
+				if (!terminal) return { error: 'Service Logs terminal not found' };
+				
+				const logLines = terminal.querySelectorAll('.terminal-line');
+				const levels = [];
+				const invalidLevels = [];
+				
+				logLines.forEach(line => {
+					// Extract level from log line text - format is [HH:MM:SS] [LEVEL] message
+					const text = line.textContent;
+					const levelMatch = text.match(/\[(\d{2}:\d{2}:\d{2})\]\s*\[([A-Z]+)\]/);
+					if (levelMatch) {
+						const level = levelMatch[2];
+						levels.push(level);
+						// Check if it's a 3-letter code
+						if (level.length !== 3 || !['INF', 'WRN', 'ERR', 'DBG'].includes(level)) {
+							invalidLevels.push(level);
+						}
+					}
+				});
+				
+				return {
+					totalLogs: logLines.length,
+					levels: levels,
+					invalidLevels: invalidLevels,
+					hasInvalidLevels: invalidLevels.length > 0
+				};
+			})()
+		`, &serviceLogLevels),
+	)
+
+	if err != nil {
+		env.LogTest(t, "ERROR: Failed to check Service Log level format: %v", err)
+		t.Errorf("Failed to check Service Log level format: %v", err)
+	} else if serviceLogLevels["error"] != nil {
+		env.LogTest(t, "ERROR: Service Log level check error: %v", serviceLogLevels["error"])
+		t.Errorf("Service Log level check error: %v", serviceLogLevels["error"])
+	} else {
+		totalLogs := int(serviceLogLevels["totalLogs"].(float64))
+		hasInvalidLevels := serviceLogLevels["hasInvalidLevels"].(bool)
+
+		if hasInvalidLevels {
+			invalidLevels := serviceLogLevels["invalidLevels"].([]interface{})
+			env.LogTest(t, "ERROR: Service Logs contain invalid level formats: %v", invalidLevels)
+			t.Errorf("Service Logs should use 3-letter format (INF, WRN, ERR, DBG), found: %v", invalidLevels)
+		} else {
+			env.LogTest(t, "✓ All %d Service Log entries use 3-letter format", totalLogs)
+		}
+	}
+
+	env.LogTest(t, "✓ System Logs menu item clicked and content loaded without errors")
 }
 
 // TestSettingsMenuPersistence tests that menu state persists on page refresh

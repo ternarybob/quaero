@@ -71,6 +71,50 @@ window.formatDate = function (timestamp) {
 document.addEventListener('alpine:init', () => {
     window.debugLog('Common', 'Alpine.js init event started');
 
+    // Global Confirmation Modal Store
+    Alpine.store('confirmation', {
+        open: false,
+        title: 'Confirmation',
+        message: 'Are you sure?',
+        confirmText: 'Confirm',
+        cancelText: 'Cancel',
+        type: 'primary',
+        resolve: null,
+
+        confirm() {
+            this.open = false;
+            document.body.classList.remove('modal-open');
+            if (this.resolve) {
+                this.resolve(true);
+                this.resolve = null;
+            }
+        },
+
+        cancel() {
+            this.open = false;
+            document.body.classList.remove('modal-open');
+            if (this.resolve) {
+                this.resolve(false);
+                this.resolve = null;
+            }
+        }
+    });
+
+    // Expose global confirm function
+    window.confirmAction = (options = {}) => {
+        return new Promise((resolve) => {
+            const store = Alpine.store('confirmation');
+            store.title = options.title || 'Confirmation';
+            store.message = options.message || 'Are you sure?';
+            store.confirmText = options.confirmText || 'Confirm';
+            store.cancelText = options.cancelText || 'Cancel';
+            store.type = options.type || 'primary';
+            store.resolve = resolve;
+            store.open = true;
+            document.body.classList.add('modal-open');
+        });
+    };
+
     // Service Logs Component
     Alpine.data('serviceLogs', () => ({
         logs: [],
@@ -163,7 +207,8 @@ document.addEventListener('alpine:init', () => {
 
         _parseLogEntry(logData) {
             const timestamp = logData.timestamp || logData.time || new Date().toISOString();
-            const level = (logData.level || 'INFO').toUpperCase();
+            // Server sends level in 3-letter format (INF, WRN, ERR, DBG) - use as-is
+            const level = logData.level || 'INF';
             const message = logData.message || logData.msg || '';
 
             return {
@@ -195,14 +240,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         _getLevelClass(level) {
-            const levelMap = {
-                'ERROR': 'terminal-error',
-                'WARN': 'terminal-warning',
-                'WARNING': 'terminal-warning',
-                'INFO': 'terminal-info',
-                'DEBUG': 'terminal-time'
-            };
-            return levelMap[level] || 'terminal-info';
+            // Map to existing CSS classes
+            const levelUpper = level.toUpperCase();
+            if (levelUpper === 'ERR' || levelUpper === 'ERROR') return 'text-error';
+            if (levelUpper === 'WRN' || levelUpper === 'WARN' || levelUpper === 'WARNING') return 'text-warning';
+            if (levelUpper === 'INF' || levelUpper === 'INFO') return 'text-primary';
+            if (levelUpper === 'DBG' || levelUpper === 'DEBUG') return 'text-gray';
+            return 'text-gray';
         },
 
         clearLogs() {
@@ -601,7 +645,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async deleteJobDefinition(jobDefId) {
-            if (!confirm('Are you sure you want to delete this job definition?')) {
+            const confirmed = await window.confirmAction({
+                title: 'Delete Job Definition',
+                message: 'Are you sure you want to delete this job definition? This action cannot be undone.',
+                confirmText: 'Delete',
+                type: 'danger'
+            });
+
+            if (!confirmed) {
                 return;
             }
 
@@ -625,7 +676,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         async executeJobDefinition(jobDefId, jobDefName) {
-            if (!confirm(`Are you sure you want to execute "${jobDefName}"?`)) {
+            const confirmed = await window.confirmAction({
+                title: 'Run Job',
+                message: `Are you sure you want to execute "${jobDefName}"?`,
+                confirmText: 'Run Job',
+                type: 'primary'
+            });
+
+            if (!confirmed) {
                 return;
             }
 

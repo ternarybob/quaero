@@ -1,0 +1,77 @@
+<div class="card" x-data="settingsLogs" x-init="init()" style="height: 100%; display: flex; flex-direction: column;">
+    <div class="card-header" style="flex-shrink: 0;">
+        <header class="navbar">
+            <section class="navbar-section">
+                <h3>System Logs</h3>
+            </section>
+            <section class="navbar-section">
+                <button class="btn btn-sm" @click="loadLogs()" title="Refresh Logs">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </section>
+        </header>
+    </div>
+
+    <div class="card-body" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+        <!-- Filter Bar -->
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-shrink: 0;">
+            <!-- File Selection -->
+            <div class="form-group" style="margin-bottom: 0;">
+                <select class="form-select select-sm" x-model="selectedFile" @change="loadLogs()">
+                    <template x-for="file in logFiles" :key="file.name">
+                        <option :value="file.name" x-text="`${file.name} (${formatSize(file.size)})`"></option>
+                    </template>
+                </select>
+            </div>
+
+            <!-- Filter Dropdown -->
+            <div class="dropdown">
+                <a href="#" class="btn btn-sm dropdown-toggle" tabindex="0">
+                    <i class="fas fa-filter"></i> Filter
+                </a>
+                <ul class="menu">
+                    <li class="menu-item">
+                        <label class="form-checkbox">
+                            <input type="checkbox" x-model="filters.debug" @change="loadLogs()">
+                            <i class="form-icon"></i> Debug
+                        </label>
+                    </li>
+                    <li class="menu-item">
+                        <label class="form-checkbox">
+                            <input type="checkbox" x-model="filters.info" @change="loadLogs()">
+                            <i class="form-icon"></i> Info
+                        </label>
+                    </li>
+                    <li class="menu-item">
+                        <label class="form-checkbox">
+                            <input type="checkbox" x-model="filters.warn" @change="loadLogs()">
+                            <i class="form-icon"></i> Warn
+                        </label>
+                    </li>
+                    <li class="menu-item">
+                        <label class="form-checkbox">
+                            <input type="checkbox" x-model="filters.error" @change="loadLogs()">
+                            <i class="form-icon"></i> Error
+                        </label>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Logs Container -->
+        <div class="terminal" x-ref="logsContainer" style="flex: 1; overflow-y: auto; min-height: 0;">
+            <template x-if="logs.length === 0 && !isLoading">
+                <div style="text-align: center; color: var(--text-secondary);">No logs found matching criteria</div>
+            </template>
+
+            <template x-for="(log, index) in logs" :key="index">
+                <div class="terminal-line">
+                    <span class="text-gray" x-text="`[${formatTime(log.timestamp)}]`"></span>
+                    <span :class="getLevelClass(log.level)" style="font-weight: bold;"
+                        x-text="`[${log.level || 'UNK'}]`"></span>
+                    <span x-text="log.message"></span>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
