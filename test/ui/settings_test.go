@@ -41,7 +41,7 @@ func TestSettingsPageLoad(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := env.GetBaseURL() + "/settings"
+	url := env.GetBaseURL() + "/settings?a=logs"
 	var title string
 	var consoleErrors []string
 

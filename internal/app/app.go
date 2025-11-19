@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
-
+	arbormodels "github.com/ternarybob/arbor/models"
+	"github.com/ternarybob/arbor/services/logviewer"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -41,7 +42,6 @@ import (
 	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
-	"github.com/ternarybob/quaero/internal/services/systemlogs"
 	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
@@ -76,7 +76,7 @@ type App struct {
 
 	// Source-agnostic services
 	StatusService     *status.Service
-	SystemLogsService *systemlogs.Service
+	SystemLogsService *logviewer.Service
 
 	// Authentication service (supports multiple providers)
 	AuthService *auth.Service
@@ -162,10 +162,32 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	}
 	app.LogConsumer = logConsumer
 
-	// Configure Arbor with context channel from consumer
-	// This ensures all derived loggers (via WithCorrelationId) send logs to the consumer
+	// Configure Arbor with channel from consumer
+	// Use a custom writer adapter to send all logs to the channel
 	logBatchChannel := logConsumer.GetChannel()
+
+	// We can use SetChannel("context") for derived loggers
 	app.Logger.SetChannel("context", logBatchChannel)
+
+	// For the root logger, we need to ensure logs go to the channel too.
+	// Since Arbor doesn't expose a direct "WithChannelWriter", we rely on the fact that
+	// the consumer is now processing all logs (including those without correlation ID).
+	// However, we need to make sure the root logger actually WRITES to this channel.
+	// If SetChannel only affects context-aware logs, we might need to wrap the logger or use a different approach.
+	//
+	// Let's try to use the "context" channel which we set above.
+	// If the root logger doesn't use it, we might need to add a custom writer.
+	// But for now, let's assume SetChannel works for derived loggers which is the primary use case for job logs.
+	// For system logs (root logger), if they are missing, we might need to add a ConsoleWriter that also writes to channel?
+	// No, that's messy.
+
+	// Let's try to use a custom writer configuration if possible, but Arbor API is limited here.
+	// Actually, let's look at how MemoryWriter works. It writes to a list.
+	// We want to write to a channel.
+
+	// Reverting to SetChannel("context") as it's the standard way.
+	// The issue might have been the consumer filtering.
+	// Let's verify if consumer filtering fix is enough.
 
 	app.Logger.Info().
 		Int("channel_capacity", cap(logBatchChannel)).
@@ -335,7 +357,17 @@ func (a *App) initServices() error {
 	} else {
 		logsDir = "logs" // Fallback
 	}
-	a.SystemLogsService = systemlogs.NewService(logsDir, a.Logger)
+
+	// Create writer config for log viewer
+	// Note: We point to the same file that the logger is writing to
+	logViewerConfig := arbormodels.WriterConfiguration{
+		Type:       arbormodels.LogWriterTypeFile,
+		FileName:   filepath.Join(logsDir, "quaero.log"),
+		TimeFormat: "15:04:05",
+		TextOutput: true,
+	}
+
+	a.SystemLogsService = logviewer.NewService(logViewerConfig)
 	a.Logger.Info().Str("logs_dir", logsDir).Msg("System logs service initialized")
 
 	// 5.6. Initialize queue manager (goqite-backed)

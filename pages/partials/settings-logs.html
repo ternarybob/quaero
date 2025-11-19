@@ -66,7 +66,7 @@
 
             <template x-for="(log, index) in logs" :key="index">
                 <div class="terminal-line">
-                    <span class="text-gray" x-text="`[${formatTime(log.timestamp)}]`"></span>
+                    <span class="terminal-time" x-text="`[${formatTime(log.time)}]`"></span>
                     <span :class="getLevelClass(log.level)" style="font-weight: bold;"
                         x-text="`[${log.level || 'UNK'}]`"></span>
                     <span x-text="log.message"></span>

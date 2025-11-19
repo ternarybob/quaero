@@ -7,15 +7,15 @@ import (
 	"strings"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/services/systemlogs"
+	"github.com/ternarybob/arbor/services/logviewer"
 )
 
 type SystemLogsHandler struct {
-	service *systemlogs.Service
+	service *logviewer.Service
 	logger  arbor.ILogger
 }
 
-func NewSystemLogsHandler(service *systemlogs.Service, logger arbor.ILogger) *SystemLogsHandler {
+func NewSystemLogsHandler(service *logviewer.Service, logger arbor.ILogger) *SystemLogsHandler {
 	return &SystemLogsHandler{
 		service: service,
 		logger:  logger,

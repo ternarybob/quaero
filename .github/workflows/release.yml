@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep "^version:" .version | awk '{print $2}')
+          # Use current timestamp for build time in CI to avoid dirty git state
+          BUILD_TIMESTAMP=$(date +%m-%d-%H-%M-%S)
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "BUILD_TIMESTAMP=$BUILD_TIMESTAMP" >> $GITHUB_ENV
+          echo "COMMIT=$COMMIT" >> $GITHUB_ENV
+          echo "Detected version: $VERSION"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.3'
+
+      - name: Build and Package
+        run: |
+          # Define targets
+          targets=(
+            "windows/amd64/exe"
+            "darwin/amd64/"
+            "darwin/arm64/"
+          )
+
+          for target in "${targets[@]}"; do
+            IFS="/" read -r GOOS GOARCH EXT <<< "$target"
+            
+            echo "Building for $GOOS/$GOARCH..."
+            
+            # Setup directory structure
+            DIST_DIR="dist/quaero-${{ env.VERSION }}-$GOOS-$GOARCH"
+            mkdir -p "$DIST_DIR"
+            mkdir -p "$DIST_DIR/quaero-mcp"
+            
+            # Build quaero
+            OUTPUT="$DIST_DIR/quaero"
+            if [ "$EXT" == "exe" ]; then OUTPUT="$OUTPUT.exe"; fi
+            
+            LDFLAGS="-X github.com/ternarybob/quaero/internal/common.Version=${{ env.VERSION }} -X github.com/ternarybob/quaero/internal/common.Build=${{ env.BUILD_TIMESTAMP }} -X github.com/ternarybob/quaero/internal/common.GitCommit=${{ env.COMMIT }} -w -s"
+            
+            env GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$OUTPUT" ./cmd/quaero
+            
+            # Build quaero-mcp
+            MCP_OUTPUT="$DIST_DIR/quaero-mcp/quaero-mcp"
+            if [ "$EXT" == "exe" ]; then MCP_OUTPUT="$MCP_OUTPUT.exe"; fi
+            
+            env GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$MCP_OUTPUT" ./cmd/quaero-mcp
+
+            # Copy resources (mimicking build.ps1)
+            cp README.md "$DIST_DIR/"
+            if [ -f "deployments/local/quaero.toml" ]; then cp deployments/local/quaero.toml "$DIST_DIR/"; fi
+            
+            # Copy MCP resources
+            if [ -f "cmd/quaero-mcp/README.md" ]; then cp cmd/quaero-mcp/README.md "$DIST_DIR/quaero-mcp/"; fi
+            if [ -f "deployments/local/quaero-mcp.toml" ]; then cp deployments/local/quaero-mcp.toml "$DIST_DIR/quaero-mcp/"; fi
+            
+            # Copy directories
+            cp -r pages "$DIST_DIR/"
+            cp -r cmd/quaero-chrome-extension "$DIST_DIR/"
+            
+            # Optional directories (check if they exist first to avoid errors)
+            if [ -d "deployments/local/job-definitions" ]; then cp -r deployments/local/job-definitions "$DIST_DIR/"; fi
+            if [ -d "deployments/local/auth" ]; then cp -r deployments/local/auth "$DIST_DIR/"; fi
+            if [ -d "deployments/local/variables" ]; then cp -r deployments/local/variables "$DIST_DIR/"; fi
+            
+            # Create Zip
+            cd dist
+            zip -r "quaero-${{ env.VERSION }}-$GOOS-$GOARCH.zip" "quaero-${{ env.VERSION }}-$GOOS-$GOARCH"
+            cd ..
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          files: dist/*.zip
+          draft: false
+          prerelease: false
+          make_latest: true

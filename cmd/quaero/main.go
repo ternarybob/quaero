@@ -11,12 +11,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/arbor/models"
 	"github.com/ternarybob/quaero/internal/app"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/server"
@@ -107,98 +105,8 @@ func main() {
 	// 2. Apply command-line flag overrides (highest priority)
 	common.ApplyFlagOverrides(config, finalPort, *serverHost)
 
-	// 3. Initialize logger with final configuration (inline from common.InitLogger)
-	logger = arbor.NewLogger()
-
-	// Get executable path for log directory
-	execPath, err := os.Executable()
-	if err != nil {
-		// Add console writer first, then log the warning
-		logger = logger.WithConsoleWriter(models.WriterConfiguration{
-			Type:             models.LogWriterTypeConsole,
-			TimeFormat:       "15:04:05",
-			TextOutput:       true,
-			DisableTimestamp: false,
-		})
-		logger.Warn().Err(err).Msg("Failed to get executable path - using fallback console logging")
-	} else {
-		execDir := filepath.Dir(execPath)
-		logsDir := filepath.Join(execDir, "logs")
-
-		// Check if file output is enabled
-		hasFileOutput := false
-		hasStdoutOutput := false
-		for _, output := range config.Logging.Output {
-			if output == "file" {
-				hasFileOutput = true
-			}
-			if output == "stdout" || output == "console" {
-				hasStdoutOutput = true
-			}
-		}
-
-		// Configure file logging if enabled
-		if hasFileOutput {
-			if err := os.MkdirAll(logsDir, 0755); err != nil {
-				// Use console writer temporarily for this warning
-				tempLogger := logger.WithConsoleWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeConsole,
-					TimeFormat:       "15:04:05",
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
-				tempLogger.Warn().Err(err).Str("logs_dir", logsDir).Msg("Failed to create logs directory")
-			} else {
-				logFile := filepath.Join(logsDir, "quaero.log")
-				logger = logger.WithFileWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeFile,
-					FileName:         logFile,
-					TimeFormat:       "15:04:05",
-					MaxSize:          100 * 1024 * 1024, // 100 MB
-					MaxBackups:       3,
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
-			}
-		}
-
-		// Configure console logging if enabled
-		if hasStdoutOutput {
-			logger = logger.WithConsoleWriter(models.WriterConfiguration{
-				Type:             models.LogWriterTypeConsole,
-				TimeFormat:       "15:04:05",
-				TextOutput:       true,
-				DisableTimestamp: false,
-			})
-		}
-
-		// Ensure at least one visible log writer is configured
-		if !hasFileOutput && !hasStdoutOutput {
-			logger = logger.WithConsoleWriter(models.WriterConfiguration{
-				Type:             models.LogWriterTypeConsole,
-				TimeFormat:       "15:04:05",
-				TextOutput:       true,
-				DisableTimestamp: false,
-			})
-			logger.Warn().
-				Strs("configured_outputs", config.Logging.Output).
-				Msg("No visible log outputs configured - falling back to console")
-		}
-	}
-
-	// Always add memory writer for WebSocket log streaming
-	logger = logger.WithMemoryWriter(models.WriterConfiguration{
-		Type:             models.LogWriterTypeMemory,
-		TimeFormat:       "15:04:05",
-		TextOutput:       true,
-		DisableTimestamp: false,
-	})
-
-	// Set log level
-	logger = logger.WithLevelFromString(config.Logging.Level)
-
-	// Store logger in singleton for global access
-	common.InitLogger(logger)
+	// 3. Initialize logger with final configuration
+	logger = common.SetupLogger(config)
 
 	// 4. Print banner with configuration and logger
 	common.PrintBanner(config, logger)

@@ -125,12 +125,6 @@ func (c *Consumer) consumer() {
 
 			// Process each event in the batch
 			for _, event := range batch {
-				// Skip events without CorrelationID (no jobID)
-				jobID := event.CorrelationID
-				if jobID == "" {
-					continue
-				}
-
 				// Skip HTTP request logs - these are not job-specific logs
 				// HTTP middleware generates correlation IDs for all requests, but these
 				// should not be stored in job_logs table (they're for request tracing only)
@@ -144,8 +138,11 @@ func (c *Consumer) consumer() {
 				// Transform arbor log event to JobLogEntry
 				logEntry := transformEvent(event)
 
-				// Group by jobID for batch database writes
-				entriesByJob[jobID] = append(entriesByJob[jobID], logEntry)
+				// Group by jobID for batch database writes ONLY if jobID is present
+				jobID := event.CorrelationID
+				if jobID != "" {
+					entriesByJob[jobID] = append(entriesByJob[jobID], logEntry)
+				}
 
 				// Publish as event if level >= threshold (for UI real-time updates)
 				if c.eventService != nil && c.shouldPublishEvent(event.Level) {

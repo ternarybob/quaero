@@ -14,7 +14,7 @@ require (
 	github.com/phuslu/log v1.0.120
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
-	github.com/ternarybob/arbor v1.4.54
+	github.com/ternarybob/arbor v1.4.60
 	github.com/ternarybob/banner v0.0.5
 	golang.org/x/time v0.14.0
 	google.golang.org/genai v1.34.0
@@ -74,3 +74,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+// replace github.com/ternarybob/arbor => C:/development/ternarybob/arbor

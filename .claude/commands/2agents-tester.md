@@ -1,5 +1,5 @@
 ---
-name: testfix
+name: 2agents-tester
 description: Two-agent workflow - run test, fix failures, iterate until passing. Test-driven code fixing.
 ---
 

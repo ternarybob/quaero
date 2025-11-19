@@ -1,0 +1,21 @@
+
+⚠ Service not pre-started (tests using SetupTestEnvironment will start their own)
+   Note: service not accessible at http://localhost:18085: Get "http://localhost:18085": dial tcp [::1]:18085: connectex: No connection could be made because the target machine actively refused it.
+
+=== RUN   TestSettingsPageLoad
+    setup.go:1122: === RUN TestSettingsPageLoad
+    setup.go:1122: Test environment ready, service running at: http://localhost:18085
+    setup.go:1122: Results directory: ..\..\test\results\ui\settings-20251119-222226\SettingsPageLoad
+    setup.go:1122: Navigating to settings page: http://localhost:18085/settings?a=logs
+    setup.go:1122: Page loaded successfully, title: Settings - Quaero
+    setup.go:1122: Screenshot saved: ..\..\test\results\ui\settings-20251119-222226\SettingsPageLoad\settings-page-load.png
+    setup.go:1122: ✓ Title verified: Settings - Quaero
+    setup.go:1122: ✓ No console errors detected
+    setup.go:1122: ✓ Settings menu structure found
+    setup.go:1122: ✓ Settings page loaded successfully without errors
+    setup.go:1122: --- PASS: TestSettingsPageLoad (2.37s)
+--- PASS: TestSettingsPageLoad (8.05s)
+PASS
+Cleaning up test resources...
+✓ Cleanup complete
+ok  	github.com/ternarybob/quaero/test/ui	8.444s
