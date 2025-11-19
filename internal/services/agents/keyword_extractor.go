@@ -127,7 +127,7 @@ Document:
 
 	var genaiResponse *genai.GenerateContentResponse
 	var apiErr error
-	
+
 	// Retry configuration
 	const maxRetries = 5
 	const initialBackoff = 1 * time.Second
