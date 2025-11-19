@@ -292,7 +292,7 @@ document.addEventListener('alpine:init', () => {
         loadedSections: new Set(),
         activeSection: 'auth-apikeys',
         defaultSection: 'auth-apikeys',
-        validSections: ['auth-apikeys', 'auth-cookies', 'config', 'danger', 'status'],
+        validSections: ['auth-apikeys', 'auth-cookies', 'config', 'danger', 'status', 'logs'],
 
         init() {
             window.debugLog('SettingsNavigation', 'Initializing component');
@@ -799,63 +799,49 @@ document.addEventListener('alpine:init', () => {
             // Fetch the full (unmasked) value from the API
             try {
                 const response = await fetch(`/api/kv/${encodeURIComponent(apiKey.key)}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    this.formData.value = data.value || '';
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                const data = await response.json();
+                this.formData.value = data.value;
+                this.showEditModal = true;
             } catch (error) {
-                console.error('Failed to fetch API key value:', error);
-                window.showNotification('Failed to load key value', 'error');
+                console.error('Failed to fetch key value:', error);
+                window.showNotification('Failed to fetch key value', 'error');
             }
-
-            this.showEditModal = true;
         },
 
-        async submitApiKey() {
+        async saveApiKey() {
             this.saving = true;
             try {
-                const isEdit = this.showEditModal;
-                const url = isEdit ? `/api/kv/${encodeURIComponent(this.formData.key)}` : '/api/kv';
-                const method = isEdit ? 'PUT' : 'POST';
+                const url = this.editingKey
+                    ? `/api/kv/${encodeURIComponent(this.editingKey)}`
+                    : '/api/kv';
 
-                // Prepare request body
-                const body = {
-                    value: this.formData.value,
-                    description: this.formData.description || ''
-                };
-
-                // Include key for create
-                if (!isEdit) {
-                    body.key = this.formData.key;
-                }
+                const method = this.editingKey ? 'PUT' : 'POST';
 
                 const response = await fetch(url, {
                     method: method,
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify({
+                        key: this.formData.key,
+                        value: this.formData.value,
+                        description: this.formData.description
+                    })
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                // Reload API keys from server
-                await this.loadApiKeys();
+                window.showNotification(`Key ${this.editingKey ? 'updated' : 'created'} successfully`, 'success');
                 this.closeModals();
-
-                window.showNotification(
-                    `Key ${isEdit ? 'updated' : 'created'} successfully`,
-                    'success'
-                );
+                await this.loadApiKeys();
             } catch (error) {
                 console.error('Failed to save key:', error);
-                window.showNotification(
-                    error.message || `Failed to ${this.showEditModal ? 'update' : 'create'} key`,
-                    'error'
-                );
+                window.showNotification('Failed to save key', 'error');
             } finally {
                 this.saving = false;
             }
@@ -865,17 +851,142 @@ document.addEventListener('alpine:init', () => {
             this.showCreateModal = false;
             this.showEditModal = false;
             this.editingKey = null;
-            this.formData = {
-                key: '',
-                value: '',
-                description: ''
-            };
+            this.formData = { key: '', value: '', description: '' };
         },
 
         getDescription(apiKey) {
             return apiKey.description || '-';
         }
     }));
+
+    // System Logs Component
+    Alpine.data('settingsLogs', () => ({
+        logFiles: [],
+        selectedFile: '',
+        logs: [],
+        isLoading: false,
+        filters: {
+            debug: false,
+            info: false,
+            warn: true,
+            error: true
+        },
+
+        init() {
+            this.loadLogFiles();
+        },
+
+        async loadLogFiles() {
+            try {
+                const response = await fetch('/api/system/logs/files');
+                if (!response.ok) throw new Error('Failed to load log files');
+
+                this.logFiles = await response.json();
+
+                // Select first file if available and none selected
+                if (this.logFiles.length > 0 && !this.selectedFile) {
+                    this.selectedFile = this.logFiles[0].name;
+                    this.loadLogs();
+                }
+            } catch (error) {
+                console.error('Error loading log files:', error);
+                if (window.showNotification) window.showNotification('Failed to load log files', 'error');
+            }
+        },
+
+        async loadLogs() {
+            if (!this.selectedFile) return;
+
+            this.isLoading = true;
+            try {
+                // Build query params
+                const params = new URLSearchParams({
+                    filename: this.selectedFile,
+                    limit: 1000
+                });
+
+                // Add level filters
+                const activeLevels = [];
+                if (this.filters.debug) activeLevels.push('debug');
+                if (this.filters.info) activeLevels.push('info');
+                if (this.filters.warn) activeLevels.push('warn');
+                if (this.filters.error) activeLevels.push('error');
+
+                if (activeLevels.length > 0) {
+                    params.append('levels', activeLevels.join(','));
+                }
+
+                const response = await fetch(`/api/system/logs/content?${params.toString()}`);
+                if (!response.ok) throw new Error('Failed to load logs');
+
+                const data = await response.json();
+                this.logs = Array.isArray(data) ? data : [];
+
+                // Always scroll to bottom after loading
+                this.$nextTick(() => {
+                    if (this.$refs.logsContainer) {
+                        this.$refs.logsContainer.scrollTop = this.$refs.logsContainer.scrollHeight;
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading logs:', error);
+                if (window.showNotification) window.showNotification('Failed to load logs', 'error');
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        toggleFilter(level) {
+            this.filters[level] = !this.filters[level];
+            this.loadLogs();
+        },
+
+        clearLogs() {
+            this.logs = [];
+        },
+
+        formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        },
+
+        formatTime(timestamp) {
+            if (!timestamp) return '';
+            // If timestamp is just time string "15:04:05", return as is
+            if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
+                return timestamp;
+            }
+
+            // Otherwise format full date
+            try {
+                const date = new Date(timestamp);
+                if (isNaN(date.getTime())) return timestamp;
+                return date.toLocaleTimeString('en-US', {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch (e) {
+                return timestamp;
+            }
+        },
+
+        getLevelClass(level) {
+            if (!level) return 'text-gray';
+            const levelUpper = level.toUpperCase();
+            if (levelUpper === 'ERR' || levelUpper === 'ERROR') return 'text-error';
+            if (levelUpper === 'WRN' || levelUpper === 'WARN' || levelUpper === 'WARNING') return 'text-warning';
+            if (levelUpper === 'INF' || levelUpper === 'INFO') return 'text-primary';
+            if (levelUpper === 'DBG' || levelUpper === 'DEBUG') return 'text-gray';
+            return 'text-gray';
+        }
+    }));
+
 
     // Settings Danger Zone Component
     Alpine.data('settingsDanger', () => ({
@@ -892,19 +1003,19 @@ document.addEventListener('alpine:init', () => {
             fetch('/api/documents/clear-all', {
                 method: 'DELETE'
             })
-            .then(response => {
-                if (!response.ok) {
-                    return response.json().catch(() => ({ error: 'Failed to clear documents' }));
-                }
-                return response.json();
-            })
-            .then(result => {
-                window.showNotification(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`, 'success');
-            })
-            .catch(error => {
-                console.error('Error clearing documents:', error);
-                window.showNotification('Failed to clear documents: ' + error.message, 'error');
-            });
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().catch(() => ({ error: 'Failed to clear documents' }));
+                    }
+                    return response.json();
+                })
+                .then(result => {
+                    window.showNotification(`Success: ${result.message}\n\nDocuments deleted: ${result.documents_affected}`, 'success');
+                })
+                .catch(error => {
+                    console.error('Error clearing documents:', error);
+                    window.showNotification('Failed to clear documents: ' + error.message, 'error');
+                });
         }
     }));
 

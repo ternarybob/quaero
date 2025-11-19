@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -24,12 +25,15 @@ type AgentExecutor interface {
 // Service manages agent lifecycle and execution using direct genai API.
 // It maintains a registry of agent types and routes execution requests to the appropriate agent.
 type Service struct {
-	config    *common.GeminiConfig
-	logger    arbor.ILogger
-	client    *genai.Client
-	modelName string
-	agents    map[string]AgentExecutor
-	timeout   time.Duration
+	config      *common.GeminiConfig
+	logger      arbor.ILogger
+	client      *genai.Client
+	modelName   string
+	agents      map[string]AgentExecutor
+	timeout     time.Duration
+	rateLimit   time.Duration
+	lastRequest time.Time
+	mu          sync.Mutex
 }
 
 // NewService creates a new agent service with Google Gemini API integration.
@@ -85,6 +89,12 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		return nil, fmt.Errorf("invalid timeout duration '%s': %w", config.Timeout, err)
 	}
 
+	// Parse rate limit duration
+	rateLimit, err := time.ParseDuration(config.RateLimit)
+	if err != nil {
+		return nil, fmt.Errorf("invalid rate limit duration '%s': %w", config.RateLimit, err)
+	}
+
 	// Initialize direct genai client
 	logger.Debug().
 		Str("backend", "GeminiAPI").
@@ -113,6 +123,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		modelName: config.AgentModel,
 		agents:    make(map[string]AgentExecutor),
 		timeout:   timeout,
+		rateLimit: rateLimit,
 	}
 
 	// Register built-in agents
@@ -123,6 +134,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 		Str("model", config.AgentModel).
 		Int("max_turns", config.MaxTurns).
 		Dur("timeout", timeout).
+		Dur("rate_limit", rateLimit).
 		Int("registered_agents", len(service.agents)).
 		Msg("Agent service initialized with Google Gemini API")
 
@@ -174,6 +186,19 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 	// Create timeout context
 	timeoutCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+
+	// Enforce rate limit
+	s.mu.Lock()
+	timeSinceLast := time.Since(s.lastRequest)
+	if timeSinceLast < s.rateLimit {
+		sleepDuration := s.rateLimit - timeSinceLast
+		s.logger.Debug().
+			Dur("sleep_duration", sleepDuration).
+			Msg("Rate limit enforcing delay")
+		time.Sleep(sleepDuration)
+	}
+	s.lastRequest = time.Now()
+	s.mu.Unlock()
 
 	// Execute agent
 	startTime := time.Now()

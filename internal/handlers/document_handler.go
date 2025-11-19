@@ -73,48 +73,43 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-
-	// Parse query parameters
-	limitStr := r.URL.Query().Get("limit")
-	offsetStr := r.URL.Query().Get("offset")
-	sourceType := r.URL.Query().Get("sourceType")
-	tagsParam := r.URL.Query().Get("tags")
-
-	// Set defaults
-	limit := 50
-	offset := 0
-
-	if limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil {
-			limit = parsed
-		}
+	// Parse query params
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit <= 0 {
+		limit = 20
+	}
+	offset, _ := strconv.Atoi(query.Get("offset"))
+	if offset < 0 {
+		offset = 0
 	}
 
-	if offsetStr != "" {
-		if parsed, err := strconv.Atoi(offsetStr); err == nil {
-			offset = parsed
-		}
-	}
-
-	// Parse tags (comma-separated list)
+	// Parse tags (comma separated)
 	var tags []string
+	tagsParam := query.Get("tags")
 	if tagsParam != "" {
 		tags = strings.Split(tagsParam, ",")
-		// Trim whitespace from each tag
-		for i := range tags {
-			tags[i] = strings.TrimSpace(tags[i])
-		}
 	}
 
 	opts := &interfaces.ListOptions{
-		SourceType: sourceType,
-		Tags:       tags,
-		Limit:      limit,
-		Offset:     offset,
+		SourceType:    query.Get("source_type"),
+		Tags:          tags,
+		Limit:         limit,
+		Offset:        offset,
+		OrderBy:       query.Get("order_by"),
+		OrderDir:      query.Get("order_dir"),
+		CreatedAfter:  nil,
+		CreatedBefore: nil,
 	}
 
-	documents, err := h.documentService.List(ctx, opts)
+	if ca := query.Get("created_after"); ca != "" {
+		opts.CreatedAfter = &ca
+	}
+	if cb := query.Get("created_before"); cb != "" {
+		opts.CreatedBefore = &cb
+	}
+
+	docs, err := h.documentService.List(r.Context(), opts)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to list documents")
 		http.Error(w, "Failed to list documents", http.StatusInternalServerError)
@@ -122,23 +117,62 @@ func (h *DocumentHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get total count for pagination
-	totalCount, err := h.documentService.Count(ctx, sourceType)
+	// Note: This is an approximation if filters are applied, as Count() only filters by source type
+	// Ideally we'd have a Count(opts) method
+	totalCount, err := h.documentService.Count(r.Context(), opts.SourceType)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to get document count")
-		// Fallback to returned document count if total count fails
-		totalCount = len(documents)
+		h.logger.Error().Err(err).Msg("Failed to count documents")
+		// Don't fail the request, just return 0 count
+		totalCount = 0
 	}
 
 	response := map[string]interface{}{
-		"documents":   documents,
-		"count":       len(documents), // Number of documents in current response
-		"total_count": totalCount,     // Total number of documents in database
+		"documents":   docs,
+		"total_count": totalCount,
 		"limit":       limit,
 		"offset":      offset,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// GetDocumentHandler handles GET /api/documents/{id}
+// Returns a single document by ID
+func (h *DocumentHandler) GetDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+
+	// Extract ID from URL path
+	// Path is /api/documents/{id}
+	path := r.URL.Path
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid document ID", http.StatusBadRequest)
+		return
+	}
+	id := parts[len(parts)-1]
+
+	if id == "" {
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
+
+	doc, err := h.documentService.GetDocument(r.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("id", id).Msg("Failed to get document")
+		http.Error(w, "Failed to get document", http.StatusInternalServerError)
+		return
+	}
+
+	if doc == nil {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(doc)
 }
 
 // ReprocessDocumentHandler handles POST /api/documents/{id}/reprocess

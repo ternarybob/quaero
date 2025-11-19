@@ -22,7 +22,7 @@ timeout = "10m"
 enabled = true
 
 # Whether to auto-start when scheduler initializes
-auto_start = false
+auto_start = true
 
 # Job steps definition
 [[steps]]
@@ -38,7 +38,7 @@ agent_type = "keyword_extractor"
 # This step processes all documents matching the filter criteria
 # Available filters: source_type, limit, created_after, updated_after
 [steps.config.document_filter]
-source_type = "crawler"  # Process documents from crawler jobs
+source_type = "crawler" # Process documents from crawler jobs
 
 # Optional: Maximum keywords to extract (default: 10, range: 5-15)
 max_keywords = 10

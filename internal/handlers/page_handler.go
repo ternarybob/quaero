@@ -137,6 +137,7 @@ func (h *PageHandler) ServePartial(w http.ResponseWriter, r *http.Request) {
 		"config.html":       true,
 		"danger.html":       true,
 		"status.html":       true,
+		"logs.html":         true,
 	}
 
 	if !allowedPartials[partialName] {

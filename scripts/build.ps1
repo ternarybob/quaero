@@ -392,7 +392,10 @@ function Deploy-Files {
                 $skippedCount++
             }
         }
-
+        
+        if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
+            Write-Host "  Job definitions: $copiedCount copied, $skippedCount skipped (existing)" -ForegroundColor Gray
+        }
     }
 
     # Deploy auth directory (only new files, no override)

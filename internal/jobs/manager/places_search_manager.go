@@ -207,21 +207,19 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 				Type:    interfaces.EventDocumentSaved,
 				Payload: payload,
 			}
-			// Publish asynchronously to not block document save
-			go func() {
-				if err := m.eventService.Publish(context.Background(), event); err != nil {
-					m.logger.Warn().
-						Err(err).
-						Str("document_id", docID).
-						Str("parent_job_id", parentJobID).
-						Msg("Failed to publish document_saved event")
-				} else {
-					m.logger.Debug().
-						Str("document_id", docID).
-						Str("parent_job_id", parentJobID).
-						Msg("Published document_saved event for parent job document count")
-				}
-			}()
+			// Publish synchronously to ensure document count is updated before job completes
+			if err := m.eventService.PublishSync(context.Background(), event); err != nil {
+				m.logger.Warn().
+					Err(err).
+					Str("document_id", docID).
+					Str("parent_job_id", parentJobID).
+					Msg("Failed to publish document_saved event")
+			} else {
+				m.logger.Debug().
+					Str("document_id", docID).
+					Str("parent_job_id", parentJobID).
+					Msg("Published document_saved event for parent job document count")
+			}
 		}
 	}
 

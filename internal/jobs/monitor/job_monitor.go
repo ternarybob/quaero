@@ -33,8 +33,8 @@ func NewJobMonitor(
 		logger:       logger,
 	}
 
-	// Subscribe to child job status changes for real-time progress tracking
-	monitor.SubscribeToChildStatusChanges()
+	// Subscribe to job events for real-time progress tracking
+	monitor.SubscribeToJobEvents()
 
 	return monitor
 }
@@ -305,9 +305,9 @@ func (m *jobMonitor) publishChildJobStats(ctx context.Context, parentJobID strin
 	}()
 }
 
-// SubscribeToChildStatusChanges subscribes to child job status change events
+// SubscribeToJobEvents subscribes to job lifecycle events
 // This enables real-time progress tracking without polling
-func (m *jobMonitor) SubscribeToChildStatusChanges() {
+func (m *jobMonitor) SubscribeToJobEvents() {
 	if m.eventService == nil {
 		return
 	}
@@ -409,7 +409,8 @@ func (m *jobMonitor) SubscribeToChildStatusChanges() {
 		return
 	}
 
-	// Subscribe to document_updated events for real-time document update count tracking
+	// Subscribe to document_updated events for agent jobs (e.g. keyword extraction)
+	// We only increment count for agent jobs here because crawler jobs use document_saved
 	if err := m.eventService.Subscribe(interfaces.EventDocumentUpdated, func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
@@ -417,33 +418,58 @@ func (m *jobMonitor) SubscribeToChildStatusChanges() {
 			return nil
 		}
 
-		// Extract parent job ID from payload
+		// Extract job type to ensure we only count for agents
+		// Note: The payload might not have job_type directly, we might need to fetch the job
+		// But typically agent workers should include relevant context.
+		// Let's check if we can determine if it's an agent job.
+		// For now, we'll rely on the fact that crawlers don't emit document_updated for new docs,
+		// they emit document_saved.
+		// However, to be safe, we should check if this update represents a "new" result for an agent.
+		// Agent jobs update existing documents with new metadata.
+		// If we increment for every update, we might overcount if multiple updates happen.
+		// But typically an agent runs once per document.
+
+		// Extract parent job ID
 		parentJobID := getStringFromPayload(payload, "parent_job_id")
 		if parentJobID == "" {
-			return nil // No parent job, ignore
+			return nil
 		}
 
-		// Extract additional fields for logging
-		documentID := getStringFromPayload(payload, "document_id")
-		jobID := getStringFromPayload(payload, "job_id")
+		// We need to check if this is an agent job to avoid double counting if a crawler updates a doc?
+		// Crawlers usually just save.
+		// Let's fetch the job to be sure, or check payload for "job_type".
+		// Assuming the payload has what we need or we fetch the job.
+		// Since fetching is expensive, let's try to rely on the event context.
+		// If the event source is an agent, we increment.
+		// But the event is generic.
 
-		// Increment document count in parent job metadata (async operation)
-		go func() {
-			if err := m.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
-				m.logger.Error().Err(err).
-					Str("parent_job_id", parentJobID).
-					Str("document_id", documentID).
-					Str("job_id", jobID).
-					Msg("Failed to increment document count for parent job")
-				return
-			}
+		// Let's fetch the parent job to check its type.
+		// This might be slightly expensive but safe.
+		jobInterface, err := m.jobMgr.GetJob(ctx, parentJobID)
+		if err != nil {
+			m.logger.Warn().Err(err).Str("job_id", parentJobID).Msg("Failed to get job to check type for document count")
+			return nil
+		}
+		job, ok := jobInterface.(*models.Job)
+		if !ok {
+			return nil
+		}
 
-			m.logger.Debug().
-				Str("parent_job_id", parentJobID).
-				Str("document_id", documentID).
-				Str("job_id", jobID).
-				Msg("Incremented document count for parent job (document updated)")
-		}()
+		// Only increment for agent jobs (which process existing docs and "create" new value)
+		// Actually, for keyword extraction, the "document count" in the UI usually represents
+		// the number of documents processed/enriched.
+		// So incrementing on update is correct for agents.
+		// We must ensure we don't count for crawlers if they ever update.
+		if job.Type == "agent" {
+			// Increment document count
+			go func() {
+				if err := m.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
+					m.logger.Error().Err(err).
+						Str("parent_job_id", parentJobID).
+						Msg("Failed to increment document count for agent job")
+				}
+			}()
+		}
 
 		return nil
 	}); err != nil {

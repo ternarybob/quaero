@@ -95,6 +95,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/config", s.app.ConfigHandler.GetConfig) // GET - application configuration
 	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)           // Graceful shutdown endpoint (dev mode)
 
+	// API routes - System Logs
+	mux.HandleFunc("/api/system/logs/files", s.app.SystemLogsHandler.ListLogFilesHandler)
+	mux.HandleFunc("/api/system/logs/content", s.app.SystemLogsHandler.GetLogContentHandler)
+
 	// 404 handler for unmatched API routes
 	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)
 
@@ -310,6 +314,12 @@ func (s *Server) handleDocumentRoutes(w http.ResponseWriter, r *http.Request) {
 	// DELETE /api/documents/{id}
 	if r.Method == "DELETE" && len(path) > len("/api/documents/") {
 		s.app.DocumentHandler.DeleteDocumentHandler(w, r)
+		return
+	}
+
+	// GET /api/documents/{id}
+	if r.Method == "GET" && len(path) > len("/api/documents/") {
+		s.app.DocumentHandler.GetDocumentHandler(w, r)
 		return
 	}
 

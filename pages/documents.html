@@ -4,6 +4,45 @@
 <head>
     {{template "head.html" .}}
     <title>Document Management - Quaero</title>
+    <style>
+        .document-row {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .document-row:hover {
+            background-color: #f8f9fa;
+        }
+
+        .detail-row {
+            background-color: #fcfcfc;
+        }
+
+        .detail-content {
+            padding: 1rem;
+            border-top: 1px solid #eee;
+            border-bottom: 1px solid #eee;
+        }
+
+        /* Ensure code block doesn't overflow table width */
+        .detail-content pre {
+            max-height: 60vh;
+            /* Limit height to 60% of viewport height */
+            max-width: 90vw;
+            /* Limit width to 90% of viewport width */
+            overflow: auto;
+            /* Enable scrolling for both axes */
+            margin: 0;
+            font-size: 0.7rem;
+            /* Smaller font size as requested */
+            border-radius: 4px;
+        }
+
+        /* Explicitly target code element to override PrismJS */
+        .detail-content pre code {
+            font-size: 0.7rem !important;
+        }
+    </style>
 </head>
 
 <body>
@@ -56,10 +95,12 @@
                 <div class="card-header">
                     <header class="navbar">
                         <section class="navbar-section">
-                            <h2><span id="document-count" style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Documents</h2>
+                            <h2><span id="document-count"
+                                    style="color: var(--text-secondary); margin-right: 0.5rem;">0</span>Documents</h2>
                         </section>
                         <section class="navbar-section">
-                            <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedDocuments()" style="display: none;">
+                            <button id="delete-selected-btn" class="btn btn-sm btn-error"
+                                onclick="deleteSelectedDocuments()" style="display: none;">
                                 <i class="fas fa-trash"></i> Delete Selected (<span id="selected-count">0</span>)
                             </button>
                         </section>
@@ -70,7 +111,8 @@
                     <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                         <input type="search" id="search-box" class="form-input" placeholder="Search documents...">
                         <div style="position: relative;">
-                            <input type="text" id="tag-filter-input" class="form-input" placeholder="Filter by tags..." onfocus="showTagDropdown()" oninput="filterTagDropdown()" autocomplete="off">
+                            <input type="text" id="tag-filter-input" class="form-input" placeholder="Filter by tags..."
+                                onfocus="showTagDropdown()" oninput="filterTagDropdown()" autocomplete="off">
                             <div id="tag-dropdown"
                                 style="display: none; position: absolute; z-index: 1000; background: white; border: 1px solid #ccc; border-radius: 4px; max-height: 200px; overflow-y: auto; width: 100%; margin-top: 2px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                                 <!-- Tag options will be populated here -->
@@ -114,24 +156,6 @@
             </div>
         </section>
 
-        <!-- Document Detail -->
-        <section style="margin-top: 1.5rem;">
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h2>Document Detail</h2>
-                        </section>
-                        <section class="navbar-section">
-                            <span id="selected-document-id" class="label label-primary"></span>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <pre id="document-detail-json" class="code-block"><code class="language-json"></code></pre>
-                </div>
-            </div>
-        </section>
 
         <!-- Service Logs -->
         <section style="margin-top: 1.5rem;">
@@ -148,7 +172,7 @@
         // State management
         let allDocuments = [];
         let filteredDocuments = [];
-        let selectedDocument = null;
+        // selectedDocument removed as we use accordion view now
         let selectedDocumentIds = new Set(); // Track selected documents for batch operations
         let currentPage = 1;
         let totalDocuments = 0; // Total documents from API
@@ -270,7 +294,6 @@
                         (doc.source_id && doc.source_id.toLowerCase().includes(searchTerm));
                 });
             }
-
             renderDocuments();
         }
 
@@ -299,12 +322,11 @@
 
             tbody.innerHTML = filteredDocuments.map((doc, index) => {
                 const updatedDate = doc.updated_at ? new Date(doc.updated_at).toLocaleString() : 'N/A';
-                const isSelected = selectedDocument && selectedDocument.id === doc.id;
                 const isChecked = selectedDocumentIds.has(doc.id);
 
                 // Truncate source_id if too long to maintain table size
                 const sourceId = doc.source_id || 'N/A';
-                const displaySourceId = sourceId.length > 180 ? sourceId.substring(0, 180) + '...' : sourceId;
+                const displaySourceId = sourceId.length > 100 ? sourceId.substring(0, 100) + '...' : sourceId;
 
                 // Check if source_id is a URL (starts with http)
                 const isUrl = sourceId.startsWith('http://') || sourceId.startsWith('https://');
@@ -319,23 +341,92 @@
                     : '<span class="text-gray">-</span>';
 
                 return `
-                    <tr class="${isSelected ? 'bg-gray' : ''}">
-                        <td style="text-align: center;">
-                            <input type="checkbox"
-                                   ${isChecked ? 'checked' : ''}
-                                   onchange="toggleDocumentSelection('${doc.id}')"
-                                   onclick="event.stopPropagation()">
+                    <tr class="document-row" onclick="toggleDetail('${doc.id}')">
+                        <td style="text-align: center;" onclick="event.stopPropagation()">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleDocumentSelection('${doc.id}')">
                         </td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${doc.source_type || 'N/A'}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer; text-align: left;">
-                            <div class="text-small" title="${sourceId}" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${sourceIdHtml}</div>
-                            <div class="text-small" style="max-width: 800px; word-wrap: break-word; overflow-wrap: break-word;">${doc.title || 'Untitled'}</div>
+                        <td>${doc.source_type || 'N/A'}</td>
+                        <td style="text-align: left;">
+                            <div class="text-small" title="${sourceId}" style="max-width: 600px; word-wrap: break-word; overflow-wrap: break-word;">
+                                ${sourceIdHtml}
+                            </div>
+                            <div class="text-small" style="max-width: 600px; word-wrap: break-word; overflow-wrap: break-word; font-weight: 500;">
+                                ${doc.title || 'Untitled'}
+                            </div>
                         </td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${tagsHtml}</td>
-                        <td onclick="selectDocument(${index})" style="cursor: pointer;">${updatedDate}</td>
+                        <td>${tagsHtml}</td>
+                        <td>${updatedDate}</td>
+                    </tr>
+                    <tr id="detail-${doc.id}" class="detail-row" style="display: none;">
+                        <td colspan="5" style="padding: 0;">
+                            <div class="detail-content">
+                                <div style="margin-bottom: 0.5rem;">
+                                    <span class="label label-primary">${doc.id}</span>
+                                    <span class="text-gray text-small ml-2">Click row to collapse</span>
+                                </div>
+                                <pre><code id="code-${doc.id}" class="language-json">Loading content...</code></pre>
+                            </div>
+                        </td>
                     </tr>
                 `;
             }).join('');
+        }
+
+        // Toggle document detail view (Accordion)
+        async function toggleDetail(docId) {
+            const detailRow = document.getElementById(`detail-${docId}`);
+            if (!detailRow) return;
+
+            const isExpanded = detailRow.style.display !== 'none';
+
+            if (isExpanded) {
+                detailRow.style.display = 'none';
+                return;
+            }
+
+            // Expand row
+            detailRow.style.display = 'table-row';
+
+            const codeBlock = document.getElementById(`code-${docId}`);
+            if (!codeBlock || codeBlock.dataset.loaded === 'true') return;
+
+            // Fetch full document details
+            try {
+                // Show loading state
+                codeBlock.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Loading full content...';
+
+                const response = await fetch(`/api/documents/${docId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch document details');
+                }
+
+                const doc = await response.json();
+
+                // Build explicit projection of desired fields
+                const clean = {
+                    id: doc.id,
+                    source_type: doc.source_type,
+                    source_id: doc.source_id,
+                    title: doc.title,
+                    content_markdown: doc.content_markdown,
+                    url: doc.url,
+                    detail_level: doc.detail_level,
+                    metadata: doc.metadata,
+                    created_at: doc.created_at,
+                    updated_at: doc.updated_at
+                };
+
+                const jsonString = JSON.stringify(clean, null, 2);
+                codeBlock.textContent = jsonString;
+                codeBlock.dataset.loaded = 'true';
+
+                if (typeof hljs !== 'undefined') {
+                    hljs.highlightElement(codeBlock);
+                }
+            } catch (error) {
+                console.error('Error loading document details:', error);
+                codeBlock.innerHTML = `<span class="text-error">Error loading content: ${error.message}</span>`;
+            }
         }
 
         // Custom pagination rendering
@@ -436,8 +527,7 @@
             const selectAllCheckbox = document.getElementById('select-all-checkbox');
             if (!selectAllCheckbox) return;
 
-            const allSelected = filteredDocuments.length > 0 &&
-                filteredDocuments.every(doc => selectedDocumentIds.has(doc.id));
+            const allSelected = filteredDocuments.length > 0 && filteredDocuments.every(doc => selectedDocumentIds.has(doc.id));
             selectAllCheckbox.checked = allSelected;
         }
 
@@ -445,6 +535,7 @@
         function updateDeleteButton() {
             const deleteBtn = document.getElementById('delete-selected-btn');
             const countSpan = document.getElementById('selected-count');
+
             if (deleteBtn && countSpan) {
                 const count = selectedDocumentIds.size;
                 if (count > 0) {
@@ -461,7 +552,7 @@
             const count = selectedDocumentIds.size;
             if (count === 0) return;
 
-            if (!confirm(`Are you sure you want to delete ${count} document(s)? This action cannot be undone.`)) {
+            if (!await window.confirmAction(`Are you sure you want to delete ${count} document(s)? This action cannot be undone.`)) {
                 return;
             }
 
@@ -513,48 +604,6 @@
             }
         }
 
-        // Select and display document details
-        function selectDocument(index) {
-            selectedDocument = filteredDocuments[index];
-            displayDocumentDetail(selectedDocument);
-            renderDocuments();
-        }
-
-        function displayDocumentDetail(doc) {
-            const selectedId = document.getElementById('selected-document-id');
-            const detailPre = document.getElementById('document-detail-json');
-            const codeBlock = detailPre.querySelector('code');
-
-            if (!doc) {
-                selectedId.textContent = '';
-                codeBlock.textContent = '';
-                return;
-            }
-
-            selectedId.textContent = doc.id || 'Unknown';
-
-            // Build explicit projection of desired fields (excludes embedding, embedding_model)
-            const clean = {
-                id: doc.id,
-                source_type: doc.source_type,
-                source_id: doc.source_id,
-                title: doc.title,
-                content_markdown: doc.content_markdown,
-                url: doc.url,
-                detail_level: doc.detail_level,
-                metadata: doc.metadata,
-                created_at: doc.created_at,
-                updated_at: doc.updated_at
-            };
-
-            const jsonString = JSON.stringify(clean, null, 2);
-            codeBlock.textContent = jsonString;
-
-            if (typeof hljs !== 'undefined') {
-                hljs.highlightElement(codeBlock);
-            }
-        }
-
         // Tag filter dropdown functions
         function showTagDropdown() {
             const dropdown = document.getElementById('tag-dropdown');
@@ -579,9 +628,7 @@
             const searchTerm = input.value.toLowerCase();
 
             // Show all tags matching search, mark selected ones with checkmark
-            const filteredTags = availableTags.filter(tag =>
-                tag.toLowerCase().includes(searchTerm)
-            );
+            const filteredTags = availableTags.filter(tag => tag.toLowerCase().includes(searchTerm));
 
             if (filteredTags.length === 0) {
                 dropdown.innerHTML = '<div style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">No tags found</div>';
@@ -594,11 +641,11 @@
                 const fontWeight = isSelected ? 'bold' : 'normal';
 
                 return `
-                    <div style="padding: 0.5rem; cursor: pointer; font-weight: ${fontWeight};"
-                         onmouseover="this.style.backgroundColor='#f0f0f0'"
+                    <div style="padding: 0.5rem; cursor: pointer; font-weight: ${fontWeight};" 
+                         onmouseover="this.style.backgroundColor='#f0f0f0'" 
                          onmouseout="this.style.backgroundColor='white'"
                          onclick="${isSelected ? `removeTag('${tag}')` : `selectTag('${tag}')`}; event.stopPropagation();">
-                        ${checkmark}${tag}
+                        ${checkmark} ${tag}
                     </div>
                 `;
             }).join('');
@@ -641,6 +688,7 @@
         document.addEventListener('click', function (event) {
             const tagInput = document.getElementById('tag-filter-input');
             const tagDropdown = document.getElementById('tag-dropdown');
+
             if (!tagInput.contains(event.target) && !tagDropdown.contains(event.target)) {
                 hideTagDropdown();
             }

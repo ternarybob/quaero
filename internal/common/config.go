@@ -155,6 +155,7 @@ type GeminiConfig struct {
 	ChatModel    string  `toml:"chat_model"`     // Gemini model for chat operations (default: "gemini-2.0-flash")
 	MaxTurns     int     `toml:"max_turns"`      // Maximum agent conversation turns (default: 10)
 	Timeout      string  `toml:"timeout"`        // Operation timeout as duration string (default: "5m")
+	RateLimit    string  `toml:"rate_limit"`     // Rate limit duration string (default: "4s" for 15 RPM)
 	Temperature  float32 `toml:"temperature"`    // Chat completion temperature (default: 0.7)
 }
 
@@ -267,6 +268,7 @@ func NewDefaultConfig() *Config {
 			ChatModel:    "gemini-2.0-flash", // Fast, cost-effective model for chat
 			MaxTurns:     10,                 // Reasonable limit for agent loops
 			Timeout:      "5m",               // 5 minutes for operations
+			RateLimit:    "4s",               // Default to 4s (15 RPM) for free tier
 			Temperature:  0.7,                // Default temperature for chat completions
 		},
 	}
@@ -566,6 +568,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if timeout := os.Getenv("QUAERO_GEMINI_TIMEOUT"); timeout != "" {
 		config.Gemini.Timeout = timeout
+	}
+	if rateLimit := os.Getenv("QUAERO_GEMINI_RATE_LIMIT"); rateLimit != "" {
+		config.Gemini.RateLimit = rateLimit
 	}
 	if temperature := os.Getenv("QUAERO_GEMINI_TEMPERATURE"); temperature != "" {
 		if t, err := strconv.ParseFloat(temperature, 32); err == nil {

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,7 +167,7 @@ func TestSettingsAPIKeyWarning_NotSet(t *testing.T) {
 	}
 
 	// Verify warning text contains "Configuration Required"
-	if !contains(warningInfo.WarningText, "Configuration Required") {
+	if !strings.Contains(warningInfo.WarningText, "Configuration Required") {
 		env.LogTest(t, "ERROR: Warning text should contain 'Configuration Required'")
 		t.Error("Warning text should contain 'Configuration Required'")
 	} else {
@@ -174,7 +175,7 @@ func TestSettingsAPIKeyWarning_NotSet(t *testing.T) {
 	}
 
 	// Verify runtime error mentions Google API key
-	if !contains(warningInfo.RuntimeError, "Google API key") && !contains(warningInfo.RuntimeError, "QUAERO_AGENT_GOOGLE_API_KEY") {
+	if !strings.Contains(warningInfo.RuntimeError, "Google API key") && !strings.Contains(warningInfo.RuntimeError, "QUAERO_AGENT_GOOGLE_API_KEY") {
 		env.LogTest(t, "WARNING: Runtime error should mention Google API key")
 	} else {
 		env.LogTest(t, "✓ Runtime error mentions Google API key")

@@ -1,20 +1,43 @@
 <footer>
-  <div id="footer-version">
-    Quaero
-  </div>
+    <div id="footer-version">
+        Quaero
+    </div>
 </footer>
 
+<!-- Global Confirmation Modal -->
+<div class="modal" :class="{'active': $store.confirmation.open}" x-data>
+    <a href="#close" class="modal-overlay" aria-label="Close" @click.prevent="$store.confirmation.cancel()"></a>
+    <div class="modal-container">
+        <div class="modal-header">
+            <a href="#close" class="btn btn-clear float-right" aria-label="Close"
+                @click.prevent="$store.confirmation.cancel()"></a>
+            <div class="modal-title h5" x-text="$store.confirmation.title">Confirmation</div>
+        </div>
+        <div class="modal-body">
+            <div class="content">
+                <p x-text="$store.confirmation.message"></p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-link" @click="$store.confirmation.cancel()"
+                x-text="$store.confirmation.cancelText">Cancel</button>
+            <button class="btn" :class="$store.confirmation.type === 'danger' ? 'btn-error' : 'btn-primary'"
+                @click="$store.confirmation.confirm()" x-text="$store.confirmation.confirmText">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <script>
-  // Load and format version info
-  fetch('/api/version')
-    .then(response => response.json())
-    .then(data => {
-      const footerEl = document.getElementById('footer-version');
-      if (footerEl && data.version) {
-        footerEl.innerHTML = `Quaero • Version ${data.version} • Build ${data.build}`;
-      }
-    })
-    .catch(error => {
-      console.error('Failed to load version:', error);
-    });
+    // Load and format version info
+    fetch('/api/version')
+        .then(response => response.json())
+        .then(data => {
+            const footerEl = document.getElementById('footer-version');
+            if (footerEl && data.version) {
+                footerEl.innerHTML = `Quaero • Version ${data.version} • Build ${data.build}`;
+            }
+        })
+        .catch(error => {
+            console.error('Failed to load version:', error);
+        });
 </script>

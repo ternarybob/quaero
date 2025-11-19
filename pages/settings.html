@@ -45,23 +45,29 @@
                                 Configuration
                             </a>
                         </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'status' }">
+                            <a href="#" @click.prevent="selectSection('status')">
+                                <i class="icon icon-check"></i>
+                                Status
+                            </a>
+                        </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'logs' }">
+                            <a href="#" @click.prevent="selectSection('logs')">
+                                <i class="icon icon-menu"></i>
+                                System Logs
+                            </a>
+                        </li>
                         <li class="nav-item" :class="{ 'active': activeSection === 'danger' }">
                             <a href="#" @click.prevent="selectSection('danger')">
                                 <i class="icon icon-stop"></i>
                                 Danger Zone
                             </a>
                         </li>
-                        <li class="nav-item" :class="{ 'active': activeSection === 'status' }">
-                            <a href="#" @click.prevent="selectSection('status')">
-                                <i class="icon icon-flag"></i>
-                                Service Status
-                            </a>
-                        </li>
                     </ul>
                 </div>
 
-                <!-- Right Content Panel: Standard Column -->
-                <div class="column col-10" style="min-height: 50vh;">
+                <!-- Right Content Panel: Dynamic Content -->
+                <div class="column col-10">
                     <!-- Loading State -->
                     <div x-show="loading[activeSection]" class="text-center loading-state">
                         <div class="loading loading-lg"></div>

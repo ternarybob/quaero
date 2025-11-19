@@ -9,6 +9,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -39,6 +41,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/search"
 	"github.com/ternarybob/quaero/internal/services/status"
 	"github.com/ternarybob/quaero/internal/services/summary"
+	"github.com/ternarybob/quaero/internal/services/systemlogs"
 	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
@@ -72,7 +75,8 @@ type App struct {
 	JobService                *jobsvc.Service
 
 	// Source-agnostic services
-	StatusService *status.Service
+	StatusService     *status.Service
+	SystemLogsService *systemlogs.Service
 
 	// Authentication service (supports multiple providers)
 	AuthService *auth.Service
@@ -116,6 +120,7 @@ type App struct {
 	ConfigHandler        *handlers.ConfigHandler
 	PageHandler          *handlers.PageHandler
 	JobDefinitionHandler *handlers.JobDefinitionHandler
+	SystemLogsHandler    *handlers.SystemLogsHandler
 }
 
 // New initializes the application with all dependencies
@@ -320,6 +325,18 @@ func (a *App) initServices() error {
 	a.StatusService = status.NewService(a.EventService, a.Logger)
 	a.StatusService.SubscribeToCrawlerEvents()
 	a.Logger.Info().Msg("Status service initialized")
+
+	// 5.5.1 Initialize system logs service
+	// Calculate logs directory (same logic as main.go)
+	execPath, err := os.Executable()
+	var logsDir string
+	if err == nil {
+		logsDir = filepath.Join(filepath.Dir(execPath), "logs")
+	} else {
+		logsDir = "logs" // Fallback
+	}
+	a.SystemLogsService = systemlogs.NewService(logsDir, a.Logger)
+	a.Logger.Info().Str("logs_dir", logsDir).Msg("System logs service initialized")
 
 	// 5.6. Initialize queue manager (goqite-backed)
 	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), a.Config.Queue.QueueName)
@@ -622,6 +639,9 @@ func (a *App) initHandlers() error {
 
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
+
+	// Initialize system logs handler
+	a.SystemLogsHandler = handlers.NewSystemLogsHandler(a.SystemLogsService, a.Logger)
 
 	// Initialize config handler with ConfigService for dynamic key injection
 	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)

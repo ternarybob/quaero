@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -119,22 +120,57 @@ If you cannot assign meaningful confidence scores, use simple array: ["keyword1"
 Document:
 %s`, maxKeywords, maxKeywords, content)
 
-	// Generate content with direct API call
+	// Generate content with retry logic for rate limiting
 	config := &genai.GenerateContentConfig{
 		Temperature: genai.Ptr(float32(0.3)),
 	}
 
-	genaiResponse, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
-		{
-			Role: "user",
-			Parts: []*genai.Part{
-				genai.NewPartFromText(instruction),
-			},
-		},
-	}, config)
+	var genaiResponse *genai.GenerateContentResponse
+	var apiErr error
+	
+	// Retry configuration
+	const maxRetries = 5
+	const initialBackoff = 1 * time.Second
+	const maxBackoff = 10 * time.Second
+	const backoffMultiplier = 2.0
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate content for document %s (model: %s): %w", documentID, modelName, err)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		genaiResponse, apiErr = client.Models.GenerateContent(ctx, modelName, []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					genai.NewPartFromText(instruction),
+				},
+			},
+		}, config)
+
+		if apiErr == nil {
+			// Success - break out of retry loop
+			break
+		}
+
+		// If this was the last attempt, don't wait
+		if attempt == maxRetries {
+			break
+		}
+
+		// Calculate backoff duration with exponential increase
+		backoff := time.Duration(float64(initialBackoff) * float64(uint(1)<<uint(attempt)) * backoffMultiplier)
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+
+		// Wait before retrying
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during retry for document %s: %w", documentID, ctx.Err())
+		case <-time.After(backoff):
+			// Continue to next retry attempt
+		}
+	}
+
+	if apiErr != nil {
+		return nil, fmt.Errorf("failed to generate content for document %s (model: %s) after %d retries: %w", documentID, modelName, maxRetries, apiErr)
 	}
 
 	// Extract text from response using convenience method

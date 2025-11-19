@@ -30,9 +30,9 @@ type JobMonitor interface {
 	// Returns immediately after starting the monitoring goroutine.
 	StartMonitoring(ctx context.Context, job *models.JobModel)
 
-	// SubscribeToChildStatusChanges sets up event subscriptions for real-time child job tracking.
+	// SubscribeToJobEvents sets up event subscriptions for real-time child job tracking.
 	// This is called during orchestrator initialization.
-	SubscribeToChildStatusChanges()
+	SubscribeToJobEvents()
 }
 
 // JobWorker defines the interface that all job workers must implement.

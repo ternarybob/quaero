@@ -18,7 +18,7 @@ timeout = "5m"
 enabled = true
 
 # Whether to auto-start when scheduler initializes
-auto_start = false
+auto_start = true
 
 # Job steps definition
 [[steps]]
