@@ -262,6 +262,15 @@ func (a *App) initDatabase() error {
 			a.Logger.Info().Str("dir", a.Config.Variables.Dir).Msg("Variables loaded from files")
 		}
 
+		// Load connectors from files
+		// Must happen after database initialization and before services that use connectors
+		if err := sqliteMgr.LoadConnectorsFromFiles(ctx, a.Config.Connectors.Dir); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to load connectors from files")
+			// Don't fail startup - connector files are optional
+		} else {
+			a.Logger.Info().Str("dir", a.Config.Connectors.Dir).Msg("Connectors loaded from files")
+		}
+
 		// Migrate API keys from auth_credentials to key_value_store (idempotent)
 		// This separates concerns: auth_credentials for cookie auth, key_value_store for API keys
 		if err := sqliteMgr.MigrateAPIKeysToKVStore(ctx); err != nil {

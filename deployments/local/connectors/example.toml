@@ -1,0 +1,21 @@
+# GitHub Connector Configuration
+#
+# This file defines GitHub connectors that will be loaded at application startup.
+# Each section represents one connector, with the section name as the connector name.
+#
+# Required fields:
+#   type  = "github"  # Connector type
+#   token = "..."     # Personal Access Token (PAT)
+#
+# The token requires 'repo' and 'workflow' scopes for accessing action logs.
+#
+# To use this example:
+# 1. Copy this file to the connectors directory (remove .example extension)
+# 2. Replace the token with your actual GitHub PAT
+# 3. Restart the application
+#
+# Example:
+
+[my-github]
+type = "github"
+token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

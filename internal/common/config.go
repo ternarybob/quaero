@@ -17,20 +17,21 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Environment string           `toml:"environment"` // "development" or "production" - controls test URL validation
-	Server      ServerConfig     `toml:"server"`
-	Queue       QueueConfig      `toml:"queue"`
-	Storage     StorageConfig    `toml:"storage"`
-	Processing  ProcessingConfig `toml:"processing"`
-	Logging     LoggingConfig    `toml:"logging"`
-	Jobs        JobsConfig       `toml:"jobs"`
-	Auth        AuthDirConfig    `toml:"auth"`
-	Variables   KeysDirConfig    `toml:"variables"` // Variables directory configuration (./keys/*.toml) for key/value pairs
-	Crawler     CrawlerConfig    `toml:"crawler"`
-	Search      SearchConfig     `toml:"search"`
-	WebSocket   WebSocketConfig  `toml:"websocket"`
-	PlacesAPI   PlacesAPIConfig  `toml:"places_api"`
-	Gemini      GeminiConfig     `toml:"gemini"`
+	Environment string             `toml:"environment"` // "development" or "production" - controls test URL validation
+	Server      ServerConfig       `toml:"server"`
+	Queue       QueueConfig        `toml:"queue"`
+	Storage     StorageConfig      `toml:"storage"`
+	Processing  ProcessingConfig   `toml:"processing"`
+	Logging     LoggingConfig      `toml:"logging"`
+	Jobs        JobsConfig         `toml:"jobs"`
+	Auth        AuthDirConfig      `toml:"auth"`
+	Variables   KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
+	Connectors  ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./bin/connectors/*.toml)
+	Crawler     CrawlerConfig      `toml:"crawler"`
+	Search      SearchConfig       `toml:"search"`
+	WebSocket   WebSocketConfig    `toml:"websocket"`
+	PlacesAPI   PlacesAPIConfig    `toml:"places_api"`
+	Gemini      GeminiConfig       `toml:"gemini"`
 }
 
 type ServerConfig struct {
@@ -93,9 +94,19 @@ type JobsConfig struct {
 	DefinitionsDir string `toml:"definitions_dir"` // Directory containing job definition files (TOML/JSON)
 }
 
+// KeysDirConfig contains configuration for key/value file loading (generic secrets/configuration)
+type KeysDirConfig struct {
+	Dir string `toml:"dir"` // Directory containing variable files (TOML)
+}
+
 // AuthDirConfig contains configuration for authentication file loading
 type AuthDirConfig struct {
 	CredentialsDir string `toml:"credentials_dir"` // Directory containing auth credential files (TOML)
+}
+
+// ConnectorDirConfig contains configuration for connector file loading
+type ConnectorDirConfig struct {
+	Dir string `toml:"dir"` // Directory containing connector files (TOML)
 }
 
 // CrawlerConfig contains Firecrawl-inspired HTML scraping configuration
@@ -211,6 +222,9 @@ func NewDefaultConfig() *Config {
 		},
 		Variables: KeysDirConfig{
 			Dir: "./variables", // Default directory for variables files (./variables/*.toml)
+		},
+		Connectors: ConnectorDirConfig{
+			Dir: "./connectors", // Default directory for connector files (relative to executable)
 		},
 		Crawler: CrawlerConfig{
 			UserAgent:                 "Quaero/1.0 (Web Crawler)",
@@ -587,6 +601,11 @@ func applyEnvOverrides(config *Config) {
 	// Variables configuration
 	if variablesDir := os.Getenv("QUAERO_VARIABLES_DIR"); variablesDir != "" {
 		config.Variables.Dir = variablesDir
+	}
+
+	// Connectors configuration
+	if connectorsDir := os.Getenv("QUAERO_CONNECTORS_DIR"); connectorsDir != "" {
+		config.Connectors.Dir = connectorsDir
 	}
 }
 

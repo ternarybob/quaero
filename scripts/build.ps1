@@ -435,6 +435,25 @@ function Deploy-Files {
             }
         }
     }
+
+    # Deploy connectors directory (only new files, no override)
+    $connectorsSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\connectors"
+    $connectorsDestPath = Join-Path -Path $BinDirectory -ChildPath "connectors"
+
+    if (Test-Path $connectorsSourcePath) {
+        if (-not (Test-Path $connectorsDestPath)) {
+            New-Item -ItemType Directory -Path $connectorsDestPath -Force | Out-Null
+        }
+
+        # Copy files without overriding existing ones
+        $sourceFiles = Get-ChildItem -Path $connectorsSourcePath -File
+        foreach ($file in $sourceFiles) {
+            $destFile = Join-Path -Path $connectorsDestPath -ChildPath $file.Name
+            if (-not (Test-Path $destFile)) {
+                Copy-Item -Path $file.FullName -Destination $destFile
+            }
+        }
+    }
 }
 
 # ========== END HELPER FUNCTIONS ==========
