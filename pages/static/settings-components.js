@@ -866,6 +866,9 @@ document.addEventListener('alpine:init', () => {
         isSaving: false,
         deleting: null,
         error: null,
+        showModal: false,
+        isEditing: false,
+        editingId: null,
         formData: {
             name: '',
             type: 'github',
@@ -898,24 +901,65 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async createConnector() {
+        openCreateModal() {
+            this.isEditing = false;
+            this.editingId = null;
+            this.formData = {
+                name: '',
+                type: 'github',
+                config: {
+                    token: ''
+                }
+            };
+            this.showModal = true;
+        },
+
+        openEditModal(connector) {
+            this.isEditing = true;
+            this.editingId = connector.id;
+            this.formData = {
+                name: connector.name,
+                type: connector.type,
+                config: {
+                    token: connector.config?.token || ''
+                }
+            };
+            this.showModal = true;
+        },
+
+        closeModal() {
+            this.showModal = false;
+            this.isEditing = false;
+            this.editingId = null;
+            this.formData = {
+                name: '',
+                type: 'github',
+                config: {
+                    token: ''
+                }
+            };
+        },
+
+        async saveConnector() {
             if (!this.isValid) return;
             this.isSaving = true;
             this.error = null;
             try {
-                const response = await fetch('/api/connectors', {
-                    method: 'POST',
+                const url = this.isEditing ? `/api/connectors/${this.editingId}` : '/api/connectors';
+                const method = this.isEditing ? 'PUT' : 'POST';
+
+                const response = await fetch(url, {
+                    method: method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(this.formData)
                 });
                 if (!response.ok) {
                     const err = await response.json();
-                    throw new Error(err.error || 'Failed to create connector');
+                    throw new Error(err.error || 'Failed to save connector');
                 }
                 await this.loadConnectors();
-                this.formData.name = '';
-                this.formData.config.token = '';
-                if (window.showNotification) window.showNotification('Connector created successfully', 'success');
+                this.closeModal();
+                if (window.showNotification) window.showNotification(`Connector ${this.isEditing ? 'updated' : 'created'} successfully`, 'success');
             } catch (e) {
                 this.error = e.message;
                 if (window.showNotification) window.showNotification(e.message, 'error');

@@ -244,7 +244,7 @@ func (s *Server) handleConnectorsRoute(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConnectorRoutes(w http.ResponseWriter, r *http.Request) {
 	RouteResourceItem(w, r,
 		nil, // Get not exposed yet
-		nil, // Update not exposed yet
+		s.app.ConnectorHandler.UpdateConnectorHandler,
 		s.app.ConnectorHandler.DeleteConnectorHandler,
 	)
 }

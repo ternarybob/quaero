@@ -72,6 +72,51 @@ func (h *ConnectorHandler) CreateConnectorHandler(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(connector)
 }
 
+func (h *ConnectorHandler) UpdateConnectorHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/api/connectors/"):]
+	if id == "" {
+		http.Error(w, "ID required", http.StatusBadRequest)
+		return
+	}
+
+	var connector models.Connector
+	if err := json.NewDecoder(r.Body).Decode(&connector); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure ID matches
+	connector.ID = id
+
+	// Basic validation
+	if connector.Name == "" || connector.Type == "" {
+		http.Error(w, "Name and Type are required", http.StatusBadRequest)
+		return
+	}
+
+	// Test connection before saving
+	if connector.Type == models.ConnectorTypeGitHub {
+		ghConnector, err := github.NewConnector(&connector)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid configuration: %v", err), http.StatusBadRequest)
+			return
+		}
+		if err := ghConnector.TestConnection(r.Context()); err != nil {
+			http.Error(w, fmt.Sprintf("Connection test failed: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.service.UpdateConnector(r.Context(), &connector); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to update connector")
+		http.Error(w, "Failed to update connector", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(connector)
+}
+
 func (h *ConnectorHandler) DeleteConnectorHandler(w http.ResponseWriter, r *http.Request) {
 	// ID extraction handled by router helper usually, but here we might need to parse it from URL if using standard mux
 	// Assuming RouteResourceItem passes ID or we parse it.
