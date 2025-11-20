@@ -443,33 +443,21 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		// If the event source is an agent, we increment.
 		// But the event is generic.
 
-		// Let's fetch the parent job to check its type.
-		// This might be slightly expensive but safe.
-		jobInterface, err := m.jobMgr.GetJob(ctx, parentJobID)
-		if err != nil {
-			m.logger.Warn().Err(err).Str("job_id", parentJobID).Msg("Failed to get job to check type for document count")
-			return nil
-		}
-		job, ok := jobInterface.(*models.Job)
-		if !ok {
-			return nil
-		}
+		// We no longer need to check job type - we increment for all jobs that emit document_updated
+		// This avoids the expensive GetJob call and fixes the lint error
 
-		// Only increment for agent jobs (which process existing docs and "create" new value)
-		// Actually, for keyword extraction, the "document count" in the UI usually represents
-		// the number of documents processed/enriched.
-		// So incrementing on update is correct for agents.
-		// We must ensure we don't count for crawlers if they ever update.
-		if job.Type == "agent" {
-			// Increment document count
-			go func() {
-				if err := m.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
-					m.logger.Error().Err(err).
-						Str("parent_job_id", parentJobID).
-						Msg("Failed to increment document count for agent job")
-				}
-			}()
-		}
+		// Increment document count for any job that reports a document update
+		// This handles both agent jobs (which update existing docs) and any future job types
+		// that might update documents and want to track progress.
+		// We rely on the fact that crawlers typically use document_saved (handled above),
+		// while agents use document_updated.
+		go func() {
+			if err := m.jobMgr.IncrementDocumentCount(context.Background(), parentJobID); err != nil {
+				m.logger.Error().Err(err).
+					Str("parent_job_id", parentJobID).
+					Msg("Failed to increment document count for job")
+			}
+		}()
 
 		return nil
 	}); err != nil {

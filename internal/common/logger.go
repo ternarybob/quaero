@@ -36,12 +36,7 @@ func GetLogger() arbor.ILogger {
 	// Double-check after acquiring write lock
 	if globalLogger == nil {
 		// WARNING: Using fallback logger - InitLogger() should be called during startup
-		globalLogger = arbor.NewLogger().WithConsoleWriter(models.WriterConfiguration{
-			Type:             models.LogWriterTypeConsole,
-			TimeFormat:       "15:04:05",
-			TextOutput:       true,
-			DisableTimestamp: false,
-		})
+		globalLogger = arbor.NewLogger().WithConsoleWriter(createWriterConfig(nil, models.LogWriterTypeConsole, ""))
 		// Log warning about initialization order issue
 		globalLogger.Warn().Msg("Using fallback logger - InitLogger() should be called during startup")
 	}
@@ -63,12 +58,7 @@ func SetupLogger(config *Config) arbor.ILogger {
 	execPath, err := os.Executable()
 	if err != nil {
 		// Add console writer first, then log the warning
-		logger = logger.WithConsoleWriter(models.WriterConfiguration{
-			Type:             models.LogWriterTypeConsole,
-			TimeFormat:       "15:04:05",
-			TextOutput:       true,
-			DisableTimestamp: false,
-		})
+		logger = logger.WithConsoleWriter(createWriterConfig(config, models.LogWriterTypeConsole, ""))
 		logger.Warn().Err(err).Msg("Failed to get executable path - using fallback console logging")
 	} else {
 		execDir := filepath.Dir(execPath)
@@ -90,45 +80,22 @@ func SetupLogger(config *Config) arbor.ILogger {
 		if hasFileOutput {
 			if err := os.MkdirAll(logsDir, 0755); err != nil {
 				// Use console writer temporarily for this warning
-				tempLogger := logger.WithConsoleWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeConsole,
-					TimeFormat:       "15:04:05",
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
+				tempLogger := logger.WithConsoleWriter(createWriterConfig(config, models.LogWriterTypeConsole, ""))
 				tempLogger.Warn().Err(err).Str("logs_dir", logsDir).Msg("Failed to create logs directory")
 			} else {
 				logFile := filepath.Join(logsDir, "quaero.log")
-				logger = logger.WithFileWriter(models.WriterConfiguration{
-					Type:             models.LogWriterTypeFile,
-					FileName:         logFile,
-					TimeFormat:       "15:04:05",
-					MaxSize:          100 * 1024 * 1024, // 100 MB
-					MaxBackups:       3,
-					TextOutput:       true,
-					DisableTimestamp: false,
-				})
+				logger = logger.WithFileWriter(createWriterConfig(config, models.LogWriterTypeFile, logFile))
 			}
 		}
 
 		// Configure console logging if enabled
 		if hasStdoutOutput {
-			logger = logger.WithConsoleWriter(models.WriterConfiguration{
-				Type:             models.LogWriterTypeConsole,
-				TimeFormat:       "15:04:05",
-				TextOutput:       true,
-				DisableTimestamp: false,
-			})
+			logger = logger.WithConsoleWriter(createWriterConfig(config, models.LogWriterTypeConsole, ""))
 		}
 
 		// Ensure at least one visible log writer is configured
 		if !hasFileOutput && !hasStdoutOutput {
-			logger = logger.WithConsoleWriter(models.WriterConfiguration{
-				Type:             models.LogWriterTypeConsole,
-				TimeFormat:       "15:04:05",
-				TextOutput:       true,
-				DisableTimestamp: false,
-			})
+			logger = logger.WithConsoleWriter(createWriterConfig(config, models.LogWriterTypeConsole, ""))
 			logger.Warn().
 				Strs("configured_outputs", config.Logging.Output).
 				Msg("No visible log outputs configured - falling back to console")
@@ -136,12 +103,7 @@ func SetupLogger(config *Config) arbor.ILogger {
 	}
 
 	// Always add memory writer for WebSocket log streaming (GetRecentLogsHandler)
-	logger = logger.WithMemoryWriter(models.WriterConfiguration{
-		Type:             models.LogWriterTypeMemory,
-		TimeFormat:       "15:04:05",
-		TextOutput:       true,
-		DisableTimestamp: false,
-	})
+	logger = logger.WithMemoryWriter(createWriterConfig(config, models.LogWriterTypeMemory, ""))
 
 	// Set log level
 	logger = logger.WithLevelFromString(config.Logging.Level)
@@ -150,6 +112,25 @@ func SetupLogger(config *Config) arbor.ILogger {
 	InitLogger(logger)
 
 	return logger
+}
+
+// createWriterConfig creates a standard writer configuration with user preferences
+func createWriterConfig(config *Config, writerType models.LogWriterType, filename string) models.WriterConfiguration {
+	// Default time format if not specified
+	timeFormat := "15:04:05"
+	if config != nil && config.Logging.TimeFormat != "" {
+		timeFormat = config.Logging.TimeFormat
+	}
+
+	return models.WriterConfiguration{
+		Type:             writerType,
+		FileName:         filename,
+		TimeFormat:       timeFormat,
+		TextOutput:       true,
+		DisableTimestamp: false,
+		MaxSize:          100 * 1024 * 1024, // 100 MB (only used for file writer)
+		MaxBackups:       3,                 // (only used for file writer)
+	}
 }
 
 // Stop flushes any remaining context logs before application shutdown

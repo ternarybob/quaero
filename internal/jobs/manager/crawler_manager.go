@@ -145,6 +145,11 @@ func (m *CrawlerManager) GetManagerType() string {
 	return "crawl"
 }
 
+// ReturnsChildJobs returns true since crawler creates child jobs for each URL
+func (m *CrawlerManager) ReturnsChildJobs() bool {
+	return true
+}
+
 // buildCrawlConfig constructs a CrawlConfig struct from a config map
 func (m *CrawlerManager) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
 	config := crawler.CrawlConfig{

@@ -121,3 +121,8 @@ func (m *ReindexManager) CreateParentJob(ctx context.Context, step models.JobSte
 func (m *ReindexManager) GetManagerType() string {
 	return "reindex"
 }
+
+// ReturnsChildJobs returns false since reindex is synchronous
+func (m *ReindexManager) ReturnsChildJobs() bool {
+	return false
+}

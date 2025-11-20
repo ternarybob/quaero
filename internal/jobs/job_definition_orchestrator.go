@@ -169,6 +169,9 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		// TODO: Load and execute pre-job definitions
 	}
 
+	// Track if any child jobs were created
+	hasChildJobs := false
+
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
 		parentLogger.Info().
@@ -263,6 +266,11 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 			continue
 		}
 
+		// Mark that we have created at least one child job if the manager returns child jobs
+		if mgr.ReturnsChildJobs() {
+			hasChildJobs = true
+		}
+
 		parentLogger.Info().
 			Str("step_name", step.Name).
 			Str("child_job_id", childJobID).
@@ -307,24 +315,21 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		Int("expected_len", len(string(models.JobDefinitionTypeCrawler))).
 		Msg("Checking job definition type for completion handling")
 
-	// Check if this is a crawler job by looking at the job definition type OR the steps
-	isCrawlerJob := jobDef.Type == models.JobDefinitionTypeCrawler
+	// Determine if we should monitor this job
+	// We only monitor if there are child jobs to track (as indicated by step managers)
+	isCrawlerJob := hasChildJobs
 
-	// Log all step actions for debugging
-	stepActions := make([]string, len(jobDef.Steps))
-	for i, step := range jobDef.Steps {
-		stepActions[i] = step.Action
-	}
-	o.jobManager.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Job has %d steps with actions: %v", len(jobDef.Steps), stepActions))
-
-	// Also check if any step has action "crawl" as a fallback
-	if !isCrawlerJob && len(jobDef.Steps) > 0 {
-		for _, step := range jobDef.Steps {
-			if step.Action == "crawl" {
-				isCrawlerJob = true
-				o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected via step action (type mismatch - please check job definition)")
-				break
-			}
+	if isCrawlerJob {
+		// If we have child jobs, we monitor regardless of the job definition type
+		// This handles agent jobs, crawler jobs, and any future job types with children
+		if jobDef.Type != models.JobDefinitionTypeCrawler {
+			o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Child jobs detected - enabling parent job monitoring")
+		}
+	} else {
+		// If no child jobs were created, we do NOT monitor, even if the type is "crawler"
+		// This prevents the monitor from waiting indefinitely for children that will never arrive
+		if jobDef.Type == models.JobDefinitionTypeCrawler {
+			o.jobManager.AddJobLog(ctx, parentJobID, "warn", "⚠ Job type is 'crawler' but no child jobs were created - skipping monitoring")
 		}
 	}
 

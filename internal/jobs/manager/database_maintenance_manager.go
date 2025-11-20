@@ -189,3 +189,8 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 func (m *DatabaseMaintenanceManager) GetManagerType() string {
 	return "database_maintenance"
 }
+
+// ReturnsChildJobs returns true since database maintenance creates child jobs for each operation
+func (m *DatabaseMaintenanceManager) ReturnsChildJobs() bool {
+	return true
+}

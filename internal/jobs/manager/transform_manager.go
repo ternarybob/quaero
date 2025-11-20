@@ -129,6 +129,11 @@ func (m *TransformManager) GetManagerType() string {
 	return "transform"
 }
 
+// ReturnsChildJobs returns false since transform is synchronous
+func (m *TransformManager) ReturnsChildJobs() bool {
+	return false
+}
+
 // TransformConfig represents configuration for transform steps
 type TransformConfig struct {
 	InputFormat  string `json:"input_format"`  // e.g., "html"

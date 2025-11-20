@@ -67,6 +67,7 @@ func (h *SystemLogsHandler) GetLogContentHandler(w http.ResponseWriter, r *http.
 		levels = strings.Split(levelsStr, ",")
 	}
 
+	// Use arbor service to get log content with correct directory path
 	entries, err := h.service.GetLogContent(filename, limit, levels)
 	if err != nil {
 		h.logger.Error().Err(err).Str("filename", filename).Msg("Failed to get log content")

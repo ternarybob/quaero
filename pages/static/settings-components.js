@@ -977,6 +977,7 @@ document.addEventListener('alpine:init', () => {
         },
 
         getLevelClass(level) {
+            console.log('getLevelClass', level);
             if (!level) return 'text-gray';
             const levelUpper = level.toUpperCase();
             if (levelUpper === 'ERR' || levelUpper === 'ERROR') return 'text-error';

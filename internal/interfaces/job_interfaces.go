@@ -19,6 +19,10 @@ type StepManager interface {
 	// GetManagerType returns the action type this manager handles (e.g., 'crawl', 'agent',
 	// 'database_maintenance', 'transform', 'reindex', 'places_search')
 	GetManagerType() string
+
+	// ReturnsChildJobs returns true if this manager creates asynchronous child jobs that need monitoring.
+	// Returns false if the manager performs work synchronously or doesn't create child jobs.
+	ReturnsChildJobs() bool
 }
 
 // JobMonitor monitors parent job progress and aggregates child job statistics.

@@ -237,6 +237,11 @@ func (m *PlacesSearchManager) GetManagerType() string {
 	return "places_search"
 }
 
+// ReturnsChildJobs returns false since places search is synchronous
+func (m *PlacesSearchManager) ReturnsChildJobs() bool {
+	return false
+}
+
 // createPlaceDocuments creates individual documents for each place in the search results
 func (m *PlacesSearchManager) createPlaceDocuments(result *models.PlacesSearchResult, jobID string, tags []string) ([]*models.Document, error) {
 	docs := make([]*models.Document, 0, len(result.Places))

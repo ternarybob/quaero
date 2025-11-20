@@ -161,6 +161,11 @@ func (m *AgentManager) GetManagerType() string {
 	return "agent"
 }
 
+// ReturnsChildJobs returns true since agent creates child jobs for each document
+func (m *AgentManager) ReturnsChildJobs() bool {
+	return true
+}
+
 // queryDocuments queries documents to process based on job definition and filter
 func (m *AgentManager) queryDocuments(ctx context.Context, jobDef *models.JobDefinition, filter map[string]interface{}) ([]*models.Document, error) {
 	// Build search options based on job definition and filter
