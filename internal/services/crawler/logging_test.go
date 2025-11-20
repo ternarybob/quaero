@@ -43,7 +43,7 @@ func TestCrawlerServiceLogging(t *testing.T) {
 
 	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
 	queueManager := &mockQueueManager{}
-	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
+	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, nil, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {
@@ -165,7 +165,7 @@ func TestCrawlerLoggingWithFollowLinksDisabled(t *testing.T) {
 
 	// VERIFICATION COMMENT 2: Added mockQueueManager parameter (required after worker cleanup)
 	queueManager := &mockQueueManager{}
-	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, logger, config)
+	service := NewService(authService, authStorage, eventService, jobStorage, documentStorage, queueManager, nil, logger, config)
 
 	// Start service
 	if err := service.Start(); err != nil {

@@ -37,6 +37,11 @@ type JobModel struct {
 	Depth int `json:"depth"` // Depth in job tree (0 for root, 1 for direct children, etc.)
 }
 
+const (
+	SourceTypeGitHubActionLog = "github_action_log"
+	JobTypeGitHubActionLog    = "github_action_log"
+)
+
 // NewJobModel creates a new root job model
 func NewJobModel(jobType, name string, config, metadata map[string]interface{}) *JobModel {
 	return &JobModel{
@@ -52,11 +57,11 @@ func NewJobModel(jobType, name string, config, metadata map[string]interface{}) 
 }
 
 // NewChildJobModel creates a new child job model
-func NewChildJobModel(parentID, jobType, name string, config, metadata map[string]interface{}, depth int) *JobModel {
+func NewChildJobModel(parentID string, jobType JobType, name string, config, metadata map[string]interface{}, depth int) *JobModel {
 	return &JobModel{
 		ID:        uuid.New().String(),
 		ParentID:  &parentID,
-		Type:      jobType,
+		Type:      string(jobType),
 		Name:      name,
 		Config:    config,
 		Metadata:  metadata,

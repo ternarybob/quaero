@@ -29,6 +29,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
 	"github.com/ternarybob/quaero/internal/services/config"
+	"github.com/ternarybob/quaero/internal/services/connectors"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/documents"
 	"github.com/ternarybob/quaero/internal/services/events"
@@ -105,6 +106,9 @@ type App struct {
 	// Config service
 	ConfigService interfaces.ConfigService
 
+	// Connector service
+	ConnectorService interfaces.ConnectorService
+
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
@@ -121,6 +125,7 @@ type App struct {
 	PageHandler          *handlers.PageHandler
 	JobDefinitionHandler *handlers.JobDefinitionHandler
 	SystemLogsHandler    *handlers.SystemLogsHandler
+	ConnectorHandler     *handlers.ConnectorHandler
 }
 
 // New initializes the application with all dependencies
@@ -412,6 +417,13 @@ func (a *App) initServices() error {
 	}
 	a.Logger.Info().Msg("Config service initialized with dynamic key injection")
 
+	// 5.13. Initialize connector service
+	a.ConnectorService = connectors.NewService(
+		a.StorageManager.DB().(*sql.DB),
+		a.Logger,
+	)
+	a.Logger.Info().Msg("Connector service initialized")
+
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
 		a.StorageManager.AuthStorage(),
@@ -422,7 +434,7 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service with queue manager for job enqueueing
-	a.CrawlerService = crawler.NewService(a.AuthService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.Logger, a.Config)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.ConnectorService, a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -443,6 +455,17 @@ func (a *App) initServices() error {
 	)
 	jobProcessor.RegisterExecutor(crawlerWorker)
 	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
+
+	// Register GitHub Log worker
+	githubLogWorker := worker.NewGitHubLogWorker(
+		a.ConnectorService,
+		jobMgr,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	jobProcessor.RegisterExecutor(githubLogWorker)
+	a.Logger.Info().Msg("GitHub Log worker registered for job type: github_action_log")
 
 	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
@@ -677,6 +700,9 @@ func (a *App) initHandlers() error {
 
 	// Initialize config handler with ConfigService for dynamic key injection
 	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)
+
+	// Initialize connector handler
+	a.ConnectorHandler = handlers.NewConnectorHandler(a.ConnectorService, a.Logger)
 
 	// Initialize page handler for serving HTML templates
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)

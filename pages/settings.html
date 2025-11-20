@@ -39,6 +39,12 @@
                                 Authentication
                             </a>
                         </li>
+                        <li class="nav-item" :class="{ 'active': activeSection === 'connectors' }">
+                            <a href="#" @click.prevent="selectSection('connectors')">
+                                <i class="icon icon-link"></i>
+                                Connectors
+                            </a>
+                        </li>
                         <li class="nav-item" :class="{ 'active': activeSection === 'config' }">
                             <a href="#" @click.prevent="selectSection('config')">
                                 <i class="icon icon-apps"></i>

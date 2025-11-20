@@ -138,6 +138,18 @@ CREATE TABLE IF NOT EXISTS job_logs (
 CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_logs_level ON job_logs(level, created_at DESC);
 
+-- Connectors table for external service connections
+CREATE TABLE IF NOT EXISTS connectors (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	type TEXT NOT NULL,
+	config TEXT NOT NULL, -- JSON configuration
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_connectors_type ON connectors(type);
+
 
 
 -- Job settings table for persisting scheduler job configurations

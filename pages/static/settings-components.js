@@ -292,7 +292,7 @@ document.addEventListener('alpine:init', () => {
         loadedSections: new Set(),
         activeSection: 'auth-apikeys',
         defaultSection: 'auth-apikeys',
-        validSections: ['auth-apikeys', 'auth-cookies', 'config', 'danger', 'status', 'logs'],
+        validSections: ['auth-apikeys', 'auth-cookies', 'connectors', 'config', 'danger', 'status', 'logs'],
 
         init() {
             window.debugLog('SettingsNavigation', 'Initializing component');
@@ -856,6 +856,88 @@ document.addEventListener('alpine:init', () => {
 
         getDescription(apiKey) {
             return apiKey.description || '-';
+        }
+    }));
+
+    // Connectors Component
+    Alpine.data('connectors', () => ({
+        connectors: [],
+        isLoading: false,
+        isSaving: false,
+        deleting: null,
+        error: null,
+        formData: {
+            name: '',
+            type: 'github',
+            config: {
+                token: ''
+            }
+        },
+
+        init() {
+            this.loadConnectors();
+        },
+
+        get isValid() {
+            if (!this.formData.name) return false;
+            if (this.formData.type === 'github' && !this.formData.config.token) return false;
+            return true;
+        },
+
+        async loadConnectors() {
+            this.isLoading = true;
+            this.error = null;
+            try {
+                const response = await fetch('/api/connectors');
+                if (!response.ok) throw new Error('Failed to load connectors');
+                this.connectors = await response.json();
+            } catch (e) {
+                this.error = e.message;
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async createConnector() {
+            if (!this.isValid) return;
+            this.isSaving = true;
+            this.error = null;
+            try {
+                const response = await fetch('/api/connectors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.formData)
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Failed to create connector');
+                }
+                await this.loadConnectors();
+                this.formData.name = '';
+                this.formData.config.token = '';
+                if (window.showNotification) window.showNotification('Connector created successfully', 'success');
+            } catch (e) {
+                this.error = e.message;
+                if (window.showNotification) window.showNotification(e.message, 'error');
+            } finally {
+                this.isSaving = false;
+            }
+        },
+
+        async deleteConnector(id, name) {
+            if (!confirm(`Are you sure you want to delete connector "${name}"?`)) return;
+            this.deleting = id;
+            try {
+                const response = await fetch(`/api/connectors/${id}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('Failed to delete connector');
+                await this.loadConnectors();
+                if (window.showNotification) window.showNotification('Connector deleted successfully', 'success');
+            } catch (e) {
+                this.error = e.message;
+                if (window.showNotification) window.showNotification(e.message, 'error');
+            } finally {
+                this.deleting = null;
+            }
         }
     }));
 

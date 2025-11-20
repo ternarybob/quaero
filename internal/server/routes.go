@@ -89,6 +89,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/kv", s.handleKVRoute)   // GET (list), POST (create)
 	mux.HandleFunc("/api/kv/", s.handleKVRoutes) // GET/PUT/DELETE /{key}
 
+	// API routes - Connectors
+	mux.HandleFunc("/api/connectors", s.handleConnectorsRoute)
+	mux.HandleFunc("/api/connectors/", s.handleConnectorRoutes)
+
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
@@ -225,6 +229,23 @@ func (s *Server) handleKVRoutes(w http.ResponseWriter, r *http.Request) {
 		s.app.KVHandler.GetKVHandler,
 		s.app.KVHandler.UpdateKVHandler,
 		s.app.KVHandler.DeleteKVHandler,
+	)
+}
+
+// handleConnectorsRoute routes /api/connectors requests (list and create)
+func (s *Server) handleConnectorsRoute(w http.ResponseWriter, r *http.Request) {
+	RouteResourceCollection(w, r,
+		s.app.ConnectorHandler.ListConnectorsHandler,
+		s.app.ConnectorHandler.CreateConnectorHandler,
+	)
+}
+
+// handleConnectorRoutes routes /api/connectors/{id} requests
+func (s *Server) handleConnectorRoutes(w http.ResponseWriter, r *http.Request) {
+	RouteResourceItem(w, r,
+		nil, // Get not exposed yet
+		nil, // Update not exposed yet
+		s.app.ConnectorHandler.DeleteConnectorHandler,
 	)
 }
 

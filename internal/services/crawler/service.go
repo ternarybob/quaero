@@ -26,10 +26,11 @@ import (
 
 // Source type constants (moved from deleted models/source.go)
 const (
-	SourceTypeJira       = "jira"
-	SourceTypeConfluence = "confluence"
-	SourceTypeGithub     = "github"
-	SourceTypeWeb        = "web" // Generic web crawler for arbitrary websites
+	SourceTypeJira            = "jira"
+	SourceTypeConfluence      = "confluence"
+	SourceTypeGithub          = "github"
+	SourceTypeGitHubActionLog = "github_action_log"
+	SourceTypeWeb             = "web" // Generic web crawler for arbitrary websites
 )
 
 // ============================================================================
@@ -109,14 +110,15 @@ const (
 // Worker management has been migrated to queue.WorkerPool
 // Job execution is handled by queue-based job types (internal/jobs/types/crawler.go)
 type Service struct {
-	authService     interfaces.AuthService
-	authStorage     interfaces.AuthStorage
-	eventService    interfaces.EventService
-	jobStorage      interfaces.JobStorage
-	documentStorage interfaces.DocumentStorage // Used for immediate document persistence during crawling
-	queueManager    interfaces.QueueManager    // Replaces custom URLQueue with goqite-backed queue
-	logger          arbor.ILogger
-	config          *common.Config
+	authService      interfaces.AuthService
+	authStorage      interfaces.AuthStorage
+	eventService     interfaces.EventService
+	jobStorage       interfaces.JobStorage
+	documentStorage  interfaces.DocumentStorage // Used for immediate document persistence during crawling
+	queueManager     interfaces.QueueManager    // Replaces custom URLQueue with goqite-backed queue
+	connectorService interfaces.ConnectorService
+	logger           arbor.ILogger
+	config           *common.Config
 
 	// ChromeDP browser pool for efficient JavaScript rendering
 	chromeDPPool *ChromeDPPool
@@ -132,7 +134,7 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, logger arbor.ILogger, config *common.Config) *Service {
+func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, connectorService interfaces.ConnectorService, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create ChromeDP pool configuration from app config
@@ -150,20 +152,21 @@ func NewService(authService interfaces.AuthService, authStorage interfaces.AuthS
 	chromeDPPool := NewChromeDPPool(poolConfig, logger)
 
 	s := &Service{
-		authService:     authService,
-		authStorage:     authStorage,
-		eventService:    eventService,
-		jobStorage:      jobStorage,
-		documentStorage: documentStorage,
-		queueManager:    queueManager,
-		logger:          logger,
-		config:          config,
-		chromeDPPool:    chromeDPPool,
-		activeJobs:      make(map[string]*models.Job),
-		jobResults:      make(map[string][]*CrawlResult),
-		jobClients:      make(map[string]*http.Client),
-		ctx:             ctx,
-		cancel:          cancel,
+		authService:      authService,
+		authStorage:      authStorage,
+		eventService:     eventService,
+		jobStorage:       jobStorage,
+		documentStorage:  documentStorage,
+		queueManager:     queueManager,
+		connectorService: connectorService,
+		logger:           logger,
+		config:           config,
+		chromeDPPool:     chromeDPPool,
+		activeJobs:       make(map[string]*models.Job),
+		jobResults:       make(map[string][]*CrawlResult),
+		jobClients:       make(map[string]*http.Client),
+		ctx:              ctx,
+		cancel:           cancel,
 	}
 
 	return s
@@ -289,10 +292,11 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 	// Validate source type - support both platform-specific and generic web crawling
 	validSourceTypes := map[string]bool{
-		SourceTypeJira:       true,
-		SourceTypeConfluence: true,
-		SourceTypeGithub:     true,
-		SourceTypeWeb:        true, // Generic web crawler for arbitrary websites
+		SourceTypeJira:            true,
+		SourceTypeConfluence:      true,
+		SourceTypeGithub:          true,
+		SourceTypeGitHubActionLog: true,
+		SourceTypeWeb:             true, // Generic web crawler for arbitrary websites
 	}
 	if !validSourceTypes[sourceType] {
 		err := fmt.Errorf("invalid source type: %s (must be one of: jira, confluence, github, web)", sourceType)
@@ -570,13 +574,19 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 		childMetadata["seed_index"] = i
 
+		// Determine job type based on source type
+		jobType := string(models.JobTypeCrawlerURL)
+		if sourceType == SourceTypeGitHubActionLog {
+			jobType = models.JobTypeGitHubActionLog
+		}
+
 		// Create child JobModel
 		// For existing parent jobs (from JobExecutor), children are at depth 1
 		// For new parent jobs (standalone), children are also at depth 1
 		childJobModel := &models.JobModel{
 			ID:        childID,
 			ParentID:  &jobID,
-			Type:      string(models.JobTypeCrawlerURL),
+			Type:      jobType,
 			Name:      fmt.Sprintf("URL: %s", seedURL),
 			Config:    childConfig,
 			Metadata:  childMetadata,
