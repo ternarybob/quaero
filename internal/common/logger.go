@@ -126,7 +126,6 @@ func createWriterConfig(config *Config, writerType models.LogWriterType, filenam
 		Type:             writerType,
 		FileName:         filename,
 		TimeFormat:       timeFormat,
-		TextOutput:       true,
 		DisableTimestamp: false,
 		MaxSize:          100 * 1024 * 1024, // 100 MB (only used for file writer)
 		MaxBackups:       3,                 // (only used for file writer)

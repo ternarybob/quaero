@@ -5,7 +5,7 @@
 // This file loads connector configurations from TOML files at startup
 // and stores them in the connectors table via ConnectorService.
 //
-// Default storage location: ./bin/connectors/ directory
+// Default storage location: ./connectors/ directory
 // File format: Any *.toml file in the connectors directory
 //
 // TOML file format (section name = connector name):
@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/quaero/internal/models"
@@ -45,7 +46,7 @@ type ConnectorFile struct {
 // LoadConnectorsFromFiles loads connectors from TOML files in the specified directory
 // and stores them via the ConnectorService. This is called during startup.
 //
-// Default storage location: ./bin/connectors/ directory
+// Default storage location: ./connectors/ directory
 // The function is idempotent - uses upsert strategy via ConnectorService.
 // Duplicate names (case-insensitive) are detected and logged with warnings.
 func (m *Manager) LoadConnectorsFromFiles(ctx context.Context, dirPath string) error {
@@ -267,15 +268,17 @@ func (m *Manager) getConnectorByName(ctx context.Context, name string) (*models.
 
 // createConnector creates a new connector in the database
 func (m *Manager) createConnector(ctx context.Context, name string, connType models.ConnectorType, config json.RawMessage) error {
+	now := time.Now().Unix()
 	query := `INSERT INTO connectors (id, name, type, config, created_at, updated_at) 
-			  VALUES (lower(hex(randomblob(16))), ?, ?, ?, datetime('now'), datetime('now'))`
-	_, err := m.db.DB().ExecContext(ctx, query, name, string(connType), config)
+			  VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)`
+	_, err := m.db.DB().ExecContext(ctx, query, name, string(connType), config, now, now)
 	return err
 }
 
 // updateConnector updates an existing connector in the database
 func (m *Manager) updateConnector(ctx context.Context, id string, name string, connType models.ConnectorType, config json.RawMessage) error {
-	query := `UPDATE connectors SET name = ?, type = ?, config = ?, updated_at = datetime('now') WHERE id = ?`
-	_, err := m.db.DB().ExecContext(ctx, query, name, string(connType), config, id)
+	now := time.Now().Unix()
+	query := `UPDATE connectors SET name = ?, type = ?, config = ?, updated_at = ? WHERE id = ?`
+	_, err := m.db.DB().ExecContext(ctx, query, name, string(connType), config, now, id)
 	return err
 }

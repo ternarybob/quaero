@@ -369,33 +369,10 @@ function Deploy-Files {
         Copy-Item -Path $pagesSourcePath -Destination $pagesDestPath -Recurse
     }
 
-    # Deploy job-definitions directory (only new files, no override)
-    $jobDefsSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\job-definitions"
+    # Create job-definitions directory if it doesn't exist
     $jobDefsDestPath = Join-Path -Path $BinDirectory -ChildPath "job-definitions"
-
-    if (Test-Path $jobDefsSourcePath) {
-        if (-not (Test-Path $jobDefsDestPath)) {
-            New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
-        }
-
-        # Copy files without overriding existing ones
-        $sourceFiles = Get-ChildItem -Path $jobDefsSourcePath -File
-        $copiedCount = 0
-        $skippedCount = 0
-
-        foreach ($file in $sourceFiles) {
-            $destFile = Join-Path -Path $jobDefsDestPath -ChildPath $file.Name
-            if (-not (Test-Path $destFile)) {
-                Copy-Item -Path $file.FullName -Destination $destFile
-                $copiedCount++
-            } else {
-                $skippedCount++
-            }
-        }
-        
-        if ($copiedCount -gt 0 -or $skippedCount -gt 0) {
-            Write-Host "  Job definitions: $copiedCount copied, $skippedCount skipped (existing)" -ForegroundColor Gray
-        }
+    if (-not (Test-Path $jobDefsDestPath)) {
+        New-Item -ItemType Directory -Path $jobDefsDestPath -Force | Out-Null
     }
 
     # Deploy auth directory (only new files, no override)
@@ -417,43 +394,12 @@ function Deploy-Files {
         }
     }
 
-    # Deploy variables directory (only new files, no override)
-    $variablesSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\variables"
+    # Create variables directory if it doesn't exist
     $variablesDestPath = Join-Path -Path $BinDirectory -ChildPath "variables"
-
-    if (Test-Path $variablesSourcePath) {
-        if (-not (Test-Path $variablesDestPath)) {
-            New-Item -ItemType Directory -Path $variablesDestPath -Force | Out-Null
-        }
-
-        # Copy files without overriding existing ones
-        $sourceFiles = Get-ChildItem -Path $variablesSourcePath -File
-        foreach ($file in $sourceFiles) {
-            $destFile = Join-Path -Path $variablesDestPath -ChildPath $file.Name
-            if (-not (Test-Path $destFile)) {
-                Copy-Item -Path $file.FullName -Destination $destFile
-            }
-        }
+    if (-not (Test-Path $variablesDestPath)) {
+        New-Item -ItemType Directory -Path $variablesDestPath -Force | Out-Null
     }
 
-    # Deploy connectors directory (only new files, no override)
-    $connectorsSourcePath = Join-Path -Path $ProjectRoot -ChildPath "deployments\local\connectors"
-    $connectorsDestPath = Join-Path -Path $BinDirectory -ChildPath "connectors"
-
-    if (Test-Path $connectorsSourcePath) {
-        if (-not (Test-Path $connectorsDestPath)) {
-            New-Item -ItemType Directory -Path $connectorsDestPath -Force | Out-Null
-        }
-
-        # Copy files without overriding existing ones
-        $sourceFiles = Get-ChildItem -Path $connectorsSourcePath -File
-        foreach ($file in $sourceFiles) {
-            $destFile = Join-Path -Path $connectorsDestPath -ChildPath $file.Name
-            if (-not (Test-Path $destFile)) {
-                Copy-Item -Path $file.FullName -Destination $destFile
-            }
-        }
-    }
 }
 
 # ========== END HELPER FUNCTIONS ==========

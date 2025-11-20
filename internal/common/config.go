@@ -26,7 +26,7 @@ type Config struct {
 	Jobs        JobsConfig         `toml:"jobs"`
 	Auth        AuthDirConfig      `toml:"auth"`
 	Variables   KeysDirConfig      `toml:"variables"`  // Variables directory configuration (./keys/*.toml) for key/value pairs
-	Connectors  ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./bin/connectors/*.toml)
+	Connectors  ConnectorDirConfig `toml:"connectors"` // Connectors directory configuration (./connectors/*.toml)
 	Crawler     CrawlerConfig      `toml:"crawler"`
 	Search      SearchConfig       `toml:"search"`
 	WebSocket   WebSocketConfig    `toml:"websocket"`

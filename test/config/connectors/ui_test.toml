@@ -1,0 +1,3 @@
+[ui-test-connector]
+type = "github"
+token = "ghp_test_token_12345"

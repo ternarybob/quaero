@@ -676,6 +676,30 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Variables directory copied from %s to: %s\n", variablesSourcePath, variablesDestPath)
 
+	// Copy connectors directory to bin/bin/connectors (to match config.go default: ./bin/connectors)
+	// Source is test/config/connectors
+	connectorsSourcePath, err := filepath.Abs("../config/connectors")
+	if err != nil {
+		return fmt.Errorf("failed to resolve connectors source path: %w", err)
+	}
+
+	// Destination is bin/bin/connectors inside the build output directory
+	// This ensures that when running from test/bin/, the app finds connectors at ./bin/connectors
+	connectorsDestPath := filepath.Join(binDir, "bin", "connectors")
+
+	// Remove existing connectors directory if it exists
+	if _, err := os.Stat(connectorsDestPath); err == nil {
+		if err := os.RemoveAll(connectorsDestPath); err != nil {
+			return fmt.Errorf("failed to remove existing connectors directory: %w", err)
+		}
+	}
+
+	// Copy connectors directory
+	if err := env.copyDir(connectorsSourcePath, connectorsDestPath); err != nil {
+		return fmt.Errorf("failed to copy connectors directory: %w", err)
+	}
+	fmt.Fprintf(env.LogFile, "Connectors directory copied from %s to: %s\n", connectorsSourcePath, connectorsDestPath)
+
 	return nil
 }
 

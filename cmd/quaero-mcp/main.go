@@ -31,7 +31,6 @@ func main() {
 	logger := arbor.NewLogger().WithConsoleWriter(arbor_models.WriterConfiguration{
 		Type:             arbor_models.LogWriterTypeConsole,
 		TimeFormat:       "15:04:05",
-		TextOutput:       true,
 		DisableTimestamp: false,
 	}).WithLevelFromString("warn") // Minimal logging to avoid cluttering MCP stdio
 
