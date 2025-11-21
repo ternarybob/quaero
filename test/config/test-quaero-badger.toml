@@ -1,0 +1,12 @@
+# =============================================================================
+# Badger Storage Test Configuration
+# =============================================================================
+# This configuration overrides the base test config to use Badger storage.
+# It is used by tests that require BadgerDB instead of SQLite.
+# =============================================================================
+
+[storage]
+type = "badger"
+
+[storage.badger]
+path = "./data/test-badger"  # Test-specific path

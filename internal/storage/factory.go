@@ -6,6 +6,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/storage/badger"
 	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
@@ -14,6 +15,8 @@ func NewStorageManager(logger arbor.ILogger, config *common.Config) (interfaces.
 	switch config.Storage.Type {
 	case "sqlite", "":
 		return sqlite.NewManager(logger, &config.Storage.SQLite)
+	case "badger":
+		return badger.NewManager(logger, &config.Storage.Badger)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", config.Storage.Type)
 	}

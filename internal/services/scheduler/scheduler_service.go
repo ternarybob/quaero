@@ -7,8 +7,9 @@ package scheduler
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,10 +44,10 @@ type Service struct {
 	jobStorage     interfaces.JobStorage // For stale job detection
 	cron           *cron.Cron
 	logger         arbor.ILogger
-	db             *sql.DB    // Database for persisting job settings
-	mu             sync.Mutex // Protects isProcessing
-	jobMu          sync.Mutex // Protects jobs map
-	globalMu       sync.Mutex // Prevents concurrent job execution
+	kvStorage      interfaces.KeyValueStorage // For persisting job settings
+	mu             sync.Mutex                 // Protects isProcessing
+	jobMu          sync.Mutex                 // Protects jobs map
+	globalMu       sync.Mutex                 // Prevents concurrent job execution
 	jobs           map[string]*jobEntry
 	isProcessing   bool
 	running        bool
@@ -67,7 +68,7 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 
 // NewServiceWithDB creates a new scheduler service with database persistence
 // TODO Phase 8-11: Re-enable proper jobExecutor type once job system is re-integrated
-func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, db *sql.DB, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
+func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, kvStorage interfaces.KeyValueStorage, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
 	return &Service{
 		eventService:   eventService,
 		crawlerService: crawlerService,
@@ -76,7 +77,7 @@ func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger
 		jobExecutor:    jobExecutor, // Temporarily accepts nil during queue refactor
 		cron:           cron.New(),
 		logger:         logger,
-		db:             db,
+		kvStorage:      kvStorage,
 		jobs:           make(map[string]*jobEntry),
 	}
 }
@@ -686,31 +687,40 @@ func (s *Service) runScheduledTask() {
 	s.logger.Info().Msg("✅ >>> SCHEDULER: Collection completed successfully")
 }
 
-// saveJobSettings persists job schedule, description, enabled status, and last run timestamp to database
+// JobSettings represents persisted job configuration
+type JobSettings struct {
+	JobName     string     `json:"job_name"`
+	Schedule    string     `json:"schedule"`
+	Description string     `json:"description"`
+	Enabled     bool       `json:"enabled"`
+	LastRun     *time.Time `json:"last_run"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// saveJobSettings persists job schedule, description, enabled status, and last run timestamp to KV storage
 func (s *Service) saveJobSettings(name string, schedule string, description string, enabled bool, lastRun *time.Time) error {
-	if s.db == nil {
-		return nil // No database available, skip persistence
+	if s.kvStorage == nil {
+		return nil // No KV storage available, skip persistence
 	}
 
-	// Convert lastRun to Unix timestamp or NULL
-	var lastRunUnix interface{}
-	if lastRun != nil {
-		lastRunUnix = lastRun.Unix()
+	settings := JobSettings{
+		JobName:     name,
+		Schedule:    schedule,
+		Description: description,
+		Enabled:     enabled,
+		LastRun:     lastRun,
+		UpdatedAt:   time.Now(),
 	}
 
-	query := `
-		INSERT INTO job_settings (job_name, schedule, description, enabled, last_run, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(job_name) DO UPDATE SET
-			schedule = excluded.schedule,
-			description = excluded.description,
-			enabled = excluded.enabled,
-			last_run = excluded.last_run,
-			updated_at = excluded.updated_at
-	`
-
-	_, err := s.db.Exec(query, name, schedule, description, enabled, lastRunUnix, time.Now().Unix())
+	// Serialize to JSON
+	data, err := json.Marshal(settings)
 	if err != nil {
+		return fmt.Errorf("failed to marshal job settings: %w", err)
+	}
+
+	// Store in KV with prefix
+	key := fmt.Sprintf("job_settings:%s", name)
+	if err := s.kvStorage.Set(context.Background(), key, string(data), "Job scheduler settings"); err != nil {
 		return fmt.Errorf("failed to save job settings: %w", err)
 	}
 
@@ -719,36 +729,45 @@ func (s *Service) saveJobSettings(name string, schedule string, description stri
 		Str("schedule", schedule).
 		Str("description", description).
 		Str("enabled", fmt.Sprintf("%t", enabled)).
-		Msg("Job settings persisted to database")
+		Msg("Job settings persisted to KV storage")
 
 	return nil
 }
 
-// LoadJobSettings loads job settings from database and applies them
+// LoadJobSettings loads job settings from KV storage and applies them
 // Should be called after jobs are registered but before scheduler starts
 func (s *Service) LoadJobSettings() error {
-	if s.db == nil {
-		s.logger.Debug().Msg("No database available, skipping job settings load")
+	if s.kvStorage == nil {
+		s.logger.Debug().Msg("No KV storage available, skipping job settings load")
 		return nil
 	}
 
-	query := `SELECT job_name, schedule, description, enabled, last_run FROM job_settings`
-	rows, err := s.db.Query(query)
+	ctx := context.Background()
+	// List all keys, filter for job_settings prefix
+	// This is inefficient if KV store is huge, but fine for typical config size
+	// Ideally KV storage would support prefix scan
+	allKeys, err := s.kvStorage.GetAll(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load job settings: %w", err)
 	}
-	defer rows.Close()
 
 	settingsLoaded := 0
-	for rows.Next() {
-		var name, schedule string
-		var description sql.NullString
-		var enabled bool
-		var lastRunUnix sql.NullInt64
 
-		if err := rows.Scan(&name, &schedule, &description, &enabled, &lastRunUnix); err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to scan job setting")
+	for key, value := range allKeys {
+		if !strings.HasPrefix(key, "job_settings:") {
 			continue
+		}
+
+		var settings JobSettings
+		if err := json.Unmarshal([]byte(value), &settings); err != nil {
+			s.logger.Warn().Err(err).Str("key", key).Msg("Failed to unmarshal job settings")
+			continue
+		}
+
+		name := settings.JobName
+		if name == "" {
+			// Fallback to extracting name from key if not in JSON (legacy support)
+			name = strings.TrimPrefix(key, "job_settings:")
 		}
 
 		// Check if job exists
@@ -762,39 +781,38 @@ func (s *Service) LoadJobSettings() error {
 		}
 
 		// Restore last_run timestamp
-		if lastRunUnix.Valid {
-			lastRun := time.Unix(lastRunUnix.Int64, 0)
+		if settings.LastRun != nil {
 			s.jobMu.Lock()
-			entry.lastRun = &lastRun
+			entry.lastRun = settings.LastRun
 			s.jobMu.Unlock()
 		}
 
 		// Update description if provided and different
-		if description.Valid && entry.description != description.String {
+		if settings.Description != "" && entry.description != settings.Description {
 			s.jobMu.Lock()
-			entry.description = description.String
+			entry.description = settings.Description
 			s.jobMu.Unlock()
 			settingsLoaded++
 		}
 
 		// Update schedule if different
-		if entry.schedule != schedule {
-			if err := s.UpdateJobSchedule(name, schedule); err != nil {
-				s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to update job schedule from database")
+		if entry.schedule != settings.Schedule {
+			if err := s.UpdateJobSchedule(name, settings.Schedule); err != nil {
+				s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to update job schedule from storage")
 			} else {
 				settingsLoaded++
 			}
 		}
 
 		// Update enabled status if different
-		if entry.enabled != enabled {
-			if enabled {
+		if entry.enabled != settings.Enabled {
+			if settings.Enabled {
 				if err := s.EnableJob(name); err != nil {
-					s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to enable job from database")
+					s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to enable job from storage")
 				}
 			} else {
 				if err := s.DisableJob(name); err != nil {
-					s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to disable job from database")
+					s.logger.Error().Err(err).Str("job_name", name).Msg("Failed to disable job from storage")
 				}
 			}
 			settingsLoaded++
@@ -802,7 +820,7 @@ func (s *Service) LoadJobSettings() error {
 	}
 
 	if settingsLoaded > 0 {
-		s.logger.Info().Int("count", settingsLoaded).Msg("Loaded job settings from database")
+		s.logger.Info().Int("count", settingsLoaded).Msg("Loaded job settings from storage")
 	}
 
 	return nil

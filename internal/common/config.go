@@ -48,10 +48,15 @@ type QueueConfig struct {
 }
 
 type StorageConfig struct {
-	Type       string           `toml:"type"` // "sqlite", "ravendb", etc.
+	Type       string           `toml:"type"` // "sqlite", "ravendb", "badger"
 	SQLite     SQLiteConfig     `toml:"sqlite"`
+	Badger     BadgerConfig     `toml:"badger"`
 	RavenDB    RavenDBConfig    `toml:"ravendb"`
 	Filesystem FilesystemConfig `toml:"filesystem"`
+}
+
+type BadgerConfig struct {
+	Path string `toml:"path"` // Database directory path
 }
 
 type SQLiteConfig struct {
@@ -189,7 +194,7 @@ func NewDefaultConfig() *Config {
 			QueueName:         "quaero_jobs",
 		},
 		Storage: StorageConfig{
-			Type: "sqlite",
+			Type: "badger",
 			SQLite: SQLiteConfig{
 				Path:          "./data/quaero.db",
 				EnableFTS5:    true,          // Full-text search for keyword queries
@@ -197,6 +202,9 @@ func NewDefaultConfig() *Config {
 				WALMode:       true,          // Write-Ahead Logging for better concurrency
 				BusyTimeoutMS: 10000,         // 10 seconds for high-concurrency job processing
 				Environment:   "development", // Default to development mode
+			},
+			Badger: BadgerConfig{
+				Path: "./data/quaero.badger",
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",
@@ -398,6 +406,9 @@ func applyEnvOverrides(config *Config) {
 	}
 	if sqlitePath := os.Getenv("QUAERO_SQLITE_PATH"); sqlitePath != "" {
 		config.Storage.SQLite.Path = sqlitePath
+	}
+	if badgerPath := os.Getenv("QUAERO_BADGER_PATH"); badgerPath != "" {
+		config.Storage.Badger.Path = badgerPath
 	}
 
 	// Logging configuration

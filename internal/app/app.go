@@ -109,6 +109,10 @@ type App struct {
 	// Connector service
 	ConnectorService interfaces.ConnectorService
 
+	// SQLite DB (required for queue, jobs, connectors even if main storage is Badger)
+	SQLiteDB      *sql.DB
+	SQLiteDBCloser interface{ Close() error }
+
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
 	AuthHandler          *handlers.AuthHandler
@@ -384,7 +388,20 @@ func (a *App) initServices() error {
 	a.Logger.Info().Str("logs_dir", logsDir).Msg("System logs service initialized")
 
 	// 5.6. Initialize queue manager (goqite-backed)
-	queueMgr, err := queue.NewManager(a.StorageManager.DB().(*sql.DB), a.Config.Queue.QueueName)
+	// If main storage is not SQLite, we need to initialize a separate SQLite DB for the queue/jobs/connectors
+	if db, ok := a.StorageManager.DB().(*sql.DB); ok {
+		a.SQLiteDB = db
+	} else {
+		a.Logger.Info().Msg("Main storage is not SQLite, initializing separate SQLite DB for queue/jobs")
+		sqliteDB, err := sqlite.NewSQLiteDB(a.Logger, &a.Config.Storage.SQLite)
+		if err != nil {
+			return fmt.Errorf("failed to initialize SQLite: %w", err)
+		}
+		a.SQLiteDB = sqliteDB.DB()
+		a.SQLiteDBCloser = sqliteDB
+	}
+
+	queueMgr, err := queue.NewManager(a.SQLiteDB, a.Config.Queue.QueueName)
 	if err != nil {
 		return fmt.Errorf("failed to initialize queue manager: %w", err)
 	}
@@ -392,7 +409,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
 	// 5.8. Initialize job manager with event service for status change publishing
-	jobMgr := jobs.NewManager(a.StorageManager.DB().(*sql.DB), queueMgr, a.EventService)
+	jobMgr := jobs.NewManager(a.SQLiteDB, queueMgr, a.EventService)
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 
@@ -427,7 +444,7 @@ func (a *App) initServices() error {
 
 	// 5.13. Initialize connector service
 	a.ConnectorService = connectors.NewService(
-		a.StorageManager.DB().(*sql.DB),
+		a.SQLiteDB,
 		a.Logger,
 	)
 	a.Logger.Info().Msg("Connector service initialized")
@@ -487,7 +504,7 @@ func (a *App) initServices() error {
 
 	// Register database maintenance worker (ARCH-008)
 	dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
-		a.StorageManager.DB().(*sql.DB),
+		a.SQLiteDB,
 		jobMgr,
 		a.Logger,
 	)
@@ -609,7 +626,7 @@ func (a *App) initServices() error {
 	a.SchedulerService = scheduler.NewServiceWithDB(
 		a.EventService,
 		a.Logger,
-		a.StorageManager.DB().(*sql.DB),
+		a.StorageManager.KeyValueStorage(),
 		a.CrawlerService,
 		a.StorageManager.JobStorage(),
 		a.StorageManager.JobDefinitionStorage(),
@@ -717,10 +734,6 @@ func (a *App) initHandlers() error {
 
 	// Initialize job definition handler
 	// Note: JobExecutor and JobRegistry are nil during queue refactor, but handler can work without them
-	db, ok := a.StorageManager.DB().(*sql.DB)
-	if !ok {
-		return fmt.Errorf("storage manager DB is not *sql.DB")
-	}
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.JobStorage(),
@@ -728,7 +741,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
-		db,                                 // Pass *sql.DB for validation service
+		a.SQLiteDB,                         // Pass *sql.DB for validation service
 		a.Logger,
 	)
 
@@ -951,5 +964,15 @@ func (a *App) Close() error {
 		}
 		a.Logger.Info().Msg("Storage closed")
 	}
+
+	// Close separate SQLite DB if it exists
+	if a.SQLiteDBCloser != nil {
+		if err := a.SQLiteDBCloser.Close(); err != nil {
+			a.Logger.Warn().Err(err).Msg("Failed to close SQLite DB")
+		} else {
+			a.Logger.Info().Msg("SQLite DB closed")
+		}
+	}
+
 	return nil
 }
