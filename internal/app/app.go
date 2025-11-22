@@ -44,7 +44,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/timshannon/badgerhold/v4"
 )
 
 // App holds all application components and dependencies
@@ -346,12 +346,14 @@ func (a *App) initServices() error {
 
 	// 5.6. Initialize queue manager (Badger-backed)
 	// Obtain underlying Badger DB from storage manager
-	// Note: StorageManager.DB() returns interface{}, we assert to *badger.DB
-	// This assumes StorageManager is backed by Badger, which is enforced by config
-	badgerDB, ok := a.StorageManager.DB().(*badger.DB)
+	// StorageManager.DB() returns *badgerhold.Store, we need to extract the underlying *badger.DB
+	badgerStore, ok := a.StorageManager.DB().(*badgerhold.Store)
 	if !ok {
 		return fmt.Errorf("storage manager is not backed by BadgerDB (got %T)", a.StorageManager.DB())
 	}
+
+	// Extract underlying *badger.DB from BadgerHold wrapper
+	badgerDB := badgerStore.Badger()
 
 	queueMgr, err := queue.NewBadgerManager(
 		badgerDB,
