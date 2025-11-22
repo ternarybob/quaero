@@ -7,26 +7,13 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/storage/badger"
-	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 // NewStorageManager creates a new storage manager based on config
 func NewStorageManager(logger arbor.ILogger, config *common.Config) (interfaces.StorageManager, error) {
-	switch config.Storage.Type {
-	case "sqlite", "":
-		return sqlite.NewManager(logger, &config.Storage.SQLite)
-	case "badger":
-		return badger.NewManager(logger, &config.Storage.Badger)
-	default:
-		return nil, fmt.Errorf("unsupported storage type: %s", config.Storage.Type)
+	// Enforce Badger-only storage
+	if config.Storage.Type != "badger" && config.Storage.Type != "" {
+		return nil, fmt.Errorf("unsupported storage type: %s (only 'badger' is supported)", config.Storage.Type)
 	}
-}
-
-// NewAuthStorage creates a new Auth storage instance
-func NewAuthStorage(logger arbor.ILogger, config *common.Config) (interfaces.AuthStorage, error) {
-	manager, err := NewStorageManager(logger, config)
-	if err != nil {
-		return nil, err
-	}
-	return manager.AuthStorage(), nil
+	return badger.NewManager(logger, &config.Storage.Badger)
 }

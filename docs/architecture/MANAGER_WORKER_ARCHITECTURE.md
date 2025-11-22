@@ -23,9 +23,9 @@ This architecture provides:
 ```mermaid
 graph TB
     UI[Web UI] -->|Trigger Job| Manager[Job Manager]
-    Manager -->|Create Job Record| DB[(SQLite Jobs DB)]
+    Manager -->|Create Job Record| DB[(Badger Jobs DB)]
     Manager -->|CreateJob| StepMgr[Step Manager]
-    StepMgr -->|Enqueue Tasks| Queue[goqite Queue]
+    StepMgr -->|Enqueue Tasks| Queue[Badger Queue]
 
     Queue -->|Dequeue| Processor[Job Processor]
     Processor -->|Route by Type| Worker[Job Worker]
@@ -110,7 +110,7 @@ All 6 managers follow the same pattern, implementing the `StepManager` interface
 - **DatabaseMaintenanceManager** (`internal/jobs/manager/database_maintenance_manager.go`) - Orchestrates database vacuum, analyze, reindex, and optimize operations
 - **AgentManager** (`internal/jobs/manager/agent_manager.go`) - Orchestrates AI agent workflows for document processing (keyword extraction, summarization)
 - **TransformManager** (`internal/jobs/manager/transform_manager.go`) - Orchestrates HTML-to-markdown transformation for existing documents
-- **ReindexManager** (`internal/jobs/manager/reindex_manager.go`) - Orchestrates FTS5 full-text search index rebuilds
+- **ReindexManager** (`internal/jobs/manager/reindex_manager.go`) - Orchestrates full-text search index rebuilds
 - **PlacesSearchManager** (`internal/jobs/manager/places_search_manager.go`) - Orchestrates Google Places API searches and document creation
 
 Each manager creates a parent job and spawns child jobs specific to its domain.
@@ -312,8 +312,8 @@ sequenceDiagram
     participant Orchestrator as JobDefinitionOrchestrator
     participant Manager as Step Manager
     participant Service as Workflow Service
-    participant DB as SQLite DB
-    participant Queue as goqite Queue
+    participant DB as BadgerDB
+    participant Queue as Badger Queue
     participant Processor as Job Processor
     participant Worker as Job Worker
     participant Monitor as Job Monitor
@@ -327,7 +327,7 @@ sequenceDiagram
     loop For each step in jobDef.Steps
         Orchestrator->>Manager: CreateParentJob(step, jobDef, parentJobID)
         Manager->>Service: StartWorkflow(config, workItems)
-        Service->>DB: INSERT parent job (type=parent, status=pending)
+        Service->>DB: SaveJob (parent job)
         Service->>Queue: ENQUEUE child jobs (type=task)
         Service->>Monitor: StartMonitoring(parentJobModel)
         Monitor-->>WS: job_progress event
@@ -345,20 +345,20 @@ sequenceDiagram
         Processor->>Worker: Execute(jobModel)
         Worker->>Worker: Execute task via external service
         Worker->>Worker: Process results
-        Worker->>DB: INSERT result data
+        Worker->>DB: Save result data
         Worker-->>WS: result_saved event
         Worker->>Worker: Discover additional work
         Worker->>Queue: ENQUEUE subtasks (depth+1)
-        Worker->>DB: UPDATE job status=completed
+        Worker->>DB: UpdateJobStatus('completed')
         Worker-->>WS: job_status_change event
     end
 
     %% Phase 3: Progress Monitoring (Monitor Layer)
     loop Every 5 seconds
-        Monitor->>DB: SELECT child job statistics
+        Monitor->>DB: GetChildJobStats
         Monitor-->>WS: job_progress event
         alt All children complete
-            Monitor->>DB: UPDATE parent status=completed
+            Monitor->>DB: UpdateJobStatus('completed')
             Monitor-->>WS: job_progress (completed)
         end
     end
@@ -380,7 +380,7 @@ sequenceDiagram
 11. Handler returns parent job ID to UI
 
 #### Phase 2: Job Execution (Worker Layer)
-12. `JobProcessor` dequeues message from goqite via `Receive()` method (polling-based)
+12. `JobProcessor` dequeues message from queue via `Receive()` method (polling-based)
 13. Processor routes to appropriate `JobWorker` based on job type
 14. Worker executes task via external service
 15. Worker processes task results
@@ -470,7 +470,7 @@ Each worker implements the `JobWorker` interface and follows the execution patte
   - ✅ `database_maintenance_manager.go` - Database maintenance workflows
   - ✅ `agent_manager.go` - AI agent workflows
   - ✅ `transform_manager.go` - HTML→markdown transformation
-  - ✅ `reindex_manager.go` - FTS5 index rebuild
+  - ✅ `reindex_manager.go` - Search index rebuild
   - ✅ `places_search_manager.go` - Google Places API search
 - ✅ `internal/jobs/worker/` - 3 workers (execution, implement JobWorker)
   - ✅ `crawler_worker.go` - URL crawling execution
@@ -546,7 +546,7 @@ All managers followed the standardized transformation pattern:
 2. **DatabaseMaintenanceManager** - Database maintenance workflows (ARCH-004)
 3. **AgentManager** - AI agent workflows (ARCH-004)
 4. **TransformManager** - HTML→markdown transformation (ARCH-009)
-5. **ReindexManager** - FTS5 index rebuild (ARCH-009)
+5. **ReindexManager** - Search index rebuild (ARCH-009)
 6. **PlacesSearchManager** - Google Places API search (ARCH-009)
 
 **Import Path Updates:**
@@ -567,7 +567,7 @@ internal/
 │   │   ├── database_maintenance_manager.go # Database maintenance workflows
 │   │   ├── agent_manager.go              # AI agent workflows
 │   │   ├── transform_manager.go          # HTML→markdown transformation
-│   │   ├── reindex_manager.go            # FTS5 index rebuild
+│   │   ├── reindex_manager.go            # Search index rebuild
 │   │   └── places_search_manager.go      # Google Places API search
 │   ├── worker/                           # Workers (execution)
 │   │   ├── crawler_worker.go             # URL crawling execution
@@ -639,18 +639,11 @@ CREATE TABLE job_logs (
 );
 ```
 
-### Queue Table (goqite)
+### Queue Storage (Badger)
 
-```sql
-CREATE TABLE queue_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    message BLOB NOT NULL,             -- JSON-serialized queue.Message
-    timeout TIMESTAMP,
-    received INTEGER DEFAULT 0
-);
-```
+Queue messages are stored in BadgerDB with the following key structure:
+- `queue:{queue_name}:msg:{id}` - Message payload
+- `queue:{queue_name}:index:{visible_at}:{id}` - Visibility index for polling
 
 ## Configuration
 
@@ -927,11 +920,11 @@ cat bin/quaero.toml
 # Check monitor logs
 grep "Job monitoring" logs/quaero.log
 
-# Query subtask statistics
-sqlite3 bin/quaero.db "SELECT status, COUNT(*) FROM jobs WHERE parent_id='job_abc123' GROUP BY status;""
+# Query subtask statistics via API
+curl "http://localhost:8085/api/jobs?parent_id=job_abc123"
 
-# Check if finished_at timestamp is set
-sqlite3 bin/quaero.db "SELECT id, status, finished_at FROM jobs WHERE id='job_abc123';"
+# Check job status via API
+curl "http://localhost:8085/api/jobs/job_abc123"
 ```
 
 ### WebSocket Events Not Publishing

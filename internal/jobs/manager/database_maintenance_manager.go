@@ -24,7 +24,7 @@ const jobTypeDatabaseMaintenanceOperation = "database_maintenance_operation"
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceManager struct {
 	jobManager *jobs.Manager
-	queueMgr   *queue.Manager
+	queueMgr   interfaces.QueueManager
 	jobMonitor interfaces.JobMonitor
 	logger     arbor.ILogger
 }
@@ -33,7 +33,7 @@ type DatabaseMaintenanceManager struct {
 var _ interfaces.StepManager = (*DatabaseMaintenanceManager)(nil)
 
 // NewDatabaseMaintenanceManager creates a new database maintenance manager
-func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr *queue.Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *DatabaseMaintenanceManager {
+func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr interfaces.QueueManager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *DatabaseMaintenanceManager {
 	return &DatabaseMaintenanceManager{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,

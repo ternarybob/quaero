@@ -163,7 +163,7 @@ func deleteJob(t *testing.T, helper *common.HTTPTestHelper, jobID string) {
 
 // TestJobManagement_ListJobs tests GET /api/jobs with pagination and filtering
 func TestJobManagement_ListJobs(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -239,7 +239,7 @@ func TestJobManagement_ListJobs(t *testing.T) {
 
 // TestJobManagement_GetJob tests GET /api/jobs/{id}
 func TestJobManagement_GetJob(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -323,7 +323,7 @@ func TestJobManagement_GetJob(t *testing.T) {
 
 // TestJobManagement_JobStats tests GET /api/jobs/stats
 func TestJobManagement_JobStats(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -362,7 +362,7 @@ func TestJobManagement_JobStats(t *testing.T) {
 
 // TestJobManagement_JobQueue tests GET /api/jobs/queue
 func TestJobManagement_JobQueue(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -399,7 +399,7 @@ func TestJobManagement_JobQueue(t *testing.T) {
 
 // TestJobManagement_JobLogs tests GET /api/jobs/{id}/logs
 func TestJobManagement_JobLogs(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -470,7 +470,7 @@ func TestJobManagement_JobLogs(t *testing.T) {
 
 // TestJobManagement_AggregatedLogs tests GET /api/jobs/{id}/logs/aggregated
 func TestJobManagement_AggregatedLogs(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -548,7 +548,7 @@ func TestJobManagement_AggregatedLogs(t *testing.T) {
 
 // TestJobManagement_RerunJob tests POST /api/jobs/{id}/rerun
 func TestJobManagement_RerunJob(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -606,7 +606,7 @@ func TestJobManagement_RerunJob(t *testing.T) {
 
 // TestJobManagement_CancelJob tests POST /api/jobs/{id}/cancel
 func TestJobManagement_CancelJob(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -658,7 +658,7 @@ func TestJobManagement_CancelJob(t *testing.T) {
 
 // TestJobManagement_CopyJob tests POST /api/jobs/{id}/copy
 func TestJobManagement_CopyJob(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -709,7 +709,7 @@ func TestJobManagement_CopyJob(t *testing.T) {
 
 // TestJobManagement_DeleteJob tests DELETE /api/jobs/{id}
 func TestJobManagement_DeleteJob(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -763,7 +763,7 @@ func TestJobManagement_DeleteJob(t *testing.T) {
 
 // TestJobManagement_JobResults tests GET /api/jobs/{id}/results
 func TestJobManagement_JobResults(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -825,7 +825,7 @@ func TestJobManagement_JobResults(t *testing.T) {
 
 // TestJobManagement_JobLifecycle tests complete job lifecycle
 func TestJobManagement_JobLifecycle(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -964,7 +964,7 @@ func TestJobManagement_JobLifecycle(t *testing.T) {
 
 // TestJobDefinition_List tests GET /api/job-definitions with pagination and filtering
 func TestJobDefinition_List(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1040,7 +1040,7 @@ func TestJobDefinition_List(t *testing.T) {
 
 // TestJobDefinition_Create tests POST /api/job-definitions
 func TestJobDefinition_Create(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1146,7 +1146,7 @@ func TestJobDefinition_Create(t *testing.T) {
 
 // TestJobDefinition_Get tests GET /api/job-definitions/{id}
 func TestJobDefinition_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1197,7 +1197,7 @@ func TestJobDefinition_Get(t *testing.T) {
 
 // TestJobDefinition_Update tests PUT /api/job-definitions/{id}
 func TestJobDefinition_Update(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1268,7 +1268,7 @@ func TestJobDefinition_Update(t *testing.T) {
 
 // TestJobDefinition_Delete tests DELETE /api/job-definitions/{id}
 func TestJobDefinition_Delete(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1306,7 +1306,7 @@ func TestJobDefinition_Delete(t *testing.T) {
 
 // TestJobDefinition_Execute tests POST /api/job-definitions/{id}/execute
 func TestJobDefinition_Execute(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1396,7 +1396,7 @@ func TestJobDefinition_Execute(t *testing.T) {
 
 // TestJobDefinition_Export tests GET /api/job-definitions/{id}/export
 func TestJobDefinition_Export(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1438,7 +1438,7 @@ func TestJobDefinition_Export(t *testing.T) {
 
 // TestJobDefinition_Status tests GET /api/jobs/{id}/status
 func TestJobDefinition_Status(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1500,7 +1500,7 @@ func TestJobDefinition_Status(t *testing.T) {
 
 // TestJobDefinition_ValidateTOML tests POST /api/job-definitions/validate
 func TestJobDefinition_ValidateTOML(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1570,7 +1570,7 @@ name = "Incomplete Job"
 
 // TestJobDefinition_UploadTOML tests POST /api/job-definitions/upload
 func TestJobDefinition_UploadTOML(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1689,7 +1689,7 @@ max_pages = 5
 
 // TestJobDefinition_SaveInvalidTOML tests POST /api/job-definitions/save-invalid
 func TestJobDefinition_SaveInvalidTOML(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1728,7 +1728,7 @@ But this endpoint saves it anyway for testing purposes
 
 // TestJobDefinition_QuickCrawl tests POST /api/job-definitions/quick-crawl
 func TestJobDefinition_QuickCrawl(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1843,7 +1843,7 @@ func TestJobDefinition_QuickCrawl(t *testing.T) {
 
 // TestJobDefinition_SystemJobProtection tests system job protection (Comment 4)
 func TestJobDefinition_SystemJobProtection(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -1913,7 +1913,7 @@ func TestJobDefinition_SystemJobProtection(t *testing.T) {
 
 // TestJobDefinition_DependencyValidation tests runtime dependency validation (Comment 4)
 func TestJobDefinition_DependencyValidation(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 

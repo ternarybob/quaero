@@ -78,7 +78,7 @@ type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
-	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.JobModel, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.Job, error)
 	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
 	// GetChildJobs retrieves all child jobs for a given parent job ID
 	// Returns jobs ordered by created_at DESC (newest first)

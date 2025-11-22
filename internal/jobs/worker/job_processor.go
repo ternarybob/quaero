@@ -14,13 +14,12 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// JobProcessor is a job-agnostic processor that uses goqite for queue management.
+// JobProcessor is a job-agnostic processor that uses Badger queue for queue management.
 // It routes jobs to registered workers based on job type.
 type JobProcessor struct {
-	queueMgr  *queue.Manager
+	queueMgr  interfaces.QueueManager
 	jobMgr    *jobs.Manager
 	executors map[string]interfaces.JobWorker // Job workers keyed by job type
 	logger    arbor.ILogger
@@ -32,7 +31,7 @@ type JobProcessor struct {
 }
 
 // NewJobProcessor creates a new job processor that routes jobs to registered workers.
-func NewJobProcessor(queueMgr *queue.Manager, jobMgr *jobs.Manager, logger arbor.ILogger) *JobProcessor {
+func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *jobs.Manager, logger arbor.ILogger) *JobProcessor {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &JobProcessor{

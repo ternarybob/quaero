@@ -44,34 +44,17 @@ type QueueConfig struct {
 	Concurrency       int    `toml:"concurrency"`        // Number of concurrent workers
 	VisibilityTimeout string `toml:"visibility_timeout"` // e.g., "5m" - message visibility timeout for redelivery
 	MaxReceive        int    `toml:"max_receive"`        // Max times a message can be received before dead-letter
-	QueueName         string `toml:"queue_name"`         // Queue name in goqite table
+	QueueName         string `toml:"queue_name"`         // Queue name prefix in Badger
 }
 
 type StorageConfig struct {
-	Type       string           `toml:"type"` // "sqlite", "ravendb", "badger"
-	SQLite     SQLiteConfig     `toml:"sqlite"`
+	Type       string           `toml:"type"` // "badger" only
 	Badger     BadgerConfig     `toml:"badger"`
-	RavenDB    RavenDBConfig    `toml:"ravendb"`
 	Filesystem FilesystemConfig `toml:"filesystem"`
 }
 
 type BadgerConfig struct {
 	Path string `toml:"path"` // Database directory path
-}
-
-type SQLiteConfig struct {
-	Path           string `toml:"path"`             // Database file path
-	EnableFTS5     bool   `toml:"enable_fts5"`      // Enable full-text search
-	CacheSizeMB    int    `toml:"cache_size_mb"`    // Cache size in MB
-	WALMode        bool   `toml:"wal_mode"`         // Enable WAL mode for better concurrency
-	BusyTimeoutMS  int    `toml:"busy_timeout_ms"`  // Busy timeout in milliseconds
-	ResetOnStartup bool   `toml:"reset_on_startup"` // Delete database on startup (development only)
-	Environment    string `toml:"environment"`      // Environment setting for SQLite operations ("development" or "production")
-}
-
-type RavenDBConfig struct {
-	URLs     []string `toml:"urls"`
-	Database string   `toml:"database"`
 }
 
 type FilesystemConfig struct {
@@ -194,15 +177,8 @@ func NewDefaultConfig() *Config {
 			QueueName:         "quaero_jobs",
 		},
 		Storage: StorageConfig{
-			Type: "badger",
-			SQLite: SQLiteConfig{
-				Path:          "./data/quaero.db",
-				EnableFTS5:    true,          // Full-text search for keyword queries
-				CacheSizeMB:   64,            // Balanced performance for typical workloads
-				WALMode:       true,          // Write-Ahead Logging for better concurrency
-				BusyTimeoutMS: 10000,         // 10 seconds for high-concurrency job processing
-				Environment:   "development", // Default to development mode
-			},
+			Type: "badger", // Only supported backend
+
 			Badger: BadgerConfig{
 				Path: "./data/quaero.badger",
 			},
@@ -363,10 +339,8 @@ func applyEnvOverrides(config *Config) {
 	// Environment configuration (highest priority: QUAERO_ENV, fallback: GO_ENV)
 	if env := os.Getenv("QUAERO_ENV"); env != "" {
 		config.Environment = env
-		config.Storage.SQLite.Environment = env // Sync to SQLiteConfig
 	} else if env := os.Getenv("GO_ENV"); env != "" {
 		config.Environment = env
-		config.Storage.SQLite.Environment = env // Sync to SQLiteConfig
 	}
 
 	// Server configuration
@@ -404,9 +378,7 @@ func applyEnvOverrides(config *Config) {
 	if storageType := os.Getenv("QUAERO_STORAGE_TYPE"); storageType != "" {
 		config.Storage.Type = storageType
 	}
-	if sqlitePath := os.Getenv("QUAERO_SQLITE_PATH"); sqlitePath != "" {
-		config.Storage.SQLite.Path = sqlitePath
-	}
+
 	if badgerPath := os.Getenv("QUAERO_BADGER_PATH"); badgerPath != "" {
 		config.Storage.Badger.Path = badgerPath
 	}

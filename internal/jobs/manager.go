@@ -2,11 +2,8 @@ package jobs
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,18 +13,19 @@ import (
 )
 
 // Manager handles job metadata and lifecycle.
-// It does NOT manage the queue - that's goqite's job.
 type Manager struct {
-	db           *sql.DB
-	queue        *queue.Manager
-	eventService interfaces.EventService // Optional: may be nil for testing
+	jobStorage    interfaces.JobStorage
+	jobLogStorage interfaces.JobLogStorage
+	queue         interfaces.QueueManager
+	eventService  interfaces.EventService // Optional: may be nil for testing
 }
 
-func NewManager(db *sql.DB, queue *queue.Manager, eventService interfaces.EventService) *Manager {
+func NewManager(jobStorage interfaces.JobStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService) *Manager {
 	return &Manager{
-		db:           db,
-		queue:        queue,
-		eventService: eventService,
+		jobStorage:    jobStorage,
+		jobLogStorage: jobLogStorage,
+		queue:         queue,
+		eventService:  eventService,
 	}
 }
 
@@ -59,126 +57,46 @@ type JobLog struct {
 	Message   string    `json:"message"`
 }
 
-// Helper types for JSON field mapping
-type metadataJSON struct {
-	Phase  string `json:"phase,omitempty"`
-	Result string `json:"result,omitempty"`
-}
-
-type progressJSON struct {
-	Current int `json:"current"`
-	Total   int `json:"total"`
-}
-
-// retryOnBusy retries a database operation with exponential backoff on SQLITE_BUSY errors
-// This is critical for handling write contention in high-concurrency job processing
-func retryOnBusy(ctx context.Context, operation func() error) error {
-	const maxRetries = 5
-	const baseDelay = 50 * time.Millisecond // Start with 50ms
-
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		err := operation()
-		if err == nil {
-			return nil
-		}
-
-		// Check if error is SQLITE_BUSY
-		errMsg := err.Error()
-		if !strings.Contains(errMsg, "database is locked") && !strings.Contains(errMsg, "SQLITE_BUSY") {
-			// Not a busy error, fail immediately
-			return err
-		}
-
-		lastErr = err
-
-		// Check context cancellation
-		if ctx.Err() != nil {
-			return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
-		}
-
-		// Last attempt failed, don't sleep
-		if attempt == maxRetries-1 {
-			break
-		}
-
-		// Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms
-		delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
-		time.Sleep(delay)
-	}
-
-	return fmt.Errorf("operation failed after %d retries: %w", maxRetries, lastErr)
-}
-
 // Helper functions for time conversions
 func timeToUnix(t time.Time) int64 {
 	return t.Unix()
-}
-
-func timeToUnixPtr(t *time.Time) sql.NullInt64 {
-	if t == nil {
-		return sql.NullInt64{Valid: false}
-	}
-	return sql.NullInt64{Int64: t.Unix(), Valid: true}
 }
 
 func unixToTime(unix int64) time.Time {
 	return time.Unix(unix, 0)
 }
 
-func unixToTimePtr(unix sql.NullInt64) *time.Time {
-	if !unix.Valid {
-		return nil
-	}
-	t := time.Unix(unix.Int64, 0)
-	return &t
-}
-
 // CreateJobRecord creates a new job record without enqueueing (for tracking only)
 func (m *Manager) CreateJobRecord(ctx context.Context, job *Job) error {
-	// Create metadata JSON with phase
-	metadata := metadataJSON{Phase: job.Phase}
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
+	// Convert internal Job to models.JobModel for storage
+	metadata := map[string]interface{}{
+		"phase": job.Phase,
+	}
+	
+	config := make(map[string]interface{})
+	
+	jobModel := &models.JobModel{
+		ID:        job.ID,
+		Type:      job.Type,
+		Name:      job.Name,
+		CreatedAt: job.CreatedAt,
+		Config:    config,
+		Metadata:  metadata,
+	}
+	
+	if job.ParentID != nil {
+		jobModel.ParentID = job.ParentID
 	}
 
-	// Create progress JSON
-	progress := progressJSON{Current: job.ProgressCurrent, Total: job.ProgressTotal}
-	progressJSONBytes, err := json.Marshal(progress)
-	if err != nil {
-		return fmt.Errorf("marshal progress: %w", err)
+	// Create job record using storage interface
+	jobEntity := models.NewJob(jobModel)
+	jobEntity.Status = models.JobStatus(job.Status)
+	
+	if job.ProgressTotal > 0 {
+		jobEntity.UpdateProgress(job.ProgressCurrent, 0, 0, job.ProgressTotal)
 	}
 
-	now := time.Now()
-	if job.CreatedAt.IsZero() {
-		job.CreatedAt = now
-	}
-
-	// Create empty config JSON for parent jobs
-	emptyConfig := make(map[string]interface{})
-	configJSONBytes, err := json.Marshal(emptyConfig)
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	// Create job record in jobs table with retry on SQLITE_BUSY
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO jobs (
-				id, parent_id, job_type, name, description,
-				config_json, metadata_json,
-				status, progress_json,
-				created_at, result_count, failed_count
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-		`, job.ID, job.ParentID, job.Type, job.Name, job.Name,
-			string(configJSONBytes), string(metadataJSON),
-			job.Status, string(progressJSONBytes), timeToUnix(job.CreatedAt))
-		return err
-	})
-
-	if err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
 		return fmt.Errorf("create job record: %w", err)
 	}
 
@@ -194,40 +112,25 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	// Create metadata JSON with phase and document_count initialization
+	// Parse payload as config map if possible
+	var config map[string]interface{}
+	if err := json.Unmarshal(payloadJSON, &config); err != nil {
+		// If not a map, wrap it
+		config = map[string]interface{}{"payload": payload}
+	}
+
 	metadata := map[string]interface{}{
 		"phase":          "core",
 		"document_count": 0,
 	}
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return "", fmt.Errorf("marshal metadata: %w", err)
-	}
 
-	// Create empty progress JSON
-	progress := progressJSON{Current: 0, Total: 0}
-	progressJSONBytes, err := json.Marshal(progress)
-	if err != nil {
-		return "", fmt.Errorf("marshal progress: %w", err)
-	}
+	jobModel := models.NewJobModel(jobType, "", config, metadata)
+	jobModel.ID = jobID
+	
+	jobEntity := models.NewJob(jobModel)
+	jobEntity.Status = models.JobStatusPending
 
-	now := time.Now()
-
-	// Create job record in jobs table with retry on SQLITE_BUSY
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO jobs (
-				id, parent_id, job_type, name, description,
-				config_json, metadata_json,
-				status, progress_json,
-				created_at, result_count, failed_count
-			)
-			VALUES (?, NULL, ?, '', '', ?, ?, 'pending', ?, ?, 0, 0)
-		`, jobID, jobType, string(payloadJSON), string(metadataJSON), string(progressJSONBytes), timeToUnix(now))
-		return err
-	})
-
-	if err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
@@ -252,37 +155,24 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 
-	// Create metadata JSON with phase
-	metadata := metadataJSON{Phase: phase}
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return "", fmt.Errorf("marshal metadata: %w", err)
+	// Parse payload as config map if possible
+	var config map[string]interface{}
+	if err := json.Unmarshal(payloadJSON, &config); err != nil {
+		config = map[string]interface{}{"payload": payload}
 	}
 
-	// Create empty progress JSON
-	progress := progressJSON{Current: 0, Total: 0}
-	progressJSONBytes, err := json.Marshal(progress)
-	if err != nil {
-		return "", fmt.Errorf("marshal progress: %w", err)
+	metadata := map[string]interface{}{
+		"phase": phase,
 	}
 
-	now := time.Now()
+	jobModel := models.NewJobModel(jobType, "", config, metadata)
+	jobModel.ID = jobID
+	jobModel.ParentID = &parentID
+	
+	jobEntity := models.NewJob(jobModel)
+	jobEntity.Status = models.JobStatusPending
 
-	// Create job record in jobs table with retry on SQLITE_BUSY
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO jobs (
-				id, parent_id, job_type, name, description,
-				config_json, metadata_json,
-				status, progress_json,
-				created_at, result_count, failed_count
-			)
-			VALUES (?, ?, ?, '', '', ?, ?, 'pending', ?, ?, 0, 0)
-		`, jobID, parentID, jobType, string(payloadJSON), string(metadataJSON), string(progressJSONBytes), timeToUnix(now))
-		return err
-	})
-
-	if err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
@@ -300,216 +190,154 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 
 // GetJobInternal retrieves a job by ID (internal jobs.Job type)
 func (m *Manager) GetJobInternal(ctx context.Context, jobID string) (*Job, error) {
-	var job Job
-	var parentID sql.NullString
-	var startedAt, completedAt, finishedAt sql.NullInt64
-	var errMsg sql.NullString
-	var createdAtUnix int64
-	var configJSON, metadataStr, progressStr string
-
-	row := m.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, job_type, status, created_at, started_at,
-		       completed_at, finished_at, config_json, metadata_json, error, progress_json
-		FROM jobs
-		WHERE id = ?
-	`, jobID)
-
-	if err := row.Scan(
-		&job.ID, &parentID, &job.Type, &job.Status,
-		&createdAtUnix, &startedAt, &completedAt, &finishedAt,
-		&configJSON, &metadataStr, &errMsg, &progressStr,
-	); err != nil {
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
 		return nil, err
 	}
-
-	// Map fields
-	if parentID.Valid {
-		job.ParentID = &parentID.String
+	
+	jobEntity, ok := jobEntityInterface.(*models.Job)
+	if !ok {
+		return nil, fmt.Errorf("invalid job type from storage")
 	}
-	job.CreatedAt = unixToTime(createdAtUnix)
-	job.StartedAt = unixToTimePtr(startedAt)
-	job.CompletedAt = unixToTimePtr(completedAt)
-	job.FinishedAt = unixToTimePtr(finishedAt)
-	job.Payload = configJSON
-	if errMsg.Valid {
-		job.Error = &errMsg.String
+	
+	jobModel := jobEntity.JobModel
+	
+	job := &Job{
+		ID:        jobModel.ID,
+		Type:      jobModel.Type,
+		Name:      jobModel.Name,
+		Status:    string(jobEntity.Status),
+		CreatedAt: jobModel.CreatedAt,
+		StartedAt: jobEntity.StartedAt,
+		CompletedAt: jobEntity.CompletedAt,
+		FinishedAt:  jobEntity.FinishedAt,
+		ParentID:  jobModel.ParentID,
 	}
-
-	// Parse metadata JSON for phase and result
-	var metadata metadataJSON
-	if err := json.Unmarshal([]byte(metadataStr), &metadata); err == nil {
-		job.Phase = metadata.Phase
-		job.Result = metadata.Result
+	
+	if jobEntity.Error != "" {
+		job.Error = &jobEntity.Error
 	}
-
-	// Parse progress JSON
-	var progress progressJSON
-	if err := json.Unmarshal([]byte(progressStr), &progress); err == nil {
-		job.ProgressCurrent = progress.Current
-		job.ProgressTotal = progress.Total
+	
+	// Map config to payload
+	if configJSON, err := json.Marshal(jobModel.Config); err == nil {
+		job.Payload = string(configJSON)
 	}
-
-	return &job, nil
+	
+	// Map metadata fields
+	if phase, ok := jobModel.Metadata["phase"].(string); ok {
+		job.Phase = phase
+	}
+	if result, ok := jobModel.Metadata["result"].(string); ok {
+		job.Result = result
+	}
+	
+	// Map progress
+	if jobEntity.Progress != nil {
+		job.ProgressCurrent = jobEntity.Progress.CompletedURLs
+		job.ProgressTotal = jobEntity.Progress.TotalURLs
+	}
+	
+	return job, nil
 }
 
 // ListParentJobs returns all parent jobs (parent_id IS NULL)
 func (m *Manager) ListParentJobs(ctx context.Context, limit, offset int) ([]Job, error) {
-	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, job_type, status, created_at, started_at, completed_at, finished_at,
-		       metadata_json, progress_json, error
-		FROM jobs
-		WHERE parent_id IS NULL
-		ORDER BY created_at DESC
-		LIMIT ? OFFSET ?
-	`, limit, offset)
+	opts := &interfaces.JobListOptions{
+		ParentID: "root", // Special value for root jobs
+		Limit:    limit,
+		Offset:   offset,
+		OrderBy:  "created_at",
+		OrderDir: "DESC",
+	}
 
+	jobEntities, err := m.jobStorage.ListJobs(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var jobs []Job
-	for rows.Next() {
-		var job Job
-		var startedAt, completedAt, finishedAt sql.NullInt64
-		var errorMsg sql.NullString
-		var createdAtUnix int64
-		var metadataStr, progressStr string
-
-		if err := rows.Scan(
-			&job.ID, &job.Type, &job.Status,
-			&createdAtUnix, &startedAt, &completedAt, &finishedAt,
-			&metadataStr, &progressStr, &errorMsg,
-		); err != nil {
-			return nil, err
+	for _, je := range jobEntities {
+		jobModel := je.JobModel
+		job := Job{
+			ID:          jobModel.ID,
+			Type:        jobModel.Type,
+			Name:        jobModel.Name,
+			Status:      string(je.Status),
+			CreatedAt:   jobModel.CreatedAt,
+			StartedAt:   je.StartedAt,
+			CompletedAt: je.CompletedAt,
+			FinishedAt:  je.FinishedAt,
+			ParentID:    jobModel.ParentID,
 		}
 
-		job.CreatedAt = unixToTime(createdAtUnix)
-		job.StartedAt = unixToTimePtr(startedAt)
-		job.CompletedAt = unixToTimePtr(completedAt)
-		job.FinishedAt = unixToTimePtr(finishedAt)
-		if errorMsg.Valid {
-			job.Error = &errorMsg.String
+		if je.Error != "" {
+			job.Error = &je.Error
 		}
 
-		// Parse metadata for phase
-		var metadata metadataJSON
-		if err := json.Unmarshal([]byte(metadataStr), &metadata); err == nil {
-			job.Phase = metadata.Phase
+		// Map config to payload
+		if configJSON, err := json.Marshal(jobModel.Config); err == nil {
+			job.Payload = string(configJSON)
 		}
 
-		// Parse progress JSON
-		var progress progressJSON
-		if err := json.Unmarshal([]byte(progressStr), &progress); err == nil {
-			job.ProgressCurrent = progress.Current
-			job.ProgressTotal = progress.Total
+		// Map metadata fields
+		if phase, ok := jobModel.Metadata["phase"].(string); ok {
+			job.Phase = phase
+		}
+		if result, ok := jobModel.Metadata["result"].(string); ok {
+			job.Result = result
+		}
+
+		// Map progress
+		if je.Progress != nil {
+			job.ProgressCurrent = je.Progress.CompletedURLs
+			job.ProgressTotal = je.Progress.TotalURLs
 		}
 
 		jobs = append(jobs, job)
 	}
 
-	return jobs, rows.Err()
+	return jobs, nil
 }
 
 // ListChildJobs returns all child jobs for a parent
 func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, error) {
-	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, parent_id, job_type, status, created_at, started_at,
-		       completed_at, finished_at, metadata_json, progress_json, error
-		FROM jobs
-		WHERE parent_id = ?
-		ORDER BY created_at ASC
-	`, parentID)
-
+	jobModels, err := m.jobStorage.GetChildJobs(ctx, parentID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
+	
 	var jobs []Job
-	for rows.Next() {
-		var job Job
-		var parentIDStr sql.NullString
-		var startedAt, completedAt, finishedAt sql.NullInt64
-		var errorMsg sql.NullString
-		var createdAtUnix int64
-		var metadataStr, progressStr string
-
-		if err := rows.Scan(
-			&job.ID, &parentIDStr, &job.Type, &job.Status,
-			&createdAtUnix, &startedAt, &completedAt, &finishedAt,
-			&metadataStr, &progressStr, &errorMsg,
-		); err != nil {
-			return nil, err
+	for _, jm := range jobModels {
+		// Same issue as ListParentJobs
+		job := Job{
+			ID:          jm.ID,
+			ParentID:    jm.ParentID,
+			Type:        jm.Type,
+			CreatedAt:   jm.CreatedAt,
 		}
-
-		if parentIDStr.Valid {
-			job.ParentID = &parentIDStr.String
-		}
-		job.CreatedAt = unixToTime(createdAtUnix)
-		job.StartedAt = unixToTimePtr(startedAt)
-		job.CompletedAt = unixToTimePtr(completedAt)
-		job.FinishedAt = unixToTimePtr(finishedAt)
-		if errorMsg.Valid {
-			job.Error = &errorMsg.String
-		}
-
-		// Parse metadata for phase
-		var metadata metadataJSON
-		if err := json.Unmarshal([]byte(metadataStr), &metadata); err == nil {
-			job.Phase = metadata.Phase
-		}
-
-		// Parse progress JSON
-		var progress progressJSON
-		if err := json.Unmarshal([]byte(progressStr), &progress); err == nil {
-			job.ProgressCurrent = progress.Current
-			job.ProgressTotal = progress.Total
-		}
-
 		jobs = append(jobs, job)
 	}
-
-	return jobs, rows.Err()
+	
+	return jobs, nil
 }
 
 // UpdateJobStatus updates the job status
 func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) error {
 	// Get job details before update to access parent_id and job_type
-	var parentID sql.NullString
-	var jobType string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT parent_id, job_type FROM jobs WHERE id = ?
-	`, jobID).Scan(&parentID, &jobType)
-
-	if err != nil && err != sql.ErrNoRows {
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
 		return fmt.Errorf("failed to get job details: %w", err)
 	}
-
-	now := time.Now()
-	nowUnix := timeToUnix(now)
-
-	query := "UPDATE jobs SET status = ?, last_heartbeat = ?"
-	args := []interface{}{status, nowUnix}
-
-	if status == "running" {
-		query += ", started_at = ?"
-		args = append(args, nowUnix)
-	} else if status == "completed" || status == "failed" || status == "cancelled" {
-		query += ", completed_at = ?"
-		args = append(args, nowUnix)
+	
+	jobEntity, ok := jobEntityInterface.(*models.Job)
+	if !ok {
+		return fmt.Errorf("invalid job type")
 	}
-
-	query += " WHERE id = ?"
-	args = append(args, jobID)
-
-	// Use retry logic for status updates to handle write contention
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, query, args...)
-		return err
-	})
-
-	if err != nil {
+	
+	jobModel := jobEntity.JobModel
+	
+	// Update status via storage interface
+	if err := m.jobStorage.UpdateJobStatus(ctx, jobID, status, ""); err != nil {
 		return err
 	}
 
@@ -525,13 +353,13 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 		payload := map[string]interface{}{
 			"job_id":    jobID,
 			"status":    status,
-			"job_type":  jobType,
-			"timestamp": now.Format(time.RFC3339),
+			"job_type":  jobModel.Type,
+			"timestamp": time.Now().Format(time.RFC3339),
 		}
 
 		// Include parent_id if this is a child job
-		if parentID.Valid {
-			payload["parent_id"] = parentID.String
+		if jobModel.ParentID != nil {
+			payload["parent_id"] = *jobModel.ParentID
 		}
 
 		event := interfaces.Event{
@@ -553,27 +381,22 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 
 // UpdateJobProgress updates job progress
 func (m *Manager) UpdateJobProgress(ctx context.Context, jobID string, current, total int) error {
-	progress := progressJSON{Current: current, Total: total}
-	progressJSONBytes, err := json.Marshal(progress)
+	progress := &models.JobProgress{
+		CompletedURLs: current,
+		TotalURLs:     total,
+	}
+	
+	progressJSON, err := json.Marshal(progress)
 	if err != nil {
 		return fmt.Errorf("marshal progress: %w", err)
 	}
-
-	_, err = m.db.ExecContext(ctx, `
-		UPDATE jobs SET progress_json = ?
-		WHERE id = ?
-	`, string(progressJSONBytes), jobID)
-	return err
+	
+	return m.jobStorage.UpdateJobProgress(ctx, jobID, string(progressJSON))
 }
 
 // SetJobError sets job error message and marks as failed
 func (m *Manager) SetJobError(ctx context.Context, jobID string, errorMsg string) error {
-	now := time.Now()
-	_, err := m.db.ExecContext(ctx, `
-		UPDATE jobs SET status = 'failed', error = ?, completed_at = ?
-		WHERE id = ?
-	`, errorMsg, timeToUnix(now), jobID)
-	return err
+	return m.jobStorage.UpdateJobStatus(ctx, jobID, string(models.JobStatusFailed), errorMsg)
 }
 
 // SetJobResult sets job result data
@@ -583,189 +406,136 @@ func (m *Manager) SetJobResult(ctx context.Context, jobID string, result interfa
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
-	// Read existing metadata to preserve phase
-	var existingMetadata string
-	err = m.db.QueryRowContext(context.Background(), `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&existingMetadata)
+	// Get job to update metadata
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("read existing metadata: %w", err)
+		return err
 	}
-
-	// Parse existing metadata
-	var metadata metadataJSON
-	if err := json.Unmarshal([]byte(existingMetadata), &metadata); err != nil {
-		metadata = metadataJSON{} // Start fresh if parse fails
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		jobModel.Metadata = make(map[string]interface{})
 	}
-
-	// Update result field
-	metadata.Result = string(resultJSON)
-
-	// Marshal updated metadata
-	updatedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("marshal updated metadata: %w", err)
-	}
-
-	_, err = m.db.ExecContext(context.Background(), `
-		UPDATE jobs SET metadata_json = ? WHERE id = ?
-	`, string(updatedMetadata), jobID)
-	return err
+	
+	jobModel.Metadata["result"] = string(resultJSON)
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // IncrementDocumentCount increments the document_count in job metadata
 // This is used to track the number of documents saved by child jobs for a parent job
 func (m *Manager) IncrementDocumentCount(ctx context.Context, jobID string) error {
-	// Read current metadata
-	var metadataStr string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&metadataStr)
+	// Get job
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("failed to get job metadata: %w", err)
+		return err
 	}
-
-	// Parse metadata
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata: %w", err)
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		jobModel.Metadata = make(map[string]interface{})
 	}
-
-	// Increment document_count (default 0 if not exists)
+	
+	// Increment document_count
 	currentCount := 0
-	if count, ok := metadata["document_count"].(float64); ok {
+	if count, ok := jobModel.Metadata["document_count"].(float64); ok {
 		currentCount = int(count)
-	} else if count, ok := metadata["document_count"].(int); ok {
+	} else if count, ok := jobModel.Metadata["document_count"].(int); ok {
 		currentCount = count
 	}
-	metadata["document_count"] = currentCount + 1
-
-	// Save updated metadata
-	updatedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Use retry logic for write contention
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			UPDATE jobs SET metadata_json = ? WHERE id = ?
-		`, string(updatedMetadata), jobID)
-		return err
-	})
-
-	return err
+	jobModel.Metadata["document_count"] = currentCount + 1
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // SetJobFinished sets the finished_at timestamp for a job
 // This should be called when a job AND all its spawned children complete or timeout
 func (m *Manager) SetJobFinished(ctx context.Context, jobID string) error {
+	// Get job
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	jobEntity := jobEntityInterface.(*models.Job)
+	
 	now := time.Now()
-	_, err := m.db.ExecContext(ctx, `
-		UPDATE jobs SET finished_at = ?
-		WHERE id = ?
-	`, timeToUnix(now), jobID)
-	return err
+	jobEntity.FinishedAt = &now
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // UpdateJobConfig updates the job configuration in the database
 func (m *Manager) UpdateJobConfig(ctx context.Context, jobID string, config map[string]interface{}) error {
-	configJSON, err := json.Marshal(config)
+	// Get job
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		return err
 	}
-
-	_, err = m.db.ExecContext(ctx, `
-		UPDATE jobs SET config_json = ?
-		WHERE id = ?
-	`, string(configJSON), jobID)
-	return err
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	jobModel.Config = config
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // UpdateJobMetadata updates the job metadata in the database
 // This method merges new metadata with existing metadata to preserve fields like phase
 func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata map[string]interface{}) error {
-	// Read existing metadata
-	var existingMetadataJSON string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&existingMetadataJSON)
+	// Get job
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("failed to read existing metadata: %w", err)
-	}
-
-	// Unmarshal existing metadata
-	var existingMetadata map[string]interface{}
-	if err := json.Unmarshal([]byte(existingMetadataJSON), &existingMetadata); err != nil {
-		// If unmarshal fails, start with empty map
-		existingMetadata = make(map[string]interface{})
-	}
-
-	// Merge new metadata into existing metadata (new values override existing)
-	for key, value := range metadata {
-		existingMetadata[key] = value
-	}
-
-	// Marshal merged metadata
-	mergedMetadataJSON, err := json.Marshal(existingMetadata)
-	if err != nil {
-		return fmt.Errorf("marshal merged metadata: %w", err)
-	}
-
-	// Update database with merged metadata using retry logic for write contention
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			UPDATE jobs SET metadata_json = ?
-			WHERE id = ?
-		`, string(mergedMetadataJSON), jobID)
 		return err
-	})
-
-	return err
+	}
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		jobModel.Metadata = make(map[string]interface{})
+	}
+	
+	// Merge metadata
+	for k, v := range metadata {
+		jobModel.Metadata[k] = v
+	}
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // AddJobLog adds a log entry for a job
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	now := time.Now()
-	_, err := m.db.ExecContext(ctx, `
-		INSERT INTO job_logs (job_id, timestamp, level, message, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, jobID, now.Format(time.RFC3339), level, message, timeToUnix(now))
-	return err
+	entry := models.JobLogEntry{
+		AssociatedJobID: jobID,
+		Timestamp:       now.Format("15:04:05"),
+		FullTimestamp:   now.Format(time.RFC3339),
+		Level:           level,
+		Message:         message,
+	}
+	return m.jobLogStorage.AppendLog(ctx, jobID, entry)
 }
 
 // GetJobLogs retrieves logs for a job
 func (m *Manager) GetJobLogs(ctx context.Context, jobID string, limit int) ([]JobLog, error) {
-	rows, err := m.db.QueryContext(ctx, `
-		SELECT id, job_id, timestamp, level, message
-		FROM job_logs
-		WHERE job_id = ?
-		ORDER BY created_at DESC
-		LIMIT ?
-	`, jobID, limit)
-
+	entries, err := m.jobLogStorage.GetLogs(ctx, jobID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
+	
 	var logs []JobLog
-	for rows.Next() {
-		var log JobLog
-		var timestampStr string
-		if err := rows.Scan(&log.ID, &log.JobID, &timestampStr, &log.Level, &log.Message); err != nil {
-			return nil, err
-		}
-
-		// Parse RFC3339 timestamp
-		if t, err := time.Parse(time.RFC3339, timestampStr); err == nil {
-			log.Timestamp = t
-		}
-
-		logs = append(logs, log)
+	for _, entry := range entries {
+		ts, _ := time.Parse(time.RFC3339, entry.FullTimestamp)
+		logs = append(logs, JobLog{
+			JobID:     entry.AssociatedJobID,
+			Timestamp: ts,
+			Level:     entry.Level,
+			Message:   entry.Message,
+		})
 	}
-
-	return logs, rows.Err()
+	
+	return logs, nil
 }
 
 // JobTreeStatus represents aggregated status for a job tree (parent + children)
@@ -790,31 +560,23 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 		return nil, fmt.Errorf("failed to get parent job: %w", err)
 	}
 
-	// Aggregate child job statuses with single SQL query
-	var totalChildren, completedCount, failedCount, runningCount, pendingCount, cancelledCount int
-
-	row := m.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) as total,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
-			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
-		FROM jobs
-		WHERE parent_id = ?
-	`, parentJobID)
-
-	if err := row.Scan(&totalChildren, &completedCount, &failedCount, &runningCount, &pendingCount, &cancelledCount); err != nil {
+	// Aggregate child job statuses
+	childStats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID})
+	if err != nil {
 		return nil, fmt.Errorf("failed to aggregate child statuses: %w", err)
+	}
+	
+	stats := childStats[parentJobID]
+	if stats == nil {
+		stats = &interfaces.JobChildStats{}
 	}
 
 	// Calculate overall progress
 	// Progress based on completed + failed (terminal states) vs total
 	var overallProgress float64
-	if totalChildren > 0 {
-		terminalCount := completedCount + failedCount + cancelledCount
-		overallProgress = float64(terminalCount) / float64(totalChildren)
+	if stats.ChildCount > 0 {
+		terminalCount := stats.CompletedChildren + stats.FailedChildren + stats.CancelledChildren
+		overallProgress = float64(terminalCount) / float64(stats.ChildCount)
 	} else {
 		// No children yet, use parent job progress if available
 		if parentJobInternal.ProgressTotal > 0 {
@@ -824,7 +586,7 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 
 	// Estimate time to completion (simple linear extrapolation)
 	var estimatedTime *int64
-	if runningCount > 0 && parentJobInternal.StartedAt != nil {
+	if stats.RunningChildren > 0 && parentJobInternal.StartedAt != nil {
 		elapsed := time.Since(*parentJobInternal.StartedAt)
 		if overallProgress > 0 && overallProgress < 1.0 {
 			totalEstimated := float64(elapsed) / overallProgress
@@ -836,12 +598,12 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 
 	status := &JobTreeStatus{
 		ParentJob:       parentJobInternal,
-		TotalChildren:   totalChildren,
-		CompletedCount:  completedCount,
-		FailedCount:     failedCount,
-		RunningCount:    runningCount,
-		PendingCount:    pendingCount,
-		CancelledCount:  cancelledCount,
+		TotalChildren:   stats.ChildCount,
+		CompletedCount:  stats.CompletedChildren,
+		FailedCount:     stats.FailedChildren,
+		RunningCount:    stats.RunningChildren,
+		PendingCount:    stats.PendingChildren,
+		CancelledCount:  stats.CancelledChildren,
 		OverallProgress: overallProgress,
 		EstimatedTime:   estimatedTime,
 	}
@@ -851,18 +613,16 @@ func (m *Manager) GetJobTreeStatus(ctx context.Context, parentJobID string) (*Jo
 
 // GetFailedChildCount returns the count of failed child jobs for a parent job
 func (m *Manager) GetFailedChildCount(ctx context.Context, parentJobID string) (int, error) {
-	var failedCount int
-	err := m.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM jobs
-		WHERE parent_id = ? AND status = 'failed'
-	`, parentJobID).Scan(&failedCount)
-
+	childStats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID})
 	if err != nil {
-		return 0, fmt.Errorf("failed to query failed job count: %w", err)
+		return 0, err
 	}
-
-	return failedCount, nil
+	
+	if stats, ok := childStats[parentJobID]; ok {
+		return stats.FailedChildren, nil
+	}
+	
+	return 0, nil
 }
 
 // ============================================================================
@@ -888,42 +648,11 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 		return "", fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Serialize metadata
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Serialize progress
-	progress := &models.JobProgress{
-		TotalURLs:     0,
-		CompletedURLs: 0,
-		FailedURLs:    0,
-		PendingURLs:   0,
-		Percentage:    0.0,
-	}
-	progressJSON, err := json.Marshal(progress)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal progress: %w", err)
-	}
-
-	now := time.Now()
-
-	// Create job record in jobs table
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			INSERT INTO jobs (
-				id, parent_id, job_type, name, description,
-				config_json, metadata_json,
-				status, progress_json,
-				created_at, result_count, failed_count
-			)
-			VALUES (?, NULL, ?, ?, '', ?, ?, 'pending', ?, ?, 0, 0)
-		`, jobModel.ID, jobType, name, string(configJSON), string(metadataJSON), string(progressJSON), timeToUnix(now))
-		return err
-	})
-
-	if err != nil {
+	// Create job record in storage
+	jobEntity := models.NewJob(jobModel)
+	jobEntity.Status = models.JobStatusPending
+	
+	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
@@ -942,335 +671,38 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 // GetJob implements interfaces.JobManager.GetJob
 // Returns interface{} to match the interface, but the actual type is *models.Job
 func (m *Manager) GetJob(ctx context.Context, jobID string) (interface{}, error) {
-	// Query the jobs table
-	var job models.Job
-	var jobModel models.JobModel
-	var parentID, errorMsg sql.NullString
-	var startedAt, completedAt, finishedAt, lastHeartbeat sql.NullInt64
-	var configJSON, metadataJSON, progressJSON string
-	var createdAtUnix int64
-	var depth sql.NullInt64
-
-	row := m.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, job_type, name, description, config_json, metadata_json,
-		       status, progress_json, created_at, started_at, completed_at, finished_at,
-		       last_heartbeat, error, result_count, failed_count, depth
-		FROM jobs
-		WHERE id = ?
-	`, jobID)
-
-	err := row.Scan(
-		&jobModel.ID, &parentID, &jobModel.Type, &jobModel.Name, &sql.NullString{}, // description not in JobModel
-		&configJSON, &metadataJSON,
-		&job.Status, &progressJSON,
-		&createdAtUnix, &startedAt, &completedAt, &finishedAt,
-		&lastHeartbeat, &errorMsg, &job.ResultCount, &job.FailedCount, &depth,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("job not found: %s", jobID)
-		}
-		return nil, fmt.Errorf("failed to get job: %w", err)
-	}
-
-	// Map fields
-	if parentID.Valid {
-		jobModel.ParentID = &parentID.String
-	}
-	jobModel.CreatedAt = unixToTime(createdAtUnix)
-	if depth.Valid {
-		jobModel.Depth = int(depth.Int64)
-	}
-
-	// Parse config JSON
-	if err := json.Unmarshal([]byte(configJSON), &jobModel.Config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	// Parse metadata JSON
-	if err := json.Unmarshal([]byte(metadataJSON), &jobModel.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
-
-	// Parse progress JSON
-	var progress models.JobProgress
-	if err := json.Unmarshal([]byte(progressJSON), &progress); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal progress: %w", err)
-	}
-	job.Progress = &progress
-
-	// Map timestamps
-	job.StartedAt = unixToTimePtr(startedAt)
-	job.CompletedAt = unixToTimePtr(completedAt)
-	job.FinishedAt = unixToTimePtr(finishedAt)
-	job.LastHeartbeat = unixToTimePtr(lastHeartbeat)
-
-	if errorMsg.Valid {
-		job.Error = errorMsg.String
-	}
-
-	// Embed JobModel into Job
-	job.JobModel = &jobModel
-
-	return &job, nil
+	return m.jobStorage.GetJob(ctx, jobID)
 }
 
 // ListJobs implements interfaces.JobManager.ListJobs
-// Converts internal Job type to models.Job for compatibility
+// Returns []*models.Job directly from storage
 func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.Job, error) {
-	// Build query based on options
-	query := `
-		SELECT id, parent_id, job_type, name, description, config_json, metadata_json,
-		       status, progress_json, created_at, started_at, completed_at, finished_at,
-		       last_heartbeat, error, result_count, failed_count, depth
-		FROM jobs
-		WHERE 1=1
-	`
-	args := []interface{}{}
-
-	if opts != nil {
-		if opts.Status != "" {
-			// Support comma-separated status values (e.g., "pending,running,completed")
-			statuses := strings.Split(opts.Status, ",")
-			if len(statuses) == 1 {
-				// Single status value
-				query += " AND status = ?"
-				args = append(args, strings.TrimSpace(statuses[0]))
-			} else {
-				// Multiple status values - use IN clause
-				placeholders := strings.Repeat("?,", len(statuses))
-				placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
-				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
-				for _, s := range statuses {
-					args = append(args, strings.TrimSpace(s))
-				}
-			}
-		}
-		if opts.ParentID != "" {
-			if opts.ParentID == "root" {
-				query += " AND parent_id IS NULL"
-			} else {
-				query += " AND parent_id = ?"
-				args = append(args, opts.ParentID)
-			}
-		}
-
-		// Ordering
-		orderBy := "created_at"
-		if opts.OrderBy != "" {
-			orderBy = opts.OrderBy
-		}
-		orderDir := "DESC"
-		if opts.OrderDir != "" {
-			orderDir = opts.OrderDir
-		}
-		query += fmt.Sprintf(" ORDER BY %s %s", orderBy, orderDir)
-
-		// Pagination
-		if opts.Limit > 0 {
-			query += " LIMIT ?"
-			args = append(args, opts.Limit)
-			if opts.Offset > 0 {
-				query += " OFFSET ?"
-				args = append(args, opts.Offset)
-			}
-		}
-	} else {
-		query += " ORDER BY created_at DESC"
-	}
-
-	rows, err := m.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list jobs: %w", err)
-	}
-	defer rows.Close()
-
-	jobs := []*models.Job{}
-	for rows.Next() {
-		var job models.Job
-		var jobModel models.JobModel
-		var parentID, errorMsg sql.NullString
-		var startedAt, completedAt, finishedAt, lastHeartbeat sql.NullInt64
-		var configJSON, metadataJSON, progressJSON string
-		var createdAtUnix int64
-		var depth sql.NullInt64
-
-		var description sql.NullString
-		if err := rows.Scan(
-			&jobModel.ID, &parentID, &jobModel.Type, &jobModel.Name, &description,
-			&configJSON, &metadataJSON,
-			&job.Status, &progressJSON,
-			&createdAtUnix, &startedAt, &completedAt, &finishedAt, &lastHeartbeat,
-			&errorMsg, &job.ResultCount, &job.FailedCount, &depth,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan job: %w", err)
-		}
-
-		// Parse timestamps
-		jobModel.CreatedAt = unixToTime(createdAtUnix)
-		if startedAt.Valid {
-			t := unixToTime(startedAt.Int64)
-			job.StartedAt = &t
-		}
-		if completedAt.Valid {
-			t := unixToTime(completedAt.Int64)
-			job.CompletedAt = &t
-		}
-		if finishedAt.Valid {
-			t := unixToTime(finishedAt.Int64)
-			job.FinishedAt = &t
-		}
-		if lastHeartbeat.Valid {
-			t := unixToTime(lastHeartbeat.Int64)
-			job.LastHeartbeat = &t
-		}
-
-		// Parse JSON fields
-		if err := json.Unmarshal([]byte(configJSON), &jobModel.Config); err != nil {
-			jobModel.Config = make(map[string]interface{})
-		}
-		if err := json.Unmarshal([]byte(metadataJSON), &jobModel.Metadata); err != nil {
-			jobModel.Metadata = make(map[string]interface{})
-		}
-		if err := json.Unmarshal([]byte(progressJSON), &job.Progress); err != nil {
-			job.Progress = &models.JobProgress{}
-		}
-
-		// Set optional fields
-		if parentID.Valid {
-			jobModel.ParentID = &parentID.String
-		}
-		if errorMsg.Valid {
-			job.Error = errorMsg.String
-		}
-
-		// Embed JobModel into Job
-		job.JobModel = &jobModel
-		jobs = append(jobs, &job)
-	}
-
-	return jobs, rows.Err()
+	return m.jobStorage.ListJobs(ctx, opts)
 }
 
 // CountJobs implements interfaces.JobManager.CountJobs
 func (m *Manager) CountJobs(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
-	query := "SELECT COUNT(*) FROM jobs WHERE 1=1"
-	args := []interface{}{}
-
-	if opts != nil {
-		if opts.Status != "" {
-			// Support comma-separated status values (e.g., "pending,running,completed")
-			statuses := strings.Split(opts.Status, ",")
-			if len(statuses) == 1 {
-				// Single status value
-				query += " AND status = ?"
-				args = append(args, strings.TrimSpace(statuses[0]))
-			} else {
-				// Multiple status values - use IN clause
-				placeholders := strings.Repeat("?,", len(statuses))
-				placeholders = placeholders[:len(placeholders)-1] // Remove trailing comma
-				query += fmt.Sprintf(" AND status IN (%s)", placeholders)
-				for _, s := range statuses {
-					args = append(args, strings.TrimSpace(s))
-				}
-			}
-		}
-		if opts.ParentID != "" {
-			if opts.ParentID == "root" {
-				query += " AND parent_id IS NULL"
-			} else {
-				query += " AND parent_id = ?"
-				args = append(args, opts.ParentID)
-			}
-		}
-	}
-
-	var count int
-	err := m.db.QueryRowContext(ctx, query, args...).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("failed to count jobs: %w", err)
-	}
-
-	return count, nil
+	return m.jobStorage.CountJobsWithFilters(ctx, opts)
 }
 
 // UpdateJob implements interfaces.JobManager.UpdateJob
 func (m *Manager) UpdateJob(ctx context.Context, job interface{}) error {
-	// Type assert to *models.Job
-	modelJob, ok := job.(*models.Job)
-	if !ok {
-		return fmt.Errorf("invalid job type: expected *models.Job, got %T", job)
-	}
-
-	// Serialize JSON fields
-	configJSON, err := json.Marshal(modelJob.Config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-	metadataJSON, err := json.Marshal(modelJob.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	progressJSON, err := json.Marshal(modelJob.Progress)
-	if err != nil {
-		return fmt.Errorf("failed to marshal progress: %w", err)
-	}
-
-	// Build update query
-	query := `
-		UPDATE jobs SET
-			name = ?, config_json = ?, metadata_json = ?,
-			status = ?, progress_json = ?, error = ?,
-			result_count = ?, failed_count = ?
-		WHERE id = ?
-	`
-
-	_, err = m.db.ExecContext(ctx, query,
-		modelJob.Name, string(configJSON), string(metadataJSON),
-		modelJob.Status, string(progressJSON), modelJob.Error,
-		modelJob.ResultCount, modelJob.FailedCount,
-		modelJob.ID,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to update job: %w", err)
-	}
-
-	return nil
+	return m.jobStorage.UpdateJob(ctx, job)
 }
 
 // DeleteJob implements interfaces.JobManager.DeleteJob
 func (m *Manager) DeleteJob(ctx context.Context, jobID string) (int, error) {
 	// Count children before deletion (CASCADE will delete them)
-	var childCount int
-	err := m.db.QueryRowContext(ctx, `
-		WITH RECURSIVE job_tree AS (
-			SELECT id FROM jobs WHERE id = ?
-			UNION ALL
-			SELECT j.id FROM jobs j
-			INNER JOIN job_tree jt ON j.parent_id = jt.id
-		)
-		SELECT COUNT(*) - 1 FROM job_tree
-	`, jobID).Scan(&childCount)
-
-	if err != nil {
-		return 0, fmt.Errorf("failed to count child jobs: %w", err)
+	// Note: Badger storage implementation of DeleteJob might not return count of deleted children
+	// We'll try to count them first
+	childStats, _ := m.jobStorage.GetJobChildStats(ctx, []string{jobID})
+	childCount := 0
+	if stats, ok := childStats[jobID]; ok {
+		childCount = stats.ChildCount
 	}
 
-	// Delete job (CASCADE will delete children and related records)
-	result, err := m.db.ExecContext(ctx, "DELETE FROM jobs WHERE id = ?", jobID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to delete job: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return childCount, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return 0, fmt.Errorf("job not found: %s", jobID)
+	if err := m.jobStorage.DeleteJob(ctx, jobID); err != nil {
+		return 0, err
 	}
 
 	return childCount, nil
@@ -1279,40 +711,26 @@ func (m *Manager) DeleteJob(ctx context.Context, jobID string) (int, error) {
 // CopyJob implements interfaces.JobManager.CopyJob
 func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 	// Get original job
-	var jobType, name, description, configJSON, metadataJSON string
-	var parentID sql.NullString
-
-	err := m.db.QueryRowContext(ctx, `
-		SELECT parent_id, job_type, name, description, config_json, metadata_json
-		FROM jobs WHERE id = ?
-	`, jobID).Scan(&parentID, &jobType, &name, &description, &configJSON, &metadataJSON)
-
-	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("job not found: %s", jobID)
-	}
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get job: %w", err)
+		return "", err
 	}
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
 
 	// Create new job with same configuration
 	newJobID := uuid.New().String()
-	now := timeToUnix(time.Now())
+	
+	// Clone job model
+	newJobModel := jobModel.Clone()
+	newJobModel.ID = newJobID
+	newJobModel.Name = jobModel.Name + " (Copy)"
+	newJobModel.CreatedAt = time.Now()
+	
+	newJobEntity := models.NewJob(newJobModel)
+	newJobEntity.Status = models.JobStatusPending
 
-	// Default progress JSON
-	progressJSON := `{"current":0,"total":0,"message":""}`
-
-	_, err = m.db.ExecContext(ctx, `
-		INSERT INTO jobs (
-			id, parent_id, job_type, name, description,
-			config_json, metadata_json,
-			status, progress_json,
-			created_at, result_count, failed_count
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0, 0)
-	`, newJobID, parentID, jobType, name+" (Copy)", description,
-		configJSON, metadataJSON, progressJSON, now)
-
-	if err != nil {
+	if err := m.jobStorage.SaveJob(ctx, newJobEntity); err != nil {
 		return "", fmt.Errorf("failed to create job copy: %w", err)
 	}
 
@@ -1321,71 +739,45 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 
 // GetJobChildStats implements interfaces.JobManager.GetJobChildStats
 func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
-	if len(parentIDs) == 0 {
-		return make(map[string]*interfaces.JobChildStats), nil
-	}
-
-	// Build IN clause
-	placeholders := make([]string, len(parentIDs))
-	args := make([]interface{}, len(parentIDs))
-	for i, id := range parentIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	query := fmt.Sprintf(`
-		SELECT parent_id,
-		       COUNT(*) as child_count,
-		       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_children,
-		       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_children,
-		       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_children,
-		       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_children,
-		       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_children
-		FROM jobs
-		WHERE parent_id IN (%s)
-		GROUP BY parent_id
-	`, strings.Join(placeholders, ","))
-
-	rows, err := m.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query child stats: %w", err)
-	}
-	defer rows.Close()
-
-	stats := make(map[string]*interfaces.JobChildStats)
-	for rows.Next() {
-		var parentID string
-		var stat interfaces.JobChildStats
-
-		if err := rows.Scan(&parentID, &stat.ChildCount, &stat.CompletedChildren, &stat.FailedChildren, &stat.CancelledChildren, &stat.PendingChildren, &stat.RunningChildren); err != nil {
-			return nil, fmt.Errorf("failed to scan child stats: %w", err)
-		}
-
-		stats[parentID] = &stat
-	}
-
-	return stats, rows.Err()
+	return m.jobStorage.GetJobChildStats(ctx, parentIDs)
 }
 
 // StopAllChildJobs implements interfaces.JobManager.StopAllChildJobs
 func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
-	// Update all running/pending child jobs to cancelled
-	result, err := m.db.ExecContext(ctx, `
-		UPDATE jobs
-		SET status = 'cancelled', completed_at = ?
-		WHERE parent_id = ? AND status IN ('running', 'pending')
-	`, timeToUnix(time.Now()), parentID)
-
-	if err != nil {
-		return 0, fmt.Errorf("failed to stop child jobs: %w", err)
+	// Get running/pending child jobs
+	// This is inefficient without a direct update query, but Badger doesn't support SQL updates
+	// We have to list and update individually
+	
+	// Get all children
+	// Note: GetChildJobs returns []*models.JobModel, but we need status which is in models.Job
+	// We need to fix the interface or use ListJobs with filter.
+	// Assuming GetChildJobs returns JobModel which doesn't have status.
+	// We need to fetch each job to check status.
+	// Or use ListJobs with ParentID filter if supported.
+	
+	// Let's use ListJobs with ParentID filter
+	opts := &interfaces.JobListOptions{
+		ParentID: parentID,
 	}
-
-	rowsAffected, err := result.RowsAffected()
+	
+	// ListJobs returns []*models.JobModel in interface, but we know it's broken.
+	// We will use m.ListJobs which returns []*models.Job (our wrapper).
+	
+	children, err := m.ListJobs(ctx, opts)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+		return 0, err
 	}
-
-	return int(rowsAffected), nil
+	
+	count := 0
+	for _, child := range children {
+		if child.Status == models.JobStatusRunning || child.Status == models.JobStatusPending {
+			if err := m.jobStorage.UpdateJobStatus(ctx, child.ID, string(models.JobStatusCancelled), ""); err == nil {
+				count++
+			}
+		}
+	}
+	
+	return count, nil
 }
 
 // ============================================================================
@@ -1526,32 +918,22 @@ type childJobStatistics struct {
 
 // getChildJobStatistics retrieves detailed child job statistics
 func (m *Manager) getChildJobStatistics(ctx context.Context, parentJobID string) (*childJobStatistics, error) {
-	var stats childJobStatistics
-
-	row := m.db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) as total,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
-			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-			SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
-		FROM jobs
-		WHERE parent_id = ?
-	`, parentJobID)
-
-	if err := row.Scan(
-		&stats.TotalChildren,
-		&stats.CompletedChildren,
-		&stats.FailedChildren,
-		&stats.RunningChildren,
-		&stats.PendingChildren,
-		&stats.CancelledChildren,
-	); err != nil {
-		return nil, fmt.Errorf("failed to aggregate child statistics: %w", err)
+	statsMap, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID})
+	if err != nil {
+		return nil, err
 	}
-
-	return &stats, nil
+	
+	stats := &childJobStatistics{}
+	if s, ok := statsMap[parentJobID]; ok {
+		stats.TotalChildren = s.ChildCount
+		stats.CompletedChildren = s.CompletedChildren
+		stats.FailedChildren = s.FailedChildren
+		stats.RunningChildren = s.RunningChildren
+		stats.PendingChildren = s.PendingChildren
+		stats.CancelledChildren = s.CancelledChildren
+	}
+	
+	return stats, nil
 }
 
 // linkFollowingStats holds link following statistics
@@ -1595,61 +977,40 @@ func (m *Manager) GetJobTreeProgressStats(ctx context.Context, parentJobIDs []st
 
 	result := make(map[string]*CrawlerProgressStats)
 
-	// Get all parent jobs in a single query
-	placeholders := make([]string, len(parentJobIDs))
-	args := make([]interface{}, len(parentJobIDs))
-	for i, id := range parentJobIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	query := fmt.Sprintf(`
-		SELECT id, parent_id, job_type, status, started_at, completed_at, error,
-		       progress_json, created_at
-		FROM jobs
-		WHERE id IN (%s)
-	`, strings.Join(placeholders, ","))
-
-	rows, err := m.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query parent jobs: %w", err)
-	}
-	defer rows.Close()
-
-	// Process each parent job
-	for rows.Next() {
-		var jobID, jobType, status string
-		var parentID sql.NullString
-		var startedAt, completedAt sql.NullInt64
-		var errorMsg sql.NullString
-		var progressJSON string
-		var createdAtUnix int64
-
-		if err := rows.Scan(&jobID, &parentID, &jobType, &status, &startedAt, &completedAt, &errorMsg, &progressJSON, &createdAtUnix); err != nil {
-			continue // Skip invalid rows
+	// Get all parent jobs
+	// We have to loop because ListJobs doesn't support IN clause for IDs
+	// Or we can use ListJobs with no filter and filter in memory if list is small?
+	// Better to loop GetJob for now or add GetJobs(ids) to interface.
+	// Since interface is fixed, we loop.
+	
+	for _, id := range parentJobIDs {
+		jobEntityInterface, err := m.jobStorage.GetJob(ctx, id)
+		if err != nil {
+			continue
 		}
-
+		jobEntity := jobEntityInterface.(*models.Job)
+		jobModel := jobEntity.JobModel
+		
 		stats := &CrawlerProgressStats{
-			JobID:   jobID,
-			Status:  status,
-			JobType: jobType,
+			JobID:   jobModel.ID,
+			Status:  string(jobEntity.Status),
+			JobType: jobModel.Type,
 		}
-
-		if parentID.Valid {
-			stats.ParentID = parentID.String
+		
+		if jobModel.ParentID != nil {
+			stats.ParentID = *jobModel.ParentID
 		}
-
-		if startedAt.Valid {
-			t := unixToTime(startedAt.Int64)
-			stats.StartedAt = &t
+		
+		if jobEntity.StartedAt != nil {
+			stats.StartedAt = jobEntity.StartedAt
 		}
-
-		if errorMsg.Valid && errorMsg.String != "" {
-			stats.Errors = []string{errorMsg.String}
+		
+		if jobEntity.Error != "" {
+			stats.Errors = []string{jobEntity.Error}
 		}
-
+		
 		// Get child statistics for this parent
-		childStats, err := m.getChildJobStatistics(ctx, jobID)
+		childStats, err := m.getChildJobStatistics(ctx, id)
 		if err == nil {
 			stats.TotalChildren = childStats.TotalChildren
 			stats.CompletedChildren = childStats.CompletedChildren
@@ -1666,11 +1027,11 @@ func (m *Manager) GetJobTreeProgressStats(ctx context.Context, parentJobIDs []st
 
 			stats.ProgressText = m.generateProgressText(stats)
 		}
-
-		result[jobID] = stats
+		
+		result[id] = stats
 	}
 
-	return result, rows.Err()
+	return result, nil
 }
 
 // ChildJobStats represents statistics for child jobs of a parent job
@@ -1686,184 +1047,125 @@ type ChildJobStats struct {
 // GetChildJobStats retrieves child job statistics for a single parent job
 // This is used by the JobMonitor to monitor child job progress
 func (m *Manager) GetChildJobStats(ctx context.Context, parentJobID string) (*ChildJobStats, error) {
-	var stats ChildJobStats
-
-	query := `
-		SELECT
-			COUNT(*) as total_children,
-			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed_children,
-			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed_children,
-			COALESCE(SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END), 0) as cancelled_children,
-			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) as running_children,
-			COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) as pending_children
-		FROM jobs
-		WHERE parent_id = ?
-	`
-
-	err := m.db.QueryRowContext(ctx, query, parentJobID).Scan(
-		&stats.TotalChildren,
-		&stats.CompletedChildren,
-		&stats.FailedChildren,
-		&stats.CancelledChildren,
-		&stats.RunningChildren,
-		&stats.PendingChildren,
-	)
-
+	statsMap, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get child job stats: %w", err)
+		return nil, err
 	}
-
-	return &stats, nil
+	
+	s := statsMap[parentJobID]
+	if s == nil {
+		return &ChildJobStats{}, nil
+	}
+	
+	return &ChildJobStats{
+		TotalChildren:     s.ChildCount,
+		CompletedChildren: s.CompletedChildren,
+		FailedChildren:    s.FailedChildren,
+		CancelledChildren: s.CancelledChildren,
+		RunningChildren:   s.RunningChildren,
+		PendingChildren:   s.PendingChildren,
+	}, nil
 }
 
 // GetQueue returns the queue manager for enqueueing jobs
-func (m *Manager) GetQueue() *queue.Manager {
+func (m *Manager) GetQueue() interfaces.QueueManager {
+	return m.queue
+}
+
+// GetQueueInterface returns the queue manager interface
+func (m *Manager) GetQueueInterface() interfaces.QueueManager {
 	return m.queue
 }
 
 // GetDocumentCount retrieves the document_count from job metadata
 // Returns 0 if document_count is not present in metadata
 func (m *Manager) GetDocumentCount(ctx context.Context, jobID string) (int, error) {
-	var metadataStr string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&metadataStr)
-
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query metadata: %w", err)
+		return 0, err
 	}
-
-	// Parse metadata JSON
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
-		return 0, fmt.Errorf("failed to parse metadata: %w", err)
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		return 0, nil
 	}
-
-	// Extract document_count (handle both float64 and int types from JSON)
-	if val, ok := metadata["document_count"]; ok {
-		if floatVal, ok := val.(float64); ok {
-			return int(floatVal), nil
-		} else if intVal, ok := val.(int); ok {
-			return intVal, nil
-		}
+	
+	if count, ok := jobModel.Metadata["document_count"].(float64); ok {
+		return int(count), nil
+	} else if count, ok := jobModel.Metadata["document_count"].(int); ok {
+		return count, nil
 	}
-
-	// document_count not found in metadata, return 0
+	
 	return 0, nil
 }
 
 // AddJobError adds an error message to the job's status_report
 // This is used to track and display errors in the UI
 func (m *Manager) AddJobError(ctx context.Context, jobID, errorMessage string) error {
-	// Read current metadata
-	var metadataStr string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&metadataStr)
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("failed to get job metadata: %w", err)
+		return err
 	}
-
-	// Parse metadata
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata: %w", err)
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		jobModel.Metadata = make(map[string]interface{})
 	}
-
-	// Get or create status_report object
+	
 	var statusReport map[string]interface{}
-	if sr, ok := metadata["status_report"].(map[string]interface{}); ok {
+	if sr, ok := jobModel.Metadata["status_report"].(map[string]interface{}); ok {
 		statusReport = sr
 	} else {
 		statusReport = make(map[string]interface{})
 	}
-
-	// Get or create errors array
+	
 	var errors []interface{}
 	if e, ok := statusReport["errors"].([]interface{}); ok {
 		errors = e
 	} else {
 		errors = make([]interface{}, 0)
 	}
-
-	// Append new error message
+	
 	errors = append(errors, errorMessage)
 	statusReport["errors"] = errors
-
-	// Update metadata with status_report
-	metadata["status_report"] = statusReport
-
-	// Save updated metadata
-	updatedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Use retry logic for write contention
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			UPDATE jobs SET metadata_json = ? WHERE id = ?
-		`, string(updatedMetadata), jobID)
-		return err
-	})
-
-	return err
+	jobModel.Metadata["status_report"] = statusReport
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }
 
 // AddJobWarning adds a warning message to the job's status_report
 // This is used to track and display warnings in the UI
 func (m *Manager) AddJobWarning(ctx context.Context, jobID, warningMessage string) error {
-	// Read current metadata
-	var metadataStr string
-	err := m.db.QueryRowContext(ctx, `
-		SELECT metadata_json FROM jobs WHERE id = ?
-	`, jobID).Scan(&metadataStr)
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("failed to get job metadata: %w", err)
+		return err
 	}
-
-	// Parse metadata
-	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata: %w", err)
+	jobEntity := jobEntityInterface.(*models.Job)
+	jobModel := jobEntity.JobModel
+	
+	if jobModel.Metadata == nil {
+		jobModel.Metadata = make(map[string]interface{})
 	}
-
-	// Get or create status_report object
+	
 	var statusReport map[string]interface{}
-	if sr, ok := metadata["status_report"].(map[string]interface{}); ok {
+	if sr, ok := jobModel.Metadata["status_report"].(map[string]interface{}); ok {
 		statusReport = sr
 	} else {
 		statusReport = make(map[string]interface{})
 	}
-
-	// Get or create warnings array
+	
 	var warnings []interface{}
 	if w, ok := statusReport["warnings"].([]interface{}); ok {
 		warnings = w
 	} else {
 		warnings = make([]interface{}, 0)
 	}
-
-	// Append new warning message
+	
 	warnings = append(warnings, warningMessage)
 	statusReport["warnings"] = warnings
-
-	// Update metadata with status_report
-	metadata["status_report"] = statusReport
-
-	// Save updated metadata
-	updatedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Use retry logic for write contention
-	err = retryOnBusy(ctx, func() error {
-		_, err := m.db.ExecContext(ctx, `
-			UPDATE jobs SET metadata_json = ? WHERE id = ?
-		`, string(updatedMetadata), jobID)
-		return err
-	})
-
-	return err
+	jobModel.Metadata["status_report"] = statusReport
+	
+	return m.jobStorage.UpdateJob(ctx, jobEntity)
 }

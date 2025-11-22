@@ -68,7 +68,7 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 
 - 🔐 **Automatic Authentication** - Chrome extension captures credentials
 - 📊 **Real-time Updates** - WebSocket-based live log streaming
-- 💾 **SQLite Storage** - Local database with full-text search
+- 💾 **Badger Storage** - Local embedded key-value database for documents and metadata
 - 🌐 **Web Interface** - Browser-based UI for collection and browsing
 - 🤖 **Cloud LLM** - Google ADK with Gemini models for embeddings and chat
 - 🔍 **Vector Search** - 768-dimension embeddings for semantic search
@@ -78,7 +78,7 @@ This file provides guidance to AI agents (Claude Code, GitHub Copilot, etc.) whe
 ### Technology Stack
 
 - **Language:** Go 1.25+
-- **Storage:** SQLite with FTS5 (full-text search)
+- **Storage:** BadgerDB (embedded key-value store)
 - **Web UI:** HTML templates, Alpine.js, Bulma CSS, WebSockets
 - **LLM:** Google ADK with Gemini API (cloud-based embeddings and chat)
 - **Authentication:** Chrome extension → HTTP service
@@ -118,7 +118,7 @@ Quaero follows a clean architecture pattern with clear separation of concerns:
 └─────────────────────────────────────────┘
                   ↓
 ┌─────────────────────────────────────────┐
-│  internal/storage/sqlite/               │  Data persistence
+│  internal/storage/badger/               │  Data persistence
 │  └─ Uses: interfaces/                  │
 └─────────────────────────────────────────┘
 ```
@@ -153,7 +153,7 @@ Quaero uses a Manager/Worker pattern for job orchestration and execution:
 - **Workers** execute individual jobs from the queue
 - **Monitors** monitor parent job progress and aggregate child statistics
 
-The queue-based architecture uses goqite (SQLite-backed message queue) for distributed job processing:
+The queue-based architecture uses a Badger-backed message queue for distributed job processing:
 
 #### Directory Structure (Migration Complete - ARCH-009)
 
@@ -218,11 +218,10 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
 
 **Core Components:**
 
-1. **QueueManager** (`internal/queue/manager.go`)
-   - Manages goqite-backed job queue
+1. **QueueManager** (`internal/queue/badger_manager.go`)
+   - Manages Badger-backed job queue
    - Lifecycle management (Start/Stop/Restart)
-   - Message operations: Enqueue, EnqueueWithDelay, Receive, Delete, Extend
-   - Queue statistics: GetQueueLength, GetQueueStats
+   - Message operations: Enqueue, Receive, Extend, Close
    - Visibility timeout for worker fault tolerance
 
 2. **WorkerPool** (`internal/queue/worker.go`)
@@ -249,11 +248,11 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
 ```
 1. User triggers job via UI or JobDefinition
    ↓
-2. Parent job message created and enqueued to goqite queue
+2. Parent job message created and enqueued to Badger queue
    ↓
-3. WorkerPool receives message from queue
+3. JobProcessor receives message from queue
    ↓
-4. Worker routes message to appropriate handler (CrawlerJob, SummarizerJob, etc.)
+4. Worker routes message to appropriate handler (CrawlerWorker, AgentWorker, etc.)
    ↓
 5. Handler executes job logic:
    - CrawlerJob: Fetch URL, extract content, discover links
@@ -271,7 +270,7 @@ See [Manager/Worker Architecture](docs/architecture/MANAGER_WORKER_ARCHITECTURE.
 
 **Key Features:**
 
-- **Persistent Queue:** goqite uses SQLite for durable message storage
+- **Persistent Queue:** Badger-backed durable message storage
 - **Worker Pool:** Configurable concurrency with polling-based processing
 - **Job Spawning:** Parent jobs can spawn child jobs (URL discovery)
 - **Progress Tracking:** Real-time progress updates via crawl_jobs table
@@ -319,7 +318,7 @@ max_receive = 3
 
 The app initialization sequence in `internal/app/app.go` is critical:
 
-1. **Storage Layer** - SQLite
+1. **Storage Layer** - BadgerDB
 2. **LLM Service** - Google ADK-based embeddings and chat (cloud mode)
 3. **Embedding Service** - Uses LLM service
 4. **Document Service** - Uses embedding service
@@ -372,7 +371,7 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required
 embed_model_name = "gemini-embedding-001"      # Default
 chat_model_name = "gemini-2.0-flash"           # Default
 timeout = "5m"                                  # Operation timeout
-embed_dimension = 768                           # Must match SQLite config
+embed_dimension = 768                           # Must match storage config
 ```
 
 **Environment variable overrides:**
@@ -387,21 +386,18 @@ embed_dimension = 768                           # Must match SQLite config
 
 ### Storage Schema
 
-**Documents Table** (`documents`):
+**Documents:**
 - Central unified storage for all source types
 - Fields: id, source_id, source_type, title, content, embedding, embedding_model, last_synced, created_at, updated_at
-- FTS5 index: documents_fts (title + content)
+- Full-text search index (title + content)
 - Force sync flags: force_sync_pending, force_embed_pending
 
-**Auth Table:**
+**Auth:**
 - `auth_credentials` - Generic web authentication tokens and cookies
 
-**Job Tables:**
+**Jobs:**
 - `crawl_jobs` - Persistent job state and progress tracking
-  - **Note:** `logs` column was removed - logs now in separate table
 - `job_logs` - Unlimited job log history
-  - Foreign key with `ON DELETE CASCADE` for automatic cleanup
-  - Indexed by job_id and level for efficient queries
 - `job_seen_urls` - URL deduplication for crawler jobs
 
 ### Chrome Extension & Authentication Flow
@@ -798,7 +794,6 @@ Configuration loading happens in `internal/common/config.go`
 **Core dependencies:**
 - `github.com/spf13/cobra` - CLI framework
 - `github.com/gorilla/websocket` - WebSocket support
-- `modernc.org/sqlite` - Pure Go SQLite driver
 - `github.com/robfig/cron/v3` - Cron scheduler
 - `github.com/chromedp/chromedp` - UI testing
 
@@ -1050,7 +1045,7 @@ RAGConfig{
 ## Security & Data Privacy
 
 **Current Architecture:**
-- All data stored locally in SQLite
+- All data stored locally in Badger
 - Storage, crawling, and search operations are local
 - LLM features require Google ADK (cloud) and send data to Google's API
 - Audit logging for compliance

@@ -30,7 +30,7 @@ type CrawlerWorker struct {
 	// Core dependencies
 	crawlerService  *crawler.Service
 	jobMgr          *jobs.Manager
-	queueMgr        *queue.Manager
+	queueMgr        interfaces.QueueManager
 	documentStorage interfaces.DocumentStorage
 	authStorage     interfaces.AuthStorage
 	jobDefStorage   interfaces.JobDefinitionStorage
@@ -48,7 +48,7 @@ var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,
 	jobMgr *jobs.Manager,
-	queueMgr *queue.Manager,
+	queueMgr interfaces.QueueManager,
 	documentStorage interfaces.DocumentStorage,
 	authStorage interfaces.AuthStorage,
 	jobDefStorage interfaces.JobDefinitionStorage,

@@ -4,7 +4,7 @@
 
 ## Overview
 
-Enterprise knowledge is locked behind authenticated web applications (Confluence, Jira, documentation sites) where traditional RAG tools cannot access or safely store sensitive data. Quaero solves this by running entirely locally on your machine, capturing your authenticated browser sessions via a Chrome extension, and crawling pages to normalize them into markdown with metadata. All data is stored in a local SQLite database with scheduled recrawls and LLM-powered summarization keeping your private knowledge base current using Google ADK with Gemini models.
+Enterprise knowledge is locked behind authenticated web applications (Confluence, Jira, documentation sites) where traditional RAG tools cannot access or safely store sensitive data. Quaero solves this by running entirely locally on your machine, capturing your authenticated browser sessions via a Chrome extension, and crawling pages to normalize them into markdown with metadata. All data is stored in a local Badger database with scheduled recrawls and LLM-powered summarization keeping your private knowledge base current using Google ADK with Gemini models.
 
 Quaero is a local service (Windows, Linux, macOS) that provides fast full-text and semantic search, along with chat capabilities through integrated language models via Google ADK.
 
@@ -13,20 +13,20 @@ Quaero is a local service (Windows, Linux, macOS) that provides fast full-text a
 - 🔐 **Cookie-Based Authentication** - Chrome extension captures session cookies
 - 🕸️ **Website Crawler** - Depth-based crawling starting from seed URLs
 - 📝 **Markdown Conversion** - Converts web pages to LLM-friendly markdown
-- 💾 **SQLite Storage** - Local database for documents and metadata
+- 💾 **Badger Storage** - Local embedded key-value database for documents and metadata
 - 🎯 **Job Manager** - Persistent queue-based job execution system
 - 📚 **Document Summarization** - LLM-powered content summaries
-- 🔍 **Advanced Search** - Google-style query parser with FTS5 and vector search
+- 🔍 **Advanced Search** - Google-style query parser with regex-based search and vector search
 - 🌐 **Web Interface** - Browser-based UI for job management and monitoring
 - ⏰ **Scheduled Jobs** - Automated crawling and summarization tasks
 
 ## Technology Stack
 
 - **Language:** Go 1.25+
-- **Storage:** SQLite with persistent job queue (goqite)
+- **Storage:** BadgerDB (embedded key-value store)
 - **Web UI:** HTML templates, Alpine.js, Bulma CSS
 - **Crawler:** chromedp for JavaScript rendering, HTML to Markdown conversion
-- **Job Queue:** goqite (SQLite-backed persistent queue)
+- **Job Queue:** Badger-backed persistent queue
 - **Authentication:** Chrome extension → HTTP POST
 - **Logging:** github.com/ternarybob/arbor (structured logging)
 - **Configuration:** TOML via github.com/pelletier/go-toml/v2
@@ -38,7 +38,6 @@ Quaero is a local service (Windows, Linux, macOS) that provides fast full-text a
 
 - Go 1.25+
 - Chrome browser
-- SQLite support
 
 ### Installation
 
@@ -103,7 +102,7 @@ Quaero includes an **MCP (Model Context Protocol) server** that exposes search f
 
 ### Available Tools
 
-- `search_documents` - Full-text search with FTS5 (filters, limits, boolean operators)
+- `search_documents` - Full-text search (filters, limits, boolean operators)
 - `get_document` - Retrieve complete document by ID
 - `list_recent_documents` - Show recently updated documents
 - `get_related_documents` - Find documents referencing specific keys
@@ -129,16 +128,10 @@ port = 8080  # Default port (can be overridden with --port flag or QUAERO_SERVER
 
 # Storage configuration
 [storage]
-type = "sqlite"
+type = "badger"
 
-[storage.sqlite]
-path = "./data/quaero.db"
-enable_fts5 = true           # Full-text search
-enable_vector = true         # Vector embeddings for semantic search
-embedding_dimension = 768    # Matches Gemini embedding model output
-cache_size_mb = 64          # SQLite cache size
-wal_mode = true             # Write-ahead logging for better concurrency
-busy_timeout_ms = 5000      # Busy timeout in milliseconds
+[storage.badger]
+path = "./data/quaero.badger"
 
 # LLM configuration
 [llm]
@@ -146,7 +139,7 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for Google ADK
 embed_model_name = "gemini-embedding-001"      # Default embedding model
 chat_model_name = "gemini-2.0-flash"           # Default chat model
 timeout = "5m"                                  # Operation timeout
-embed_dimension = 768                           # Must match SQLite config
+embed_dimension = 768                           # Must match storage config
 
 [llm.audit]
 enabled = true      # Enable audit logging
@@ -154,7 +147,7 @@ log_queries = false # Don't log query text (PII protection)
 
 # Search configuration
 [search]
-mode = "advanced"  # "advanced" (Google-style), "fts5", or "disabled"
+mode = "advanced"  # "advanced" (Google-style) or "disabled"
 case_sensitive_multiplier = 3
 case_sensitive_max_cap = 1000
 
@@ -242,7 +235,7 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"
 embed_model_name = "gemini-embedding-001"  # 768-dimension embeddings
 chat_model_name = "gemini-2.0-flash"       # Fast, cost-effective chat
 timeout = "5m"                             # Operation timeout
-embed_dimension = 768                      # Must match SQLite config
+embed_dimension = 768                           # Must match storage config
 ```
 
 #### 3. Environment Variable Override (Optional)
@@ -310,8 +303,8 @@ Failed to initialize LLM service - agent features will be unavailable
 - Check Gemini API status: https://status.ai.google.dev/
 
 **Embedding Dimension Mismatch**:
-- Ensure `embed_dimension = 768` in both `[llm]` and `[storage.sqlite]`
-- Database schema requires 768-dimension embeddings
+- Ensure `embed_dimension = 768` in `[llm]`
+- Storage schema requires 768-dimension embeddings
 
 **No Embeddings Generated**:
 - Check that scheduler is running (logs every 5 minutes)
@@ -459,7 +452,7 @@ quaero/
 │   │   │   └── gemini_service.go    # Google ADK Gemini implementation
 │   │   ├── documents/               # Document service
 │   │   ├── chat/                    # Chat service (RAG)
-│   │   ├── search/                  # Search service (FTS5)
+│   │   ├── search/                  # Search service
 │   │   ├── summary/                 # Summary generation
 │   │   ├── sources/                 # Source configuration
 │   │   ├── status/                  # Status tracking
@@ -468,8 +461,7 @@ quaero/
 │   │       ├── registry.go          # Action type registry
 │   │       └── actions/             # Action handlers (crawler, summarizer)
 │   ├── queue/                       # Queue-based job system
-│   │   ├── manager.go               # Queue manager (goqite)
-│   │   ├── worker.go                # Worker pool
+│   │   ├── badger_manager.go        # Queue manager (Badger)
 │   │   └── types.go                 # Queue message types
 │   ├── jobs/                        # Job management
 │   │   ├── manager.go               # Job CRUD operations
@@ -479,11 +471,14 @@ quaero/
 │   │       ├── summarizer.go        # SummarizerJob
 │   │       └── cleanup.go           # CleanupJob
 │   ├── storage/                     # Data persistence layer
-│   │   └── sqlite/                  # SQLite implementation
+│   │   ├── factory.go               # Storage factory
+│   │   └── badger/                  # Badger implementation
+│   │       ├── auth_storage.go      # Authentication storage
 │   │       ├── document_storage.go  # Document CRUD
 │   │       ├── job_storage.go       # Job CRUD
-│   │       ├── source_storage.go    # Source configuration
-│   │       └── schema.go            # Database schema & migrations
+│   │       ├── job_log_storage.go   # Job logs
+│   │       ├── kv_storage.go        # Key-value storage
+│   │       └── manager.go           # Storage manager
 │   ├── interfaces/                  # Service interfaces
 │   │   ├── llm_service.go           # LLM abstraction
 │   │   ├── event_service.go         # Event pub/sub
@@ -522,7 +517,7 @@ quaero/
 ├── bin/                             # Build output
 │   ├── quaero.exe                   # Compiled binary
 │   ├── quaero.toml                  # Runtime config
-│   └── data/                        # SQLite database
+│   └── data/                        # Badger database
 └── CLAUDE.md                        # Development standards
 ```
 
@@ -558,7 +553,7 @@ quaero version
 **Current Configuration:** Quaero uses Google ADK with Gemini models for LLM processing, ensuring:
 - ✅ **Efficient Cloud Processing** - Leverages Google's infrastructure for fast, scalable LLM operations
 - ✅ **No Model Management** - No local model files or binary management required
-- ✅ **SQLite Storage** - All crawled content and metadata stored locally
+- ✅ **Badger Storage** - All crawled content and metadata stored locally
 - ✅ **No Telemetry** - No usage data collection from Quaero itself
 
 ### API Security
@@ -583,7 +578,7 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
 **Data Handling:**
 - Document content transmitted to Google for embedding and chat
 - Query text sent to Gemini API for processing
-- Local SQLite database contains all crawled content
+- Local Badger database contains all crawled content
 - Review Google's AI privacy policy for data retention details
 
 ⚠️ **Important**: If you require 100% local processing, this configuration is not suitable. Consider alternative solutions with local LLM inference.
@@ -598,7 +593,7 @@ enabled = true      # Log all LLM interactions
 log_queries = false # Disable to protect PII in queries
 ```
 
-Audit logs are stored in SQLite and include:
+Audit logs are stored in Badger and include:
 - Timestamp and request ID
 - Model used and token counts
 - Response metadata (not content if `log_queries=false`)
@@ -609,7 +604,7 @@ Audit logs are stored in SQLite and include:
 - Chrome extension captures cookies locally
 - Cookies transmitted only to localhost
 - No cloud storage of credentials
-- Session data encrypted at rest in SQLite
+- Session data encrypted at rest in Badger
 
 ## Architecture
 
@@ -648,8 +643,8 @@ The crawler service (`internal/services/crawler/`) manages web crawling operatio
 #### 2. Job Manager
 The job manager (`internal/jobs/`) handles job lifecycle and execution:
 
-**Job Queue System (goqite):**
-- Persistent queue backed by SQLite
+**Job Queue System (Badger):**
+- Persistent queue backed by BadgerDB
 - Jobs survive application restarts
 - Worker pool processes messages (5 workers default)
 - Visibility timeout (5 minutes default) - messages become visible for retry if not completed
@@ -678,7 +673,7 @@ The job manager (`internal/jobs/`) handles job lifecycle and execution:
    - Configurable age threshold
 
 #### 3. Document Storage
-The document storage (`internal/storage/sqlite/`) manages crawled content:
+The document storage (`internal/storage/badger/`) manages crawled content:
 
 **Document Model:**
 - Unique document ID
@@ -689,7 +684,7 @@ The document storage (`internal/storage/sqlite/`) manages crawled content:
 - Creation and update timestamps
 
 **Storage Features:**
-- SQLite database with FTS5 full-text search
+- Badger database with regex-based search
 - Document deduplication by URL
 - Batch operations for performance
 - Metadata queries and filtering
@@ -704,13 +699,12 @@ The search service (`internal/services/search/`) provides multiple search modes:
   - Boolean operators: `AND`, `OR`, `NOT`
   - Field searches: `title:keyword`
   - Wildcards: `test*`
-- **fts5** - Direct SQLite FTS5 full-text search
 - **disabled** - Search disabled
 
 **Features:**
 - Case-sensitive search with multiplier (fetches 3x results, caps at 1000)
-- SQLite FTS5 indexing on title + content
-- Vector search support when enabled (`storage.sqlite.enable_vector=true`)
+- Regex-based search on title + content
+- Vector search support when enabled
 - Configurable embedding dimensions (768 for Gemini embedding model)
 - Hybrid search combining keyword and semantic results
 
@@ -755,7 +749,7 @@ Model Context Protocol integration (internal for Claude Code only):
 
 Quaero has two complementary job execution systems that work together to provide robust, scalable job processing:
 
-- **Queue System** (`internal/queue/`, `internal/jobs/`, `internal/services/workers/`) - Handles persistent job execution with goqite (SQLite-backed queue), QueueManager, JobManager, and WorkerPool for reliable background processing
+- **Queue System** (`internal/queue/`, `internal/jobs/`, `internal/services/workers/`) - Handles persistent job execution with Badger-backed queue, QueueManager, JobManager, and WorkerPool for reliable background processing
 - **Job Executor** (`internal/jobs/executor/`) - Orchestrates multi-step workflows from JobDefinitions with sequential step execution and proper error handling
 
 These systems work together seamlessly: JobExecutor creates parent jobs and executes JobDefinition steps sequentially, which may create child jobs that are processed by the queue-based system. This architecture enables complex workflows while maintaining reliability and observability.
@@ -768,7 +762,7 @@ sequenceDiagram
     participant SE as StepExecutor
     participant JM as JobManager
     participant QM as QueueManager
-    participant DB as SQLite<br/>(goqite + jobs)
+    participant DB as BadgerDB<br/>(queue + jobs)
     participant WP as WorkerPool
     participant EX as Executor
     participant WS as WebSocketHandler
@@ -777,15 +771,15 @@ sequenceDiagram
     UI->>JDH: POST /api/job-definitions/{id}/execute
     JDH->>JE: Execute(jobDefinition)
     JE->>JM: CreateParentJob(type, payload)
-    JM->>DB: INSERT INTO jobs (parent job)
+    JM->>DB: SaveJob (parent job)
 
     Note over JE,SE: Sequential Step Execution
     loop For each step in JobDefinition.Steps
         JE->>SE: ExecuteStep(step, phase, payload)
         SE->>JM: CreateChildJob(type, payload)
-        JM->>DB: INSERT INTO jobs (child job)
+        JM->>DB: SaveJob (child job)
         JM->>QM: Enqueue(Message{JobID, Type, Payload})
-        QM->>DB: INSERT INTO goqite_messages
+        QM->>DB: Store message
         SE-->>JE: childJobID
     end
 
@@ -794,12 +788,12 @@ sequenceDiagram
 
     Note over WP,EX: Queue-Based Job Processing
     WP->>QM: Receive(ctx) [blocking poll]
-    QM->>DB: SELECT from goqite_messages
+    QM->>DB: Retrieve message
     DB-->>QM: Message (with visibility timeout)
     QM-->>WP: Message{JobID, Type, Payload}
 
     WP->>JM: UpdateJobStatus(jobID, "running")
-    JM->>DB: UPDATE jobs SET status='running'
+    JM->>DB: UpdateJobStatus('running')
     WP->>WS: SendLog(jobID, "info", "Job started")
     WS-->>UI: WebSocket: job_status update
 
@@ -809,28 +803,28 @@ sequenceDiagram
         EX-->>WP: nil (success)
         WP->>JM: UpdateJobStatus(jobID, "completed")
         WP->>JM: SetJobResult(jobID, result)
-        JM->>DB: UPDATE jobs SET status='completed'
+        JM->>DB: UpdateJobStatus('completed')
         WP->>WS: SendLog(jobID, "info", "Job completed")
     else Failure
         EX-->>WP: error
         WP->>JM: UpdateJobStatus(jobID, "failed")
         WP->>JM: SetJobError(jobID, error)
-        JM->>DB: UPDATE jobs SET status='failed'
+        JM->>DB: UpdateJobStatus('failed')
         WP->>WS: SendLog(jobID, "error", error message)
     end
 
     WS-->>UI: WebSocket: job_status update
     WP->>QM: deleteFn() [remove from queue]
-    QM->>DB: DELETE from goqite_messages
+    QM->>DB: Delete message
 
-    Note over UI,WS: Parent-child hierarchy tracked via parent_id<br/>goqite provides persistence and visibility timeout<br/>Worker pool processes jobs concurrently<br/>WebSocket provides real-time updates
+    Note over UI,WS: Parent-child hierarchy tracked via parent_id<br/>Badger queue provides persistence and visibility timeout<br/>Worker pool processes jobs concurrently<br/>WebSocket provides real-time updates
 ```
 
 This architecture provides several key benefits:
 
 - **Separation of Concerns**: JobExecutor handles workflow orchestration while the Queue System manages reliable execution
 - **Parent-Child Hierarchy**: Enables comprehensive progress tracking and status aggregation across complex job trees
-- **Persistent Queuing**: goqite provides SQLite-backed persistence with visibility timeouts for fault tolerance
+- **Persistent Queuing**: Badger-backed persistence with visibility timeouts for fault tolerance
 - **Real-Time Updates**: WebSocket integration delivers live progress updates to the UI
 - **Scalable Processing**: Configurable worker pool enables concurrent job processing with proper resource management
 
@@ -844,7 +838,7 @@ The JobExecutor system supports multiple step types through registered executors
 |--------|----------|---------|
 | `crawl` | CrawlerStepExecutor | Start crawling jobs for URL discovery and content extraction |
 | `transform` | TransformStepExecutor | Data transformation and processing |
-| `reindex` | ReindexStepExecutor | Rebuild FTS5 search index for optimal performance |
+| `reindex` | ReindexStepExecutor | Rebuild search index for optimal performance |
 
 #### Configuration
 
@@ -894,7 +888,7 @@ For comprehensive technical documentation including database schemas, error hand
    ↓
 3. Extension sends POST to localhost:8080/api/auth
    ↓
-4. Server stores cookies in SQLite
+4. Server stores cookies in Badger
    ↓
 5. Crawler uses cookies for authenticated requests
 ```
@@ -917,7 +911,7 @@ For comprehensive technical documentation including database schemas, error hand
 5. For each URL:
    ├─ Fetch HTML (with chromedp if JavaScript)
    ├─ Convert to markdown
-   ├─ Save document to SQLite
+   ├─ Save document to Badger
    ├─ Discover child links
    ├─ Filter links (patterns, depth, domain)
    ├─ Deduplicate URLs (database)
@@ -1200,7 +1194,7 @@ go test -v ./api -run TestListSources
 - **Unit Tests** (`internal/*/...`): Colocated with source code
   - Crawler service (9 tests)
   - Search service (8 tests)
-  - Storage/SQLite (11 tests)
+  - Storage/Badger (11 tests)
   - Config, identifiers, metadata (30 tests)
 - **API Tests** (`test/api/`): HTTP endpoint testing
   - Sources API
@@ -1253,7 +1247,7 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
 embed_model_name = "gemini-embedding-001"       # Default embedding model
 chat_model_name = "gemini-2.0-flash"            # Default chat model
 timeout = "5m"                                   # Operation timeout
-embed_dimension = 768                            # Must match SQLite config
+embed_dimension = 768                           # Must match storage config
 
 [llm.audit]
 enabled = true
@@ -1280,13 +1274,10 @@ min_event_level = "info"     # Minimum log level to publish as real-time events 
                              # Example: Set to "debug" to show all logs in UI (verbose)
 
 [storage]
-type = "sqlite"
+type = "badger"
 
-[storage.sqlite]
-path = "./quaero.db"
-enable_fts5 = true
-enable_wal = true
-cache_size_mb = 100
+[storage.badger]
+path = "./data/quaero.badger"
 ```
 
 ## Troubleshooting
@@ -1334,9 +1325,9 @@ type quaero.toml
 - Generic website crawler with depth-based traversal
 - Cookie-based authentication via Chrome extension
 - HTML to Markdown conversion with chromedp
-- Persistent job queue (goqite/SQLite)
+- Persistent job queue (Badger)
 - Worker pool with configurable concurrency
-- Document storage with SQLite FTS5
+- Document storage with Badger
 - Job progress tracking with real-time WebSocket updates
 - URL filtering (include/exclude regex patterns)
 - Job management UI (create, monitor, execute)
@@ -1364,7 +1355,7 @@ type quaero.toml
 See [docs/remaining-requirements.md](docs/remaining-requirements.md) and [docs/QUEUE_MANAGER_IMPLEMENTATION_STATUS.md](docs/QUEUE_MANAGER_IMPLEMENTATION_STATUS.md) for detailed status.
 
 **Current Sprint (~75% Complete):**
-- [x] Persistent job queue (goqite)
+- [x] Persistent job queue (Badger)
 - [x] Worker pool with job routing
 - [x] Crawler job implementation
 - [x] Document storage and deduplication

@@ -1,8 +1,14 @@
 package queue
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
-// Message is the ONLY structure that goes into goqite.
+// ErrNoMessage is returned when the queue is empty
+var ErrNoMessage = errors.New("no messages in queue")
+
+// Message is the structure stored in the queue.
 // Keep it simple - just enough to route the job.
 type Message struct {
 	JobID   string          `json:"job_id"`  // References jobs.id

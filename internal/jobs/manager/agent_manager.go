@@ -16,7 +16,7 @@ import (
 // AgentManager creates parent agent jobs and orchestrates AI-powered document processing workflows
 type AgentManager struct {
 	jobMgr        *jobs.Manager
-	queueMgr      *queue.Manager
+	queueMgr      interfaces.QueueManager
 	searchService interfaces.SearchService
 	kvStorage     interfaces.KeyValueStorage
 	authStorage   interfaces.AuthStorage
@@ -30,7 +30,7 @@ var _ interfaces.StepManager = (*AgentManager)(nil)
 // NewAgentManager creates a new agent manager
 func NewAgentManager(
 	jobMgr *jobs.Manager,
-	queueMgr *queue.Manager,
+	queueMgr interfaces.QueueManager,
 	searchService interfaces.SearchService,
 	kvStorage interfaces.KeyValueStorage,
 	authStorage interfaces.AuthStorage,

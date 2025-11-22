@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/validation"
-	"github.com/ternarybob/quaero/internal/storage/sqlite"
 )
 
 var ErrJobDefinitionNotFound = errors.New("job definition not found")
@@ -33,8 +31,8 @@ type JobDefinitionHandler struct {
 	authStorage               interfaces.AuthStorage
 	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService         *validation.TOMLValidationService
-	agentService              interfaces.AgentService // Optional: nil if agent service unavailable
-	db                        *sql.DB
+	agentService interfaces.AgentService // Optional: nil if agent service unavailable
+	// db                        *sql.DB // Removed SQLite dependency
 	logger                    arbor.ILogger
 }
 
@@ -46,7 +44,7 @@ func NewJobDefinitionHandler(
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
-	db *sql.DB,
+	_ interface{}, // Placeholder for removed DB
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -64,9 +62,6 @@ func NewJobDefinitionHandler(
 	if kvStorage == nil {
 		panic("kvStorage cannot be nil")
 	}
-	if db == nil {
-		panic("db cannot be nil")
-	}
 	if logger == nil {
 		panic("logger cannot be nil")
 	}
@@ -81,7 +76,6 @@ func NewJobDefinitionHandler(
 		kvStorage:                 kvStorage,
 		validationService:         validation.NewTOMLValidationService(logger),
 		agentService:              agentService, // Can be nil
-		db:                        db,
 		logger:                    logger,
 	}
 }
@@ -341,7 +335,7 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 	// Check if job definition exists and is not a system job
 	existingJobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
 	if err != nil {
-		if err == sqlite.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
 			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
@@ -415,7 +409,7 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 	// Check if job definition exists and is not a system job
 	existingJobDef, err := h.jobDefStorage.GetJobDefinition(ctx, id)
 	if err != nil {
-		if err == sqlite.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
 			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
@@ -433,7 +427,7 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 	}
 
 	if err := h.jobDefStorage.DeleteJobDefinition(ctx, id); err != nil {
-		if err == sqlite.ErrJobDefinitionNotFound {
+		if err == ErrJobDefinitionNotFound {
 			h.logger.Warn().Str("job_def_id", id).Msg("Job definition not found")
 			WriteError(w, http.StatusNotFound, "Job definition not found")
 			return
@@ -790,10 +784,17 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 	jobID := r.URL.Query().Get("job_id")
 	if jobID != "" {
 		// Update validation status in database
+		// Note: UpdateValidationStatus currently depends on *sql.DB.
+		// Since we removed SQLite, we need to update validationService or skip this.
+		// For now, we skip persisting validation status until validationService is updated.
+		h.logger.Warn().Str("job_id", jobID).Msg("Skipping validation status persistence (SQLite removed)")
+		
+		/*
 		if err := h.validationService.UpdateValidationStatus(ctx, h.db, jobID, result); err != nil {
 			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update validation status")
 			// Don't fail the request - validation result is still valuable
 		}
+		*/
 	}
 
 	// Return validation result
@@ -819,7 +820,7 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	defer r.Body.Close()
 
 	// Parse TOML into generic JobDefinitionFile
-	var jobFile sqlite.JobDefinitionFile
+	var jobFile JobDefinitionFile
 	if err := toml.Unmarshal(tomlContent, &jobFile); err != nil {
 		h.logger.Error().Err(err).Msg("Invalid TOML syntax")
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid TOML syntax: %v", err))
@@ -1135,4 +1136,69 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
+}
+
+// JobDefinitionFile represents the TOML file structure for job definitions
+type JobDefinitionFile struct {
+	ID              string   `toml:"id"`
+	Name            string   `toml:"name"`
+	Type            string   `toml:"type"`
+	Description     string   `toml:"description"`
+	Schedule        string   `toml:"schedule"`
+	Timeout         string   `toml:"timeout"`
+	Enabled         bool     `toml:"enabled"`
+	AutoStart       bool     `toml:"auto_start"`
+	AuthID          string   `toml:"authentication"`
+	StartURLs       []string `toml:"start_urls"`
+	IncludePatterns []string `toml:"include_patterns"`
+	ExcludePatterns []string `toml:"exclude_patterns"`
+	MaxDepth        int      `toml:"max_depth"`
+	MaxPages        int      `toml:"max_pages"`
+	Concurrency     int      `toml:"concurrency"`
+	FollowLinks     bool     `toml:"follow_links"`
+}
+
+// ToJobDefinition converts the file structure to the internal model
+func (f *JobDefinitionFile) ToJobDefinition(kvStorage interfaces.KeyValueStorage, logger arbor.ILogger) *models.JobDefinition {
+	// Create config map for crawler
+	config := make(map[string]interface{})
+
+	if len(f.StartURLs) > 0 {
+		config["start_urls"] = f.StartURLs
+	}
+	if len(f.IncludePatterns) > 0 {
+		config["include_patterns"] = f.IncludePatterns
+	}
+	if len(f.ExcludePatterns) > 0 {
+		config["exclude_patterns"] = f.ExcludePatterns
+	}
+
+	config["max_depth"] = f.MaxDepth
+	config["max_pages"] = f.MaxPages
+	config["concurrency"] = f.Concurrency
+	config["follow_links"] = f.FollowLinks
+
+	// Create step
+	step := models.JobStep{
+		Name:    "crawl",
+		Action:  "crawl",
+		Config:  config,
+		OnError: models.ErrorStrategyContinue,
+	}
+
+	return &models.JobDefinition{
+		ID:          f.ID,
+		Name:        f.Name,
+		Type:        models.JobDefinitionType(f.Type),
+		Description: f.Description,
+		Schedule:    f.Schedule,
+		Timeout:     f.Timeout,
+		Enabled:     f.Enabled,
+		AutoStart:   f.AutoStart,
+		AuthID:      f.AuthID,
+		Steps:       []models.JobStep{step},
+		JobType:     models.JobOwnerTypeUser,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
 }

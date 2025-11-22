@@ -7,7 +7,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +44,7 @@ import (
 	"github.com/ternarybob/quaero/internal/services/summary"
 	"github.com/ternarybob/quaero/internal/services/transform"
 	"github.com/ternarybob/quaero/internal/storage"
-	"github.com/ternarybob/quaero/internal/storage/sqlite"
+	"github.com/dgraph-io/badger/v3"
 )
 
 // App holds all application components and dependencies
@@ -67,7 +66,7 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution (using concrete types for refactored queue system)
-	QueueManager              *queue.Manager
+	QueueManager              interfaces.QueueManager
 	LogService                interfaces.LogService
 	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
 	JobManager                *jobs.Manager
@@ -108,10 +107,6 @@ type App struct {
 
 	// Connector service
 	ConnectorService interfaces.ConnectorService
-
-	// SQLite DB (required for queue, jobs, connectors even if main storage is Badger)
-	SQLiteDB      *sql.DB
-	SQLiteDBCloser interface{ Close() error }
 
 	// HTTP handlers
 	APIHandler           *handlers.APIHandler
@@ -234,7 +229,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	return app, nil
 }
 
-// initDatabase initializes the storage layer (SQLite)
+// initDatabase initializes the storage layer (Badger)
 func (a *App) initDatabase() error {
 	storageManager, err := storage.NewStorageManager(a.Logger, a.Config)
 	if err != nil {
@@ -244,45 +239,8 @@ func (a *App) initDatabase() error {
 	a.StorageManager = storageManager
 	a.Logger.Info().
 		Str("type", a.Config.Storage.Type).
-		Str("path", a.Config.Storage.SQLite.Path).
-		Str("fts5_enabled", fmt.Sprintf("%v", a.Config.Storage.SQLite.EnableFTS5)).
+		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
-
-	// Load user-defined job definitions from TOML/JSON files
-	if sqliteMgr, ok := storageManager.(*sqlite.Manager); ok {
-		ctx := context.Background()
-		if err := sqliteMgr.LoadJobDefinitionsFromFiles(ctx, a.Config.Jobs.DefinitionsDir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load job definitions from files")
-		}
-
-		// Load variables from files
-		// This is separate from auth - auth is for cookies, variables are for API keys and generic secrets
-		// Environment variables are checked at runtime via ResolveAPIKey() in config.go
-		if err := sqliteMgr.LoadKeysFromFiles(ctx, a.Config.Variables.Dir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load variables from files")
-			// Don't fail startup - variable files are optional
-		} else {
-			a.Logger.Info().Str("dir", a.Config.Variables.Dir).Msg("Variables loaded from files")
-		}
-
-		// Load connectors from files
-		// Must happen after database initialization and before services that use connectors
-		if err := sqliteMgr.LoadConnectorsFromFiles(ctx, a.Config.Connectors.Dir); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to load connectors from files")
-			// Don't fail startup - connector files are optional
-		} else {
-			a.Logger.Info().Str("dir", a.Config.Connectors.Dir).Msg("Connectors loaded from files")
-		}
-
-		// Migrate API keys from auth_credentials to key_value_store (idempotent)
-		// This separates concerns: auth_credentials for cookie auth, key_value_store for API keys
-		if err := sqliteMgr.MigrateAPIKeysToKVStore(ctx); err != nil {
-			a.Logger.Warn().Err(err).Msg("API key migration to KV store failed")
-			// Don't fail startup - migration is not critical (backward compatibility maintained)
-		} else {
-			a.Logger.Info().Msg("API key migration to KV store completed successfully")
-		}
-	}
 
 	// Phase 2: Perform {key-name} replacement in config after storage initialization
 	// This replaces any {key-name} references in config values with actual KV store values
@@ -386,29 +344,34 @@ func (a *App) initServices() error {
 	a.SystemLogsService = logviewer.NewService(logViewerConfig)
 	a.Logger.Info().Str("logs_dir", logsDir).Msg("System logs service initialized")
 
-	// 5.6. Initialize queue manager (goqite-backed)
-	// If main storage is not SQLite, we need to initialize a separate SQLite DB for the queue/jobs/connectors
-	if db, ok := a.StorageManager.DB().(*sql.DB); ok {
-		a.SQLiteDB = db
-	} else {
-		a.Logger.Info().Msg("Main storage is not SQLite, initializing separate SQLite DB for queue/jobs")
-		sqliteDB, err := sqlite.NewSQLiteDB(a.Logger, &a.Config.Storage.SQLite)
-		if err != nil {
-			return fmt.Errorf("failed to initialize SQLite: %w", err)
-		}
-		a.SQLiteDB = sqliteDB.DB()
-		a.SQLiteDBCloser = sqliteDB
+	// 5.6. Initialize queue manager (Badger-backed)
+	// Obtain underlying Badger DB from storage manager
+	// Note: StorageManager.DB() returns interface{}, we assert to *badger.DB
+	// This assumes StorageManager is backed by Badger, which is enforced by config
+	badgerDB, ok := a.StorageManager.DB().(*badger.DB)
+	if !ok {
+		return fmt.Errorf("storage manager is not backed by BadgerDB (got %T)", a.StorageManager.DB())
 	}
 
-	queueMgr, err := queue.NewManager(a.SQLiteDB, a.Config.Queue.QueueName)
+	queueMgr, err := queue.NewBadgerManager(
+		badgerDB,
+		a.Config.Queue.QueueName,
+		parseDuration(a.Config.Queue.VisibilityTimeout),
+		a.Config.Queue.MaxReceive,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize queue manager: %w", err)
 	}
 	a.QueueManager = queueMgr
 	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
-	// 5.8. Initialize job manager with event service for status change publishing
-	jobMgr := jobs.NewManager(a.SQLiteDB, queueMgr, a.EventService)
+	// 5.8. Initialize job manager with storage interfaces
+	jobMgr := jobs.NewManager(
+		a.StorageManager.JobStorage(),
+		a.StorageManager.JobLogStorage(),
+		queueMgr,
+		a.EventService,
+	)
 	a.JobManager = jobMgr
 	a.Logger.Info().Msg("Job manager initialized")
 
@@ -442,11 +405,14 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Config service initialized with dynamic key injection")
 
 	// 5.13. Initialize connector service
+	// Note: ConnectorService currently depends on *sql.DB.
+	// We pass nil for now as SQLite is removed.
+	// TODO: Refactor ConnectorService to use storage interfaces if needed.
 	a.ConnectorService = connectors.NewService(
-		a.SQLiteDB,
+		nil, // SQLiteDB removed
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Connector service initialized")
+	a.Logger.Info().Msg("Connector service initialized (DB disabled)")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -502,13 +468,14 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Job monitor created (runs in background goroutines, not via queue)")
 
 	// Register database maintenance worker (ARCH-008)
-	dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
-		a.SQLiteDB,
-		jobMgr,
-		a.Logger,
-	)
-	jobProcessor.RegisterExecutor(dbMaintenanceWorker)
-	a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
+	// Disabled as it depends on SQLite - will be removed or replaced with Badger maintenance
+	// dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
+	// 	nil, // SQLite DB removed
+	// 	jobMgr,
+	// 	a.Logger,
+	// )
+	// jobProcessor.RegisterExecutor(dbMaintenanceWorker)
+	// a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -734,7 +701,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
-		a.SQLiteDB,                         // Pass *sql.DB for validation service
+		nil,                                // SQLiteDB removed
 		a.Logger,
 	)
 
@@ -958,14 +925,13 @@ func (a *App) Close() error {
 		a.Logger.Info().Msg("Storage closed")
 	}
 
-	// Close separate SQLite DB if it exists
-	if a.SQLiteDBCloser != nil {
-		if err := a.SQLiteDBCloser.Close(); err != nil {
-			a.Logger.Warn().Err(err).Msg("Failed to close SQLite DB")
-		} else {
-			a.Logger.Info().Msg("SQLite DB closed")
-		}
-	}
-
 	return nil
+}
+
+func parseDuration(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 5 * time.Minute
+	}
+	return d
 }

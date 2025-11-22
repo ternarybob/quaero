@@ -56,7 +56,7 @@ func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
 	return s.SaveJob(ctx, job)
 }
 
-func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.JobModel, error) {
+func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.Job, error) {
 	query := badgerhold.Where("ID").Ne("")
 
 	if opts != nil {
@@ -65,7 +65,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 		}
 		// Note: Type field is not available in JobListOptions in current interface definition
 		// If needed, interface should be updated. For now, ignoring Type filter if not present.
-		
+
 		if opts.ParentID != "" {
 			query = query.And("ParentID").Eq(opts.ParentID)
 		}
@@ -93,9 +93,9 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	result := make([]*models.JobModel, len(jobs))
+	result := make([]*models.Job, len(jobs))
 	for i := range jobs {
-		result[i] = jobs[i].JobModel
+		result[i] = &jobs[i]
 	}
 	return result, nil
 }

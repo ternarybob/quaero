@@ -6,7 +6,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/ternarybob/arbor"
@@ -16,8 +15,10 @@ import (
 )
 
 // DatabaseMaintenanceWorker processes individual database maintenance operations (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
+// NOTE: This worker is currently disabled/deprecated as we moved to BadgerDB which handles maintenance differently.
+// It is kept for interface compatibility but operations are no-ops or return errors.
 type DatabaseMaintenanceWorker struct {
-	db     *sql.DB
+	// db     *sql.DB // Removed SQLite dependency
 	jobMgr *jobs.Manager
 	logger arbor.ILogger
 }
@@ -27,12 +28,11 @@ var _ interfaces.JobWorker = (*DatabaseMaintenanceWorker)(nil)
 
 // NewDatabaseMaintenanceWorker creates a new database maintenance worker
 func NewDatabaseMaintenanceWorker(
-	db *sql.DB,
+	_ interface{}, // Placeholder for removed DB
 	jobMgr *jobs.Manager,
 	logger arbor.ILogger,
 ) *DatabaseMaintenanceWorker {
 	return &DatabaseMaintenanceWorker{
-		db:     db,
 		jobMgr: jobMgr,
 		logger: logger,
 	}
@@ -144,87 +144,24 @@ func (w *DatabaseMaintenanceWorker) executeOperation(ctx context.Context, logger
 
 // vacuum performs VACUUM operation
 func (w *DatabaseMaintenanceWorker) vacuum(ctx context.Context, logger arbor.ILogger) error {
-	logger.Debug().Msg("Executing VACUUM")
-
-	_, err := w.db.ExecContext(ctx, "VACUUM")
-	if err != nil {
-		return fmt.Errorf("VACUUM failed: %w", err)
-	}
-
-	logger.Info().Msg("VACUUM completed successfully")
+	logger.Info().Msg("VACUUM operation skipped (BadgerDB handles compaction automatically)")
 	return nil
 }
 
 // analyze performs ANALYZE operation
 func (w *DatabaseMaintenanceWorker) analyze(ctx context.Context, logger arbor.ILogger) error {
-	logger.Debug().Msg("Executing ANALYZE")
-
-	_, err := w.db.ExecContext(ctx, "ANALYZE")
-	if err != nil {
-		return fmt.Errorf("ANALYZE failed: %w", err)
-	}
-
-	logger.Info().Msg("ANALYZE completed successfully")
+	logger.Info().Msg("ANALYZE operation skipped (Not applicable to BadgerDB)")
 	return nil
 }
 
 // reindex performs REINDEX operation on all indexes
 func (w *DatabaseMaintenanceWorker) reindex(ctx context.Context, logger arbor.ILogger) error {
-	logger.Debug().Msg("Executing REINDEX")
-
-	// Get all indexes
-	rows, err := w.db.QueryContext(ctx, `
-		SELECT name FROM sqlite_master
-		WHERE type = 'index'
-		AND name NOT LIKE 'sqlite_%'
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to query indexes: %w", err)
-	}
-	defer rows.Close()
-
-	var indexes []string
-	for rows.Next() {
-		var indexName string
-		if err := rows.Scan(&indexName); err != nil {
-			return fmt.Errorf("failed to scan index name: %w", err)
-		}
-		indexes = append(indexes, indexName)
-	}
-
-	logger.Info().
-		Int("index_count", len(indexes)).
-		Msg("Reindexing database indexes")
-
-	// Reindex each index
-	for _, indexName := range indexes {
-		logger.Debug().
-			Str("index", indexName).
-			Msg("Reindexing")
-
-		_, err := w.db.ExecContext(ctx, fmt.Sprintf("REINDEX %s", indexName))
-		if err != nil {
-			logger.Warn().
-				Err(err).
-				Str("index", indexName).
-				Msg("Failed to reindex - continuing")
-			continue
-		}
-	}
-
-	logger.Info().Msg("REINDEX completed successfully")
+	logger.Info().Msg("REINDEX operation skipped (Not applicable to BadgerDB)")
 	return nil
 }
 
 // optimize performs database optimization
 func (w *DatabaseMaintenanceWorker) optimize(ctx context.Context, logger arbor.ILogger) error {
-	logger.Debug().Msg("Executing OPTIMIZE")
-
-	_, err := w.db.ExecContext(ctx, "PRAGMA optimize")
-	if err != nil {
-		return fmt.Errorf("OPTIMIZE failed: %w", err)
-	}
-
-	logger.Info().Msg("OPTIMIZE completed successfully")
+	logger.Info().Msg("OPTIMIZE operation skipped (BadgerDB handles optimization automatically)")
 	return nil
 }

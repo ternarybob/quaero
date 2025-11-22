@@ -96,7 +96,7 @@ func deleteConnector(t *testing.T, helper *common.HTTPTestHelper, id string) {
 
 // TestKVStore_CRUD tests complete KV store lifecycle
 func TestKVStore_CRUD(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -208,7 +208,7 @@ func TestKVStore_CRUD(t *testing.T) {
 
 // TestKVStore_CaseInsensitive tests case-insensitive key handling
 func TestKVStore_CaseInsensitive(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -288,7 +288,7 @@ func TestKVStore_CaseInsensitive(t *testing.T) {
 
 // TestKVStore_Upsert tests PUT upsert behavior
 func TestKVStore_Upsert(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -348,7 +348,7 @@ func TestKVStore_Upsert(t *testing.T) {
 
 // TestKVStore_DuplicateValidation tests duplicate key detection
 func TestKVStore_DuplicateValidation(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -396,7 +396,7 @@ func TestKVStore_DuplicateValidation(t *testing.T) {
 
 // TestKVStore_ValueMasking tests value masking in list endpoint
 func TestKVStore_ValueMasking(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -470,7 +470,7 @@ func TestKVStore_ValueMasking(t *testing.T) {
 
 // TestKVStore_ValidationErrors tests validation error cases
 func TestKVStore_ValidationErrors(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -542,7 +542,7 @@ func TestKVStore_ValidationErrors(t *testing.T) {
 
 // TestConnectors_CRUD tests connector lifecycle
 func TestConnectors_CRUD(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -664,7 +664,7 @@ func TestConnectors_CRUD(t *testing.T) {
 
 // TestConnectors_Validation tests connector validation
 func TestConnectors_Validation(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -721,7 +721,7 @@ func TestConnectors_Validation(t *testing.T) {
 
 // TestConnectors_GitHubConnectionTest tests GitHub connector connection testing
 func TestConnectors_GitHubConnectionTest(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -760,7 +760,7 @@ func TestConnectors_GitHubConnectionTest(t *testing.T) {
 
 // TestConfig_Get tests config endpoint
 func TestConfig_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -810,7 +810,7 @@ func TestConfig_Get(t *testing.T) {
 
 // TestStatus_Get tests status endpoint
 func TestStatus_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -837,7 +837,7 @@ func TestStatus_Get(t *testing.T) {
 
 // TestVersion_Get tests version endpoint
 func TestVersion_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -878,7 +878,7 @@ func TestVersion_Get(t *testing.T) {
 
 // TestHealth_Get tests health endpoint
 func TestHealth_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -903,7 +903,7 @@ func TestHealth_Get(t *testing.T) {
 
 // TestLogsRecent_Get tests recent logs endpoint
 func TestLogsRecent_Get(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -940,7 +940,7 @@ func TestLogsRecent_Get(t *testing.T) {
 
 // TestSystemLogs_ListFiles tests log file listing
 func TestSystemLogs_ListFiles(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -975,7 +975,7 @@ func TestSystemLogs_ListFiles(t *testing.T) {
 
 // TestSystemLogs_GetContent tests log content retrieval
 func TestSystemLogs_GetContent(t *testing.T) {
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 

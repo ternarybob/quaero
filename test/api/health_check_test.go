@@ -14,7 +14,7 @@ import (
 // and responds to health checks.
 func TestHealthCheckWithBadger(t *testing.T) {
 	// Start service with Badger configuration
-	env, err := common.SetupTestEnvironment(t.Name(), "../config/test-quaero-badger.toml")
+	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
@@ -24,7 +24,7 @@ func TestHealthCheckWithBadger(t *testing.T) {
 	// Test health endpoint
 	resp, err := helper.GET("/api/health")
 	require.NoError(t, err, "Failed to call health endpoint")
-	
+
 	// Verify status code
 	helper.AssertStatusCode(resp, http.StatusOK)
 
@@ -32,9 +32,9 @@ func TestHealthCheckWithBadger(t *testing.T) {
 	var result map[string]string
 	err = helper.ParseJSONResponse(resp, &result)
 	require.NoError(t, err, "Failed to parse health response")
-	
+
 	assert.Equal(t, "ok", result["status"], "Health status should be 'ok'")
-	
+
 	// Log success
 	t.Logf("Health check passed with Badger storage")
 	t.Logf("Service running on port %d", env.Port)

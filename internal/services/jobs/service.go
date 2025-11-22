@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -18,12 +19,12 @@ import (
 // Service provides high-level job management operations
 type Service struct {
 	jobManager *jobs.Manager
-	queueMgr   *queue.Manager
+	queueMgr   interfaces.QueueManager
 	logger     arbor.ILogger
 }
 
 // NewService creates a new job service
-func NewService(jobManager *jobs.Manager, queueMgr *queue.Manager, logger arbor.ILogger) *Service {
+func NewService(jobManager *jobs.Manager, queueMgr interfaces.QueueManager, logger arbor.ILogger) *Service {
 	return &Service{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,
