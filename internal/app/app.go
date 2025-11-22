@@ -118,7 +118,6 @@ type App struct {
 	AuthHandler          *handlers.AuthHandler
 	KVHandler            *handlers.KVHandler
 	WSHandler            *handlers.WebSocketHandler
-	CollectionHandler    *handlers.CollectionHandler
 	DocumentHandler      *handlers.DocumentHandler
 	SearchHandler        *handlers.SearchHandler
 	SchedulerHandler     *handlers.SchedulerHandler
@@ -685,11 +684,6 @@ func (a *App) initHandlers() error {
 	a.KVHandler = handlers.NewKVHandler(a.KVService, a.Logger)
 	a.Logger.Info().Msg("KV handler initialized")
 
-	a.CollectionHandler = handlers.NewCollectionHandler(
-		a.EventService,
-		a.Logger,
-	)
-
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
 		a.StorageManager.DocumentStorage(),
@@ -703,7 +697,6 @@ func (a *App) initHandlers() error {
 
 	a.SchedulerHandler = handlers.NewSchedulerHandler(
 		a.SchedulerService,
-		a.StorageManager.DocumentStorage(),
 	)
 
 	// Initialize MCP handler with SearchService

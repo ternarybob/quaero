@@ -48,30 +48,21 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// NOTE: Old data management and collector routes removed - handlers deleted during Stage 2.4 cleanup
 
-	// API routes - Collection (manual data sync)
-	mux.HandleFunc("/api/collection/jira/sync", s.app.CollectionHandler.SyncJiraHandler)
-	mux.HandleFunc("/api/collection/confluence/sync", s.app.CollectionHandler.SyncConfluenceHandler)
-	mux.HandleFunc("/api/collection/sync-all", s.app.CollectionHandler.SyncAllHandler)
-
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler) // GET - all unique tags
 	mux.HandleFunc("/api/documents", s.handleDocumentsRoute)                 // GET (list) and POST (create)
-	mux.HandleFunc("/api/documents/force-sync", s.app.SchedulerHandler.ForceSyncDocumentHandler)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents
 	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes)                                   // Handles /api/documents/{id} and subpaths
 
 	// API routes - Search
 	mux.HandleFunc("/api/search", s.handleSearchRoute)
 
-	// MCP (Model Context Protocol) endpoints
-	mux.HandleFunc("/mcp", s.app.MCPHandler.HandleRPC)
-	mux.HandleFunc("/mcp/info", s.app.MCPHandler.InfoHandler)
+	// NOTE: MCP endpoints removed from public routes - MCPHandler kept for external API integration
 
 	// NOTE: Processing routes removed - ProcessHandler and ProcessingStatusHandler deleted during Stage 2.4 cleanup
 
-	// API routes - Scheduler
-	mux.HandleFunc("/api/scheduler/trigger-collection", s.app.SchedulerHandler.TriggerCollectionHandler)
+	// NOTE: Scheduler trigger-collection endpoint removed - automatic scheduling via cron (every 5 minutes)
 
 	// API routes - Logs
 	mux.HandleFunc("/api/logs/recent", s.app.WSHandler.GetRecentLogsHandler)
@@ -97,7 +88,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
 	mux.HandleFunc("/api/config", s.app.ConfigHandler.GetConfig) // GET - application configuration
-	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)           // Graceful shutdown endpoint (dev mode)
+	mux.HandleFunc("/api/shutdown", s.ShutdownHandler)           // Graceful shutdown endpoint (internal-only, dev mode)
 
 	// API routes - System Logs
 	mux.HandleFunc("/api/system/logs/files", s.app.SystemLogsHandler.ListLogFilesHandler)

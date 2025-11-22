@@ -4,17 +4,17 @@ import (
 	"context"
 	"time"
 
-	"maragu.dev/goqite"
-
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // QueueManager manages the persistent message queue
+// BREAKING CHANGE: Extend method now uses string messageID instead of goqite.ID
+// to support Badger-backed queue implementation (removed goqite dependency)
 type QueueManager interface {
 	Enqueue(ctx context.Context, msg queue.Message) error
 	Receive(ctx context.Context) (*queue.Message, func() error, error)
-	Extend(ctx context.Context, messageID goqite.ID, duration time.Duration) error
+	Extend(ctx context.Context, messageID string, duration time.Duration) error
 	Close() error
 }
 
