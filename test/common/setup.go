@@ -95,6 +95,7 @@ type TestEnvironment struct {
 //	"HomepageTitle" -> "homepage" (from homepage_test.go)
 //	"TestSourcesPageLoad" -> "sources" (from sources_test.go)
 //	"TestJobsCreateModal" -> "jobs" (from jobs_test.go)
+//	"TestConfig_Something" -> "config" (from config_test.go)
 func extractSuiteName(testName string) string {
 	// Remove "Test" prefix if present
 	remainder := testName
@@ -110,17 +111,21 @@ func extractSuiteName(testName string) string {
 		}
 	}
 
+	var suiteName string
 	// If we have at least 2 capitals, take everything up to the second one
 	// Example: "HomepageTitle" has capitals at [0, 8]
 	//          We want "homepage" (lowercase, up to index 8)
 	// Example: "SourcesPageLoad" has capitals at [0, 7, 11]
 	//          We want "sources" (lowercase, up to index 7)
 	if len(capitals) >= 2 {
-		return strings.ToLower(remainder[:capitals[1]])
+		suiteName = strings.ToLower(remainder[:capitals[1]])
+	} else {
+		// If only one capital or none, return the lowercase name
+		suiteName = strings.ToLower(remainder)
 	}
 
-	// If only one capital or none, return the lowercase name
-	return strings.ToLower(remainder)
+	// Trim trailing underscores (from test names like TestConfig_Something)
+	return strings.TrimRight(suiteName, "_")
 }
 
 // getOrCreateSuiteDirectory gets or creates a parent directory for a test suite

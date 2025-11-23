@@ -1,0 +1,5 @@
+# Test configuration with search disabled
+# Used by TestSearchFTS5Disabled to test 503 error response
+
+[search]
+mode = "disabled"
