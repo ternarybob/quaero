@@ -1115,7 +1115,7 @@ func (env *TestEnvironment) TakeFullScreenshot(ctx context.Context, name string)
 func (env *TestEnvironment) TakeBeforeAfterScreenshots(ctx context.Context, baseName string, action func() error) error {
 	// Take "before" screenshot
 	beforeName := fmt.Sprintf("%s_before", baseName)
-	if err := env.TakeFullScreenshot(ctx, beforeName); err != nil {
+	if err := env.TakeScreenshot(ctx, beforeName); err != nil {
 		return fmt.Errorf("failed to take before screenshot: %w", err)
 	}
 
@@ -1129,7 +1129,7 @@ func (env *TestEnvironment) TakeBeforeAfterScreenshots(ctx context.Context, base
 
 	// Take "after" screenshot
 	afterName := fmt.Sprintf("%s_after", baseName)
-	if err := env.TakeFullScreenshot(ctx, afterName); err != nil {
+	if err := env.TakeScreenshot(ctx, afterName); err != nil {
 		return fmt.Errorf("failed to take after screenshot: %w", err)
 	}
 

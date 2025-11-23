@@ -155,6 +155,15 @@ type JobLogStorage interface {
 	GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.JobLogEntry, error)
 }
 
+// ConnectorStorage - interface for connector persistence
+type ConnectorStorage interface {
+	SaveConnector(ctx context.Context, connector *models.Connector) error
+	GetConnector(ctx context.Context, id string) (*models.Connector, error)
+	ListConnectors(ctx context.Context) ([]*models.Connector, error)
+	UpdateConnector(ctx context.Context, connector *models.Connector) error
+	DeleteConnector(ctx context.Context, id string) error
+}
+
 // StorageManager - composite interface for all storage operations
 type StorageManager interface {
 	AuthStorage() AuthStorage
@@ -163,10 +172,15 @@ type StorageManager interface {
 	JobLogStorage() JobLogStorage
 	JobDefinitionStorage() JobDefinitionStorage
 	KeyValueStorage() KeyValueStorage
+	ConnectorStorage() ConnectorStorage
 	DB() interface{}
 	Close() error
 
 	// MigrateAPIKeysToKVStore migrates API keys from auth_credentials table to key_value_store
 	// This is idempotent and safe to call multiple times
 	MigrateAPIKeysToKVStore(ctx context.Context) error
+
+	// LoadVariablesFromFiles loads variables (key/value pairs) from TOML files in the specified directory
+	// This is used to load configuration secrets and other variables at startup
+	LoadVariablesFromFiles(ctx context.Context, dirPath string) error
 }

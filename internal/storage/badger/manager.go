@@ -17,6 +17,7 @@ type Manager struct {
 	jobLog        interfaces.JobLogStorage
 	jobDefinition interfaces.JobDefinitionStorage
 	kv            interfaces.KeyValueStorage
+	connector     interfaces.ConnectorStorage
 	logger        arbor.ILogger
 }
 
@@ -35,6 +36,7 @@ func NewManager(logger arbor.ILogger, config *common.BadgerConfig) (interfaces.S
 		jobLog:        NewJobLogStorage(db, logger),
 		jobDefinition: NewJobDefinitionStorage(db, logger),
 		kv:            NewKVStorage(db, logger),
+		connector:     NewConnectorStorage(db, logger),
 		logger:        logger,
 	}
 
@@ -71,6 +73,11 @@ func (m *Manager) JobDefinitionStorage() interfaces.JobDefinitionStorage {
 // KeyValueStorage returns the KeyValue storage interface
 func (m *Manager) KeyValueStorage() interfaces.KeyValueStorage {
 	return m.kv
+}
+
+// ConnectorStorage returns the Connector storage interface
+func (m *Manager) ConnectorStorage() interfaces.ConnectorStorage {
+	return m.connector
 }
 
 // DB returns the underlying database connection

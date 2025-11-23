@@ -242,6 +242,13 @@ func (a *App) initDatabase() error {
 		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
 
+	// Load variables from files (e.g. API keys, secrets)
+	// This must happen before config replacement so that loaded variables can be used
+	if err := a.StorageManager.LoadVariablesFromFiles(context.Background(), a.Config.Variables.Dir); err != nil {
+		// Log warning but don't fail startup (consistent with other loaders)
+		a.Logger.Warn().Err(err).Msg("Failed to load variables from files")
+	}
+
 	// Phase 2: Perform {key-name} replacement in config after storage initialization
 	// This replaces any {key-name} references in config values with actual KV store values
 	// Must happen BEFORE services (LLM, Agent, Places) are initialized
@@ -407,14 +414,11 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Config service initialized with dynamic key injection")
 
 	// 5.13. Initialize connector service
-	// Note: ConnectorService currently depends on *sql.DB.
-	// We pass nil for now as SQLite is removed.
-	// TODO: Refactor ConnectorService to use storage interfaces if needed.
 	a.ConnectorService = connectors.NewService(
-		nil, // SQLiteDB removed
+		a.StorageManager.ConnectorStorage(), // Pass the Badger-backed ConnectorStorage
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Connector service initialized (DB disabled)")
+	a.Logger.Info().Msg("Connector service initialized")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
