@@ -23,8 +23,8 @@ import (
 
 // JobGroup represents a parent job with its children
 type JobGroup struct {
-	Parent   *models.Job
-	Children []*models.Job
+	Parent   *models.QueueJobState
+	Children []*models.QueueJobState
 }
 
 // JobHandler handles job-related API requests
@@ -231,16 +231,16 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Group jobs by parent
 	groupsMap := make(map[string]*JobGroup)
-	var orphanJobs []*models.Job
+	var orphanJobs []*models.QueueJobState
 
 	if grouped && parentID != "" && parentID != "root" {
 		// Fetch the parent job to ensure it's in the response
 		parentJob, err := h.jobManager.GetJob(ctx, parentID)
 		if err == nil {
-			if p, ok := parentJob.(*models.Job); ok {
+			if p, ok := parentJob.(*models.QueueJobState); ok {
 				groupsMap[p.ID] = &JobGroup{
 					Parent:   p,
-					Children: make([]*models.Job, 0),
+					Children: make([]*models.QueueJobState, 0),
 				}
 			}
 		}
@@ -252,7 +252,7 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 			if _, exists := groupsMap[job.ID]; !exists {
 				groupsMap[job.ID] = &JobGroup{
 					Parent:   job,
-					Children: make([]*models.Job, 0),
+					Children: make([]*models.QueueJobState, 0),
 				}
 			}
 		} else {
@@ -335,26 +335,26 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Type assert the job from active jobs
-	job, ok := jobInterface.(*models.Job)
+	jobState, ok := jobInterface.(*models.QueueJobState)
 	if !ok {
 		http.Error(w, "Invalid job type", http.StatusInternalServerError)
 		return
 	}
 
 	// For parent jobs (empty parent_id), enrich with child statistics
-	if job.ParentID == nil || *job.ParentID == "" {
-		childStatsMap, err := h.jobManager.GetJobChildStats(ctx, []string{job.ID})
+	if jobState.ParentID == nil || *jobState.ParentID == "" {
+		childStatsMap, err := h.jobManager.GetJobChildStats(ctx, []string{jobState.ID})
 		if err != nil {
 			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get child statistics, continuing without stats")
 		}
 
 		// Convert to map for enrichment
-		jobMap := convertJobToMap(job)
-		jobMap["parent_id"] = job.ParentID
+		jobMap := convertJobToMap(jobState)
+		jobMap["parent_id"] = jobState.ParentID
 
 		// Add child statistics
 		var stats *interfaces.JobChildStats
-		if s, exists := childStatsMap[job.ID]; exists {
+		if s, exists := childStatsMap[jobState.ID]; exists {
 			stats = s
 			jobMap["child_count"] = stats.ChildCount
 			jobMap["completed_children"] = stats.CompletedChildren
@@ -377,8 +377,8 @@ func (h *JobHandler) GetJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For child jobs
-	jobMap := convertJobToMap(job)
-	jobMap["parent_id"] = job.ParentID
+	jobMap := convertJobToMap(jobState)
+	jobMap["parent_id"] = jobState.ParentID
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobMap)
@@ -894,7 +894,7 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Type assert to get job details
-	job, ok := jobInterface.(*models.Job)
+	jobState, ok := jobInterface.(*models.QueueJobState)
 	if !ok {
 		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type retrieved")
 		h.writeDeleteError(w, 500, "Internal server error", "Invalid job type", jobID, "", 0)
@@ -903,14 +903,14 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if job is running (but allow deletion of orchestrating jobs)
 	// Orchestrating jobs are parent jobs monitoring children - deletion will cancel them
-	if job.Status == models.JobStatusRunning && job.Type != "parent" {
+	if jobState.Status == models.JobStatusRunning && jobState.Type != "parent" {
 		h.logger.Warn().Str("job_id", jobID).Msg("Attempt to delete running job blocked")
-		h.writeDeleteError(w, 400, "Cannot delete running job", fmt.Sprintf("Job %s is currently running. Cancel it first.", jobID), jobID, string(job.Status), 0)
+		h.writeDeleteError(w, 400, "Cannot delete running job", fmt.Sprintf("Job %s is currently running. Cancel it first.", jobID), jobID, string(jobState.Status), 0)
 		return
 	}
 
 	// If job is orchestrating (parent job), cancel it and all children first before deletion
-	if job.Status == models.JobStatusRunning && job.Type == "parent" {
+	if jobState.Status == models.JobStatusRunning && jobState.Type == "parent" {
 		h.logger.Info().Str("job_id", jobID).Msg("Cancelling orchestrating job and children before deletion")
 
 		// Cancel all child jobs first
@@ -922,10 +922,10 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Cancel the parent job by updating its status
-		job.Status = models.JobStatusCancelled
-		if err := h.jobManager.UpdateJob(ctx, job); err != nil {
+		jobState.Status = models.JobStatusCancelled
+		if err := h.jobManager.UpdateJob(ctx, jobState); err != nil {
 			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel orchestrating job")
-			h.writeDeleteError(w, 500, "Failed to cancel job", err.Error(), jobID, string(job.Status), 0)
+			h.writeDeleteError(w, 500, "Failed to cancel job", err.Error(), jobID, string(jobState.Status), 0)
 			return
 		}
 
@@ -954,11 +954,11 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 		// Determine error type and return structured response
 		errorMsg := err.Error()
 		if strings.Contains(strings.ToLower(errorMsg), "running") {
-			h.writeDeleteError(w, 400, "Cannot delete running job", errorMsg, jobID, string(job.Status), childCount)
+			h.writeDeleteError(w, 400, "Cannot delete running job", errorMsg, jobID, string(jobState.Status), childCount)
 		} else if strings.Contains(strings.ToLower(errorMsg), "not found") {
 			h.writeDeleteError(w, 404, "Job not found", errorMsg, jobID, "", childCount)
 		} else {
-			h.writeDeleteError(w, 500, "Failed to delete job", errorMsg, jobID, string(job.Status), childCount)
+			h.writeDeleteError(w, 500, "Failed to delete job", errorMsg, jobID, string(jobState.Status), childCount)
 		}
 		return
 	}
@@ -1060,20 +1060,20 @@ func (h *JobHandler) GetJobQueueHandler(w http.ResponseWriter, r *http.Request) 
 	// Convert jobs to enriched maps to extract document_count from metadata
 	// This ensures the queue endpoint returns consistent data with document_count field
 	pendingJobs := make([]map[string]interface{}, 0, len(pendingJobsInterface))
-	for _, jobModel := range pendingJobsInterface {
-		// Convert JobModel to Job for convertJobToMap compatibility
-		job := models.NewJob(jobModel)
-		jobMap := convertJobToMap(job)
-		jobMap["parent_id"] = jobModel.ParentID
+	for _, queueJob := range pendingJobsInterface {
+		// Convert QueueJob to QueueJobState for convertJobToMap compatibility
+		jobState := models.NewQueueJobState(queueJob)
+		jobMap := convertJobToMap(jobState)
+		jobMap["parent_id"] = queueJob.ParentID
 		pendingJobs = append(pendingJobs, jobMap)
 	}
 
 	runningJobs := make([]map[string]interface{}, 0, len(runningJobsInterface))
-	for _, jobModel := range runningJobsInterface {
-		// Convert JobModel to Job for convertJobToMap compatibility
-		job := models.NewJob(jobModel)
-		jobMap := convertJobToMap(job)
-		jobMap["parent_id"] = jobModel.ParentID
+	for _, queueJob := range runningJobsInterface {
+		// Convert QueueJob to QueueJobState for convertJobToMap compatibility
+		jobState := models.NewQueueJobState(queueJob)
+		jobMap := convertJobToMap(jobState)
+		jobMap["parent_id"] = queueJob.ParentID
 		runningJobs = append(runningJobs, jobMap)
 	}
 
@@ -1170,19 +1170,19 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// convertJobToMap converts a Job struct to a map for JSON response enrichment
+// convertJobToMap converts a QueueJobState struct to a map for JSON response enrichment
 // IMPORTANT: Converts the Config field to a flexible map[string]interface{} for executor-agnostic display
 // Extracts document_count from metadata for easier UI access
-func convertJobToMap(job *models.Job) map[string]interface{} {
+func convertJobToMap(jobState *models.QueueJobState) map[string]interface{} {
 	// Marshal to JSON then unmarshal to map to preserve all fields and JSON tags
-	data, err := json.Marshal(job)
+	data, err := json.Marshal(jobState)
 	if err != nil {
-		return map[string]interface{}{"id": job.ID, "error": "failed to serialize job"}
+		return map[string]interface{}{"id": jobState.ID, "error": "failed to serialize job"}
 	}
 
 	var jobMap map[string]interface{}
 	if err := json.Unmarshal(data, &jobMap); err != nil {
-		return map[string]interface{}{"id": job.ID, "error": "failed to deserialize job"}
+		return map[string]interface{}{"id": jobState.ID, "error": "failed to deserialize job"}
 	}
 
 	// Convert the config field from CrawlConfig struct to map[string]interface{}
