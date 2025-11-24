@@ -68,14 +68,14 @@ func unixToTime(unix int64) time.Time {
 
 // CreateJobRecord creates a new job record without enqueueing (for tracking only)
 func (m *Manager) CreateJobRecord(ctx context.Context, job *Job) error {
-	// Convert internal Job to models.JobModel for storage
+	// Convert internal Job to models.QueueJob for storage
 	metadata := map[string]interface{}{
 		"phase": job.Phase,
 	}
 
 	config := make(map[string]interface{})
 
-	jobModel := &models.JobModel{
+	queueJob := &models.QueueJob{
 		ID:        job.ID,
 		Type:      job.Type,
 		Name:      job.Name,
@@ -85,18 +85,18 @@ func (m *Manager) CreateJobRecord(ctx context.Context, job *Job) error {
 	}
 
 	if job.ParentID != nil {
-		jobModel.ParentID = job.ParentID
+		queueJob.ParentID = job.ParentID
 	}
 
 	// Create job record using storage interface
-	jobEntity := models.NewJob(jobModel)
-	jobEntity.Status = models.JobStatus(job.Status)
+	jobState := models.NewQueueJobState(queueJob)
+	jobState.Status = models.JobStatus(job.Status)
 
 	if job.ProgressTotal > 0 {
-		jobEntity.UpdateProgress(job.ProgressCurrent, 0, 0, job.ProgressTotal)
+		jobState.UpdateProgress(job.ProgressCurrent, 0, 0, job.ProgressTotal)
 	}
 
-	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobState); err != nil {
 		return fmt.Errorf("create job record: %w", err)
 	}
 
@@ -124,13 +124,13 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 		"document_count": 0,
 	}
 
-	jobModel := models.NewJobModel(jobType, "", config, metadata)
-	jobModel.ID = jobID
+	queueJob := models.NewQueueJob(jobType, "", config, metadata)
+	queueJob.ID = jobID
 
-	jobEntity := models.NewJob(jobModel)
-	jobEntity.Status = models.JobStatusPending
+	jobState := models.NewQueueJobState(queueJob)
+	jobState.Status = models.JobStatusPending
 
-	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobState); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
@@ -165,14 +165,14 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 		"phase": phase,
 	}
 
-	jobModel := models.NewJobModel(jobType, "", config, metadata)
-	jobModel.ID = jobID
-	jobModel.ParentID = &parentID
+	queueJob := models.NewQueueJob(jobType, "", config, metadata)
+	queueJob.ID = jobID
+	queueJob.ParentID = &parentID
 
-	jobEntity := models.NewJob(jobModel)
-	jobEntity.Status = models.JobStatusPending
+	jobState := models.NewQueueJobState(queueJob)
+	jobState.Status = models.JobStatusPending
 
-	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobState); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
@@ -195,43 +195,43 @@ func (m *Manager) GetJobInternal(ctx context.Context, jobID string) (*Job, error
 		return nil, err
 	}
 
-	jobEntity, ok := jobEntityInterface.(*models.Job)
+	jobState, ok := jobEntityInterface.(*models.QueueJobState)
 	if !ok {
 		return nil, fmt.Errorf("invalid job type from storage")
 	}
 
 	job := &Job{
-		ID:          jobEntity.ID,
-		Type:        jobEntity.Type,
-		Name:        jobEntity.Name,
-		Status:      string(jobEntity.Status),
-		CreatedAt:   jobEntity.CreatedAt,
-		StartedAt:   jobEntity.StartedAt,
-		CompletedAt: jobEntity.CompletedAt,
-		FinishedAt:  jobEntity.FinishedAt,
-		ParentID:    jobEntity.ParentID,
+		ID:          jobState.ID,
+		Type:        jobState.Type,
+		Name:        jobState.Name,
+		Status:      string(jobState.Status),
+		CreatedAt:   jobState.CreatedAt,
+		StartedAt:   jobState.StartedAt,
+		CompletedAt: jobState.CompletedAt,
+		FinishedAt:  jobState.FinishedAt,
+		ParentID:    jobState.ParentID,
 	}
 
-	if jobEntity.Error != "" {
-		job.Error = &jobEntity.Error
+	if jobState.Error != "" {
+		job.Error = &jobState.Error
 	}
 
 	// Map config to payload
-	if configJSON, err := json.Marshal(jobEntity.Config); err == nil {
+	if configJSON, err := json.Marshal(jobState.Config); err == nil {
 		job.Payload = string(configJSON)
 	}
 
 	// Map metadata fields
-	if phase, ok := jobEntity.Metadata["phase"].(string); ok {
+	if phase, ok := jobState.Metadata["phase"].(string); ok {
 		job.Phase = phase
 	}
-	if result, ok := jobEntity.Metadata["result"].(string); ok {
+	if result, ok := jobState.Metadata["result"].(string); ok {
 		job.Result = result
 	}
 
 	// Map progress (Progress is now a value type, always present)
-	job.ProgressCurrent = jobEntity.Progress.CompletedURLs
-	job.ProgressTotal = jobEntity.Progress.TotalURLs
+	job.ProgressCurrent = jobState.Progress.CompletedURLs
+	job.ProgressTotal = jobState.Progress.TotalURLs
 
 	return job, nil
 }
@@ -322,7 +322,7 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 		return fmt.Errorf("failed to get job details: %w", err)
 	}
 
-	jobEntity, ok := jobEntityInterface.(*models.Job)
+	jobState, ok := jobEntityInterface.(*models.QueueJobState)
 	if !ok {
 		return fmt.Errorf("invalid job type")
 	}
@@ -344,13 +344,13 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 		payload := map[string]interface{}{
 			"job_id":    jobID,
 			"status":    status,
-			"job_type":  jobEntity.Type,
+			"job_type":  jobState.Type,
 			"timestamp": time.Now().Format(time.RFC3339),
 		}
 
 		// Include parent_id if this is a child job
-		if jobEntity.ParentID != nil {
-			payload["parent_id"] = *jobEntity.ParentID
+		if jobState.ParentID != nil {
+			payload["parent_id"] = *jobState.ParentID
 		}
 
 		event := interfaces.Event{
@@ -402,15 +402,15 @@ func (m *Manager) SetJobResult(ctx context.Context, jobID string, result interfa
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
-		jobEntity.Metadata = make(map[string]interface{})
+	if jobState.Metadata == nil {
+		jobState.Metadata = make(map[string]interface{})
 	}
 
-	jobEntity.Metadata["result"] = string(resultJSON)
+	jobState.Metadata["result"] = string(resultJSON)
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // IncrementDocumentCount increments the document_count in job metadata
@@ -421,22 +421,22 @@ func (m *Manager) IncrementDocumentCount(ctx context.Context, jobID string) erro
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
-		jobEntity.Metadata = make(map[string]interface{})
+	if jobState.Metadata == nil {
+		jobState.Metadata = make(map[string]interface{})
 	}
 
 	// Increment document_count
 	currentCount := 0
-	if count, ok := jobEntity.Metadata["document_count"].(float64); ok {
+	if count, ok := jobState.Metadata["document_count"].(float64); ok {
 		currentCount = int(count)
-	} else if count, ok := jobEntity.Metadata["document_count"].(int); ok {
+	} else if count, ok := jobState.Metadata["document_count"].(int); ok {
 		currentCount = count
 	}
-	jobEntity.Metadata["document_count"] = currentCount + 1
+	jobState.Metadata["document_count"] = currentCount + 1
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // SetJobFinished sets the finished_at timestamp for a job
@@ -447,12 +447,12 @@ func (m *Manager) SetJobFinished(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
 	now := time.Now()
-	jobEntity.FinishedAt = &now
+	jobState.FinishedAt = &now
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // UpdateJobConfig updates the job configuration in the database
@@ -462,11 +462,11 @@ func (m *Manager) UpdateJobConfig(ctx context.Context, jobID string, config map[
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	jobEntity.Config = config
+	jobState.Config = config
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // UpdateJobMetadata updates the job metadata in the database
@@ -477,18 +477,18 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
-		jobEntity.Metadata = make(map[string]interface{})
+	if jobState.Metadata == nil {
+		jobState.Metadata = make(map[string]interface{})
 	}
 
 	// Merge metadata
 	for k, v := range metadata {
-		jobEntity.Metadata[k] = v
+		jobState.Metadata[k] = v
 	}
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // AddJobLog adds a log entry for a job
@@ -627,7 +627,7 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 		"source_id": sourceID,
 	}
 
-	jobModel := models.NewJobModel(jobType, name, config, metadata)
+	queueJob := models.NewQueueJob(jobType, name, config, metadata)
 
 	// Serialize config to JSON
 	configJSON, err := json.Marshal(config)
@@ -636,34 +636,34 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 	}
 
 	// Create job record in storage
-	jobEntity := models.NewJob(jobModel)
-	jobEntity.Status = models.JobStatusPending
+	jobState := models.NewQueueJobState(queueJob)
+	jobState.Status = models.JobStatusPending
 
-	if err := m.jobStorage.SaveJob(ctx, jobEntity); err != nil {
+	if err := m.jobStorage.SaveJob(ctx, jobState); err != nil {
 		return "", fmt.Errorf("create job record: %w", err)
 	}
 
 	// Enqueue the job
 	if err := m.queue.Enqueue(ctx, queue.Message{
-		JobID:   jobModel.ID,
+		JobID:   queueJob.ID,
 		Type:    jobType,
 		Payload: configJSON,
 	}); err != nil {
 		return "", fmt.Errorf("enqueue job: %w", err)
 	}
 
-	return jobModel.ID, nil
+	return queueJob.ID, nil
 }
 
 // GetJob implements interfaces.JobManager.GetJob
-// Returns interface{} to match the interface, but the actual type is *models.Job
+// Returns interface{} to match the interface, but the actual type is *models.QueueJobState
 func (m *Manager) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	return m.jobStorage.GetJob(ctx, jobID)
 }
 
 // ListJobs implements interfaces.JobManager.ListJobs
-// Returns []*models.Job directly from storage
-func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.Job, error) {
+// Returns []*models.QueueJobState directly from storage
+func (m *Manager) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {
 	return m.jobStorage.ListJobs(ctx, opts)
 }
 
@@ -702,21 +702,21 @@ func (m *Manager) CopyJob(ctx context.Context, jobID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
 	// Create new job with same configuration
 	newJobID := uuid.New().String()
 
-	// Clone job model
-	newJobModel := jobEntity.ToJobModel().Clone()
-	newJobModel.ID = newJobID
-	newJobModel.Name = jobEntity.Name + " (Copy)"
-	newJobModel.CreatedAt = time.Now()
+	// Clone queue job
+	newQueueJob := jobState.ToQueueJob().Clone()
+	newQueueJob.ID = newJobID
+	newQueueJob.Name = jobState.Name + " (Copy)"
+	newQueueJob.CreatedAt = time.Now()
 
-	newJobEntity := models.NewJob(newJobModel)
-	newJobEntity.Status = models.JobStatusPending
+	newJobState := models.NewQueueJobState(newQueueJob)
+	newJobState.Status = models.JobStatusPending
 
-	if err := m.jobStorage.SaveJob(ctx, newJobEntity); err != nil {
+	if err := m.jobStorage.SaveJob(ctx, newJobState); err != nil {
 		return "", fmt.Errorf("failed to create job copy: %w", err)
 	}
 
@@ -735,9 +735,9 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 	// We have to list and update individually
 
 	// Get all children
-	// Note: GetChildJobs returns []*models.JobModel, but we need status which is in models.Job
+	// Note: GetChildJobs returns []*models.QueueJob, but we need status which is in QueueJobState
 	// We need to fix the interface or use ListJobs with filter.
-	// Assuming GetChildJobs returns JobModel which doesn't have status.
+	// Assuming GetChildJobs returns QueueJob which doesn't have status.
 	// We need to fetch each job to check status.
 	// Or use ListJobs with ParentID filter if supported.
 
@@ -746,9 +746,7 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 		ParentID: parentID,
 	}
 
-	// ListJobs returns []*models.JobModel in interface, but we know it's broken.
-	// We will use m.ListJobs which returns []*models.Job (our wrapper).
-
+	// ListJobs returns []*models.QueueJobState
 	children, err := m.ListJobs(ctx, opts)
 	if err != nil {
 		return 0, err
@@ -974,24 +972,24 @@ func (m *Manager) GetJobTreeProgressStats(ctx context.Context, parentJobIDs []st
 		if err != nil {
 			continue
 		}
-		jobEntity := jobEntityInterface.(*models.Job)
+		jobState := jobEntityInterface.(*models.QueueJobState)
 
 		stats := &CrawlerProgressStats{
-			JobID:   jobEntity.ID,
-			Status:  string(jobEntity.Status),
-			JobType: jobEntity.Type,
+			JobID:   jobState.ID,
+			Status:  string(jobState.Status),
+			JobType: jobState.Type,
 		}
 
-		if jobEntity.ParentID != nil {
-			stats.ParentID = *jobEntity.ParentID
+		if jobState.ParentID != nil {
+			stats.ParentID = *jobState.ParentID
 		}
 
-		if jobEntity.StartedAt != nil {
-			stats.StartedAt = jobEntity.StartedAt
+		if jobState.StartedAt != nil {
+			stats.StartedAt = jobState.StartedAt
 		}
 
-		if jobEntity.Error != "" {
-			stats.Errors = []string{jobEntity.Error}
+		if jobState.Error != "" {
+			stats.Errors = []string{jobState.Error}
 		}
 
 		// Get child statistics for this parent
@@ -1069,15 +1067,15 @@ func (m *Manager) GetDocumentCount(ctx context.Context, jobID string) (int, erro
 	if err != nil {
 		return 0, err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
+	if jobState.Metadata == nil {
 		return 0, nil
 	}
 
-	if count, ok := jobEntity.Metadata["document_count"].(float64); ok {
+	if count, ok := jobState.Metadata["document_count"].(float64); ok {
 		return int(count), nil
-	} else if count, ok := jobEntity.Metadata["document_count"].(int); ok {
+	} else if count, ok := jobState.Metadata["document_count"].(int); ok {
 		return count, nil
 	}
 
@@ -1091,14 +1089,14 @@ func (m *Manager) AddJobError(ctx context.Context, jobID, errorMessage string) e
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
-		jobEntity.Metadata = make(map[string]interface{})
+	if jobState.Metadata == nil {
+		jobState.Metadata = make(map[string]interface{})
 	}
 
 	var statusReport map[string]interface{}
-	if sr, ok := jobEntity.Metadata["status_report"].(map[string]interface{}); ok {
+	if sr, ok := jobState.Metadata["status_report"].(map[string]interface{}); ok {
 		statusReport = sr
 	} else {
 		statusReport = make(map[string]interface{})
@@ -1113,9 +1111,9 @@ func (m *Manager) AddJobError(ctx context.Context, jobID, errorMessage string) e
 
 	errors = append(errors, errorMessage)
 	statusReport["errors"] = errors
-	jobEntity.Metadata["status_report"] = statusReport
+	jobState.Metadata["status_report"] = statusReport
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
 // AddJobWarning adds a warning message to the job's status_report
@@ -1125,14 +1123,14 @@ func (m *Manager) AddJobWarning(ctx context.Context, jobID, warningMessage strin
 	if err != nil {
 		return err
 	}
-	jobEntity := jobEntityInterface.(*models.Job)
+	jobState := jobEntityInterface.(*models.QueueJobState)
 
-	if jobEntity.Metadata == nil {
-		jobEntity.Metadata = make(map[string]interface{})
+	if jobState.Metadata == nil {
+		jobState.Metadata = make(map[string]interface{})
 	}
 
 	var statusReport map[string]interface{}
-	if sr, ok := jobEntity.Metadata["status_report"].(map[string]interface{}); ok {
+	if sr, ok := jobState.Metadata["status_report"].(map[string]interface{}); ok {
 		statusReport = sr
 	} else {
 		statusReport = make(map[string]interface{})
@@ -1147,7 +1145,7 @@ func (m *Manager) AddJobWarning(ctx context.Context, jobID, warningMessage strin
 
 	warnings = append(warnings, warningMessage)
 	statusReport["warnings"] = warnings
-	jobEntity.Metadata["status_report"] = statusReport
+	jobState.Metadata["status_report"] = statusReport
 
-	return m.jobStorage.UpdateJob(ctx, jobEntity)
+	return m.jobStorage.UpdateJob(ctx, jobState)
 }

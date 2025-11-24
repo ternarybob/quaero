@@ -352,7 +352,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		// Start parent job monitoring in a separate goroutine (NOT via queue)
 		// This prevents blocking the queue worker with long-running monitoring loops
 		// Note: parentMetadata was already persisted earlier (right after CreateJobRecord)
-		// We reconstruct it here for the in-memory parentJobModel only
+		// We reconstruct it here for the in-memory QueueJob only
 		parentMetadata := make(map[string]interface{})
 
 		// Include auth_id in metadata if present (required for cookie injection)
@@ -366,7 +366,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		// Include phase in metadata
 		parentMetadata["phase"] = "execution"
 
-		parentJobModel := &models.JobModel{
+		parentQueueJob := &models.QueueJob{
 			ID:        parentJobID,
 			ParentID:  nil,
 			Type:      "parent",
@@ -378,7 +378,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		}
 
 		// Start monitoring in background goroutine
-		o.jobMonitor.StartMonitoring(ctx, parentJobModel)
+		o.jobMonitor.StartMonitoring(ctx, parentQueueJob)
 
 		parentLogger.Info().Msg("✓ Parent job monitoring started in background goroutine")
 		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Parent job monitoring started - tracking child job progress")
