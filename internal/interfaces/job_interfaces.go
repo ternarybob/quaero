@@ -32,7 +32,7 @@ type JobMonitor interface {
 	// StartMonitoring begins monitoring a parent job in a background goroutine.
 	// Takes the full queued job (not just ID) to access config fields like source_type and entity_type.
 	// Returns immediately after starting the monitoring goroutine.
-	StartMonitoring(ctx context.Context, job *models.JobQueued)
+	StartMonitoring(ctx context.Context, job *models.QueueJob)
 
 	// SubscribeToJobEvents sets up event subscriptions for real-time child job tracking.
 	// This is called during orchestrator initialization.
@@ -45,7 +45,7 @@ type JobMonitor interface {
 type JobWorker interface {
 	// Execute processes a single job from the queue. Returns error if execution fails.
 	// Worker is responsible for updating job status and logging progress.
-	Execute(ctx context.Context, job *models.JobQueued) error
+	Execute(ctx context.Context, job *models.QueueJob) error
 
 	// GetWorkerType returns the job type this worker handles.
 	// Examples: "database_maintenance", "crawler_url", "agent"
@@ -53,7 +53,7 @@ type JobWorker interface {
 
 	// Validate validates that the queued job is compatible with this worker.
 	// Returns error if the queued job is invalid for this worker.
-	Validate(job *models.JobQueued) error
+	Validate(job *models.QueueJob) error
 }
 
 // JobSpawner defines the interface for workers that can spawn child jobs.
@@ -61,5 +61,5 @@ type JobWorker interface {
 type JobSpawner interface {
 	// SpawnChildJob creates and enqueues a child job
 	// The child job will be linked to the parent via ParentID
-	SpawnChildJob(ctx context.Context, parentJob *models.JobQueued, childType, childName string, config map[string]interface{}) error
+	SpawnChildJob(ctx context.Context, parentJob *models.QueueJob, childType, childName string, config map[string]interface{}) error
 }
