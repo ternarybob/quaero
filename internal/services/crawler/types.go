@@ -39,16 +39,16 @@ var (
 )
 
 // ============================================================================
-// CONVERSION HELPERS: CrawlJob ↔ models.Job
+// CONVERSION HELPERS: CrawlJob ↔ models.QueueJobState
 // ============================================================================
 //
 // These helpers convert between the legacy CrawlJob structure and the new
-// executor-agnostic models.Job structure. The new Job model uses flexible
+// executor-agnostic models.QueueJobState structure. The new QueueJobState model uses flexible
 // Config and Metadata maps instead of fixed struct fields.
 //
-// CrawlJob → Job Mapping:
-//   - CrawlJob.Config → Job.Config["crawl_config"]
-//   - CrawlJob.SourceConfigSnapshot → Job.Config["source_config_snapshot"]
+// CrawlJob → QueueJobState Mapping:
+//   - CrawlJob.Config → QueueJobState.Config["crawl_config"]
+//   - CrawlJob.SourceConfigSnapshot → QueueJobState.Config["source_config_snapshot"]
 //   - CrawlJob.AuthSnapshot → Job.Config["auth_snapshot"]
 //   - CrawlJob.RefreshSource → Job.Config["refresh_source"]
 //   - CrawlJob.SeedURLs → Job.Config["seed_urls"]
@@ -60,8 +60,8 @@ var (
 //
 // ============================================================================
 
-// CrawlJobToJob converts a legacy CrawlJob to the new models.Job structure
-func CrawlJobToJob(crawlJob *CrawlJob) *models.Job {
+// CrawlJobToJob converts a legacy CrawlJob to the new models.QueueJobState structure
+func CrawlJobToJob(crawlJob *CrawlJob) *models.QueueJobState {
 	// Build config map from CrawlJob fields
 	config := make(map[string]interface{})
 	config["crawl_config"] = crawlJob.Config
@@ -112,8 +112,8 @@ func CrawlJobToJob(crawlJob *CrawlJob) *models.Job {
 		jobType = "crawler" // Default fallback
 	}
 
-	// Create JobModel
-	jobModel := &models.JobModel{
+	// Create QueueJob
+	queueJob := &models.QueueJob{
 		ID:        crawlJob.ID,
 		ParentID:  parentID,
 		Type:      jobType,
@@ -124,42 +124,42 @@ func CrawlJobToJob(crawlJob *CrawlJob) *models.Job {
 		Depth:     0, // Not tracked in CrawlJob
 	}
 
-	// Create Job with runtime state
-	job := models.NewJob(jobModel)
-	job.Status = crawlJob.Status
+	// Create QueueJobState with runtime state
+	jobState := models.NewQueueJobState(queueJob)
+	jobState.Status = crawlJob.Status
 	// Progress is now a value type - dereference if not nil, otherwise use zero value
 	if jobProgress != nil {
-		job.Progress = *jobProgress
+		jobState.Progress = *jobProgress
 	}
-	job.StartedAt = startedAt
-	job.CompletedAt = completedAt
-	job.FinishedAt = finishedAt
-	job.LastHeartbeat = lastHeartbeat
-	job.Error = crawlJob.Error
-	job.ResultCount = crawlJob.ResultCount
-	job.FailedCount = crawlJob.FailedCount
+	jobState.StartedAt = startedAt
+	jobState.CompletedAt = completedAt
+	jobState.FinishedAt = finishedAt
+	jobState.LastHeartbeat = lastHeartbeat
+	jobState.Error = crawlJob.Error
+	jobState.ResultCount = crawlJob.ResultCount
+	jobState.FailedCount = crawlJob.FailedCount
 
-	return job
+	return jobState
 }
 
-// JobToCrawlJob converts a models.Job back to a legacy CrawlJob structure
+// JobToCrawlJob converts a models.QueueJobState back to a legacy CrawlJob structure
 // This is used for backward compatibility with existing code that expects CrawlJob
-func JobToCrawlJob(job *models.Job) (*CrawlJob, error) {
+func JobToCrawlJob(jobState *models.QueueJobState) (*CrawlJob, error) {
 	// Extract config fields
-	crawlConfig, err := extractCrawlConfig(job.Config)
+	crawlConfig, err := extractCrawlConfig(jobState.Config)
 	if err != nil {
 		return nil, err
 	}
 
-	sourceConfigSnapshot, _ := job.Config["source_config_snapshot"].(string)
-	authSnapshot, _ := job.Config["auth_snapshot"].(string)
-	refreshSource, _ := job.Config["refresh_source"].(bool)
-	sourceType, _ := job.Config["source_type"].(string)
-	entityType, _ := job.Config["entity_type"].(string)
+	sourceConfigSnapshot, _ := jobState.Config["source_config_snapshot"].(string)
+	authSnapshot, _ := jobState.Config["auth_snapshot"].(string)
+	refreshSource, _ := jobState.Config["refresh_source"].(bool)
+	sourceType, _ := jobState.Config["source_type"].(string)
+	entityType, _ := jobState.Config["entity_type"].(string)
 
 	// Extract seed URLs
 	var seedURLs []string
-	if seedURLsRaw, ok := job.Config["seed_urls"]; ok {
+	if seedURLsRaw, ok := jobState.Config["seed_urls"]; ok {
 		if seedURLsSlice, ok := seedURLsRaw.([]interface{}); ok {
 			for _, url := range seedURLsSlice {
 				if urlStr, ok := url.(string); ok {
@@ -173,64 +173,64 @@ func JobToCrawlJob(job *models.Job) (*CrawlJob, error) {
 
 	// Convert JobProgress to CrawlProgress (Progress is now a value type, always present)
 	crawlProgress := CrawlProgress{
-		TotalURLs:     job.Progress.TotalURLs,
-		CompletedURLs: job.Progress.CompletedURLs,
-		FailedURLs:    job.Progress.FailedURLs,
-		PendingURLs:   job.Progress.PendingURLs,
-		CurrentURL:    job.Progress.CurrentURL,
-		Percentage:    job.Progress.Percentage,
+		TotalURLs:     jobState.Progress.TotalURLs,
+		CompletedURLs: jobState.Progress.CompletedURLs,
+		FailedURLs:    jobState.Progress.FailedURLs,
+		PendingURLs:   jobState.Progress.PendingURLs,
+		CurrentURL:    jobState.Progress.CurrentURL,
+		Percentage:    jobState.Progress.Percentage,
 	}
 
 	// Handle ParentID pointer
 	parentID := ""
-	if job.ParentID != nil {
-		parentID = *job.ParentID
+	if jobState.ParentID != nil {
+		parentID = *jobState.ParentID
 	}
 
 	// Convert timestamps from pointers
 	var startedAt, completedAt, finishedAt, lastHeartbeat time.Time
-	if job.StartedAt != nil {
-		startedAt = *job.StartedAt
+	if jobState.StartedAt != nil {
+		startedAt = *jobState.StartedAt
 	}
-	if job.CompletedAt != nil {
-		completedAt = *job.CompletedAt
+	if jobState.CompletedAt != nil {
+		completedAt = *jobState.CompletedAt
 	}
-	if job.FinishedAt != nil {
-		finishedAt = *job.FinishedAt
+	if jobState.FinishedAt != nil {
+		finishedAt = *jobState.FinishedAt
 	}
-	if job.LastHeartbeat != nil {
-		lastHeartbeat = *job.LastHeartbeat
+	if jobState.LastHeartbeat != nil {
+		lastHeartbeat = *jobState.LastHeartbeat
 	}
 
 	// Parse JobType from string
-	jobType := models.JobType(job.Type)
+	jobType := models.JobType(jobState.Type)
 
 	crawlJob := &CrawlJob{
-		ID:                   job.ID,
+		ID:                   jobState.ID,
 		ParentID:             parentID,
 		JobType:              jobType,
-		Name:                 job.Name,
-		Description:          "", // Not stored in Job model
+		Name:                 jobState.Name,
+		Description:          "", // Not stored in QueueJobState model
 		SourceType:           sourceType,
 		EntityType:           entityType,
 		Config:               crawlConfig,
 		SourceConfigSnapshot: sourceConfigSnapshot,
 		AuthSnapshot:         authSnapshot,
 		RefreshSource:        refreshSource,
-		Status:               job.Status,
+		Status:               jobState.Status,
 		Progress:             crawlProgress,
-		CreatedAt:            job.CreatedAt,
+		CreatedAt:            jobState.CreatedAt,
 		StartedAt:            startedAt,
 		CompletedAt:          completedAt,
 		FinishedAt:           finishedAt,
 		LastHeartbeat:        lastHeartbeat,
-		Error:                job.Error,
-		ResultCount:          job.ResultCount,
-		FailedCount:          job.FailedCount,
-		DocumentsSaved:       0, // Not tracked in Job model
+		Error:                jobState.Error,
+		ResultCount:          jobState.ResultCount,
+		FailedCount:          jobState.FailedCount,
+		DocumentsSaved:       0, // Not tracked in QueueJobState model
 		SeedURLs:             seedURLs,
 		SeenURLs:             nil, // In-memory only, not persisted
-		Metadata:             job.Metadata,
+		Metadata:             jobState.Metadata,
 	}
 
 	return crawlJob, nil

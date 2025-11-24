@@ -162,7 +162,7 @@ func NewService(authService interfaces.AuthService, authStorage interfaces.AuthS
 		logger:           logger,
 		config:           config,
 		chromeDPPool:     chromeDPPool,
-		activeJobs:       make(map[string]*models.Job),
+		activeJobs:       make(map[string]*models.QueueJobState),
 		jobResults:       make(map[string][]*CrawlResult),
 		jobClients:       make(map[string]*http.Client),
 		ctx:              ctx,
@@ -327,11 +327,11 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Msg("Auth ID stored in job metadata for cookie injection")
 	}
 
-	var job *models.Job
+	var jobState *models.QueueJobState
 
 	if !isExistingParentJob {
-		// Create JobModel for new parent job (standalone crawl, not from JobExecutor)
-		jobModel := &models.JobModel{
+		// Create QueueJob for new parent job (standalone crawl, not from JobExecutor)
+		queueJob := &models.QueueJob{
 			ID:        jobID,
 			ParentID:  nil, // Parent jobs have no parent
 			Type:      string(models.JobTypeParent),
@@ -342,9 +342,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Depth:     0,
 		}
 
-		// Create Job with runtime state
-		job = models.NewJob(jobModel)
-		job.Progress = models.JobProgress{
+		// Create QueueJobState with runtime state
+		jobState = models.NewQueueJobState(queueJob)
+		jobState.Progress = models.JobProgress{
 			TotalURLs:     len(seedURLs),
 			CompletedURLs: 0,
 			FailedURLs:    0,
@@ -432,14 +432,14 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	var httpClientType string
 	if authSnapshot != nil {
 		// Store auth snapshot in job config (only for new parent jobs)
-		if !isExistingParentJob && job != nil {
+		if !isExistingParentJob && jobState != nil {
 			authJSON, err := json.Marshal(authSnapshot)
 			if err != nil {
 				// Log auth snapshot serialization failure
 				contextLogger.Error().Err(err).Msg("Failed to serialize auth snapshot")
 				return "", fmt.Errorf("failed to serialize auth snapshot: %w", err)
 			}
-			job.Config["auth_snapshot"] = string(authJSON)
+			jobState.Config["auth_snapshot"] = string(authJSON)
 		}
 
 		// Log auth snapshot presence
@@ -475,7 +475,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 	// Persist job to database (only for new parent jobs)
 	if !isExistingParentJob && s.jobStorage != nil {
-		if err := s.jobStorage.SaveJob(s.ctx, job); err != nil {
+		if err := s.jobStorage.SaveJob(s.ctx, jobState); err != nil {
 			s.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to persist job to database")
 			return "", fmt.Errorf("failed to save job: %w", err)
 		}
@@ -511,7 +511,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Track job in active jobs (only for new parent jobs)
 	if !isExistingParentJob {
 		s.jobsMu.Lock()
-		s.activeJobs[jobID] = job
+		s.activeJobs[jobID] = jobState
 		s.jobResults[jobID] = make([]*CrawlResult, 0)
 		s.jobsMu.Unlock()
 	} else {
@@ -575,10 +575,10 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			jobType = models.JobTypeGitHubActionLog
 		}
 
-		// Create child JobModel
+		// Create child QueueJob
 		// For existing parent jobs (from JobExecutor), children are at depth 1
 		// For new parent jobs (standalone), children are also at depth 1
-		childJobModel := &models.JobModel{
+		childQueueJob := &models.QueueJob{
 			ID:        childID,
 			ParentID:  &jobID,
 			Type:      jobType,
@@ -589,9 +589,9 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 			Depth:     1, // First level children are always depth 1
 		}
 
-		// Create child Job with runtime state
-		childJob := models.NewJob(childJobModel)
-		childJob.Progress = models.JobProgress{
+		// Create child QueueJobState with runtime state
+		childJobState := models.NewQueueJobState(childQueueJob)
+		childJobState.Progress = models.JobProgress{
 			TotalURLs:     1,
 			PendingURLs:   1,
 			CompletedURLs: 0,
@@ -601,7 +601,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 		// Save child job to database
 		if s.jobStorage != nil {
-			if err := s.jobStorage.SaveJob(s.ctx, childJob); err != nil {
+			if err := s.jobStorage.SaveJob(s.ctx, childJobState); err != nil {
 				contextLogger.Warn().
 					Err(err).
 					Str("child_id", childID).
@@ -619,14 +619,14 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 
 		// Enqueue message to queue for processing
 		if s.queueManager != nil {
-			// Serialize the child JobModel to JSON for queue payload
-			payloadJSON, err := childJob.ToJobModel().ToJSON()
+			// Serialize the child QueueJob to JSON for queue payload
+			payloadJSON, err := childJobState.ToQueueJob().ToJSON()
 			if err != nil {
 				contextLogger.Warn().
 					Err(err).
 					Str("seed_url", seedURL).
 					Str("child_id", childID).
-					Msg("Failed to serialize child job model")
+					Msg("Failed to serialize child queue job")
 				continue
 			}
 
@@ -657,8 +657,8 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	// Update PendingURLs and TotalURLs to match actual queue state (only for new parent jobs)
 	if !isExistingParentJob {
 		s.jobsMu.Lock()
-		job.Progress.PendingURLs = actuallyEnqueued
-		job.Progress.TotalURLs = actuallyEnqueued
+		jobState.Progress.PendingURLs = actuallyEnqueued
+		jobState.Progress.TotalURLs = actuallyEnqueued
 		s.jobsMu.Unlock()
 	}
 
@@ -980,8 +980,8 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 		return "", fmt.Errorf("failed to get job: %w", err)
 	}
 
-	originalJob, ok := jobInterface.(*models.Job)
-	if !ok || originalJob == nil {
+	originalJobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok || originalJobState == nil {
 		return "", fmt.Errorf("invalid job type or nil job")
 	}
 
@@ -991,7 +991,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 
 	// Extract seed URLs from original job config
 	var seedURLs []string
-	if seedURLsRaw, ok := originalJob.Config["seed_urls"]; ok {
+	if seedURLsRaw, ok := originalJobState.Config["seed_urls"]; ok {
 		if seedURLsSlice, ok := seedURLsRaw.([]interface{}); ok {
 			for _, url := range seedURLsSlice {
 				if urlStr, ok := url.(string); ok {
@@ -1005,7 +1005,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 
 	// Copy config map from original job
 	newConfig := make(map[string]interface{})
-	for k, v := range originalJob.Config {
+	for k, v := range originalJobState.Config {
 		newConfig[k] = v
 	}
 
@@ -1018,27 +1018,27 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 
 	// Copy metadata from original job
 	newMetadata := make(map[string]interface{})
-	if originalJob.Metadata != nil {
-		for k, v := range originalJob.Metadata {
+	if originalJobState.Metadata != nil {
+		for k, v := range originalJobState.Metadata {
 			newMetadata[k] = v
 		}
 	}
 
-	// Create new JobModel
-	newJobModel := &models.JobModel{
+	// Create new QueueJob
+	newQueueJob := &models.QueueJob{
 		ID:        newJobID,
-		ParentID:  originalJob.ParentID, // Preserve parent relationship
-		Type:      originalJob.Type,
-		Name:      originalJob.Name,
+		ParentID:  originalJobState.ParentID, // Preserve parent relationship
+		Type:      originalJobState.Type,
+		Name:      originalJobState.Name,
 		Config:    newConfig,
 		Metadata:  newMetadata,
 		CreatedAt: now,
-		Depth:     originalJob.Depth,
+		Depth:     originalJobState.Depth,
 	}
 
-	// Create new Job with fresh runtime state
-	newJob := models.NewJob(newJobModel)
-	newJob.Progress = models.JobProgress{
+	// Create new QueueJobState with fresh runtime state
+	newJobState := models.NewQueueJobState(newQueueJob)
+	newJobState.Progress = models.JobProgress{
 		TotalURLs:     len(seedURLs),
 		CompletedURLs: 0,
 		FailedURLs:    0,
@@ -1047,7 +1047,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 	}
 
 	// Save the new job
-	if err := s.jobStorage.SaveJob(ctx, newJob); err != nil {
+	if err := s.jobStorage.SaveJob(ctx, newJobState); err != nil {
 		return "", fmt.Errorf("failed to save job: %w", err)
 	}
 
