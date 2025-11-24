@@ -42,16 +42,16 @@ func NewJobMonitor(
 // StartMonitoring starts monitoring a parent job in a separate goroutine.
 // This is the primary entry point for parent job monitoring - NOT via queue.
 // Returns immediately after starting the goroutine.
-func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.JobModel) {
+func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.QueueJob) {
 	// Validate job before starting
 	if err := m.validate(job); err != nil {
 		m.logger.Error().
 			Err(err).
 			Str("job_id", job.ID).
-			Msg("Invalid parent job model - cannot start monitoring")
+			Msg("Invalid parent queue job - cannot start monitoring")
 
 		// Update job status to failed
-		m.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid job model: %v", err))
+		m.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid job: %v", err))
 		m.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		// Set finished_at timestamp for failed parent jobs
 		if err := m.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
@@ -75,8 +75,8 @@ func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.JobModel) 
 		Msg("Parent job monitoring started in background goroutine")
 }
 
-// validate validates that the job model is compatible with this monitor
-func (m *jobMonitor) validate(job *models.JobModel) error {
+// validate validates that the queue job is compatible with this monitor
+func (m *jobMonitor) validate(job *models.QueueJob) error {
 	if job.Type != string(models.JobTypeParent) {
 		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeParent, job.Type)
 	}
@@ -93,7 +93,7 @@ func (m *jobMonitor) validate(job *models.JobModel) error {
 
 // monitorChildJobs monitors child job progress and updates parent job status.
 // This runs in a separate goroutine and blocks until all children complete or timeout.
-func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.JobModel) error {
+func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob) error {
 	// Create job-specific logger for consistent logging
 	jobLogger := m.logger.WithCorrelationId(job.ID)
 
@@ -241,7 +241,7 @@ func (m *jobMonitor) checkChildJobProgress(ctx context.Context, parentJobID stri
 }
 
 // publishParentJobProgress publishes a parent job progress update for real-time monitoring
-func (m *jobMonitor) publishParentJobProgress(ctx context.Context, job *models.JobModel, status, activity string) {
+func (m *jobMonitor) publishParentJobProgress(ctx context.Context, job *models.QueueJob, status, activity string) {
 	if m.eventService == nil {
 		return
 	}
@@ -661,8 +661,8 @@ func (m *jobMonitor) getJobErrorsAndWarnings(ctx context.Context, jobID string) 
 		return []string{}, []string{}
 	}
 
-	// Type assert to *models.Job
-	job, ok := jobInterface.(*models.Job)
+	// Type assert to *models.QueueJobState
+	jobState, ok := jobInterface.(*models.QueueJobState)
 	if !ok {
 		m.logger.Debug().
 			Str("job_id", jobID).
@@ -671,7 +671,7 @@ func (m *jobMonitor) getJobErrorsAndWarnings(ctx context.Context, jobID string) 
 	}
 
 	// Extract status_report from metadata
-	statusReport, ok := job.Metadata["status_report"].(map[string]interface{})
+	statusReport, ok := jobState.Metadata["status_report"].(map[string]interface{})
 	if !ok {
 		// No status_report yet, return empty arrays
 		return []string{}, []string{}
