@@ -124,13 +124,13 @@ func (jp *JobProcessor) processNextJob() {
 		Str("job_type", msg.Type).
 		Msg("Processing job from queue")
 
-	// Deserialize job model from payload
-	jobModel, err := models.FromJSON(msg.Payload)
+	// Deserialize queue job from payload
+	queueJob, err := models.QueueJobFromJSON(msg.Payload)
 	if err != nil {
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
-			Msg("Failed to deserialize job model")
+			Msg("Failed to deserialize queue job")
 
 		// Delete malformed message from queue
 		if err := deleteFn(); err != nil {
@@ -139,12 +139,12 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Validate job model
-	if err := jobModel.Validate(); err != nil {
+	// Validate queue job
+	if err := queueJob.Validate(); err != nil {
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
-			Msg("Invalid job model")
+			Msg("Invalid queue job")
 
 		// Delete invalid message from queue
 		if err := deleteFn(); err != nil {
@@ -173,13 +173,13 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
-	// Validate job model with worker
-	if err := worker.Validate(jobModel); err != nil {
+	// Validate queue job with worker
+	if err := worker.Validate(queueJob); err != nil {
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
-			Msg("Job model validation failed")
+			Msg("Queue job validation failed")
 
 		// Update job status to failed
 		jp.jobMgr.SetJobError(jp.ctx, msg.JobID, err.Error())
@@ -193,7 +193,7 @@ func (jp *JobProcessor) processNextJob() {
 	}
 
 	// Execute the job using the worker
-	err = worker.Execute(jp.ctx, jobModel)
+	err = worker.Execute(jp.ctx, queueJob)
 
 	if err != nil {
 		// Job failed

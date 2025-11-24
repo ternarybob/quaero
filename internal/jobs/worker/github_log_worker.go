@@ -44,8 +44,8 @@ func (w *GitHubLogWorker) GetWorkerType() string {
 	return models.JobTypeGitHubActionLog
 }
 
-// Validate validates that the job model is compatible with this worker
-func (w *GitHubLogWorker) Validate(job *models.JobModel) error {
+// Validate validates that the queue job is compatible with this worker
+func (w *GitHubLogWorker) Validate(job *models.QueueJob) error {
 	if job.Type != models.JobTypeGitHubActionLog {
 		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeGitHubActionLog, job.Type)
 	}
@@ -53,7 +53,7 @@ func (w *GitHubLogWorker) Validate(job *models.JobModel) error {
 }
 
 // Execute processes a GitHub Action Log job
-func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.JobModel) error {
+func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	w.logger.Info().Str("job_id", job.ID).Msg("Processing GitHub Action Log job")
 
 	// Update job status to running

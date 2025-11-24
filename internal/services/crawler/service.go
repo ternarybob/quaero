@@ -123,7 +123,7 @@ type Service struct {
 	// ChromeDP browser pool for efficient JavaScript rendering
 	chromeDPPool *ChromeDPPool
 
-	activeJobs map[string]*models.Job
+	activeJobs map[string]*models.QueueJobState
 	jobResults map[string][]*CrawlResult
 	jobClients map[string]*http.Client // Per-job HTTP clients built from auth snapshots
 	jobsMu     sync.RWMutex
