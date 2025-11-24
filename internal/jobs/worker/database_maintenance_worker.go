@@ -47,8 +47,8 @@ func (w *DatabaseMaintenanceWorker) GetWorkerType() string {
 	return "database_maintenance_operation"
 }
 
-// Validate validates that the job model is compatible with this worker
-func (w *DatabaseMaintenanceWorker) Validate(job *models.JobModel) error {
+// Validate validates that the queue job is compatible with this worker
+func (w *DatabaseMaintenanceWorker) Validate(job *models.QueueJob) error {
 	if job.Type != "database_maintenance_operation" {
 		return fmt.Errorf("invalid job type: expected %s, got %s", "database_maintenance_operation", job.Type)
 	}
@@ -62,7 +62,7 @@ func (w *DatabaseMaintenanceWorker) Validate(job *models.JobModel) error {
 }
 
 // Execute executes a single database maintenance operation
-func (w *DatabaseMaintenanceWorker) Execute(ctx context.Context, job *models.JobModel) error {
+func (w *DatabaseMaintenanceWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	// Create job-specific logger with correlation ID
 	parentID := job.GetParentID()
 	if parentID == "" {

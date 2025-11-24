@@ -77,8 +77,8 @@ func (w *CrawlerWorker) GetWorkerType() string {
 	return "crawler_url"
 }
 
-// Validate validates that the job model is compatible with this worker
-func (w *CrawlerWorker) Validate(job *models.JobModel) error {
+// Validate validates that the queue job is compatible with this worker
+func (w *CrawlerWorker) Validate(job *models.QueueJob) error {
 	if job.Type != "crawler_url" {
 		return fmt.Errorf("invalid job type: expected %s, got %s", "crawler_url", job.Type)
 	}
@@ -110,7 +110,7 @@ func (w *CrawlerWorker) Validate(job *models.JobModel) error {
 // 3. Document storage with comprehensive metadata
 // 4. Link discovery and filtering
 // 5. Child job spawning for discovered links (respecting depth limits)
-func (w *CrawlerWorker) Execute(ctx context.Context, job *models.JobModel) error {
+func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	// Create job-specific logger using parent context for log aggregation
 	// All children log under the root parent ID for unified log viewing
 	parentID := job.GetParentID()
@@ -850,36 +850,36 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 	}
 	logger.Debug().Msg("🔐 OK: Parent job retrieved from database")
 
-	// Extract JobModel from either JobModel or Job (which embeds JobModel)
+	// Extract QueueJob from QueueJobState
 	var authID string
-	var jobModel *models.JobModel
+	var queueJob *models.QueueJob
 
-	// Try Job first (can extract JobModel)
-	if job, ok := parentJobInterface.(*models.Job); ok {
-		logger.Debug().Msg("🔐 OK: Parent job is Job type (extracting JobModel)")
-		jobModel = job.ToJobModel()
-	} else if jm, ok := parentJobInterface.(*models.JobModel); ok {
-		logger.Debug().Msg("🔐 OK: Parent job is JobModel type")
-		jobModel = jm
+	// Type assert to QueueJobState and extract QueueJob
+	if jobState, ok := parentJobInterface.(*models.QueueJobState); ok {
+		logger.Debug().Msg("🔐 OK: Parent job is QueueJobState type (extracting QueueJob)")
+		queueJob = jobState.ToQueueJob()
+	} else if qj, ok := parentJobInterface.(*models.QueueJob); ok {
+		logger.Debug().Msg("🔐 OK: Parent job is QueueJob type")
+		queueJob = qj
 	} else {
 		logger.Error().
 			Str("actual_type", fmt.Sprintf("%T", parentJobInterface)).
-			Msg("🔐 ERROR: Parent job is neither Job nor JobModel type")
+			Msg("🔐 ERROR: Parent job is neither QueueJobState nor QueueJob type")
 		return nil
 	}
 
-	if jobModel == nil {
-		logger.Error().Msg("🔐 ERROR: JobModel is nil after extraction")
+	if queueJob == nil {
+		logger.Error().Msg("🔐 ERROR: QueueJob is nil after extraction")
 		return nil
 	}
 
 	logger.Debug().
-		Int("metadata_count", len(jobModel.Metadata)).
-		Msg("🔐 OK: JobModel extracted successfully")
+		Int("metadata_count", len(queueJob.Metadata)).
+		Msg("🔐 OK: QueueJob extracted successfully")
 
 	// Log all metadata keys for debugging
-	metadataKeys := make([]string, 0, len(jobModel.Metadata))
-	for k := range jobModel.Metadata {
+	metadataKeys := make([]string, 0, len(queueJob.Metadata))
+	for k := range queueJob.Metadata {
 		metadataKeys = append(metadataKeys, k)
 	}
 	logger.Debug().
@@ -887,7 +887,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 		Msg("🔐 DEBUG: Parent job metadata keys")
 
 	// Check metadata for auth_id
-	if authIDVal, exists := jobModel.Metadata["auth_id"]; exists {
+	if authIDVal, exists := queueJob.Metadata["auth_id"]; exists {
 		if authIDStr, ok := authIDVal.(string); ok && authIDStr != "" {
 			authID = authIDStr
 			logger.Debug().
@@ -905,7 +905,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 	// If not in metadata, try job_definition_id
 	if authID == "" {
 		logger.Debug().Msg("🔐 Trying job_definition_id fallback")
-		if jobDefID, exists := jobModel.Metadata["job_definition_id"]; exists {
+		if jobDefID, exists := queueJob.Metadata["job_definition_id"]; exists {
 			if jobDefIDStr, ok := jobDefID.(string); ok && jobDefIDStr != "" {
 				logger.Debug().
 					Str("job_def_id", jobDefIDStr).
@@ -1305,7 +1305,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 // ============================================================================
 
 // spawnChildJob creates and enqueues a child job for a discovered link
-func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.JobModel, childURL string, crawlConfig *models.CrawlConfig, sourceType, entityType string, linkIndex int, logger arbor.ILogger) error {
+func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.QueueJob, childURL string, crawlConfig *models.CrawlConfig, sourceType, entityType string, linkIndex int, logger arbor.ILogger) error {
 	// Create child job configuration
 	childConfig := make(map[string]interface{})
 	childConfig["crawl_config"] = crawlConfig
@@ -1324,10 +1324,10 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Job
 	childMetadata["discovered_by"] = parentJob.ID
 	childMetadata["link_index"] = linkIndex
 
-	// Create child job model with incremented depth
-	childJob := models.NewChildJobModel(
+	// Create child queue job with incremented depth
+	childJob := models.NewQueueJobChild(
 		parentJob.GetParentID(), // All children reference the same root parent (flat hierarchy)
-		"crawler_url",
+		models.JobTypeCrawlerURL,
 		fmt.Sprintf("URL: %s", childURL),
 		childConfig,
 		childMetadata,
@@ -1336,7 +1336,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Job
 
 	// Validate child job
 	if err := childJob.Validate(); err != nil {
-		return fmt.Errorf("invalid child job model: %w", err)
+		return fmt.Errorf("invalid child queue job: %w", err)
 	}
 
 	// Serialize job model to JSON for payload
@@ -1424,7 +1424,7 @@ func (w *CrawlerWorker) publishCrawlerJobLog(ctx context.Context, jobID, level, 
 }
 
 // publishCrawlerProgressUpdate publishes a crawler job progress update for real-time monitoring
-func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *models.JobModel, status, activity, currentURL string) {
+func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *models.QueueJob, status, activity, currentURL string) {
 	if w.eventService == nil {
 		return
 	}
@@ -1469,7 +1469,7 @@ func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *m
 }
 
 // publishLinkDiscoveryEvent publishes link discovery and following statistics
-func (w *CrawlerWorker) publishLinkDiscoveryEvent(ctx context.Context, job *models.JobModel, linkStats *crawler.LinkProcessingResult, currentURL string) {
+func (w *CrawlerWorker) publishLinkDiscoveryEvent(ctx context.Context, job *models.QueueJob, linkStats *crawler.LinkProcessingResult, currentURL string) {
 	if w.eventService == nil {
 		return
 	}
@@ -1493,7 +1493,7 @@ func (w *CrawlerWorker) publishLinkDiscoveryEvent(ctx context.Context, job *mode
 }
 
 // publishJobSpawnEvent publishes a job spawn event when child jobs are created
-func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *models.JobModel, childJobID, childURL string) {
+func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *models.QueueJob, childJobID, childURL string) {
 	if w.eventService == nil {
 		return
 	}

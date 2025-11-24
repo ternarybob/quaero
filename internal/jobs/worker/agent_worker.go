@@ -51,8 +51,8 @@ func (w *AgentWorker) GetWorkerType() string {
 	return "agent"
 }
 
-// Validate validates that the job model is compatible with this worker
-func (w *AgentWorker) Validate(job *models.JobModel) error {
+// Validate validates that the queue job is compatible with this worker
+func (w *AgentWorker) Validate(job *models.QueueJob) error {
 	if job.Type != "agent" {
 		return fmt.Errorf("invalid job type: expected %s, got %s", "agent", job.Type)
 	}
@@ -74,7 +74,7 @@ func (w *AgentWorker) Validate(job *models.JobModel) error {
 // 2. Execute agent with document content
 // 3. Update document metadata with agent results
 // 4. Publish DocumentUpdated event
-func (w *AgentWorker) Execute(ctx context.Context, job *models.JobModel) error {
+func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	// Create job-specific logger
 	parentID := job.GetParentID()
 	if parentID == "" {
