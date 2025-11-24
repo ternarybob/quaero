@@ -90,9 +90,25 @@ func (h *JobHandler) ListJobsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if orderBy == "" {
-		orderBy = "created_at"
+	// Normalize orderBy field name to match struct field names (BadgerHold is case-sensitive)
+	// Map common query parameter names to actual struct field names
+	fieldNameMap := map[string]string{
+		"created_at":   "CreatedAt",
+		"updated_at":   "UpdatedAt",
+		"started_at":   "StartedAt",
+		"completed_at": "CompletedAt",
+		"finished_at":  "FinishedAt",
+		"status":       "Status",
+		"name":         "Name",
+		"type":         "Type",
 	}
+
+	if orderBy == "" {
+		orderBy = "CreatedAt" // Default to CreatedAt
+	} else if normalized, exists := fieldNameMap[strings.ToLower(orderBy)]; exists {
+		orderBy = normalized // Normalize to struct field name
+	}
+
 	if orderDir == "" {
 		orderDir = "DESC"
 	}

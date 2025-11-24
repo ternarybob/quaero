@@ -74,7 +74,7 @@ type JobManager interface {
 	// Job lifecycle
 	CreateJob(ctx context.Context, sourceType, sourceID string, config map[string]interface{}) (string, error)
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
-	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.Job, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.JobExecutionState, error)
 	CountJobs(ctx context.Context, opts *JobListOptions) (int, error)
 	UpdateJob(ctx context.Context, job interface{}) error
 

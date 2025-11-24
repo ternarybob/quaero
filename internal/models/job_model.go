@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------
-// Job Model - Common immutable job structure for queue persistence
+// Queue Job - Immutable job structure for queue persistence
 // -----------------------------------------------------------------------
 
 package models
@@ -12,10 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// JobModel represents the immutable job definition stored in the queue and database.
-// Once created and enqueued, this model should not be modified.
+// QueueJob represents the immutable job sent to the queue and stored in the database.
+// Once created and enqueued, this job should not be modified.
 // All job types (parent, child, crawler, summarizer, etc.) use this common structure.
-type JobModel struct {
+//
+// Job State Lifecycle:
+//  1. Job/JobDefinition (jobs page) - User-defined workflow
+//  2. QueueJob (this struct) - Immutable job sent to queue for execution
+//  3. QueueJobState - In-memory runtime state during execution (Status, Progress)
+//  4. Job logs/events - Runtime state changes tracked via JobMonitor
+type QueueJob struct {
 	// Core identification
 	ID       string  `json:"id"`        // Unique job ID (UUID)
 	ParentID *string `json:"parent_id"` // Parent job ID for child jobs (nil for root jobs)
@@ -42,9 +48,9 @@ const (
 	JobTypeGitHubActionLog    = "github_action_log"
 )
 
-// NewJobModel creates a new root job model
-func NewJobModel(jobType, name string, config, metadata map[string]interface{}) *JobModel {
-	return &JobModel{
+// NewQueueJob creates a new root queued job
+func NewQueueJob(jobType, name string, config, metadata map[string]interface{}) *QueueJob {
+	return &QueueJob{
 		ID:        uuid.New().String(),
 		ParentID:  nil,
 		Type:      jobType,
@@ -56,9 +62,9 @@ func NewJobModel(jobType, name string, config, metadata map[string]interface{}) 
 	}
 }
 
-// NewChildJobModel creates a new child job model
-func NewChildJobModel(parentID string, jobType JobType, name string, config, metadata map[string]interface{}, depth int) *JobModel {
-	return &JobModel{
+// NewQueueJobChild creates a new child queued job
+func NewQueueJobChild(parentID string, jobType JobType, name string, config, metadata map[string]interface{}, depth int) *QueueJob {
+	return &QueueJob{
 		ID:        uuid.New().String(),
 		ParentID:  &parentID,
 		Type:      string(jobType),
@@ -71,38 +77,38 @@ func NewChildJobModel(parentID string, jobType JobType, name string, config, met
 }
 
 // IsRootJob returns true if this is a root job (no parent)
-func (j *JobModel) IsRootJob() bool {
+func (j *QueueJob) IsRootJob() bool {
 	return j.ParentID == nil
 }
 
 // GetParentID returns the parent ID or empty string if root job
-func (j *JobModel) GetParentID() string {
+func (j *QueueJob) GetParentID() string {
 	if j.ParentID == nil {
 		return ""
 	}
 	return *j.ParentID
 }
 
-// ToJSON serializes the job model to JSON for queue storage
-func (j *JobModel) ToJSON() ([]byte, error) {
+// ToJSON serializes the queued job to JSON for queue storage
+func (j *QueueJob) ToJSON() ([]byte, error) {
 	data, err := json.Marshal(j)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal job model: %w", err)
+		return nil, fmt.Errorf("failed to marshal queued job: %w", err)
 	}
 	return data, nil
 }
 
-// FromJSON deserializes a job model from JSON
-func FromJSON(data []byte) (*JobModel, error) {
-	var model JobModel
-	if err := json.Unmarshal(data, &model); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal job model: %w", err)
+// QueueJobFromJSON deserializes a queued job from JSON
+func QueueJobFromJSON(data []byte) (*QueueJob, error) {
+	var job QueueJob
+	if err := json.Unmarshal(data, &job); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal queued job: %w", err)
 	}
-	return &model, nil
+	return &job, nil
 }
 
-// Validate validates the job model
-func (j *JobModel) Validate() error {
+// Validate validates the queued job
+func (j *QueueJob) Validate() error {
 	if j.ID == "" {
 		return fmt.Errorf("job ID is required")
 	}
@@ -124,8 +130,8 @@ func (j *JobModel) Validate() error {
 	return nil
 }
 
-// Clone creates a deep copy of the job model (useful for creating child jobs)
-func (j *JobModel) Clone() *JobModel {
+// Clone creates a deep copy of the queued job (useful for creating child jobs)
+func (j *QueueJob) Clone() *QueueJob {
 	// Deep copy config
 	configCopy := make(map[string]interface{})
 	for k, v := range j.Config {
@@ -138,7 +144,7 @@ func (j *JobModel) Clone() *JobModel {
 		metadataCopy[k] = v
 	}
 
-	clone := &JobModel{
+	clone := &QueueJob{
 		ID:        j.ID,
 		ParentID:  j.ParentID,
 		Type:      j.Type,
@@ -153,7 +159,7 @@ func (j *JobModel) Clone() *JobModel {
 }
 
 // GetConfigString retrieves a string value from config
-func (j *JobModel) GetConfigString(key string) (string, bool) {
+func (j *QueueJob) GetConfigString(key string) (string, bool) {
 	val, ok := j.Config[key]
 	if !ok {
 		return "", false
@@ -163,7 +169,7 @@ func (j *JobModel) GetConfigString(key string) (string, bool) {
 }
 
 // GetConfigInt retrieves an int value from config
-func (j *JobModel) GetConfigInt(key string) (int, bool) {
+func (j *QueueJob) GetConfigInt(key string) (int, bool) {
 	val, ok := j.Config[key]
 	if !ok {
 		return 0, false
@@ -181,7 +187,7 @@ func (j *JobModel) GetConfigInt(key string) (int, bool) {
 }
 
 // GetConfigBool retrieves a bool value from config
-func (j *JobModel) GetConfigBool(key string) (bool, bool) {
+func (j *QueueJob) GetConfigBool(key string) (bool, bool) {
 	val, ok := j.Config[key]
 	if !ok {
 		return false, false
@@ -191,7 +197,7 @@ func (j *JobModel) GetConfigBool(key string) (bool, bool) {
 }
 
 // GetConfigStringSlice retrieves a string slice from config
-func (j *JobModel) GetConfigStringSlice(key string) ([]string, bool) {
+func (j *QueueJob) GetConfigStringSlice(key string) ([]string, bool) {
 	val, ok := j.Config[key]
 	if !ok {
 		return nil, false
@@ -217,7 +223,7 @@ func (j *JobModel) GetConfigStringSlice(key string) ([]string, bool) {
 }
 
 // GetMetadataString retrieves a string value from metadata
-func (j *JobModel) GetMetadataString(key string) (string, bool) {
+func (j *QueueJob) GetMetadataString(key string) (string, bool) {
 	val, ok := j.Metadata[key]
 	if !ok {
 		return "", false
@@ -226,8 +232,8 @@ func (j *JobModel) GetMetadataString(key string) (string, bool) {
 	return str, ok
 }
 
-// SetMetadata sets a metadata value (use sparingly - model should be immutable after creation)
-func (j *JobModel) SetMetadata(key string, value interface{}) {
+// SetMetadata sets a metadata value (use sparingly - queued job should be immutable after creation)
+func (j *QueueJob) SetMetadata(key string, value interface{}) {
 	if j.Metadata == nil {
 		j.Metadata = make(map[string]interface{})
 	}
@@ -235,7 +241,7 @@ func (j *JobModel) SetMetadata(key string, value interface{}) {
 }
 
 // -----------------------------------------------------------------------
-// Job - Runtime job state (combines JobModel with execution state)
+// Queue Job State - Runtime job state (combines QueueJob with execution state)
 // -----------------------------------------------------------------------
 
 // JobProgress tracks job execution progress
@@ -248,45 +254,92 @@ type JobProgress struct {
 	Percentage    float64 `json:"percentage"`
 }
 
-// Job represents a job with runtime execution state
-// This combines the immutable JobModel with mutable runtime state
-type Job struct {
-	// Immutable job definition
-	*JobModel
+// QueueJobState represents a job with runtime execution state (in-memory only)
+// This combines the immutable QueueJob fields with mutable runtime state
+// Runtime state (Status, Progress) should be tracked via job logs/events, not stored in database
+//
+// Job State Lifecycle:
+//  1. Job/JobDefinition (jobs page) - User-defined workflow
+//  2. QueueJob - Immutable job sent to queue for execution (stored in database)
+//  3. QueueJobState (this struct) - In-memory runtime state during execution
+//  4. Job logs/events - Runtime state changes tracked via JobMonitor
+type QueueJobState struct {
+	// Core identification (from QueueJob)
+	ID       string  `json:"id"`        // Unique job ID (UUID)
+	ParentID *string `json:"parent_id"` // Parent job ID for child jobs (nil for root jobs)
 
-	// Mutable runtime state
-	Status        JobStatus    `json:"status"`
-	Progress      *JobProgress `json:"progress,omitempty"`
-	StartedAt     *time.Time   `json:"started_at,omitempty"`
-	CompletedAt   *time.Time   `json:"completed_at,omitempty"`
-	FinishedAt    *time.Time   `json:"finished_at,omitempty"`
-	LastHeartbeat *time.Time   `json:"last_heartbeat,omitempty"`
-	Error         string       `json:"error,omitempty"`
-	ResultCount   int          `json:"result_count"`
-	FailedCount   int          `json:"failed_count"`
+	// Job classification (from QueueJob)
+	Type string `json:"type"` // Job type: "database_maintenance", "crawler", "summarizer", etc.
+	Name string `json:"name"` // Human-readable job name
+
+	// Configuration (from QueueJob)
+	Config   map[string]interface{} `json:"config"`   // Job-specific configuration
+	Metadata map[string]interface{} `json:"metadata"` // Additional metadata
+
+	// Timestamps (from QueueJob)
+	CreatedAt time.Time `json:"created_at"` // Job creation timestamp
+
+	// Hierarchy tracking (from QueueJob)
+	Depth int `json:"depth"` // Depth in job tree (0 for root, 1 for direct children, etc.)
+
+	// Mutable runtime state (tracked via job logs/events)
+	Status        JobStatus   `json:"status"`
+	Progress      JobProgress `json:"progress"` // Value type (not pointer)
+	StartedAt     *time.Time  `json:"started_at,omitempty"`
+	CompletedAt   *time.Time  `json:"completed_at,omitempty"`
+	FinishedAt    *time.Time  `json:"finished_at,omitempty"`
+	LastHeartbeat *time.Time  `json:"last_heartbeat,omitempty"`
+	Error         string      `json:"error,omitempty"`
+	ResultCount   int         `json:"result_count"`
+	FailedCount   int         `json:"failed_count"`
 }
 
-// NewJob creates a new job from a JobModel
-func NewJob(model *JobModel) *Job {
-	return &Job{
-		JobModel:    model,
+// NewQueueJobState creates a new job execution state from a QueueJob
+func NewQueueJobState(queued *QueueJob) *QueueJobState {
+	// Ensure Config and Metadata are never nil
+	config := queued.Config
+	if config == nil {
+		config = make(map[string]interface{})
+	}
+	metadata := queued.Metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+
+	return &QueueJobState{
+		// Copy fields from QueueJob
+		ID:        queued.ID,
+		ParentID:  queued.ParentID,
+		Type:      queued.Type,
+		Name:      queued.Name,
+		Config:    config,
+		Metadata:  metadata,
+		CreatedAt: queued.CreatedAt,
+		Depth:     queued.Depth,
+		// Initialize runtime state
 		Status:      JobStatusPending,
-		Progress:    &JobProgress{},
+		Progress:    JobProgress{}, // Initialize to empty struct (not pointer)
 		ResultCount: 0,
 		FailedCount: 0,
 	}
 }
 
-// ToJobModel extracts the immutable JobModel from a Job
-func (j *Job) ToJobModel() *JobModel {
-	return j.JobModel
+// ToQueueJob extracts the immutable QueueJob from a QueueJobState
+func (j *QueueJobState) ToQueueJob() *QueueJob {
+	return &QueueJob{
+		ID:        j.ID,
+		ParentID:  j.ParentID,
+		Type:      j.Type,
+		Name:      j.Name,
+		Config:    j.Config,
+		Metadata:  j.Metadata,
+		CreatedAt: j.CreatedAt,
+		Depth:     j.Depth,
+	}
 }
 
 // UpdateProgress updates the job progress and percentage
-func (j *Job) UpdateProgress(completed, failed, pending, total int) {
-	if j.Progress == nil {
-		j.Progress = &JobProgress{}
-	}
+func (j *QueueJobState) UpdateProgress(completed, failed, pending, total int) {
 	j.Progress.CompletedURLs = completed
 	j.Progress.FailedURLs = failed
 	j.Progress.PendingURLs = pending
@@ -298,52 +351,48 @@ func (j *Job) UpdateProgress(completed, failed, pending, total int) {
 }
 
 // MarkStarted marks the job as started
-func (j *Job) MarkStarted() {
+func (j *QueueJobState) MarkStarted() {
 	j.Status = JobStatusRunning
 	now := time.Now()
 	j.StartedAt = &now
 }
 
 // MarkCompleted marks the job as completed
-func (j *Job) MarkCompleted() {
+func (j *QueueJobState) MarkCompleted() {
 	j.Status = JobStatusCompleted
 	now := time.Now()
 	j.CompletedAt = &now
 	// Note: ResultCount is managed via event-driven metadata updates (EventDocumentSaved)
 	// Do not overwrite with progress.completed_urls as it causes double counting
-	if j.Progress != nil {
-		j.FailedCount = j.Progress.FailedURLs
-	}
+	j.FailedCount = j.Progress.FailedURLs
 }
 
 // MarkFailed marks the job as failed with an error message
-func (j *Job) MarkFailed(errorMsg string) {
+func (j *QueueJobState) MarkFailed(errorMsg string) {
 	j.Status = JobStatusFailed
 	j.Error = errorMsg
 	now := time.Now()
 	j.CompletedAt = &now
 	// Note: ResultCount is managed via event-driven metadata updates (EventDocumentSaved)
 	// Do not overwrite with progress.completed_urls as it causes double counting
-	if j.Progress != nil {
-		j.FailedCount = j.Progress.FailedURLs
-	}
+	j.FailedCount = j.Progress.FailedURLs
 }
 
 // MarkCancelled marks the job as cancelled
-func (j *Job) MarkCancelled() {
+func (j *QueueJobState) MarkCancelled() {
 	j.Status = JobStatusCancelled
 	now := time.Now()
 	j.CompletedAt = &now
 }
 
 // UpdateHeartbeat updates the last heartbeat timestamp
-func (j *Job) UpdateHeartbeat() {
+func (j *QueueJobState) UpdateHeartbeat() {
 	now := time.Now()
 	j.LastHeartbeat = &now
 }
 
 // IsTerminal returns true if the job is in a terminal state
-func (j *Job) IsTerminal() bool {
+func (j *QueueJobState) IsTerminal() bool {
 	return j.Status == JobStatusCompleted ||
 		j.Status == JobStatusFailed ||
 		j.Status == JobStatusCancelled

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -450,6 +451,17 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 	fmt.Fprintf(logFile, "✓ Service URL: http://%s:%d\n", config.Service.Host, config.Service.Port)
 	fmt.Fprintf(logFile, "✓ Test can proceed\n\n")
 
+	// Load .env.test variables into KV store (if includeEnv is true)
+	if includeEnv && len(env.EnvVars) > 0 {
+		fmt.Fprintf(logFile, "\n=== LOADING ENV VARIABLES INTO KV STORE ===\n")
+		if err := env.LoadEnvVariablesIntoKVStore(); err != nil {
+			fmt.Fprintf(logFile, "❌ Failed to load env variables into KV store: %v\n", err)
+			env.Cleanup()
+			return nil, fmt.Errorf("failed to load env variables into KV store: %w", err)
+		}
+		fmt.Fprintf(logFile, "✓ Env variables loaded into KV store\n")
+	}
+
 	// Load test job definitions
 	fmt.Fprintf(logFile, "\n=== LOADING TEST JOB DEFINITIONS ===\n")
 	if err := env.LoadTestJobDefinitions(); err != nil {
@@ -718,6 +730,11 @@ func (env *TestEnvironment) buildService() error {
 			Value:       key,
 			Description: "Injected from GOOGLE_API_KEY environment variable",
 		}
+		// Also set google_places_api_key for Places jobs
+		variablesConfig["google_places_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from GOOGLE_API_KEY environment variable",
+		}
 	}
 
 	// Also check specific env vars if set (overrides generic key)
@@ -917,26 +934,9 @@ func (env *TestEnvironment) startService() error {
 	// Override port via environment variable (takes precedence over config file)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("QUAERO_SERVER_PORT=%d", env.Config.Service.Port))
 
-	// Pass .env.test variables to service process
-	// Map generic environment variable names to service-specific names
-	envMappings := map[string][]string{
-		"GOOGLE_API_KEY": {"QUAERO_PLACES_API_KEY", "QUAERO_GEMINI_GOOGLE_API_KEY"},
-	}
-
-	for envKey, envValue := range env.EnvVars {
-		// Check if this env var needs to be mapped to multiple service env vars
-		if targetEnvVars, ok := envMappings[envKey]; ok {
-			// Map to all target environment variables
-			for _, targetEnvVar := range targetEnvVars {
-				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", targetEnvVar, envValue))
-				fmt.Fprintf(env.LogFile, "  Env: %s=***REDACTED*** (mapped from %s)\n", targetEnvVar, envKey)
-			}
-		} else {
-			// No mapping - use as-is
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", envKey, envValue))
-			fmt.Fprintf(env.LogFile, "  Env: %s=***REDACTED***\n", envKey)
-		}
-	}
+	// Note: .env.test variables are loaded into KV store via API after service starts
+	// This allows them to override placeholder values in variables.toml
+	// See LoadEnvVariablesIntoKVStore() function
 
 	fmt.Fprintf(env.LogFile, "Starting service process...\n")
 	if err := cmd.Start(); err != nil {
@@ -1115,6 +1115,56 @@ func (env *TestEnvironment) LoadJobDefinitionFile(filePath string) error {
 
 	// Log success
 	fmt.Fprintf(env.LogFile, "✓ Loaded job definition: %s (status: %d)\n", filepath.Base(filePath), resp.StatusCode)
+	return nil
+}
+
+// LoadEnvVariablesIntoKVStore loads environment variables from .env.test into the KV store via API
+// This allows .env.test variables to override placeholder values in variables.toml
+func (env *TestEnvironment) LoadEnvVariablesIntoKVStore() error {
+	if len(env.EnvVars) == 0 {
+		return nil
+	}
+
+	baseURL := fmt.Sprintf("http://%s:%d", env.Config.Service.Host, env.Config.Service.Port)
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	loadedCount := 0
+	for key, value := range env.EnvVars {
+		// Upsert variable via PUT /api/kv/{key}
+		url := fmt.Sprintf("%s/api/kv/%s", baseURL, url.PathEscape(key))
+
+		reqBody := map[string]string{
+			"value":       value,
+			"description": "Loaded from .env.test",
+		}
+
+		jsonBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request for key %s: %w", key, err)
+		}
+
+		req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonBytes))
+		if err != nil {
+			return fmt.Errorf("failed to create request for key %s: %w", key, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to upsert key %s: %w", key, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("failed to upsert key %s (status %d): %s", key, resp.StatusCode, string(body))
+		}
+
+		fmt.Fprintf(env.LogFile, "  ✓ Loaded variable: %s\n", key)
+		loadedCount++
+	}
+
+	fmt.Fprintf(env.LogFile, "Loaded %d variable(s) into KV store\n", loadedCount)
 	return nil
 }
 

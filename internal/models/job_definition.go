@@ -6,6 +6,7 @@
 package models
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,12 @@ import (
 
 	"github.com/robfig/cron/v3"
 )
+
+func init() {
+	// Register types for gob encoding (required for BadgerHold storage of interface{} fields)
+	gob.Register(map[string]interface{}{})
+	gob.Register([]interface{}{})
+}
 
 // JobDefinitionType represents the type of job definition
 type JobDefinitionType string

@@ -53,8 +53,10 @@ type StorageConfig struct {
 	Filesystem FilesystemConfig `toml:"filesystem"`
 }
 
+// BadgerConfig represents BadgerDB-specific configuration
 type BadgerConfig struct {
-	Path string `toml:"path"` // Database directory path
+	Path           string `toml:"path"`             // Database directory path
+	ResetOnStartup bool   `toml:"reset_on_startup"` // Delete database on startup for clean test runs
 }
 
 type FilesystemConfig struct {

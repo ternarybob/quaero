@@ -73,13 +73,17 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 
 	// Check for API key in step config and resolve it from KV store
 	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, apiKeyName, "")
+		// Strip curly braces if present (e.g., "{google_places_api_key}" → "google_places_api_key")
+		// This handles cases where variable substitution didn't happen during job definition loading
+		cleanAPIKeyName := strings.Trim(apiKeyName, "{}")
+
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, cleanAPIKeyName, "")
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", apiKeyName, err)
+			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 		}
 		m.logger.Info().
 			Str("step_name", step.Name).
-			Str("api_key_name", apiKeyName).
+			Str("api_key_name", cleanAPIKeyName).
 			Msg("Resolved API key from storage for places search execution")
 		stepConfig["resolved_api_key"] = resolvedAPIKey
 	}

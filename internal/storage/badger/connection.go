@@ -19,6 +19,16 @@ type BadgerDB struct {
 
 // NewBadgerDB creates a new Badger database connection
 func NewBadgerDB(logger arbor.ILogger, config *common.BadgerConfig) (*BadgerDB, error) {
+	// If reset_on_startup is enabled, delete the existing database
+	if config.ResetOnStartup {
+		if _, err := os.Stat(config.Path); err == nil {
+			logger.Info().Str("path", config.Path).Msg("Deleting existing database (reset_on_startup=true)")
+			if err := os.RemoveAll(config.Path); err != nil {
+				logger.Warn().Err(err).Str("path", config.Path).Msg("Failed to delete database directory")
+			}
+		}
+	}
+
 	// Ensure the directory exists
 	dir := filepath.Dir(config.Path)
 	if err := os.MkdirAll(dir, 0755); err != nil {

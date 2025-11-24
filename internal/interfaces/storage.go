@@ -73,23 +73,23 @@ type DocumentStorage interface {
 type JobChildStats = jobtypes.JobChildStats
 
 // JobStorage - interface for executor-agnostic job persistence
-// Uses JobModel for flexible, executor-agnostic job storage
+// Uses JobQueued for flexible, executor-agnostic job storage
 type JobStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
-	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.Job, error)
+	ListJobs(ctx context.Context, opts *JobListOptions) ([]*models.JobExecutionState, error)
 	GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*JobChildStats, error)
 	// GetChildJobs retrieves all child jobs for a given parent job ID
 	// Returns jobs ordered by created_at DESC (newest first)
 	// Returns empty slice if parent has no children or parent doesn't exist
-	GetChildJobs(ctx context.Context, parentID string) ([]*models.JobModel, error)
-	GetJobsByStatus(ctx context.Context, status string) ([]*models.JobModel, error)
+	GetChildJobs(ctx context.Context, parentID string) ([]*models.JobQueued, error)
+	GetJobsByStatus(ctx context.Context, status string) ([]*models.JobQueued, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
 	UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error
 	UpdateJobHeartbeat(ctx context.Context, jobID string) error
-	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.JobModel, error)
+	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.JobQueued, error)
 	DeleteJob(ctx context.Context, jobID string) error
 	CountJobs(ctx context.Context) (int, error)
 	CountJobsByStatus(ctx context.Context, status string) (int, error)
@@ -183,4 +183,8 @@ type StorageManager interface {
 	// LoadVariablesFromFiles loads variables (key/value pairs) from TOML files in the specified directory
 	// This is used to load configuration secrets and other variables at startup
 	LoadVariablesFromFiles(ctx context.Context, dirPath string) error
+
+	// LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory
+	// This is used to load job definitions at startup
+	LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error
 }

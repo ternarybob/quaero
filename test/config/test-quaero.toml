@@ -27,6 +27,13 @@ type = "badger"
 
 [storage.badger]
 path = "./data/quaero.badger"
+reset_on_startup = true  # Delete database on startup for clean test runs
+
+# =============================================================================
+# Jobs Configuration
+# =============================================================================
+[jobs]
+definitions_dir = "./job-definitions"  # Directory for job definition files
 
 # =============================================================================
 # Gemini Configuration (Google ADK - unified for agents and chat)

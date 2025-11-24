@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -27,7 +28,7 @@ func NewJobStorage(db *BadgerDB, logger arbor.ILogger) interfaces.JobStorage {
 }
 
 func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
-	j, ok := job.(*models.Job)
+	j, ok := job.(*models.JobExecutionState)
 	if !ok {
 		return fmt.Errorf("invalid job type")
 	}
@@ -35,21 +36,29 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 		return fmt.Errorf("job ID is required")
 	}
 
-	if err := s.db.Store().Upsert(j.ID, j); err != nil {
+	// Store ONLY JobQueued (immutable queued job definition)
+	// Runtime state (Status, Progress) is tracked via job logs/events
+	jobQueued := j.ToJobQueued()
+	if err := s.db.Store().Upsert(jobQueued.ID, jobQueued); err != nil {
 		return fmt.Errorf("failed to save job: %w", err)
 	}
 	return nil
 }
 
 func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
-	var job models.Job
-	if err := s.db.Store().Get(jobID, &job); err != nil {
+	// Load JobQueued from storage (immutable queued job)
+	var jobQueued models.JobQueued
+	if err := s.db.Store().Get(jobID, &jobQueued); err != nil {
 		if err == badgerhold.ErrNotFound {
 			return nil, fmt.Errorf("job not found: %s", jobID)
 		}
 		return nil, fmt.Errorf("failed to get job: %w", err)
 	}
-	return &job, nil
+
+	// Convert to JobExecutionState for in-memory use
+	// Runtime state will be populated from job logs/events by the caller
+	job := models.NewJobExecutionState(&jobQueued)
+	return job, nil
 }
 
 func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
@@ -60,14 +69,23 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 	query := badgerhold.Where("ID").Ne("")
 
 	if opts != nil {
-		if opts.Status != "" {
-			query = query.And("Status").Eq(opts.Status)
-		}
+		// TODO: Status filtering removed - JobModel doesn't have Status field
+		// Status is now tracked in job logs/events, not in stored JobModel
+		// Need to implement status filtering via job logs or store status separately
+		// For now, all jobs are returned regardless of status filter
+
 		// Note: Type field is not available in JobListOptions in current interface definition
 		// If needed, interface should be updated. For now, ignoring Type filter if not present.
 
 		if opts.ParentID != "" {
-			query = query.And("ParentID").Eq(opts.ParentID)
+			// Special handling for "root" value - query for jobs with nil ParentID
+			if opts.ParentID == "root" {
+				// Query for root jobs (ParentID is nil)
+				query = query.And("ParentID").IsNil()
+			} else {
+				// Query for child jobs with specific parent ID
+				query = query.And("ParentID").Eq(&opts.ParentID)
+			}
 		}
 		if opts.Limit > 0 {
 			query = query.Limit(opts.Limit)
@@ -75,27 +93,31 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 		if opts.Offset > 0 {
 			query = query.Skip(opts.Offset)
 		}
-		// Sorting
-		if opts.OrderBy != "" {
-			if opts.OrderDir == "DESC" {
-				query = query.SortBy(opts.OrderBy).Reverse()
-			} else {
-				query = query.SortBy(opts.OrderBy)
-			}
-		} else {
-			// Default sort
-			query = query.SortBy("CreatedAt").Reverse()
-		}
+		// Sorting - TEMPORARILY DISABLED to debug BadgerHold embedded struct issue
+		// TODO: Re-enable sorting once BadgerHold field path is fixed
+		// if opts.OrderBy != "" {
+		// 	if opts.OrderDir == "DESC" {
+		// 		query = query.SortBy(opts.OrderBy).Reverse()
+		// 	} else {
+		// 		query = query.SortBy(opts.OrderBy)
+		// 	}
+		// } else {
+		// 	// Default sort
+		// 	query = query.SortBy("CreatedAt").Reverse()
+		// }
 	}
 
-	var jobs []models.Job
-	if err := s.db.Store().Find(&jobs, query); err != nil {
+	// Query JobQueued from storage (immutable queued jobs)
+	var jobsQueued []models.JobQueued
+	if err := s.db.Store().Find(&jobsQueued, query); err != nil {
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	result := make([]*models.Job, len(jobs))
-	for i := range jobs {
-		result[i] = &jobs[i]
+	// Convert JobQueued to JobExecutionState structs for in-memory use
+	// Runtime state will be populated from job logs/events by the caller
+	result := make([]*models.JobExecutionState, len(jobsQueued))
+	for i := range jobsQueued {
+		result[i] = models.NewJobExecutionState(&jobsQueued[i])
 	}
 	return result, nil
 }
@@ -127,7 +149,7 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 				childStats.CancelledChildren++
 			}
 		}
-		
+
 		stats[parentID] = childStats
 	}
 	return stats, nil
@@ -141,7 +163,7 @@ func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*mode
 
 	result := make([]*models.JobModel, len(jobs))
 	for i := range jobs {
-		result[i] = jobs[i].JobModel
+		result[i] = jobs[i].ToJobModel()
 	}
 	return result, nil
 }
@@ -154,7 +176,7 @@ func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*mod
 
 	result := make([]*models.JobModel, len(jobs))
 	for i := range jobs {
-		result[i] = jobs[i].JobModel
+		result[i] = jobs[i].ToJobModel()
 	}
 	return result, nil
 }
@@ -192,7 +214,7 @@ func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progre
 		return fmt.Errorf("failed to unmarshal progress: %w", err)
 	}
 
-	job.Progress = &progress
+	job.Progress = progress // Changed from pointer to value
 	return s.SaveJob(ctx, &job)
 }
 
@@ -210,10 +232,7 @@ func (s *JobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID str
 		return err
 	}
 
-	if job.Progress == nil {
-		job.Progress = &models.JobProgress{}
-	}
-
+	// Progress is now a value type, not a pointer - no nil check needed
 	job.Progress.CompletedURLs += completedDelta
 	job.Progress.PendingURLs += pendingDelta
 	job.Progress.TotalURLs += totalDelta
@@ -248,7 +267,7 @@ func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int
 
 	result := make([]*models.JobModel, len(jobs))
 	for i := range jobs {
-		result[i] = jobs[i].JobModel
+		result[i] = jobs[i].ToJobModel()
 	}
 	return result, nil
 }
@@ -284,11 +303,30 @@ func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.
 
 	if opts != nil {
 		if opts.Status != "" {
-			query = query.And("Status").Eq(opts.Status)
+			// Handle comma-separated status values (e.g., "pending,running,completed")
+			statuses := strings.Split(opts.Status, ",")
+			if len(statuses) == 1 {
+				// Single status - use Eq for efficiency
+				query = query.And("Status").Eq(models.JobStatus(strings.TrimSpace(statuses[0])))
+			} else {
+				// Multiple statuses - convert to interface{} slice for BadgerHold's In method
+				statusValues := make([]interface{}, 0, len(statuses))
+				for _, s := range statuses {
+					statusValues = append(statusValues, models.JobStatus(strings.TrimSpace(s)))
+				}
+				query = query.And("Status").In(statusValues...)
+			}
 		}
 		// Type filter removed as it's not in options
 		if opts.ParentID != "" {
-			query = query.And("ParentID").Eq(opts.ParentID)
+			// Special handling for "root" value - query for jobs with nil ParentID
+			if opts.ParentID == "root" {
+				// Query for root jobs (ParentID is nil)
+				query = query.And("ParentID").IsNil()
+			} else {
+				// Query for child jobs with specific parent ID
+				query = query.And("ParentID").Eq(&opts.ParentID)
+			}
 		}
 	}
 

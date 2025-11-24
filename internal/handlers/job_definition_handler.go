@@ -1138,52 +1138,84 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	WriteJSON(w, http.StatusAccepted, response)
 }
 
+// JobStepFile represents a step in the TOML file
+type JobStepFile struct {
+	Name      string                 `toml:"name"`
+	Action    string                 `toml:"action"`
+	Config    map[string]interface{} `toml:"config"`
+	OnError   string                 `toml:"on_error"`
+	Condition string                 `toml:"condition"`
+}
+
 // JobDefinitionFile represents the TOML file structure for job definitions
 type JobDefinitionFile struct {
-	ID              string   `toml:"id"`
-	Name            string   `toml:"name"`
-	Type            string   `toml:"type"`
-	Description     string   `toml:"description"`
-	Schedule        string   `toml:"schedule"`
-	Timeout         string   `toml:"timeout"`
-	Enabled         bool     `toml:"enabled"`
-	AutoStart       bool     `toml:"auto_start"`
-	AuthID          string   `toml:"authentication"`
-	StartURLs       []string `toml:"start_urls"`
-	IncludePatterns []string `toml:"include_patterns"`
-	ExcludePatterns []string `toml:"exclude_patterns"`
-	MaxDepth        int      `toml:"max_depth"`
-	MaxPages        int      `toml:"max_pages"`
-	Concurrency     int      `toml:"concurrency"`
-	FollowLinks     bool     `toml:"follow_links"`
+	ID              string        `toml:"id"`
+	Name            string        `toml:"name"`
+	Type            string        `toml:"type"`
+	Description     string        `toml:"description"`
+	Schedule        string        `toml:"schedule"`
+	Timeout         string        `toml:"timeout"`
+	Enabled         bool          `toml:"enabled"`
+	AutoStart       bool          `toml:"auto_start"`
+	AuthID          string        `toml:"authentication"`
+	StartURLs       []string      `toml:"start_urls"`
+	IncludePatterns []string      `toml:"include_patterns"`
+	ExcludePatterns []string      `toml:"exclude_patterns"`
+	MaxDepth        int           `toml:"max_depth"`
+	MaxPages        int           `toml:"max_pages"`
+	Concurrency     int           `toml:"concurrency"`
+	FollowLinks     bool          `toml:"follow_links"`
+	Steps           []JobStepFile `toml:"steps"`
 }
 
 // ToJobDefinition converts the file structure to the internal model
 func (f *JobDefinitionFile) ToJobDefinition(kvStorage interfaces.KeyValueStorage, logger arbor.ILogger) *models.JobDefinition {
-	// Create config map for crawler
-	config := make(map[string]interface{})
+	var steps []models.JobStep
 
-	if len(f.StartURLs) > 0 {
-		config["start_urls"] = f.StartURLs
-	}
-	if len(f.IncludePatterns) > 0 {
-		config["include_patterns"] = f.IncludePatterns
-	}
-	if len(f.ExcludePatterns) > 0 {
-		config["exclude_patterns"] = f.ExcludePatterns
-	}
+	// If steps are explicitly defined, use them
+	if len(f.Steps) > 0 {
+		for _, s := range f.Steps {
+			step := models.JobStep{
+				Name:      s.Name,
+				Action:    s.Action,
+				Config:    s.Config,
+				OnError:   models.ErrorStrategy(s.OnError),
+				Condition: s.Condition,
+			}
+			// Default OnError if empty
+			if step.OnError == "" {
+				step.OnError = models.ErrorStrategyContinue
+			}
+			steps = append(steps, step)
+		}
+	} else {
+		// Legacy/Simplified mode: Create default crawl step from flat config
+		// Create config map for crawler
+		config := make(map[string]interface{})
 
-	config["max_depth"] = f.MaxDepth
-	config["max_pages"] = f.MaxPages
-	config["concurrency"] = f.Concurrency
-	config["follow_links"] = f.FollowLinks
+		if len(f.StartURLs) > 0 {
+			config["start_urls"] = f.StartURLs
+		}
+		if len(f.IncludePatterns) > 0 {
+			config["include_patterns"] = f.IncludePatterns
+		}
+		if len(f.ExcludePatterns) > 0 {
+			config["exclude_patterns"] = f.ExcludePatterns
+		}
 
-	// Create step
-	step := models.JobStep{
-		Name:    "crawl",
-		Action:  "crawl",
-		Config:  config,
-		OnError: models.ErrorStrategyContinue,
+		config["max_depth"] = f.MaxDepth
+		config["max_pages"] = f.MaxPages
+		config["concurrency"] = f.Concurrency
+		config["follow_links"] = f.FollowLinks
+
+		// Create step
+		step := models.JobStep{
+			Name:    "crawl",
+			Action:  "crawl",
+			Config:  config,
+			OnError: models.ErrorStrategyContinue,
+		}
+		steps = append(steps, step)
 	}
 
 	return &models.JobDefinition{
@@ -1196,7 +1228,7 @@ func (f *JobDefinitionFile) ToJobDefinition(kvStorage interfaces.KeyValueStorage
 		Enabled:     f.Enabled,
 		AutoStart:   f.AutoStart,
 		AuthID:      f.AuthID,
-		Steps:       []models.JobStep{step},
+		Steps:       steps,
 		JobType:     models.JobOwnerTypeUser,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),

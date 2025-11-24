@@ -101,3 +101,8 @@ func (m *Manager) MigrateAPIKeysToKVStore(ctx context.Context) error {
 	m.logger.Info().Msg("MigrateAPIKeysToKVStore is no-op (Phase 4: API key migration completed)")
 	return nil
 }
+
+// LoadJobDefinitionsFromFiles loads job definitions from TOML files
+func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error {
+	return LoadJobDefinitionsFromFiles(ctx, m.jobDefinition, m.kv, dirPath, m.logger)
+}

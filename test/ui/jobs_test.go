@@ -55,6 +55,82 @@ func TestJobs(t *testing.T) {
 	); err != nil {
 		t.Fatalf("Failed to navigate to jobs page: %v", err)
 	}
+
+	// 3. Verify All Job Definitions Are Loaded
+	// Expected: 5 job definitions from test/config/job-definitions/
+	// 1. news-crawler.toml
+	// 2. my-custom-crawler.toml
+	// 3. test-agent-job.toml
+	// 4. keyword-extractor-agent.toml (has {google_gemini_api_key} variable)
+	// 5. nearby-restaurants-places.toml (has {google_places_api_key} variable)
+	env.LogTest(t, "Verifying all 5 job definitions are loaded")
+
+	// Wait for Alpine.js to load job definitions
+	// The page uses Alpine.js x-data="jobDefinitionsManagement" which loads jobs via API
+	time.Sleep(2 * time.Second)
+
+	var actualJobCount int
+	var jobNames []string
+
+	// Query job definitions from Alpine.js component state
+	// The component stores jobs in jobDefinitions array
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const component = Alpine.$data(document.querySelector('[x-data*="jobDefinitionsManagement"]'));
+				return component ? component.jobDefinitions.length : 0;
+			})()
+		`, &actualJobCount),
+	); err != nil {
+		t.Fatalf("Failed to count job definitions: %v", err)
+	}
+
+	// Get job names from Alpine.js component
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const component = Alpine.$data(document.querySelector('[x-data*="jobDefinitionsManagement"]'));
+				return component ? component.jobDefinitions.map(j => j.name) : [];
+			})()
+		`, &jobNames),
+	); err != nil {
+		t.Fatalf("Failed to get job names: %v", err)
+	}
+
+	env.LogTest(t, "Found %d job definitions: %v", actualJobCount, jobNames)
+
+	if actualJobCount != 5 {
+		// Take screenshot for debugging
+		env.TakeScreenshot(ctx, "job_count_mismatch")
+		t.Fatalf("Expected 5 job definitions, but found %d: %v", actualJobCount, jobNames)
+	}
+
+	// Verify expected job names are present (from TOML files)
+	expectedJobNames := []string{
+		"News Crawler",                       // news-crawler.toml
+		"My Custom Crawler",                  // my-custom-crawler.toml
+		"Test Keyword Extraction",            // test-agent-job.toml
+		"Keyword Extraction",                 // keyword-extractor-agent.toml
+		"Nearby Restaurants (Wheelers Hill)", // nearby-restaurants-places.toml
+	}
+
+	for _, expectedName := range expectedJobNames {
+		found := false
+		for _, actualName := range jobNames {
+			if actualName == expectedName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			env.TakeScreenshot(ctx, "missing_job_"+strings.ReplaceAll(expectedName, " ", "_"))
+			t.Errorf("Expected job definition '%s' not found in page", expectedName)
+		}
+	}
+
+	env.LogTest(t, "✓ All 5 job definitions verified")
+
+	// 4. Verify Action Buttons for News Crawler
 	// "News Crawler" -> "news-crawler-run"
 	runBtnID := "#news-crawler-run"
 	editBtnID := "#news-crawler-edit"

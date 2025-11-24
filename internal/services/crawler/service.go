@@ -343,18 +343,13 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 
 		// Create Job with runtime state
-		job = &models.Job{
-			JobModel: jobModel,
-			Status:   JobStatusPending,
-			Progress: &models.JobProgress{
-				TotalURLs:     len(seedURLs),
-				CompletedURLs: 0,
-				FailedURLs:    0,
-				PendingURLs:   len(seedURLs),
-				Percentage:    0,
-			},
-			ResultCount: 0,
-			FailedCount: 0,
+		job = models.NewJob(jobModel)
+		job.Progress = models.JobProgress{
+			TotalURLs:     len(seedURLs),
+			CompletedURLs: 0,
+			FailedURLs:    0,
+			PendingURLs:   len(seedURLs),
+			Percentage:    0,
 		}
 	} else {
 		// For existing parent jobs from JobExecutor, we don't create a new job object
@@ -595,18 +590,13 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 
 		// Create child Job with runtime state
-		childJob := &models.Job{
-			JobModel: childJobModel,
-			Status:   JobStatusPending,
-			Progress: &models.JobProgress{
-				TotalURLs:     1,
-				PendingURLs:   1,
-				CompletedURLs: 0,
-				FailedURLs:    0,
-				Percentage:    0,
-			},
-			ResultCount: 0,
-			FailedCount: 0,
+		childJob := models.NewJob(childJobModel)
+		childJob.Progress = models.JobProgress{
+			TotalURLs:     1,
+			PendingURLs:   1,
+			CompletedURLs: 0,
+			FailedURLs:    0,
+			Percentage:    0,
 		}
 
 		// Save child job to database
@@ -630,7 +620,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		// Enqueue message to queue for processing
 		if s.queueManager != nil {
 			// Serialize the child JobModel to JSON for queue payload
-			payloadJSON, err := childJob.JobModel.ToJSON()
+			payloadJSON, err := childJob.ToJobModel().ToJSON()
 			if err != nil {
 				contextLogger.Warn().
 					Err(err).
@@ -764,11 +754,9 @@ func (s *Service) CancelJob(jobID string) error {
 	now := time.Now()
 	job.CompletedAt = &now
 
-	// Sync result counts with progress counters before terminating
-	if job.Progress != nil {
-		job.ResultCount = job.Progress.CompletedURLs
-		job.FailedCount = job.Progress.FailedURLs
-	}
+	// Sync result counts with progress counters before terminating (Progress is now a value type)
+	job.ResultCount = job.Progress.CompletedURLs
+	job.FailedCount = job.Progress.FailedURLs
 
 	// Extract source_type and entity_type from config
 	sourceType, _ := job.Config["source_type"].(string)
@@ -784,12 +772,9 @@ func (s *Service) CancelJob(jobID string) error {
 
 		// Publish EventJobCancelled after successful job cancellation
 		if s.eventService != nil {
-			completedURLs := 0
-			pendingURLs := 0
-			if job.Progress != nil {
-				completedURLs = job.Progress.CompletedURLs
-				pendingURLs = job.Progress.PendingURLs
-			}
+			// Progress is now a value type, always present
+			completedURLs := job.Progress.CompletedURLs
+			pendingURLs := job.Progress.PendingURLs
 
 			cancelledEvent := interfaces.Event{
 				Type: interfaces.EventJobCancelled,
@@ -851,11 +836,9 @@ func (s *Service) FailJob(jobID string, reason string) error {
 	job.CompletedAt = &now
 	job.Error = reason
 
-	// Sync result counts with progress counters before terminating
-	if job.Progress != nil {
-		job.ResultCount = job.Progress.CompletedURLs
-		job.FailedCount = job.Progress.FailedURLs
-	}
+	// Sync result counts with progress counters before terminating (Progress is now a value type)
+	job.ResultCount = job.Progress.CompletedURLs
+	job.FailedCount = job.Progress.FailedURLs
 
 	// Extract source_type and entity_type from config
 	sourceType, _ := job.Config["source_type"].(string)
@@ -871,12 +854,9 @@ func (s *Service) FailJob(jobID string, reason string) error {
 
 		// Publish EventJobFailed after successful job failure persistence
 		if s.eventService != nil {
-			completedURLs := 0
-			pendingURLs := 0
-			if job.Progress != nil {
-				completedURLs = job.Progress.CompletedURLs
-				pendingURLs = job.Progress.PendingURLs
-			}
+			// Progress is now a value type, always present
+			completedURLs := job.Progress.CompletedURLs
+			pendingURLs := job.Progress.PendingURLs
 
 			failedEvent := interfaces.Event{
 				Type: interfaces.EventJobFailed,
@@ -1057,22 +1037,13 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 	}
 
 	// Create new Job with fresh runtime state
-	newJob := &models.Job{
-		JobModel: newJobModel,
-		Status:   JobStatusPending,
-		Progress: &models.JobProgress{
-			TotalURLs:     len(seedURLs),
-			CompletedURLs: 0,
-			FailedURLs:    0,
-			PendingURLs:   len(seedURLs),
-			Percentage:    0,
-		},
-		StartedAt:   nil,
-		CompletedAt: nil,
-		FinishedAt:  nil,
-		Error:       "",
-		ResultCount: 0,
-		FailedCount: 0,
+	newJob := models.NewJob(newJobModel)
+	newJob.Progress = models.JobProgress{
+		TotalURLs:     len(seedURLs),
+		CompletedURLs: 0,
+		FailedURLs:    0,
+		PendingURLs:   len(seedURLs),
+		Percentage:    0,
 	}
 
 	// Save the new job

@@ -1,5 +1,6 @@
 # Test API Key Configuration
 # This file is used by tests to verify API key loading functionality
+# These are FAKE placeholder keys - real keys are injected from .env.test during test setup
 
 [test-google-places-key]
 value = "AIzaSyTest1234567890ABCDEFGHIJKLMNOPQRS"
@@ -8,3 +9,12 @@ description = "Test Google Places API key for automated testing"
 [google_api_key]
 value = "test-key"
 description = "Test Gemini API key for automated testing"
+
+# Additional keys for job definitions
+[google_gemini_api_key]
+value = "fake-gemini-api-key-for-testing"
+description = "Fake Gemini API key for keyword extractor agent job (overridden by .env.test)"
+
+[google_places_api_key]
+value = "fake-places-api-key-for-testing"
+description = "Fake Google Places API key for nearby restaurants job (overridden by .env.test)"

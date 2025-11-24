@@ -65,6 +65,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		Name:            jobDef.Name, // Use job definition name
 		Phase:           "execution",
 		Status:          "pending",
+		CreatedAt:       time.Now(), // Set creation timestamp
 		ProgressCurrent: 0,
 		ProgressTotal:   len(jobDef.Steps),
 	}
@@ -76,6 +77,13 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 			Msg("Failed to create parent job record")
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
+
+	parentLogger.Info().
+		Str("parent_job_id", parentJobID).
+		Str("job_name", jobDef.Name).
+		Str("status", parentJob.Status).
+		Str("created_at", parentJob.CreatedAt.Format("2006-01-02 15:04:05")).
+		Msg("✓ Parent job record created successfully")
 
 	// Persist metadata immediately after job creation to avoid race with child jobs
 	// This ensures auth_id and job_definition_id are available when crawler jobs start

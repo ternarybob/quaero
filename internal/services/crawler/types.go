@@ -125,18 +125,19 @@ func CrawlJobToJob(crawlJob *CrawlJob) *models.Job {
 	}
 
 	// Create Job with runtime state
-	job := &models.Job{
-		JobModel:      jobModel,
-		Status:        crawlJob.Status,
-		Progress:      jobProgress,
-		StartedAt:     startedAt,
-		CompletedAt:   completedAt,
-		FinishedAt:    finishedAt,
-		LastHeartbeat: lastHeartbeat,
-		Error:         crawlJob.Error,
-		ResultCount:   crawlJob.ResultCount,
-		FailedCount:   crawlJob.FailedCount,
+	job := models.NewJob(jobModel)
+	job.Status = crawlJob.Status
+	// Progress is now a value type - dereference if not nil, otherwise use zero value
+	if jobProgress != nil {
+		job.Progress = *jobProgress
 	}
+	job.StartedAt = startedAt
+	job.CompletedAt = completedAt
+	job.FinishedAt = finishedAt
+	job.LastHeartbeat = lastHeartbeat
+	job.Error = crawlJob.Error
+	job.ResultCount = crawlJob.ResultCount
+	job.FailedCount = crawlJob.FailedCount
 
 	return job
 }
@@ -170,15 +171,14 @@ func JobToCrawlJob(job *models.Job) (*CrawlJob, error) {
 		}
 	}
 
-	// Convert JobProgress to CrawlProgress
-	crawlProgress := CrawlProgress{}
-	if job.Progress != nil {
-		crawlProgress.TotalURLs = job.Progress.TotalURLs
-		crawlProgress.CompletedURLs = job.Progress.CompletedURLs
-		crawlProgress.FailedURLs = job.Progress.FailedURLs
-		crawlProgress.PendingURLs = job.Progress.PendingURLs
-		crawlProgress.CurrentURL = job.Progress.CurrentURL
-		crawlProgress.Percentage = job.Progress.Percentage
+	// Convert JobProgress to CrawlProgress (Progress is now a value type, always present)
+	crawlProgress := CrawlProgress{
+		TotalURLs:     job.Progress.TotalURLs,
+		CompletedURLs: job.Progress.CompletedURLs,
+		FailedURLs:    job.Progress.FailedURLs,
+		PendingURLs:   job.Progress.PendingURLs,
+		CurrentURL:    job.Progress.CurrentURL,
+		Percentage:    job.Progress.Percentage,
 	}
 
 	// Handle ParentID pointer

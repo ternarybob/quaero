@@ -80,7 +80,7 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 
 	// Extract metadata from parent job (best-effort - don't fail if extraction fails)
 	if job, ok := parentJob.(*models.Job); ok {
-		jobMeta := s.extractJobMetadata(job.JobModel)
+		jobMeta := s.extractJobMetadata(job.ToJobModel())
 		metadata[parentJobID] = jobMeta
 	} else {
 		// Log warning but continue - metadata enrichment is optional, job existence is not

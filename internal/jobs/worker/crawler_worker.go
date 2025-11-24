@@ -854,10 +854,10 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 	var authID string
 	var jobModel *models.JobModel
 
-	// Try Job first (embeds JobModel)
+	// Try Job first (can extract JobModel)
 	if job, ok := parentJobInterface.(*models.Job); ok {
-		logger.Debug().Msg("🔐 OK: Parent job is Job type (with embedded JobModel)")
-		jobModel = job.JobModel
+		logger.Debug().Msg("🔐 OK: Parent job is Job type (extracting JobModel)")
+		jobModel = job.ToJobModel()
 	} else if jm, ok := parentJobInterface.(*models.JobModel); ok {
 		logger.Debug().Msg("🔐 OK: Parent job is JobModel type")
 		jobModel = jm
