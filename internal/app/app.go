@@ -415,7 +415,7 @@ func (a *App) initServices() error {
 
 	// 5.13. Initialize connector service
 	a.ConnectorService = connectors.NewService(
-		a.StorageManager.ConnectorStorage(), // Pass the Badger-backed ConnectorStorage
+		a.StorageManager.ConnectorStorage(),
 		a.Logger,
 	)
 	a.Logger.Info().Msg("Connector service initialized")

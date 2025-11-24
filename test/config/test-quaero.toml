@@ -32,7 +32,7 @@ path = "./data/quaero.badger"
 # Gemini Configuration (Google ADK - unified for agents and chat)
 # =============================================================================
 [gemini]
-google_api_key = ""                       # Disabled by default (override with custom config if needed)
+google_api_key = "{google_gemini_api_key}"    # Loaded from variables
 agent_model = "gemini-2.0-flash"          # Model for agent operations (keyword extraction)
 chat_model = "gemini-2.0-flash"           # Model for chat operations
 timeout = "5m"                            # Operation timeout
@@ -44,3 +44,4 @@ temperature = 0.7                         # Chat completion temperature
 [logging]
 level = "debug"           # Debug level for detailed test logs
 min_event_level = "debug" # Publish all logs to UI for test visibility
+output = ["file", "console"] # Write to both file (for SystemLogsService) and console (for test harness capture)

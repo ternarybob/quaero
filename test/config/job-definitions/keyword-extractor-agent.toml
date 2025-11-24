@@ -1,0 +1,60 @@
+# ============================================================================
+# Keyword Extraction Agent Job Definition
+# ============================================================================
+# This job definition demonstrates how to use the Google Gemini-powered
+# agent framework to extract keywords from documents.
+#
+# The agent analyzes document content and identifies semantically relevant
+# keywords with confidence scores, storing results in Document.Metadata.
+#
+# Prerequisites:
+#   - Valid Google API key configured (QUAERO_AGENT_GOOGLE_API_KEY)
+#   - Documents crawled and stored in the database
+#
+# Job Flow:
+#   1. Query documents by source type
+#   2. For each document, create an agent job
+#   3. Agent analyzes content and extracts keywords
+#   4. Results stored in Document.Metadata["keyword_extractor"]
+# ============================================================================
+
+# Job metadata
+id = "keyword-extractor-agent"
+name = "Keyword Extraction"
+type = "custom"  # Job definition type must be one of: crawler, summarizer, custom, places
+job_type = "user"
+description = "Extracts keywords from crawled documents using Google Gemini"
+enabled = true  # Set to true to enable automatic execution
+auto_start = true
+
+# Optional: Schedule for automatic execution
+# schedule = "0 0 * * *"  # Run daily at midnight
+
+# Optional: Tags for categorization
+tags = ["agent", "keyword-extraction", "nlp"]
+
+# ============================================================================
+# Job Steps
+# ============================================================================
+
+[[steps]]
+name = "Extract Keywords from Confluence Pages"
+action = "agent"
+
+# Step configuration
+[steps.config]
+# Agent type to execute (registered in agent service)
+agent_type = "keyword_extractor"
+
+# API Key (loaded from variables)
+api_key = "{google_gemini_api_key}"
+
+# Optional: Maximum number of keywords to extract per document
+# max_keywords = 10
+
+# Optional: Filter documents to process
+[steps.config.document_filter]
+# Limit number of documents to process
+limit = 100
+
+

@@ -681,6 +681,75 @@ func (env *TestEnvironment) buildService() error {
 
 	fmt.Fprintf(env.LogFile, "Variables directory copied from %s to: %s\n", variablesSourcePath, variablesDestPath)
 
+	// Inject real API keys from environment into variables.toml
+	// This ensures tests run with actual keys without committing them to git
+	variablesFile := filepath.Join(variablesDestPath, "variables.toml")
+
+	type VariableConfig struct {
+		Value       string `toml:"value"`
+		Description string `toml:"description"`
+	}
+	var variablesConfig map[string]VariableConfig
+
+	// Read existing variables.toml
+	if data, err := os.ReadFile(variablesFile); err == nil {
+		if err := toml.Unmarshal(data, &variablesConfig); err != nil {
+			fmt.Fprintf(env.LogFile, "Warning: Failed to parse variables.toml: %v\n", err)
+			variablesConfig = make(map[string]VariableConfig)
+		}
+	} else {
+		variablesConfig = make(map[string]VariableConfig)
+	}
+
+	// Update with environment variables
+	// Note: These env vars are loaded from .env.test in NewTestEnvironment
+	if key := env.EnvVars["GOOGLE_API_KEY"]; key != "" {
+		// Map to both places and gemini keys as they often share the same project key in dev
+		variablesConfig["test-google-places-key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from GOOGLE_API_KEY environment variable",
+		}
+		variablesConfig["google_gemini_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from GOOGLE_API_KEY environment variable",
+		}
+		// Also set the generic google_api_key if used
+		variablesConfig["google_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from GOOGLE_API_KEY environment variable",
+		}
+	}
+
+	// Also check specific env vars if set (overrides generic key)
+	if key := env.EnvVars["QUAERO_PLACES_API_KEY"]; key != "" {
+		variablesConfig["test-google-places-key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from QUAERO_PLACES_API_KEY environment variable",
+		}
+	}
+	if key := env.EnvVars["QUAERO_GEMINI_GOOGLE_API_KEY"]; key != "" {
+		variablesConfig["google_gemini_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from QUAERO_GEMINI_GOOGLE_API_KEY environment variable",
+		}
+	}
+	if key := env.EnvVars["QUAERO_AGENT_GOOGLE_API_KEY"]; key != "" {
+		variablesConfig["google_gemini_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from QUAERO_AGENT_GOOGLE_API_KEY environment variable",
+		}
+	}
+
+	// Write updated variables.toml
+	if data, err := toml.Marshal(variablesConfig); err == nil {
+		if err := os.WriteFile(variablesFile, data, 0644); err != nil {
+			return fmt.Errorf("failed to write updated variables.toml: %w", err)
+		}
+		fmt.Fprintf(env.LogFile, "Injected API keys into variables.toml\n")
+	} else {
+		return fmt.Errorf("failed to marshal variables config: %w", err)
+	}
+
 	// Copy connectors directory to bin/bin/connectors (to match config.go default: ./bin/connectors)
 	// Source is test/config/connectors
 	connectorsSourcePath, err := filepath.Abs("../config/connectors")

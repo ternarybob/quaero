@@ -31,9 +31,9 @@ type JobDefinitionHandler struct {
 	authStorage               interfaces.AuthStorage
 	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService         *validation.TOMLValidationService
-	agentService interfaces.AgentService // Optional: nil if agent service unavailable
+	agentService              interfaces.AgentService // Optional: nil if agent service unavailable
 	// db                        *sql.DB // Removed SQLite dependency
-	logger                    arbor.ILogger
+	logger arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler
@@ -211,7 +211,7 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 	opts := interfaces.JobDefinitionListOptions{
 		Limit:    50,
 		Offset:   0,
-		OrderBy:  "created_at",
+		OrderBy:  "CreatedAt",
 		OrderDir: "DESC",
 	}
 
@@ -788,12 +788,12 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 		// Since we removed SQLite, we need to update validationService or skip this.
 		// For now, we skip persisting validation status until validationService is updated.
 		h.logger.Warn().Str("job_id", jobID).Msg("Skipping validation status persistence (SQLite removed)")
-		
+
 		/*
-		if err := h.validationService.UpdateValidationStatus(ctx, h.db, jobID, result); err != nil {
-			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update validation status")
-			// Don't fail the request - validation result is still valuable
-		}
+			if err := h.validationService.UpdateValidationStatus(ctx, h.db, jobID, result); err != nil {
+				h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update validation status")
+				// Don't fail the request - validation result is still valuable
+			}
 		*/
 	}
 
