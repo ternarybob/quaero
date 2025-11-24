@@ -33,10 +33,10 @@ func NewService(jobManager *jobs.Manager, queueMgr interfaces.QueueManager, logg
 }
 
 // CreateAndEnqueueJob creates a job record and enqueues it for processing
-func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.JobModel) error {
-	// Validate job model
+func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob) error {
+	// Validate queue job
 	if err := job.Validate(); err != nil {
-		return fmt.Errorf("invalid job model: %w", err)
+		return fmt.Errorf("invalid queue job: %w", err)
 	}
 
 	s.logger.Info().
@@ -59,10 +59,10 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.JobModel)
 		ProgressTotal:   0,
 	}
 
-	// Serialize job model as payload
+	// Serialize queue job as payload
 	payloadBytes, err := job.ToJSON()
 	if err != nil {
-		return fmt.Errorf("failed to serialize job model: %w", err)
+		return fmt.Errorf("failed to serialize queue job: %w", err)
 	}
 	dbJob.Payload = string(payloadBytes)
 
@@ -90,8 +90,8 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.JobModel)
 	return nil
 }
 
-// CreateJobFromDefinition creates a job model from a job definition
-func (s *Service) CreateJobFromDefinition(jobDef *models.JobDefinition) (*models.JobModel, error) {
+// CreateJobFromDefinition creates a queue job from a job definition
+func (s *Service) CreateJobFromDefinition(jobDef *models.JobDefinition) (*models.QueueJob, error) {
 	// Build config from job definition
 	config := make(map[string]interface{})
 
@@ -116,8 +116,8 @@ func (s *Service) CreateJobFromDefinition(jobDef *models.JobDefinition) (*models
 		"description":       jobDef.Description,
 	}
 
-	// Create job model
-	job := models.NewJobModel(
+	// Create queue job
+	job := models.NewQueueJob(
 		string(jobDef.Type),
 		jobDef.Name,
 		config,

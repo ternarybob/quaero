@@ -79,8 +79,8 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 	}
 
 	// Extract metadata from parent job (best-effort - don't fail if extraction fails)
-	if job, ok := parentJob.(*models.Job); ok {
-		jobMeta := s.extractJobMetadata(job.ToJobModel())
+	if jobState, ok := parentJob.(*models.QueueJobState); ok {
+		jobMeta := s.extractJobMetadata(jobState.ToQueueJob())
 		metadata[parentJobID] = jobMeta
 	} else {
 		// Log warning but continue - metadata enrichment is optional, job existence is not
@@ -91,7 +91,7 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 	jobIDs := []string{parentJobID}
 
 	// Step 1: Fetch child jobs if requested
-	var childJobs []*models.JobModel
+	var childJobs []*models.QueueJob
 	if includeChildren {
 		childJobs, err = s.jobStorage.GetChildJobs(ctx, parentJobID)
 		if err != nil {
@@ -200,8 +200,8 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 	return allLogs, metadata, nextCursor, nil
 }
 
-// extractJobMetadata extracts relevant metadata from a JobModel for UI display
-func (s *Service) extractJobMetadata(job *models.JobModel) *interfaces.AggregatedJobMeta {
+// extractJobMetadata extracts relevant metadata from a QueueJob for UI display
+func (s *Service) extractJobMetadata(job *models.QueueJob) *interfaces.AggregatedJobMeta {
 	meta := &interfaces.AggregatedJobMeta{}
 
 	// Job name
