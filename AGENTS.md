@@ -155,6 +155,45 @@ Quaero uses a Manager/Worker pattern for job orchestration and execution:
 
 The queue-based architecture uses a Badger-backed message queue for distributed job processing:
 
+#### Job Naming Conventions (V2.0 - IMPLEMENTED)
+
+**CRITICAL: Three distinct job domains with clear naming:**
+
+1. **Jobs Domain** - Job definitions (user-defined workflows)
+   - Type: `Job` or `JobDefinition`
+   - Prefix: `Job`
+   - Purpose: User-defined workflows in `job-definitions/` directory
+
+2. **Queue Domain** - Queued work (immutable)
+   - Type: `QueueJob`
+   - Prefix: `Queue`
+   - Purpose: Immutable job sent to message queue
+   - Constructors: `NewQueueJob()`, `NewQueueJobChild()`
+   - Deserialization: `QueueJobFromJSON()`
+
+3. **Queue State Domain** - Runtime information (in-memory)
+   - Type: `QueueJobState`
+   - Prefix: `QueueJobState`
+   - Purpose: In-memory runtime execution state
+   - Constructors: `NewQueueJobState()`
+   - Conversion: `QueueJobState.ToQueueJob()`
+
+**Storage Architecture:**
+- **BadgerDB stores:** `QueueJob` (immutable) ONLY
+- **Runtime state:** `QueueJobState` (in-memory, NOT stored)
+- **Conversion pattern:**
+  ```go
+  // Storage → In-Memory
+  queueJob := storage.GetJob(id)
+  jobState := models.NewQueueJobState(queueJob)
+
+  // In-Memory → Storage
+  queueJob := jobState.ToQueueJob()
+  storage.SaveJob(queueJob)
+  ```
+
+**Migration completed:** See `docs/features/refactor-job-queues/MIGRATION_COMPLETE_SUMMARY.md` for details.
+
 #### Directory Structure (Migration Complete - ARCH-009)
 
 Quaero uses a Manager/Worker/Monitor architecture for job orchestration and execution:
