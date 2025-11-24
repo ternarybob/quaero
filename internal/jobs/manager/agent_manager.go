@@ -216,8 +216,8 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 		jobConfig["max_keywords"] = maxKeywords
 	}
 
-	// Create job model
-	jobModel := models.NewChildJobModel(
+	// Create queue job
+	queueJob := models.NewQueueJobChild(
 		parentJobID,
 		"agent",
 		fmt.Sprintf("Agent: %s (document: %s)", agentType, documentID),
@@ -226,26 +226,26 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 		0,                        // depth (not used for agent jobs)
 	)
 
-	// Validate job model
-	if err := jobModel.Validate(); err != nil {
-		return "", fmt.Errorf("invalid job model: %w", err)
+	// Validate queue job
+	if err := queueJob.Validate(); err != nil {
+		return "", fmt.Errorf("invalid queue job: %w", err)
 	}
 
-	// Serialize job model to JSON
-	payloadBytes, err := jobModel.ToJSON()
+	// Serialize queue job to JSON
+	payloadBytes, err := queueJob.ToJSON()
 	if err != nil {
-		return "", fmt.Errorf("failed to serialize job model: %w", err)
+		return "", fmt.Errorf("failed to serialize queue job: %w", err)
 	}
 
 	// Create job record in database
 	if err := m.jobMgr.CreateJobRecord(ctx, &jobs.Job{
-		ID:              jobModel.ID,
-		ParentID:        jobModel.ParentID,
-		Type:            jobModel.Type,
-		Name:            jobModel.Name,
+		ID:              queueJob.ID,
+		ParentID:        queueJob.ParentID,
+		Type:            queueJob.Type,
+		Name:            queueJob.Name,
 		Phase:           "execution",
 		Status:          "pending",
-		CreatedAt:       jobModel.CreatedAt,
+		CreatedAt:       queueJob.CreatedAt,
 		ProgressCurrent: 0,
 		ProgressTotal:   1,
 		Payload:         string(payloadBytes),
@@ -255,8 +255,8 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 
 	// Enqueue job
 	queueMsg := queue.Message{
-		JobID:   jobModel.ID,
-		Type:    jobModel.Type,
+		JobID:   queueJob.ID,
+		Type:    queueJob.Type,
 		Payload: payloadBytes,
 	}
 
@@ -265,13 +265,13 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	}
 
 	m.logger.Debug().
-		Str("job_id", jobModel.ID).
+		Str("job_id", queueJob.ID).
 		Str("parent_job_id", parentJobID).
 		Str("agent_type", agentType).
 		Str("document_id", documentID).
 		Msg("Agent job created and enqueued")
 
-	return jobModel.ID, nil
+	return queueJob.ID, nil
 }
 
 // pollJobCompletion polls for job completion with timeout

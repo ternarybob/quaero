@@ -100,8 +100,8 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 	for _, operation := range operations {
 		childJobID := uuid.New().String()
 
-		// Create child job model
-		childJob := models.NewChildJobModel(
+		// Create child queue job
+		childJob := models.NewQueueJobChild(
 			dbMaintenanceParentJobID,
 			jobTypeDatabaseMaintenanceOperation,
 			operation, // Use operation as name
@@ -115,9 +115,9 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		)
 		childJob.ID = childJobID
 
-		// Validate job model
+		// Validate queue job
 		if err := childJob.Validate(); err != nil {
-			return "", fmt.Errorf("invalid child job model for operation %s: %w", operation, err)
+			return "", fmt.Errorf("invalid child queue job for operation %s: %w", operation, err)
 		}
 
 		// Create child job record in database
@@ -134,10 +134,10 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 			return "", fmt.Errorf("failed to create child job record for operation %s: %w", operation, err)
 		}
 
-		// Serialize job model to JSON
+		// Serialize queue job to JSON
 		payloadBytes, err := childJob.ToJSON()
 		if err != nil {
-			return "", fmt.Errorf("failed to serialize child job model for operation %s: %w", operation, err)
+			return "", fmt.Errorf("failed to serialize child queue job for operation %s: %w", operation, err)
 		}
 
 		// Create queue message
@@ -159,7 +159,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 	}
 
 	// Start JobMonitor monitoring
-	parentJobModel := &models.JobModel{
+	parentQueueJob := &models.QueueJob{
 		ID:       dbMaintenanceParentJobID,
 		ParentID: &parentJobID,
 		Type:     string(models.JobTypeParent),
@@ -174,7 +174,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		Depth: 0,
 	}
 
-	m.jobMonitor.StartMonitoring(ctx, parentJobModel)
+	m.jobMonitor.StartMonitoring(ctx, parentQueueJob)
 
 	m.logger.Info().
 		Str("step_name", step.Name).
