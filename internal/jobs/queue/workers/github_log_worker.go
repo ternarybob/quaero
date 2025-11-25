@@ -1,4 +1,4 @@
-package worker
+package workers
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"github.com/ternarybob/quaero/internal/connectors/github"
 	"github.com/ternarybob/quaero/internal/githublogs"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
 // GitHubLogWorker handles GitHub Action Log jobs
 type GitHubLogWorker struct {
 	connectorService interfaces.ConnectorService
-	jobManager       *jobs.Manager
+	jobManager       *queue.Manager
 	documentStorage  interfaces.DocumentStorage
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
@@ -25,7 +25,7 @@ type GitHubLogWorker struct {
 // NewGitHubLogWorker creates a new GitHub log worker
 func NewGitHubLogWorker(
 	connectorService interfaces.ConnectorService,
-	jobManager *jobs.Manager,
+	jobManager *queue.Manager,
 	documentStorage interfaces.DocumentStorage,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,

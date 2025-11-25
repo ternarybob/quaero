@@ -2,7 +2,7 @@
 // Database Maintenance Manager - Handles "database_maintenance" action in job definitions
 // -----------------------------------------------------------------------
 
-package manager
+package managers
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
+	internalqueue "github.com/ternarybob/quaero/internal/queue"
 )
 
 // Job type constant for database maintenance child jobs
@@ -23,7 +23,7 @@ const jobTypeDatabaseMaintenanceOperation = "database_maintenance_operation"
 // DatabaseMaintenanceManager creates parent database maintenance jobs and orchestrates database
 // optimization workflows (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
 type DatabaseMaintenanceManager struct {
-	jobManager *jobs.Manager
+	jobManager *queue.Manager
 	queueMgr   interfaces.QueueManager
 	jobMonitor interfaces.JobMonitor
 	logger     arbor.ILogger
@@ -33,7 +33,7 @@ type DatabaseMaintenanceManager struct {
 var _ interfaces.StepManager = (*DatabaseMaintenanceManager)(nil)
 
 // NewDatabaseMaintenanceManager creates a new database maintenance manager
-func NewDatabaseMaintenanceManager(jobManager *jobs.Manager, queueMgr interfaces.QueueManager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *DatabaseMaintenanceManager {
+func NewDatabaseMaintenanceManager(jobManager *queue.Manager, queueMgr interfaces.QueueManager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *DatabaseMaintenanceManager {
 	return &DatabaseMaintenanceManager{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,
@@ -78,7 +78,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 	}
 
 	// Create parent job record for orchestration tracking
-	parentJob := &jobs.Job{
+	parentJob := &queue.Job{
 		ID:       dbMaintenanceParentJobID,
 		ParentID: &parentJobID, // Reference to job definition parent
 		Type:     string(models.JobTypeParent),
@@ -121,7 +121,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		}
 
 		// Create child job record in database
-		dbJob := &jobs.Job{
+		dbJob := &queue.Job{
 			ID:       childJobID,
 			ParentID: &dbMaintenanceParentJobID,
 			Type:     jobTypeDatabaseMaintenanceOperation,
@@ -141,7 +141,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		}
 
 		// Create queue message
-		queueMsg := queue.Message{
+		queueMsg := internalqueue.Message{
 			JobID:   childJobID,
 			Type:    jobTypeDatabaseMaintenanceOperation,
 			Payload: json.RawMessage(payloadBytes),

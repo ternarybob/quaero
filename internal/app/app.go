@@ -18,10 +18,11 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
-	"github.com/ternarybob/quaero/internal/jobs/manager"
-	"github.com/ternarybob/quaero/internal/jobs/monitor"
-	"github.com/ternarybob/quaero/internal/jobs/worker"
+	"github.com/ternarybob/quaero/internal/jobs/definitions"
+	jobqueue "github.com/ternarybob/quaero/internal/jobs/queue"
+	"github.com/ternarybob/quaero/internal/jobs/queue/managers"
+	"github.com/ternarybob/quaero/internal/jobs/queue/workers"
+	"github.com/ternarybob/quaero/internal/jobs/state"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
@@ -69,9 +70,9 @@ type App struct {
 	QueueManager              interfaces.QueueManager
 	LogService                interfaces.LogService
 	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
-	JobManager                *jobs.Manager
-	JobProcessor              *worker.JobProcessor
-	JobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
+	JobManager                *jobqueue.Manager
+	JobProcessor              *workers.JobProcessor
+	JobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator
 	JobService                *jobsvc.Service
 
 	// Source-agnostic services
@@ -389,7 +390,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
 	// 5.8. Initialize job manager with storage interfaces
-	jobMgr := jobs.NewManager(
+	jobMgr := jobqueue.NewManager(
 		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobLogStorage(),
 		queueMgr,
@@ -399,7 +400,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Job manager initialized")
 
 	// 5.9. Initialize job processor (replaces worker pool)
-	jobProcessor := worker.NewJobProcessor(queueMgr, jobMgr, a.Logger)
+	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger)
 	a.JobProcessor = jobProcessor
 	a.Logger.Info().Msg("Job processor initialized")
 
@@ -453,7 +454,7 @@ func (a *App) initServices() error {
 	// 6.6. Register job executors with job processor
 
 	// Register crawler_url worker (ChromeDP rendering and content processing)
-	crawlerWorker := worker.NewCrawlerWorker(
+	crawlerWorker := workers.NewCrawlerWorker(
 		a.CrawlerService,
 		jobMgr,
 		queueMgr,
@@ -467,7 +468,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
 
 	// Register GitHub Log worker
-	githubLogWorker := worker.NewGitHubLogWorker(
+	githubLogWorker := workers.NewGitHubLogWorker(
 		a.ConnectorService,
 		jobMgr,
 		a.StorageManager.DocumentStorage(),
@@ -480,7 +481,7 @@ func (a *App) initServices() error {
 	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 	// to avoid blocking queue workers with long-running monitoring loops
-	jobMonitor := monitor.NewJobMonitor(
+	jobMonitor := state.NewJobMonitor(
 		jobMgr,
 		a.EventService,
 		a.Logger,
@@ -489,7 +490,7 @@ func (a *App) initServices() error {
 
 	// Register database maintenance worker (ARCH-008)
 	// Disabled as it depends on SQLite - will be removed or replaced with Badger maintenance
-	// dbMaintenanceWorker := worker.NewDatabaseMaintenanceWorker(
+	// dbMaintenanceWorker := workers.NewDatabaseMaintenanceWorker(
 	// 	nil, // SQLite DB removed
 	// 	jobMgr,
 	// 	a.Logger,
@@ -550,7 +551,7 @@ func (a *App) initServices() error {
 			a.Logger.Info().Msg("Agent service initialized and health check passed")
 
 			// Register agent worker immediately after successful initialization
-			agentWorker := worker.NewAgentWorker(
+			agentWorker := workers.NewAgentWorker(
 				a.AgentService,
 				jobMgr,
 				a.StorageManager.DocumentStorage(),
@@ -564,32 +565,32 @@ func (a *App) initServices() error {
 
 	// 6.9. Initialize JobDefinitionOrchestrator for job definition execution (ARCH-009)
 	// Pass jobMonitor so it can start monitoring goroutines for crawler jobs
-	a.JobDefinitionOrchestrator = jobs.NewJobDefinitionOrchestrator(jobMgr, jobMonitor, a.Logger)
+	a.JobDefinitionOrchestrator = definitions.NewJobDefinitionOrchestrator(jobMgr, jobMonitor, a.Logger)
 
 	// Register managers for job definition steps
-	crawlerManager := manager.NewCrawlerManager(a.CrawlerService, a.Logger)
+	crawlerManager := managers.NewCrawlerManager(a.CrawlerService, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(crawlerManager)
 	a.Logger.Info().Msg("Crawler manager registered")
 
-	transformManager := manager.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
+	transformManager := managers.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(transformManager)
 	a.Logger.Info().Msg("Transform manager registered")
 
-	reindexManager := manager.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
+	reindexManager := managers.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(reindexManager)
 	a.Logger.Info().Msg("Reindex manager registered")
 
-	dbMaintenanceManager := manager.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
+	dbMaintenanceManager := managers.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
-	placesSearchManager := manager.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
+	placesSearchManager := managers.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
 	// Register agent manager (if agent service is available)
 	if a.AgentService != nil {
-		agentManager := manager.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
+		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered")
 	}

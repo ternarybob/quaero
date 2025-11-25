@@ -1,4 +1,4 @@
-package manager
+package managers
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
 // ReindexManager orchestrates FTS5 full-text search index rebuilding workflows for optimal search performance
 type ReindexManager struct {
 	documentStorage interfaces.DocumentStorage
-	jobManager      *jobs.Manager
+	jobManager      *queue.Manager
 	logger          arbor.ILogger
 }
 
@@ -22,7 +22,7 @@ type ReindexManager struct {
 var _ interfaces.StepManager = (*ReindexManager)(nil)
 
 // NewReindexManager creates a new reindex manager for orchestrating FTS5 index rebuilding
-func NewReindexManager(documentStorage interfaces.DocumentStorage, jobManager *jobs.Manager, logger arbor.ILogger) *ReindexManager {
+func NewReindexManager(documentStorage interfaces.DocumentStorage, jobManager *queue.Manager, logger arbor.ILogger) *ReindexManager {
 	return &ReindexManager{
 		documentStorage: documentStorage,
 		jobManager:      jobManager,
@@ -43,7 +43,7 @@ func (m *ReindexManager) CreateParentJob(ctx context.Context, step models.JobSte
 	jobID := uuid.New().String()
 
 	// Create job record for tracking
-	job := &jobs.Job{
+	job := &queue.Job{
 		ID:       jobID,
 		ParentID: &parentJobID,
 		Type:     "reindex",

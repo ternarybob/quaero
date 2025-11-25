@@ -1,4 +1,4 @@
-package jobs
+package definitions
 
 import (
 	"context"
@@ -8,19 +8,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
 // JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate StepManagers and managing parent-child hierarchy
 type JobDefinitionOrchestrator struct {
 	stepExecutors map[string]interfaces.StepManager // Step managers keyed by action type
-	jobManager    *Manager
+	jobManager    *queue.Manager
 	jobMonitor    interfaces.JobMonitor
 	logger        arbor.ILogger
 }
 
 // NewJobDefinitionOrchestrator creates a new job definition orchestrator for routing job definition steps to managers
-func NewJobDefinitionOrchestrator(jobManager *Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *JobDefinitionOrchestrator {
+func NewJobDefinitionOrchestrator(jobManager *queue.Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *JobDefinitionOrchestrator {
 	return &JobDefinitionOrchestrator{
 		stepExecutors: make(map[string]interfaces.StepManager), // Initialize step manager map
 		jobManager:    jobManager,
@@ -58,7 +59,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 
 	// Create parent job record in database to track overall progress
 	// Use old Job format for now (will be migrated to models.Job later)
-	parentJob := &Job{
+	parentJob := &queue.Job{
 		ID:              parentJobID,
 		ParentID:        nil,         // This is a root job
 		Type:            "parent",    // Always use "parent" type for parent jobs created by JobDefinitionOrchestrator

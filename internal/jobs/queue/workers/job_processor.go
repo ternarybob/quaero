@@ -2,7 +2,7 @@
 // Job Processor - Routes jobs from queue to registered workers
 // -----------------------------------------------------------------------
 
-package worker
+package workers
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -20,7 +20,7 @@ import (
 // It routes jobs to registered workers based on job type.
 type JobProcessor struct {
 	queueMgr  interfaces.QueueManager
-	jobMgr    *jobs.Manager
+	jobMgr    *queue.Manager
 	executors map[string]interfaces.JobWorker // Job workers keyed by job type
 	logger    arbor.ILogger
 	ctx       context.Context
@@ -31,7 +31,7 @@ type JobProcessor struct {
 }
 
 // NewJobProcessor creates a new job processor that routes jobs to registered workers.
-func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *jobs.Manager, logger arbor.ILogger) *JobProcessor {
+func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *queue.Manager, logger arbor.ILogger) *JobProcessor {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &JobProcessor{

@@ -1,4 +1,4 @@
-package monitor
+package state
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -16,14 +16,14 @@ import (
 // NOTE: Parent jobs are NOT processed via the queue - they run in separate goroutines
 // to avoid blocking queue workers with long-running monitoring loops.
 type jobMonitor struct {
-	jobMgr       *jobs.Manager
+	jobMgr       *queue.Manager
 	eventService interfaces.EventService
 	logger       arbor.ILogger
 }
 
 // NewJobMonitor creates a new job monitor for monitoring parent job lifecycle and aggregating child job progress
 func NewJobMonitor(
-	jobMgr *jobs.Manager,
+	jobMgr *queue.Manager,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
 ) interfaces.JobMonitor {
@@ -199,9 +199,26 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 // checkChildJobProgress checks the progress of child jobs and returns true if all are complete
 func (m *jobMonitor) checkChildJobProgress(ctx context.Context, parentJobID string, logger arbor.ILogger) (bool, error) {
 	// Get child job statistics
-	childStats, err := m.jobMgr.GetChildJobStats(ctx, parentJobID)
+	childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{parentJobID})
 	if err != nil {
 		return false, fmt.Errorf("failed to get child job stats: %w", err)
+	}
+
+	// Extract stats for this parent job
+	interfaceStats, ok := childStatsMap[parentJobID]
+	if !ok || interfaceStats == nil {
+		// No children yet, keep waiting
+		return false, nil
+	}
+
+	// Convert interfaces.JobChildStats to local ChildJobStats
+	childStats := &ChildJobStats{
+		TotalChildren:     interfaceStats.ChildCount,
+		CompletedChildren: interfaceStats.CompletedChildren,
+		FailedChildren:    interfaceStats.FailedChildren,
+		CancelledChildren: interfaceStats.CancelledChildren,
+		RunningChildren:   interfaceStats.RunningChildren,
+		PendingChildren:   interfaceStats.PendingChildren,
 	}
 
 	// Log current progress
@@ -275,7 +292,7 @@ func (m *jobMonitor) publishParentJobProgress(ctx context.Context, job *models.Q
 }
 
 // publishChildJobStats publishes child job statistics for real-time monitoring
-func (m *jobMonitor) publishChildJobStats(ctx context.Context, parentJobID string, stats *jobs.ChildJobStats, progressText string) {
+func (m *jobMonitor) publishChildJobStats(ctx context.Context, parentJobID string, stats *ChildJobStats, progressText string) {
 	if m.eventService == nil {
 		return
 	}
@@ -340,12 +357,29 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 			Msg("Child job status changed")
 
 		// Get fresh child job stats for the parent
-		stats, err := m.jobMgr.GetChildJobStats(ctx, parentID)
+		childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{parentID})
 		if err != nil {
 			m.logger.Error().Err(err).
 				Str("parent_id", parentID).
 				Msg("Failed to get child job stats after status change")
 			return nil // Don't fail the event handler
+		}
+
+		// Extract stats for this parent job
+		interfaceStats, ok := childStatsMap[parentID]
+		if !ok || interfaceStats == nil {
+			// No stats available, skip this update
+			return nil
+		}
+
+		// Convert interfaces.JobChildStats to local ChildJobStats
+		stats := &ChildJobStats{
+			TotalChildren:     interfaceStats.ChildCount,
+			CompletedChildren: interfaceStats.CompletedChildren,
+			FailedChildren:    interfaceStats.FailedChildren,
+			CancelledChildren: interfaceStats.CancelledChildren,
+			RunningChildren:   interfaceStats.RunningChildren,
+			PendingChildren:   interfaceStats.PendingChildren,
 		}
 
 		// Generate progress text in required format
@@ -540,7 +574,7 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 
 // formatProgressText generates the required progress format
 // Example: "66 pending, 1 running, 41 completed, 0 failed"
-func (m *jobMonitor) formatProgressText(stats *jobs.ChildJobStats) string {
+func (m *jobMonitor) formatProgressText(stats *ChildJobStats) string {
 	return fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
 		stats.PendingChildren,
 		stats.RunningChildren,
@@ -552,7 +586,7 @@ func (m *jobMonitor) formatProgressText(stats *jobs.ChildJobStats) string {
 func (m *jobMonitor) publishParentJobProgressUpdate(
 	ctx context.Context,
 	parentJobID string,
-	stats *jobs.ChildJobStats,
+	stats *ChildJobStats,
 	progressText string) {
 
 	if m.eventService == nil {
@@ -607,7 +641,7 @@ func (m *jobMonitor) publishParentJobProgressUpdate(
 }
 
 // calculateOverallStatus determines parent job status from child statistics
-func (m *jobMonitor) calculateOverallStatus(stats *jobs.ChildJobStats) string {
+func (m *jobMonitor) calculateOverallStatus(stats *ChildJobStats) string {
 	// If no children yet, status is determined by parent job state (handled elsewhere)
 	if stats.TotalChildren == 0 {
 		return "running" // Waiting for children to spawn

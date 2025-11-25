@@ -6,17 +6,17 @@ import (
 	"fmt"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 )
 
 // Executor executes crawler jobs
 type Executor struct {
-	jobMgr  *jobs.Manager
+	jobMgr  *queue.Manager
 	logger  arbor.ILogger
 	service *Service // Your existing crawler service
 }
 
-func NewExecutor(jobMgr *jobs.Manager, logger arbor.ILogger, service *Service) *Executor {
+func NewExecutor(jobMgr *queue.Manager, logger arbor.ILogger, service *Service) *Executor {
 	return &Executor{
 		jobMgr:  jobMgr,
 		logger:  logger,

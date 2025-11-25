@@ -2,7 +2,7 @@
 // Database Maintenance Worker - Processes individual database maintenance operations from the queue
 // -----------------------------------------------------------------------
 
-package worker
+package workers
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -19,7 +19,7 @@ import (
 // It is kept for interface compatibility but operations are no-ops or return errors.
 type DatabaseMaintenanceWorker struct {
 	// db     *sql.DB // Removed SQLite dependency
-	jobMgr *jobs.Manager
+	jobMgr *queue.Manager
 	logger arbor.ILogger
 }
 
@@ -29,7 +29,7 @@ var _ interfaces.JobWorker = (*DatabaseMaintenanceWorker)(nil)
 // NewDatabaseMaintenanceWorker creates a new database maintenance worker
 func NewDatabaseMaintenanceWorker(
 	_ interface{}, // Placeholder for removed DB
-	jobMgr *jobs.Manager,
+	jobMgr *queue.Manager,
 	logger arbor.ILogger,
 ) *DatabaseMaintenanceWorker {
 	return &DatabaseMaintenanceWorker{

@@ -1,4 +1,4 @@
-package manager
+package managers
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
+	internalqueue "github.com/ternarybob/quaero/internal/queue"
 )
 
 // AgentManager creates parent agent jobs and orchestrates AI-powered document processing workflows
 type AgentManager struct {
-	jobMgr        *jobs.Manager
+	jobMgr        *queue.Manager
 	queueMgr      interfaces.QueueManager
 	searchService interfaces.SearchService
 	kvStorage     interfaces.KeyValueStorage
@@ -30,7 +30,7 @@ var _ interfaces.StepManager = (*AgentManager)(nil)
 
 // NewAgentManager creates a new agent manager
 func NewAgentManager(
-	jobMgr *jobs.Manager,
+	jobMgr *queue.Manager,
 	queueMgr interfaces.QueueManager,
 	searchService interfaces.SearchService,
 	kvStorage interfaces.KeyValueStorage,
@@ -238,7 +238,7 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	}
 
 	// Create job record in database
-	if err := m.jobMgr.CreateJobRecord(ctx, &jobs.Job{
+	if err := m.jobMgr.CreateJobRecord(ctx, &queue.Job{
 		ID:              queueJob.ID,
 		ParentID:        queueJob.ParentID,
 		Type:            queueJob.Type,
@@ -254,7 +254,7 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	}
 
 	// Enqueue job
-	queueMsg := queue.Message{
+	queueMsg := internalqueue.Message{
 		JobID:   queueJob.ID,
 		Type:    queueJob.Type,
 		Payload: payloadBytes,
@@ -301,8 +301,8 @@ func (m *AgentManager) pollJobCompletion(ctx context.Context, jobIDs []string) e
 					continue
 				}
 
-				// Type assert to *jobs.Job
-				job, ok := jobInterface.(*jobs.Job)
+				// Type assert to *queue.Job
+				job, ok := jobInterface.(*queue.Job)
 				if !ok {
 					m.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job")
 					continue

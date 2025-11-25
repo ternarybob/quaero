@@ -1,7 +1,7 @@
 # Manager/Worker Architecture
 
 **Version:** 2.0 (Revised Naming - IMPLEMENTED)
-**Last Updated:** 2025-11-24
+**Last Updated:** 2025-11-25
 **Migration Status:** ✅ Complete - All phases finished (Steps 0-13)
 **Migration Details:** See `docs/features/refactor-job-queues/MIGRATION_COMPLETE_SUMMARY.md`
 
@@ -12,8 +12,11 @@ Quaero's job system implements a **Manager/Worker/Monitor pattern** with clear s
 ### Three Domains
 
 1. **Jobs Domain** - User-defined workflows (JobDefinition or Job)
+   - Located in: `internal/jobs/definitions/`
 2. **Queue Domain** - Immutable queued work (QueueJob)
+   - Located in: `internal/jobs/queue/`
 3. **Queue State Domain** - Runtime execution information (QueueJobState)
+   - Located in: `internal/jobs/state/`
 
 ### Three Job Operations
 
@@ -35,6 +38,72 @@ Quaero's job system implements a **Manager/Worker/Monitor pattern** with clear s
 - **Queue** prefix = Queue-related operations and state
 
 **Event-Driven State:** Job status changes are published as events and stored in job logs. The `JobMonitor` aggregates these events to track overall job progress.
+
+**Domain-Based Organization:** The folder structure enforces the three-domain model with clear boundaries between job definitions, queue operations, and runtime state.
+
+## Folder Structure
+
+The job system is organized into three distinct domains:
+
+### Jobs Domain - Definitions (`internal/jobs/definitions/`)
+- **`orchestrator.go`** - `JobDefinitionOrchestrator`
+  - Routes job definition steps to appropriate StepManagers
+  - Coordinates overall workflow execution
+
+### Queue Domain - Immutable Operations (`internal/jobs/queue/`)
+- **`lifecycle.go`** - Job lifecycle management (immutable operations)
+  - Job creation (`CreateJob`, `CreateChildJob`)
+  - Job retrieval (`GetJob`, `ListJobs`)
+  - Queue enqueue/dequeue operations
+- **`managers/`** - StepManager implementations
+  - `crawler_manager.go` - Handles "crawl" action
+  - `transform_manager.go` - Handles "transform" action
+  - `reindex_manager.go` - Handles "reindex" action
+  - `places_search_manager.go` - Handles "places_search" action
+  - `agent_manager.go` - Handles "agent" action
+  - `database_maintenance_manager.go` - Handles "database_maintenance" action
+- **`workers/`** - JobWorker implementations
+  - `crawler_worker.go` - Executes crawler jobs
+  - `agent_worker.go` - Executes agent jobs
+  - `github_log_worker.go` - Executes GitHub logging jobs
+  - `database_maintenance_worker.go` - Executes maintenance jobs
+  - `job_processor.go` - Routes jobs to appropriate workers
+
+### Queue State Domain - Runtime Operations (`internal/jobs/state/`)
+- **`runtime.go`** - Status and error management (mutable operations)
+  - `UpdateJobStatus` - Update job execution status
+  - `MarkJobStarted/Completed/Failed` - Status transitions
+  - `SetJobError` - Error tracking
+- **`progress.go`** - Progress tracking
+  - `UpdateJobProgress` - Update progress counters
+  - `IncrementProcessed/Failed` - Atomic counter updates
+- **`stats.go`** - Statistics aggregation
+  - `GetJobStats` - Aggregate statistics for parent jobs
+  - `CalculateCompletionPercentage` - Progress calculations
+- **`monitor.go`** - `JobMonitor` implementation
+  - Job completion monitoring
+  - Event aggregation and WebSocket publishing
+
+### Responsibility Separation
+
+**Queue Manager (`queue/lifecycle.go`)** - Immutable operations:
+- Creating jobs (parent and child)
+- Retrieving jobs
+- Enqueuing/dequeuing messages
+- NO status updates or mutations
+
+**State Manager (`state/runtime.go`, `state/progress.go`, `state/stats.go`)** - Mutable operations:
+- Status updates and transitions
+- Progress tracking and counters
+- Error recording
+- Statistics aggregation
+- NO job creation or retrieval
+
+This separation ensures:
+- Clear domain boundaries
+- Immutable queue operations separate from mutable state tracking
+- Easy testing and maintenance
+- Enforcement of architectural principles at the folder level
 
 ## Architecture Overview
 
@@ -216,19 +285,20 @@ type StepManager interface {
 }
 ```
 
-**Implementations:**
-- `CrawlerManager` - Handles "crawl" action
-- `AgentManager` - Handles "agent" action
-- `DatabaseMaintenanceManager` - Handles "database_maintenance" action
-- `TransformManager` - Handles "transform" action
-- `ReindexManager` - Handles "reindex" action
-- `PlacesSearchManager` - Handles "places_search" action
+**Implementations:** (Located in `internal/jobs/queue/managers/`)
+- `CrawlerManager` (`crawler_manager.go`) - Handles "crawl" action
+- `AgentManager` (`agent_manager.go`) - Handles "agent" action
+- `DatabaseMaintenanceManager` (`database_maintenance_manager.go`) - Handles "database_maintenance" action
+- `TransformManager` (`transform_manager.go`) - Handles "transform" action
+- `ReindexManager` (`reindex_manager.go`) - Handles "reindex" action
+- `PlacesSearchManager` (`places_search_manager.go`) - Handles "places_search" action
 
 **Responsibilities:**
-1. Create parent `JobQueued` record in database
+1. Create parent `QueueJob` record in database (via `queue/lifecycle.go`)
 2. Define work items (e.g., URLs to crawl, documents to process)
-3. Enqueue child `JobQueued` records to queue
+3. Enqueue child `QueueJob` records to queue (via `queue/lifecycle.go`)
 4. NO direct execution - delegates to workers
+5. NO status updates - delegates to state management
 
 ### JobWorker (Job Execution)
 
@@ -248,18 +318,22 @@ type JobWorker interface {
 }
 ```
 
-**Implementations:**
-- `CrawlerWorker` - Executes crawler jobs
-- `AgentWorker` - Executes agent jobs
-- `DatabaseMaintenanceWorker` - Executes maintenance jobs
+**Implementations:** (Located in `internal/jobs/queue/workers/`)
+- `CrawlerWorker` (`crawler_worker.go`) - Executes crawler jobs
+- `AgentWorker` (`agent_worker.go`) - Executes agent jobs
+- `DatabaseMaintenanceWorker` (`database_maintenance_worker.go`) - Executes maintenance jobs
+- `GitHubLogWorker` (`github_log_worker.go`) - Executes GitHub logging jobs
+- `JobProcessor` (`job_processor.go`) - Routes jobs to appropriate workers
 
 **Responsibilities:**
-1. Load `JobQueued` from queue
-2. Create `JobExecutionState` for in-memory tracking
+1. Load `QueueJob` from queue (via `queue/lifecycle.go`)
+2. Create `QueueJobState` for in-memory tracking
 3. Execute task (fetch URL, run agent, etc.)
-4. Publish status events (started, progress, completed)
-5. Spawn child jobs if needed (URL discovery)
-6. Save results to storage
+4. Publish status events (started, progress, completed) - tracked by `state/monitor.go`
+5. Update job status via `state/runtime.go` (started, completed, failed)
+6. Update progress counters via `state/progress.go`
+7. Spawn child jobs if needed (URL discovery) via `queue/lifecycle.go`
+8. Save results to storage
 
 ### JobMonitor (Progress Monitoring)
 
@@ -279,14 +353,103 @@ type JobMonitor interface {
 }
 ```
 
-**Implementation:** `internal/jobs/monitor/job_monitor.go`
+**Implementation:** `internal/jobs/state/monitor.go`
 
 **Responsibilities:**
 1. Subscribe to job events (started, progress, completed)
-2. Aggregate child job statistics
+2. Aggregate child job statistics (via `state/stats.go`)
 3. Determine parent job completion
 4. Publish progress updates via WebSocket
 5. Store job logs in database
+6. Coordinate with `state/runtime.go` for status updates
+7. Use `state/progress.go` for progress tracking
+
+## Data Flow Between Domains
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Jobs Domain (internal/jobs/definitions/)                            │
+│                                                                      │
+│ orchestrator.go - JobDefinitionOrchestrator                         │
+│   └─> Routes job steps to appropriate StepManagers                  │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │
+                           v
+┌─────────────────────────────────────────────────────────────────────┐
+│ Queue Domain (internal/jobs/queue/)                                 │
+│                                                                      │
+│ managers/ - StepManager implementations                             │
+│   ├─> crawler_manager.go                                            │
+│   ├─> agent_manager.go                                              │
+│   ├─> database_maintenance_manager.go                               │
+│   ├─> transform_manager.go                                          │
+│   ├─> reindex_manager.go                                            │
+│   └─> places_search_manager.go                                      │
+│                                                                      │
+│ lifecycle.go - Queue Manager (Immutable Operations)                 │
+│   ├─> CreateJob() - Create parent QueueJob                          │
+│   ├─> CreateChildJob() - Create child QueueJob                      │
+│   ├─> EnqueueJob() - Add to queue                                   │
+│   ├─> DequeueJob() - Get from queue                                 │
+│   └─> GetJob() - Retrieve QueueJob                                  │
+│                                                                      │
+│ workers/ - JobWorker implementations                                │
+│   ├─> job_processor.go - Routes to workers                          │
+│   ├─> crawler_worker.go                                             │
+│   ├─> agent_worker.go                                               │
+│   ├─> github_log_worker.go                                          │
+│   └─> database_maintenance_worker.go                                │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │
+                           v
+┌─────────────────────────────────────────────────────────────────────┐
+│ Queue State Domain (internal/jobs/state/)                           │
+│                                                                      │
+│ runtime.go - State Manager (Mutable Operations)                     │
+│   ├─> UpdateJobStatus() - Change status                             │
+│   ├─> MarkJobStarted() - Start execution                            │
+│   ├─> MarkJobCompleted() - Complete execution                       │
+│   ├─> MarkJobFailed() - Record failure                              │
+│   └─> SetJobError() - Store error                                   │
+│                                                                      │
+│ progress.go - Progress Tracking                                     │
+│   ├─> UpdateJobProgress() - Update counters                         │
+│   ├─> IncrementProcessed() - Increment success                      │
+│   └─> IncrementFailed() - Increment failures                        │
+│                                                                      │
+│ stats.go - Statistics Aggregation                                   │
+│   ├─> GetJobStats() - Aggregate child stats                         │
+│   └─> CalculateCompletionPercentage()                               │
+│                                                                      │
+│ monitor.go - JobMonitor                                             │
+│   ├─> StartMonitoring() - Begin monitoring                          │
+│   ├─> StopMonitoring() - End monitoring                             │
+│   ├─> GetJobProgress() - Get current progress                       │
+│   └─> Uses runtime.go, progress.go, stats.go                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Interaction Flow
+
+1. **Job Creation Flow** (Jobs Domain -> Queue Domain)
+   ```
+   JobDefinitionOrchestrator -> StepManager -> queue/lifecycle.go
+   ```
+
+2. **Job Execution Flow** (Queue Domain -> Queue State Domain)
+   ```
+   queue/lifecycle.go -> JobWorker -> state/runtime.go -> state/progress.go
+   ```
+
+3. **Monitoring Flow** (Queue State Domain)
+   ```
+   state/monitor.go -> state/stats.go -> state/runtime.go -> state/progress.go
+   ```
+
+4. **Status Update Flow** (Queue State Domain only)
+   ```
+   JobWorker -> state/runtime.go -> state/progress.go -> state/monitor.go
+   ```
 
 ## Storage Architecture
 
@@ -320,6 +483,40 @@ Runtime state is tracked via:
 3. JobMonitor aggregating events into progress statistics
 
 This solves the BadgerHold serialization issue by avoiding complex nested structs with runtime state.
+
+## Benefits of Domain-Based Organization
+
+The new folder structure provides several key benefits:
+
+### 1. Clear Separation of Concerns
+- **Jobs Domain** (`internal/jobs/definitions/`) handles user-defined workflows
+- **Queue Domain** (`internal/jobs/queue/`) manages immutable job operations
+- **Queue State Domain** (`internal/jobs/state/`) tracks mutable runtime state
+
+### 2. Enforced Immutability
+- Queue operations (`queue/lifecycle.go`) cannot modify job state
+- State operations (`state/runtime.go`, `state/progress.go`) cannot create jobs
+- Architectural principles are enforced at the file system level
+
+### 3. Easier Navigation and Maintenance
+- Developers can quickly find the right file for their task
+- Related functionality is grouped together
+- Clear boundaries prevent cross-domain pollution
+
+### 4. Improved Testability
+- Each domain can be tested independently
+- Mock implementations are easier to create
+- Integration tests have clear boundaries
+
+### 5. Scalability
+- New managers/workers can be added without touching other domains
+- State tracking can be extended without affecting queue operations
+- Each domain can evolve independently
+
+### 6. Documentation Alignment
+- Folder structure matches architectural diagrams
+- Code organization reflects conceptual model
+- New developers can understand the system faster
 
 ## Migration Plan (Incremental Steps)
 

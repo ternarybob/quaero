@@ -11,20 +11,20 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	jobqueue "github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // Service provides high-level job management operations
 type Service struct {
-	jobManager *jobs.Manager
+	jobManager *jobqueue.Manager
 	queueMgr   interfaces.QueueManager
 	logger     arbor.ILogger
 }
 
 // NewService creates a new job service
-func NewService(jobManager *jobs.Manager, queueMgr interfaces.QueueManager, logger arbor.ILogger) *Service {
+func NewService(jobManager *jobqueue.Manager, queueMgr interfaces.QueueManager, logger arbor.ILogger) *Service {
 	return &Service{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,
@@ -47,7 +47,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob)
 		Msg("Creating and enqueueing job")
 
 	// Create job record in database
-	dbJob := &jobs.Job{
+	dbJob := &jobqueue.Job{
 		ID:              job.ID,
 		ParentID:        job.ParentID,
 		Type:            job.Type,
@@ -149,13 +149,13 @@ func (s *Service) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 }
 
 // GetJobStatus retrieves the current status of a job
-func (s *Service) GetJobStatus(ctx context.Context, jobID string) (*jobs.Job, error) {
-	// Use GetJobInternal to get the internal jobs.Job type directly
+func (s *Service) GetJobStatus(ctx context.Context, jobID string) (*jobqueue.Job, error) {
+	// Use GetJobInternal to get the internal jobqueue.Job type directly
 	return s.jobManager.GetJobInternal(ctx, jobID)
 }
 
 // GetJobLogs retrieves logs for a job
-func (s *Service) GetJobLogs(ctx context.Context, jobID string, limit int) ([]jobs.JobLog, error) {
+func (s *Service) GetJobLogs(ctx context.Context, jobID string, limit int) ([]jobqueue.JobLog, error) {
 	return s.jobManager.GetJobLogs(ctx, jobID, limit)
 }
 

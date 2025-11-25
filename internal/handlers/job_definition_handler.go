@@ -16,7 +16,8 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/definitions"
+	"github.com/ternarybob/quaero/internal/jobs/state"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/services/validation"
 )
@@ -27,7 +28,7 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 type JobDefinitionHandler struct {
 	jobDefStorage             interfaces.JobDefinitionStorage
 	jobStorage                interfaces.QueueStorage
-	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
+	jobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator
 	authStorage               interfaces.AuthStorage
 	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService         *validation.TOMLValidationService
@@ -40,7 +41,7 @@ type JobDefinitionHandler struct {
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.QueueStorage,
-	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator,
+	jobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
@@ -98,7 +99,7 @@ func (h *JobDefinitionHandler) GetJobTreeStatusHandler(w http.ResponseWriter, r 
 
 	// Get job manager from job storage (type assertion)
 	jobManager, ok := h.jobStorage.(interface {
-		GetJobTreeStatus(ctx context.Context, parentJobID string) (*jobs.JobTreeStatus, error)
+		GetJobTreeStatus(ctx context.Context, parentJobID string) (*state.JobTreeStatus, error)
 	})
 
 	if !ok {

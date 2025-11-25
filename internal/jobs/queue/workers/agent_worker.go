@@ -2,7 +2,7 @@
 // Agent Worker - Individual agent job execution with document processing
 // -----------------------------------------------------------------------
 
-package worker
+package workers
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -20,7 +20,7 @@ import (
 type AgentWorker struct {
 	// Core dependencies
 	agentService    interfaces.AgentService
-	jobMgr          *jobs.Manager
+	jobMgr          *queue.Manager
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	eventService    interfaces.EventService
@@ -32,7 +32,7 @@ var _ interfaces.JobWorker = (*AgentWorker)(nil)
 // NewAgentWorker creates a new agent worker for processing individual agent jobs from the queue
 func NewAgentWorker(
 	agentService interfaces.AgentService,
-	jobMgr *jobs.Manager,
+	jobMgr *queue.Manager,
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	eventService interfaces.EventService,

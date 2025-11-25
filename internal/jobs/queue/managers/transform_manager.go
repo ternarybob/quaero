@@ -1,4 +1,4 @@
-package manager
+package managers
 
 import (
 	"context"
@@ -8,14 +8,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
 // TransformManager orchestrates document transformation workflows, converting HTML content to markdown format
 type TransformManager struct {
 	transformService interfaces.TransformService
-	jobManager       *jobs.Manager
+	jobManager       *queue.Manager
 	logger           arbor.ILogger
 }
 
@@ -23,7 +23,7 @@ type TransformManager struct {
 var _ interfaces.StepManager = (*TransformManager)(nil)
 
 // NewTransformManager creates a new transform manager for orchestrating document transformation workflows
-func NewTransformManager(transformService interfaces.TransformService, jobManager *jobs.Manager, logger arbor.ILogger) *TransformManager {
+func NewTransformManager(transformService interfaces.TransformService, jobManager *queue.Manager, logger arbor.ILogger) *TransformManager {
 	return &TransformManager{
 		transformService: transformService,
 		jobManager:       jobManager,
@@ -45,7 +45,7 @@ func (m *TransformManager) CreateParentJob(ctx context.Context, step models.JobS
 	jobID := uuid.New().String()
 
 	// Create job record for tracking
-	job := &jobs.Job{
+	job := &queue.Job{
 		ID:       jobID,
 		ParentID: &parentJobID,
 		Type:     "transform",

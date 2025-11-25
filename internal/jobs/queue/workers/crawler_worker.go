@@ -2,7 +2,7 @@
 // Crawler Worker - Processes individual crawler jobs from the queue with ChromeDP rendering, content processing, and child job spawning
 // -----------------------------------------------------------------------
 
-package worker
+package workers
 
 import (
 	"context"
@@ -18,9 +18,9 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs"
+	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
+	queuelib "github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
@@ -29,7 +29,7 @@ import (
 type CrawlerWorker struct {
 	// Core dependencies
 	crawlerService  *crawler.Service
-	jobMgr          *jobs.Manager
+	jobMgr          *queue.Manager
 	queueMgr        interfaces.QueueManager
 	documentStorage interfaces.DocumentStorage
 	authStorage     interfaces.AuthStorage
@@ -47,7 +47,7 @@ var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
 // NewCrawlerWorker creates a new crawler worker for processing individual crawler jobs from the queue
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,
-	jobMgr *jobs.Manager,
+	jobMgr *queue.Manager,
 	queueMgr interfaces.QueueManager,
 	documentStorage interfaces.DocumentStorage,
 	authStorage interfaces.AuthStorage,
@@ -1346,7 +1346,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 	}
 
 	// Create job record in database
-	if err := w.jobMgr.CreateJobRecord(ctx, &jobs.Job{
+	if err := w.jobMgr.CreateJobRecord(ctx, &queue.Job{
 		ID:              childJob.ID,
 		ParentID:        childJob.ParentID,
 		Type:            childJob.Type,
@@ -1365,7 +1365,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 	jobBytes := payloadBytes
 
 	// Enqueue child job
-	queueMsg := queue.Message{
+	queueMsg := queuelib.Message{
 		JobID:   childJob.ID,
 		Type:    childJob.Type,
 		Payload: jobBytes,
