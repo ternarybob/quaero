@@ -26,7 +26,7 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
 	jobDefStorage             interfaces.JobDefinitionStorage
-	jobStorage                interfaces.JobStorage
+	jobStorage                interfaces.QueueStorage
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator
 	authStorage               interfaces.AuthStorage
 	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
@@ -39,7 +39,7 @@ type JobDefinitionHandler struct {
 // NewJobDefinitionHandler creates a new job definition handler
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
-	jobStorage interfaces.JobStorage,
+	jobStorage interfaces.QueueStorage,
 	jobDefinitionOrchestrator *jobs.JobDefinitionOrchestrator,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions

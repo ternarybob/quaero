@@ -20,12 +20,12 @@ import (
 
 // QueueMessage represents the internal structure stored in Badger
 type QueueMessage struct {
-	ID           string        `json:"id"`
-	Body         Message       `json:"body"`
-	EnqueuedAt   time.Time     `json:"enqueued_at"`
-	VisibleAt    time.Time     `json:"visible_at"`
-	ReceiveCount int           `json:"receive_count"`
-	DedupID      string        `json:"dedup_id,omitempty"` // Optional deduplication ID
+	ID           string    `json:"id"`
+	Body         Message   `json:"body"`
+	EnqueuedAt   time.Time `json:"enqueued_at"`
+	VisibleAt    time.Time `json:"visible_at"`
+	ReceiveCount int       `json:"receive_count"`
+	DedupID      string    `json:"dedup_id,omitempty"` // Optional deduplication ID
 }
 
 // BadgerManager implements a persistent queue using BadgerDB
@@ -63,7 +63,7 @@ func NewBadgerManager(db *badger.DB, queueName string, visibilityTimeout time.Du
 func (m *BadgerManager) Enqueue(ctx context.Context, msg Message) error {
 	// Generate a unique ID for the message
 	id := uuid.New().String()
-	
+
 	// Create internal message wrapper
 	qMsg := QueueMessage{
 		ID:           id,
@@ -88,11 +88,11 @@ func (m *BadgerManager) Enqueue(ctx context.Context, msg Message) error {
 	// Badger supports iteration.
 	// Let's use a composite key for ordering: queue:{queueName}:visible:{timestamp}:{id} -> ID
 	// And the data stored at: queue:{queueName}:data:{id} -> JSON
-	
+
 	// Actually, simpler approach for now:
 	// Store data at: queue:{queueName}:msg:{id}
 	// Maintain an index for visibility: queue:{queueName}:index:{visibleAt}:{id} -> empty
-	
+
 	return m.db.Update(func(txn *badger.Txn) error {
 		// 1. Store message data
 		msgKey := m.msgKey(id)
@@ -130,11 +130,11 @@ func (m *BadgerManager) Receive(ctx context.Context) (*Message, func() error, er
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			key := item.Key()
-			
+
 			// Parse timestamp from key
 			// Key format: queue:{queueName}:index:{timestamp}:{id}
 			// We need to extract timestamp and compare with now
-			
+
 			// Helper to parse key
 			ts, id, err := m.parseIndexKey(key)
 			if err != nil {
@@ -228,7 +228,7 @@ func (m *BadgerManager) Receive(ctx context.Context) (*Message, func() error, er
 			// To delete, we need to find the current index key.
 			// Since visibility might have changed (if extended), or we just know the ID.
 			// We can look up the message to get the current VisibleAt.
-			
+
 			msgKey := m.msgKey(msgID)
 			item, err := txn.Get(msgKey)
 			if err != nil {
@@ -248,7 +248,7 @@ func (m *BadgerManager) Receive(ctx context.Context) (*Message, func() error, er
 			// Delete index
 			idxKey := m.indexKey(currentMsg.VisibleAt, msgID)
 			if err := txn.Delete(idxKey); err != nil {
-				// If not found, maybe it was moved/updated? 
+				// If not found, maybe it was moved/updated?
 				// Ignore not found for index deletion to be safe
 				if err != badger.ErrKeyNotFound {
 					return err

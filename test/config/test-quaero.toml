@@ -33,7 +33,10 @@ reset_on_startup = true  # Delete database on startup for clean test runs
 # Jobs Configuration
 # =============================================================================
 [jobs]
-definitions_dir = "./job-definitions"  # Directory for job definition files
+definitions_dir = "./job-definitions"  # Directory for job definition filesreplace
+
+[places_api]
+api_key = "{google_places_api_key}"  # Required for places search jobs
 
 # =============================================================================
 # Gemini Configuration (Google ADK - unified for agents and chat)

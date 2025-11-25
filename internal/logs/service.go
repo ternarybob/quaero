@@ -16,12 +16,12 @@ var ErrJobNotFound = fmt.Errorf("job not found")
 // Service implements LogService for storage operations only
 type Service struct {
 	storage    interfaces.JobLogStorage
-	jobStorage interfaces.JobStorage
+	jobStorage interfaces.QueueStorage
 	logger     arbor.ILogger
 }
 
 // NewService creates a new LogService for log storage operations
-func NewService(storage interfaces.JobLogStorage, jobStorage interfaces.JobStorage, logger arbor.ILogger) interfaces.LogService {
+func NewService(storage interfaces.JobLogStorage, jobStorage interfaces.QueueStorage, logger arbor.ILogger) interfaces.LogService {
 	return &Service{
 		storage:    storage,
 		jobStorage: jobStorage,

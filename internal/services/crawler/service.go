@@ -113,7 +113,7 @@ type Service struct {
 	authService      interfaces.AuthService
 	authStorage      interfaces.AuthStorage
 	eventService     interfaces.EventService
-	jobStorage       interfaces.JobStorage
+	jobStorage       interfaces.QueueStorage
 	documentStorage  interfaces.DocumentStorage // Used for immediate document persistence during crawling
 	queueManager     interfaces.QueueManager    // Replaces custom URLQueue with goqite-backed queue
 	connectorService interfaces.ConnectorService
@@ -134,7 +134,7 @@ type Service struct {
 }
 
 // NewService creates a new crawler service
-func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.JobStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, connectorService interfaces.ConnectorService, logger arbor.ILogger, config *common.Config) *Service {
+func NewService(authService interfaces.AuthService, authStorage interfaces.AuthStorage, eventService interfaces.EventService, jobStorage interfaces.QueueStorage, documentStorage interfaces.DocumentStorage, queueManager interfaces.QueueManager, connectorService interfaces.ConnectorService, logger arbor.ILogger, config *common.Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create ChromeDP pool configuration from app config

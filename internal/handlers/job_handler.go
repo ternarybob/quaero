@@ -30,7 +30,7 @@ type JobGroup struct {
 // JobHandler handles job-related API requests
 type JobHandler struct {
 	crawlerService   *crawler.Service
-	jobStorage       interfaces.JobStorage
+	jobStorage       interfaces.QueueStorage
 	authStorage      interfaces.AuthStorage
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
@@ -40,7 +40,7 @@ type JobHandler struct {
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.JobStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,

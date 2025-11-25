@@ -72,9 +72,10 @@ type DocumentStorage interface {
 // This is a type alias to jobtypes.JobChildStats for backward compatibility
 type JobChildStats = jobtypes.JobChildStats
 
-// JobStorage - interface for executor-agnostic job persistence
-// Uses QueueJob for flexible, executor-agnostic job storage
-type JobStorage interface {
+// QueueStorage - interface for queue execution and state persistence
+// Handles QueueJob (immutable queued work) and QueueJobState (runtime execution state)
+// This is separate from JobDefinitionStorage which handles job definitions
+type QueueStorage interface {
 	SaveJob(ctx context.Context, job interface{}) error
 	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	UpdateJob(ctx context.Context, job interface{}) error
@@ -168,7 +169,7 @@ type ConnectorStorage interface {
 type StorageManager interface {
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
-	JobStorage() JobStorage
+	QueueStorage() QueueStorage
 	JobLogStorage() JobLogStorage
 	JobDefinitionStorage() JobDefinitionStorage
 	KeyValueStorage() KeyValueStorage
@@ -183,6 +184,11 @@ type StorageManager interface {
 	// LoadVariablesFromFiles loads variables (key/value pairs) from TOML files in the specified directory
 	// This is used to load configuration secrets and other variables at startup
 	LoadVariablesFromFiles(ctx context.Context, dirPath string) error
+
+	// LoadEnvFile loads variables from a .env file into the KV store
+	// Format: KEY=value or KEY="value", # comments, empty lines ignored
+	// This is loaded after TOML variables, so .env values take precedence
+	LoadEnvFile(ctx context.Context, filePath string) error
 
 	// LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory
 	// This is used to load job definitions at startup

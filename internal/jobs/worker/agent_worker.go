@@ -224,6 +224,8 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		agentType, documentID))
 
 	// Step 5: Publish DocumentUpdated event (agent jobs update existing documents)
+	// Use PublishSync to ensure document count is incremented before job completes
+	// This matches the pattern used by places_search_manager.go
 	if w.eventService != nil {
 		event := interfaces.Event{
 			Type: interfaces.EventDocumentUpdated,
@@ -236,11 +238,9 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 			},
 		}
 
-		go func() {
-			if err := w.eventService.Publish(context.Background(), event); err != nil {
-				jobLogger.Warn().Err(err).Msg("Failed to publish DocumentUpdated event")
-			}
-		}()
+		if err := w.eventService.PublishSync(ctx, event); err != nil {
+			jobLogger.Warn().Err(err).Msg("Failed to publish DocumentUpdated event")
+		}
 	}
 
 	// Update job status to completed

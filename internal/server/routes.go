@@ -50,8 +50,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
-	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler) // GET - all unique tags
-	mux.HandleFunc("/api/documents", s.handleDocumentsRoute)                 // GET (list) and POST (create)
+	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler)                    // GET - all unique tags
+	mux.HandleFunc("/api/documents", s.handleDocumentsRoute)                                    // GET (list) and POST (create)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents
 	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes)                                   // Handles /api/documents/{id} and subpaths
 

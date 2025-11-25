@@ -249,7 +249,9 @@
                                                         <!-- Status Badge -->
                                                         <div>
                                                             <span class="label"
-                                                                :class="getStatusBadgeClass(item.type, item.job.status, item.job)">
+                                                                :class="getStatusBadgeClass(item.type, item.job.status, item.job)"
+                                                                :data-job-id="item.job.id"
+                                                                :data-status="item.job.status">
                                                                 <i class="fas"
                                                                     :class="getStatusIcon(item.type === 'parent' && item.job.child_count > 0 ? deriveParentStatus(item.job).status : item.job.status)"
                                                                     style="margin-right: 0.25rem;"></i>

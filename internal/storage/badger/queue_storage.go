@@ -3,6 +3,7 @@ package badger
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -11,13 +12,15 @@ import (
 	"github.com/timshannon/badgerhold/v4"
 )
 
-// JobStorage implements the JobStorage interface for Badger
-type JobStorage struct {
+// QueueStorage implements the QueueStorage interface for Badger
+// This handles queue execution operations (QueueJob + QueueJobState)
+// NOT job definitions (those are in JobDefinitionStorage)
+type QueueStorage struct {
 	db     *BadgerDB
 	logger arbor.ILogger
 }
 
-// JobStatusRecord represents the mutable runtime state of a job
+// JobStatusRecord represents the mutable runtime state of a queued job
 // Stored separately from the immutable QueueJob to allow efficient updates
 // Key format: "job_status:<JobID>"
 type JobStatusRecord struct {
@@ -34,15 +37,15 @@ type JobStatusRecord struct {
 	UpdatedAt     time.Time
 }
 
-// NewJobStorage creates a new JobStorage instance
-func NewJobStorage(db *BadgerDB, logger arbor.ILogger) interfaces.JobStorage {
-	return &JobStorage{
+// NewQueueStorage creates a new QueueStorage instance
+func NewQueueStorage(db *BadgerDB, logger arbor.ILogger) interfaces.QueueStorage {
+	return &QueueStorage{
 		db:     db,
 		logger: logger,
 	}
 }
 
-func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
+func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 	j, ok := job.(*models.QueueJobState)
 	if !ok {
 		return fmt.Errorf("invalid job type")
@@ -78,7 +81,7 @@ func (s *JobStorage) SaveJob(ctx context.Context, job interface{}) error {
 	return nil
 }
 
-func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
+func (s *QueueStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	// 1. Load QueueJob from storage (immutable queued job)
 	var queueJob models.QueueJob
 	if err := s.db.Store().Get(jobID, &queueJob); err != nil {
@@ -114,21 +117,21 @@ func (s *JobStorage) GetJob(ctx context.Context, jobID string) (interface{}, err
 	return job, nil
 }
 
-func (s *JobStorage) UpdateJob(ctx context.Context, job interface{}) error {
+func (s *QueueStorage) UpdateJob(ctx context.Context, job interface{}) error {
 	return s.SaveJob(ctx, job)
 }
 
-func (s *JobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+func (s *QueueStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
 	// Deprecated
 	return nil
 }
 
-func (s *JobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+func (s *QueueStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
 	// Deprecated
 	return []models.JobLogEntry{}, nil
 }
 
-func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {
+func (s *QueueStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {
 	// Fetch all jobs and filter in memory due to BadgerHold pointer query issues
 	var queueJobs []models.QueueJob
 	if err := s.db.Store().Find(&queueJobs, nil); err != nil {
@@ -168,9 +171,18 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 			jobState.FailedCount = statusRecord.FailedCount
 		}
 
-		// Apply status filter
+		// Apply status filter (supports comma-separated values)
 		if opts != nil && opts.Status != "" {
-			if string(jobState.Status) != opts.Status {
+			// Parse comma-separated status values
+			statusList := strings.Split(opts.Status, ",")
+			matchFound := false
+			for _, status := range statusList {
+				if string(jobState.Status) == strings.TrimSpace(status) {
+					matchFound = true
+					break
+				}
+			}
+			if !matchFound {
 				continue
 			}
 		}
@@ -200,7 +212,7 @@ func (s *JobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptio
 	return result, nil
 }
 
-func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+func (s *QueueStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
 	stats := make(map[string]*interfaces.JobChildStats)
 
 	// Fetch all jobs once
@@ -253,7 +265,7 @@ func (s *JobStorage) GetJobChildStats(ctx context.Context, parentIDs []string) (
 	return stats, nil
 }
 
-func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.QueueJob, error) {
+func (s *QueueStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.QueueJob, error) {
 	var allJobs []models.QueueJob
 	if err := s.db.Store().Find(&allJobs, nil); err != nil {
 		return nil, fmt.Errorf("failed to get child jobs: %w", err)
@@ -279,7 +291,7 @@ func (s *JobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*mode
 	return result, nil
 }
 
-func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error) {
+func (s *QueueStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error) {
 	// 1. Find all status records matching the status
 	var statusRecords []JobStatusRecord
 	if err := s.db.Store().Find(&statusRecords, badgerhold.Where("Status").Eq(status)); err != nil {
@@ -298,7 +310,7 @@ func (s *JobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*mod
 	return result, nil
 }
 
-func (s *JobStorage) UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error {
+func (s *QueueStorage) UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error {
 	// Update or create JobStatusRecord
 	var record JobStatusRecord
 	err := s.db.Store().Get(jobID, &record)
@@ -335,7 +347,7 @@ func (s *JobStorage) UpdateJobStatus(ctx context.Context, jobID string, status s
 	return nil
 }
 
-func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error {
+func (s *QueueStorage) UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error {
 	var record JobStatusRecord
 	err := s.db.Store().Get(jobID, &record)
 	if err != nil {
@@ -348,7 +360,7 @@ func (s *JobStorage) UpdateJobProgress(ctx context.Context, jobID string, progre
 	return s.db.Store().Upsert(jobID, &record)
 }
 
-func (s *JobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error {
+func (s *QueueStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error {
 	var record JobStatusRecord
 	err := s.db.Store().Get(jobID, &record)
 	if err == badgerhold.ErrNotFound {
@@ -373,7 +385,7 @@ func (s *JobStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID str
 	return s.db.Store().Upsert(jobID, &record)
 }
 
-func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
+func (s *QueueStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {
 	var record JobStatusRecord
 	err := s.db.Store().Get(jobID, &record)
 	if err == badgerhold.ErrNotFound {
@@ -389,7 +401,7 @@ func (s *JobStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error
 	return s.db.Store().Upsert(jobID, &record)
 }
 
-func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.QueueJob, error) {
+func (s *QueueStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.QueueJob, error) {
 	threshold := time.Now().Add(-time.Duration(staleThresholdMinutes) * time.Minute)
 
 	// Find status records that are running and haven't heartbeat since threshold
@@ -420,7 +432,7 @@ func (s *JobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int
 	return result, nil
 }
 
-func (s *JobStorage) DeleteJob(ctx context.Context, jobID string) error {
+func (s *QueueStorage) DeleteJob(ctx context.Context, jobID string) error {
 	// Delete QueueJob
 	if err := s.db.Store().Delete(jobID, &models.QueueJob{}); err != nil && err != badgerhold.ErrNotFound {
 		return err
@@ -434,7 +446,7 @@ func (s *JobStorage) DeleteJob(ctx context.Context, jobID string) error {
 	return nil
 }
 
-func (s *JobStorage) CountJobs(ctx context.Context) (int, error) {
+func (s *QueueStorage) CountJobs(ctx context.Context) (int, error) {
 	count, err := s.db.Store().Count(&models.QueueJob{}, nil)
 	if err != nil {
 		return 0, err
@@ -442,7 +454,7 @@ func (s *JobStorage) CountJobs(ctx context.Context) (int, error) {
 	return int(count), nil
 }
 
-func (s *JobStorage) CountJobsByStatus(ctx context.Context, status string) (int, error) {
+func (s *QueueStorage) CountJobsByStatus(ctx context.Context, status string) (int, error) {
 	count, err := s.db.Store().Count(&JobStatusRecord{}, badgerhold.Where("Status").Eq(status))
 	if err != nil {
 		return 0, err
@@ -450,7 +462,7 @@ func (s *JobStorage) CountJobsByStatus(ctx context.Context, status string) (int,
 	return int(count), nil
 }
 
-func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
+func (s *QueueStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.JobListOptions) (int, error) {
 	// Fetch all and count in memory
 	var queueJobs []models.QueueJob
 	if err := s.db.Store().Find(&queueJobs, nil); err != nil {
@@ -475,7 +487,7 @@ func (s *JobStorage) CountJobsWithFilters(ctx context.Context, opts *interfaces.
 	return count, nil
 }
 
-func (s *JobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
+func (s *QueueStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {
 	type SeenURL struct {
 		ID    string // Composite key: jobID + url
 		JobID string
@@ -505,7 +517,7 @@ func (s *JobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) 
 	return true, nil
 }
 
-func (s *JobStorage) MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error) {
+func (s *QueueStorage) MarkRunningJobsAsPending(ctx context.Context, reason string) (int, error) {
 	// Find all running jobs
 	var runningRecords []JobStatusRecord
 	err := s.db.Store().Find(&runningRecords, badgerhold.Where("Status").Eq("running"))

@@ -13,7 +13,7 @@ type Manager struct {
 	db            *BadgerDB
 	auth          interfaces.AuthStorage
 	document      interfaces.DocumentStorage
-	job           interfaces.JobStorage
+	job           interfaces.QueueStorage
 	jobLog        interfaces.JobLogStorage
 	jobDefinition interfaces.JobDefinitionStorage
 	kv            interfaces.KeyValueStorage
@@ -32,7 +32,7 @@ func NewManager(logger arbor.ILogger, config *common.BadgerConfig) (interfaces.S
 		db:            db,
 		auth:          NewAuthStorage(db, logger),
 		document:      NewDocumentStorage(db, logger),
-		job:           NewJobStorage(db, logger),
+		job:           NewQueueStorage(db, logger),
 		jobLog:        NewJobLogStorage(db, logger),
 		jobDefinition: NewJobDefinitionStorage(db, logger),
 		kv:            NewKVStorage(db, logger),
@@ -55,8 +55,8 @@ func (m *Manager) DocumentStorage() interfaces.DocumentStorage {
 	return m.document
 }
 
-// JobStorage returns the Job storage interface
-func (m *Manager) JobStorage() interfaces.JobStorage {
+// QueueStorage returns the Queue storage interface
+func (m *Manager) QueueStorage() interfaces.QueueStorage {
 	return m.job
 }
 

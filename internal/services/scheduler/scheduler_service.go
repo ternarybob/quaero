@@ -40,8 +40,8 @@ type jobEntry struct {
 // Service implements SchedulerService interface
 type Service struct {
 	eventService   interfaces.EventService
-	crawlerService *crawler.Service      // For shutdown coordination
-	jobStorage     interfaces.JobStorage // For stale job detection
+	crawlerService *crawler.Service        // For shutdown coordination
+	jobStorage     interfaces.QueueStorage // For stale job detection
 	cron           *cron.Cron
 	logger         arbor.ILogger
 	kvStorage      interfaces.KeyValueStorage // For persisting job settings
@@ -68,7 +68,7 @@ func NewService(eventService interfaces.EventService, logger arbor.ILogger) inte
 
 // NewServiceWithDB creates a new scheduler service with database persistence
 // TODO Phase 8-11: Re-enable proper jobExecutor type once job system is re-integrated
-func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, kvStorage interfaces.KeyValueStorage, crawlerService *crawler.Service, jobStorage interfaces.JobStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
+func NewServiceWithDB(eventService interfaces.EventService, logger arbor.ILogger, kvStorage interfaces.KeyValueStorage, crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, jobDefStorage interfaces.JobDefinitionStorage, jobExecutor interface{}) interfaces.SchedulerService {
 	return &Service{
 		eventService:   eventService,
 		crawlerService: crawlerService,

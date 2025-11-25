@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/bobmc/Pictures/Screenshots/**)"
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

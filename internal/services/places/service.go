@@ -33,8 +33,9 @@ func NewService(
 	logger arbor.ILogger,
 ) interfaces.PlacesService {
 	// Resolve API key with KV-first resolution order: KV store → config fallback
+	// Variable name matches the {google_places_api_key} placeholder format used in config files
 	ctx := context.Background()
-	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google-places", config.APIKey)
+	apiKey, err := common.ResolveAPIKey(ctx, storageManager.KeyValueStorage(), "google_places_api_key", config.APIKey)
 	if err != nil {
 		// If resolution fails, fall back to config value (for backward compatibility)
 		apiKey = config.APIKey

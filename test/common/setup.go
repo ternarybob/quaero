@@ -715,30 +715,66 @@ func (env *TestEnvironment) buildService() error {
 
 	// Update with environment variables
 	// Note: These env vars are loaded from .env.test in NewTestEnvironment
-	if key := env.EnvVars["GOOGLE_API_KEY"]; key != "" {
-		// Map to both places and gemini keys as they often share the same project key in dev
-		variablesConfig["test-google-places-key"] = VariableConfig{
-			Value:       key,
-			Description: "Injected from GOOGLE_API_KEY environment variable",
-		}
+	// .env.test uses lowercase key names matching the placeholder format in config files
+	// Priority: Specific keys (google_places_api_key, google_gemini_api_key) > Generic keys (GOOGLE_API_KEY)
+
+	// Load google_gemini_api_key from .env.test
+	if key := env.EnvVars["google_gemini_api_key"]; key != "" {
 		variablesConfig["google_gemini_api_key"] = VariableConfig{
 			Value:       key,
-			Description: "Injected from GOOGLE_API_KEY environment variable",
+			Description: "Injected from google_gemini_api_key in .env.test",
 		}
-		// Also set the generic google_api_key if used
+		// Also set google_api_key as fallback for generic references
 		variablesConfig["google_api_key"] = VariableConfig{
 			Value:       key,
-			Description: "Injected from GOOGLE_API_KEY environment variable",
-		}
-		// Also set google_places_api_key for Places jobs
-		variablesConfig["google_places_api_key"] = VariableConfig{
-			Value:       key,
-			Description: "Injected from GOOGLE_API_KEY environment variable",
+			Description: "Injected from google_gemini_api_key in .env.test",
 		}
 	}
 
-	// Also check specific env vars if set (overrides generic key)
+	// Load google_places_api_key from .env.test
+	if key := env.EnvVars["google_places_api_key"]; key != "" {
+		variablesConfig["google_places_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from google_places_api_key in .env.test",
+		}
+		// Also set test-google-places-key for consistency with old format
+		variablesConfig["test-google-places-key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from google_places_api_key in .env.test",
+		}
+	}
+
+	// Fallback: Check for legacy GOOGLE_API_KEY format (if neither specific key is set)
+	if key := env.EnvVars["GOOGLE_API_KEY"]; key != "" {
+		// Only use if specific keys weren't already set
+		if _, hasGemini := variablesConfig["google_gemini_api_key"]; !hasGemini {
+			variablesConfig["google_gemini_api_key"] = VariableConfig{
+				Value:       key,
+				Description: "Injected from GOOGLE_API_KEY environment variable (fallback)",
+			}
+			variablesConfig["google_api_key"] = VariableConfig{
+				Value:       key,
+				Description: "Injected from GOOGLE_API_KEY environment variable (fallback)",
+			}
+		}
+		if _, hasPlaces := variablesConfig["google_places_api_key"]; !hasPlaces {
+			variablesConfig["google_places_api_key"] = VariableConfig{
+				Value:       key,
+				Description: "Injected from GOOGLE_API_KEY environment variable (fallback)",
+			}
+			variablesConfig["test-google-places-key"] = VariableConfig{
+				Value:       key,
+				Description: "Injected from GOOGLE_API_KEY environment variable (fallback)",
+			}
+		}
+	}
+
+	// Override with QUAERO_ prefixed environment variables if set (highest priority)
 	if key := env.EnvVars["QUAERO_PLACES_API_KEY"]; key != "" {
+		variablesConfig["google_places_api_key"] = VariableConfig{
+			Value:       key,
+			Description: "Injected from QUAERO_PLACES_API_KEY environment variable",
+		}
 		variablesConfig["test-google-places-key"] = VariableConfig{
 			Value:       key,
 			Description: "Injected from QUAERO_PLACES_API_KEY environment variable",

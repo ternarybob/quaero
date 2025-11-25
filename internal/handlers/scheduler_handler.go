@@ -38,4 +38,3 @@ func (h *SchedulerHandler) TriggerCollectionHandler(w http.ResponseWriter, r *ht
 		"message": "Collection triggered successfully",
 	})
 }
-

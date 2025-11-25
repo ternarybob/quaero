@@ -147,7 +147,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Initialize log service (simplified to storage operations only)
 	logService := logs.NewService(
 		app.StorageManager.JobLogStorage(),
-		app.StorageManager.JobStorage(),
+		app.StorageManager.QueueStorage(),
 		app.Logger,
 	)
 	app.LogService = logService
@@ -247,6 +247,13 @@ func (a *App) initDatabase() error {
 	if err := a.StorageManager.LoadVariablesFromFiles(context.Background(), a.Config.Variables.Dir); err != nil {
 		// Log warning but don't fail startup (consistent with other loaders)
 		a.Logger.Warn().Err(err).Msg("Failed to load variables from files")
+	}
+
+	// Load variables from .env file (takes precedence over TOML variables)
+	// This allows API keys to be stored in .env files for security
+	if err := a.StorageManager.LoadEnvFile(context.Background(), ".env"); err != nil {
+		// Log warning but don't fail startup (consistent with other loaders)
+		a.Logger.Warn().Err(err).Msg("Failed to load .env file")
 	}
 
 	// Load job definitions from files
@@ -383,7 +390,7 @@ func (a *App) initServices() error {
 
 	// 5.8. Initialize job manager with storage interfaces
 	jobMgr := jobs.NewManager(
-		a.StorageManager.JobStorage(),
+		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobLogStorage(),
 		queueMgr,
 		a.EventService,
@@ -437,7 +444,7 @@ func (a *App) initServices() error {
 	}
 
 	// 6.5. Initialize crawler service with queue manager for job enqueueing
-	a.CrawlerService = crawler.NewService(a.AuthService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.JobStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.ConnectorService, a.Logger, a.Config)
+	a.CrawlerService = crawler.NewService(a.AuthService, a.StorageManager.AuthStorage(), a.EventService, a.StorageManager.QueueStorage(), a.StorageManager.DocumentStorage(), queueMgr, a.ConnectorService, a.Logger, a.Config)
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
@@ -607,7 +614,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		a.StorageManager.KeyValueStorage(),
 		a.CrawlerService,
-		a.StorageManager.JobStorage(),
+		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobDefinitionStorage(),
 		nil, // JobDefinitionOrchestrator temporarily disabled
 	)
@@ -688,7 +695,7 @@ func (a *App) initHandlers() error {
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
 	// Initialize job handler with JobManager
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.JobStorage(), a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.QueueStorage(), a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.Config, a.Logger)
 
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)
@@ -709,7 +716,7 @@ func (a *App) initHandlers() error {
 	// Note: JobExecutor and JobRegistry are nil during queue refactor, but handler can work without them
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
-		a.StorageManager.JobStorage(),
+		a.StorageManager.QueueStorage(),
 		a.JobDefinitionOrchestrator,
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
@@ -733,7 +740,7 @@ func (a *App) initHandlers() error {
 			select {
 			case <-ticker.C:
 				// Check for jobs that have been running for more than 15 minutes without heartbeat
-				staleJobs, err := a.StorageManager.JobStorage().GetStaleJobs(context.Background(), 15)
+				staleJobs, err := a.StorageManager.QueueStorage().GetStaleJobs(context.Background(), 15)
 				if err != nil {
 					a.Logger.Warn().Err(err).Msg("Failed to check for stale jobs")
 					continue
@@ -745,7 +752,7 @@ func (a *App) initHandlers() error {
 						Msg("Detected stale jobs - marking as failed")
 
 					for _, job := range staleJobs {
-						if err := a.StorageManager.JobStorage().UpdateJobStatus(
+						if err := a.StorageManager.QueueStorage().UpdateJobStatus(
 							context.Background(),
 							job.ID,
 							"failed",

@@ -14,13 +14,13 @@ import (
 
 // Manager handles job metadata and lifecycle.
 type Manager struct {
-	jobStorage    interfaces.JobStorage
+	jobStorage    interfaces.QueueStorage
 	jobLogStorage interfaces.JobLogStorage
 	queue         interfaces.QueueManager
 	eventService  interfaces.EventService // Optional: may be nil for testing
 }
 
-func NewManager(jobStorage interfaces.JobStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService) *Manager {
+func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService) *Manager {
 	return &Manager{
 		jobStorage:    jobStorage,
 		jobLogStorage: jobLogStorage,
