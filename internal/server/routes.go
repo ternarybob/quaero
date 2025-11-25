@@ -354,9 +354,9 @@ func (s *Server) handleAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	existingA := params.Get("a")
 	if existingA != "" {
 		// Merge existing accordion sections with auth sections
-		params.Set("a", existingA+",auth-apikeys,auth-cookies")
+		params.Set("a", existingA+",kv,auth-cookies")
 	} else {
-		params.Set("a", "auth-apikeys,auth-cookies")
+		params.Set("a", "kv,auth-cookies")
 	}
 
 	// Build redirect URL

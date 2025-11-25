@@ -113,7 +113,7 @@ environment = "development" # "development" or "production"
 #
 # USAGE:
 #   - Variables can be referenced in config using placeholder syntax: {variable-name}
-#   - View and manage in UI: /settings?a=auth-apikeys
+#   - View and manage in UI: /settings?a=kv
 #   - Values are masked in logs and UI for security
 #
 # Example: See bin/variables/example-variables.toml

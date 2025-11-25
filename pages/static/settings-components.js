@@ -9,7 +9,7 @@
  * - settingsStatus: Service status and configuration display
  * - settingsConfig: Configuration details viewer
  * - authCookies: Authentication cookies management
- * - authApiKeys: API keys management
+ * - kv: Key values management
  * - settingsDanger: Dangerous operations (document deletion)
  *
  * @version 3.0.0
@@ -36,7 +36,7 @@ document.addEventListener('alpine:init', () => {
     // when accordion content is re-rendered via x-html
     const componentStateCache = {
         authCookies: { hasLoaded: false, data: [] },
-        authApiKeys: { hasLoaded: false, data: [] },
+        kv: { hasLoaded: false, data: [] },
         config: { hasLoaded: false, data: null }
     };
 
@@ -290,9 +290,9 @@ document.addEventListener('alpine:init', () => {
         content: {},
         loading: {},
         loadedSections: new Set(),
-        activeSection: 'auth-apikeys',
-        defaultSection: 'auth-apikeys',
-        validSections: ['auth-apikeys', 'auth-cookies', 'connectors', 'config', 'danger', 'status', 'logs'],
+        activeSection: 'kv',
+        defaultSection: 'kv',
+        validSections: ['kv', 'auth-cookies', 'connectors', 'config', 'danger', 'status', 'logs'],
 
         init() {
             window.debugLog('SettingsNavigation', 'Initializing component');
@@ -708,9 +708,9 @@ document.addEventListener('alpine:init', () => {
         }
     }));
 
-    // Authentication API Keys Component
-    Alpine.data('authApiKeys', () => ({
-        apiKeys: [],
+    // Key Values Component
+    Alpine.data('kv', () => ({
+        keyValues: [],
         loading: true,
         deleting: null,
         saving: false,
@@ -725,18 +725,18 @@ document.addEventListener('alpine:init', () => {
 
         init() {
             // Check global cache to prevent duplicate API calls when component re-initializes
-            if (componentStateCache.authApiKeys.hasLoaded) {
-                logger.debug('AuthApiKeys', 'Loading from cache, skipping API call');
-                this.apiKeys = componentStateCache.authApiKeys.data;
+            if (componentStateCache.kv.hasLoaded) {
+                logger.debug('KV', 'Loading from cache, skipping API call');
+                this.keyValues = componentStateCache.kv.data;
                 this.loading = false;
                 return;
             }
 
             // First load - fetch from API
-            this.loadApiKeys();
+            this.loadKeyValues();
         },
 
-        async loadApiKeys() {
+        async loadKeyValues() {
             this.loading = true;
             try {
                 const response = await fetch('/api/kv');
@@ -746,23 +746,23 @@ document.addEventListener('alpine:init', () => {
                 const data = await response.json();
                 // Store key/value pairs
                 if (Array.isArray(data)) {
-                    this.apiKeys = data;
+                    this.keyValues = data;
                 } else {
-                    this.apiKeys = [];
+                    this.keyValues = [];
                 }
 
                 // Store in global cache to prevent duplicate API calls on re-initialization
-                componentStateCache.authApiKeys.hasLoaded = true;
-                componentStateCache.authApiKeys.data = this.apiKeys;
+                componentStateCache.kv.hasLoaded = true;
+                componentStateCache.kv.data = this.keyValues;
             } catch (error) {
-                console.error('Failed to load API keys:', error);
-                window.showNotification('Failed to load API keys', 'error');
+                console.error('Failed to load key values:', error);
+                window.showNotification('Failed to load key values', 'error');
             } finally {
                 this.loading = false;
             }
         },
 
-        async deleteApiKey(key, displayName) {
+        async deleteKeyValue(key, displayName) {
             if (!confirm(`Are you sure you want to delete key "${displayName}"?\n\nAny job definitions using this key will fail.`)) {
                 return;
             }
@@ -778,7 +778,7 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 // Remove from local array
-                this.apiKeys = this.apiKeys.filter(item => item.key !== key);
+                this.keyValues = this.keyValues.filter(item => item.key !== key);
                 window.showNotification('Key deleted successfully', 'success');
             } catch (error) {
                 console.error('Failed to delete key:', error);
@@ -788,17 +788,17 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async editApiKey(apiKey) {
-            this.editingKey = apiKey.key;
+        async editKeyValue(kv) {
+            this.editingKey = kv.key;
             this.formData = {
-                key: apiKey.key,
+                key: kv.key,
                 value: '', // Will be fetched from API
-                description: apiKey.description || ''
+                description: kv.description || ''
             };
 
             // Fetch the full (unmasked) value from the API
             try {
-                const response = await fetch(`/api/kv/${encodeURIComponent(apiKey.key)}`);
+                const response = await fetch(`/api/kv/${encodeURIComponent(kv.key)}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -811,7 +811,7 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async saveApiKey() {
+        async submitKeyValue() {
             this.saving = true;
             try {
                 const url = this.editingKey
@@ -838,7 +838,7 @@ document.addEventListener('alpine:init', () => {
 
                 window.showNotification(`Key ${this.editingKey ? 'updated' : 'created'} successfully`, 'success');
                 this.closeModals();
-                await this.loadApiKeys();
+                await this.loadKeyValues();
             } catch (error) {
                 console.error('Failed to save key:', error);
                 window.showNotification('Failed to save key', 'error');
@@ -854,8 +854,8 @@ document.addEventListener('alpine:init', () => {
             this.formData = { key: '', value: '', description: '' };
         },
 
-        getDescription(apiKey) {
-            return apiKey.description || '-';
+        getDescription(kv) {
+            return kv.description || '-';
         }
     }));
 

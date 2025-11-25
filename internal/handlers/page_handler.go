@@ -132,7 +132,7 @@ func (h *PageHandler) ServePartial(w http.ResponseWriter, r *http.Request) {
 
 	// Security validation using allowlist approach
 	allowedPartials := map[string]bool{
-		"auth-apikeys.html": true,
+		"kv.html":           true,
 		"auth-cookies.html": true,
 		"config.html":       true,
 		"danger.html":       true,

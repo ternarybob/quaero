@@ -62,10 +62,10 @@ func TestSettings(t *testing.T) {
 	}
 
 	// 3. Configuration Check (Variables) - MOVED UP
-	// Verify that auth-apikeys displays keys loaded from test/config/variables/variables.toml
+	// Verify that kv section displays keys loaded from test/config/variables/variables.toml
 	// The variables.toml defines [test-google-places-key] and [google_api_key]
-	// Since API Keys is the default section, we can check immediately.
-	env.LogTest(t, "Verifying API Key Configuration loading")
+	// Since Key Values is the default section, we can check immediately.
+	env.LogTest(t, "Verifying Key Value Configuration loading")
 
 	// Dump HTML to file for debugging
 	var bodyHTML string
@@ -92,13 +92,13 @@ func TestSettings(t *testing.T) {
 		checkCancel()
 
 		if err != nil {
-			t.Errorf("Expected API key '%s' not found in UI: %v", key, err)
+			t.Errorf("Expected key value '%s' not found in UI: %v", key, err)
 		} else {
-			env.LogTest(t, "✓ Found API key: %s", key)
+			env.LogTest(t, "✓ Found key value: %s", key)
 		}
 	}
 
-	env.TakeScreenshot(ctx, "api_keys_verified")
+	env.TakeScreenshot(ctx, "key_values_verified")
 
 	// 4. Verify Menu Items and Navigation
 	menuItems := []struct {
@@ -107,7 +107,7 @@ func TestSettings(t *testing.T) {
 		expectedURL string
 		checkText   string
 	}{
-		{"auth-apikeys", "API Keys", "#auth-apikeys", "API Key Configuration"},
+		{"kv", "Key Values", "#kv", "Key Value Configuration"},
 		{"auth-cookies", "Authentication", "#auth-cookies", "Cookie Configuration"},
 		{"connectors", "Connectors", "#connectors", "Connector Configuration"},
 		{"config", "Configuration", "#config", "System Configuration"},
