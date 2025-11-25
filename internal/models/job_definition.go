@@ -30,6 +30,7 @@ const (
 	JobDefinitionTypeSummarizer JobDefinitionType = "summarizer"
 	JobDefinitionTypeCustom     JobDefinitionType = "custom"
 	JobDefinitionTypePlaces     JobDefinitionType = "places"
+	JobDefinitionTypeAI         JobDefinitionType = "ai" // AI-powered document processing jobs
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -44,7 +45,7 @@ const (
 // IsValidJobDefinitionType checks if a given JobDefinitionType is one of the valid constants
 func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	switch jobType {
-	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces:
+	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAI:
 		return true
 	default:
 		return false
@@ -154,7 +155,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Validate JobDefinitionType is one of the allowed constants
 	if !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, ai)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -256,6 +257,75 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 			// Valid strategy
 		default:
 			return fmt.Errorf("invalid error strategy: %s (must be one of: continue, fail, retry)", step.OnError)
+		}
+	}
+
+	// AI-specific validation for AI job types
+	if j.Type == JobDefinitionTypeAI {
+		if step.Config == nil {
+			return errors.New("AI job steps must have config")
+		}
+
+		// Validate operation_type if provided (optional but recommended)
+		if operationType, ok := step.Config["operation_type"].(string); ok && operationType != "" {
+			// Skip validation for placeholder values
+			if !isPlaceholder(operationType) {
+				validOperations := map[string]bool{
+					"scan":     true, // Add metadata/tags/keywords to existing documents
+					"enrich":   true, // Add web-sourced information to documents
+					"generate": true, // Create new documents from existing ones
+				}
+				if !validOperations[operationType] {
+					return fmt.Errorf("invalid operation_type for AI job: %s (must be one of: scan, enrich, generate)", operationType)
+				}
+			}
+		}
+
+		// Validate agent_type is provided (required for AI jobs)
+		if agentType, ok := step.Config["agent_type"].(string); ok {
+			if agentType == "" && !isPlaceholder(agentType) {
+				return errors.New("agent_type cannot be empty for AI job steps")
+			}
+		} else {
+			return errors.New("agent_type is required in step config for AI job steps")
+		}
+
+		// Validate document_filter if provided (optional)
+		if filter, ok := step.Config["document_filter"].(map[string]interface{}); ok {
+			// Validate tags filter if provided
+			if tags, ok := filter["tags"].([]interface{}); ok {
+				for i, tag := range tags {
+					if _, ok := tag.(string); !ok {
+						return fmt.Errorf("document_filter.tags[%d] must be a string", i)
+					}
+				}
+			} else if tags, ok := filter["tags"].([]string); ok {
+				// Already validated as string array
+				_ = tags
+			}
+
+			// Validate date filters format if provided
+			if createdAfter, ok := filter["created_after"].(string); ok && createdAfter != "" {
+				if _, err := time.Parse(time.RFC3339, createdAfter); err != nil {
+					return fmt.Errorf("document_filter.created_after must be in RFC3339 format: %w", err)
+				}
+			}
+			if updatedAfter, ok := filter["updated_after"].(string); ok && updatedAfter != "" {
+				if _, err := time.Parse(time.RFC3339, updatedAfter); err != nil {
+					return fmt.Errorf("document_filter.updated_after must be in RFC3339 format: %w", err)
+				}
+			}
+
+			// Validate limit if provided
+			if limit, ok := filter["limit"].(float64); ok {
+				if limit < 1 {
+					return errors.New("document_filter.limit must be >= 1")
+				}
+			} else if limit, ok := filter["limit"].(int); ok {
+				if limit < 1 {
+					return errors.New("document_filter.limit must be >= 1")
+				}
+			}
 		}
 	}
 

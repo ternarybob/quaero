@@ -191,7 +191,27 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 			Msg("Executing step")
 
 		// Get manager for this step
-		mgr, exists := o.stepExecutors[step.Action]
+		// For AI job types, always route to AgentManager regardless of action name
+		// This allows free-text action names in AI job definitions
+		var mgr interfaces.StepManager
+		var exists bool
+
+		if jobDef.Type == models.JobDefinitionTypeAI {
+			// Route AI jobs to AgentManager (registered with manager type "ai")
+			mgr, exists = o.stepExecutors["ai"]
+			if !exists {
+				err := fmt.Errorf("AI job detected but AgentManager not registered")
+				parentLogger.Error().
+					Err(err).
+					Str("action", step.Action).
+					Msg("Failed to find AI manager")
+				return parentJobID, err
+			}
+		} else {
+			// Non-AI jobs use standard action-based routing
+			mgr, exists = o.stepExecutors[step.Action]
+		}
+
 		if !exists {
 			err := fmt.Errorf("no manager registered for action: %s", step.Action)
 			parentLogger.Error().

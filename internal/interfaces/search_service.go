@@ -19,6 +19,15 @@ type SearchOptions struct {
 
 	// MetadataFilters filters by metadata fields (e.g., {"project": "PROJ-123"})
 	MetadataFilters map[string]string
+
+	// Tags filters documents that have ALL specified tags (AND operation)
+	Tags []string
+
+	// CreatedAfter filters documents created after this timestamp (RFC3339 format)
+	CreatedAfter string
+
+	// UpdatedAfter filters documents updated after this timestamp (RFC3339 format)
+	UpdatedAfter string
 }
 
 // SearchService provides document search functionality

@@ -559,7 +559,7 @@ func (a *App) initServices() error {
 				a.EventService,
 			)
 			jobProcessor.RegisterExecutor(agentWorker)
-			a.Logger.Info().Msg("Agent worker registered for job type: agent")
+			a.Logger.Info().Msg("AI worker registered for job type: ai")
 		}
 	}
 
@@ -588,11 +588,11 @@ func (a *App) initServices() error {
 	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
-	// Register agent manager (if agent service is available)
+	// Register AI manager (if agent service is available)
 	if a.AgentService != nil {
 		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
-		a.Logger.Info().Msg("Agent manager registered")
+		a.Logger.Info().Msg("AI manager registered")
 	}
 
 	a.Logger.Info().Msg("JobDefinitionOrchestrator initialized with all managers (ARCH-009)")

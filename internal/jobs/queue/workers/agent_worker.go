@@ -46,15 +46,15 @@ func NewAgentWorker(
 	}
 }
 
-// GetWorkerType returns "agent" - the job type this worker handles
+// GetWorkerType returns "ai" - the job type this worker handles
 func (w *AgentWorker) GetWorkerType() string {
-	return "agent"
+	return "ai"
 }
 
 // Validate validates that the queue job is compatible with this worker
 func (w *AgentWorker) Validate(job *models.QueueJob) error {
-	if job.Type != "agent" {
-		return fmt.Errorf("invalid job type: expected %s, got %s", "agent", job.Type)
+	if job.Type != "ai" {
+		return fmt.Errorf("invalid job type: expected %s, got %s", "ai", job.Type)
 	}
 
 	// Validate required config fields

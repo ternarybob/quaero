@@ -161,9 +161,9 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 	return parentJobID, nil
 }
 
-// GetManagerType returns "agent" - the action type this manager handles
+// GetManagerType returns "ai" - the action type this manager handles
 func (m *AgentManager) GetManagerType() string {
-	return "agent"
+	return "ai"
 }
 
 // ReturnsChildJobs returns true since agent creates child jobs for each document
@@ -186,11 +186,41 @@ func (m *AgentManager) queryDocuments(ctx context.Context, jobDef *models.JobDef
 
 	// Apply additional filters if specified
 	if filter != nil {
+		// Support source_type override in filter
+		if sourceType, ok := filter["source_type"].(string); ok && sourceType != "" {
+			opts.SourceTypes = []string{sourceType}
+		}
+
+		// Support tags filter - only return documents with ALL specified tags
+		if tags, ok := filter["tags"].([]interface{}); ok && len(tags) > 0 {
+			tagStrings := make([]string, 0, len(tags))
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok {
+					tagStrings = append(tagStrings, tagStr)
+				}
+			}
+			if len(tagStrings) > 0 {
+				opts.Tags = tagStrings
+			}
+		} else if tags, ok := filter["tags"].([]string); ok && len(tags) > 0 {
+			opts.Tags = tags
+		}
+
 		// Support limit override
 		if limit, ok := filter["limit"].(int); ok && limit > 0 {
 			opts.Limit = limit
 		} else if limitFloat, ok := filter["limit"].(float64); ok && limitFloat > 0 {
 			opts.Limit = int(limitFloat)
+		}
+
+		// Support created_after date filter
+		if createdAfter, ok := filter["created_after"].(string); ok && createdAfter != "" {
+			opts.CreatedAfter = createdAfter
+		}
+
+		// Support updated_after date filter
+		if updatedAfter, ok := filter["updated_after"].(string); ok && updatedAfter != "" {
+			opts.UpdatedAfter = updatedAfter
 		}
 	}
 
@@ -219,11 +249,11 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	// Create queue job
 	queueJob := models.NewQueueJobChild(
 		parentJobID,
-		"agent",
-		fmt.Sprintf("Agent: %s (document: %s)", agentType, documentID),
+		"ai",  // AI job type for AI-powered document processing
+		fmt.Sprintf("AI: %s (document: %s)", agentType, documentID),
 		jobConfig,
 		map[string]interface{}{}, // metadata (must be non-nil)
-		0,                        // depth (not used for agent jobs)
+		0,                        // depth (not used for AI jobs)
 	)
 
 	// Validate queue job
