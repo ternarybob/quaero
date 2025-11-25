@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // Manager handles job metadata and lifecycle.
@@ -135,7 +134,7 @@ func (m *Manager) CreateParentJob(ctx context.Context, jobType string, payload i
 	}
 
 	// Enqueue the job
-	if err := m.queue.Enqueue(ctx, queue.Message{
+	if err := m.queue.Enqueue(ctx, Message{
 		JobID:   jobID,
 		Type:    jobType,
 		Payload: payloadJSON,
@@ -177,7 +176,7 @@ func (m *Manager) CreateChildJob(ctx context.Context, parentID, jobType, phase s
 	}
 
 	// Enqueue the job
-	if err := m.queue.Enqueue(ctx, queue.Message{
+	if err := m.queue.Enqueue(ctx, Message{
 		JobID:   jobID,
 		Type:    jobType,
 		Payload: payloadJSON,
@@ -367,7 +366,7 @@ func (m *Manager) CreateJob(ctx context.Context, sourceType, sourceID string, co
 	}
 
 	// Enqueue the job
-	if err := m.queue.Enqueue(ctx, queue.Message{
+	if err := m.queue.Enqueue(ctx, Message{
 		JobID:   queueJob.ID,
 		Type:    jobType,
 		Payload: configJSON,

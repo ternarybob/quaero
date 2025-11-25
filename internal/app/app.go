@@ -18,11 +18,10 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/definitions"
-	jobqueue "github.com/ternarybob/quaero/internal/jobs/queue"
-	"github.com/ternarybob/quaero/internal/jobs/queue/managers"
-	"github.com/ternarybob/quaero/internal/jobs/queue/workers"
-	"github.com/ternarybob/quaero/internal/jobs/state"
+	"github.com/ternarybob/quaero/internal/actions/definitions"
+	"github.com/ternarybob/quaero/internal/queue/managers"
+	"github.com/ternarybob/quaero/internal/queue/state"
+	"github.com/ternarybob/quaero/internal/queue/workers"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
@@ -70,7 +69,7 @@ type App struct {
 	QueueManager              interfaces.QueueManager
 	LogService                interfaces.LogService
 	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
-	JobManager                *jobqueue.Manager
+	JobManager                *queue.Manager
 	JobProcessor              *workers.JobProcessor
 	JobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator
 	JobService                *jobsvc.Service
@@ -390,7 +389,7 @@ func (a *App) initServices() error {
 	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
 	// 5.8. Initialize job manager with storage interfaces
-	jobMgr := jobqueue.NewManager(
+	jobMgr := queue.NewManager(
 		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobLogStorage(),
 		queueMgr,
@@ -559,7 +558,7 @@ func (a *App) initServices() error {
 				a.EventService,
 			)
 			jobProcessor.RegisterExecutor(agentWorker)
-			a.Logger.Info().Msg("AI worker registered for job type: ai")
+			a.Logger.Info().Msg("Agent worker registered for job type: agent")
 		}
 	}
 
@@ -592,7 +591,7 @@ func (a *App) initServices() error {
 	if a.AgentService != nil {
 		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
 		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
-		a.Logger.Info().Msg("AI manager registered")
+		a.Logger.Info().Msg("Agent manager registered for action type: agent")
 	}
 
 	a.Logger.Info().Msg("JobDefinitionOrchestrator initialized with all managers (ARCH-009)")

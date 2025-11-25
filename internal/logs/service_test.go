@@ -81,7 +81,7 @@ func (m *MockJobStorage) CreateJob(ctx context.Context, sourceType, sourceID str
 
 func (m *MockJobStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
 	args := m.Called(ctx, jobID)
-	if job, ok := args.Get(0).(*models.Job); ok {
+	if job, ok := args.Get(0).(*models.QueueJobState); ok {
 		return job, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -97,9 +97,9 @@ func (m *MockJobStorage) DeleteJob(ctx context.Context, jobID string) error {
 	return args.Error(0)
 }
 
-func (m *MockJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.JobModel, error) {
+func (m *MockJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {
 	args := m.Called(ctx, opts)
-	if jobs, ok := args.Get(0).([]*models.JobModel); ok {
+	if jobs, ok := args.Get(0).([]*models.QueueJobState); ok {
 		return jobs, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -123,9 +123,9 @@ func (m *MockJobStorage) GetJobChildStats(ctx context.Context, parentIDs []strin
 	return nil, args.Error(1)
 }
 
-func (m *MockJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.JobModel, error) {
+func (m *MockJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error) {
 	args := m.Called(ctx, status)
-	if jobs, ok := args.Get(0).([]*models.JobModel); ok {
+	if jobs, ok := args.Get(0).([]*models.QueueJob); ok {
 		return jobs, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -136,17 +136,17 @@ func (m *MockJobStorage) UpdateJobStatus(ctx context.Context, jobID, status, mes
 	return args.Error(0)
 }
 
-func (m *MockJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.JobModel, error) {
+func (m *MockJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.QueueJob, error) {
 	args := m.Called(ctx, parentID)
-	if jobs, ok := args.Get(0).([]*models.JobModel); ok {
+	if jobs, ok := args.Get(0).([]*models.QueueJob); ok {
 		return jobs, args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *MockJobStorage) GetStaleJobs(ctx context.Context, thresholdMinutes int) ([]*models.JobModel, error) {
+func (m *MockJobStorage) GetStaleJobs(ctx context.Context, thresholdMinutes int) ([]*models.QueueJob, error) {
 	args := m.Called(ctx, thresholdMinutes)
-	if jobs, ok := args.Get(0).([]*models.JobModel); ok {
+	if jobs, ok := args.Get(0).([]*models.QueueJob); ok {
 		return jobs, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -212,15 +212,13 @@ func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
 	service := NewService(mockLogStorage, mockJobStorage, logger)
 
 	// Setup: Parent job with logs
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   "parent-123",
-			Name: "Parent Job",
-			Type: "crawler",
-			Config: map[string]interface{}{
-				"max_depth": 3,
-				"seed_urls": []interface{}{"https://example.com"},
-			},
+	parentJob := &models.QueueJobState{
+		ID:   "parent-123",
+		Name: "Parent Job",
+		Type: "crawler",
+		Config: map[string]interface{}{
+			"max_depth": 3,
+			"seed_urls": []interface{}{"https://example.com"},
 		},
 	}
 
@@ -271,19 +269,17 @@ func TestService_GetAggregatedLogs_WithChildren(t *testing.T) {
 
 	// Setup: Parent job with child jobs
 	parentID := "parent-123"
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   parentID,
-			Name: "Parent Job",
-			Type: "crawler",
-			Config: map[string]interface{}{
-				"max_depth": 3,
-				"seed_urls": []interface{}{"https://example.com"},
-			},
+	parentJob := &models.QueueJobState{
+		ID:   parentID,
+		Name: "Parent Job",
+		Type: "crawler",
+		Config: map[string]interface{}{
+			"max_depth": 3,
+			"seed_urls": []interface{}{"https://example.com"},
 		},
 	}
 
-	childJobs := []*models.JobModel{
+	childJobs := []*models.QueueJob{
 		{
 			ID:       "child-456",
 			ParentID: &parentID,
@@ -369,12 +365,10 @@ func TestService_GetAggregatedLogs_LevelFiltering(t *testing.T) {
 	service := NewService(mockLogStorage, mockJobStorage, logger)
 
 	// Setup: Parent job with mixed-level logs
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   "parent-123",
-			Name: "Parent Job",
-			Type: "crawler",
-		},
+	parentJob := &models.QueueJobState{
+		ID:   "parent-123",
+		Name: "Parent Job",
+		Type: "crawler",
 	}
 
 	errorLogs := []models.JobLogEntry{
@@ -411,12 +405,10 @@ func TestService_GetAggregatedLogs_LimitApplied(t *testing.T) {
 	service := NewService(mockLogStorage, mockJobStorage, logger)
 
 	// Setup: Parent job with many logs
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   "parent-123",
-			Name: "Parent Job",
-			Type: "crawler",
-		},
+	parentJob := &models.QueueJobState{
+		ID:   "parent-123",
+		Name: "Parent Job",
+		Type: "crawler",
 	}
 
 	// Create 15 logs in DESC order (newest first) to match storage behavior
@@ -490,15 +482,13 @@ func TestService_GetAggregatedLogs_ChildJobErrorContinues(t *testing.T) {
 
 	// Setup: Parent job with child jobs (one will fail)
 	parentID := "parent-123"
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   parentID,
-			Name: "Parent Job",
-			Type: "crawler",
-		},
+	parentJob := &models.QueueJobState{
+		ID:   parentID,
+		Name: "Parent Job",
+		Type: "crawler",
 	}
 
-	childJobs := []*models.JobModel{
+	childJobs := []*models.QueueJob{
 		{
 			ID:       "child-456",
 			ParentID: &parentID,
@@ -557,15 +547,13 @@ func TestService_GetAggregatedLogs_EmptyLogs(t *testing.T) {
 	service := NewService(mockLogStorage, mockJobStorage, logger)
 
 	// Setup: Job with no logs
-	parentJob := &models.Job{
-		JobModel: &models.JobModel{
-			ID:   "parent-123",
-			Name: "Parent Job",
-			Type: "crawler",
-			Config: map[string]interface{}{
-				"max_depth": 3,
-				"seed_urls": []interface{}{"https://example.com"},
-			},
+	parentJob := &models.QueueJobState{
+		ID:   "parent-123",
+		Name: "Parent Job",
+		Type: "crawler",
+		Config: map[string]interface{}{
+			"max_depth": 3,
+			"seed_urls": []interface{}{"https://example.com"},
 		},
 	}
 

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -197,8 +197,8 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 		var exists bool
 
 		if jobDef.Type == models.JobDefinitionTypeAI {
-			// Route AI jobs to AgentManager (registered with manager type "ai")
-			mgr, exists = o.stepExecutors["ai"]
+			// Route AI jobs to AgentManager (registered with manager type "agent")
+			mgr, exists = o.stepExecutors["agent"]
 			if !exists {
 				err := fmt.Errorf("AI job detected but AgentManager not registered")
 				parentLogger.Error().

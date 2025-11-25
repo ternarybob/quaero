@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // TransformManager orchestrates document transformation workflows, converting HTML content to markdown format
@@ -81,24 +81,24 @@ func (m *TransformManager) CreateParentJob(ctx context.Context, step models.JobS
 
 	// Validate configuration
 	if config.InputFormat != "html" {
-		errMsg := fmt.Sprintf("unsupported input format: %s (only 'html' is supported)", config.InputFormat)
+		err := fmt.Errorf("unsupported input format: %s (only 'html' is supported)", config.InputFormat)
 
 		// Mark job as failed
-		if err := m.jobManager.SetJobError(ctx, jobID, errMsg); err != nil {
-			m.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to set job error")
+		if setErr := m.jobManager.SetJobError(ctx, jobID, err.Error()); setErr != nil {
+			m.logger.Error().Err(setErr).Str("job_id", jobID).Msg("Failed to set job error")
 		}
 
-		return "", fmt.Errorf(errMsg)
+		return "", err
 	}
 	if config.OutputFormat != "markdown" {
-		errMsg := fmt.Sprintf("unsupported output format: %s (only 'markdown' is supported)", config.OutputFormat)
+		err := fmt.Errorf("unsupported output format: %s (only 'markdown' is supported)", config.OutputFormat)
 
 		// Mark job as failed
-		if err := m.jobManager.SetJobError(ctx, jobID, errMsg); err != nil {
-			m.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to set job error")
+		if setErr := m.jobManager.SetJobError(ctx, jobID, err.Error()); setErr != nil {
+			m.logger.Error().Err(setErr).Str("job_id", jobID).Msg("Failed to set job error")
 		}
 
-		return "", fmt.Errorf(errMsg)
+		return "", err
 	}
 
 	// For now, transform steps are informational only

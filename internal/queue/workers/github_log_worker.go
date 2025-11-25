@@ -9,8 +9,8 @@ import (
 	"github.com/ternarybob/quaero/internal/connectors/github"
 	"github.com/ternarybob/quaero/internal/githublogs"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // GitHubLogWorker handles GitHub Action Log jobs

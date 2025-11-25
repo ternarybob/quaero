@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // ReindexManager orchestrates FTS5 full-text search index rebuilding workflows for optimal search performance

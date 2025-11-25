@@ -12,9 +12,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	internalqueue "github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // Job type constant for database maintenance child jobs
@@ -141,7 +140,7 @@ func (m *DatabaseMaintenanceManager) CreateParentJob(ctx context.Context, step m
 		}
 
 		// Create queue message
-		queueMsg := internalqueue.Message{
+		queueMsg := models.QueueMessage{
 			JobID:   childJobID,
 			Type:    jobTypeDatabaseMaintenanceOperation,
 			Payload: json.RawMessage(payloadBytes),

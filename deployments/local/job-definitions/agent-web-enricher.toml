@@ -1,16 +1,16 @@
-# AI Web Enricher Job Definition
-# This file demonstrates web enrichment using AI to add external information to documents
+# Agent Web Enricher Job Definition
+# This file demonstrates web enrichment using agents to add external information to documents
 # Place .toml files in job-definitions/ directory to auto-load at startup
 
-id = "ai-web-enricher"
-name = "AI Web Enricher"
+id = "agent-web-enricher"
+name = "Agent Web Enricher"
 type = "ai"  # AI job type for AI-powered document processing
 job_type = "user"
-source_type = ""  # AI jobs don't require source_type
+source_type = ""  # Agent jobs don't require source_type
 description = "Enriches documents with web-sourced information using Google Gemini ADK"
 
 # Tags to apply to all documents processed by this job
-tags = ["ai", "enrichment", "web"]
+tags = ["agent", "enrichment", "web"]
 
 # Cron schedule (empty = manual execution only)
 schedule = ""
@@ -27,11 +27,11 @@ auto_start = false
 # Job steps definition
 [[steps]]
 name = "enrich_with_web_content"
-action = "web_enrichment"  # Free-text action name (AI jobs support custom action names)
+action = "web_enrichment"  # Free-text action name (agent jobs support custom action names)
 on_error = "continue"  # Continue processing other documents even if one fails
 
 [steps.config]
-# AI operation type: "enrich" adds external information to documents
+# Agent operation type: "enrich" adds external information to documents
 operation_type = "enrich"
 
 # Agent type for web enrichment

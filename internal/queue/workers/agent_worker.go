@@ -11,8 +11,8 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // AgentWorker processes individual agent jobs from the queue, loading documents, executing AI agents,
@@ -46,15 +46,15 @@ func NewAgentWorker(
 	}
 }
 
-// GetWorkerType returns "ai" - the job type this worker handles
+// GetWorkerType returns "agent" - the job type this worker handles
 func (w *AgentWorker) GetWorkerType() string {
-	return "ai"
+	return "agent"
 }
 
 // Validate validates that the queue job is compatible with this worker
 func (w *AgentWorker) Validate(job *models.QueueJob) error {
-	if job.Type != "ai" {
-		return fmt.Errorf("invalid job type: expected %s, got %s", "ai", job.Type)
+	if job.Type != "agent" {
+		return fmt.Errorf("invalid job type: expected %s, got %s", "agent", job.Type)
 	}
 
 	// Validate required config fields

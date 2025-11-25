@@ -21,7 +21,7 @@
 # Job metadata
 id = "keyword-extractor-agent"
 name = "Keyword Extraction"
-type = "custom"  # Job definition type must be one of: crawler, summarizer, custom, places
+type = "ai"  # Agent job type for AI-powered document processing
 job_type = "user"
 description = "Extracts keywords from crawled documents using Google Gemini"
 enabled = true  # Set to true to enable automatic execution

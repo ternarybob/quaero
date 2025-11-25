@@ -1,17 +1,12 @@
 package queue
 
 import (
-	"encoding/json"
-	"errors"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // ErrNoMessage is returned when the queue is empty
-var ErrNoMessage = errors.New("no messages in queue")
+var ErrNoMessage = models.ErrNoMessage
 
-// Message is the structure stored in the queue.
-// Keep it simple - just enough to route the job.
-type Message struct {
-	JobID   string          `json:"job_id"`  // References jobs.id
-	Type    string          `json:"type"`    // Job type for executor routing
-	Payload json.RawMessage `json:"payload"` // Job-specific data (passed through)
-}
+// Message is an alias for models.QueueMessage to maintain backward compatibility
+// within the queue package. New code should use models.QueueMessage directly.
+type Message = models.QueueMessage

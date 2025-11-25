@@ -14,11 +14,11 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/actions/definitions"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/definitions"
-	"github.com/ternarybob/quaero/internal/jobs/state"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/services/validation"
 )
 

@@ -18,9 +18,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	queuelib "github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
@@ -1365,7 +1364,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 	jobBytes := payloadBytes
 
 	// Enqueue child job
-	queueMsg := queuelib.Message{
+	queueMsg := queue.Message{
 		JobID:   childJob.ID,
 		Type:    childJob.Type,
 		Payload: jobBytes,

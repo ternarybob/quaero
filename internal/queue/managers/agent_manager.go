@@ -9,9 +9,8 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
-	internalqueue "github.com/ternarybob/quaero/internal/queue"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // AgentManager creates parent agent jobs and orchestrates AI-powered document processing workflows
@@ -161,9 +160,9 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 	return parentJobID, nil
 }
 
-// GetManagerType returns "ai" - the action type this manager handles
+// GetManagerType returns "agent" - the action type this manager handles
 func (m *AgentManager) GetManagerType() string {
-	return "ai"
+	return "agent"
 }
 
 // ReturnsChildJobs returns true since agent creates child jobs for each document
@@ -249,7 +248,7 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	// Create queue job
 	queueJob := models.NewQueueJobChild(
 		parentJobID,
-		"ai",  // AI job type for AI-powered document processing
+		"agent", // Agent job type for AI-powered document processing
 		fmt.Sprintf("AI: %s (document: %s)", agentType, documentID),
 		jobConfig,
 		map[string]interface{}{}, // metadata (must be non-nil)
@@ -284,7 +283,7 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	}
 
 	// Enqueue job
-	queueMsg := internalqueue.Message{
+	queueMsg := queue.Message{
 		JobID:   queueJob.ID,
 		Type:    queueJob.Type,
 		Payload: payloadBytes,

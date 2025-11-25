@@ -1,16 +1,16 @@
-# AI Document Generator Job Definition
-# This file demonstrates document generation using AI to create new documents from existing ones
+# Agent Document Generator Job Definition
+# This file demonstrates document generation using agents to create new documents from existing ones
 # Place .toml files in job-definitions/ directory to auto-load at startup
 
-id = "ai-document-generator"
-name = "AI Document Generator"
+id = "agent-document-generator"
+name = "Agent Document Generator"
 type = "ai"  # AI job type for AI-powered document processing
 job_type = "user"
-source_type = ""  # AI jobs don't require source_type
+source_type = ""  # Agent jobs don't require source_type
 description = "Generates summary documents from existing documents using Google Gemini ADK"
 
 # Tags to apply to all generated documents
-tags = ["ai", "generated", "summary"]
+tags = ["agent", "generated", "summary"]
 
 # Cron schedule (empty = manual execution only)
 schedule = ""
@@ -27,11 +27,11 @@ auto_start = false
 # Job steps definition
 [[steps]]
 name = "generate_summaries"
-action = "create_summaries"  # Free-text action name (AI jobs support custom action names)
+action = "create_summaries"  # Free-text action name (agent jobs support custom action names)
 on_error = "fail"  # Fail if document generation fails
 
 [steps.config]
-# AI operation type: "generate" creates new documents from existing ones
+# Agent operation type: "generate" creates new documents from existing ones
 operation_type = "generate"
 
 # Agent type for document generation

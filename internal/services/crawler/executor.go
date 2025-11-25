@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // Executor executes crawler jobs

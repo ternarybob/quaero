@@ -18,8 +18,6 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
-	"github.com/ternarybob/quaero/internal/queue"
-	"maragu.dev/goqite"
 )
 
 var errNotFound = errors.New("not found")
@@ -87,9 +85,9 @@ func TestCrawlerServiceLogging(t *testing.T) {
 		t.Fatalf("Failed to get job status: %v", err)
 	}
 
-	job, ok := jobStatus.(*models.Job)
+	job, ok := jobStatus.(*models.QueueJobState)
 	if !ok {
-		t.Fatalf("Expected *models.Job, got %T", jobStatus)
+		t.Fatalf("Expected *models.QueueJobState, got %T", jobStatus)
 	}
 
 	t.Logf("Job status: %s", job.Status)
@@ -209,9 +207,9 @@ func TestCrawlerLoggingWithFollowLinksDisabled(t *testing.T) {
 		t.Fatalf("Failed to get job status: %v", err)
 	}
 
-	job, ok := jobStatus.(*models.Job)
+	job, ok := jobStatus.(*models.QueueJobState)
 	if !ok {
-		t.Fatalf("Expected *models.Job, got %T", jobStatus)
+		t.Fatalf("Expected *models.QueueJobState, got %T", jobStatus)
 	}
 
 	t.Logf("Job with follow_links=false: status=%s, completed=%d", job.Status, job.Progress.CompletedURLs)
@@ -400,17 +398,17 @@ func (s *InMemoryJobStorage) UpdateJob(ctx context.Context, job interface{}) err
 	return nil
 }
 
-func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.JobModel, error) {
-	jobs := make([]*models.JobModel, 0, len(s.jobs))
+func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {
+	jobs := make([]*models.QueueJobState, 0, len(s.jobs))
 	for _, job := range s.jobs {
-		// Type assert to *CrawlJob and convert to *models.JobModel
+		// Type assert to *CrawlJob and convert to *models.QueueJobState
 		if crawlJob, ok := job.(*CrawlJob); ok {
 			var parentID *string
 			if crawlJob.ParentID != "" {
 				parentID = &crawlJob.ParentID
 			}
 
-			jobModel := &models.JobModel{
+			jobState := &models.QueueJobState{
 				ID:        crawlJob.ID,
 				ParentID:  parentID,
 				Type:      string(crawlJob.JobType),
@@ -419,15 +417,16 @@ func (s *InMemoryJobStorage) ListJobs(ctx context.Context, opts *interfaces.JobL
 				Metadata:  make(map[string]interface{}),
 				CreatedAt: crawlJob.CreatedAt,
 				Depth:     0,
+				Status:    models.JobStatus(crawlJob.Status),
 			}
-			jobs = append(jobs, jobModel)
+			jobs = append(jobs, jobState)
 		}
 	}
 	return jobs, nil
 }
 
-func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.JobModel, error) {
-	jobs := make([]*models.JobModel, 0)
+func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error) {
+	jobs := make([]*models.QueueJob, 0)
 	for _, job := range s.jobs {
 		if crawlJob, ok := job.(*CrawlJob); ok && string(crawlJob.Status) == status {
 			var parentID *string
@@ -435,7 +434,7 @@ func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string)
 				parentID = &crawlJob.ParentID
 			}
 
-			jobModel := &models.JobModel{
+			queueJob := &models.QueueJob{
 				ID:        crawlJob.ID,
 				ParentID:  parentID,
 				Type:      string(crawlJob.JobType),
@@ -445,7 +444,7 @@ func (s *InMemoryJobStorage) GetJobsByStatus(ctx context.Context, status string)
 				CreatedAt: crawlJob.CreatedAt,
 				Depth:     0,
 			}
-			jobs = append(jobs, jobModel)
+			jobs = append(jobs, queueJob)
 		}
 	}
 	return jobs, nil
@@ -471,8 +470,8 @@ func (s *InMemoryJobStorage) UpdateJobHeartbeat(ctx context.Context, jobID strin
 	return nil
 }
 
-func (s *InMemoryJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.JobModel, error) {
-	return []*models.JobModel{}, nil
+func (s *InMemoryJobStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.QueueJob, error) {
+	return []*models.QueueJob{}, nil
 }
 
 func (s *InMemoryJobStorage) DeleteJob(ctx context.Context, jobID string) error {
@@ -503,8 +502,8 @@ func (s *InMemoryJobStorage) GetJobChildStats(ctx context.Context, parentIDs []s
 	return nil, nil
 }
 
-func (s *InMemoryJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.JobModel, error) {
-	jobs := make([]*models.JobModel, 0)
+func (s *InMemoryJobStorage) GetChildJobs(ctx context.Context, parentID string) ([]*models.QueueJob, error) {
+	jobs := make([]*models.QueueJob, 0)
 	for _, job := range s.jobs {
 		if crawlJob, ok := job.(*CrawlJob); ok && crawlJob.ParentID == parentID {
 			var pID *string
@@ -512,7 +511,7 @@ func (s *InMemoryJobStorage) GetChildJobs(ctx context.Context, parentID string) 
 				pID = &crawlJob.ParentID
 			}
 
-			jobModel := &models.JobModel{
+			queueJob := &models.QueueJob{
 				ID:        crawlJob.ID,
 				ParentID:  pID,
 				Type:      string(crawlJob.JobType),
@@ -522,7 +521,7 @@ func (s *InMemoryJobStorage) GetChildJobs(ctx context.Context, parentID string) 
 				CreatedAt: crawlJob.CreatedAt,
 				Depth:     0,
 			}
-			jobs = append(jobs, jobModel)
+			jobs = append(jobs, queueJob)
 		}
 	}
 	return jobs, nil
@@ -745,14 +744,14 @@ func (m *mockQueueManager) Stop() error    { return nil }
 func (m *mockQueueManager) Restart() error { return nil }
 func (m *mockQueueManager) Close() error   { return nil }
 
-func (m *mockQueueManager) Enqueue(ctx context.Context, msg queue.Message) error {
+func (m *mockQueueManager) Enqueue(ctx context.Context, msg models.QueueMessage) error {
 	return nil
 }
 
-func (m *mockQueueManager) Receive(ctx context.Context) (*queue.Message, func() error, error) {
+func (m *mockQueueManager) Receive(ctx context.Context) (*models.QueueMessage, func() error, error) {
 	return nil, nil, fmt.Errorf("no messages")
 }
 
-func (m *mockQueueManager) Extend(ctx context.Context, messageID goqite.ID, duration time.Duration) error {
+func (m *mockQueueManager) Extend(ctx context.Context, messageID string, duration time.Duration) error {
 	return nil
 }

@@ -34,7 +34,7 @@ func TestJobStatusPersistence(t *testing.T) {
 	// Create BadgerDB wrapper
 	db := &BadgerDB{store: store}
 	logger := arbor.NewLogger()
-	storage := NewJobStorage(db, logger)
+	storage := NewQueueStorage(db, logger)
 
 	ctx := context.Background()
 

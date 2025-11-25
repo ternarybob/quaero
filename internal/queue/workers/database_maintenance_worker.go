@@ -10,8 +10,8 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // DatabaseMaintenanceWorker processes individual database maintenance operations (VACUUM, ANALYZE, REINDEX, OPTIMIZE)

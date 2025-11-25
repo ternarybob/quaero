@@ -11,20 +11,19 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	jobqueue "github.com/ternarybob/quaero/internal/jobs/queue"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // Service provides high-level job management operations
 type Service struct {
-	jobManager *jobqueue.Manager
+	jobManager *queue.Manager
 	queueMgr   interfaces.QueueManager
 	logger     arbor.ILogger
 }
 
 // NewService creates a new job service
-func NewService(jobManager *jobqueue.Manager, queueMgr interfaces.QueueManager, logger arbor.ILogger) *Service {
+func NewService(jobManager *queue.Manager, queueMgr interfaces.QueueManager, logger arbor.ILogger) *Service {
 	return &Service{
 		jobManager: jobManager,
 		queueMgr:   queueMgr,
@@ -47,7 +46,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob)
 		Msg("Creating and enqueueing job")
 
 	// Create job record in database
-	dbJob := &jobqueue.Job{
+	dbJob := &queue.Job{
 		ID:              job.ID,
 		ParentID:        job.ParentID,
 		Type:            job.Type,
@@ -72,7 +71,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob)
 	}
 
 	// Enqueue job
-	queueMsg := queue.Message{
+	queueMsg := models.QueueMessage{
 		JobID:   job.ID,
 		Type:    job.Type,
 		Payload: json.RawMessage(payloadBytes),
@@ -149,13 +148,13 @@ func (s *Service) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 }
 
 // GetJobStatus retrieves the current status of a job
-func (s *Service) GetJobStatus(ctx context.Context, jobID string) (*jobqueue.Job, error) {
-	// Use GetJobInternal to get the internal jobqueue.Job type directly
+func (s *Service) GetJobStatus(ctx context.Context, jobID string) (*queue.Job, error) {
+	// Use GetJobInternal to get the internal queue.Job type directly
 	return s.jobManager.GetJobInternal(ctx, jobID)
 }
 
 // GetJobLogs retrieves logs for a job
-func (s *Service) GetJobLogs(ctx context.Context, jobID string, limit int) ([]jobqueue.JobLog, error) {
+func (s *Service) GetJobLogs(ctx context.Context, jobID string, limit int) ([]queue.JobLog, error) {
 	return s.jobManager.GetJobLogs(ctx, jobID, limit)
 }
 
