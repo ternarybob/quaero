@@ -3,6 +3,7 @@ package badger
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -10,6 +11,9 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/timshannon/badgerhold/v4"
 )
+
+// logSequence is a global counter to ensure unique log keys even within the same nanosecond
+var logSequence uint64
 
 // JobLogStorage implements the JobLogStorage interface for Badger
 type JobLogStorage struct {
@@ -47,8 +51,10 @@ func (s *JobLogStorage) AppendLog(ctx context.Context, jobID string, entry model
 	// Let's use a composite key string: "log:<jobID>:<timestamp>:<nanos>"
 	// This allows range scans if needed, but BadgerHold queries by field index.
 
-	// Actually, BadgerHold requires a key.
-	key := fmt.Sprintf("%s_%d", jobID, time.Now().UnixNano())
+	// Generate unique key using timestamp + atomic sequence counter
+	// This ensures uniqueness even when multiple logs are written within the same nanosecond
+	seq := atomic.AddUint64(&logSequence, 1)
+	key := fmt.Sprintf("%s_%d_%d", jobID, time.Now().UnixNano(), seq)
 
 	if err := s.db.Store().Insert(key, &entry); err != nil {
 		return fmt.Errorf("failed to append log: %w", err)

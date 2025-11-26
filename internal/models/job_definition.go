@@ -19,6 +19,11 @@ func init() {
 	// Register types for gob encoding (required for BadgerHold storage of interface{} fields)
 	gob.Register(map[string]interface{}{})
 	gob.Register([]interface{}{})
+	gob.Register(map[string]float64{}) // Used by keyword extractor agent for keyword scores
+	gob.Register(map[string]string{})  // Used in document metadata (open_graph, meta, etc.)
+	gob.Register([]string{})           // Used by agents for keyword lists
+	gob.Register(time.Time{})          // Used in document timestamps and job metadata
+	gob.Register(CrawlConfig{})        // Used in crawler job configs
 }
 
 // JobDefinitionType represents the type of job definition

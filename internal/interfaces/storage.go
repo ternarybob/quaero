@@ -89,6 +89,9 @@ type QueueStorage interface {
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error
 	UpdateProgressCountersAtomic(ctx context.Context, jobID string, completedDelta, pendingDelta, totalDelta, failedDelta int) error
+	// IncrementDocumentCountAtomic atomically increments the document_count in job metadata
+	// Returns the new count after incrementing. Thread-safe for concurrent worker access.
+	IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error)
 	UpdateJobHeartbeat(ctx context.Context, jobID string) error
 	GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.QueueJob, error)
 	DeleteJob(ctx context.Context, jobID string) error

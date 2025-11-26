@@ -96,8 +96,8 @@ environment = "development" # "development" or "production"
 # Default: definitions_dir="./job-definitions"
 # Env var: QUAERO_JOBS_DEFINITIONS_DIR
 
-# [jobs]
-# definitions_dir = "./job-definitions"  # Uncomment to override default
+[jobs]
+definitions_dir = "./deployments/local/job-definitions"  # Load job definitions from local directory
 
 # =============================================================================
 # Variables Configuration

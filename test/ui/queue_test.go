@@ -291,6 +291,61 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 
 	qtc.env.LogTest(qtc.t, "✓ Final job status: %s", currentStatus)
 
+	// Wait for UI to refresh with final document count
+	// The job completion might be detected before the UI has fetched updated document counts
+	qtc.env.LogTest(qtc.t, "Waiting for UI to refresh with final statistics...")
+	time.Sleep(2 * time.Second)
+
+	// Trigger loadJobs and wait using polling
+	qtc.env.LogTest(qtc.t, "Triggering data refresh...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(`
+			(() => {
+				if (typeof loadJobs === 'function') {
+					loadJobs();
+				}
+			})()
+		`, nil),
+	); err != nil {
+		qtc.env.LogTest(qtc.t, "  Warning: Failed to trigger loadJobs: %v", err)
+	}
+
+	// Wait for loadJobs to complete (it updates lastUpdateTime when done)
+	time.Sleep(3 * time.Second) // Give loadJobs time to complete
+
+	// Now read the Alpine data to debug
+	var refreshData map[string]interface{}
+	refreshErr := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const element = document.querySelector('[x-data="jobList"]');
+				if (!element) return { error: 'jobList element not found' };
+				const component = Alpine.$data(element);
+				if (!component) return { error: 'Alpine component not found' };
+				if (!component.allJobs) return { error: 'allJobs not found', isLoading: component.isLoading };
+
+				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+				if (!job) return { error: 'Job not found in allJobs', jobCount: component.allJobs.length, jobNames: component.allJobs.map(j => j.name) };
+
+				return {
+					jobName: job.name,
+					jobID: job.id,
+					documentCount: job.document_count,
+					metadataDocCount: job.metadata ? job.metadata.document_count : 'no metadata',
+					status: job.status,
+					allJobsCount: component.allJobs.length,
+					lastUpdateTime: component.lastUpdateTime ? component.lastUpdateTime.toISOString() : 'none',
+					isLoading: component.isLoading
+				};
+			})()
+		`, jobName), &refreshData),
+	)
+	if refreshErr != nil {
+		qtc.env.LogTest(qtc.t, "  Warning: Failed to get refresh data: %v", refreshErr)
+	} else if refreshData != nil {
+		qtc.env.LogTest(qtc.t, "  Alpine data after refresh: %+v", refreshData)
+	}
+
 	// Get job statistics
 	cardSelector := fmt.Sprintf(`//div[contains(@class, "card-title")]//span[contains(text(), "%s")]/ancestor::div[contains(@class, "card")]`, jobName)
 

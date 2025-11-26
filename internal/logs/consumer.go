@@ -107,7 +107,10 @@ func (c *Consumer) consumer() {
 	// Panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("ERROR: LogConsumer panic recovered: %v\n", r)
+			// Use logger without correlation ID to avoid recursive channel processing
+			c.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Msg("LogConsumer panic recovered")
 		}
 	}()
 
@@ -159,8 +162,13 @@ func (c *Consumer) consumer() {
 
 					// Dispatch to database with proper context (cancellable during shutdown)
 					if err := c.storage.AppendLogs(c.ctx, jid, logs); err != nil {
-						// Use fmt.Printf to avoid deadlock with logger
-						fmt.Printf("WARN: Failed to write batch logs to database for job %s: %v\n", jid, err)
+						// Use logger without correlation ID to avoid recursive channel processing
+						// Logs without correlation ID won't be stored in job logs or re-published
+						c.logger.Warn().
+							Err(err).
+							Str("job_id", jid).
+							Int("log_count", len(logs)).
+							Msg("Failed to write batch logs to database")
 					}
 				}(jobID, entries)
 			}
@@ -205,8 +213,11 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 			},
 		})
 		if err != nil {
-			// Use fmt.Printf to avoid deadlock with logger
-			fmt.Printf("WARN: Failed to publish log event for job %s: %v\n", event.CorrelationID, err)
+			// Use logger without correlation ID to avoid recursive channel processing
+			c.logger.Warn().
+				Err(err).
+				Str("job_id", event.CorrelationID).
+				Msg("Failed to publish log event")
 		}
 	}()
 }

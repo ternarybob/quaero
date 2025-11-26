@@ -618,29 +618,14 @@ func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map
 	return m.jobStorage.GetJobChildStats(ctx, parentIDs)
 }
 
-// IncrementDocumentCount increments the document_count in job metadata
+// IncrementDocumentCount atomically increments the document_count for a job
+// Uses the storage layer's atomic increment to prevent race conditions
 func (m *Manager) IncrementDocumentCount(ctx context.Context, jobID string) error {
-	// Get job
-	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	_, err := m.jobStorage.IncrementDocumentCountAtomic(ctx, jobID)
 	if err != nil {
-		return err
+		return fmt.Errorf("IncrementDocumentCount: failed to increment for job %s: %w", jobID, err)
 	}
-	jobState := jobEntityInterface.(*models.QueueJobState)
-
-	if jobState.Metadata == nil {
-		jobState.Metadata = make(map[string]interface{})
-	}
-
-	// Increment document_count
-	currentCount := 0
-	if count, ok := jobState.Metadata["document_count"].(float64); ok {
-		currentCount = int(count)
-	} else if count, ok := jobState.Metadata["document_count"].(int); ok {
-		currentCount = count
-	}
-	jobState.Metadata["document_count"] = currentCount + 1
-
-	return m.jobStorage.UpdateJob(ctx, jobState)
+	return nil
 }
 
 // AddJobError adds an error message to the job's status_report

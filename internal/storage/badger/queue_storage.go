@@ -34,6 +34,7 @@ type JobStatusRecord struct {
 	Error         string
 	ResultCount   int
 	FailedCount   int
+	DocumentCount int // Atomic counter for documents created/updated by this job
 	UpdatedAt     time.Time
 }
 
@@ -55,23 +56,35 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 	}
 
 	// 1. Store QueueJob (immutable queued job definition)
+	// IMPORTANT: Dereference pointer to ensure consistent type with Find operations
+	// BadgerHold uses type name for key prefix; storing *QueueJob vs QueueJob creates different prefixes
 	queueJob := j.ToQueueJob()
-	if err := s.db.Store().Upsert(queueJob.ID, queueJob); err != nil {
+	if err := s.db.Store().Upsert(queueJob.ID, *queueJob); err != nil {
 		return fmt.Errorf("failed to save job: %w", err)
 	}
 
-	// 2. Store initial JobStatusRecord (mutable runtime state)
+	// 2. Preserve existing DocumentCount from JobStatusRecord (atomic counter)
+	// DocumentCount is managed separately via IncrementDocumentCountAtomic
+	// and must NOT be overwritten when updating job status/metadata
+	existingDocCount := 0
+	var existingRecord JobStatusRecord
+	if err := s.db.Store().Get(j.ID, &existingRecord); err == nil {
+		existingDocCount = existingRecord.DocumentCount
+	}
+
+	// 3. Store JobStatusRecord (mutable runtime state) with preserved DocumentCount
 	statusRecord := &JobStatusRecord{
-		JobID:       j.ID,
-		Status:      string(j.Status),
-		Progress:    j.Progress,
-		StartedAt:   j.StartedAt,
-		CompletedAt: j.CompletedAt,
-		FinishedAt:  j.FinishedAt,
-		Error:       j.Error,
-		ResultCount: j.ResultCount,
-		FailedCount: j.FailedCount,
-		UpdatedAt:   time.Now(),
+		JobID:         j.ID,
+		Status:        string(j.Status),
+		Progress:      j.Progress,
+		StartedAt:     j.StartedAt,
+		CompletedAt:   j.CompletedAt,
+		FinishedAt:    j.FinishedAt,
+		Error:         j.Error,
+		ResultCount:   j.ResultCount,
+		FailedCount:   j.FailedCount,
+		DocumentCount: existingDocCount, // Preserve existing document count!
+		UpdatedAt:     time.Now(),
 	}
 
 	if err := s.db.Store().Upsert(statusRecord.JobID, statusRecord); err != nil {
@@ -112,6 +125,12 @@ func (s *QueueStorage) GetJob(ctx context.Context, jobID string) (interface{}, e
 		job.Error = statusRecord.Error
 		job.ResultCount = statusRecord.ResultCount
 		job.FailedCount = statusRecord.FailedCount
+
+		// Sync document_count from JobStatusRecord to Metadata (authoritative source)
+		if job.Metadata == nil {
+			job.Metadata = make(map[string]interface{})
+		}
+		job.Metadata["document_count"] = float64(statusRecord.DocumentCount)
 	}
 
 	return job, nil
@@ -169,6 +188,12 @@ func (s *QueueStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOpt
 			jobState.Error = statusRecord.Error
 			jobState.ResultCount = statusRecord.ResultCount
 			jobState.FailedCount = statusRecord.FailedCount
+
+			// Sync document_count from JobStatusRecord to Metadata (authoritative source)
+			if jobState.Metadata == nil {
+				jobState.Metadata = make(map[string]interface{})
+			}
+			jobState.Metadata["document_count"] = float64(statusRecord.DocumentCount)
 		}
 
 		// Apply status filter (supports comma-separated values)
@@ -383,6 +408,29 @@ func (s *QueueStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID s
 	}
 
 	return s.db.Store().Upsert(jobID, &record)
+}
+
+// IncrementDocumentCountAtomic atomically increments the document_count in JobStatusRecord
+// This is the authoritative source for document_count (not QueueJob.Metadata)
+// Returns the new count after incrementing. Thread-safe for concurrent worker access.
+func (s *QueueStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error) {
+	var record JobStatusRecord
+	err := s.db.Store().Get(jobID, &record)
+	if err == badgerhold.ErrNotFound {
+		// Create new record if not exists
+		record = JobStatusRecord{JobID: jobID, DocumentCount: 0}
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to get job status record: %w", err)
+	}
+
+	record.DocumentCount++
+	record.UpdatedAt = time.Now()
+
+	if err := s.db.Store().Upsert(jobID, &record); err != nil {
+		return 0, fmt.Errorf("failed to increment document count: %w", err)
+	}
+
+	return record.DocumentCount, nil
 }
 
 func (s *QueueStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) error {

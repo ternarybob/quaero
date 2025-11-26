@@ -145,16 +145,10 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		Int("jobs_created", len(jobIDs)).
 		Msg("Agent jobs created and enqueued")
 
-	// Update parent job metadata with document count for UI display
-	if err := m.jobMgr.UpdateJobMetadata(ctx, parentJobID, map[string]interface{}{
-		"document_count": len(jobIDs),
-	}); err != nil {
-		m.logger.Warn().
-			Err(err).
-			Str("parent_job_id", parentJobID).
-			Int("document_count", len(jobIDs)).
-			Msg("Failed to update parent job document_count (non-fatal)")
-	}
+	// Note: document_count is NOT set upfront here. It is incremented by the
+	// AgentWorker via EventDocumentUpdated as each document is successfully processed.
+	// This ensures the count reflects actual output (documents created/updated),
+	// not just the input documents in scope.
 
 	// Poll for job completion (wait for all agent jobs to complete)
 	if err := m.pollJobCompletion(ctx, jobIDs); err != nil {
