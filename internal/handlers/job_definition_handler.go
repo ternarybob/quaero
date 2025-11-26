@@ -12,12 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/actions/definitions"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/services/validation"
 )
@@ -26,14 +25,13 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage             interfaces.JobDefinitionStorage
-	jobStorage                interfaces.QueueStorage
-	jobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator
-	authStorage               interfaces.AuthStorage
+	jobDefStorage interfaces.JobDefinitionStorage
+	jobStorage    interfaces.QueueStorage
+	orchestrator  *queue.Orchestrator
+	authStorage   interfaces.AuthStorage
 	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService         *validation.TOMLValidationService
-	agentService              interfaces.AgentService // Optional: nil if agent service unavailable
-	// db                        *sql.DB // Removed SQLite dependency
+	jobService                *jobs.Service // Business logic for job definitions
 	logger arbor.ILogger
 }
 
@@ -41,11 +39,10 @@ type JobDefinitionHandler struct {
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.QueueStorage,
-	jobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator,
+	orchestrator *queue.Orchestrator,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
-	_ interface{}, // Placeholder for removed DB
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -54,8 +51,8 @@ func NewJobDefinitionHandler(
 	if jobStorage == nil {
 		panic("jobStorage cannot be nil")
 	}
-	if jobDefinitionOrchestrator == nil {
-		panic("jobDefinitionOrchestrator cannot be nil")
+	if orchestrator == nil {
+		panic("orchestrator cannot be nil")
 	}
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
@@ -67,17 +64,17 @@ func NewJobDefinitionHandler(
 		panic("logger cannot be nil")
 	}
 
-	logger.Info().Msg("Job definition handler initialized with job definition orchestrator and auth storage (ARCH-009)")
+	logger.Info().Msg("Job definition handler initialized with orchestrator and auth storage (ARCH-009)")
 
 	return &JobDefinitionHandler{
-		jobDefStorage:             jobDefStorage,
-		jobStorage:                jobStorage,
-		jobDefinitionOrchestrator: jobDefinitionOrchestrator,
-		authStorage:               authStorage,
-		kvStorage:                 kvStorage,
-		validationService:         validation.NewTOMLValidationService(logger),
-		agentService:              agentService, // Can be nil
-		logger:                    logger,
+		jobDefStorage:     jobDefStorage,
+		jobStorage:        jobStorage,
+		orchestrator:      orchestrator,
+		authStorage:       authStorage,
+		kvStorage:         kvStorage,
+		validationService: validation.NewTOMLValidationService(logger),
+		jobService:        jobs.NewService(kvStorage, agentService, logger),
+		logger:            logger,
 	}
 }
 
@@ -182,7 +179,7 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 	ctx := r.Context()
 
 	// Validate step actions are registered
-	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
+	if err := h.jobService.ValidateStepActions(jobDef.Type, jobDef.Steps); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Action validation failed")
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
 		return
@@ -275,7 +272,7 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 
 	// Validate runtime dependencies for each job definition
 	for _, jobDef := range jobDefs {
-		h.validateRuntimeDependencies(jobDef)
+		h.jobService.ValidateRuntimeDependencies(jobDef)
 	}
 
 	h.logger.Info().Int("count", len(jobDefs)).Int("total", totalCount).Msg("Listed job definitions")
@@ -371,7 +368,7 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 	}
 
 	// Validate step actions are registered
-	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
+	if err := h.jobService.ValidateStepActions(jobDef.Type, jobDef.Steps); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Action validation failed")
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
 		return
@@ -492,7 +489,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobDefinitionOrchestrator.Execute(bgCtx, jobDef)
+		parentJobID, err := h.orchestrator.Execute(bgCtx, jobDef)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -515,84 +512,6 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
-}
-
-// validateStepActions validates that all step actions are registered
-// TODO Phase 8-11: Re-enable when job registry is re-integrated
-func (h *JobDefinitionHandler) validateStepActions(jobType models.JobDefinitionType, steps []models.JobStep) error {
-	// Temporarily disabled during queue refactor - jobRegistry is interface{} with no methods
-	_ = jobType // Suppress unused variable
-	_ = steps   // Suppress unused variable
-	return nil  // Skip validation during refactor
-
-	// TODO Phase 8-11: Uncomment when job registry is available
-	// for _, step := range steps {
-	// 	if _, err := h.jobRegistry.GetAction(jobType, step.Action); err != nil {
-	// 		return fmt.Errorf("unknown action '%s' for step '%s'", step.Action, step.Name)
-	// 	}
-	// }
-	// return nil
-}
-
-// validateRuntimeDependencies checks if a job definition can execute based on available services
-// This is separate from TOML validation - it checks runtime service availability
-func (h *JobDefinitionHandler) validateRuntimeDependencies(jobDef *models.JobDefinition) {
-	// Default to ready
-	jobDef.RuntimeStatus = "ready"
-	jobDef.RuntimeError = ""
-
-	// Validate API keys referenced in job definition steps
-	h.validateAPIKeys(jobDef)
-	if jobDef.RuntimeStatus != "ready" {
-		// validateAPIKeys set an error status, return early
-		return
-	}
-
-	// Check each step for dependencies
-	for _, step := range jobDef.Steps {
-		switch step.Action {
-		case "agent":
-			// Agent steps require agent service
-			if h.agentService == nil {
-				jobDef.RuntimeStatus = "disabled"
-				jobDef.RuntimeError = "Google API key is required for agent service (set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config)"
-				return
-			}
-			// Add more action types here as needed
-			// case "places_search":
-			//     if h.placesService == nil {
-			//         jobDef.RuntimeStatus = "disabled"
-			//         jobDef.RuntimeError = "Google Places API key required"
-			//         return
-			//     }
-		}
-	}
-}
-
-// validateAPIKeys validates that API keys referenced in job definition steps exist in storage
-func (h *JobDefinitionHandler) validateAPIKeys(jobDef *models.JobDefinition) {
-	ctx := context.Background()
-
-	// Check all steps for api_key field
-	for _, step := range jobDef.Steps {
-		if step.Config != nil {
-			if apiKeyName, ok := step.Config["api_key"].(string); ok && apiKeyName != "" {
-				// Try to resolve the API key from KV store
-				_, err := common.ResolveAPIKey(ctx, h.kvStorage, apiKeyName, "")
-				if err != nil {
-					// API key not found or invalid
-					jobDef.RuntimeStatus = "error"
-					jobDef.RuntimeError = fmt.Sprintf("API key '%s' not found", apiKeyName)
-					h.logger.Warn().
-						Str("job_def_id", jobDef.ID).
-						Str("api_key_name", apiKeyName).
-						Str("error", err.Error()).
-						Msg("API key validation failed for job definition")
-					return // Return immediately on first error
-				}
-			}
-		}
-	}
 }
 
 // extractJobDefinitionID extracts the job definition ID from the URL path
@@ -652,7 +571,7 @@ func (h *JobDefinitionHandler) ExportJobDefinitionHandler(w http.ResponseWriter,
 	}
 
 	// Convert to simplified TOML format
-	tomlData, err := h.convertJobDefinitionToTOML(jobDef)
+	tomlData, err := h.jobService.ConvertToTOML(jobDef)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to convert job definition to TOML")
 		WriteError(w, http.StatusInternalServerError, "Failed to export job definition")
@@ -671,99 +590,6 @@ func (h *JobDefinitionHandler) ExportJobDefinitionHandler(w http.ResponseWriter,
 	w.Write(tomlData)
 }
 
-// convertJobDefinitionToTOML converts a JobDefinition to simplified TOML format
-func (h *JobDefinitionHandler) convertJobDefinitionToTOML(jobDef *models.JobDefinition) ([]byte, error) {
-	// Extract crawler configuration from first step
-	var crawlConfig map[string]interface{}
-	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Action == "crawl" {
-		crawlConfig = jobDef.Steps[0].Config
-	} else {
-		crawlConfig = make(map[string]interface{})
-	}
-
-	// Build simplified structure matching the file format
-	simplified := map[string]interface{}{
-		"id":             jobDef.ID,
-		"name":           jobDef.Name,
-		"description":    jobDef.Description,
-		"schedule":       jobDef.Schedule,
-		"timeout":        jobDef.Timeout,
-		"enabled":        jobDef.Enabled,
-		"auto_start":     jobDef.AutoStart,
-		"authentication": jobDef.AuthID, // Include authentication reference
-	}
-
-	// Extract crawler-specific fields from config
-	if startURLs, ok := crawlConfig["start_urls"].([]interface{}); ok {
-		urls := make([]string, 0, len(startURLs))
-		for _, url := range startURLs {
-			if urlStr, ok := url.(string); ok {
-				urls = append(urls, urlStr)
-			}
-		}
-		simplified["start_urls"] = urls
-	} else {
-		simplified["start_urls"] = []string{}
-	}
-
-	if includePatterns, ok := crawlConfig["include_patterns"].([]interface{}); ok {
-		patterns := make([]string, 0, len(includePatterns))
-		for _, pattern := range includePatterns {
-			if patternStr, ok := pattern.(string); ok {
-				patterns = append(patterns, patternStr)
-			}
-		}
-		simplified["include_patterns"] = patterns
-	} else {
-		simplified["include_patterns"] = []string{}
-	}
-
-	if excludePatterns, ok := crawlConfig["exclude_patterns"].([]interface{}); ok {
-		patterns := make([]string, 0, len(excludePatterns))
-		for _, pattern := range excludePatterns {
-			if patternStr, ok := pattern.(string); ok {
-				patterns = append(patterns, patternStr)
-			}
-		}
-		simplified["exclude_patterns"] = patterns
-	} else {
-		simplified["exclude_patterns"] = []string{}
-	}
-
-	// Extract numeric fields with defaults
-	if maxDepth, ok := crawlConfig["max_depth"].(float64); ok {
-		simplified["max_depth"] = int(maxDepth)
-	} else {
-		simplified["max_depth"] = 2
-	}
-
-	if maxPages, ok := crawlConfig["max_pages"].(float64); ok {
-		simplified["max_pages"] = int(maxPages)
-	} else {
-		simplified["max_pages"] = 100
-	}
-
-	if concurrency, ok := crawlConfig["concurrency"].(float64); ok {
-		simplified["concurrency"] = int(concurrency)
-	} else {
-		simplified["concurrency"] = 5
-	}
-
-	if followLinks, ok := crawlConfig["follow_links"].(bool); ok {
-		simplified["follow_links"] = followLinks
-	} else {
-		simplified["follow_links"] = true
-	}
-
-	// Marshal to TOML
-	tomlData, err := toml.Marshal(simplified)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal to TOML: %w", err)
-	}
-
-	return tomlData, nil
-}
-
 // ValidateJobDefinitionTOMLHandler handles POST /api/job-definitions/validate
 // Validates TOML content and optionally persists validation status if job_id query param provided
 func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseWriter, r *http.Request) {
@@ -780,23 +606,6 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 
 	// Validate TOML using validation service
 	result := h.validationService.ValidateTOML(ctx, string(tomlContent))
-
-	// Check if job_id query param provided to persist validation status
-	jobID := r.URL.Query().Get("job_id")
-	if jobID != "" {
-		// Update validation status in database
-		// Note: UpdateValidationStatus currently depends on *sql.DB.
-		// Since we removed SQLite, we need to update validationService or skip this.
-		// For now, we skip persisting validation status until validationService is updated.
-		h.logger.Warn().Str("job_id", jobID).Msg("Skipping validation status persistence (SQLite removed)")
-
-		/*
-			if err := h.validationService.UpdateValidationStatus(ctx, h.db, jobID, result); err != nil {
-				h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update validation status")
-				// Don't fail the request - validation result is still valuable
-			}
-		*/
-	}
 
 	// Return validation result
 	if result.Valid {
@@ -821,15 +630,15 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	defer r.Body.Close()
 
 	// Parse TOML into generic JobDefinitionFile
-	var jobFile JobDefinitionFile
-	if err := toml.Unmarshal(tomlContent, &jobFile); err != nil {
+	jobFile, err := jobs.ParseTOML(tomlContent)
+	if err != nil {
 		h.logger.Error().Err(err).Msg("Invalid TOML syntax")
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid TOML syntax: %v", err))
+		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Convert to full JobDefinition model
-	jobDef := jobFile.ToJobDefinition(h.kvStorage, h.logger)
+	jobDef := jobFile.ToJobDefinition()
 
 	// Store raw TOML content
 	jobDef.TOML = string(tomlContent)
@@ -842,7 +651,7 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	}
 
 	// Validate step actions are registered
-	if err := h.validateStepActions(jobDef.Type, jobDef.Steps); err != nil {
+	if err := h.jobService.ValidateStepActions(jobDef.Type, jobDef.Steps); err != nil {
 		h.logger.Error().Err(err).Msg("Action validation failed")
 		WriteError(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %v", err))
 		return
@@ -1110,7 +919,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobDefinitionOrchestrator.Execute(bgCtx, jobDef)
+		parentJobID, err := h.orchestrator.Execute(bgCtx, jobDef)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -1137,101 +946,4 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
-}
-
-// JobStepFile represents a step in the TOML file
-type JobStepFile struct {
-	Name      string                 `toml:"name"`
-	Action    string                 `toml:"action"`
-	Config    map[string]interface{} `toml:"config"`
-	OnError   string                 `toml:"on_error"`
-	Condition string                 `toml:"condition"`
-}
-
-// JobDefinitionFile represents the TOML file structure for job definitions
-type JobDefinitionFile struct {
-	ID              string        `toml:"id"`
-	Name            string        `toml:"name"`
-	Type            string        `toml:"type"`
-	Description     string        `toml:"description"`
-	Schedule        string        `toml:"schedule"`
-	Timeout         string        `toml:"timeout"`
-	Enabled         bool          `toml:"enabled"`
-	AutoStart       bool          `toml:"auto_start"`
-	AuthID          string        `toml:"authentication"`
-	StartURLs       []string      `toml:"start_urls"`
-	IncludePatterns []string      `toml:"include_patterns"`
-	ExcludePatterns []string      `toml:"exclude_patterns"`
-	MaxDepth        int           `toml:"max_depth"`
-	MaxPages        int           `toml:"max_pages"`
-	Concurrency     int           `toml:"concurrency"`
-	FollowLinks     bool          `toml:"follow_links"`
-	Steps           []JobStepFile `toml:"steps"`
-}
-
-// ToJobDefinition converts the file structure to the internal model
-func (f *JobDefinitionFile) ToJobDefinition(kvStorage interfaces.KeyValueStorage, logger arbor.ILogger) *models.JobDefinition {
-	var steps []models.JobStep
-
-	// If steps are explicitly defined, use them
-	if len(f.Steps) > 0 {
-		for _, s := range f.Steps {
-			step := models.JobStep{
-				Name:      s.Name,
-				Action:    s.Action,
-				Config:    s.Config,
-				OnError:   models.ErrorStrategy(s.OnError),
-				Condition: s.Condition,
-			}
-			// Default OnError if empty
-			if step.OnError == "" {
-				step.OnError = models.ErrorStrategyContinue
-			}
-			steps = append(steps, step)
-		}
-	} else {
-		// Legacy/Simplified mode: Create default crawl step from flat config
-		// Create config map for crawler
-		config := make(map[string]interface{})
-
-		if len(f.StartURLs) > 0 {
-			config["start_urls"] = f.StartURLs
-		}
-		if len(f.IncludePatterns) > 0 {
-			config["include_patterns"] = f.IncludePatterns
-		}
-		if len(f.ExcludePatterns) > 0 {
-			config["exclude_patterns"] = f.ExcludePatterns
-		}
-
-		config["max_depth"] = f.MaxDepth
-		config["max_pages"] = f.MaxPages
-		config["concurrency"] = f.Concurrency
-		config["follow_links"] = f.FollowLinks
-
-		// Create step
-		step := models.JobStep{
-			Name:    "crawl",
-			Action:  "crawl",
-			Config:  config,
-			OnError: models.ErrorStrategyContinue,
-		}
-		steps = append(steps, step)
-	}
-
-	return &models.JobDefinition{
-		ID:          f.ID,
-		Name:        f.Name,
-		Type:        models.JobDefinitionType(f.Type),
-		Description: f.Description,
-		Schedule:    f.Schedule,
-		Timeout:     f.Timeout,
-		Enabled:     f.Enabled,
-		AutoStart:   f.AutoStart,
-		AuthID:      f.AuthID,
-		Steps:       steps,
-		JobType:     models.JobOwnerTypeUser,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
 }

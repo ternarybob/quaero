@@ -7,7 +7,7 @@ import (
 // createSearchDocumentsTool returns the search_documents tool definition
 func createSearchDocumentsTool() mcp.Tool {
 	return mcp.NewTool("search_documents",
-		mcp.WithDescription("Search Quaero knowledge base using full-text search (SQLite FTS5)"),
+		mcp.WithDescription("Search Quaero knowledge base using full-text search"),
 		mcp.WithString("query",
 			mcp.Required(),
 			mcp.Description("Search query (FTS5 syntax: quoted phrases, +required, OR, AND)"),

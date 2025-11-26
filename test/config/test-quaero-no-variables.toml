@@ -6,7 +6,7 @@ environment = "development"
 [server]
 port = 18085  # Test port (UI tests)
 
-[storage.sqlite]
+[storage.badger]
 reset_on_startup = true  # Delete database on startup for clean test runs
 
 # Configure variables directory to use test variables

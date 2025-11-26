@@ -6,7 +6,6 @@ package validation
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -36,7 +35,6 @@ func NewTOMLValidationService(logger arbor.ILogger) *TOMLValidationService {
 }
 
 // CrawlerJobDefinitionFile represents the simplified crawler job file format
-// This is duplicated here to avoid circular dependency with storage/sqlite
 type CrawlerJobDefinitionFile struct {
 	ID              string   `toml:"id" json:"id"`
 	Name            string   `toml:"name" json:"name"`
@@ -162,58 +160,4 @@ func (s *TOMLValidationService) crawlerJobToJobDefinition(c *CrawlerJobDefinitio
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-}
-
-// UpdateValidationStatus updates the validation status in the database
-func (s *TOMLValidationService) UpdateValidationStatus(
-	ctx context.Context,
-	db *sql.DB,
-	jobDefID string,
-	result ValidationResult,
-) error {
-	now := time.Now()
-
-	status := "unknown"
-	errorMsg := ""
-
-	if result.Valid {
-		status = "valid"
-	} else {
-		status = "invalid"
-		errorMsg = result.Error
-	}
-
-	query := `
-		UPDATE job_definitions
-		SET validation_status = ?,
-		    validation_error = ?,
-		    validated_at = ?,
-		    updated_at = ?
-		WHERE id = ?
-	`
-
-	_, err := db.ExecContext(
-		ctx,
-		query,
-		status,
-		errorMsg,
-		now.Unix(),
-		now.Unix(),
-		jobDefID,
-	)
-
-	if err != nil {
-		s.logger.Error().
-			Err(err).
-			Str("job_definition_id", jobDefID).
-			Msg("Failed to update validation status")
-		return fmt.Errorf("failed to update validation status: %w", err)
-	}
-
-	s.logger.Debug().
-		Str("job_definition_id", jobDefID).
-		Str("status", status).
-		Msg("Updated validation status")
-
-	return nil
 }

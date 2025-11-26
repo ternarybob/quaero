@@ -57,16 +57,8 @@ host = "0.0.0.0"  # Listen on all interfaces in Docker
 # =============================================================================
 # Storage Configuration
 # =============================================================================
-[storage]
-type = "sqlite"
-
-[storage.sqlite]
-path = "/data/quaero.db"  # Docker volume mount point
-enable_fts5 = true         # Full-text search
-# DEPRECATED: enable_vector and embedding_dimension removed (embeddings no longer supported)
-cache_size_mb = 128        # Production cache size
-wal_mode = true            # Write-Ahead Logging
-busy_timeout_ms = 10000    # 10 seconds for production
+[storage.badger]
+path = "/data/quaero.badger"  # Docker volume mount point
 
 [storage.filesystem]
 images = "/data/images"

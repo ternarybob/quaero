@@ -5,7 +5,7 @@
 # Job metadata
 id = "test-keyword-extractor"
 name = "Test Keyword Extraction"
-type = "ai"  # Agent job type for AI-powered document processing
+type = "agent"  # Agent job type for AI-powered document processing
 job_type = "user"
 description = "Test agent job for keyword extraction (requires Google Gemini API key)"
 enabled = true

@@ -113,7 +113,7 @@ func main() {
 
 	// Debug: Log final resolved configuration for troubleshooting
 	logger.Debug().
-		Str("storage_type", config.Storage.Type).
+		Str("storage", "badger").
 		Str("badger_path", config.Storage.Badger.Path).
 		Str("log_level", config.Logging.Level).
 		Strs("log_output", config.Logging.Output).

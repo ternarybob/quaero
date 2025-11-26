@@ -22,9 +22,6 @@ port = 18085  # Test port (UI tests), API tests override to 19085
 # =============================================================================
 # Storage Configuration
 # =============================================================================
-[storage]
-type = "badger"
-
 [storage.badger]
 path = "./data/quaero.badger"
 reset_on_startup = true  # Delete database on startup for clean test runs

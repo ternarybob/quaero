@@ -64,7 +64,7 @@ func PrintBanner(config *Config, logger arbor.ILogger) {
 	// Log configuration through Arbor
 	logger.Info().
 		Str("log_file", logFilePath).
-		Str("storage_type", config.Storage.Type).
+		Str("storage", "badger").
 		Msg("Configuration loaded")
 
 	// Print capabilities to console
@@ -80,14 +80,14 @@ func printCapabilities(config *Config, logger arbor.ILogger) {
 	fmt.Printf("   • Generic web crawler (ChromeDP-based)\n")
 
 	// Show storage configuration
-	fmt.Printf("   • Local SQLite database with full-text search\n")
+	fmt.Printf("   • Badger database with full-text search\n")
 
 	// Show authentication
 	fmt.Printf("   • Extension-based authentication (OAuth/SSO)\n")
 
 	// Log capabilities through Arbor
 	logger.Info().
-		Str("storage", "sqlite_fts5").
+		Str("storage", "badger").
 		Str("authentication", "extension_oauth_sso").
 		Str("crawler", "chromedp").
 		Msg("System capabilities")

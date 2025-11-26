@@ -1,6 +1,6 @@
 ---
 name: 3agents
-description: Three-agent parallel workflow. Opus plans, executes, validates.
+description: Three-phase workflow. Opus plans, executes, validates - all inline.
 ---
 
 Execute workflow for: $ARGUMENTS
@@ -9,9 +9,6 @@ Execute workflow for: $ARGUMENTS
 
 ```yaml
 model: claude-opus-4-5-20251101
-timeout: 600
-max_parallel: 3
-working_dir: /tmp/3agents-work
 
 skills:
   code-architect: [architecture, design, refactoring]
@@ -34,249 +31,306 @@ critical_triggers:
 
 - **Tests:** Only `/test/api` and `/test/ui`
 - **Binaries:** `go build -o /tmp/` or `go run` - never in root
-- **Workers:** Never ask questions - make technical decisions
-- **Complete:** Run all steps - only stop for design decisions
+- **Decisions:** Make technical decisions - only stop for architecture choices
+- **Complete:** Run ALL phases to completion
+- **Document:** Write output files as you go - this is your audit trail
+
+---
+
+## WORKDIR SETUP
+
+```bash
+# If $ARGUMENTS is a file path
+DIR=$(dirname "$ARGUMENTS")
+BASE=$(basename "$ARGUMENTS" .md)
+WORKDIR="${DIR}/$(date +%Y%m%d-%H%M%S)-${BASE}/"
+
+# If $ARGUMENTS is a task description  
+WORKDIR="docs/features/$(date +%Y%m%d-%H%M%S)-${SLUG}/"
+```
+
+Create the workdir before starting.
 
 ---
 
 ## PHASE 1: PLAN
 
-```bash
-claude --model claude-opus-4-5-20251101 --verbose "$PROMPT"
-```
+**Think deeply before planning:**
+1. What are ALL discrete tasks?
+2. What depends on what?
+3. What's the critical path?
+4. What triggers final review?
 
-**Planner thinks about:**
-1. All discrete tasks needed
-2. Dependency graph
-3. Parallel groupings
-4. Critical path flags
-
-### Output: `plan.md`
+**Create: `{workdir}/plan.md`**
 
 ```markdown
 # Plan: {task}
 
-## Dependency Analysis
-{what depends on what}
+## Analysis
+{dependencies, approach, risks}
 
-## Execution Groups
+## Steps
 
-### Group 1 (Sequential)
-1. **{Description}**
-   - Skill: @{skill} | Files: {paths}
-   - Critical: no | Depends: none
+### Step 1: {Description}
+- Skill: @{skill}
+- Files: {paths}
+- Critical: no | yes:{trigger}
+- Depends: none
 
-### Group 2 (Parallel)
-2a. **{Description}**
-    - Skill: @{skill} | Files: {paths}
-    - Critical: yes:security | Depends: 1 | Sandbox: worker-a
+### Step 2: {Description}
+- Skill: @{skill}
+- Files: {paths}
+- Critical: yes:security
+- Depends: Step 1
 
-2b. **{Description}**
-    - Skill: @{skill} | Files: {paths}
-    - Critical: no | Depends: 1 | Sandbox: worker-b
+### Step 3: {Description}
+- Skill: @{skill}
+- Files: {paths}
+- Critical: yes:api-breaking
+- Depends: Step 2
+- User decision: {if needed}
 
-### Group 3 (Sequential)
-3. **{Description}**
-   - Skill: @{skill} | Files: {paths}
-   - Critical: yes:api-breaking | Depends: 2a,2b
-   - User decision: yes - {choice needed}
-
-## Execution Map
-[1] ──┬──> [2a] ──┬──> [3] ──> [Final Review]
-      └──> [2b] ──┘
+## Execution Order
+1 → 2 → 3 → Final Review (if critical)
 
 ## Success Criteria
-- {done condition}
+- {condition}
+- {condition}
 ```
 
 ---
 
 ## PHASE 2: EXECUTE
 
-### Spawn Workers
+For EACH step in plan.md:
 
-```bash
-spawn_worker() {
-    local step_id=$1 step_desc=$2 skill=$3 files=$4 sandbox=$5
-    
-    SANDBOX_DIR="/tmp/3agents-sandbox-${sandbox}"
-    mkdir -p "$SANDBOX_DIR"
-    cp -r $files "$SANDBOX_DIR/" 2>/dev/null || true
-    
-    timeout 600 claude --model claude-opus-4-5-20251101 \
-           --print --output-format json \
-           --allowedTools "Edit,Write,Bash" \
-           "Execute step ${step_id}: ${step_desc}
-            Skill: @${skill} | Files: ${files} | Dir: ${SANDBOX_DIR}
-            
-            1. Implement completely
-            2. Compile: go build -o /tmp/test ./...
-            3. Test if applicable
-            4. Output JSON result with embedded markdown summary
-            " > "${WORKDIR}/step-${step_id}-result.json" 2>&1 &
-    echo $!
-}
+### 2.1 Execute the Step
 
-# Parallel execution
-PIDS=()
-PIDS+=($(spawn_worker "2a" "Auth handler" "go-coder" "internal/handlers/" "worker-a"))
-PIDS+=($(spawn_worker "2b" "Add tests" "test-writer" "test/" "worker-b"))
-for pid in "${PIDS[@]}"; do wait $pid; done
-```
+Do the implementation work.
 
-### Worker Output Format
+### 2.2 Write Step File
 
-Workers output JSON with embedded markdown summary:
-
-```json
-{
-  "status": "success|partial|failed",
-  "files_changed": ["path1", "path2"],
-  "compilation": "pass|fail",
-  "tests": "pass|fail|skipped",
-  "errors": null,
-  "needs_retry": false,
-  "summary": "## Step 2a: Auth Handler\n\n### Actions\n1. Created JWT middleware in auth.go\n2. Added login/logout handlers\n\n### Files\n- `internal/handlers/auth.go` - new handlers\n- `internal/middleware/jwt.go` - token validation\n\n### Decisions\n- Pointer receiver to match patterns\n- bcrypt cost 12\n\n### Verify\n✅ Compiled\n✅ Tests pass"
-}
-```
-
-### Worker Summary Template
+**Create: `{workdir}/step-{N}.md`**
 
 ```markdown
-## Step {N}: {Description}
+# Step {N}: {Description}
 
-### Actions
-1. {what was done}
-2. {what was done}
+## Actions Taken
+1. {what you did}
+2. {what you did}
 
-### Files
-- `{path}` - {change}
+## Files Modified
+- `{path}` - {what changed}
+- `{path}` - {what changed}
 
-### Decisions
-- {choice}: {rationale}
+## Decisions Made
+- **{choice}**: {rationale}
+- **{choice}**: {rationale}
 
-### Verify
-{✅|❌} Compiled | {✅|❌|⚙️} Tests
+## Verification
+```bash
+# Compilation
+go build -o /tmp/test ./...
+# Result: ✅ Pass | ❌ Fail: {error}
+
+# Tests (if applicable)
+go test ./test/api/... -run {relevant}
+# Result: ✅ Pass | ❌ Fail | ⚙️ Skipped
 ```
+
+## Issues/Notes
+- {any concerns, TODOs, or observations}
+
+## Status: ✅ COMPLETE | ⚠️ PARTIAL | ❌ BLOCKED
+```
+
+### 2.3 Update Progress
+
+**Create/Update: `{workdir}/progress.md`**
+
+```markdown
+# Progress: {task}
+
+Started: {timestamp}
+
+| Step | Description | Status | Quality | Notes |
+|------|-------------|--------|---------|-------|
+| 1 | {desc} | ✅ | 9/10 | |
+| 2 | {desc} | ✅ | 8/10 | Minor TODO |
+| 3 | {desc} | 🔄 | - | In progress |
+| 4 | {desc} | ⏳ | - | Waiting |
+
+Last updated: {timestamp}
+```
+
+### 2.4 Handle Failures
+
+- **Compilation fails:** Fix and retry (max 2 attempts), document in step file
+- **Tests fail:** Fix if obvious, otherwise document and continue
+- **Blocked:** Document why, continue to next step if possible
 
 ---
 
 ## PHASE 3: VALIDATE
 
-```bash
-validate_step() {
-    claude --model claude-opus-4-5-20251101 --print \
-           "Review: $(cat $result_file)
-            
-            Check: compile, tests, correctness, quality (1-10)
-            
-            JSON: {\"step\": \"N\", \"valid\": bool, \"quality\": N, \"verdict\": \"PASS|NEEDS_RETRY|DONE_WITH_ISSUES\"}" \
-           > "${WORKDIR}/validation-${step_id}.json"
-}
-```
+After ALL steps complete:
+
+1. **Full compilation check**
+   ```bash
+   go build -o /tmp/final ./...
+   ```
+
+2. **Full test suite**
+   ```bash
+   go test ./test/api/... ./test/ui/...
+   ```
+
+3. **Document results in progress.md**
 
 ---
 
-## PHASE 4: MERGE
+## PHASE 4: FINAL REVIEW
 
-```bash
-for sandbox in /tmp/3agents-sandbox-*; do
-    changed=$(jq -r '.files_changed[]' "${WORKDIR}"/step-*.json 2>/dev/null)
-    for file in $changed; do
-        [ -f "${sandbox}/${file}" ] && cp "${sandbox}/${file}" "./${file}"
-    done
-done
+**Run if ANY step has `Critical: yes:{trigger}`**
 
-go build -o /tmp/final ./...
-go test ./test/api/... ./test/ui/...
-```
+Review all changes for:
+- Security vulnerabilities
+- Architecture issues
+- Breaking change impact
+- Migration requirements
 
----
-
-## PHASE 5: FINAL REVIEW
-
-**Triggers:** When plan contains `Critical: yes:{trigger}`
-
-```bash
-claude --model claude-opus-4-5-20251101 --verbose \
-       "FINAL REVIEW - Security/architecture review.
-        Triggers: $CRITICAL_STEPS
-        Changes: $CHANGES
-        
-        Output final-review.md"
-```
-
-### Output: `final-review.md`
+**Create: `{workdir}/final-review.md`**
 
 ```markdown
 # Final Review: {task}
 
 ## Scope
-Triggers: {list} | Files: {N}
+- Triggers: {list from plan}
+- Steps reviewed: {N}
+- Files changed: {N}
 
-## Security
-**Critical:** {issues or "None"}
-**Warnings:** {list}
+## Security Findings
 
-## Architecture  
-**Breaking:** {assessment}
-**Migration:** {notes}
+### Critical Issues
+{must fix before merge - or "None"}
+
+### Warnings
+- {concern}
+
+### Passed
+- {check}
+
+## Architecture Findings
+
+### Breaking Changes
+{impact assessment}
+
+### Migration Required
+{steps if any}
+
+## Code Quality
+- {observation}
+- {recommendation}
 
 ## Verdict
+
 **Status:** ✅ APPROVED | ⚠️ APPROVED_WITH_NOTES | ❌ CHANGES_REQUIRED
 
-## Actions
-1. [ ] {item}
+### Required Actions (if CHANGES_REQUIRED)
+1. {must do}
+
+### Recommended Actions
+1. [ ] {should do}
 ```
 
 ---
 
-## OUTPUT FILES
+## PHASE 5: SUMMARY
 
-| File | Content |
-|------|---------|
-| `plan.md` | Execution plan |
-| `step-{N}-result.json` | Worker output + summary |
-| `validation-{N}.json` | Validator results |
-| `final-review.md` | Review verdict |
-| `summary.md` | Final summary |
-
-### `summary.md`
+**Create: `{workdir}/summary.md`**
 
 ```markdown
 # Complete: {task}
 
+## Overview
+{one paragraph summary of what was done}
+
 ## Stats
-Steps: {N} | Parallel: {N} | Duration: {time} | Quality: {avg}/10
+| Metric | Value |
+|--------|-------|
+| Steps | {N} |
+| Files Changed | {N} |
+| Duration | {time} |
+| Quality | {avg}/10 |
 
-## Worker Summaries
-{extracted from each step JSON summary field}
+## Changes by Step
 
-## Review
+### Step 1: {title}
+{copy key points from step-1.md}
+
+### Step 2: {title}
+{copy key points from step-2.md}
+
+## Final Review
 **Status:** {verdict}
-**Actions:** {list}
+**Triggers:** {list}
 
-## Verify
-go build ./...     # ✅
-go test ./test/... # ✅ {N} passed
+### Action Items
+1. [ ] {from final review}
 
-**Done:** {ISO8601}
+## Verification
+```bash
+go build ./...     # ✅ Pass
+go test ./test/... # ✅ {N} passed, {N} failed
+```
+
+## Files Modified
+```
+{tree or list of all changed files}
+```
+
+## Completed: {ISO8601}
 ```
 
 ---
 
 ## STOP CONDITIONS
 
-**Stop:** User decision | Merge conflict | Ambiguous requirements | `CHANGES_REQUIRED`
+### STOP for:
+- `User decision: yes` in plan step
+- Final review verdict: `CHANGES_REQUIRED`
+- Ambiguous requirements (can't determine what to build)
 
-**Continue:** Next step | Spawning | `APPROVED_WITH_NOTES` | Retryable failures
+### NEVER stop for:
+- Moving to next step
+- Compilation errors (fix or document)
+- Test failures (fix or document)
+- `APPROVED_WITH_NOTES` (continue, log warnings)
+
+---
+
+## EXECUTION CHECKLIST
+
+Claude must complete ALL of these:
+
+- [ ] Create workdir
+- [ ] Write plan.md
+- [ ] For each step:
+  - [ ] Execute implementation
+  - [ ] Write step-{N}.md
+  - [ ] Update progress.md
+  - [ ] Verify (compile/test)
+- [ ] Run final validation
+- [ ] Write final-review.md (if critical triggers)
+- [ ] Write summary.md
+
+**Do not stop until summary.md is written.**
 
 ---
 
 ## INVOKE
 
-```bash
-./3agents.sh "Add JWT authentication"
-./3agents.sh docs/fixes/01-plan.md
-./3agents.sh --resume $WORKDIR --decision "option-1"
+```
+/3agents Add JWT authentication
+/3agents docs/fixes/01-plan-xyz.md
 ```

@@ -15,10 +15,9 @@ import (
 )
 
 // DatabaseMaintenanceWorker processes individual database maintenance operations (VACUUM, ANALYZE, REINDEX, OPTIMIZE)
-// NOTE: This worker is currently disabled/deprecated as we moved to BadgerDB which handles maintenance differently.
-// It is kept for interface compatibility but operations are no-ops or return errors.
+// NOTE: This worker is deprecated as BadgerDB handles maintenance automatically.
+// It is kept for interface compatibility but operations are no-ops.
 type DatabaseMaintenanceWorker struct {
-	// db     *sql.DB // Removed SQLite dependency
 	jobMgr *queue.Manager
 	logger arbor.ILogger
 }
@@ -28,7 +27,6 @@ var _ interfaces.JobWorker = (*DatabaseMaintenanceWorker)(nil)
 
 // NewDatabaseMaintenanceWorker creates a new database maintenance worker
 func NewDatabaseMaintenanceWorker(
-	_ interface{}, // Placeholder for removed DB
 	jobMgr *queue.Manager,
 	logger arbor.ILogger,
 ) *DatabaseMaintenanceWorker {

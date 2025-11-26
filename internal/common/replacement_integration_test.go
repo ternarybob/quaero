@@ -134,13 +134,12 @@ func TestConfigReplacement_Integration(t *testing.T) {
 		APIKey string
 	}
 
-	type SQLiteConfig struct {
+	type BadgerConfig struct {
 		Path string
 	}
 
 	type StorageConfig struct {
-		Type   string
-		SQLite SQLiteConfig
+		Badger BadgerConfig
 	}
 
 	type QueueConfig struct {
@@ -168,8 +167,7 @@ func TestConfigReplacement_Integration(t *testing.T) {
 			APIKey: "{places-api-key}",
 		},
 		Storage: StorageConfig{
-			Type: "sqlite",
-			SQLite: SQLiteConfig{
+			Badger: BadgerConfig{
 				Path: "{db-path}",
 			},
 		},
@@ -188,7 +186,7 @@ func TestConfigReplacement_Integration(t *testing.T) {
 	assert.Equal(t, "sk-agent-67890", config.Agent.GoogleAPIKey)
 	assert.Equal(t, "gemini-2.0-flash", config.Agent.ModelName)
 	assert.Equal(t, "sk-places-abcde", config.PlacesAPI.APIKey)
-	assert.Equal(t, "/data/quaero.db", config.Storage.SQLite.Path)
+	assert.Equal(t, "/data/quaero.db", config.Storage.Badger.Path)
 	assert.Equal(t, "custom_queue", config.Queue.QueueName)
 }
 

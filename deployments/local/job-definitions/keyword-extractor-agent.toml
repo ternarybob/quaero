@@ -4,7 +4,7 @@
 
 id = "keyword-extractor-agent"
 name = "Keyword Extractor AI"
-type = "ai"  # AI job type for AI-powered document processing
+type = "agent"  # Agent job type for AI-powered document processing
 job_type = "user"
 source_type = ""  # AI jobs don't require source_type
 description = "Extracts keywords from documents using Google Gemini ADK"

@@ -48,7 +48,6 @@ type QueueConfig struct {
 }
 
 type StorageConfig struct {
-	Type       string           `toml:"type"` // "badger" only
 	Badger     BadgerConfig     `toml:"badger"`
 	Filesystem FilesystemConfig `toml:"filesystem"`
 }
@@ -179,8 +178,6 @@ func NewDefaultConfig() *Config {
 			QueueName:         "quaero_jobs",
 		},
 		Storage: StorageConfig{
-			Type: "badger", // Only supported backend
-
 			Badger: BadgerConfig{
 				Path: "./data/quaero.badger",
 			},
@@ -377,10 +374,6 @@ func applyEnvOverrides(config *Config) {
 	}
 
 	// Storage configuration
-	if storageType := os.Getenv("QUAERO_STORAGE_TYPE"); storageType != "" {
-		config.Storage.Type = storageType
-	}
-
 	if badgerPath := os.Getenv("QUAERO_BADGER_PATH"); badgerPath != "" {
 		config.Storage.Badger.Path = badgerPath
 	}

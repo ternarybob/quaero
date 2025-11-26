@@ -4,7 +4,7 @@
 
 id = "agent-document-generator"
 name = "Agent Document Generator"
-type = "ai"  # AI job type for AI-powered document processing
+type = "agent"  # Agent job type for AI-powered document processing
 job_type = "user"
 source_type = ""  # Agent jobs don't require source_type
 description = "Generates summary documents from existing documents using Google Gemini ADK"

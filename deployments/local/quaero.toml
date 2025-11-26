@@ -37,11 +37,11 @@ environment = "development" # "development" or "production"
 # =============================================================================
 # Storage Configuration
 # =============================================================================
-# Defaults: path="./data/quaero.db", images="./data/images", attachments="./data/attachments"
-# Env vars: QUAERO_SQLITE_PATH
+# Defaults: path="./data/quaero.badger", images="./data/images", attachments="./data/attachments"
+# Env vars: QUAERO_BADGER_PATH
 
-# [storage.sqlite]
-# path = "./data/quaero.db"  # Uncomment to override default
+# [storage.badger]
+# path = "./data/quaero.badger"  # Uncomment to override default
 
 # [storage.filesystem]
 # images = "./data/images"  # Uncomment to override default

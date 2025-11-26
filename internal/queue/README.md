@@ -18,7 +18,7 @@ The Queue Domain manages HOW work gets executed. It handles:
 
 | Domain | Location | Purpose |
 |--------|----------|---------|
-| **Actions** | `internal/actions/` | User-defined workflows (WHAT to do) |
+| **Jobs** | `internal/jobs/` | User-defined workflows (WHAT to do) |
 | **Queue** | `internal/queue/` | Job execution and runtime state (HOW to do it) |
 
 ## Package Structure
@@ -26,7 +26,8 @@ The Queue Domain manages HOW work gets executed. It handles:
 ```
 internal/queue/
 ├── badger_manager.go      # Badger-backed queue manager
-├── lifecycle.go           # Job creation and retrieval (immutable)
+├── manager.go             # Job creation and retrieval (immutable)
+├── orchestrator.go        # Orchestrator - routes job steps to managers
 ├── types.go               # Shared types and aliases
 ├── managers/              # StepManager implementations
 │   ├── crawler_manager.go
@@ -233,5 +234,5 @@ if err := ack(); err != nil {
 ## Related Documentation
 
 - [Manager/Worker Architecture](../../docs/architecture/MANAGER_WORKER_ARCHITECTURE.md)
-- [Actions Domain README](../actions/README.md)
+- [Jobs Domain README](../jobs/README.md)
 - [Agent Framework](../../AGENTS.md)

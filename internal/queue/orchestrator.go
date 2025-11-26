@@ -1,4 +1,4 @@
-package definitions
+package queue
 
 import (
 	"context"
@@ -8,21 +8,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// JobDefinitionOrchestrator orchestrates job definition execution by routing steps to appropriate StepManagers and managing parent-child hierarchy
-type JobDefinitionOrchestrator struct {
+// Orchestrator orchestrates job definition execution by routing steps to appropriate StepManagers and managing parent-child hierarchy
+type Orchestrator struct {
 	stepExecutors map[string]interfaces.StepManager // Step managers keyed by action type
-	jobManager    *queue.Manager
+	jobManager    *Manager
 	jobMonitor    interfaces.JobMonitor
 	logger        arbor.ILogger
 }
 
-// NewJobDefinitionOrchestrator creates a new job definition orchestrator for routing job definition steps to managers
-func NewJobDefinitionOrchestrator(jobManager *queue.Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *JobDefinitionOrchestrator {
-	return &JobDefinitionOrchestrator{
+// NewOrchestrator creates a new orchestrator for routing job definition steps to managers
+func NewOrchestrator(jobManager *Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *Orchestrator {
+	return &Orchestrator{
 		stepExecutors: make(map[string]interfaces.StepManager), // Initialize step manager map
 		jobManager:    jobManager,
 		jobMonitor:    jobMonitor,
@@ -31,7 +30,7 @@ func NewJobDefinitionOrchestrator(jobManager *queue.Manager, jobMonitor interfac
 }
 
 // RegisterStepExecutor registers a step manager for an action type
-func (o *JobDefinitionOrchestrator) RegisterStepExecutor(mgr interfaces.StepManager) {
+func (o *Orchestrator) RegisterStepExecutor(mgr interfaces.StepManager) {
 	o.stepExecutors[mgr.GetManagerType()] = mgr
 	o.logger.Info().
 		Str("action_type", mgr.GetManagerType()).
@@ -40,7 +39,7 @@ func (o *JobDefinitionOrchestrator) RegisterStepExecutor(mgr interfaces.StepMana
 
 // Execute executes a job definition sequentially
 // Returns the parent job ID for tracking
-func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition) (string, error) {
+func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition) (string, error) {
 	// Generate parent job ID
 	parentJobID := uuid.New().String()
 
@@ -59,10 +58,10 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 
 	// Create parent job record in database to track overall progress
 	// Use old Job format for now (will be migrated to models.Job later)
-	parentJob := &queue.Job{
+	parentJob := &Job{
 		ID:              parentJobID,
 		ParentID:        nil,         // This is a root job
-		Type:            "parent",    // Always use "parent" type for parent jobs created by JobDefinitionOrchestrator
+		Type:            "parent",    // Always use "parent" type for parent jobs created by Orchestrator
 		Name:            jobDef.Name, // Use job definition name
 		Phase:           "execution",
 		Status:          "pending",
@@ -191,24 +190,24 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 			Msg("Executing step")
 
 		// Get manager for this step
-		// For AI job types, always route to AgentManager regardless of action name
-		// This allows free-text action names in AI job definitions
+		// For agent job types, always route to AgentManager regardless of action name
+		// This allows free-text action names in agent job definitions
 		var mgr interfaces.StepManager
 		var exists bool
 
-		if jobDef.Type == models.JobDefinitionTypeAI {
-			// Route AI jobs to AgentManager (registered with manager type "agent")
+		if jobDef.Type == models.JobDefinitionTypeAgent {
+			// Route agent jobs to AgentManager (registered with manager type "agent")
 			mgr, exists = o.stepExecutors["agent"]
 			if !exists {
-				err := fmt.Errorf("AI job detected but AgentManager not registered")
+				err := fmt.Errorf("agent job detected but AgentManager not registered")
 				parentLogger.Error().
 					Err(err).
 					Str("action", step.Action).
-					Msg("Failed to find AI manager")
+					Msg("Failed to find agent manager")
 				return parentJobID, err
 			}
 		} else {
-			// Non-AI jobs use standard action-based routing
+			// Non-agent jobs use standard action-based routing
 			mgr, exists = o.stepExecutors[step.Action]
 		}
 
@@ -434,7 +433,7 @@ func (o *JobDefinitionOrchestrator) Execute(ctx context.Context, jobDef *models.
 
 // checkErrorTolerance checks if the error tolerance threshold has been exceeded
 // Returns true if execution should stop, false if it should continue
-func (o *JobDefinitionOrchestrator) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
+func (o *Orchestrator) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
 	// If no error tolerance is configured, never stop
 	if tolerance == nil {
 		return false, nil

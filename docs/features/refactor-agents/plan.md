@@ -1,129 +1,122 @@
-# Plan: TOML Job Definition File Updates
+# Plan: Actions->Jobs Domain Rename & AI->Agent Type Refactor
 
 ## Summary
 
-The refactoring in commit 1c58fae reverted the job type naming from `"ai"` to `"agent"` in the Go code, but TOML job definition files were not updated to match. This plan addresses two issues:
-
-1. **File naming inconsistency**: AI-related TOML files use `ai-` prefix instead of `agent-` prefix
-2. **Model alignment**: TOML `type` field uses `"ai"` but per the requirements, `JobDefinitionTypeAI` should remain `"ai"` - this is intentional
+Two refactoring tasks:
+1. **Rename "Actions Domain" to "Jobs Domain"**: `internal/actions` -> `internal/jobs`
+2. **Refactor job type "ai" to "agent"**: `JobDefinitionTypeAI` -> `JobDefinitionTypeAgent`
 
 ## Current State Analysis
 
-### deployments/local/job-definitions/
-| Current Filename | Type Field | Issue |
-|------------------|------------|-------|
-| ai-web-enricher.toml | `type = "ai"` | Filename uses "ai-" prefix |
-| ai-document-generator.toml | `type = "ai"` | Filename uses "ai-" prefix |
-| keyword-extractor-agent.toml | `type = "ai"` | Correct naming (uses agent suffix) |
-| news-crawler.toml | `type = "crawler"` | No issues |
-| nearby-restaurants-places.toml | `type = "places"` | No issues |
+### Task 1: Actions -> Jobs Rename
 
-### bin/job-definitions/
-| Current Filename | Type Field | Issue |
-|------------------|------------|-------|
-| keyword-extractor-agent.toml | `type = "custom"` | Uses "custom" but should use "ai" |
-| news-crawler.toml | `type = "crawler"` | No issues |
-| nearby-restaurants-places.toml | `type = "places"` | No issues |
+**Current Structure:**
+```
+internal/actions/
+└── definitions/
+    └── orchestrator.go
+```
 
-### test/config/job-definitions/
-| Current Filename | Type Field | Issue |
-|------------------|------------|-------|
-| keyword-extractor-agent.toml | `type = "custom"` | Uses "custom" but is agent job |
-| test-agent-job.toml | `type = "custom"` | Uses "custom" but is agent job |
-| news-crawler.toml | `type = "crawler"` | No issues |
-| nearby-restaurants-places.toml | `type = "places"` | No issues |
+**Files importing `internal/actions`:**
+- `internal/handlers/job_definition_handler.go`
+- `internal/app/app.go`
 
-## Key Clarifications
+**Documentation to update:**
+- `docs/architecture/MANAGER_WORKER_ARCHITECTURE.md`
+- `internal/actions/README.md` -> `internal/jobs/README.md`
+- `internal/queue/README.md` (references actions)
 
-Per `requirements.md`:
-- **JobDefinitionType** (`internal/models/job_definition.go`): Uses `type = "ai"` in TOML files
-- **QueueJob.Type**: Uses `"agent"` in Go code (after refactor)
-- This intentional separation is documented: "Job definitions use `type = "ai"` (JobDefinitionType), but queue jobs use `type = "agent"` (QueueJob.Type)"
+### Task 2: AI -> Agent Type Refactor
+
+**Files with `JobDefinitionTypeAI` or `"ai"` job type:**
+- `internal/models/job_definition.go:33` - `JobDefinitionTypeAI = "ai"`
+- `internal/models/job_definition.go:48` - validation switch
+- `internal/models/job_definition.go:264` - AI-specific validation
+- `internal/actions/definitions/orchestrator.go:199` - type check
+
+**TOML files using `type = "ai"`:**
+- `deployments/local/job-definitions/agent-*.toml`
+- `deployments/local/job-definitions/keyword-extractor-agent.toml`
+- `bin/job-definitions/*.toml`
+- `test/config/job-definitions/*.toml`
 
 ## Execution Groups
 
-### Group 1 (Parallel - Rename AI files in deployments/local)
+### Group 1: Rename actions -> jobs (Folder & Imports)
 
-1a. **Rename ai-web-enricher.toml to agent-web-enricher.toml**
-    - Skill: @code-architect
-    - Files: `deployments/local/job-definitions/ai-web-enricher.toml`
-    - Critical: no
-    - Depends on: none
-    - Action: Rename file, update comments to use "agent" terminology
+1a. **Rename folder internal/actions to internal/jobs**
+    - Files: `internal/actions/` -> `internal/jobs/`
+    - Action: git mv or rename folder
 
-1b. **Rename ai-document-generator.toml to agent-document-generator.toml**
-    - Skill: @code-architect
-    - Files: `deployments/local/job-definitions/ai-document-generator.toml`
-    - Critical: no
-    - Depends on: none
-    - Action: Rename file, update comments to use "agent" terminology
+1b. **Update package declaration in orchestrator.go**
+    - File: `internal/jobs/definitions/orchestrator.go`
+    - Action: Keep `package definitions` (no change needed)
 
-### Group 2 (Parallel - Add missing agent files to bin/job-definitions)
+1c. **Update imports in app.go**
+    - File: `internal/app/app.go`
+    - Action: Change `internal/actions/definitions` -> `internal/jobs/definitions`
 
-2a. **Create agent-web-enricher.toml in bin/job-definitions**
-    - Skill: @code-architect
-    - Files: `bin/job-definitions/agent-web-enricher.toml`
-    - Critical: no
-    - Depends on: 1a
-    - Action: Copy from deployments/local with appropriate defaults
+1d. **Update imports in job_definition_handler.go**
+    - File: `internal/handlers/job_definition_handler.go`
+    - Action: Change `internal/actions/definitions` -> `internal/jobs/definitions`
 
-2b. **Create agent-document-generator.toml in bin/job-definitions**
-    - Skill: @code-architect
-    - Files: `bin/job-definitions/agent-document-generator.toml`
-    - Critical: no
-    - Depends on: 1b
-    - Action: Copy from deployments/local with appropriate defaults
+### Group 2: Refactor AI -> Agent type
 
-### Group 3 (Sequential - Fix test config type fields)
+2a. **Update job_definition.go model**
+    - File: `internal/models/job_definition.go`
+    - Actions:
+      - Rename `JobDefinitionTypeAI` -> `JobDefinitionTypeAgent`
+      - Change value from `"ai"` -> `"agent"`
+      - Update validation switch case
+      - Update AI-specific validation to "Agent-specific"
+      - Update error messages and comments
 
-3. **Update test TOML files to use correct type = "ai"**
-   - Skill: @code-architect
-   - Files:
-     - `test/config/job-definitions/keyword-extractor-agent.toml`
-     - `test/config/job-definitions/test-agent-job.toml`
-     - `bin/job-definitions/keyword-extractor-agent.toml`
-   - Critical: no
-   - Depends on: none
-   - Action: Change `type = "custom"` to `type = "ai"` for agent jobs
+2b. **Update orchestrator.go type check**
+    - File: `internal/jobs/definitions/orchestrator.go`
+    - Action: Change `JobDefinitionTypeAI` -> `JobDefinitionTypeAgent`
 
-### Group 4 (Sequential - Verification)
+2c. **Update TOML files type field**
+    - Files: All agent TOML files
+    - Action: Change `type = "ai"` -> `type = "agent"`
 
-4. **Run build and tests**
-   - Skill: @test-writer
-   - Files: None (verification)
-   - Critical: no
-   - Depends on: Groups 1-3
-   - Action: `go build ./...` and `go test ./...`
+### Group 3: Update Documentation
+
+3a. **Update MANAGER_WORKER_ARCHITECTURE.md**
+    - Replace "Actions Domain" with "Jobs Domain"
+    - Update folder paths from `internal/actions/` to `internal/jobs/`
+    - Update all references to "actions"
+
+3b. **Rename and update internal/actions/README.md**
+    - Move to `internal/jobs/README.md`
+    - Replace "Actions Domain" with "Jobs Domain"
+    - Update all "actions" references to "jobs"
+
+3c. **Update internal/queue/README.md**
+    - Replace "Actions" references with "Jobs"
+    - Update links to jobs README
+
+### Group 4: Verification
+
+4. **Build and test**
+    - Run `go build ./...`
+    - Run `go test ./internal/models/...`
 
 ## Execution Map
 
 ```
-[1a] ──┬──> [2a] ──┐
-       │          ├──> [4]
-[1b] ──┴──> [2b] ──┤
-                   │
-[3] ──────────────┘
+[1a] ──> [1b] ──> [1c,1d] (parallel) ──┐
+                                        ├──> [4]
+[2a] ──> [2b] ──> [2c] ────────────────┤
+                                        │
+[3a,3b,3c] (parallel) ─────────────────┘
 ```
-
-## File Changes Summary
-
-### Renames
-- `deployments/local/job-definitions/ai-web-enricher.toml` -> `agent-web-enricher.toml`
-- `deployments/local/job-definitions/ai-document-generator.toml` -> `agent-document-generator.toml`
-
-### New Files
-- `bin/job-definitions/agent-web-enricher.toml`
-- `bin/job-definitions/agent-document-generator.toml`
-
-### Modifications
-- `test/config/job-definitions/keyword-extractor-agent.toml` - change type to "ai"
-- `test/config/job-definitions/test-agent-job.toml` - change type to "ai"
-- `bin/job-definitions/keyword-extractor-agent.toml` - change type to "ai"
 
 ## Success Criteria
 
-- All agent-related TOML files use `agent-` prefix in filename
-- All agent job definitions use `type = "ai"` (JobDefinitionTypeAI)
-- `bin/job-definitions/` contains all example agent job definitions
+- `internal/jobs/` folder exists with orchestrator
+- All imports updated to `internal/jobs/definitions`
+- `JobDefinitionTypeAgent = "agent"` in models
+- All TOML files use `type = "agent"`
+- Documentation uses "Jobs Domain" terminology
 - Build succeeds
 - Tests pass

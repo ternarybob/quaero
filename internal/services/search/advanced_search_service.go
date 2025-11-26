@@ -36,7 +36,7 @@ type AdvancedSearchService struct {
 
 // ParsedQuery represents a parsed Google-style query
 type ParsedQuery struct {
-	// FTS5Query is the converted query for SQLite FTS5
+	// FTS5Query is the converted query for full-text search
 	FTS5Query string
 
 	// ID is the document ID for direct lookup (extracted from id: qualifier)

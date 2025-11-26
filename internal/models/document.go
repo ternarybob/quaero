@@ -32,7 +32,7 @@ const (
 // ContentMarkdown is the PRIMARY CONTENT field containing clean, unified text format
 // that works seamlessly with:
 // - AI/LLM reasoning and synthesis
-// - Full-text search (SQLite FTS5)
+// - Full-text search (Badger)
 // - Human readability and debugging
 //
 // Metadata is a flexible map containing source-specific structured data that enables:
@@ -43,7 +43,7 @@ const (
 // Example Transformation Pipeline:
 // Jira HTML → ParseJiraIssuePage() → JiraIssueData struct →
 // convertHTMLToMarkdown() → ContentMarkdown + JiraMetadata.ToMap() → Document →
-// SaveDocument() → SQLite (content_markdown + metadata JSON)
+// SaveDocument() → Badger (content_markdown + metadata JSON)
 //
 // See docs/architecture.md for complete pipeline documentation.
 type Document struct {

@@ -30,7 +30,7 @@ const (
 	JobDefinitionTypeSummarizer JobDefinitionType = "summarizer"
 	JobDefinitionTypeCustom     JobDefinitionType = "custom"
 	JobDefinitionTypePlaces     JobDefinitionType = "places"
-	JobDefinitionTypeAI         JobDefinitionType = "ai" // AI-powered document processing jobs
+	JobDefinitionTypeAgent      JobDefinitionType = "agent" // Agent-powered document processing jobs
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -45,7 +45,7 @@ const (
 // IsValidJobDefinitionType checks if a given JobDefinitionType is one of the valid constants
 func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	switch jobType {
-	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAI:
+	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAgent:
 		return true
 	default:
 		return false
@@ -155,7 +155,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Validate JobDefinitionType is one of the allowed constants
 	if !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, ai)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -260,10 +260,10 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 		}
 	}
 
-	// AI-specific validation for AI job types
-	if j.Type == JobDefinitionTypeAI {
+	// Agent-specific validation for agent job types
+	if j.Type == JobDefinitionTypeAgent {
 		if step.Config == nil {
-			return errors.New("AI job steps must have config")
+			return errors.New("agent job steps must have config")
 		}
 
 		// Validate operation_type if provided (optional but recommended)
@@ -276,18 +276,18 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 					"generate": true, // Create new documents from existing ones
 				}
 				if !validOperations[operationType] {
-					return fmt.Errorf("invalid operation_type for AI job: %s (must be one of: scan, enrich, generate)", operationType)
+					return fmt.Errorf("invalid operation_type for agent job: %s (must be one of: scan, enrich, generate)", operationType)
 				}
 			}
 		}
 
-		// Validate agent_type is provided (required for AI jobs)
+		// Validate agent_type is provided (required for agent jobs)
 		if agentType, ok := step.Config["agent_type"].(string); ok {
 			if agentType == "" && !isPlaceholder(agentType) {
-				return errors.New("agent_type cannot be empty for AI job steps")
+				return errors.New("agent_type cannot be empty for agent job steps")
 			}
 		} else {
-			return errors.New("agent_type is required in step config for AI job steps")
+			return errors.New("agent_type is required in step config for agent job steps")
 		}
 
 		// Validate document_filter if provided (optional)

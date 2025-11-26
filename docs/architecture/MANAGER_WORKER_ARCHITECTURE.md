@@ -11,8 +11,9 @@ Quaero's job system implements a **Manager/Worker/Monitor pattern** with clear s
 
 ### Two Domains
 
-1. **Actions Domain** - User-defined workflows (JobDefinition or Job)
-   - Located in: `internal/actions/definitions/`
+1. **Jobs Domain** - User-defined workflows (JobDefinition or Job)
+   - Located in: `internal/jobs/` (definition management)
+   - Orchestrator in: `internal/queue/orchestrator.go` (execution logic)
 2. **Queue Domain** - Job execution including immutable work and runtime state
    - Located in: `internal/queue/`
    - Includes: Queue operations, managers, workers, and state tracking
@@ -28,28 +29,28 @@ Quaero's job system implements a **Manager/Worker/Monitor pattern** with clear s
 **Immutability:** Once a job is enqueued (`QueueJob`), it is immutable. Runtime state (Status, Progress) is tracked via job logs/events, NOT in the stored job.
 
 **Separation of Concerns:**
-- **Job/JobDefinition** = What to do (user-defined workflow) - **Actions Domain**
+- **Job/JobDefinition** = What to do (user-defined workflow) - **Jobs Domain**
 - **QueueJob** = Work to be done (immutable task definition) - **Queue Domain**
 - **QueueJobState** = How it's going (runtime state, in-memory only) - **Queue Domain**
 
 **Clear Naming:**
-- **Actions** = User-defined workflows (what to execute)
+- **Jobs** = User-defined workflows (what to execute)
 - **Queue** = Execution system (how to execute, including state tracking)
 
 **Event-Driven State:** Job status changes are published as events and stored in job logs. The `JobMonitor` aggregates these events to track overall job progress.
 
 **Domain-Based Organization:** The folder structure enforces the two-domain model with clear boundaries:
-- **Actions Domain** - User-defined workflows
+- **Jobs Domain** - User-defined workflows
 - **Queue Domain** - All execution concerns (operations AND state)
 
 ## Folder Structure
 
 The job system is organized into two distinct domains:
 
-### Actions Domain - Definitions (`internal/actions/definitions/`)
-- **`orchestrator.go`** - `JobDefinitionOrchestrator`
-  - Routes job definition steps to appropriate StepManagers
-  - Coordinates overall workflow execution
+### Jobs Domain - Definition Management (`internal/jobs/`)
+- Job definition CRUD operations
+- Validation and TOML parsing
+- **Note:** `JobDefinitionOrchestrator` is in Queue Domain (`internal/queue/orchestrator.go`)
 
 ### Queue Domain - Execution (`internal/queue/`)
 
@@ -110,7 +111,7 @@ All queue operations and state tracking are unified under the queue domain:
 - NO job creation or retrieval
 
 This separation ensures:
-- Clear domain boundaries (Actions vs Queue)
+- Clear domain boundaries (Jobs vs Queue)
 - State tracking is recognized as part of the queue domain
 - Immutable queue operations separate from mutable state tracking
 - Easy testing and maintenance
@@ -120,7 +121,7 @@ This separation ensures:
 
 ```mermaid
 graph TB
-    subgraph "Actions Domain - Definitions"
+    subgraph "Jobs Domain - Definitions"
         UI[Web UI] -->|Create/Edit| JobDef[Job/JobDefinition]
         JobDef -->|Stored in| DefDB[(Job Definitions DB)]
     end
@@ -151,7 +152,7 @@ graph TB
 ## Job State Lifecycle
 
 ```
-1. User creates Job/JobDefinition via UI (Actions Domain)
+1. User creates Job/JobDefinition via UI (Jobs Domain)
    ↓
 2. User triggers job execution
    ↓
@@ -375,10 +376,10 @@ type JobMonitor interface {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Actions Domain (internal/actions/definitions/)                      │
+│ Jobs Domain (internal/jobs/)                                        │
 │                                                                      │
-│ orchestrator.go - JobDefinitionOrchestrator                         │
-│   └─> Routes job steps to appropriate StepManagers                  │
+│ Definition management (CRUD, validation, TOML parsing)              │
+│   └─> JobDefinition models in internal/models/                      │
 └──────────────────────────┬───────────────────────────────────────────┘
                            │
                            v
@@ -441,7 +442,7 @@ type JobMonitor interface {
 
 ### Interaction Flow
 
-1. **Job Creation Flow** (Actions Domain -> Queue Domain)
+1. **Job Creation Flow** (Jobs Domain -> Queue Domain)
    ```
    JobDefinitionOrchestrator -> StepManager -> lifecycle.go
    ```
@@ -499,7 +500,7 @@ This solves the BadgerHold serialization issue by avoiding complex nested struct
 The two-domain folder structure provides several key benefits:
 
 ### 1. Clear Separation of Concerns
-- **Actions Domain** (`internal/actions/definitions/`) handles user-defined workflows
+- **Jobs Domain** (`internal/jobs/`) handles job definition management
 - **Queue Domain** (`internal/queue/`) manages ALL execution concerns:
   - Immutable job operations (lifecycle, managers, workers)
   - Mutable runtime state (state/)
@@ -524,9 +525,9 @@ The two-domain folder structure provides several key benefits:
 - State tracking tests are co-located with queue tests
 
 ### 5. Scalability
-- New managers/workers can be added without touching actions domain
+- New managers/workers can be added without touching jobs domain
 - State tracking can be extended without affecting job creation
-- Queue domain can evolve independently from actions domain
+- Queue domain can evolve independently from jobs domain
 - All execution concerns scale together
 
 ### 6. Documentation Alignment

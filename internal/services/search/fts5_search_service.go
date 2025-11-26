@@ -11,7 +11,7 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// FTS5SearchService implements SearchService using SQLite FTS5 full-text search
+// FTS5SearchService implements SearchService using Badger full-text search
 type FTS5SearchService struct {
 	storage interfaces.DocumentStorage
 	logger  arbor.ILogger

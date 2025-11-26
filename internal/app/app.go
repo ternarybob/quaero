@@ -18,7 +18,6 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
-	"github.com/ternarybob/quaero/internal/actions/definitions"
 	"github.com/ternarybob/quaero/internal/queue/managers"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/queue/workers"
@@ -71,7 +70,7 @@ type App struct {
 	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
 	JobManager                *queue.Manager
 	JobProcessor              *workers.JobProcessor
-	JobDefinitionOrchestrator *definitions.JobDefinitionOrchestrator
+	Orchestrator *queue.Orchestrator
 	JobService                *jobsvc.Service
 
 	// Source-agnostic services
@@ -238,7 +237,7 @@ func (a *App) initDatabase() error {
 
 	a.StorageManager = storageManager
 	a.Logger.Info().
-		Str("type", a.Config.Storage.Type).
+		Str("storage", "badger").
 		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
 
@@ -488,14 +487,13 @@ func (a *App) initServices() error {
 	a.Logger.Info().Msg("Job monitor created (runs in background goroutines, not via queue)")
 
 	// Register database maintenance worker (ARCH-008)
-	// Disabled as it depends on SQLite - will be removed or replaced with Badger maintenance
-	// dbMaintenanceWorker := workers.NewDatabaseMaintenanceWorker(
-	// 	nil, // SQLite DB removed
-	// 	jobMgr,
-	// 	a.Logger,
-	// )
-	// jobProcessor.RegisterExecutor(dbMaintenanceWorker)
-	// a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
+	// Note: BadgerDB handles maintenance automatically, operations are no-ops
+	dbMaintenanceWorker := workers.NewDatabaseMaintenanceWorker(
+		jobMgr,
+		a.Logger,
+	)
+	jobProcessor.RegisterExecutor(dbMaintenanceWorker)
+	a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
@@ -562,39 +560,39 @@ func (a *App) initServices() error {
 		}
 	}
 
-	// 6.9. Initialize JobDefinitionOrchestrator for job definition execution (ARCH-009)
+	// 6.9. Initialize Orchestrator for job definition execution (ARCH-009)
 	// Pass jobMonitor so it can start monitoring goroutines for crawler jobs
-	a.JobDefinitionOrchestrator = definitions.NewJobDefinitionOrchestrator(jobMgr, jobMonitor, a.Logger)
+	a.Orchestrator = queue.NewOrchestrator(jobMgr, jobMonitor, a.Logger)
 
 	// Register managers for job definition steps
 	crawlerManager := managers.NewCrawlerManager(a.CrawlerService, a.Logger)
-	a.JobDefinitionOrchestrator.RegisterStepExecutor(crawlerManager)
+	a.Orchestrator.RegisterStepExecutor(crawlerManager)
 	a.Logger.Info().Msg("Crawler manager registered")
 
 	transformManager := managers.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
-	a.JobDefinitionOrchestrator.RegisterStepExecutor(transformManager)
+	a.Orchestrator.RegisterStepExecutor(transformManager)
 	a.Logger.Info().Msg("Transform manager registered")
 
 	reindexManager := managers.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
-	a.JobDefinitionOrchestrator.RegisterStepExecutor(reindexManager)
+	a.Orchestrator.RegisterStepExecutor(reindexManager)
 	a.Logger.Info().Msg("Reindex manager registered")
 
 	dbMaintenanceManager := managers.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
-	a.JobDefinitionOrchestrator.RegisterStepExecutor(dbMaintenanceManager)
+	a.Orchestrator.RegisterStepExecutor(dbMaintenanceManager)
 	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
 
 	placesSearchManager := managers.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
-	a.JobDefinitionOrchestrator.RegisterStepExecutor(placesSearchManager)
+	a.Orchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Info().Msg("Places search manager registered")
 
 	// Register AI manager (if agent service is available)
 	if a.AgentService != nil {
 		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
-		a.JobDefinitionOrchestrator.RegisterStepExecutor(agentManager)
+		a.Orchestrator.RegisterStepExecutor(agentManager)
 		a.Logger.Info().Msg("Agent manager registered for action type: agent")
 	}
 
-	a.Logger.Info().Msg("JobDefinitionOrchestrator initialized with all managers (ARCH-009)")
+	a.Logger.Info().Msg("Orchestrator initialized with all managers (ARCH-009)")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
@@ -616,7 +614,7 @@ func (a *App) initServices() error {
 		a.CrawlerService,
 		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobDefinitionStorage(),
-		nil, // JobDefinitionOrchestrator temporarily disabled
+		nil, // Orchestrator temporarily disabled
 	)
 
 	// NOTE: Scheduler triggers event-driven processing:
@@ -717,11 +715,10 @@ func (a *App) initHandlers() error {
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.QueueStorage(),
-		a.JobDefinitionOrchestrator,
+		a.Orchestrator,
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
-		nil,                                // SQLiteDB removed
 		a.Logger,
 	)
 
@@ -888,11 +885,11 @@ func (a *App) Close() error {
 
 	// Note: QueueManager (goqite) doesn't require explicit stop - it's stateless
 
-	// Shutdown job definition orchestrator (cancels all background polling tasks)
-	// TODO Phase 8-11: Re-enable once JobDefinitionOrchestrator is re-integrated
-	// if a.JobDefinitionOrchestrator != nil {
-	// 	a.JobDefinitionOrchestrator.Shutdown()
-	// 	a.Logger.Info().Msg("Job definition orchestrator shutdown complete")
+	// Shutdown orchestrator (cancels all background polling tasks)
+	// TODO Phase 8-11: Re-enable once Orchestrator is re-integrated
+	// if a.Orchestrator != nil {
+	// 	a.Orchestrator.Shutdown()
+	// 	a.Logger.Info().Msg("Orchestrator shutdown complete")
 	// }
 
 	// Close crawler service

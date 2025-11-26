@@ -6,10 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/jobs"
 )
 
 // LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory
@@ -46,14 +45,14 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 		}
 
 		// Parse TOML into JobDefinitionFile struct
-		var jobFile handlers.JobDefinitionFile
-		if err := toml.Unmarshal(tomlBytes, &jobFile); err != nil {
+		jobFile, err := jobs.ParseTOML(tomlBytes)
+		if err != nil {
 			logger.Warn().Err(err).Str("file", entry.Name()).Msg("Failed to parse job definition TOML")
 			continue
 		}
 
 		// Convert to JobDefinition model
-		jobDef := jobFile.ToJobDefinition(kvStorage, logger)
+		jobDef := jobFile.ToJobDefinition()
 
 		// Store raw TOML content
 		jobDef.TOML = string(tomlBytes)
