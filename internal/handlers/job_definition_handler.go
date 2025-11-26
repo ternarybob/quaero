@@ -25,14 +25,14 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage interfaces.JobDefinitionStorage
-	jobStorage    interfaces.QueueStorage
-	orchestrator  *queue.Orchestrator
-	authStorage   interfaces.AuthStorage
-	kvStorage                 interfaces.KeyValueStorage // For {key-name} replacement in job definitions
-	validationService         *validation.TOMLValidationService
-	jobService                *jobs.Service // Business logic for job definitions
-	logger arbor.ILogger
+	jobDefStorage     interfaces.JobDefinitionStorage
+	jobStorage        interfaces.QueueStorage
+	orchestrator      *queue.Orchestrator
+	authStorage       interfaces.AuthStorage
+	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
+	validationService *validation.TOMLValidationService
+	jobService        *jobs.Service // Business logic for job definitions
+	logger            arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler

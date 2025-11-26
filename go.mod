@@ -22,7 +22,6 @@ require (
 	golang.org/x/oauth2 v0.33.0
 	golang.org/x/time v0.14.0
 	google.golang.org/genai v1.34.0
-	maragu.dev/goqite v0.3.1
 )
 
 require (

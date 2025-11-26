@@ -145,6 +145,17 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		Int("jobs_created", len(jobIDs)).
 		Msg("Agent jobs created and enqueued")
 
+	// Update parent job metadata with document count for UI display
+	if err := m.jobMgr.UpdateJobMetadata(ctx, parentJobID, map[string]interface{}{
+		"document_count": len(jobIDs),
+	}); err != nil {
+		m.logger.Warn().
+			Err(err).
+			Str("parent_job_id", parentJobID).
+			Int("document_count", len(jobIDs)).
+			Msg("Failed to update parent job document_count (non-fatal)")
+	}
+
 	// Poll for job completion (wait for all agent jobs to complete)
 	if err := m.pollJobCompletion(ctx, jobIDs); err != nil {
 		return "", fmt.Errorf("agent jobs did not complete successfully: %w", err)
@@ -330,19 +341,20 @@ func (m *AgentManager) pollJobCompletion(ctx context.Context, jobIDs []string) e
 					continue
 				}
 
-				// Type assert to *queue.Job
-				job, ok := jobInterface.(*queue.Job)
+				// Type assert to *models.QueueJobState (the actual type returned by GetJob)
+				jobState, ok := jobInterface.(*models.QueueJobState)
 				if !ok {
-					m.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job")
+					m.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job to QueueJobState")
 					continue
 				}
 
-				if job.Status == "failed" {
+				status := string(jobState.Status)
+				if status == "failed" {
 					m.logger.Error().Str("job_id", jobID).Msg("Agent job failed")
 					anyFailed = true
 				}
 
-				if job.Status != "completed" && job.Status != "failed" {
+				if status != "completed" && status != "failed" {
 					allCompleted = false
 				}
 			}

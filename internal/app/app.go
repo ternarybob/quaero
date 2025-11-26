@@ -18,11 +18,11 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/handlers"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/logs"
+	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/managers"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/queue/workers"
-	"github.com/ternarybob/quaero/internal/logs"
-	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/services/agents"
 	"github.com/ternarybob/quaero/internal/services/auth"
 	"github.com/ternarybob/quaero/internal/services/chat"
@@ -65,13 +65,13 @@ type App struct {
 	SummaryService   *summary.Service
 
 	// Job execution (using concrete types for refactored queue system)
-	QueueManager              interfaces.QueueManager
-	LogService                interfaces.LogService
-	LogConsumer               *logs.Consumer // Log consumer for arbor context channel
-	JobManager                *queue.Manager
-	JobProcessor              *workers.JobProcessor
+	QueueManager interfaces.QueueManager
+	LogService   interfaces.LogService
+	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
+	JobManager   *queue.Manager
+	JobProcessor *workers.JobProcessor
 	Orchestrator *queue.Orchestrator
-	JobService                *jobsvc.Service
+	JobService   *jobsvc.Service
 
 	// Source-agnostic services
 	StatusService     *status.Service
