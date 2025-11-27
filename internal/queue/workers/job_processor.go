@@ -132,8 +132,35 @@ func (jp *JobProcessor) processNextJob() {
 	ctx, cancel := context.WithTimeout(jp.ctx, 1*time.Second)
 	defer cancel()
 
+	var msg *queue.Message
+	var deleteFn func() error
+	var err error
+
+	// Panic recovery for individual job processing
+	defer func() {
+		if r := recover(); r != nil {
+			jp.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Str("stack", getStackTrace()).
+				Msg("Recovered from panic in job processing")
+
+			if msg != nil {
+				// Update job status to failed
+				jp.jobMgr.SetJobError(jp.ctx, msg.JobID, fmt.Sprintf("Job panicked: %v", r))
+				jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
+
+				// Ensure message is deleted so it doesn't loop
+				if deleteFn != nil {
+					if err := deleteFn(); err != nil {
+						jp.logger.Error().Err(err).Msg("Failed to delete message after panic")
+					}
+				}
+			}
+		}
+	}()
+
 	// Receive next message from queue
-	msg, deleteFn, err := jp.queueMgr.Receive(ctx)
+	msg, deleteFn, err = jp.queueMgr.Receive(ctx)
 	if err != nil {
 		// No message available or timeout - just return
 		return

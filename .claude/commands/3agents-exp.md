@@ -1,6 +1,6 @@
 ---
 name: 3agents
-description: Three-phase workflow. Opus plans, executes, validates - all inline.
+description: Three-phase workflow. Opus plans/reviews, Sonnet executes (with Opus override for complex tasks).
 ---
 
 Execute workflow for: $ARGUMENTS
@@ -8,7 +8,23 @@ Execute workflow for: $ARGUMENTS
 ## CONFIG
 
 ```yaml
-model: claude-opus-4-5-20251101
+models:
+  planner: opus
+  worker: sonnet
+  validator: sonnet
+  reviewer: opus
+
+# Override worker to Opus for high-complexity tasks
+complexity_override:
+  high:
+    model: opus
+    indicators:
+      - security
+      - authentication
+      - crypto
+      - state machine
+      - complex algorithm
+      - architectural change
 
 skills:
   code-architect: [architecture, design, refactoring]
@@ -85,7 +101,9 @@ mkdir -p /tmp/3agents/
 
 ---
 
-## PHASE 1: PLAN
+## PHASE 1: PLAN (Opus)
+
+**Model:** `claude-opus-4-5-20251101` - deep thinking for dependency analysis
 
 **Think deeply before planning:**
 1. What are ALL discrete tasks?
@@ -123,25 +141,25 @@ mkdir -p /tmp/3agents/
 ### Group 1: Sequential (Foundation)
 Must complete before any concurrent work.
 
-| Task | Description | Depends | Critical |
-|------|-------------|---------|----------|
-| 1 | {desc} | none | no |
+| Task | Description | Depends | Critical | Complexity | Model |
+|------|-------------|---------|----------|------------|-------|
+| 1 | {desc} | none | no | low | Sonnet |
 
 ### Group 2: Concurrent
 Can run in parallel after Group 1 completes.
 
-| Task | Description | Depends | Critical | Can Parallelize |
-|------|-------------|---------|----------|-----------------|
-| 2 | {desc} | 1 | no | ✅ |
-| 3 | {desc} | 1 | yes:security | ✅ |
-| 4 | {desc} | 1 | no | ✅ |
+| Task | Description | Depends | Critical | Complexity | Model |
+|------|-------------|---------|----------|------------|-------|
+| 2 | {desc} | 1 | no | medium | Sonnet |
+| 3 | {desc} | 1 | yes:security | high | **Opus** |
+| 4 | {desc} | 1 | no | low | Sonnet |
 
 ### Group 3: Sequential (Integration)
 Requires all concurrent tasks complete.
 
-| Task | Description | Depends | Critical |
-|------|-------------|---------|----------|
-| 5 | {desc} | 2,3,4 | yes:api-breaking |
+| Task | Description | Depends | Critical | Complexity | Model |
+|------|-------------|---------|----------|------------|-------|
+| 5 | {desc} | 2,3,4 | yes:api-breaking | high | **Opus** |
 
 ## Execution Order
 ```
@@ -169,9 +187,22 @@ This is the instruction file an agent reads to execute the task.
 - **Group:** {1|2|3}
 - **Mode:** sequential | concurrent
 - **Skill:** @{skill}
+- **Complexity:** low | medium | high
+- **Model:** claude-sonnet-4-5-20250929 | claude-opus-4-5-20251101
 - **Critical:** no | yes:{trigger}
 - **Depends:** {task IDs or "none"}
 - **Blocks:** {task IDs that depend on this}
+
+## Model Selection
+```yaml
+# Default: Sonnet for standard work
+model: claude-sonnet-4-5-20250929
+
+# Override to Opus if ANY of:
+# - Complexity: high
+# - Critical: yes:security|authentication|crypto
+# - Involves: state machine, complex algorithm, architectural change
+```
 
 ## Paths
 ```yaml
@@ -218,7 +249,10 @@ After planning, workdir contains:
 
 ---
 
-## PHASE 2: EXECUTE
+## PHASE 2: EXECUTE (Sonnet default)
+
+**Default Model:** `claude-sonnet-4-5-20250929` - fast execution
+**Override to Opus:** High complexity or security-critical tasks
 
 Execute tasks by reading task-{N}.md files, respecting dependency order.
 
@@ -288,6 +322,7 @@ cp -r $source/{files_from_task_file} /tmp/3agents/task-{N}/
 ## Task Reference
 - **Task File:** task-{N}.md
 - **Group:** {N} ({sequential|concurrent})
+- **Model Used:** claude-sonnet-4-5-20250929 | claude-opus-4-5-20251101
 - **Dependencies:** {satisfied by steps X, Y}
 
 ## Params
@@ -381,7 +416,9 @@ Last updated: {timestamp}
 
 ---
 
-## PHASE 3: VALIDATE
+## PHASE 3: VALIDATE (Sonnet)
+
+**Model:** `claude-sonnet-4-5-20250929` - quick validation
 
 After ALL steps complete:
 
@@ -410,7 +447,9 @@ cd $source && go test ./test/api/... ./test/ui/...
 
 ---
 
-## PHASE 4: FINAL REVIEW
+## PHASE 4: FINAL REVIEW (Opus)
+
+**Model:** `claude-opus-4-5-20251101` - deep security/architecture review
 
 **Run if ANY step has `Critical: yes:{trigger}`**
 
@@ -474,7 +513,9 @@ Review all changes for:
 
 ---
 
-## PHASE 5: SUMMARY
+## PHASE 5: SUMMARY (Sonnet)
+
+**Model:** `claude-sonnet-4-5-20250929` - summarization
 
 ```yaml
 params:
@@ -508,6 +549,15 @@ Final Review:          ✅ APPROVED_WITH_NOTES
 | Files Changed | {N} |
 | Duration | {time} |
 | Quality | {avg}/10 |
+
+## Model Usage
+| Phase | Model | Count |
+|-------|-------|-------|
+| Planning | Opus | 1 |
+| Workers (standard) | Sonnet | {N} |
+| Workers (complex) | Opus | {N} |
+| Validation | Sonnet | 1 |
+| Final Review | Opus | 1 |
 
 ## Task Summaries
 

@@ -23,20 +23,13 @@ enabled = true
 auto_start = false
 
 # URL patterns to include (regex patterns)
-include_patterns = [
-    "abc\\.net\\.au/news",
-]
+include_patterns = ["abc\\.net\\.au/news"]
 
 # URL patterns to exclude (regex patterns)
-exclude_patterns = [
-    "/video/",
-    "/audio/",
-    "/live-blog/",
-]
+exclude_patterns = ["/video/", "/audio/", "/live-blog/"]
 
 # Crawler behavior
-max_depth = 2       # Maximum depth to follow links
-max_pages = 1       # Maximum number of pages to crawl (set to 1 for testing)
+max_depth = 3       # Maximum depth to follow links
+max_pages = 50      # Maximum number of pages to crawl
 concurrency = 5     # Number of concurrent workers
 follow_links = true # Whether to follow discovered links
-

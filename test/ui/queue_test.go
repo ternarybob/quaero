@@ -194,6 +194,7 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 	lastStatus := ""
 	checkCount := 0
 	lastProgressLog := time.Now()
+	lastScreenshotTime := time.Now()
 	var currentStatus string
 	pollStart := time.Now()
 
@@ -215,6 +216,18 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 			elapsed := time.Since(startTime)
 			qtc.env.LogTest(qtc.t, "  [%v] Still monitoring... (status: %s, checks: %d)", elapsed.Round(time.Second), lastStatus, checkCount)
 			lastProgressLog = time.Now()
+		}
+
+		// Take screenshot every 30 seconds
+		if time.Since(lastScreenshotTime) >= 30*time.Second {
+			elapsed := time.Since(startTime)
+			screenshotName := fmt.Sprintf("monitor_%s_%ds", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"), int(elapsed.Seconds()))
+			if err := qtc.env.TakeScreenshot(qtc.ctx, screenshotName); err != nil {
+				qtc.env.LogTest(qtc.t, "  Warning: Failed to take periodic screenshot: %v", err)
+			} else {
+				qtc.env.LogTest(qtc.t, "  Captured periodic screenshot: %s", screenshotName)
+			}
+			lastScreenshotTime = time.Now()
 		}
 
 		// Trigger a data refresh - log any errors
@@ -511,4 +524,37 @@ func TestQueueWithKeywordExtraction(t *testing.T) {
 	}
 
 	qtc.env.LogTest(t, "✓ All scenarios completed successfully")
+}
+
+// TestNewsCrawlerCrash tests the News Crawler job to ensure it doesn't crash the service
+func TestNewsCrawlerCrash(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 15*time.Minute)
+	defer cleanup()
+
+	jobName := "News Crawler"
+
+	qtc.env.LogTest(t, "--- Starting Test: News Crawler Crash Reproduction ---")
+
+	// Navigate to Queue page first to take a "before" screenshot
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	if err := qtc.env.TakeScreenshot(qtc.ctx, "news_crawler_before"); err != nil {
+		qtc.env.LogTest(qtc.t, "Failed to take before screenshot: %v", err)
+	}
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger %s: %v", jobName, err)
+	}
+
+	// Monitor the job
+	// We expect it to complete or fail gracefully, NOT hang or crash the service.
+	// We expect documents to be found (expectDocs: true) and run for the full duration.
+	// Using 10 minute timeout to accommodate increased load (max_pages=50).
+	if err := qtc.monitorJob(jobName, 10*time.Minute, true, false); err != nil {
+		t.Fatalf("Job monitoring failed (service might have crashed): %v", err)
+	}
+
+	qtc.env.LogTest(t, "✓ Test completed successfully - Service remained responsive")
 }
