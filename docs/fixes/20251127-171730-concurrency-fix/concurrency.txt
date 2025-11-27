@@ -1,0 +1,12 @@
+/3agents-exp \
+
+  Problem : The concurrancy setting in the job config, does not seem to work. Only 1 job is runnign at one time.
+
+  bin\job-definitions\news-crawler.toml
+  C:/Users/bobmc/Pictures/Screenshots/ksnip_20251127-160347.png \
+  \
+  Action:\
+  - review the code and assess if there is a global limitation
+  - update if global limitation, advise defaults, where is set and how to update\
+  - otherwise implement fix and test with test\ui\queue_test.go -> TestNewsCrawlerCrash , however create/replicate test with a pass on concurrenty (not crash) i.e. create a new news crawler (or similar) with
+  concurrecy > 2 and tests for running 

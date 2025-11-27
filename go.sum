@@ -202,8 +202,8 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/ternarybob/arbor v1.4.64 h1:AlXtlbxCTYyYj081mOtBoVrdyzLlg6NqvYWMu4hWB18=
-github.com/ternarybob/arbor v1.4.64/go.mod h1:6sxI32d0/tjLX6CbEGD+LW/UNXGd5dPHWDvZjFVqdm4=
+github.com/ternarybob/arbor v1.4.65 h1:X1ce1XYHK9aGbGsHqeoNWab3wDUgScC5mHBsdhN4uII=
+github.com/ternarybob/arbor v1.4.65/go.mod h1:6sxI32d0/tjLX6CbEGD+LW/UNXGd5dPHWDvZjFVqdm4=
 github.com/ternarybob/banner v0.0.5 h1:Z3lp/V8V9TKfFx9U5zAMUv3YYM6xDCUBH7avLv1oua8=
 github.com/ternarybob/banner v0.0.5/go.mod h1:PMCLEq7eh9bHrG4Og8DZCKSQtK2YO7dAd//Z6oZSnVs=
 github.com/timshannon/badgerhold/v4 v4.0.3 h1:W6pd2qckoXw2cl8eH0ZCV/9CXNaXvaM26tzFi5Tj+v8=

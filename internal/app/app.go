@@ -398,7 +398,7 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Msg("Job manager initialized")
 
 	// 5.9. Initialize job processor (replaces worker pool)
-	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger)
+	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)
 	a.JobProcessor = jobProcessor
 	a.Logger.Debug().Msg("Job processor initialized")
 
@@ -730,6 +730,16 @@ func (a *App) initHandlers() error {
 
 	// Start stale job detector (runs every 5 minutes)
 	go func() {
+		// Panic recovery to prevent service crash from stale job detector errors
+		defer func() {
+			if r := recover(); r != nil {
+				a.Logger.Error().
+					Str("panic", fmt.Sprintf("%v", r)).
+					Str("stack", common.GetStackTrace()).
+					Msg("Recovered from panic in stale job detector - detector stopped")
+			}
+		}()
+
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 

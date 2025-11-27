@@ -19,30 +19,39 @@ import (
 
 // JobProcessor is a job-agnostic processor that uses Badger queue for queue management.
 // It routes jobs to registered workers based on job type.
+// Supports concurrent job processing via multiple worker goroutines.
 type JobProcessor struct {
-	queueMgr  interfaces.QueueManager
-	jobMgr    *queue.Manager
-	executors map[string]interfaces.JobWorker // Job workers keyed by job type
-	logger    arbor.ILogger
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	running   bool
-	mu        sync.Mutex
+	queueMgr      interfaces.QueueManager
+	jobMgr        *queue.Manager
+	executors     map[string]interfaces.JobWorker // Job workers keyed by job type
+	logger        arbor.ILogger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	running       bool
+	mu            sync.Mutex
+	concurrency   int // Number of concurrent worker goroutines
 }
 
 // NewJobProcessor creates a new job processor that routes jobs to registered workers.
-func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *queue.Manager, logger arbor.ILogger) *JobProcessor {
+// The concurrency parameter controls how many jobs can be processed in parallel.
+func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *queue.Manager, logger arbor.ILogger, concurrency int) *JobProcessor {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Ensure minimum concurrency of 1
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
 	return &JobProcessor{
-		queueMgr:  queueMgr,
-		jobMgr:    jobMgr,
-		executors: make(map[string]interfaces.JobWorker), // Initialize job worker map
-		logger:    logger,
-		ctx:       ctx,
-		cancel:    cancel,
-		running:   false,
+		queueMgr:    queueMgr,
+		jobMgr:      jobMgr,
+		executors:   make(map[string]interfaces.JobWorker), // Initialize job worker map
+		logger:      logger,
+		ctx:         ctx,
+		cancel:      cancel,
+		running:     false,
+		concurrency: concurrency,
 	}
 }
 
@@ -68,11 +77,15 @@ func (jp *JobProcessor) Start() {
 	}
 
 	jp.running = true
-	jp.logger.Info().Msg("Starting job processor")
+	jp.logger.Info().
+		Int("concurrency", jp.concurrency).
+		Msg("Starting job processor")
 
-	// Start a single goroutine to process jobs
-	jp.wg.Add(1)
-	go jp.processJobs()
+	// Start multiple goroutines to process jobs concurrently
+	for i := 0; i < jp.concurrency; i++ {
+		jp.wg.Add(1)
+		go jp.processJobs(i)
+	}
 }
 
 // Stop stops the job processor gracefully.
@@ -91,7 +104,8 @@ func (jp *JobProcessor) Stop() {
 }
 
 // processJobs is the main job processing loop.
-func (jp *JobProcessor) processJobs() {
+// workerID identifies which worker goroutine this is (for logging).
+func (jp *JobProcessor) processJobs(workerID int) {
 	defer jp.wg.Done()
 
 	// CRITICAL: Panic recovery wrapper to capture fatal crashes
@@ -102,19 +116,24 @@ func (jp *JobProcessor) processJobs() {
 			jp.logger.Fatal().
 				Str("panic", fmt.Sprintf("%v", r)).
 				Str("stack", getStackTrace()).
+				Int("worker_id", workerID).
 				Msg("FATAL: Job processor goroutine panicked - application will terminate")
 		}
 	}()
 
-	jp.logger.Debug().Msg("Job processor goroutine started")
+	jp.logger.Debug().
+		Int("worker_id", workerID).
+		Msg("Job processor worker started")
 
 	for {
 		select {
 		case <-jp.ctx.Done():
-			jp.logger.Debug().Msg("Job processor goroutine stopping")
+			jp.logger.Debug().
+				Int("worker_id", workerID).
+				Msg("Job processor worker stopping")
 			return
 		default:
-			jp.processNextJob()
+			jp.processNextJob(workerID)
 		}
 	}
 }
@@ -127,7 +146,8 @@ func getStackTrace() string {
 }
 
 // processNextJob processes the next job from the queue, routing it to the appropriate worker based on job type.
-func (jp *JobProcessor) processNextJob() {
+// workerID identifies which worker goroutine is processing (for logging).
+func (jp *JobProcessor) processNextJob(workerID int) {
 	// Create a timeout context for receiving messages
 	ctx, cancel := context.WithTimeout(jp.ctx, 1*time.Second)
 	defer cancel()
@@ -142,6 +162,7 @@ func (jp *JobProcessor) processNextJob() {
 			jp.logger.Error().
 				Str("panic", fmt.Sprintf("%v", r)).
 				Str("stack", getStackTrace()).
+				Int("worker_id", workerID).
 				Msg("Recovered from panic in job processing")
 
 			if msg != nil {
@@ -173,11 +194,13 @@ func (jp *JobProcessor) processNextJob() {
 	jp.logger.Info().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
+		Int("worker_id", workerID).
 		Msg("Job started")
 
 	jp.logger.Trace().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
+		Int("worker_id", workerID).
 		Msg("Processing job from queue")
 
 	// Deserialize queue job from payload
@@ -257,6 +280,7 @@ func (jp *JobProcessor) processNextJob() {
 			Err(err).
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
+			Int("worker_id", workerID).
 			Dur("duration", time.Since(jobStartTime)).
 			Msg("Job failed")
 
@@ -272,6 +296,7 @@ func (jp *JobProcessor) processNextJob() {
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
+			Int("worker_id", workerID).
 			Dur("duration", time.Since(jobStartTime)).
 			Msg("Job completed")
 

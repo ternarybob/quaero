@@ -220,9 +220,7 @@ func (s *GeminiService) HealthCheck(ctx context.Context) error {
 
 	// Perform lightweight connectivity probe with short timeout
 	if err := s.performChatHealthCheck(ctx); err != nil {
-		s.logger.Error().
-			Err(err).
-			Msg("Chat model health check failed")
+		// Don't log here - caller (app.go) logs at appropriate level
 		return fmt.Errorf("chat model health check failed: %w", err)
 	}
 

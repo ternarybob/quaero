@@ -1015,6 +1015,16 @@ func (s *Service) DetectStaleJobs() error {
 
 // staleJobDetectorLoop runs periodically to detect and mark stale jobs
 func (s *Service) staleJobDetectorLoop() {
+	// Panic recovery to prevent service crash from stale job detector errors
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Str("stack", common.GetStackTrace()).
+				Msg("Recovered from panic in stale job detector loop - detector stopped")
+		}
+	}()
+
 	for range s.staleJobTicker.C {
 		if err := s.DetectStaleJobs(); err != nil {
 			s.logger.Error().Err(err).Msg("Stale job detection failed")

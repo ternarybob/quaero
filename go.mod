@@ -16,7 +16,7 @@ require (
 	github.com/phuslu/log v1.0.120
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
-	github.com/ternarybob/arbor v1.4.64
+	github.com/ternarybob/arbor v1.4.65
 	github.com/ternarybob/banner v0.0.5
 	github.com/timshannon/badgerhold/v4 v4.0.3
 	golang.org/x/oauth2 v0.33.0

@@ -53,6 +53,20 @@ func init() {
 }
 
 func main() {
+	// CRITICAL: Install top-level crash protection
+	// This ensures any panic in main or its goroutines writes a crash file
+	// before the process terminates
+	defer func() {
+		if r := recover(); r != nil {
+			stackTrace := common.GetStackTrace()
+			crashFile := common.WriteCrashFile(r, stackTrace)
+			if crashFile != "" {
+				fmt.Fprintf(os.Stderr, "FATAL: Application crashed. Crash report saved to: %s\n", crashFile)
+			}
+			os.Exit(1)
+		}
+	}()
+
 	// Parse command-line flags
 	flag.Parse()
 
@@ -108,6 +122,9 @@ func main() {
 	// 3. Initialize logger with final configuration
 	logger = common.SetupLogger(config)
 
+	// Install crash handler with configured log directory
+	common.InstallCrashHandler("")
+
 	// 4. Print banner with configuration and logger
 	common.PrintBanner(config, logger)
 
@@ -147,10 +164,12 @@ func main() {
 	srv := server.New(application)
 	srv.SetShutdownChannel(shutdownChan)
 
-	// Start server in goroutine
+	// Start server in goroutine with crash protection
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				stackTrace := common.GetStackTrace()
+				common.WriteCrashFile(r, stackTrace)
 				logger.Fatal().Str("panic", fmt.Sprintf("%v", r)).Msg("Server goroutine panicked")
 			}
 		}()

@@ -240,13 +240,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         _getLevelClass(level) {
-            // Map to existing CSS classes
+            // Map to terminal CSS classes (matching console formatter colors)
             const levelUpper = level.toUpperCase();
-            if (levelUpper === 'ERR' || levelUpper === 'ERROR') return 'text-error';
-            if (levelUpper === 'WRN' || levelUpper === 'WARN' || levelUpper === 'WARNING') return 'text-warning';
-            if (levelUpper === 'INF' || levelUpper === 'INFO') return 'text-primary';
-            if (levelUpper === 'DBG' || levelUpper === 'DEBUG') return 'text-gray';
-            return 'text-gray';
+            if (levelUpper === 'ERR' || levelUpper === 'ERROR') return 'terminal-error';
+            if (levelUpper === 'WRN' || levelUpper === 'WARN' || levelUpper === 'WARNING') return 'terminal-warning';
+            if (levelUpper === 'INF' || levelUpper === 'INFO') return 'terminal-info';
+            if (levelUpper === 'DBG' || levelUpper === 'DEBUG') return 'terminal-debug';
+            return 'terminal-debug';
         },
 
         clearLogs() {

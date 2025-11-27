@@ -17,6 +17,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -1382,11 +1383,11 @@ func (w *CrawlerWorker) publishCrawlerJobLog(ctx context.Context, jobID, level, 
 	}
 
 	// Publish asynchronously to avoid blocking job execution
-	go func() {
+	common.SafeGo(w.logger, "publishCrawlerJobLog", func() {
 		if err := w.eventService.Publish(ctx, event); err != nil {
 			w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish crawler job log event")
 		}
-	}()
+	})
 }
 
 // publishCrawlerProgressUpdate publishes a crawler job progress update for real-time monitoring
@@ -1427,11 +1428,11 @@ func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *m
 	}
 
 	// Publish asynchronously to avoid blocking job execution
-	go func() {
+	common.SafeGo(w.logger, "publishCrawlerProgress", func() {
 		if err := w.eventService.Publish(ctx, event); err != nil {
 			w.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to publish crawler progress event")
 		}
-	}()
+	})
 }
 
 // publishLinkDiscoveryEvent publishes link discovery and following statistics
@@ -1486,9 +1487,9 @@ func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *mod
 	}
 
 	// Publish asynchronously
-	go func() {
+	common.SafeGo(w.logger, "publishJobSpawn", func() {
 		if err := w.eventService.Publish(ctx, event); err != nil {
 			w.logger.Warn().Err(err).Str("parent_job_id", parentJob.ID).Str("child_job_id", childJobID).Msg("Failed to publish job spawn event")
 		}
-	}()
+	})
 }
