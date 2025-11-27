@@ -86,14 +86,14 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	documentID, _ := job.GetConfigString("document_id")
 	agentType, _ := job.GetConfigString("agent_type")
 
-	jobLogger.Info().
+	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("document_id", documentID).
 		Str("agent_type", agentType).
 		Msg("Starting agent job execution")
 
 	// Publish real-time log for job start
-	w.publishAgentJobLog(ctx, parentID, "info", fmt.Sprintf("Starting agent processing: %s", agentType), map[string]interface{}{
+	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Starting agent processing: %s", agentType), map[string]interface{}{
 		"document_id": documentID,
 		"agent_type":  agentType,
 		"job_id":      job.ID,
@@ -105,8 +105,8 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	}
 
 	// Step 1: Load document from storage
-	jobLogger.Debug().Str("document_id", documentID).Msg("Loading document from storage")
-	w.publishAgentJobLog(ctx, parentID, "info", "Loading document from storage", map[string]interface{}{
+	jobLogger.Trace().Str("document_id", documentID).Msg("Loading document from storage")
+	w.publishAgentJobLog(ctx, parentID, "debug", "Loading document from storage", map[string]interface{}{
 		"document_id": documentID,
 		"job_id":      job.ID,
 	})
@@ -123,13 +123,13 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		return fmt.Errorf("failed to load document: %w", err)
 	}
 
-	jobLogger.Info().
+	jobLogger.Trace().
 		Str("document_id", documentID).
 		Str("title", doc.Title).
 		Int("content_size", len(doc.ContentMarkdown)).
 		Msg("Document loaded successfully")
 
-	w.publishAgentJobLog(ctx, parentID, "info", fmt.Sprintf("Document loaded: %s (%d bytes)", doc.Title, len(doc.ContentMarkdown)), map[string]interface{}{
+	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Document loaded: %s (%d bytes)", doc.Title, len(doc.ContentMarkdown)), map[string]interface{}{
 		"document_id":  documentID,
 		"title":        doc.Title,
 		"content_size": len(doc.ContentMarkdown),
@@ -148,8 +148,8 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	}
 
 	// Step 3: Execute agent
-	jobLogger.Debug().Str("agent_type", agentType).Msg("Executing agent")
-	w.publishAgentJobLog(ctx, parentID, "info", fmt.Sprintf("Executing %s agent", agentType), map[string]interface{}{
+	jobLogger.Trace().Str("agent_type", agentType).Msg("Executing agent")
+	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Executing %s agent", agentType), map[string]interface{}{
 		"document_id": documentID,
 		"agent_type":  agentType,
 		"job_id":      job.ID,
@@ -171,12 +171,12 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		return fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	jobLogger.Info().
+	jobLogger.Trace().
 		Str("agent_type", agentType).
 		Dur("duration", duration).
 		Msg("Agent execution completed successfully")
 
-	w.publishAgentJobLog(ctx, parentID, "info", fmt.Sprintf("Agent execution completed in %v", duration), map[string]interface{}{
+	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Agent execution completed in %v", duration), map[string]interface{}{
 		"document_id": documentID,
 		"agent_type":  agentType,
 		"duration":    duration.String(),
@@ -184,8 +184,8 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	})
 
 	// Step 4: Update document metadata with agent results
-	jobLogger.Debug().Msg("Updating document metadata with agent results")
-	w.publishAgentJobLog(ctx, parentID, "info", "Updating document metadata", map[string]interface{}{
+	jobLogger.Trace().Msg("Updating document metadata with agent results")
+	w.publishAgentJobLog(ctx, parentID, "debug", "Updating document metadata", map[string]interface{}{
 		"document_id": documentID,
 		"job_id":      job.ID,
 	})
@@ -210,11 +210,11 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		return fmt.Errorf("failed to update document metadata: %w", err)
 	}
 
-	jobLogger.Info().
+	jobLogger.Trace().
 		Str("document_id", documentID).
 		Msg("Document metadata updated successfully")
 
-	w.publishAgentJobLog(ctx, parentID, "info", "Document metadata updated successfully", map[string]interface{}{
+	w.publishAgentJobLog(ctx, parentID, "debug", "Document metadata updated successfully", map[string]interface{}{
 		"document_id": documentID,
 		"job_id":      job.ID,
 	})
@@ -250,14 +250,14 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	}
 
 	totalTime := time.Since(startTime)
-	jobLogger.Info().
+	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("document_id", documentID).
 		Str("agent_type", agentType).
 		Dur("total_time", totalTime).
 		Msg("Agent job execution completed successfully")
 
-	w.publishAgentJobLog(ctx, parentID, "info", fmt.Sprintf("Agent job completed successfully in %v", totalTime), map[string]interface{}{
+	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Agent job completed successfully in %v", totalTime), map[string]interface{}{
 		"document_id": documentID,
 		"agent_type":  agentType,
 		"total_time":  totalTime.String(),

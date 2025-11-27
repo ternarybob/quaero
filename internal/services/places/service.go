@@ -56,7 +56,7 @@ func NewService(
 
 // SearchPlaces performs a Google Places API search and returns results
 func (s *Service) SearchPlaces(ctx context.Context, jobID string, req *models.PlacesSearchRequest) (*models.PlacesSearchResult, error) {
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_id", jobID).
 		Str("search_query", req.SearchQuery).
 		Str("search_type", req.SearchType).
@@ -113,7 +113,7 @@ func (s *Service) SearchPlaces(ctx context.Context, jobID string, req *models.Pl
 		"search_query":  req.SearchQuery,
 	})
 
-	s.logger.Info().
+	s.logger.Debug().
 		Int("total_results", result.TotalResults).
 		Msg("Place search completed")
 
@@ -176,7 +176,7 @@ func (s *Service) textSearch(ctx context.Context, req *models.PlacesSearchReques
 		}
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("search_query", req.SearchQuery).
 		Int("results_count", len(apiResp.Results)).
 		Str("status", apiResp.Status).
@@ -262,7 +262,7 @@ func (s *Service) nearbySearch(ctx context.Context, req *models.PlacesSearchRequ
 		}
 	}
 
-	logEvent := s.logger.Info().
+	logEvent := s.logger.Debug().
 		Str("search_query", req.SearchQuery).
 		Float64("latitude", req.Location.Latitude).
 		Float64("longitude", req.Location.Longitude).

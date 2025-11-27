@@ -42,7 +42,7 @@ func NewService(
 // GenerateSummaryDocument creates/updates a special summary document
 // containing metadata about the document corpus
 func (s *Service) GenerateSummaryDocument(ctx context.Context) error {
-	s.logger.Info().Msg("Generating corpus summary document")
+	s.logger.Debug().Msg("Generating corpus summary document")
 
 	// Get document counts by source type
 	totalDocs, err := s.docStorage.CountDocuments()
@@ -118,7 +118,7 @@ Questions you can ask about this data:
 		return fmt.Errorf("failed to save summary document: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Int("total_docs", totalDocs).
 		Int("jira_docs", jiraDocs).
 		Int("confluence_docs", confluenceDocs).

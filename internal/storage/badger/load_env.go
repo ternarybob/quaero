@@ -14,7 +14,7 @@ import (
 //   - # comments (lines starting with #)
 //   - Empty lines are ignored
 func (m *Manager) LoadEnvFile(ctx context.Context, filePath string) error {
-	m.logger.Info().Str("file", filePath).Msg("Loading variables from .env file")
+	m.logger.Debug().Str("file", filePath).Msg("Loading variables from .env file")
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -104,7 +104,7 @@ func (m *Manager) LoadEnvFile(ctx context.Context, filePath string) error {
 		m.logger.Warn().Err(err).Str("file", filePath).Msg("Error reading .env file")
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("file", filePath).
 		Int("loaded", loadedCount).
 		Int("skipped", skippedCount).

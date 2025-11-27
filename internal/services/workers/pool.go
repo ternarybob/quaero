@@ -44,7 +44,7 @@ func NewPool(maxWorkers int, logger arbor.ILogger) *Pool {
 
 // Start begins the worker pool
 func (p *Pool) Start() {
-	p.logger.Info().
+	p.logger.Debug().
 		Int("max_workers", p.maxWorkers).
 		Msg("Starting worker pool")
 
@@ -76,7 +76,7 @@ func (p *Pool) Wait() {
 func (p *Pool) Shutdown() {
 	p.cancel()
 	p.Wait()
-	p.logger.Info().Msg("Worker pool shutdown complete")
+	p.logger.Debug().Msg("Worker pool shutdown complete")
 }
 
 // Errors returns all collected errors

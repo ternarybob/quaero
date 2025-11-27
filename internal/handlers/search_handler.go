@@ -90,7 +90,7 @@ func (h *SearchHandler) SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Log the search request
 	if h.logger != nil {
-		h.logger.Info().
+		h.logger.Debug().
 			Str("query", query).
 			Int("limit", limit).
 			Int("offset", offset).

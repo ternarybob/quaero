@@ -758,7 +758,7 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied and queued")
+	h.logger.Debug().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied and queued")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -792,7 +792,7 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("job_id", jobID).Msg("Job cancelled")
+	h.logger.Debug().Str("job_id", jobID).Msg("Job cancelled")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -855,7 +855,7 @@ func (h *JobHandler) CopyJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied")
+	h.logger.Debug().Str("original_job_id", jobID).Str("new_job_id", newJobID).Msg("Job copied")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -911,14 +911,14 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 
 	// If job is orchestrating (parent job), cancel it and all children first before deletion
 	if jobState.Status == models.JobStatusRunning && jobState.Type == "parent" {
-		h.logger.Info().Str("job_id", jobID).Msg("Cancelling orchestrating job and children before deletion")
+		h.logger.Debug().Str("job_id", jobID).Msg("Cancelling orchestrating job and children before deletion")
 
 		// Cancel all child jobs first
 		childrenCancelled, err := h.jobManager.StopAllChildJobs(ctx, jobID)
 		if err != nil {
 			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to cancel child jobs")
 		} else {
-			h.logger.Info().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
+			h.logger.Debug().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
 		}
 
 		// Cancel the parent job by updating its status
@@ -929,7 +929,7 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.logger.Info().Str("job_id", jobID).Msg("Orchestrating job cancelled successfully")
+		h.logger.Debug().Str("job_id", jobID).Msg("Orchestrating job cancelled successfully")
 	}
 
 	// Get child count for response
@@ -942,7 +942,7 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log deletion attempt
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_id", jobID).
 		Int("child_count", childCount).
 		Msg("Attempting to delete job")
@@ -964,7 +964,7 @@ func (h *JobHandler) DeleteJobHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log successful deletion
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_id", jobID).
 		Int("cascade_deleted", cascadeDeleted).
 		Int("child_count", childCount).
@@ -1155,7 +1155,7 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_id", jobID).
 		Str("name", job.Name).
 		Str("description", job.Description).

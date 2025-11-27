@@ -110,11 +110,11 @@ func (s *Service) Start(cronExpr string) error {
 		if err != nil {
 			return fmt.Errorf("failed to add cron job: %w", err)
 		}
-		s.logger.Info().
+		s.logger.Debug().
 			Str("cron_expr", cronExpr).
 			Msg("Legacy scheduled task enabled (no job definitions registered)")
 	} else {
-		s.logger.Info().
+		s.logger.Debug().
 			Msg("Legacy scheduled task disabled (job definitions are registered)")
 	}
 
@@ -125,7 +125,7 @@ func (s *Service) Start(cronExpr string) error {
 	if s.jobStorage != nil {
 		s.staleJobTicker = time.NewTicker(5 * time.Minute)
 		go s.staleJobDetectorLoop()
-		s.logger.Info().Msg("Stale job detector started (5 minute interval)")
+		s.logger.Debug().Msg("Stale job detector started (5 minute interval)")
 	}
 
 	s.logger.Info().Msg("Scheduler started")
@@ -182,7 +182,7 @@ func (s *Service) Stop() error {
 	// Stop stale job ticker if running
 	if s.staleJobTicker != nil {
 		s.staleJobTicker.Stop()
-		s.logger.Info().Msg("Stale job detector stopped")
+		s.logger.Debug().Msg("Stale job detector stopped")
 	}
 
 	s.cron.Stop()
@@ -209,14 +209,14 @@ func (s *Service) executeAutoStartJobs() {
 
 	// Execute auto-start jobs (without holding lock)
 	for _, jobName := range autoStartJobs {
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_name", jobName).
 			Msg("Executing auto-start job")
 		go s.executeJob(jobName)
 	}
 
 	if len(autoStartJobs) > 0 {
-		s.logger.Info().
+		s.logger.Debug().
 			Int("count", len(autoStartJobs)).
 			Msg("Auto-start jobs initiated")
 	} else {
@@ -226,7 +226,7 @@ func (s *Service) executeAutoStartJobs() {
 
 // TriggerCollectionNow manually triggers collection
 func (s *Service) TriggerCollectionNow() error {
-	s.logger.Info().Msg("Manual collection trigger requested")
+	s.logger.Debug().Msg("Manual collection trigger requested")
 
 	ctx := context.Background()
 	event := interfaces.Event{
@@ -277,7 +277,7 @@ func (s *Service) RegisterJob(name string, schedule string, description string, 
 	entry.cronID = cronID
 	s.jobs[name] = entry
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
 		Str("schedule", schedule).
 		Msg("Job registered")
@@ -310,7 +310,7 @@ func (s *Service) EnableJob(name string) error {
 	entry.cronID = cronID
 	entry.enabled = true
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
 		Msg("Job enabled")
 
@@ -340,7 +340,7 @@ func (s *Service) DisableJob(name string) error {
 	s.cron.Remove(entry.cronID)
 	entry.enabled = false
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
 		Msg("Job disabled")
 
@@ -402,7 +402,7 @@ func (s *Service) UpdateJobSchedule(name string, schedule string) error {
 	// Note: nextRun will be computed on-demand by GetJobStatus()
 	// No need to iterate cron.Entries() here to avoid holding jobMu during iteration
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
 		Str("new_schedule", schedule).
 		Msg("Job schedule updated")
@@ -431,7 +431,7 @@ func (s *Service) UpdateJob(name string, description, schedule *string, enabled 
 		s.jobMu.Lock()
 		entry.description = *description
 		s.jobMu.Unlock()
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_name", name).
 			Str("new_description", *description).
 			Msg("Job description updated")
@@ -563,9 +563,9 @@ func (s *Service) executeJob(name string) {
 	s.globalMu.Lock()
 	defer s.globalMu.Unlock()
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
-		Msg("🚀 Job execution started")
+		Msg("Job execution started")
 
 	// Get job handler
 	s.jobMu.Lock()
@@ -607,10 +607,10 @@ func (s *Service) executeJob(name string) {
 			Msg("❌ Job execution failed")
 	} else {
 		entry.lastError = ""
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_name", name).
 			Dur("duration", time.Since(now)).
-			Msg("✅ Job execution completed successfully")
+			Msg("Job execution completed successfully")
 	}
 
 	// Capture values for persistence before unlocking
@@ -660,7 +660,7 @@ func (s *Service) runScheduledTask() {
 		s.logger.Debug().Msg(">>> SCHEDULER: Processing flag cleared")
 	}()
 
-	s.logger.Info().Msg("🔄 >>> SCHEDULER: Starting scheduled collection and embedding cycle")
+	s.logger.Debug().Msg("Starting scheduled collection and embedding cycle")
 
 	ctx := context.Background()
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 3 - Context created")
@@ -684,7 +684,7 @@ func (s *Service) runScheduledTask() {
 	}
 	s.logger.Debug().Msg(">>> SCHEDULER: Step 7 - Collection event published successfully")
 
-	s.logger.Info().Msg("✅ >>> SCHEDULER: Collection completed successfully")
+	s.logger.Debug().Msg("Collection completed successfully")
 }
 
 // JobSettings represents persisted job configuration
@@ -820,7 +820,7 @@ func (s *Service) LoadJobSettings() error {
 	}
 
 	if settingsLoaded > 0 {
-		s.logger.Info().Int("count", settingsLoaded).Msg("Loaded job settings from storage")
+		s.logger.Debug().Int("count", settingsLoaded).Msg("Loaded job settings from storage")
 	}
 
 	return nil
@@ -846,7 +846,7 @@ func (s *Service) LoadJobDefinitions() error {
 	}
 
 	if len(jobDefs) == 0 {
-		s.logger.Info().Msg("No enabled job definitions found")
+		s.logger.Debug().Msg("No enabled job definitions found")
 		return nil
 	}
 
@@ -857,7 +857,7 @@ func (s *Service) LoadJobDefinitions() error {
 		// Create local copy to avoid closure capture issues
 		jd := jobDef
 
-		s.logger.Info().
+		s.logger.Debug().
 			Str("job_id", jd.ID).
 			Str("job_name", jd.Name).
 			Str("job_type", string(jd.Type)).
@@ -866,7 +866,7 @@ func (s *Service) LoadJobDefinitions() error {
 
 		// Check if this is an on-demand job (empty schedule)
 		if jd.Schedule == "" {
-			s.logger.Info().
+			s.logger.Debug().
 				Str("job_id", jd.ID).
 				Str("job_name", jd.Name).
 				Msg("On-demand job definition (no schedule) - can be triggered manually")
@@ -908,7 +908,7 @@ func (s *Service) LoadJobDefinitions() error {
 		registeredCount++
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Int("scheduled_count", registeredCount).
 		Int("on_demand_count", onDemandCount).
 		Msg("Job definitions loaded")
@@ -934,7 +934,7 @@ func (s *Service) CleanupOrphanedJobs() error {
 		return nil
 	}
 
-	s.logger.Info().Int("count", len(runningJobs)).Msg("Cleaning up orphaned jobs from previous run")
+	s.logger.Debug().Int("count", len(runningJobs)).Msg("Cleaning up orphaned jobs from previous run")
 
 	// Mark each as failed
 	cleanedCount := 0
@@ -983,7 +983,7 @@ func (s *Service) DetectStaleJobs() error {
 			} else {
 				// Successfully failed via crawler service (in-memory + storage updated)
 				failedViaService = true
-				s.logger.Info().Str("job_id", job.ID).Msg("Marked stale job as failed (via crawler service)")
+				s.logger.Debug().Str("job_id", job.ID).Msg("Marked stale job as failed (via crawler service)")
 			}
 		}
 
@@ -992,7 +992,7 @@ func (s *Service) DetectStaleJobs() error {
 			if err := s.jobStorage.UpdateJobStatus(ctx, job.ID, "failed", reason); err != nil {
 				s.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to update stale job status")
 			} else {
-				s.logger.Info().Str("job_id", job.ID).Msg("Marked stale job as failed (via storage)")
+				s.logger.Debug().Str("job_id", job.ID).Msg("Marked stale job as failed (via storage)")
 
 				// Emit progress event for UI update
 				if s.eventService != nil {
@@ -1038,7 +1038,7 @@ func (s *Service) TriggerJob(name string) error {
 	}
 	s.jobMu.Unlock()
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_name", name).
 		Msg("Manually triggering job execution")
 

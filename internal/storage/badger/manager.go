@@ -40,7 +40,7 @@ func NewManager(logger arbor.ILogger, config *common.BadgerConfig) (interfaces.S
 		logger:        logger,
 	}
 
-	logger.Info().Msg("Badger storage manager initialized")
+	logger.Debug().Msg("Badger storage manager initialized")
 
 	return manager, nil
 }
@@ -98,7 +98,7 @@ func (m *Manager) Close() error {
 
 // MigrateAPIKeysToKVStore is a no-op function retained for backward compatibility.
 func (m *Manager) MigrateAPIKeysToKVStore(ctx context.Context) error {
-	m.logger.Info().Msg("MigrateAPIKeysToKVStore is no-op (Phase 4: API key migration completed)")
+	m.logger.Debug().Msg("MigrateAPIKeysToKVStore is no-op (Phase 4: API key migration completed)")
 	return nil
 }
 

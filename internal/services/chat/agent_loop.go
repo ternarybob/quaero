@@ -102,7 +102,7 @@ func (a *AgentLoop) Execute(
 		Content: userMessage,
 	})
 
-	a.logger.Info().
+	a.logger.Debug().
 		Str("conversation_id", state.ConversationID).
 		Str("user_message", userMessage).
 		Msg("Starting agent conversation loop")
@@ -144,7 +144,7 @@ func (a *AgentLoop) Execute(
 				})
 			}
 
-			a.logger.Info().
+			a.logger.Debug().
 				Str("conversation_id", state.ConversationID).
 				Int("turns", state.TurnCount).
 				Int("tool_calls", len(state.ToolCalls)).
@@ -235,7 +235,7 @@ func (a *AgentLoop) Execute(
 				})
 			}
 
-			a.logger.Info().
+			a.logger.Debug().
 				Str("conversation_id", state.ConversationID).
 				Int("turns", state.TurnCount).
 				Dur("duration", time.Since(startTime)).

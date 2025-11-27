@@ -39,7 +39,7 @@ func NewChatService(
 
 // Chat implements the ChatService interface using agent mode
 func (s *ChatService) Chat(ctx context.Context, req *interfaces.ChatRequest) (*interfaces.ChatResponse, error) {
-	s.logger.Info().
+	s.logger.Debug().
 		Str("message", req.Message).
 		Msg("Processing chat request (agent mode)")
 

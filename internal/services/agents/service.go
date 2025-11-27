@@ -130,7 +130,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	keywordExtractor := &KeywordExtractor{}
 	service.RegisterAgent(keywordExtractor)
 
-	logger.Info().
+	logger.Debug().
 		Str("model", config.AgentModel).
 		Int("max_turns", config.MaxTurns).
 		Dur("timeout", timeout).
@@ -149,7 +149,7 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 func (s *Service) RegisterAgent(agent AgentExecutor) {
 	agentType := agent.GetType()
 	s.agents[agentType] = agent
-	s.logger.Info().
+	s.logger.Debug().
 		Str("agent_type", agentType).
 		Msg("Agent registered")
 }
@@ -218,7 +218,7 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 		return nil, fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("agent_type", agentType).
 		Dur("duration", duration).
 		Msg("Agent execution completed successfully")
@@ -253,7 +253,7 @@ func (s *Service) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("model name is not set")
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("model", s.modelName).
 		Msg("Agent service health check passed")
 	return nil
@@ -266,7 +266,7 @@ func (s *Service) HealthCheck(ctx context.Context) error {
 //   - nil on successful cleanup
 //   - error if cleanup fails
 func (s *Service) Close() error {
-	s.logger.Info().Msg("Closing agent service")
+	s.logger.Debug().Msg("Closing agent service")
 
 	// genai client doesn't require explicit Close
 	s.client = nil

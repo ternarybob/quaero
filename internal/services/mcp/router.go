@@ -37,7 +37,7 @@ func NewToolRouter(
 func (r *ToolRouter) ExecuteTool(ctx context.Context, toolUse *ToolUse) *ToolResponse {
 	startTime := time.Now()
 
-	r.logger.Info().
+	r.logger.Debug().
 		Str("tool", toolUse.Name).
 		Str("tool_use_id", toolUse.ID).
 		Msg("Executing tool")
@@ -65,7 +65,7 @@ func (r *ToolRouter) ExecuteTool(ctx context.Context, toolUse *ToolUse) *ToolRes
 	// Convert ToolResult to ToolResponse
 	response := r.convertToolResult(toolUse.ID, result)
 
-	r.logger.Info().
+	r.logger.Debug().
 		Str("tool", toolUse.Name).
 		Str("tool_use_id", toolUse.ID).
 		Int("content_length", len(response.Content)).

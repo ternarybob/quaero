@@ -32,7 +32,7 @@ func NewOrchestrator(jobManager *Manager, jobMonitor interfaces.JobMonitor, logg
 // RegisterStepExecutor registers a step manager for an action type
 func (o *Orchestrator) RegisterStepExecutor(mgr interfaces.StepManager) {
 	o.stepExecutors[mgr.GetManagerType()] = mgr
-	o.logger.Info().
+	o.logger.Debug().
 		Str("action_type", mgr.GetManagerType()).
 		Msg("Step manager registered")
 }
@@ -47,7 +47,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 	// This ensures all parent job logs are associated with the parent job ID
 	parentLogger := o.logger.WithCorrelationId(parentJobID)
 
-	parentLogger.Info().
+	parentLogger.Debug().
 		Str("job_def_id", jobDef.ID).
 		Str("parent_job_id", parentJobID).
 		Str("job_name", jobDef.Name).
@@ -78,12 +78,12 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 		return "", fmt.Errorf("failed to create parent job: %w", err)
 	}
 
-	parentLogger.Info().
+	parentLogger.Debug().
 		Str("parent_job_id", parentJobID).
 		Str("job_name", jobDef.Name).
 		Str("status", parentJob.Status).
 		Str("created_at", parentJob.CreatedAt.Format("2006-01-02 15:04:05")).
-		Msg("✓ Parent job record created successfully")
+		Msg("Parent job record created")
 
 	// Persist metadata immediately after job creation to avoid race with child jobs
 	// This ensures auth_id and job_definition_id are available when crawler jobs start
@@ -119,7 +119,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 	if err := o.jobManager.AddJobLog(ctx, parentJobID, "info", initialLog); err != nil {
 		parentLogger.Warn().Err(err).Msg("Failed to add initial job log")
 	}
-	parentLogger.Info().Str("job_def_id", jobDef.ID).Str("type", string(jobDef.Type)).Msg("Job definition loaded")
+	parentLogger.Debug().Str("job_def_id", jobDef.ID).Str("type", string(jobDef.Type)).Msg("Job definition loaded")
 
 	// Build job definition config for parent job
 	jobDefConfig := make(map[string]interface{})
@@ -156,22 +156,22 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 			Msg("Failed to update job config, continuing without config display")
 	}
 
-	parentLogger.Info().
+	parentLogger.Debug().
 		Str("parent_job_id", parentJobID).
 		Str("job_def_id", jobDef.ID).
 		Int("total_steps", len(jobDef.Steps)).
-		Msg("Parent job record created successfully")
+		Msg("Parent job record finalized")
 
 	// Mark parent job as running
 	if err := o.jobManager.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
 		parentLogger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to update parent job status to running")
 	} else {
-		parentLogger.Info().Str("parent_job_id", parentJobID).Msg("✓ Parent job status updated to 'running'")
+		parentLogger.Debug().Str("parent_job_id", parentJobID).Msg("Parent job status updated to 'running'")
 	}
 
 	// Execute pre-jobs if any
 	if len(jobDef.PreJobs) > 0 {
-		parentLogger.Info().
+		parentLogger.Debug().
 			Int("pre_job_count", len(jobDef.PreJobs)).
 			Msg("Executing pre-jobs (not yet implemented)")
 		// TODO: Load and execute pre-job definitions
@@ -182,7 +182,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
-		parentLogger.Info().
+		parentLogger.Debug().
 			Str("step_name", step.Name).
 			Str("action", step.Action).
 			Int("step_index", i).
@@ -299,11 +299,11 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 			hasChildJobs = true
 		}
 
-		parentLogger.Info().
+		parentLogger.Debug().
 			Str("step_name", step.Name).
 			Str("child_job_id", childJobID).
 			Str("parent_job_id", parentJobID).
-			Msg("Step completed successfully")
+			Msg("Step completed")
 
 		// Update progress after successful step
 		if err := o.jobManager.UpdateJobProgress(ctx, parentJobID, i+1, len(jobDef.Steps)); err != nil {
@@ -319,7 +319,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 
 	// Execute post-jobs if any
 	if len(jobDef.PostJobs) > 0 {
-		parentLogger.Info().
+		parentLogger.Debug().
 			Int("post_job_count", len(jobDef.PostJobs)).
 			Msg("Executing post-jobs (not yet implemented)")
 		// TODO: Load and execute post-job definitions
@@ -335,7 +335,7 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 		len(string(jobDef.Type)), len(string(models.JobDefinitionTypeCrawler)))
 	o.jobManager.AddJobLog(ctx, parentJobID, "info", typeComparison)
 
-	parentLogger.Info().
+	parentLogger.Trace().
 		Str("job_def_type", string(jobDef.Type)).
 		Str("expected_type", string(models.JobDefinitionTypeCrawler)).
 		Bool("is_crawler", jobDef.Type == models.JobDefinitionTypeCrawler).
@@ -363,11 +363,11 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 
 	if isCrawlerJob {
 		// Add job log for UI visibility
-		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Crawler job detected - leaving in running state for JobMonitor to monitor child jobs")
+		o.jobManager.AddJobLog(ctx, parentJobID, "info", "Crawler job detected - leaving in running state for JobMonitor to monitor child jobs")
 
-		parentLogger.Info().
+		parentLogger.Debug().
 			Str("parent_job_id", parentJobID).
-			Msg("✓ Crawler job detected - starting parent job monitoring in background")
+			Msg("Crawler job detected - starting parent job monitoring in background")
 
 		// Start parent job monitoring in a separate goroutine (NOT via queue)
 		// This prevents blocking the queue worker with long-running monitoring loops
@@ -400,8 +400,8 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 		// Start monitoring in background goroutine
 		o.jobMonitor.StartMonitoring(ctx, parentQueueJob)
 
-		parentLogger.Info().Msg("✓ Parent job monitoring started in background goroutine")
-		o.jobManager.AddJobLog(ctx, parentJobID, "info", "✓ Parent job monitoring started - tracking child job progress")
+		parentLogger.Debug().Msg("Parent job monitoring started in background goroutine")
+		o.jobManager.AddJobLog(ctx, parentJobID, "info", "Parent job monitoring started - tracking child job progress")
 
 		// NOTE: Do NOT set finished_at for crawler jobs - JobMonitor will handle this
 		// when all children complete
@@ -421,12 +421,12 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 		}
 	}
 
-	parentLogger.Info().
+	parentLogger.Debug().
 		Str("job_def_id", jobDef.ID).
 		Str("parent_job_id", parentJobID).
 		Int("completed_steps", len(jobDef.Steps)).
 		Bool("is_crawler", jobDef.Type == models.JobDefinitionTypeCrawler).
-		Msg("Job definition execution completed successfully")
+		Msg("Job definition execution completed")
 
 	return parentJobID, nil
 }

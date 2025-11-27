@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -60,8 +61,21 @@ func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.QueueJob) 
 		return
 	}
 
-	// Start monitoring in a separate goroutine
+	// Start monitoring in a separate goroutine with panic recovery
 	go func() {
+		// CRITICAL: Panic recovery to capture fatal crashes in monitoring goroutine
+		defer func() {
+			if r := recover(); r != nil {
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				m.logger.Fatal().
+					Str("panic", fmt.Sprintf("%v", r)).
+					Str("stack", string(buf[:n])).
+					Str("job_id", job.ID).
+					Msg("FATAL: Job monitor goroutine panicked")
+			}
+		}()
+
 		if err := m.monitorChildJobs(ctx, job); err != nil {
 			m.logger.Error().
 				Err(err).
@@ -70,7 +84,7 @@ func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.QueueJob) 
 		}
 	}()
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("job_id", job.ID).
 		Msg("Parent job monitoring started in background goroutine")
 }
@@ -109,7 +123,7 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 		logMsg = fmt.Sprintf("Starting parent job for %s", sourceType)
 	}
 
-	jobLogger.Info().
+	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("source_type", sourceType).
 		Str("entity_type", entityType).
@@ -142,7 +156,7 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 	for {
 		select {
 		case <-ctx.Done():
-			jobLogger.Info().Msg("Parent job execution cancelled")
+			jobLogger.Debug().Msg("Parent job execution cancelled")
 			m.jobMgr.UpdateJobStatus(ctx, job.ID, "cancelled")
 			// Set finished_at timestamp for cancelled parent jobs
 			if err := m.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
@@ -170,7 +184,7 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 
 			if completed {
 				// All child jobs are complete
-				jobLogger.Info().Msg("All child jobs completed, finishing parent job")
+				jobLogger.Debug().Msg("All child jobs completed, finishing parent job")
 
 				// Update job status to completed
 				if err := m.jobMgr.UpdateJobStatus(ctx, job.ID, "completed"); err != nil {
@@ -189,7 +203,7 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 				// Publish completion event
 				m.publishParentJobProgress(ctx, job, "completed", "All child jobs completed")
 
-				jobLogger.Info().Str("job_id", job.ID).Msg("Parent job execution completed successfully")
+				jobLogger.Debug().Str("job_id", job.ID).Msg("Parent job execution completed successfully")
 				return nil
 			}
 		}
@@ -222,7 +236,7 @@ func (m *jobMonitor) checkChildJobProgress(ctx context.Context, parentJobID stri
 	}
 
 	// Log current progress
-	logger.Debug().
+	logger.Trace().
 		Int("total_children", childStats.TotalChildren).
 		Int("completed_children", childStats.CompletedChildren).
 		Int("failed_children", childStats.FailedChildren).
@@ -349,7 +363,7 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		}
 
 		// Log the status change
-		m.logger.Debug().
+		m.logger.Trace().
 			Str("job_id", jobID).
 			Str("parent_id", parentID).
 			Str("status", status).
@@ -430,7 +444,7 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 				Str("job_id", jobID).
 				Msg("Failed to increment document count for parent job")
 		} else {
-			m.logger.Debug().
+			m.logger.Trace().
 				Str("parent_job_id", parentJobID).
 				Str("document_id", documentID).
 				Str("job_id", jobID).
@@ -558,7 +572,7 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		return
 	}
 
-	m.logger.Info().Msg("JobMonitor subscribed to child job status changes, document events, error events, and warning events")
+	m.logger.Debug().Msg("JobMonitor subscribed to child job status changes, document events, error events, and warning events")
 }
 
 // formatProgressText generates the required progress format

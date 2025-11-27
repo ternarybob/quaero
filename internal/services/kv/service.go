@@ -71,7 +71,7 @@ func (s *Service) Set(ctx context.Context, key string, value string, description
 		return err
 	}
 
-	s.logger.Info().Str("key", key).Msg("Stored key/value pair")
+	s.logger.Debug().Str("key", key).Msg("Stored key/value pair")
 
 	// Publish EventKeyUpdated if event service is available
 	if s.eventSvc != nil {
@@ -116,9 +116,9 @@ func (s *Service) Upsert(ctx context.Context, key string, value string, descript
 
 	// Log based on operation type
 	if isNewKey {
-		s.logger.Info().Str("key", key).Msg("Created new key/value pair")
+		s.logger.Debug().Str("key", key).Msg("Created new key/value pair")
 	} else {
-		s.logger.Info().Str("key", key).Msg("Updated existing key/value pair")
+		s.logger.Debug().Str("key", key).Msg("Updated existing key/value pair")
 	}
 
 	// Publish EventKeyUpdated if event service is available
@@ -154,7 +154,7 @@ func (s *Service) Delete(ctx context.Context, key string) error {
 		return err
 	}
 
-	s.logger.Info().Str("key", key).Msg("Deleted key/value pair")
+	s.logger.Debug().Str("key", key).Msg("Deleted key/value pair")
 	return nil
 }
 

@@ -135,7 +135,7 @@ func NewGeminiService(geminiConfig *common.GeminiConfig, storageManager interfac
 		timeout: timeout,
 	}
 
-	logger.Info().
+	logger.Debug().
 		Str("chat_model", geminiConfig.ChatModel).
 		Dur("timeout", timeout).
 		Float32("temperature", geminiConfig.Temperature).
@@ -189,7 +189,7 @@ func (s *GeminiService) Chat(ctx context.Context, messages []interfaces.Message)
 	}
 
 	duration := time.Since(startTime)
-	s.logger.Info().
+	s.logger.Debug().
 		Int("message_count", len(messages)).
 		Int("response_length", len(response)).
 		Dur("duration", duration).
@@ -226,7 +226,7 @@ func (s *GeminiService) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("chat model health check failed: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("chat_model", s.config.ChatModel).
 		Msg("Gemini LLM service health check passed")
 
@@ -286,7 +286,7 @@ func (s *GeminiService) GetMode() interfaces.LLMMode {
 // Returns:
 //   - nil: Always returns nil as no cleanup errors are expected
 func (s *GeminiService) Close() error {
-	s.logger.Info().Msg("Closing Gemini LLM service")
+	s.logger.Debug().Msg("Closing Gemini LLM service")
 
 	// Clear client reference (genai.Client doesn't require explicit Close)
 	s.client = nil

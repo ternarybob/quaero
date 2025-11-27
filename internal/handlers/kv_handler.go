@@ -160,7 +160,7 @@ func (h *KVHandler) CreateKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("key", req.Key).Msg("Created key/value pair")
+	h.logger.Debug().Str("key", req.Key).Msg("Created key/value pair")
 
 	WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"status":  "success",
@@ -236,11 +236,11 @@ func (h *KVHandler) UpdateKVHandler(w http.ResponseWriter, r *http.Request) {
 	if isNewKey {
 		statusCode = http.StatusCreated
 		message = "Key/value pair created successfully"
-		h.logger.Info().Str("key", key).Msg("Created new key/value pair via PUT")
+		h.logger.Debug().Str("key", key).Msg("Created new key/value pair via PUT")
 	} else {
 		statusCode = http.StatusOK
 		message = "Key/value pair updated successfully"
-		h.logger.Info().Str("key", key).Msg("Updated existing key/value pair via PUT")
+		h.logger.Debug().Str("key", key).Msg("Updated existing key/value pair via PUT")
 	}
 
 	WriteJSON(w, statusCode, map[string]interface{}{
@@ -285,7 +285,7 @@ func (h *KVHandler) DeleteKVHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info().Str("key", key).Msg("Deleted key/value pair")
+	h.logger.Debug().Str("key", key).Msg("Deleted key/value pair")
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "success",

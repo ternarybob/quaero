@@ -20,7 +20,7 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 		return nil
 	}
 
-	logger.Info().Str("dir", definitionsDir).Msg("Loading job definitions from files")
+	logger.Debug().Str("dir", definitionsDir).Msg("Loading job definitions from files")
 
 	// Read all files in the directory
 	entries, err := os.ReadDir(definitionsDir)
@@ -79,9 +79,9 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 				continue
 			}
 			if validationErr != nil {
-				logger.Info().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from file (with validation warnings)")
+				logger.Debug().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from file (with validation warnings)")
 			} else {
-				logger.Info().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from file")
+				logger.Debug().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from file")
 			}
 		} else {
 			// Save new job definition
@@ -90,9 +90,9 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 				continue
 			}
 			if validationErr != nil {
-				logger.Info().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition loaded from file (with validation warnings)")
+				logger.Debug().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition loaded from file (with validation warnings)")
 			} else {
-				logger.Info().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition loaded from file")
+				logger.Debug().Str("file", entry.Name()).Str("job_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition loaded from file")
 			}
 		}
 
@@ -100,7 +100,7 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 	}
 
 	if loadedCount > 0 {
-		logger.Info().Int("count", loadedCount).Msg("Job definitions loaded from files")
+		logger.Debug().Int("count", loadedCount).Msg("Job definitions loaded from files")
 	} else {
 		logger.Debug().Msg("No job definitions loaded from files")
 	}

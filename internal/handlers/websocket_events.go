@@ -99,7 +99,7 @@ func (s *EventSubscriber) SubscribeAll() {
 	// Subscribe to job spawn events
 	s.eventService.Subscribe(interfaces.EventJobSpawn, s.handleJobSpawn)
 
-	s.logger.Info().Msg("EventSubscriber registered for all job lifecycle events (created, started, completed, failed, cancelled, spawn)")
+	s.logger.Debug().Msg("EventSubscriber registered for all job lifecycle events (created, started, completed, failed, cancelled, spawn)")
 }
 
 // handleJobSpawn bridges EventJobSpawn to WebSocket job_spawn broadcast

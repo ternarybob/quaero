@@ -73,7 +73,7 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 		}
-		m.logger.Info().
+		m.logger.Debug().
 			Str("step_name", step.Name).
 			Str("api_key_name", cleanAPIKeyName).
 			Msg("Resolved API key from storage for agent execution")
@@ -87,7 +87,7 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		documentFilter = filter
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Str("parent_job_id", parentJobID).
@@ -107,7 +107,7 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		return parentJobID, nil // No documents to process, but not an error
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(documents)).
@@ -139,7 +139,7 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_created", len(jobIDs)).
@@ -155,7 +155,7 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 		return "", fmt.Errorf("agent jobs did not complete successfully: %w", err)
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).

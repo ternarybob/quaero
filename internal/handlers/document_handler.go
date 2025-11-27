@@ -198,9 +198,7 @@ func (h *DocumentHandler) ReprocessDocumentHandler(w http.ResponseWriter, r *htt
 	}
 
 	// NOTE: Phase 5 - Embeddings removed, reprocessing endpoint is now a no-op
-	h.logger.Info().Str("doc_id", docID).Msg("Reprocess endpoint called (no-op after Phase 5 embedding removal)")
-
-	h.logger.Info().Str("doc_id", docID).Msg("Document reprocessing skipped (embeddings removed)")
+	h.logger.Debug().Str("doc_id", docID).Msg("Reprocess endpoint called (no-op after Phase 5 embedding removal)")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -237,7 +235,7 @@ func (h *DocumentHandler) DeleteDocumentHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	h.logger.Info().Str("doc_id", docID).Msg("Document deleted")
+	h.logger.Debug().Str("doc_id", docID).Msg("Document deleted")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -340,7 +338,7 @@ func (h *DocumentHandler) CreateDocumentHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	h.logger.Info().Str("doc_id", id).Str("source_type", sourceType).Msg("Document created")
+	h.logger.Debug().Str("doc_id", id).Str("source_type", sourceType).Msg("Document created")
 
 	// Return created document
 	w.Header().Set("Content-Type", "application/json")
@@ -359,7 +357,7 @@ func (h *DocumentHandler) RebuildIndexHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.logger.Info().Msg("FTS5 index rebuild requested")
+	h.logger.Debug().Msg("FTS5 index rebuild requested")
 
 	// Rebuild the FTS5 index
 	err := h.documentStorage.RebuildFTS5Index()
@@ -369,7 +367,7 @@ func (h *DocumentHandler) RebuildIndexHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.logger.Info().Msg("FTS5 index rebuilt successfully")
+	h.logger.Debug().Msg("FTS5 index rebuilt successfully")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

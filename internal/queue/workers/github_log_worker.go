@@ -54,7 +54,7 @@ func (w *GitHubLogWorker) Validate(job *models.QueueJob) error {
 
 // Execute processes a GitHub Action Log job
 func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.QueueJob) error {
-	w.logger.Info().Str("job_id", job.ID).Msg("Processing GitHub Action Log job")
+	w.logger.Debug().Str("job_id", job.ID).Msg("Processing GitHub Action Log job")
 
 	// Update job status to running
 	if err := w.jobManager.UpdateJobStatus(ctx, job.ID, string(models.JobStatusRunning)); err != nil {
@@ -149,6 +149,6 @@ func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.QueueJob) err
 		w.logger.Warn().Err(err).Msg("Failed to update job progress")
 	}
 
-	w.logger.Info().Str("job_id", job.ID).Msg("GitHub Action Log job completed successfully")
+	w.logger.Debug().Str("job_id", job.ID).Msg("GitHub Action Log job completed successfully")
 	return nil
 }

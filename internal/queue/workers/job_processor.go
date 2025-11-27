@@ -7,6 +7,7 @@ package workers
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *queue.Manager, lo
 func (jp *JobProcessor) RegisterExecutor(worker interfaces.JobWorker) {
 	jobType := worker.GetWorkerType()
 	jp.executors[jobType] = worker
-	jp.logger.Info().
+	jp.logger.Debug().
 		Str("job_type", jobType).
 		Msg("Job worker registered")
 }
@@ -93,17 +94,36 @@ func (jp *JobProcessor) Stop() {
 func (jp *JobProcessor) processJobs() {
 	defer jp.wg.Done()
 
-	jp.logger.Info().Msg("Job processor goroutine started")
+	// CRITICAL: Panic recovery wrapper to capture fatal crashes
+	// Without this, any panic in job processing or storage operations
+	// will crash the entire application without logging
+	defer func() {
+		if r := recover(); r != nil {
+			jp.logger.Fatal().
+				Str("panic", fmt.Sprintf("%v", r)).
+				Str("stack", getStackTrace()).
+				Msg("FATAL: Job processor goroutine panicked - application will terminate")
+		}
+	}()
+
+	jp.logger.Debug().Msg("Job processor goroutine started")
 
 	for {
 		select {
 		case <-jp.ctx.Done():
-			jp.logger.Info().Msg("Job processor goroutine stopping")
+			jp.logger.Debug().Msg("Job processor goroutine stopping")
 			return
 		default:
 			jp.processNextJob()
 		}
 	}
+}
+
+// getStackTrace returns a formatted stack trace for panic debugging
+func getStackTrace() string {
+	buf := make([]byte, 4096)
+	n := runtime.Stack(buf, false)
+	return string(buf[:n])
 }
 
 // processNextJob processes the next job from the queue, routing it to the appropriate worker based on job type.
@@ -119,7 +139,16 @@ func (jp *JobProcessor) processNextJob() {
 		return
 	}
 
+	// Track job start time for duration calculation
+	jobStartTime := time.Now()
+
+	// Log job start at Info level (significant event)
 	jp.logger.Info().
+		Str("job_id", msg.JobID).
+		Str("job_type", msg.Type).
+		Msg("Job started")
+
+	jp.logger.Trace().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
 		Msg("Processing job from queue")
@@ -196,12 +225,13 @@ func (jp *JobProcessor) processNextJob() {
 	err = worker.Execute(jp.ctx, queueJob)
 
 	if err != nil {
-		// Job failed
+		// Job failed - log at Error level with duration
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
-			Msg("Job execution failed")
+			Dur("duration", time.Since(jobStartTime)).
+			Msg("Job failed")
 
 		// Error is already set by worker, just ensure status is updated
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
@@ -211,16 +241,17 @@ func (jp *JobProcessor) processNextJob() {
 			jp.logger.Warn().Err(finishErr).Str("job_id", msg.JobID).Msg("Failed to set finished_at timestamp")
 		}
 	} else {
-		// Job succeeded
+		// Job succeeded - log at Info level with duration
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
-			Msg("Job execution completed successfully")
+			Dur("duration", time.Since(jobStartTime)).
+			Msg("Job completed")
 
 		// For parent jobs, do NOT mark as completed here - JobMonitor will handle completion
 		// when all children are done. For other job types, mark as completed immediately.
 		if msg.Type == "parent" {
-			jp.logger.Info().
+			jp.logger.Trace().
 				Str("job_id", msg.JobID).
 				Msg("Parent job execution completed - leaving in running state for child monitoring")
 			// Parent job remains in "running" state and will be monitored by JobMonitor

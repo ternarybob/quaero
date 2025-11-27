@@ -56,7 +56,7 @@ func (s *Service) SaveDocument(ctx context.Context, doc *models.Document) error 
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("doc_id", doc.ID).
 		Str("source", doc.SourceType).
 		Str("source_id", doc.SourceID).
@@ -95,7 +95,7 @@ func (s *Service) SaveDocuments(ctx context.Context, docs []*models.Document) er
 		return fmt.Errorf("failed to save documents: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Int("total", len(docs)).
 		Msg("Documents saved (embedding will be processed independently)")
 
@@ -123,7 +123,7 @@ func (s *Service) UpdateDocument(ctx context.Context, doc *models.Document) erro
 	if contentChanged {
 		changedStatus = "yes"
 	}
-	s.logger.Info().
+	s.logger.Debug().
 		Str("doc_id", doc.ID).
 		Str("content_changed", changedStatus).
 		Msg("Document updated (re-embedding will be handled independently)")
@@ -150,7 +150,7 @@ func (s *Service) DeleteDocument(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to delete document: %w", err)
 	}
 
-	s.logger.Info().Str("doc_id", id).Msg("Document deleted")
+	s.logger.Debug().Str("doc_id", id).Msg("Document deleted")
 	return nil
 }
 

@@ -244,7 +244,7 @@ func (s *Service) Close() error {
 	defer s.mu.Unlock()
 
 	s.subscribers = make(map[interfaces.EventType][]interfaces.EventHandler)
-	s.logger.Info().Msg("Event service closed")
+	s.logger.Debug().Msg("Event service closed")
 
 	return nil
 }

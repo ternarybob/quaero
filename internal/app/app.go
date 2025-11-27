@@ -209,7 +209,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Start job processor AFTER all handlers are initialized
 	// This prevents log channel blocking during initialization
 	app.JobProcessor.Start()
-	app.Logger.Info().Msg("Job processor started")
+	app.Logger.Debug().Msg("Job processor started")
 
 	// Authentication will be loaded on-demand when needed (e.g., when crawler service uses it)
 	// This prevents noisy debug logs during startup when no credentials exist
@@ -217,7 +217,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Start WebSocket background tasks for real-time UI updates
 	app.WSHandler.StartStatusBroadcaster()
 
-	logger.Info().Msg("WebSocket handlers started (status broadcaster)")
+	logger.Debug().Msg("WebSocket handlers started (status broadcaster)")
 
 	// Log initialization summary
 	logger.Info().
@@ -236,7 +236,7 @@ func (a *App) initDatabase() error {
 	}
 
 	a.StorageManager = storageManager
-	a.Logger.Info().
+	a.Logger.Debug().
 		Str("storage", "badger").
 		Str("path", a.Config.Storage.Badger.Path).
 		Msg("Storage layer initialized")
@@ -273,7 +273,7 @@ func (a *App) initDatabase() error {
 		if err := common.ReplaceInStruct(a.Config, kvMap, a.Logger); err != nil {
 			a.Logger.Warn().Err(err).Msg("Failed to replace key references in config")
 		} else {
-			a.Logger.Info().Int("keys", len(kvMap)).Msg("Applied key/value replacements to config")
+			a.Logger.Debug().Int("keys", len(kvMap)).Msg("Applied key/value replacements to config")
 		}
 	} else {
 		a.Logger.Debug().Msg("No key/value pairs found, skipping config replacement")
@@ -332,7 +332,7 @@ func (a *App) initServices() error {
 			a.Logger.Warn().Err(err).Msg("LLM service health check failed - service disabled")
 			a.Logger.Info().Msg("To enable LLM features, provide a valid Google Gemini API key")
 		} else {
-			a.Logger.Info().Msg("LLM service initialized and health check passed")
+			a.Logger.Debug().Msg("LLM service initialized and health check passed")
 		}
 	}
 
@@ -341,7 +341,7 @@ func (a *App) initServices() error {
 	// 5.5. Initialize status service
 	a.StatusService = status.NewService(a.EventService, a.Logger)
 	a.StatusService.SubscribeToCrawlerEvents()
-	a.Logger.Info().Msg("Status service initialized")
+	a.Logger.Debug().Msg("Status service initialized")
 
 	// 5.5.1 Initialize system logs service
 	// Calculate logs directory (same logic as main.go)
@@ -362,7 +362,7 @@ func (a *App) initServices() error {
 	}
 
 	a.SystemLogsService = logviewer.NewService(logViewerConfig)
-	a.Logger.Info().Str("logs_dir", logsDir).Msg("System logs service initialized")
+	a.Logger.Debug().Str("logs_dir", logsDir).Msg("System logs service initialized")
 
 	// 5.6. Initialize queue manager (Badger-backed)
 	// Obtain underlying Badger DB from storage manager
@@ -385,7 +385,7 @@ func (a *App) initServices() error {
 		return fmt.Errorf("failed to initialize queue manager: %w", err)
 	}
 	a.QueueManager = queueMgr
-	a.Logger.Info().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
+	a.Logger.Debug().Str("queue_name", a.Config.Queue.QueueName).Msg("Queue manager initialized")
 
 	// 5.8. Initialize job manager with storage interfaces
 	jobMgr := queue.NewManager(
@@ -395,16 +395,16 @@ func (a *App) initServices() error {
 		a.EventService,
 	)
 	a.JobManager = jobMgr
-	a.Logger.Info().Msg("Job manager initialized")
+	a.Logger.Debug().Msg("Job manager initialized")
 
 	// 5.9. Initialize job processor (replaces worker pool)
 	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger)
 	a.JobProcessor = jobProcessor
-	a.Logger.Info().Msg("Job processor initialized")
+	a.Logger.Debug().Msg("Job processor initialized")
 
 	// 5.10. Initialize job service for high-level job operations
 	a.JobService = jobsvc.NewService(jobMgr, queueMgr, a.Logger)
-	a.Logger.Info().Msg("Job service initialized")
+	a.Logger.Debug().Msg("Job service initialized")
 
 	// 5.11. Initialize variables service with event publishing
 	a.KVService = kv.NewService(
@@ -412,7 +412,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Variables service initialized with event publishing")
+	a.Logger.Debug().Msg("Variables service initialized")
 
 	// 5.12. Initialize config service with event-driven cache invalidation
 	a.ConfigService, err = config.NewService(
@@ -424,14 +424,14 @@ func (a *App) initServices() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize config service: %w", err)
 	}
-	a.Logger.Info().Msg("Config service initialized with dynamic key injection")
+	a.Logger.Debug().Msg("Config service initialized")
 
 	// 5.13. Initialize connector service
 	a.ConnectorService = connectors.NewService(
 		a.StorageManager.ConnectorStorage(),
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Connector service initialized")
+	a.Logger.Debug().Msg("Connector service initialized")
 
 	// 6. Initialize auth service (Atlassian)
 	a.AuthService, err = auth.NewAtlassianAuthService(
@@ -447,7 +447,7 @@ func (a *App) initServices() error {
 	if err := a.CrawlerService.Start(); err != nil {
 		return fmt.Errorf("failed to start crawler service: %w", err)
 	}
-	a.Logger.Info().Msg("Crawler service initialized")
+	a.Logger.Debug().Msg("Crawler service initialized")
 
 	// 6.6. Register job executors with job processor
 
@@ -463,7 +463,7 @@ func (a *App) initServices() error {
 		a.EventService,
 	)
 	jobProcessor.RegisterExecutor(crawlerWorker)
-	a.Logger.Info().Msg("Crawler URL worker registered for job type: crawler_url")
+	a.Logger.Debug().Msg("Crawler URL worker registered")
 
 	// Register GitHub Log worker
 	githubLogWorker := workers.NewGitHubLogWorker(
@@ -474,7 +474,7 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 	jobProcessor.RegisterExecutor(githubLogWorker)
-	a.Logger.Info().Msg("GitHub Log worker registered for job type: github_action_log")
+	a.Logger.Debug().Msg("GitHub Log worker registered")
 
 	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
@@ -484,7 +484,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Job monitor created (runs in background goroutines, not via queue)")
+	a.Logger.Debug().Msg("Job monitor created")
 
 	// Register database maintenance worker (ARCH-008)
 	// Note: BadgerDB handles maintenance automatically, operations are no-ops
@@ -493,11 +493,11 @@ func (a *App) initServices() error {
 		a.Logger,
 	)
 	jobProcessor.RegisterExecutor(dbMaintenanceWorker)
-	a.Logger.Info().Msg("Database maintenance worker registered for job type: database_maintenance_operation")
+	a.Logger.Debug().Msg("Database maintenance worker registered")
 
 	// 6.8. Initialize Transform service
 	a.TransformService = transform.NewService(a.Logger)
-	a.Logger.Info().Msg("Transform service initialized")
+	a.Logger.Debug().Msg("Transform service initialized")
 
 	// 6.8.1. Initialize Places service (Google Places API integration)
 	a.PlacesService = places.NewService(
@@ -506,7 +506,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
-	a.Logger.Info().Msg("Places service initialized")
+	a.Logger.Debug().Msg("Places service initialized")
 
 	// 6.8.2. Initialize Chat service (depends on LLM service)
 	if a.LLMService != nil {
@@ -520,11 +520,11 @@ func (a *App) initServices() error {
 		if err := a.ChatService.HealthCheck(context.Background()); err != nil {
 			a.Logger.Warn().Err(err).Msg("Chat service health check failed")
 		} else {
-			a.Logger.Info().Msg("Chat service initialized and health check passed")
+			a.Logger.Debug().Msg("Chat service initialized and health check passed")
 		}
 	} else {
 		a.ChatService = nil
-		a.Logger.Info().Msg("Chat service not initialized (LLM service unavailable)")
+		a.Logger.Debug().Msg("Chat service not initialized (LLM service unavailable)")
 	}
 
 	// 6.8.3. Initialize Agent service (Google ADK with Gemini)
@@ -545,7 +545,7 @@ func (a *App) initServices() error {
 			a.Logger.Warn().Err(err).Msg("Agent service health check failed - service disabled")
 			a.Logger.Info().Msg("To enable agents, provide a valid Google Gemini API key")
 		} else {
-			a.Logger.Info().Msg("Agent service initialized and health check passed")
+			a.Logger.Debug().Msg("Agent service initialized and health check passed")
 
 			// Register agent worker immediately after successful initialization
 			agentWorker := workers.NewAgentWorker(
@@ -556,7 +556,7 @@ func (a *App) initServices() error {
 				a.EventService,
 			)
 			jobProcessor.RegisterExecutor(agentWorker)
-			a.Logger.Info().Msg("Agent worker registered for job type: agent")
+			a.Logger.Debug().Msg("Agent worker registered")
 		}
 	}
 
@@ -567,32 +567,32 @@ func (a *App) initServices() error {
 	// Register managers for job definition steps
 	crawlerManager := managers.NewCrawlerManager(a.CrawlerService, a.Logger)
 	a.Orchestrator.RegisterStepExecutor(crawlerManager)
-	a.Logger.Info().Msg("Crawler manager registered")
+	a.Logger.Debug().Msg("Crawler manager registered")
 
 	transformManager := managers.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
 	a.Orchestrator.RegisterStepExecutor(transformManager)
-	a.Logger.Info().Msg("Transform manager registered")
+	a.Logger.Debug().Msg("Transform manager registered")
 
 	reindexManager := managers.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
 	a.Orchestrator.RegisterStepExecutor(reindexManager)
-	a.Logger.Info().Msg("Reindex manager registered")
+	a.Logger.Debug().Msg("Reindex manager registered")
 
 	dbMaintenanceManager := managers.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
 	a.Orchestrator.RegisterStepExecutor(dbMaintenanceManager)
-	a.Logger.Info().Msg("Database maintenance manager registered (ARCH-008)")
+	a.Logger.Debug().Msg("Database maintenance manager registered")
 
 	placesSearchManager := managers.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
 	a.Orchestrator.RegisterStepExecutor(placesSearchManager)
-	a.Logger.Info().Msg("Places search manager registered")
+	a.Logger.Debug().Msg("Places search manager registered")
 
 	// Register AI manager (if agent service is available)
 	if a.AgentService != nil {
 		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
 		a.Orchestrator.RegisterStepExecutor(agentManager)
-		a.Logger.Info().Msg("Agent manager registered for action type: agent")
+		a.Logger.Debug().Msg("Agent manager registered")
 	}
 
-	a.Logger.Info().Msg("Orchestrator initialized with all managers (ARCH-009)")
+	a.Logger.Debug().Msg("Orchestrator initialized with all managers")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
@@ -621,13 +621,13 @@ func (a *App) initServices() error {
 	// - EventCollectionTriggered: Specialized transformers (Jira/Confluence) transform scraped data to documents
 	// Scraping (downloading from Jira/Confluence APIs) remains user-driven via UI
 	// Start scheduler BEFORE loading job settings to ensure job definitions are loaded first
-	a.Logger.Info().Msg("Calling SchedulerService.Start()")
+	a.Logger.Debug().Msg("Calling SchedulerService.Start()")
 	if err := a.SchedulerService.Start("*/5 * * * *"); err != nil {
 		a.Logger.Warn().Err(err).Msg("Failed to start scheduler service")
 	} else {
-		a.Logger.Info().Msg("Scheduler service started")
+		a.Logger.Debug().Msg("Scheduler service started")
 	}
-	a.Logger.Info().Msg("SchedulerService.Start() returned")
+	a.Logger.Debug().Msg("SchedulerService.Start() returned")
 
 	// Load persisted job settings from database AFTER scheduler has started
 	// This ensures job definitions are loaded before applying settings
@@ -659,15 +659,15 @@ func (a *App) initHandlers() error {
 	// Subscribes to EventJobCreated, EventJobStarted, EventJobCompleted, EventJobFailed, EventJobCancelled
 	// Transforms events and broadcasts to WebSocket clients via BroadcastJobStatusChange
 	_ = handlers.NewEventSubscriber(a.WSHandler, a.EventService, a.Logger, &a.Config.WebSocket)
-	a.Logger.Info().
+	a.Logger.Debug().
 		Int("allowed_events", len(a.Config.WebSocket.AllowedEvents)).
 		Int("throttle_intervals", len(a.Config.WebSocket.ThrottleIntervals)).
-		Msg("EventSubscriber initialized with config-driven filtering and throttling")
+		Msg("EventSubscriber initialized")
 
 	a.AuthHandler = handlers.NewAuthHandler(a.AuthService, a.StorageManager.AuthStorage(), a.WSHandler, a.Logger)
 
 	a.KVHandler = handlers.NewKVHandler(a.KVService, a.Logger)
-	a.Logger.Info().Msg("KV handler initialized")
+	a.Logger.Debug().Msg("KV handler initialized")
 
 	a.DocumentHandler = handlers.NewDocumentHandler(
 		a.DocumentService,
@@ -782,7 +782,7 @@ func (a *App) initHandlers() error {
 			}
 		}
 	}()
-	a.Logger.Info().Msg("Stale job detector started (checks every 5 minutes)")
+	a.Logger.Debug().Msg("Stale job detector started")
 
 	// Start queue stats broadcaster
 	// TODO Phase 8-11: Re-enable when queue manager is integrated

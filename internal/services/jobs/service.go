@@ -38,7 +38,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob)
 		return fmt.Errorf("invalid queue job: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_id", job.ID).
 		Str("job_type", job.Type).
 		Str("job_name", job.Name).
@@ -81,7 +81,7 @@ func (s *Service) CreateAndEnqueueJob(ctx context.Context, job *models.QueueJob)
 		return fmt.Errorf("failed to enqueue job: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("job_id", job.ID).
 		Str("job_type", job.Type).
 		Msg("Job created and enqueued successfully")

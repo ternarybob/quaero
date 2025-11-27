@@ -42,7 +42,7 @@ func (e *Executor) Execute(ctx context.Context, jobID string, payload []byte) er
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
 
-	e.logger.Info().
+	e.logger.Debug().
 		Str("job_id", jobID).
 		Str("url", p.URL).
 		Int("depth", p.Depth).

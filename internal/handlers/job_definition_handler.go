@@ -64,7 +64,7 @@ func NewJobDefinitionHandler(
 		panic("logger cannot be nil")
 	}
 
-	logger.Info().Msg("Job definition handler initialized with orchestrator and auth storage (ARCH-009)")
+	logger.Debug().Msg("Job definition handler initialized with orchestrator and auth storage (ARCH-009)")
 
 	return &JobDefinitionHandler{
 		jobDefStorage:     jobDefStorage,
@@ -113,7 +113,7 @@ func (h *JobDefinitionHandler) GetJobTreeStatusHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_id", jobID).
 		Int("total_children", status.TotalChildren).
 		Int("completed", status.CompletedCount).
@@ -192,7 +192,7 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created successfully")
+	h.logger.Debug().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created successfully")
 	WriteJSON(w, http.StatusCreated, jobDef)
 }
 
@@ -275,7 +275,7 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 		h.jobService.ValidateRuntimeDependencies(jobDef)
 	}
 
-	h.logger.Info().Int("count", len(jobDefs)).Int("total", totalCount).Msg("Listed job definitions")
+	h.logger.Debug().Int("count", len(jobDefs)).Int("total", totalCount).Msg("Listed job definitions")
 
 	response := map[string]interface{}{
 		"job_definitions": jobDefs,
@@ -312,7 +312,7 @@ func (h *JobDefinitionHandler) GetJobDefinitionHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", id).Msg("Retrieved job definition")
+	h.logger.Debug().Str("job_def_id", id).Msg("Retrieved job definition")
 	WriteJSON(w, http.StatusOK, jobDef)
 }
 
@@ -386,7 +386,7 @@ func (h *JobDefinitionHandler) UpdateJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated successfully")
+	h.logger.Debug().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated successfully")
 	WriteJSON(w, http.StatusOK, jobDef)
 }
 
@@ -435,7 +435,7 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", id).Msg("Job definition deleted successfully")
+	h.logger.Debug().Str("job_def_id", id).Msg("Job definition deleted successfully")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -477,7 +477,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_def_id", jobDef.ID).
 		Str("job_name", jobDef.Name).
 		Str("job_def_type", string(jobDef.Type)).
@@ -498,7 +498,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 			return
 		}
 
-		h.logger.Info().
+		h.logger.Debug().
 			Str("job_def_id", jobDef.ID).
 			Str("parent_job_id", parentJobID).
 			Msg("Job definition execution completed successfully")
@@ -584,7 +584,7 @@ func (h *JobDefinitionHandler) ExportJobDefinitionHandler(w http.ResponseWriter,
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Length", strconv.Itoa(len(tomlData)))
 
-	h.logger.Info().Str("job_def_id", id).Str("filename", filename).Msg("Exporting job definition as TOML")
+	h.logger.Debug().Str("job_def_id", id).Str("filename", filename).Msg("Exporting job definition as TOML")
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(tomlData)
@@ -609,7 +609,7 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 
 	// Return validation result
 	if result.Valid {
-		h.logger.Info().Msg("TOML validated successfully")
+		h.logger.Debug().Msg("TOML validated successfully")
 		WriteJSON(w, http.StatusOK, result)
 	} else {
 		h.logger.Warn().Str("error", result.Error).Msg("TOML validation failed")
@@ -680,7 +680,7 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 			WriteError(w, http.StatusInternalServerError, "Failed to update job definition")
 			return
 		}
-		h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from TOML upload")
+		h.logger.Debug().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition updated from TOML upload")
 		WriteJSON(w, http.StatusOK, jobDef)
 	} else {
 		if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
@@ -688,7 +688,7 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 			WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
 			return
 		}
-		h.logger.Info().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
+		h.logger.Debug().Str("job_def_id", jobDef.ID).Str("name", jobDef.Name).Msg("Job definition created from TOML upload")
 		WriteJSON(w, http.StatusCreated, jobDef)
 	}
 }
@@ -727,7 +727,7 @@ func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWr
 		return
 	}
 
-	h.logger.Info().Str("job_def_id", jobDef.ID).Msg("Invalid job definition saved without validation")
+	h.logger.Debug().Str("job_def_id", jobDef.ID).Msg("Invalid job definition saved without validation")
 	WriteJSON(w, http.StatusCreated, jobDef)
 }
 
@@ -803,7 +803,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			return
 		}
 
-		h.logger.Info().
+		h.logger.Debug().
 			Str("site_domain", siteDomain).
 			Int("cookies_count", len(req.Cookies)).
 			Msg("Auth credentials stored for quick crawl")
@@ -817,7 +817,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		}
 		if storedCreds != nil {
 			authID = storedCreds.ID
-			h.logger.Info().
+			h.logger.Debug().
 				Str("auth_id", authID).
 				Str("site_domain", siteDomain).
 				Msg("Retrieved auth ID for job definition")
@@ -907,7 +907,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		return
 	}
 
-	h.logger.Info().
+	h.logger.Debug().
 		Str("job_def_id", jobDef.ID).
 		Str("job_name", jobDef.Name).
 		Str("url", req.URL).
@@ -928,7 +928,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			return
 		}
 
-		h.logger.Info().
+		h.logger.Debug().
 			Str("job_def_id", jobDef.ID).
 			Str("parent_job_id", parentJobID).
 			Msg("Quick crawl job execution started successfully")

@@ -72,21 +72,21 @@ func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobSte
 				seedURLs = append(seedURLs, urlStr)
 			}
 		}
-		m.logger.Info().
+		m.logger.Debug().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
 			Msg("Using start_urls from job definition config")
 	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
 		// Handle case where start_urls is already []string
 		seedURLs = startURLsStr
-		m.logger.Info().
+		m.logger.Debug().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
 			Msg("Using start_urls from job definition config")
 	} else {
 		// Fallback to building URLs based on source type and entity type
 		seedURLs = m.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
-		m.logger.Info().
+		m.logger.Debug().
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Str("base_url", jobDef.BaseURL).
@@ -99,12 +99,12 @@ func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobSte
 	sourceType := jobDef.SourceType
 	if sourceType == "" {
 		sourceType = "web"
-		m.logger.Info().
+		m.logger.Debug().
 			Str("step_name", step.Name).
 			Msg("No source_type specified, defaulting to 'web' for generic web crawling")
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("source_type", sourceType).
 		Str("base_url", jobDef.BaseURL).
@@ -131,11 +131,11 @@ func (m *CrawlerManager) CreateParentJob(ctx context.Context, step models.JobSte
 		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("job_id", jobID).
 		Str("parent_job_id", parentJobID).
-		Msg("Parent crawler job created successfully")
+		Msg("Parent crawler job created")
 
 	return jobID, nil
 }

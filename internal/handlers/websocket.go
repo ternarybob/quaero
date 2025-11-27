@@ -251,7 +251,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	h.clientMutex[conn] = &sync.Mutex{}
 	h.mu.Unlock()
 
-	h.logger.Info().Msgf("WebSocket client connected (total: %d)", len(h.clients))
+	h.logger.Debug().Msgf("WebSocket client connected (total: %d)", len(h.clients))
 
 	// Send initial status
 	h.sendStatus(conn)
@@ -272,7 +272,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		h.mu.Unlock()
 
 		conn.Close()
-		h.logger.Info().Msgf("WebSocket client disconnected (remaining: %d)", clientCount)
+		h.logger.Debug().Msgf("WebSocket client disconnected (remaining: %d)", clientCount)
 	}()
 
 	// Read messages from client (keep connection alive)

@@ -49,7 +49,7 @@ func NewService(
 		if err := eventSvc.Subscribe(interfaces.EventKeyUpdated, service.handleKeyUpdate); err != nil {
 			logger.Warn().Err(err).Msg("Failed to subscribe to key update events")
 		} else {
-			logger.Info().Msg("ConfigService subscribed to key update events")
+			logger.Debug().Msg("ConfigService subscribed to key update events")
 		}
 	}
 
@@ -95,7 +95,7 @@ func (s *Service) GetConfig(ctx context.Context) (interface{}, error) {
 			if err := common.ReplaceInStruct(configCopy, kvMap, s.logger); err != nil {
 				s.logger.Warn().Err(err).Msg("Failed to inject keys into config")
 			} else {
-				s.logger.Info().Int("keys", len(kvMap)).Msg("Injected keys into config")
+				s.logger.Debug().Int("keys", len(kvMap)).Msg("Injected keys into config")
 			}
 		}
 	}
@@ -114,13 +114,13 @@ func (s *Service) InvalidateCache() {
 
 	s.cacheValid = false
 	s.cachedConfig = nil
-	s.logger.Info().Msg("Config cache invalidated")
+	s.logger.Debug().Msg("Config cache invalidated")
 }
 
 // handleKeyUpdate is the event handler for EventKeyUpdated
 // Invalidates cache when keys change
 func (s *Service) handleKeyUpdate(ctx context.Context, event interfaces.Event) error {
-	s.logger.Info().
+	s.logger.Debug().
 		Str("event_type", string(event.Type)).
 		Msg("Key update event received, invalidating config cache")
 
@@ -136,6 +136,6 @@ func (s *Service) Close() error {
 		}
 	}
 	s.InvalidateCache()
-	s.logger.Info().Msg("ConfigService closed")
+	s.logger.Debug().Msg("ConfigService closed")
 	return nil
 }

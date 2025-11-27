@@ -21,7 +21,7 @@ type VariableFile struct {
 
 // LoadVariablesFromFiles loads variables from TOML files in the specified directory
 func (m *Manager) LoadVariablesFromFiles(ctx context.Context, dirPath string) error {
-	m.logger.Info().Str("dir", dirPath).Msg("Loading variables from files")
+	m.logger.Debug().Str("dir", dirPath).Msg("Loading variables from files")
 
 	// Check if directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
@@ -93,7 +93,7 @@ func (m *Manager) LoadVariablesFromFiles(ctx context.Context, dirPath string) er
 		}
 	}
 
-	m.logger.Info().
+	m.logger.Debug().
 		Int("loaded", loadedCount).
 		Int("skipped", skippedCount).
 		Int("errors", errorCount).

@@ -22,7 +22,7 @@ func NewSearchService(
 
 	switch mode {
 	case "advanced", "": // Default to advanced if empty
-		logger.Info().
+		logger.Debug().
 			Str("mode", "advanced").
 			Msg("Initializing advanced search service with regex-based search")
 		return NewAdvancedSearchService(storage, logger, config), nil

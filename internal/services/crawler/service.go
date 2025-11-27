@@ -191,12 +191,12 @@ func (s *Service) Start() error {
 			return fmt.Errorf("failed to initialize ChromeDP browser pool: %w", err)
 		}
 
-		s.logger.Info().
+		s.logger.Debug().
 			Int("pool_size", poolConfig.MaxInstances).
 			Bool("javascript_enabled", true).
 			Msg("Crawler service started with ChromeDP browser pool")
 	} else {
-		s.logger.Info().
+		s.logger.Debug().
 			Bool("javascript_enabled", false).
 			Msg("Crawler service started without JavaScript rendering")
 	}
@@ -354,7 +354,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 	} else {
 		// For existing parent jobs from JobExecutor, we don't create a new job object
 		// The JobExecutor has already created the parent job - we just spawn children under it
-		contextLogger.Info().
+		contextLogger.Debug().
 			Str("existing_parent_job_id", jobID).
 			Msg("Using existing parent job from JobExecutor - will spawn children directly under this parent")
 	}
@@ -1051,7 +1051,7 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 		return "", fmt.Errorf("failed to save job: %w", err)
 	}
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("original_job_id", jobID).
 		Str("new_job_id", newJobID).
 		Msg("Job rerun created successfully")

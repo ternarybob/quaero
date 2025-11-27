@@ -56,7 +56,7 @@ func (s *Service) SetState(state AppState, metadata map[string]interface{}) {
 	}
 	s.mu.Unlock()
 
-	s.logger.Info().
+	s.logger.Debug().
 		Str("old_state", string(oldState)).
 		Str("new_state", string(state)).
 		Msg("Application state changed")
@@ -129,5 +129,5 @@ func (s *Service) SubscribeToCrawlerEvents() {
 		return nil
 	})
 
-	s.logger.Info().Msg("StatusService subscribed to crawler events")
+	s.logger.Debug().Msg("StatusService subscribed to crawler events")
 }

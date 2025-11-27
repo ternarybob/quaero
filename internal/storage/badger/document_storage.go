@@ -30,6 +30,11 @@ func (s *DocumentStorage) SaveDocument(doc *models.Document) error {
 		return fmt.Errorf("document ID is required")
 	}
 
+	s.logger.Debug().
+		Str("document_id", doc.ID).
+		Str("source_type", doc.SourceType).
+		Msg("BadgerDB: SaveDocument starting")
+
 	now := time.Now()
 	if doc.CreatedAt.IsZero() {
 		doc.CreatedAt = now
@@ -37,8 +42,15 @@ func (s *DocumentStorage) SaveDocument(doc *models.Document) error {
 	doc.UpdatedAt = now
 
 	if err := s.db.Store().Upsert(doc.ID, doc); err != nil {
+		s.logger.Error().Err(err).
+			Str("document_id", doc.ID).
+			Msg("BadgerDB: Failed to save document")
 		return fmt.Errorf("failed to save document: %w", err)
 	}
+
+	s.logger.Debug().
+		Str("document_id", doc.ID).
+		Msg("BadgerDB: SaveDocument completed")
 	return nil
 }
 

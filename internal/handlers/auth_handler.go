@@ -51,7 +51,7 @@ func (h *AuthHandler) CaptureAuthHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.logger.Info().
+	h.logger.Debug().
 		Str("baseUrl", authData.BaseURL).
 		Int("cookies", len(authData.Cookies)).
 		Msg("Received authentication data from Chrome extension")
@@ -63,7 +63,7 @@ func (h *AuthHandler) CaptureAuthHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.logger.Info().Msg("Authentication captured and stored successfully")
+	h.logger.Debug().Msg("Authentication captured and stored successfully")
 
 	// Broadcast to WebSocket clients
 	if h.wsHandler != nil {
@@ -202,7 +202,7 @@ func (h *AuthHandler) DeleteAuthHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.logger.Info().Str("id", id).Msg("Deleted authentication credentials")
+	h.logger.Debug().Str("id", id).Msg("Deleted authentication credentials")
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "success",

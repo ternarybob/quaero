@@ -139,19 +139,11 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		return fmt.Errorf("failed to extract crawl config: %w", err)
 	}
 
-	jobLogger.Info().
-		Str("job_id", job.ID).
-		Str("parent_id", parentID).
-		Str("seed_url", seedURL).
-		Str("source_type", sourceType).
-		Str("entity_type", entityType).
-		Int("depth", job.Depth).
-		Int("max_depth", crawlConfig.MaxDepth).
-		Bool("follow_links", crawlConfig.FollowLinks).
-		Msg("Starting enhanced crawler job execution")
+	// Note: Per-URL job start logging removed to reduce log volume
+	// Progress is tracked via real-time events instead
 
 	// Publish real-time log for job start (under parent context)
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Starting crawl of URL: %s (depth: %d)", seedURL, job.Depth), map[string]interface{}{
+	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Starting URL: %s (depth: %d)", seedURL, job.Depth), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"max_depth":    crawlConfig.MaxDepth,
@@ -171,13 +163,13 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	// Publish initial progress update
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
 
-	jobLogger.Debug().Msg("🚨 ABOUT TO CREATE BROWSER INSTANCE")
+	jobLogger.Trace().Msg("About to create browser instance")
 
 	// Step 1: Create a fresh ChromeDP browser instance for this request
 	// TEMPORARY: Bypassing pool to debug context cancellation issue
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
 
-	jobLogger.Debug().Msg("🚨 PUBLISHED PROGRESS UPDATE FOR BROWSER CREATION")
+	jobLogger.Trace().Msg("Published progress update for browser creation")
 
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
 		context.Background(),
@@ -195,7 +187,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
 	defer browserCancel()
 
-	jobLogger.Debug().Msg("Created fresh browser instance (not using pool)")
+	jobLogger.Trace().Msg("Created fresh browser instance")
 	w.publishCrawlerJobLog(ctx, parentID, "debug", "Created fresh browser instance", map[string]interface{}{
 		"url":      seedURL,
 		"depth":    job.Depth,
@@ -230,14 +222,10 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	}
 	renderTime := time.Since(startTime)
 
-	jobLogger.Info().
-		Str("url", seedURL).
-		Int("status_code", statusCode).
-		Int("html_length", len(htmlContent)).
-		Dur("render_time", renderTime).
-		Msg("Successfully rendered page with JavaScript")
+	// Note: Per-URL success logging removed to reduce log volume
+	// Render stats are captured in real-time events instead
 
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Successfully rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime), map[string]interface{}{
+	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime), map[string]interface{}{
 		"url":         seedURL,
 		"depth":       job.Depth,
 		"status_code": statusCode,
@@ -261,15 +249,10 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		return fmt.Errorf("failed to process content: %w", err)
 	}
 
-	jobLogger.Info().
-		Str("url", seedURL).
-		Str("title", processedContent.Title).
-		Int("content_size", processedContent.ContentSize).
-		Int("links_found", len(processedContent.Links)).
-		Dur("process_time", processedContent.ProcessTime).
-		Msg("Successfully processed HTML content")
+	// Note: Per-URL success logging removed to reduce log volume
+	// Content stats are captured in real-time events instead
 
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Successfully processed content: '%s' (%d bytes, %d links, %v)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links), processedContent.ProcessTime), map[string]interface{}{
+	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Processed content: '%s' (%d bytes, %d links)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links)), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"title":        processedContent.Title,
@@ -311,13 +294,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
-	jobLogger.Info().
-		Str("document_id", crawledDoc.ID).
-		Str("url", seedURL).
-		Int("content_size", crawledDoc.ContentSize).
-		Msg("Successfully saved crawled document")
+	// Note: Per-document success logging removed to reduce log volume
 
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Document saved: %s (%d bytes)", crawledDoc.Title, crawledDoc.ContentSize), map[string]interface{}{
+	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Document saved: %s (%d bytes)", crawledDoc.Title, crawledDoc.ContentSize), map[string]interface{}{
 		"url":          seedURL,
 		"depth":        job.Depth,
 		"document_id":  crawledDoc.ID,
@@ -348,13 +327,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 		linkStats.Filtered = filterResult.Filtered
 
-		jobLogger.Info().
-			Int("links_found", filterResult.Found).
-			Int("links_filtered", filterResult.Filtered).
-			Int("links_excluded", filterResult.Excluded).
-			Msg("Link filtering completed")
+		// Note: Per-URL link filtering logging removed to reduce log volume
 
-		w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Link filtering completed: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded), map[string]interface{}{
+		w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Links: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded), map[string]interface{}{
 			"url":            seedURL,
 			"depth":          job.Depth,
 			"links_found":    filterResult.Found,
@@ -372,11 +347,11 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 				// Respect max pages limit
 				if crawlConfig.MaxPages > 0 && childJobsSpawned >= crawlConfig.MaxPages {
 					linkStats.Skipped = len(filterResult.FilteredLinks) - childJobsSpawned
-					jobLogger.Info().
+					jobLogger.Debug().
 						Int("max_pages", crawlConfig.MaxPages).
 						Int("skipped", linkStats.Skipped).
 						Msg("Reached max pages limit, skipping remaining links")
-					w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped), map[string]interface{}{
+					w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped), map[string]interface{}{
 						"url":       seedURL,
 						"depth":     job.Depth,
 						"max_pages": crawlConfig.MaxPages,
@@ -405,13 +380,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 			linkStats.Followed = childJobsSpawned
 
-			jobLogger.Info().
-				Int("child_jobs_spawned", childJobsSpawned).
-				Int("depth", job.Depth).
-				Int("max_depth", crawlConfig.MaxDepth).
-				Msg("Child jobs spawned for discovered links")
+			// Note: Per-URL child spawn logging removed to reduce log volume
 
-			w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Spawned %d child jobs for discovered links", childJobsSpawned), map[string]interface{}{
+			w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Spawned %d child jobs", childJobsSpawned), map[string]interface{}{
 				"url":                seedURL,
 				"depth":              job.Depth,
 				"max_depth":          crawlConfig.MaxDepth,
@@ -421,13 +392,13 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		} else if job.Depth >= crawlConfig.MaxDepth {
 			// All filtered links are skipped due to depth limit
 			linkStats.Skipped = filterResult.Filtered
-			jobLogger.Info().
+			jobLogger.Debug().
 				Int("current_depth", job.Depth).
 				Int("max_depth", crawlConfig.MaxDepth).
 				Int("links_skipped", linkStats.Skipped).
 				Msg("Reached maximum depth, skipping all discovered links")
 
-			w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped), map[string]interface{}{
+			w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped), map[string]interface{}{
 				"url":           seedURL,
 				"current_depth": job.Depth,
 				"max_depth":     crawlConfig.MaxDepth,
@@ -465,13 +436,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	}
 
 	totalTime := time.Since(startTime)
-	jobLogger.Info().
-		Str("job_id", job.ID).
-		Str("url", seedURL).
-		Dur("total_time", totalTime).
-		Msg("Enhanced crawler job execution completed successfully")
+	// Note: Per-URL completion logging removed to reduce log volume
 
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Crawl completed successfully in %v", totalTime), map[string]interface{}{
+	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("URL completed in %v", totalTime), map[string]interface{}{
 		"url":        seedURL,
 		"depth":      job.Depth,
 		"total_time": totalTime.String(),
@@ -567,26 +534,26 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	}
 
 	// ===== ENABLE NETWORK DOMAIN FOR COOKIE OPERATIONS =====
-	logger.Debug().Msg("🔐 DIAGNOSTIC: Enabling ChromeDP network domain for cookie operations")
+	logger.Trace().Msg("Enabling ChromeDP network domain for cookie operations")
 	if err := chromedp.Run(browserCtx, network.Enable()); err != nil {
-		logger.Error().Err(err).Msg("🔐 ERROR: Failed to enable network domain")
+		logger.Error().Err(err).Msg("Failed to enable network domain")
 		return "", 0, fmt.Errorf("failed to enable network domain: %w", err)
 	}
-	logger.Debug().Msg("🔐 SUCCESS: Network domain enabled successfully")
+	logger.Trace().Msg("Network domain enabled successfully")
 
 	// Enable log domain for capturing browser console messages
-	logger.Debug().Msg("🔐 DIAGNOSTIC: Enabling ChromeDP log domain for browser console messages")
+	logger.Trace().Msg("Enabling ChromeDP log domain for browser console messages")
 	if err := chromedp.Run(browserCtx, log.Enable()); err != nil {
-		logger.Warn().Err(err).Msg("🔐 WARNING: Failed to enable log domain")
+		logger.Warn().Err(err).Msg("Failed to enable log domain")
 	} else {
-		logger.Debug().Msg("🔐 SUCCESS: Log domain enabled successfully")
+		logger.Trace().Msg("Log domain enabled successfully")
 	}
 	// ===== END NETWORK DOMAIN ENABLEMENT =====
 
 	// ===== PHASE 3: COOKIE MONITORING BEFORE NAVIGATION =====
-	logger.Debug().
+	logger.Trace().
 		Str("url", url).
-		Msg("🔐 DIAGNOSTIC: Checking cookies before navigation")
+		Msg("Checking cookies before navigation")
 
 	var cookiesBeforeNav []*network.Cookie
 	err := chromedp.Run(browserCtx,
@@ -601,25 +568,25 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	)
 
 	if err != nil {
-		logger.Debug().
+		logger.Trace().
 			Err(err).
 			Str("url", url).
-			Msg("🔐 WARNING: Failed to read cookies before navigation")
+			Msg("Failed to read cookies before navigation")
 	} else {
-		logger.Debug().
+		logger.Trace().
 			Int("cookie_count", len(cookiesBeforeNav)).
 			Str("url", url).
-			Msg("🔐 DIAGNOSTIC: Cookies applicable to URL before navigation")
+			Msg("Cookies applicable to URL before navigation")
 
 		if len(cookiesBeforeNav) == 0 {
-			logger.Debug().
+			logger.Trace().
 				Str("url", url).
-				Msg("🔐 WARNING: No cookies found for URL - navigating without authentication")
+				Msg("No cookies found for URL - navigating without authentication")
 		} else {
 			// Parse target URL for domain comparison
 			targetURLParsed, parseErr := neturl.Parse(url)
 			if parseErr != nil {
-				logger.Debug().Err(parseErr).Msg("🔐 WARNING: Failed to parse target URL for domain analysis")
+				logger.Trace().Err(parseErr).Msg("Failed to parse target URL for domain analysis")
 			}
 
 			// Log each cookie with domain matching analysis
@@ -646,7 +613,7 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 						isMatch = false
 					}
 
-					logger.Debug().
+					logger.Trace().
 						Int("cookie_index", i).
 						Str("cookie_name", cookie.Name).
 						Str("cookie_domain", cookie.Domain).
@@ -658,17 +625,17 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 						Bool("secure", cookie.Secure).
 						Bool("http_only", cookie.HTTPOnly).
 						Str("same_site", string(cookie.SameSite)).
-						Msg("🔐 DIAGNOSTIC: Cookie domain analysis before navigation")
+						Msg("Cookie domain analysis before navigation")
 
 					if !isMatch {
-						logger.Debug().
+						logger.Trace().
 							Str("cookie_name", cookie.Name).
 							Str("cookie_domain", cookie.Domain).
 							Str("target_domain", targetHost).
-							Msg("🔐 WARNING: Cookie domain mismatch - cookie may not be sent")
+							Msg("Cookie domain mismatch - cookie may not be sent")
 					}
 				} else {
-					logger.Debug().
+					logger.Trace().
 						Int("cookie_index", i).
 						Str("cookie_name", cookie.Name).
 						Str("cookie_domain", cookie.Domain).
@@ -676,7 +643,7 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 						Bool("secure", cookie.Secure).
 						Bool("http_only", cookie.HTTPOnly).
 						Str("same_site", string(cookie.SameSite)).
-						Msg("🔐 DIAGNOSTIC: Cookie will be sent with navigation")
+						Msg("Cookie will be sent with navigation")
 				}
 			}
 		}
@@ -690,11 +657,11 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 		case *log.EventEntryAdded:
 			// Log browser console messages that mention cookies
 			if strings.Contains(strings.ToLower(evTyped.Entry.Text), "cookie") {
-				logger.Debug().
+				logger.Trace().
 					Str("source", evTyped.Entry.Source.String()).
 					Str("level", evTyped.Entry.Level.String()).
 					Str("message", evTyped.Entry.Text).
-					Msg("🔐 DIAGNOSTIC: Browser console message about cookies")
+					Msg("Browser console message about cookies")
 			}
 
 		case *network.EventRequestWillBeSent:
@@ -709,31 +676,31 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 			}
 
 			if cookieHeader != "" {
-				logger.Debug().
+				logger.Trace().
 					Str("request_url", evTyped.Request.URL).
 					Str("cookie_header", cookieHeader).
-					Msg("🔐 DIAGNOSTIC: Cookie header sent with request")
+					Msg("Cookie header sent with request")
 			} else {
-				logger.Debug().
+				logger.Trace().
 					Str("request_url", evTyped.Request.URL).
-					Msg("🔐 DIAGNOSTIC: No Cookie header in request")
+					Msg("No Cookie header in request")
 			}
 
 		case *network.EventLoadingFailed:
 			// Log network failures that might indicate cookie issues
-			logger.Debug().
+			logger.Trace().
 				Str("request_url", evTyped.RequestID.String()).
 				Str("error_text", evTyped.ErrorText).
 				Str("type", evTyped.Type.String()).
-				Msg("🔐 WARNING: Network request failed (possible cookie issue)")
+				Msg("Network request failed (possible cookie issue)")
 
 		case *network.EventResponseReceivedExtraInfo:
 			// Log Set-Cookie headers in responses
 			if evTyped.Headers != nil {
 				if setCookie, exists := evTyped.Headers["Set-Cookie"]; exists {
-					logger.Debug().
+					logger.Trace().
 						Str("set_cookie_header", fmt.Sprintf("%v", setCookie)).
-						Msg("🔐 DIAGNOSTIC: Server sent Set-Cookie header")
+						Msg("Server sent Set-Cookie header")
 				}
 			}
 		}
@@ -765,9 +732,9 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	}
 
 	// ===== PHASE 3 PART 2: COOKIE MONITORING AFTER NAVIGATION =====
-	logger.Debug().
+	logger.Trace().
 		Str("url", url).
-		Msg("🔐 DIAGNOSTIC: Checking cookies after navigation")
+		Msg("Checking cookies after navigation")
 
 	var cookiesAfterNav []*network.Cookie
 	err = chromedp.Run(browserCtx,
@@ -782,15 +749,15 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	)
 
 	if err != nil {
-		logger.Debug().
+		logger.Trace().
 			Err(err).
 			Str("url", url).
-			Msg("🔐 WARNING: Failed to read cookies after navigation")
+			Msg("Failed to read cookies after navigation")
 	} else {
-		logger.Debug().
+		logger.Trace().
 			Int("cookie_count", len(cookiesAfterNav)).
 			Str("url", url).
-			Msg("🔐 DIAGNOSTIC: Cookies after navigation")
+			Msg("Cookies after navigation")
 
 		// Compare before/after cookie counts
 		if len(cookiesBeforeNav) > 0 && len(cookiesAfterNav) < len(cookiesBeforeNav) {
@@ -798,22 +765,22 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 				Int("cookies_before", len(cookiesBeforeNav)).
 				Int("cookies_after", len(cookiesAfterNav)).
 				Int("cookies_lost", len(cookiesBeforeNav)-len(cookiesAfterNav)).
-				Msg("🔐 WARNING: Cookies were cleared during navigation")
+				Msg("Cookies were cleared during navigation")
 		} else if len(cookiesAfterNav) > len(cookiesBeforeNav) {
-			logger.Debug().
+			logger.Trace().
 				Int("cookies_before", len(cookiesBeforeNav)).
 				Int("cookies_after", len(cookiesAfterNav)).
 				Int("cookies_gained", len(cookiesAfterNav)-len(cookiesBeforeNav)).
-				Msg("🔐 DIAGNOSTIC: New cookies set during navigation")
+				Msg("New cookies set during navigation")
 		} else if len(cookiesBeforeNav) > 0 {
-			logger.Debug().
+			logger.Trace().
 				Int("cookie_count", len(cookiesAfterNav)).
-				Msg("🔐 SUCCESS: Cookies persisted through navigation")
+				Msg("Cookies persisted through navigation")
 		}
 	}
 	// ===== END PHASE 3 =====
 
-	logger.Debug().
+	logger.Trace().
 		Str("url", url).
 		Int("status_code", int(statusCode)).
 		Int("html_length", len(htmlContent)).
@@ -828,26 +795,26 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 
 // injectAuthCookies loads authentication credentials from storage and injects cookies into ChromeDP browser
 func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx context.Context, parentJobID, targetURL string, logger arbor.ILogger) error {
-	logger.Debug().
+	logger.Trace().
 		Str("parent_job_id", parentJobID).
 		Str("target_url", targetURL).
-		Msg("🔐 START: Cookie injection process initiated")
+		Msg("Cookie injection process initiated")
 
 	// Check if authStorage is available
 	if w.authStorage == nil {
-		logger.Debug().Msg("🔐 SKIP: Auth storage not configured, skipping cookie injection")
+		logger.Trace().Msg("Auth storage not configured, skipping cookie injection")
 		return nil
 	}
-	logger.Debug().Msg("🔐 OK: Auth storage is configured")
+	logger.Trace().Msg("Auth storage is configured")
 
 	// Get parent job from database to retrieve AuthID from job metadata
-	logger.Debug().Str("parent_job_id", parentJobID).Msg("🔐 Fetching parent job from database")
+	logger.Trace().Str("parent_job_id", parentJobID).Msg("Fetching parent job from database")
 	parentJobInterface, err := w.jobMgr.GetJob(ctx, parentJobID)
 	if err != nil {
-		logger.Error().Err(err).Str("parent_job_id", parentJobID).Msg("🔐 ERROR: Failed to get parent job for auth lookup")
+		logger.Error().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to get parent job for auth lookup")
 		return fmt.Errorf("failed to get parent job: %w", err)
 	}
-	logger.Debug().Msg("🔐 OK: Parent job retrieved from database")
+	logger.Trace().Msg("Parent job retrieved from database")
 
 	// Extract QueueJob from QueueJobState
 	var authID string
@@ -855,123 +822,123 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 
 	// Type assert to QueueJobState and extract QueueJob
 	if jobState, ok := parentJobInterface.(*models.QueueJobState); ok {
-		logger.Debug().Msg("🔐 OK: Parent job is QueueJobState type (extracting QueueJob)")
+		logger.Trace().Msg("Parent job is QueueJobState type (extracting QueueJob)")
 		queueJob = jobState.ToQueueJob()
 	} else if qj, ok := parentJobInterface.(*models.QueueJob); ok {
-		logger.Debug().Msg("🔐 OK: Parent job is QueueJob type")
+		logger.Trace().Msg("Parent job is QueueJob type")
 		queueJob = qj
 	} else {
 		logger.Error().
 			Str("actual_type", fmt.Sprintf("%T", parentJobInterface)).
-			Msg("🔐 ERROR: Parent job is neither QueueJobState nor QueueJob type")
+			Msg("Parent job is neither QueueJobState nor QueueJob type")
 		return nil
 	}
 
 	if queueJob == nil {
-		logger.Error().Msg("🔐 ERROR: QueueJob is nil after extraction")
+		logger.Error().Msg("QueueJob is nil after extraction")
 		return nil
 	}
 
-	logger.Debug().
+	logger.Trace().
 		Int("metadata_count", len(queueJob.Metadata)).
-		Msg("🔐 OK: QueueJob extracted successfully")
+		Msg("QueueJob extracted successfully")
 
 	// Log all metadata keys for debugging
 	metadataKeys := make([]string, 0, len(queueJob.Metadata))
 	for k := range queueJob.Metadata {
 		metadataKeys = append(metadataKeys, k)
 	}
-	logger.Debug().
+	logger.Trace().
 		Strs("metadata_keys", metadataKeys).
-		Msg("🔐 DEBUG: Parent job metadata keys")
+		Msg("Parent job metadata keys")
 
 	// Check metadata for auth_id
 	if authIDVal, exists := queueJob.Metadata["auth_id"]; exists {
 		if authIDStr, ok := authIDVal.(string); ok && authIDStr != "" {
 			authID = authIDStr
-			logger.Debug().
+			logger.Trace().
 				Str("auth_id", authID).
-				Msg("🔐 FOUND: Auth ID in job metadata")
+				Msg("Auth ID found in job metadata")
 		} else {
-			logger.Debug().
+			logger.Trace().
 				Str("auth_id_value", fmt.Sprintf("%v", authIDVal)).
-				Msg("🔐 WARNING: auth_id exists but is not a valid string")
+				Msg("auth_id exists but is not a valid string")
 		}
 	} else {
-		logger.Debug().Msg("🔐 WARNING: auth_id NOT found in job metadata")
+		logger.Trace().Msg("auth_id NOT found in job metadata")
 	}
 
 	// If not in metadata, try job_definition_id
 	if authID == "" {
-		logger.Debug().Msg("🔐 Trying job_definition_id fallback")
+		logger.Trace().Msg("Trying job_definition_id fallback")
 		if jobDefID, exists := queueJob.Metadata["job_definition_id"]; exists {
 			if jobDefIDStr, ok := jobDefID.(string); ok && jobDefIDStr != "" {
-				logger.Debug().
+				logger.Trace().
 					Str("job_def_id", jobDefIDStr).
-					Msg("🔐 Found job_definition_id, fetching job definition")
+					Msg("Found job_definition_id, fetching job definition")
 				jobDef, err := w.jobDefStorage.GetJobDefinition(ctx, jobDefIDStr)
 				if err != nil {
-					logger.Error().Err(err).Str("job_def_id", jobDefIDStr).Msg("🔐 ERROR: Failed to get job definition for auth lookup")
+					logger.Error().Err(err).Str("job_def_id", jobDefIDStr).Msg("Failed to get job definition for auth lookup")
 					return fmt.Errorf("failed to get job definition: %w", err)
 				}
 				if jobDef != nil && jobDef.AuthID != "" {
 					authID = jobDef.AuthID
-					logger.Debug().
+					logger.Trace().
 						Str("auth_id", authID).
 						Str("job_def_id", jobDefIDStr).
-						Msg("🔐 FOUND: Auth ID from job definition")
+						Msg("Auth ID found from job definition")
 				} else {
-					logger.Debug().
+					logger.Trace().
 						Str("job_def_id", jobDefIDStr).
-						Msg("🔐 WARNING: Job definition has no AuthID")
+						Msg("Job definition has no AuthID")
 				}
 			}
 		} else {
-			logger.Debug().Msg("🔐 WARNING: job_definition_id NOT found in metadata")
+			logger.Trace().Msg("job_definition_id NOT found in metadata")
 		}
 	}
 
 	if authID == "" {
-		logger.Debug().Msg("🔐 SKIP: No auth_id found - skipping cookie injection")
+		logger.Trace().Msg("No auth_id found - skipping cookie injection")
 		return nil
 	}
 
 	// Load authentication credentials from storage using AuthID
-	logger.Debug().
+	logger.Trace().
 		Str("auth_id", authID).
-		Msg("🔐 Loading auth credentials from storage")
+		Msg("Loading auth credentials from storage")
 	authCreds, err := w.authStorage.GetCredentialsByID(ctx, authID)
 	if err != nil {
-		logger.Error().Err(err).Str("auth_id", authID).Msg("🔐 ERROR: Failed to load auth credentials from storage")
+		logger.Error().Err(err).Str("auth_id", authID).Msg("Failed to load auth credentials from storage")
 		return fmt.Errorf("failed to load auth credentials: %w", err)
 	}
 
 	if authCreds == nil {
-		logger.Error().Str("auth_id", authID).Msg("🔐 ERROR: Auth credentials not found in storage")
+		logger.Error().Str("auth_id", authID).Msg("Auth credentials not found in storage")
 		return fmt.Errorf("auth credentials not found for ID: %s", authID)
 	}
-	logger.Debug().
+	logger.Trace().
 		Str("auth_id", authID).
 		Str("site_domain", authCreds.SiteDomain).
-		Msg("🔐 OK: Auth credentials loaded successfully")
+		Msg("Auth credentials loaded successfully")
 
 	// Unmarshal cookies from JSON
-	logger.Debug().Msg("🔐 Unmarshaling cookies from JSON")
+	logger.Trace().Msg("Unmarshaling cookies from JSON")
 	var extensionCookies []*interfaces.AtlassianExtensionCookie
 	if err := json.Unmarshal(authCreds.Cookies, &extensionCookies); err != nil {
-		logger.Error().Err(err).Msg("🔐 ERROR: Failed to unmarshal cookies from auth credentials")
+		logger.Error().Err(err).Msg("Failed to unmarshal cookies from auth credentials")
 		return fmt.Errorf("failed to unmarshal cookies: %w", err)
 	}
 
 	if len(extensionCookies) == 0 {
-		logger.Debug().Msg("🔐 WARNING: No cookies found in auth credentials")
+		logger.Trace().Msg("No cookies found in auth credentials")
 		return nil
 	}
 
-	logger.Debug().
+	logger.Trace().
 		Int("cookie_count", len(extensionCookies)).
 		Str("site_domain", authCreds.SiteDomain).
-		Msg("🔐 SUCCESS: Cookies loaded - preparing to inject into browser")
+		Msg("Cookies loaded - preparing to inject into browser")
 
 	// Parse target URL to get domain
 	targetURLParsed, err := neturl.Parse(targetURL)
@@ -980,21 +947,21 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 	}
 
 	// ===== PHASE 1: PRE-INJECTION DOMAIN DIAGNOSTICS =====
-	logger.Debug().
+	logger.Trace().
 		Str("target_url", targetURL).
 		Str("target_domain", targetURLParsed.Host).
 		Str("target_scheme", targetURLParsed.Scheme).
-		Msg("🔐 DIAGNOSTIC: Target URL parsed for domain analysis")
+		Msg("Target URL parsed for domain analysis")
 
 	// Analyze each cookie's domain compatibility with target URL
-	logger.Debug().Msg("🔐 DIAGNOSTIC: Analyzing cookie domain compatibility with target URL")
+	logger.Trace().Msg("Analyzing cookie domain compatibility with target URL")
 	for i, c := range extensionCookies {
 		cookieDomain := c.Domain
 		if cookieDomain == "" {
-			logger.Debug().
+			logger.Trace().
 				Int("cookie_index", i).
 				Str("cookie_name", c.Name).
-				Msg("🔐 DIAGNOSTIC: Cookie has no domain (will use target domain)")
+				Msg("Cookie has no domain (will use target domain)")
 			continue
 		}
 
@@ -1019,7 +986,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 			isMatch = false
 		}
 
-		logger.Debug().
+		logger.Trace().
 			Int("cookie_index", i).
 			Str("cookie_name", c.Name).
 			Str("cookie_domain", cookieDomain).
@@ -1027,31 +994,31 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 			Str("target_domain", targetHost).
 			Str("match_type", matchType).
 			Bool("will_be_sent", isMatch).
-			Msg("🔐 DIAGNOSTIC: Cookie domain analysis")
+			Msg("Cookie domain analysis")
 
 		if !isMatch {
-			logger.Debug().
+			logger.Trace().
 				Str("cookie_name", c.Name).
 				Str("cookie_domain", cookieDomain).
 				Str("target_domain", targetHost).
-				Msg("🔐 WARNING: Cookie domain mismatch - cookie may not be sent with requests")
+				Msg("Cookie domain mismatch - cookie may not be sent with requests")
 		}
 
 		// Check secure flag compatibility with scheme
 		if c.Secure && targetURLParsed.Scheme != "https" {
-			logger.Debug().
+			logger.Trace().
 				Str("cookie_name", c.Name).
 				Str("target_scheme", targetURLParsed.Scheme).
-				Msg("🔐 WARNING: Secure cookie will not be sent to non-HTTPS URL")
+				Msg("Secure cookie will not be sent to non-HTTPS URL")
 		}
 	}
 	// ===== END PHASE 1 =====
 
 	// Convert extension cookies to ChromeDP network cookies
-	logger.Debug().
+	logger.Trace().
 		Int("cookie_count", len(extensionCookies)).
 		Str("target_domain", targetURLParsed.Host).
-		Msg("🔐 Converting extension cookies to ChromeDP format")
+		Msg("Converting extension cookies to ChromeDP format")
 	var chromeDPCookies []*network.CookieParam
 	for i, c := range extensionCookies {
 		// Calculate expiration timestamp
@@ -1097,30 +1064,30 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 
 		chromeDPCookies = append(chromeDPCookies, chromeDPCookie)
 
-		logger.Debug().
+		logger.Trace().
 			Int("cookie_index", i).
 			Str("name", c.Name).
 			Str("domain", cookieDomain).
 			Str("path", c.Path).
 			Bool("secure", c.Secure).
 			Bool("http_only", c.HTTPOnly).
-			Msg("🔐 OK: Prepared cookie for injection")
+			Msg("Prepared cookie for injection")
 	}
 
 	// ===== PHASE 2: NETWORK DOMAIN ENABLEMENT =====
-	logger.Debug().Msg("🔐 DIAGNOSTIC: Enabling ChromeDP network domain for cookie operations")
+	logger.Trace().Msg("Enabling ChromeDP network domain for cookie operations")
 	err = chromedp.Run(browserCtx, network.Enable())
 	if err != nil {
-		logger.Error().Err(err).Msg("🔐 ERROR: Failed to enable network domain")
+		logger.Error().Err(err).Msg("Failed to enable network domain")
 		return fmt.Errorf("failed to enable network domain: %w", err)
 	}
-	logger.Debug().Msg("🔐 SUCCESS: Network domain enabled successfully")
+	logger.Trace().Msg("Network domain enabled successfully")
 	// ===== END PHASE 2 PART 1 =====
 
 	// Inject cookies into browser using ChromeDP
-	logger.Debug().
+	logger.Trace().
 		Int("cookie_count", len(chromeDPCookies)).
-		Msg("🔐 Starting browser cookie injection via ChromeDP")
+		Msg("Starting browser cookie injection via ChromeDP")
 
 	err = chromedp.Run(browserCtx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
@@ -1143,22 +1110,22 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 						Str("cookie_name", cookie.Name).
 						Str("domain", cookie.Domain).
 						Str("path", cookie.Path).
-						Msg("🔐 ERROR: Failed to inject cookie into browser")
+						Msg("Failed to inject cookie into browser")
 					// Continue with other cookies even if one fails
 				} else {
 					successCount++
-					logger.Debug().
+					logger.Trace().
 						Str("cookie_name", cookie.Name).
 						Str("domain", cookie.Domain).
-						Msg("🔐 OK: Cookie injected successfully")
+						Msg("Cookie injected successfully")
 				}
 			}
 
-			logger.Debug().
+			logger.Trace().
 				Int("success_count", successCount).
 				Int("fail_count", failCount).
 				Int("total_cookies", len(chromeDPCookies)).
-				Msg("🔐 Cookie injection batch complete")
+				Msg("Cookie injection batch complete")
 
 			return nil
 		}),
@@ -1169,19 +1136,19 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 			Err(err).
 			Str("target_url", targetURL).
 			Int("cookies_attempted", len(chromeDPCookies)).
-			Msg("🔐 ERROR: ChromeDP failed to inject cookies into browser")
+			Msg("ChromeDP failed to inject cookies into browser")
 		return fmt.Errorf("failed to inject cookies: %w", err)
 	}
 
-	logger.Info().
+	logger.Debug().
 		Int("cookies_injected", len(chromeDPCookies)).
 		Str("target_domain", targetURLParsed.Host).
-		Msg("🔐 SUCCESS: Authentication cookies injected into browser")
+		Msg("Authentication cookies injected into browser")
 
 	// ===== PHASE 2 PART 2: POST-INJECTION VERIFICATION =====
-	logger.Debug().
+	logger.Trace().
 		Str("target_url", targetURL).
-		Msg("🔐 DIAGNOSTIC: Verifying cookies after injection using network.GetCookies()")
+		Msg("Verifying cookies after injection using network.GetCookies()")
 
 	var verifiedCookies []*network.Cookie
 	err = chromedp.Run(browserCtx,
@@ -1199,13 +1166,13 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 		logger.Error().
 			Err(err).
 			Str("target_url", targetURL).
-			Msg("🔐 ERROR: Failed to verify cookies after injection")
+			Msg("Failed to verify cookies after injection")
 		// Don't return error - continue with warning
 	} else {
-		logger.Debug().
+		logger.Trace().
 			Int("verified_cookie_count", len(verifiedCookies)).
 			Int("injected_cookie_count", len(chromeDPCookies)).
-			Msg("🔐 DIAGNOSTIC: Cookie verification complete")
+			Msg("Cookie verification complete")
 
 		// Log details of each verified cookie
 		for i, cookie := range verifiedCookies {
@@ -1220,7 +1187,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 				expiryStr = time.Unix(int64(cookie.Expires), 0).Format(time.RFC3339)
 			}
 
-			logger.Debug().
+			logger.Trace().
 				Int("cookie_index", i).
 				Str("name", cookie.Name).
 				Str("value_preview", valuePreview).
@@ -1230,7 +1197,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 				Bool("http_only", cookie.HTTPOnly).
 				Str("same_site", string(cookie.SameSite)).
 				Str("expires", expiryStr).
-				Msg("🔐 DIAGNOSTIC: Verified cookie details")
+				Msg("Verified cookie details")
 		}
 
 		// Compare injected vs verified cookies
@@ -1265,27 +1232,27 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 			logger.Error().
 				Strs("missing_cookies", missingCookies).
 				Int("missing_count", len(missingCookies)).
-				Msg("🔐 ERROR: Cookies were injected but not verified (failed to persist)")
+				Msg("Cookies were injected but not verified (failed to persist)")
 		}
 
 		if len(unexpectedCookies) > 0 {
-			logger.Debug().
+			logger.Trace().
 				Strs("unexpected_cookies", unexpectedCookies).
 				Int("unexpected_count", len(unexpectedCookies)).
-				Msg("🔐 WARNING: Cookies verified but not injected (pre-existing or set by page)")
+				Msg("Cookies verified but not injected (pre-existing or set by page)")
 		}
 
 		// Final verdict
 		if len(verifiedCookies) == len(chromeDPCookies) && len(missingCookies) == 0 {
-			logger.Debug().
+			logger.Trace().
 				Int("cookie_count", len(verifiedCookies)).
-				Msg("🔐 SUCCESS: All injected cookies verified successfully")
+				Msg("All injected cookies verified successfully")
 		} else {
 			logger.Warn().
 				Int("injected", len(chromeDPCookies)).
 				Int("verified", len(verifiedCookies)).
 				Int("missing", len(missingCookies)).
-				Msg("🔐 WARNING: Cookie injection/verification mismatch detected")
+				Msg("Cookie injection/verification mismatch detected")
 		}
 	}
 	// ===== END PHASE 2 =====
@@ -1374,7 +1341,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 		return fmt.Errorf("failed to enqueue child job: %w", err)
 	}
 
-	logger.Debug().
+	logger.Trace().
 		Str("parent_job_id", parentJob.ID).
 		Str("child_job_id", childJob.ID).
 		Str("child_url", childURL).

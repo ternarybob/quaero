@@ -38,7 +38,7 @@ func (s *Service) CreateConnector(ctx context.Context, connector *models.Connect
 		return fmt.Errorf("failed to create connector: %w", err)
 	}
 
-	s.logger.Info().Str("connector_id", connector.ID).Msg("Connector created")
+	s.logger.Debug().Str("connector_id", connector.ID).Msg("Connector created")
 	return nil
 }
 
@@ -59,7 +59,7 @@ func (s *Service) UpdateConnector(ctx context.Context, connector *models.Connect
 		return fmt.Errorf("failed to update connector: %w", err)
 	}
 
-	s.logger.Info().Str("connector_id", connector.ID).Msg("Connector updated")
+	s.logger.Debug().Str("connector_id", connector.ID).Msg("Connector updated")
 	return nil
 }
 
@@ -69,6 +69,6 @@ func (s *Service) DeleteConnector(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to delete connector: %w", err)
 	}
 
-	s.logger.Info().Str("connector_id", id).Msg("Connector deleted")
+	s.logger.Debug().Str("connector_id", id).Msg("Connector deleted")
 	return nil
 }

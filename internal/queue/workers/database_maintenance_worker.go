@@ -74,7 +74,7 @@ func (w *DatabaseMaintenanceWorker) Execute(ctx context.Context, job *models.Que
 		return fmt.Errorf("missing operation in job config")
 	}
 
-	jobLogger.Info().
+	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("parent_id", parentID).
 		Str("operation", operation).
@@ -110,7 +110,7 @@ func (w *DatabaseMaintenanceWorker) Execute(ctx context.Context, job *models.Que
 		jobLogger.Warn().Err(err).Msg("Failed to update job status to completed")
 	}
 
-	jobLogger.Info().
+	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("operation", operation).
 		Msg("Database maintenance operation completed successfully")
@@ -142,24 +142,24 @@ func (w *DatabaseMaintenanceWorker) executeOperation(ctx context.Context, logger
 
 // vacuum performs VACUUM operation
 func (w *DatabaseMaintenanceWorker) vacuum(ctx context.Context, logger arbor.ILogger) error {
-	logger.Info().Msg("VACUUM operation skipped (BadgerDB handles compaction automatically)")
+	logger.Debug().Msg("VACUUM operation skipped (BadgerDB handles compaction automatically)")
 	return nil
 }
 
 // analyze performs ANALYZE operation
 func (w *DatabaseMaintenanceWorker) analyze(ctx context.Context, logger arbor.ILogger) error {
-	logger.Info().Msg("ANALYZE operation skipped (Not applicable to BadgerDB)")
+	logger.Debug().Msg("ANALYZE operation skipped (Not applicable to BadgerDB)")
 	return nil
 }
 
 // reindex performs REINDEX operation on all indexes
 func (w *DatabaseMaintenanceWorker) reindex(ctx context.Context, logger arbor.ILogger) error {
-	logger.Info().Msg("REINDEX operation skipped (Not applicable to BadgerDB)")
+	logger.Debug().Msg("REINDEX operation skipped (Not applicable to BadgerDB)")
 	return nil
 }
 
 // optimize performs database optimization
 func (w *DatabaseMaintenanceWorker) optimize(ctx context.Context, logger arbor.ILogger) error {
-	logger.Info().Msg("OPTIMIZE operation skipped (BadgerDB handles optimization automatically)")
+	logger.Debug().Msg("OPTIMIZE operation skipped (BadgerDB handles optimization automatically)")
 	return nil
 }
