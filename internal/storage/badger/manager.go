@@ -106,3 +106,8 @@ func (m *Manager) MigrateAPIKeysToKVStore(ctx context.Context) error {
 func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error {
 	return LoadJobDefinitionsFromFiles(ctx, m.jobDefinition, m.kv, dirPath, m.logger)
 }
+
+// LoadConnectorsFromFiles loads connectors from TOML files
+func (m *Manager) LoadConnectorsFromFiles(ctx context.Context, dirPath string) error {
+	return LoadConnectorsFromFiles(ctx, m.connector, dirPath, m.logger)
+}

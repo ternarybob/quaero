@@ -196,4 +196,8 @@ type StorageManager interface {
 	// LoadJobDefinitionsFromFiles loads job definitions from TOML files in the specified directory
 	// This is used to load job definitions at startup
 	LoadJobDefinitionsFromFiles(ctx context.Context, dirPath string) error
+
+	// LoadConnectorsFromFiles loads connectors from TOML files in the specified directory
+	// This is used to load connector configurations at startup
+	LoadConnectorsFromFiles(ctx context.Context, dirPath string) error
 }

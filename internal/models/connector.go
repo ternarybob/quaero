@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -10,6 +11,7 @@ type ConnectorType string
 
 const (
 	ConnectorTypeGitHub ConnectorType = "github"
+	ConnectorTypeGitLab ConnectorType = "gitlab"
 )
 
 // Connector represents an external service connection
@@ -34,7 +36,19 @@ type GitHubConnectorConfig struct {
 
 func (c *GitHubConnectorConfig) Validate() error {
 	if c.Token == "" {
-		return json.Unmarshal([]byte(`{"error": "token is required"}`), &struct{}{}) // Simple error
+		return errors.New("token is required")
+	}
+	return nil
+}
+
+// GitLabConnectorConfig defines configuration for GitLab connectors
+type GitLabConnectorConfig struct {
+	Token string `json:"token"`
+}
+
+func (c *GitLabConnectorConfig) Validate() error {
+	if c.Token == "" {
+		return errors.New("token is required")
 	}
 	return nil
 }

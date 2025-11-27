@@ -21,16 +21,16 @@ import (
 // It routes jobs to registered workers based on job type.
 // Supports concurrent job processing via multiple worker goroutines.
 type JobProcessor struct {
-	queueMgr      interfaces.QueueManager
-	jobMgr        *queue.Manager
-	executors     map[string]interfaces.JobWorker // Job workers keyed by job type
-	logger        arbor.ILogger
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	running       bool
-	mu            sync.Mutex
-	concurrency   int // Number of concurrent worker goroutines
+	queueMgr    interfaces.QueueManager
+	jobMgr      *queue.Manager
+	executors   map[string]interfaces.JobWorker // Job workers keyed by job type
+	logger      arbor.ILogger
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	running     bool
+	mu          sync.Mutex
+	concurrency int // Number of concurrent worker goroutines
 }
 
 // NewJobProcessor creates a new job processor that routes jobs to registered workers.

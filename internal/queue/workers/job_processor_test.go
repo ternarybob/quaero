@@ -69,9 +69,9 @@ var _ interfaces.QueueManager = (*mockQueueManager)(nil)
 // TestJobProcessorConcurrencyField verifies that the concurrency field is set correctly
 func TestJobProcessorConcurrencyField(t *testing.T) {
 	tests := []struct {
-		name            string
+		name             string
 		inputConcurrency int
-		expectedField   int
+		expectedField    int
 	}{
 		{"normal concurrency (2)", 2, 2},
 		{"high concurrency (5)", 5, 5},
