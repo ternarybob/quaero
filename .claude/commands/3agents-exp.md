@@ -10,7 +10,7 @@ Execute: $ARGUMENTS
 models: { planner: opus, worker: sonnet, validator: sonnet, reviewer: opus }
 opus_override: [security, authentication, crypto, state-machine, architectural-change]
 critical_triggers: [security, authentication, authorization, payments, data-migration, crypto, api-breaking, database-schema]
-paths: { root: ".", output: "{workdir}/", sandbox: "/tmp/3agents/" }
+paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents/" }
 ```
 
 ## RULES
@@ -21,11 +21,43 @@ paths: { root: ".", output: "{workdir}/", sandbox: "/tmp/3agents/" }
 
 ---
 
+## PHASE 0: CLASSIFY
+
+Analyse user input to determine:
+
+1. **Type**: `feature` or `fix`
+   - `feature`: New functionality, enhancements, additions
+   - `fix`: Bug repairs, corrections, patches, resolving issues
+
+2. **Slug**: kebab-case name from request (e.g., "Add JWT auth" → `jwt-auth`, "Fix login crash" → `login-crash`)
+
+3. **Workdir**: `./docs/{type}/{slug}/`
+
+Create workdir:
+```bash
+mkdir -p ./docs/{type}/{slug}/
+```
+
+Create `{workdir}/manifest.md`:
+```markdown
+# {Type}: {Title}
+- Slug: {slug}
+- Type: {feature|fix}
+- Created: {timestamp}
+- Request: "{original user input}"
+```
+
+---
+
 ## PHASE 1: PLAN (opus)
 
 Create `{workdir}/plan.md`:
 ```markdown
 # Plan: {task}
+
+## Classification
+- Type: {feature|fix}
+- Workdir: {workdir}
 
 ## Analysis
 {deps, approach, risks}
@@ -105,7 +137,6 @@ Deps: [x] 1→[2,3,4] [ ] 4→[5]
 ---
 
 ## PHASE 3: VALIDATE (sonnet)
-
 ```bash
 go build -o /tmp/final ./...
 go test ./test/api/... ./test/ui/...
@@ -142,6 +173,10 @@ Create `{workdir}/summary.md`:
 ```markdown
 # Complete: {task}
 
+## Classification
+- Type: {feature|fix}
+- Location: {workdir}
+
 {one paragraph overview}
 
 ## Stats
@@ -170,7 +205,8 @@ Cleanup: `rm -rf /tmp/3agents/`
 ---
 
 ## CHECKLIST
-- [ ] Create workdir + sandbox
+- [ ] CLASSIFY: Determine feature/fix + slug → create workdir
+- [ ] Create manifest.md
 - [ ] PLAN: plan.md + task-{N}.md files
 - [ ] EXECUTE: step-{N}.md + progress.md per task
 - [ ] VALIDATE: full build + test
@@ -181,6 +217,7 @@ Cleanup: `rm -rf /tmp/3agents/`
 
 ## INVOKE
 ```
-/3agents Add JWT authentication
-/3agents docs/fixes/01-plan.md
+/3agents Add JWT authentication          → ./docs/feature/jwt-authentication/
+/3agents Fix the login page crash        → ./docs/fix/login-page-crash/
+/3agents docs/feature/jwt-auth/plan.md   → Resume existing plan
 ```

@@ -200,8 +200,30 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 				// Add final job log
 				m.jobMgr.AddJobLog(ctx, job.ID, "info", "Parent job completed successfully")
 
-				// Publish completion event
-				m.publishParentJobProgress(ctx, job, "completed", "All child jobs completed")
+				// Publish completion event with full stats (including document_count)
+				// Get fresh child stats for final progress update
+				childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{job.ID})
+				if err != nil {
+					jobLogger.Warn().Err(err).Msg("Failed to get final child stats for completion event")
+					// Fall back to basic progress event
+					m.publishParentJobProgress(ctx, job, "completed", "All child jobs completed")
+				} else if interfaceStats, ok := childStatsMap[job.ID]; ok && interfaceStats != nil {
+					// Convert to local stats struct
+					finalStats := &ChildJobStats{
+						TotalChildren:     interfaceStats.ChildCount,
+						CompletedChildren: interfaceStats.CompletedChildren,
+						FailedChildren:    interfaceStats.FailedChildren,
+						CancelledChildren: interfaceStats.CancelledChildren,
+						RunningChildren:   interfaceStats.RunningChildren,
+						PendingChildren:   interfaceStats.PendingChildren,
+					}
+					progressText := m.formatProgressText(finalStats)
+					// Use publishParentJobProgressUpdate which includes document_count
+					m.publishParentJobProgressUpdate(ctx, job.ID, finalStats, progressText)
+				} else {
+					// No stats available, fall back to basic progress event
+					m.publishParentJobProgress(ctx, job, "completed", "All child jobs completed")
+				}
 
 				jobLogger.Debug().Str("job_id", job.ID).Msg("Parent job execution completed successfully")
 				return nil

@@ -605,6 +605,16 @@ func (a *App) initServices() error {
 	a.Orchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Debug().Msg("Places search manager registered")
 
+	// Register Web Search manager (Gemini SDK with GoogleSearch grounding)
+	webSearchManager := managers.NewWebSearchManager(
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	a.Orchestrator.RegisterStepExecutor(webSearchManager)
+	a.Logger.Debug().Msg("Web search manager registered")
+
 	// Register GitHub Repo manager
 	githubRepoManager := managers.NewGitHubRepoManager(
 		a.ConnectorService,

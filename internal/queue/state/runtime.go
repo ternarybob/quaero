@@ -64,16 +64,49 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 			payload["parent_id"] = *jobState.ParentID
 		}
 
-		event := interfaces.Event{
+		// Include document_count from metadata for completed jobs
+		if jobState.Metadata != nil {
+			if docCount, ok := jobState.Metadata["document_count"].(float64); ok {
+				payload["document_count"] = int(docCount)
+			} else if docCount, ok := jobState.Metadata["document_count"].(int); ok {
+				payload["document_count"] = docCount
+			}
+		}
+
+		// Publish EventJobStatusChange for monitor tracking
+		statusChangeEvent := interfaces.Event{
 			Type:    interfaces.EventJobStatusChange,
 			Payload: payload,
 		}
 
+		// Determine lifecycle event type based on terminal status
+		var lifecycleEventType interfaces.EventType
+		switch status {
+		case string(models.JobStatusCompleted):
+			lifecycleEventType = interfaces.EventJobCompleted
+		case string(models.JobStatusFailed):
+			lifecycleEventType = interfaces.EventJobFailed
+		case string(models.JobStatusCancelled):
+			lifecycleEventType = interfaces.EventJobCancelled
+		}
+
 		// Publish asynchronously to avoid blocking status updates
 		go func() {
-			if err := m.eventService.Publish(ctx, event); err != nil {
+			// Always publish status change event (for monitor)
+			if err := m.eventService.Publish(ctx, statusChangeEvent); err != nil {
 				// Log error but don't fail the status update
-				// EventService will handle logging via its subscribers
+			}
+
+			// Also publish specific lifecycle event for WebSocket handler
+			// This enables real-time UI updates via job_status_change WebSocket messages
+			if lifecycleEventType != "" {
+				lifecycleEvent := interfaces.Event{
+					Type:    lifecycleEventType,
+					Payload: payload,
+				}
+				if err := m.eventService.Publish(ctx, lifecycleEvent); err != nil {
+					// Log error but don't fail
+				}
 			}
 		}()
 	}

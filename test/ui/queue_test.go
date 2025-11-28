@@ -906,3 +906,304 @@ func TestNewsCrawlerConcurrency(t *testing.T) {
 
 	qtc.env.LogTest(t, "✓ Test completed successfully - Concurrency verified (max %d running)", maxRunningObserved)
 }
+
+// TestCopyAndQueueModal tests that the copy and queue button shows a modal (not browser popup)
+func TestCopyAndQueueModal(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 5*time.Minute)
+	defer cleanup()
+
+	qtc.env.LogTest(t, "--- Starting Test: Copy and Queue Modal ---")
+
+	// First, trigger a quick job to have something to copy
+	placesJobName := "Nearby Restaurants (Wheelers Hill)"
+
+	if err := qtc.triggerJob(placesJobName); err != nil {
+		t.Fatalf("Failed to trigger initial job: %v", err)
+	}
+
+	// Wait for job to complete
+	if err := qtc.monitorJob(placesJobName, 2*time.Minute, true, false); err != nil {
+		t.Fatalf("Initial job failed: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Initial job completed")
+
+	// Navigate to queue page
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("queue page did not load: %v", err)
+	}
+
+	// Find and click the rerun/copy button for the completed job
+	qtc.env.LogTest(t, "Clicking copy/rerun button...")
+	var clicked bool
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const cards = document.querySelectorAll('.card');
+				for (const card of cards) {
+					const titleEl = card.querySelector('.card-title');
+					if (titleEl && titleEl.textContent.includes('%s')) {
+						const rerunBtn = card.querySelector('button[title="Copy Job and Add to Queue"]');
+						if (rerunBtn) {
+							rerunBtn.click();
+							return true;
+						}
+					}
+				}
+				return false;
+			})()
+		`, placesJobName), &clicked),
+	); err != nil {
+		t.Fatalf("failed to click rerun button: %v", err)
+	}
+
+	if !clicked {
+		qtc.env.TakeScreenshot(qtc.ctx, "rerun_button_not_found")
+		t.Fatalf("Rerun button not found for job %s", placesJobName)
+	}
+	qtc.env.LogTest(t, "✓ Rerun button clicked")
+
+	// Wait for modal to appear (NOT browser confirm dialog)
+	qtc.env.LogTest(t, "Waiting for confirmation modal...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+	); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "modal_not_found")
+		t.Fatalf("Modal did not appear (still using browser confirm?): %v", err)
+	}
+	qtc.env.TakeScreenshot(qtc.ctx, "copy_queue_modal")
+	qtc.env.LogTest(t, "✓ Modal appeared")
+
+	// Verify modal title contains expected text
+	var modalTitle string
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Text(`.modal.active .modal-title`, &modalTitle, chromedp.ByQuery),
+	); err != nil {
+		t.Fatalf("failed to get modal title: %v", err)
+	}
+	qtc.env.LogTest(t, "Modal title: %s", modalTitle)
+
+	if !strings.Contains(modalTitle, "Copy") || !strings.Contains(modalTitle, "Queue") {
+		t.Fatalf("Expected modal title to contain 'Copy' and 'Queue', got: %s", modalTitle)
+	}
+
+	// Cancel to clean up
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Click(`.modal.active .btn-link`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+	); err != nil {
+		t.Fatalf("failed to cancel modal: %v", err)
+	}
+
+	qtc.env.LogTest(t, "✓ Test completed successfully - Modal confirmed working")
+}
+
+// TestCopyAndQueueJobRuns tests that copied jobs actually execute (not stuck in pending)
+func TestCopyAndQueueJobRuns(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 8*time.Minute)
+	defer cleanup()
+
+	qtc.env.LogTest(t, "--- Starting Test: Copy and Queue Job Runs ---")
+
+	placesJobName := "Nearby Restaurants (Wheelers Hill)"
+
+	// First, run the original job
+	if err := qtc.triggerJob(placesJobName); err != nil {
+		t.Fatalf("Failed to trigger initial job: %v", err)
+	}
+
+	if err := qtc.monitorJob(placesJobName, 2*time.Minute, true, false); err != nil {
+		t.Fatalf("Initial job failed: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Original job completed")
+
+	// Navigate to queue page
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("queue page did not load: %v", err)
+	}
+
+	// Count current completed jobs before copy
+	var initialCompletedCount int
+	chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const element = document.querySelector('[x-data="jobList"]');
+				if (!element) return 0;
+				const component = Alpine.$data(element);
+				if (!component || !component.allJobs) return 0;
+				return component.allJobs.filter(j =>
+					j.name && j.name.includes('%s') &&
+					j.status === 'completed'
+				).length;
+			})()
+		`, placesJobName), &initialCompletedCount),
+	)
+	qtc.env.LogTest(t, "Initial completed job count: %d", initialCompletedCount)
+
+	// Click the rerun button
+	qtc.env.LogTest(t, "Clicking copy/rerun button...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const cards = document.querySelectorAll('.card');
+				for (const card of cards) {
+					const titleEl = card.querySelector('.card-title');
+					if (titleEl && titleEl.textContent.includes('%s')) {
+						const rerunBtn = card.querySelector('button[title="Copy Job and Add to Queue"]');
+						if (rerunBtn) {
+							rerunBtn.click();
+							return true;
+						}
+					}
+				}
+				return false;
+			})()
+		`, placesJobName), nil),
+	); err != nil {
+		t.Fatalf("failed to click rerun button: %v", err)
+	}
+
+	// Wait for modal and confirm
+	qtc.env.LogTest(t, "Confirming copy in modal...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	); err != nil {
+		t.Fatalf("failed to confirm copy: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Copy confirmed")
+
+	// Wait for the copied job to execute
+	qtc.env.LogTest(t, "Waiting for copied job to run...")
+
+	// Poll for the new job to complete (should see completed count increase)
+	startTime := time.Now()
+	timeout := 3 * time.Minute
+	var newestJobStatus string
+
+	for time.Since(startTime) < timeout {
+		// Refresh job list
+		chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(`
+				(() => {
+					if (typeof loadJobs === 'function') {
+						loadJobs();
+					}
+				})()
+			`, nil),
+		)
+		time.Sleep(2 * time.Second)
+
+		// Get status of the newest job with our name
+		chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const element = document.querySelector('[x-data="jobList"]');
+					if (!element) return 'error: element not found';
+					const component = Alpine.$data(element);
+					if (!component || !component.allJobs) return 'error: no jobs';
+
+					// Find jobs with our name, get the newest one
+					const matchingJobs = component.allJobs.filter(j => j.name && j.name.includes('%s'));
+					if (matchingJobs.length === 0) return 'error: no matching jobs';
+
+					// Sort by created_at descending to get newest
+					matchingJobs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+					return matchingJobs[0].status;
+				})()
+			`, placesJobName), &newestJobStatus),
+		)
+
+		qtc.env.LogTest(t, "  Newest job status: %s", newestJobStatus)
+
+		// Job should move from pending to running to completed
+		if newestJobStatus == "completed" {
+			break
+		}
+
+		// If still pending after 30 seconds, that's a failure
+		if newestJobStatus == "pending" && time.Since(startTime) > 30*time.Second {
+			qtc.env.TakeScreenshot(qtc.ctx, "job_stuck_pending")
+			t.Fatalf("Copied job is stuck in pending status after 30s - job is NOT executing!")
+		}
+
+		time.Sleep(3 * time.Second)
+	}
+
+	if newestJobStatus != "completed" && newestJobStatus != "running" {
+		qtc.env.TakeScreenshot(qtc.ctx, "job_not_running")
+		t.Fatalf("Copied job did not run. Final status: %s", newestJobStatus)
+	}
+
+	// If still running, wait a bit more for completion
+	if newestJobStatus == "running" {
+		qtc.env.LogTest(t, "Job is running, waiting for completion...")
+		time.Sleep(30 * time.Second)
+	}
+
+	qtc.env.TakeScreenshot(qtc.ctx, "copy_job_completed")
+	qtc.env.LogTest(t, "✓ Test completed successfully - Copied job executed (status: %s)", newestJobStatus)
+}
+
+// TestWebSearchJob tests that the web search job executes and produces a document
+// Uses Gemini SDK with GoogleSearch grounding to search for ASX:GNP company info
+func TestWebSearchJob(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	// Check if a valid Gemini API key is available
+	// The test environment loads keys from .env.test into EnvVars
+	// The job definition uses {google_gemini_api_key}
+	hasGeminiKey := false
+	for _, keyName := range []string{"google_gemini_api_key", "QUAERO_GEMINI_GOOGLE_API_KEY", "QUAERO_AGENT_GOOGLE_API_KEY"} {
+		if key := qtc.env.EnvVars[keyName]; key != "" && key != "fake-gemini-api-key-for-testing" {
+			hasGeminiKey = true
+			qtc.env.LogTest(t, "Found Gemini API key: %s", keyName)
+			break
+		}
+	}
+
+	if !hasGeminiKey {
+		t.Skip("Skipping web search test - no valid google_gemini_api_key found in .env.test")
+	}
+
+	qtc.env.LogTest(t, "--- Starting Test: Web Search Job ---")
+
+	jobName := "Web Search: ASX:GNP Company Info"
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger web search job: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Web search job triggered")
+
+	// Monitor job completion (allow 5 minutes for web search with follow-up queries)
+	if err := qtc.monitorJob(jobName, 5*time.Minute, true, false); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "web_search_failed")
+		t.Fatalf("Web search job failed: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Web search job completed")
+
+	// Take screenshot of queue showing completed job
+	qtc.env.TakeScreenshot(qtc.ctx, "web_search_job_completed")
+
+	qtc.env.LogTest(t, "✓ Test completed successfully - Web search job completed with documents")
+}

@@ -188,6 +188,7 @@ type JobStatusUpdate struct {
 	ChildCount        int       `json:"child_count,omitempty"`         // Total child jobs (for error tolerance context)
 	ChildFailureCount int       `json:"child_failure_count,omitempty"` // Number of failed child jobs (for error tolerance)
 	ErrorTolerance    int       `json:"error_tolerance,omitempty"`     // Error tolerance threshold (0 = unlimited)
+	DocumentCount     int       `json:"document_count,omitempty"`      // Document count from job metadata
 	Timestamp         time.Time `json:"timestamp"`                     // Event timestamp
 	// Status report fields from backend (GetStatusReport)
 	ProgressText    string   `json:"progress_text,omitempty"`    // Human-readable progress from backend

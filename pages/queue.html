@@ -2508,6 +2508,9 @@
                     if (update.failed_count !== undefined && update.failed_count !== null) {
                         job.failed_count = update.failed_count;
                     }
+                    if (update.document_count !== undefined && update.document_count !== null) {
+                        job.document_count = update.document_count;
+                    }
 
                     // Update progress object
                     if (!job.progress) {

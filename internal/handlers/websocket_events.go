@@ -260,6 +260,7 @@ func (s *EventSubscriber) handleJobCompleted(ctx context.Context, event interfac
 		CompletedURLs: totalURLs, // All URLs completed
 		PendingURLs:   0,         // No pending URLs
 		Duration:      getFloat64WithFallback(payload, "duration_seconds", "durationSeconds"),
+		DocumentCount: getIntWithFallback(payload, "document_count", "documentCount"),
 		Timestamp:     getTimestamp(payload),
 		// Extract status_report fields from payload
 		ProgressText:    getStringWithFallback(payload, "progress_text", "progressText"),

@@ -1051,10 +1051,36 @@ func (s *Service) RerunJob(ctx context.Context, jobID string, updateConfig inter
 		return "", fmt.Errorf("failed to save job: %w", err)
 	}
 
-	s.logger.Debug().
-		Str("original_job_id", jobID).
-		Str("new_job_id", newJobID).
-		Msg("Job rerun created successfully")
+	// Enqueue the job for processing
+	if s.queueManager != nil {
+		// Serialize the job state to JSON for queue payload
+		payloadBytes, err := json.Marshal(newJobState)
+		if err != nil {
+			s.logger.Warn().Err(err).Str("job_id", newJobID).Msg("Failed to serialize job for queue, job saved but not enqueued")
+			return newJobID, nil // Job is saved, return success but it won't auto-run
+		}
+
+		msg := models.QueueMessage{
+			JobID:   newJobID,
+			Type:    newJobState.Type,
+			Payload: payloadBytes,
+		}
+
+		if err := s.queueManager.Enqueue(s.ctx, msg); err != nil {
+			s.logger.Warn().Err(err).Str("job_id", newJobID).Msg("Failed to enqueue job, job saved but not enqueued")
+			return newJobID, nil // Job is saved, return success but it won't auto-run
+		}
+
+		s.logger.Info().
+			Str("original_job_id", jobID).
+			Str("new_job_id", newJobID).
+			Str("job_type", newJobState.Type).
+			Msg("Job rerun created and enqueued for processing")
+	} else {
+		s.logger.Warn().
+			Str("job_id", newJobID).
+			Msg("Queue manager not available, job saved but not enqueued")
+	}
 
 	return newJobID, nil
 }
