@@ -1,0 +1,56 @@
+# GitHub Repository Content Collector                                                                                                                                         
+# Imports repository files as documents with folder path tracking                                                                                                             
+# Documents include metadata: owner, repo, branch, folder, path, sha, file_type                                                                                               
+                                                                                                                                                                              
+id = "github-repo-collector"                                                                                                                                                  
+name = "GitHub Repository Collector"                                                                                                                                          
+type = "fetch"                                                                                                                                                               
+job_type = "user"                                                                                                                                                             
+source_type = "github"                                                                                                                                                        
+description = "Fetches repository content from specified branches and imports as searchable documents"                                                                        
+                                                                                                                                                                              
+# Tags to apply to all documents created by this job (for filtering/categorization)                                                                                           
+tags = ["github", "source-code", "repository"]                                                                                                                                
+                                                                                                                                                                              
+# Cron schedule (empty = manual execution only)                                                                                                                               
+schedule = ""                                                                                                                                                                 
+                                                                                                                                                                              
+# Maximum execution time                                                                                                                                                      
+timeout = "30m"                                                                                                                                                               
+                                                                                                                                                                              
+# Whether this job is enabled                                                                                                                                                 
+enabled = true                                                                                                                                                                
+                                                                                                                                                                              
+# Whether to auto-start when scheduler initializes                                                                                                                            
+auto_start = false                                                                                                                                                            
+                                                                                                                                                                              
+# Job steps definition                                                                                                                                                        
+[[steps]]                                                                                                                                                                     
+name = "fetch_repo_content"                                                                                                                                                   
+action = "github_repo_fetch"                                                                                                                                                  
+on_error = "continue"                                                                                                                                                         
+                                                                                                                                                                              
+[steps.config]                                                                                                                                                                
+# GitHub connector ID (replace with your connector ID or use variable)                                                                                                        
+connector_id = "{github_connector_id}"                                                                                                                                        
+                                                                                                                                                                              
+# Repository details (must be configured before running)                                                                                                                      
+owner = "ternarybob"
+repo = "quaero"                                                                                                                                                                     
+                                                                                                                                                                              
+# Branches to fetch (default: main)                                                                                                                                           
+branches = ["main"]                                                                                                                                                           
+                                                                                                                                                                              
+# File extensions to include                                                                                                                                                  
+extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]                                                                                  
+                                                                                                                                                                              
+# Paths to exclude from fetching                                                                                                                                              
+exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/"]                                                                                                      
+                                                                                                                                                                              
+# Maximum number of files to fetch per execution
+max_files = 10                                                                                                                                                              
+                                                                                                                                                                              
+# Error tolerance configuration                                                                                                                                               
+[error_tolerance]                                                                                                                                                             
+max_child_failures = 50                                                                                                                                                       
+failure_action = "continue"

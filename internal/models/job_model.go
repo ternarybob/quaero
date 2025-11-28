@@ -44,8 +44,13 @@ type QueueJob struct {
 }
 
 const (
+	// GitHub Action Log types
 	SourceTypeGitHubActionLog = "github_action_log"
 	JobTypeGitHubActionLog    = "github_action_log"
+
+	// GitHub Repository types
+	SourceTypeGitHubRepo  = "github_repo"
+	JobTypeGitHubRepoFile = "github_repo_file"
 )
 
 // NewQueueJob creates a new root queued job

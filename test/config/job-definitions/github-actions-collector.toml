@@ -1,0 +1,55 @@
+# GitHub Actions Log Collector
+# Imports workflow run logs with metadata (time/date, workflow info)
+# Documents include metadata: owner, repo, run_id, workflow_name, run_started_at, run_date, branch, commit_sha, conclusion
+
+id = "github-actions-collector"
+name = "GitHub Actions Log Collector"
+type = "fetch"
+job_type = "user"
+source_type = "github"
+description = "Fetches GitHub Actions workflow logs with metadata including timestamps and workflow info"
+
+# Tags to apply to all documents created by this job (for filtering/categorization)
+# Note: conclusion (success/failure/cancelled) is automatically added as a tag
+tags = ["github", "actions", "ci-cd", "logs"]
+
+# Cron schedule (empty = manual execution only)
+schedule = ""
+
+# Maximum execution time
+timeout = "15m"
+
+# Whether this job is enabled
+enabled = true
+
+# Whether to auto-start when scheduler initializes
+auto_start = false
+
+# Job steps definition
+[[steps]]
+name = "fetch_action_logs"
+action = "github_actions_fetch"
+on_error = "continue"
+
+[steps.config]
+# GitHub connector ID (replace with your connector ID or use variable)
+connector_id = "{github_connector_id}"
+
+# Repository details (must be configured before running)
+owner = "ternarybob"
+repo = "quaero"
+
+# Maximum number of workflow runs to fetch
+limit = 5
+
+# Optional filters (uncomment to use):
+# Filter by workflow status: "queued", "in_progress", "completed"
+# status_filter = "completed"
+
+# Filter by branch name
+# branch_filter = "main"
+
+# Error tolerance configuration
+[error_tolerance]
+max_child_failures = 10
+failure_action = "continue"

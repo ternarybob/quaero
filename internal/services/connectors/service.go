@@ -47,6 +47,22 @@ func (s *Service) GetConnector(ctx context.Context, id string) (*models.Connecto
 	return s.storage.GetConnector(ctx, id)
 }
 
+// GetConnectorByName retrieves a connector by name
+func (s *Service) GetConnectorByName(ctx context.Context, name string) (*models.Connector, error) {
+	connectors, err := s.storage.ListConnectors(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list connectors: %w", err)
+	}
+
+	for _, c := range connectors {
+		if c.Name == name {
+			return c, nil
+		}
+	}
+
+	return nil, fmt.Errorf("connector not found: %s", name)
+}
+
 // ListConnectors retrieves all connectors
 func (s *Service) ListConnectors(ctx context.Context) ([]*models.Connector, error) {
 	return s.storage.ListConnectors(ctx)

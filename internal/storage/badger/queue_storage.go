@@ -279,7 +279,7 @@ func (s *QueueStorage) GetJobChildStats(ctx context.Context, parentIDs []string)
 		return nil, err
 	}
 
-	// Group children by parent
+	// Group children by parent (direct children only)
 	childrenByParent := make(map[string][]models.QueueJob)
 	for _, job := range allJobs {
 		if job.ParentID != nil {
@@ -287,20 +287,44 @@ func (s *QueueStorage) GetJobChildStats(ctx context.Context, parentIDs []string)
 		}
 	}
 
-	for _, parentID := range parentIDs {
-		children := childrenByParent[parentID]
+	// Helper function to recursively collect only LEAF jobs (jobs with no children)
+	// This excludes intermediate parent jobs (like step parents) that are organizational containers
+	// and only counts actual work items that get processed by workers.
+	var collectLeafJobs func(parentID string) []models.QueueJob
+	collectLeafJobs = func(parentID string) []models.QueueJob {
+		directChildren := childrenByParent[parentID]
+		leafJobs := make([]models.QueueJob, 0)
 
-		childStats := &interfaces.JobChildStats{
-			ChildCount: len(children),
+		for _, child := range directChildren {
+			// Check if this child has any children of its own
+			grandchildren := childrenByParent[child.ID]
+			if len(grandchildren) == 0 {
+				// This is a leaf job - include it
+				leafJobs = append(leafJobs, child)
+			} else {
+				// This is an intermediate parent - recurse into its children
+				leafJobs = append(leafJobs, collectLeafJobs(child.ID)...)
+			}
 		}
 
-		// For each child, get its status record
-		for _, child := range children {
+		return leafJobs
+	}
+
+	for _, parentID := range parentIDs {
+		// Get only LEAF descendants (actual work items, not intermediate parents)
+		leafJobs := collectLeafJobs(parentID)
+
+		childStats := &interfaces.JobChildStats{
+			ChildCount: len(leafJobs),
+		}
+
+		// For each leaf job, get its status record
+		for _, leaf := range leafJobs {
 			var statusRecord JobStatusRecord
 			// Default to pending if no record found
 			status := models.JobStatusPending
 
-			if err := s.db.Store().Get(child.ID, &statusRecord); err == nil {
+			if err := s.db.Store().Get(leaf.ID, &statusRecord); err == nil {
 				status = models.JobStatus(statusRecord.Status)
 			}
 

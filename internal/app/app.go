@@ -123,6 +123,7 @@ type App struct {
 	JobDefinitionHandler *handlers.JobDefinitionHandler
 	SystemLogsHandler    *handlers.SystemLogsHandler
 	ConnectorHandler     *handlers.ConnectorHandler
+	GitHubJobsHandler    *handlers.GitHubJobsHandler
 }
 
 // New initializes the application with all dependencies
@@ -483,6 +484,17 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(githubLogWorker)
 	a.Logger.Debug().Msg("GitHub Log worker registered")
 
+	// Register GitHub Repo file worker
+	githubRepoWorker := workers.NewGitHubRepoWorker(
+		a.ConnectorService,
+		jobMgr,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	jobProcessor.RegisterExecutor(githubRepoWorker)
+	a.Logger.Debug().Msg("GitHub Repo worker registered")
+
 	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
 	// to avoid blocking queue workers with long-running monitoring loops
@@ -569,7 +581,8 @@ func (a *App) initServices() error {
 
 	// 6.9. Initialize Orchestrator for job definition execution (ARCH-009)
 	// Pass jobMonitor so it can start monitoring goroutines for crawler jobs
-	a.Orchestrator = queue.NewOrchestrator(jobMgr, jobMonitor, a.Logger)
+	// Pass kvStorage for resolving {key-name} placeholders in step configs
+	a.Orchestrator = queue.NewOrchestrator(jobMgr, jobMonitor, a.StorageManager.KeyValueStorage(), a.Logger)
 
 	// Register managers for job definition steps
 	crawlerManager := managers.NewCrawlerManager(a.CrawlerService, a.Logger)
@@ -591,6 +604,26 @@ func (a *App) initServices() error {
 	placesSearchManager := managers.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
 	a.Orchestrator.RegisterStepExecutor(placesSearchManager)
 	a.Logger.Debug().Msg("Places search manager registered")
+
+	// Register GitHub Repo manager
+	githubRepoManager := managers.NewGitHubRepoManager(
+		a.ConnectorService,
+		jobMgr,
+		queueMgr,
+		a.Logger,
+	)
+	a.Orchestrator.RegisterStepExecutor(githubRepoManager)
+	a.Logger.Debug().Msg("GitHub Repo manager registered")
+
+	// Register GitHub Actions manager
+	githubActionsManager := managers.NewGitHubActionsManager(
+		a.ConnectorService,
+		jobMgr,
+		queueMgr,
+		a.Logger,
+	)
+	a.Orchestrator.RegisterStepExecutor(githubActionsManager)
+	a.Logger.Debug().Msg("GitHub Actions manager registered")
 
 	// Register AI manager (if agent service is available)
 	if a.AgentService != nil {
@@ -713,6 +746,15 @@ func (a *App) initHandlers() error {
 
 	// Initialize connector handler
 	a.ConnectorHandler = handlers.NewConnectorHandler(a.ConnectorService, a.Logger)
+
+	// Initialize GitHub jobs handler
+	a.GitHubJobsHandler = handlers.NewGitHubJobsHandler(
+		a.ConnectorService,
+		a.JobManager,
+		a.QueueManager,
+		a.Orchestrator,
+		a.Logger,
+	)
 
 	// Initialize page handler for serving HTML templates
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)

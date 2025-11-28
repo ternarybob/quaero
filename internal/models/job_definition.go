@@ -36,6 +36,7 @@ const (
 	JobDefinitionTypeCustom     JobDefinitionType = "custom"
 	JobDefinitionTypePlaces     JobDefinitionType = "places"
 	JobDefinitionTypeAgent      JobDefinitionType = "agent" // Agent-powered document processing jobs
+	JobDefinitionTypeFetch      JobDefinitionType = "fetch" // API-based data collection with authentication (GitHub, etc.)
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -50,7 +51,7 @@ const (
 // IsValidJobDefinitionType checks if a given JobDefinitionType is one of the valid constants
 func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	switch jobType {
-	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAgent:
+	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAgent, JobDefinitionTypeFetch:
 		return true
 	default:
 		return false
@@ -160,7 +161,7 @@ func (j *JobDefinition) Validate() error {
 
 	// Validate JobDefinitionType is one of the allowed constants
 	if !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent)", j.Type)
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)

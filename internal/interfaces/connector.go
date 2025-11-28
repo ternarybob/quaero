@@ -10,6 +10,7 @@ import (
 type ConnectorService interface {
 	CreateConnector(ctx context.Context, connector *models.Connector) error
 	GetConnector(ctx context.Context, id string) (*models.Connector, error)
+	GetConnectorByName(ctx context.Context, name string) (*models.Connector, error)
 	ListConnectors(ctx context.Context) ([]*models.Connector, error)
 	UpdateConnector(ctx context.Context, connector *models.Connector) error
 	DeleteConnector(ctx context.Context, id string) error

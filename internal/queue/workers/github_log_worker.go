@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/connectors/github"
 	"github.com/ternarybob/quaero/internal/githublogs"
@@ -21,6 +22,9 @@ type GitHubLogWorker struct {
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
 }
+
+// Compile-time assertion: GitHubLogWorker implements JobWorker interface
+var _ interfaces.JobWorker = (*GitHubLogWorker)(nil)
 
 // NewGitHubLogWorker creates a new GitHub log worker
 func NewGitHubLogWorker(
@@ -61,82 +65,198 @@ func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.QueueJob) err
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	// Extract configuration
-	config := job.Config
-	seedURL, _ := config["seed_url"].(string)
-	authID, _ := job.Metadata["auth_id"].(string) // Using auth_id as connector_id for now
+	// Try new-style config first (from GitHubActionsManager)
+	owner, hasOwner := job.GetConfigString("owner")
+	repo, hasRepo := job.GetConfigString("repo")
+	runID, hasRunID := job.GetConfigInt("run_id")
+	workflowName, _ := job.GetConfigString("workflow_name")
+	runStartedAt, _ := job.GetConfigString("run_started_at")
+	branch, _ := job.GetConfigString("branch")
+	commitSHA, _ := job.GetConfigString("commit_sha")
+	conclusion, _ := job.GetConfigString("conclusion")
 
-	if seedURL == "" {
-		return fmt.Errorf("seed_url is required")
+	// Get connector ID from metadata
+	connectorID, _ := job.GetMetadataString("connector_id")
+	if connectorID == "" {
+		// Fallback for legacy auth_id
+		connectorID, _ = job.Metadata["auth_id"].(string)
 	}
 
-	// Find connector
+	// Get tags from metadata
+	baseTags := getTagsFromMetadata(job.Metadata)
+
 	var connector *models.Connector
 	var err error
+	var logContent string
 
-	if authID != "" {
-		connector, err = w.connectorService.GetConnector(ctx, authID)
-		if err != nil {
-			w.logger.Warn().Err(err).Str("connector_id", authID).Msg("Failed to find connector by ID, falling back to listing")
-		}
-	}
-
-	if connector == nil {
-		// Fallback: List connectors and find the first GitHub one
-		connectors, err := w.connectorService.ListConnectors(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list connectors: %w", err)
-		}
-		for _, c := range connectors {
-			if c.Type == models.ConnectorTypeGitHub {
-				connector = c
-				break
+	// Check if we have new-style config (from manager)
+	if hasOwner && hasRepo && hasRunID {
+		// New-style: fetch workflow run logs directly
+		if connectorID != "" {
+			connector, err = w.connectorService.GetConnector(ctx, connectorID)
+			if err != nil {
+				w.logger.Warn().Err(err).Str("connector_id", connectorID).Msg("Failed to find connector by ID")
 			}
 		}
-	}
 
-	if connector == nil {
-		return fmt.Errorf("no GitHub connector found")
-	}
+		if connector == nil {
+			connector, err = w.findGitHubConnector(ctx)
+			if err != nil {
+				return err
+			}
+		}
 
-	// Initialize GitHub connector
-	ghConnector, err := github.NewConnector(connector)
-	if err != nil {
-		return fmt.Errorf("failed to create github connector: %w", err)
-	}
+		ghConnector, err := github.NewConnector(connector)
+		if err != nil {
+			return fmt.Errorf("failed to create GitHub connector: %w", err)
+		}
 
-	// Parse URL
-	owner, repo, jobID, err := githublogs.ParseLogURL(seedURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse log url: %w", err)
-	}
+		logContent, err = ghConnector.GetWorkflowRunLogs(ctx, owner, repo, int64(runID))
+		if err != nil {
+			return fmt.Errorf("failed to fetch workflow run logs: %w", err)
+		}
 
-	// Fetch log
-	logContent, err := ghConnector.GetJobLog(ctx, owner, repo, jobID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch job log: %w", err)
-	}
+		// Parse run_started_at for proper timestamp
+		var runTime time.Time
+		if runStartedAt != "" {
+			runTime, _ = time.Parse(time.RFC3339, runStartedAt)
+		}
 
-	// Save as document
-	doc := &models.Document{
-		ID:              job.ID, // Use job ID as document ID for simplicity, or generate new one
-		SourceID:        job.ID,
-		SourceType:      models.SourceTypeGitHubActionLog,
-		Title:           fmt.Sprintf("GitHub Action Log: %s/%s Job %d", owner, repo, jobID),
-		ContentMarkdown: logContent,
-		URL:             seedURL,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
-		Tags:            []string{"github", "log", repo},
-		Metadata: map[string]interface{}{
-			"owner":  owner,
-			"repo":   repo,
-			"job_id": jobID,
-		},
-	}
+		// Create document with full metadata
+		doc := &models.Document{
+			ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
+			SourceType:      models.SourceTypeGitHubActionLog,
+			SourceID:        fmt.Sprintf("%s/%s/actions/runs/%d", owner, repo, runID),
+			Title:           fmt.Sprintf("GitHub Actions: %s - %s/%s #%d", workflowName, owner, repo, runID),
+			ContentMarkdown: logContent,
+			URL:             fmt.Sprintf("https://github.com/%s/%s/actions/runs/%d", owner, repo, runID),
+			Tags:            mergeTags(baseTags, []string{"github", "actions", repo, conclusion}),
+			Metadata: map[string]interface{}{
+				"owner":          owner,
+				"repo":           repo,
+				"run_id":         runID,
+				"workflow_name":  workflowName,
+				"run_started_at": runStartedAt,
+				"run_date":       runTime.Format("2006-01-02"),
+				"branch":         branch,
+				"commit_sha":     commitSHA,
+				"conclusion":     conclusion,
+			},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
 
-	if err := w.documentStorage.SaveDocument(doc); err != nil {
-		return fmt.Errorf("failed to save document: %w", err)
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
+			return fmt.Errorf("failed to save document: %w", err)
+		}
+
+		// Publish event for real-time UI updates
+		if w.eventService != nil {
+			// Use root_parent_id for document count tracking (points to JobDefParent)
+			// Fall back to immediate parent if root_parent_id is not set
+			rootParentID, _ := job.GetMetadataString("root_parent_id")
+			if rootParentID == "" {
+				rootParentID = job.GetParentID()
+			}
+
+			event := interfaces.Event{
+				Type: interfaces.EventDocumentSaved,
+				Payload: map[string]interface{}{
+					"job_id":        job.ID,
+					"parent_job_id": rootParentID, // Root parent (JobDefParent) for document count tracking
+					"document_id":   doc.ID,
+					"title":         doc.Title,
+					"workflow_name": workflowName,
+					"timestamp":     time.Now().Format(time.RFC3339),
+				},
+			}
+			if err := w.eventService.Publish(ctx, event); err != nil {
+				w.logger.Warn().Err(err).Msg("Failed to publish document saved event")
+			}
+		}
+	} else {
+		// Legacy mode: parse URL and fetch job log
+		seedURL, _ := job.Config["seed_url"].(string)
+		if seedURL == "" {
+			return fmt.Errorf("seed_url is required (legacy mode) or owner/repo/run_id (new mode)")
+		}
+
+		if connectorID != "" {
+			connector, err = w.connectorService.GetConnector(ctx, connectorID)
+			if err != nil {
+				w.logger.Warn().Err(err).Str("connector_id", connectorID).Msg("Failed to find connector by ID")
+			}
+		}
+
+		if connector == nil {
+			connector, err = w.findGitHubConnector(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
+		ghConnector, err := github.NewConnector(connector)
+		if err != nil {
+			return fmt.Errorf("failed to create GitHub connector: %w", err)
+		}
+
+		// Parse URL
+		owner, repo, jobID, err := githublogs.ParseLogURL(seedURL)
+		if err != nil {
+			return fmt.Errorf("failed to parse log url: %w", err)
+		}
+
+		// Fetch log
+		logContent, err = ghConnector.GetJobLog(ctx, owner, repo, jobID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch job log: %w", err)
+		}
+
+		// Save as document (legacy format)
+		doc := &models.Document{
+			ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
+			SourceID:        fmt.Sprintf("%s/%s/job/%d", owner, repo, jobID),
+			SourceType:      models.SourceTypeGitHubActionLog,
+			Title:           fmt.Sprintf("GitHub Action Log: %s/%s Job %d", owner, repo, jobID),
+			ContentMarkdown: logContent,
+			URL:             seedURL,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			Tags:            mergeTags(baseTags, []string{"github", "actions", repo}),
+			Metadata: map[string]interface{}{
+				"owner":  owner,
+				"repo":   repo,
+				"job_id": jobID,
+			},
+		}
+
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
+			return fmt.Errorf("failed to save document: %w", err)
+		}
+
+		// Publish event
+		if w.eventService != nil {
+			// Use root_parent_id for document count tracking (points to JobDefParent)
+			// Fall back to immediate parent if root_parent_id is not set
+			rootParentID, _ := job.GetMetadataString("root_parent_id")
+			if rootParentID == "" {
+				rootParentID = job.GetParentID()
+			}
+
+			event := interfaces.Event{
+				Type: interfaces.EventDocumentSaved,
+				Payload: map[string]interface{}{
+					"job_id":        job.ID,
+					"parent_job_id": rootParentID, // Root parent (JobDefParent) for document count tracking
+					"document_id":   doc.ID,
+					"title":         doc.Title,
+					"timestamp":     time.Now().Format(time.RFC3339),
+				},
+			}
+			if err := w.eventService.Publish(ctx, event); err != nil {
+				w.logger.Warn().Err(err).Msg("Failed to publish document saved event")
+			}
+		}
 	}
 
 	// Update job status to completed
@@ -151,4 +271,20 @@ func (w *GitHubLogWorker) Execute(ctx context.Context, job *models.QueueJob) err
 
 	w.logger.Debug().Str("job_id", job.ID).Msg("GitHub Action Log job completed successfully")
 	return nil
+}
+
+// findGitHubConnector finds the first available GitHub connector
+func (w *GitHubLogWorker) findGitHubConnector(ctx context.Context) (*models.Connector, error) {
+	connectors, err := w.connectorService.ListConnectors(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list connectors: %w", err)
+	}
+
+	for _, c := range connectors {
+		if c.Type == models.ConnectorTypeGitHub {
+			return c, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no GitHub connector found")
 }

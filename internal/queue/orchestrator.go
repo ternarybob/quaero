@@ -16,16 +16,69 @@ type Orchestrator struct {
 	stepExecutors map[string]interfaces.StepManager // Step managers keyed by action type
 	jobManager    *Manager
 	jobMonitor    interfaces.JobMonitor
+	kvStorage     interfaces.KeyValueStorage // For resolving {key-name} placeholders in step configs
 	logger        arbor.ILogger
 }
 
 // NewOrchestrator creates a new orchestrator for routing job definition steps to managers
-func NewOrchestrator(jobManager *Manager, jobMonitor interfaces.JobMonitor, logger arbor.ILogger) *Orchestrator {
+func NewOrchestrator(jobManager *Manager, jobMonitor interfaces.JobMonitor, kvStorage interfaces.KeyValueStorage, logger arbor.ILogger) *Orchestrator {
 	return &Orchestrator{
 		stepExecutors: make(map[string]interfaces.StepManager), // Initialize step manager map
 		jobManager:    jobManager,
 		jobMonitor:    jobMonitor,
+		kvStorage:     kvStorage,
 		logger:        logger,
+	}
+}
+
+// resolvePlaceholders recursively resolves {key-name} placeholders in step config values
+// using the KV storage. Returns a new config map with resolved values.
+func (o *Orchestrator) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
+	if config == nil {
+		return nil
+	}
+	if o.kvStorage == nil {
+		return config // No KV storage, return config as-is
+	}
+
+	resolved := make(map[string]interface{})
+	for key, value := range config {
+		resolved[key] = o.resolveValue(ctx, value)
+	}
+	return resolved
+}
+
+// resolveValue recursively resolves placeholders in a single value
+func (o *Orchestrator) resolveValue(ctx context.Context, value interface{}) interface{} {
+	switch v := value.(type) {
+	case string:
+		// Check if this is a placeholder {key-name}
+		if len(v) > 2 && v[0] == '{' && v[len(v)-1] == '}' {
+			keyName := v[1 : len(v)-1]
+			// Look up in KV storage
+			kvValue, err := o.kvStorage.Get(ctx, keyName)
+			if err == nil && kvValue != "" {
+				o.logger.Debug().
+					Str("placeholder", v).
+					Str("resolved", kvValue).
+					Msg("Resolved placeholder from KV store")
+				return kvValue
+			}
+			o.logger.Warn().
+				Str("placeholder", v).
+				Msg("Failed to resolve placeholder - key not found in KV store")
+		}
+		return v
+	case map[string]interface{}:
+		return o.resolvePlaceholders(ctx, v)
+	case []interface{}:
+		resolved := make([]interface{}, len(v))
+		for i, item := range v {
+			resolved[i] = o.resolveValue(ctx, item)
+		}
+		return resolved
+	default:
+		return v
 	}
 }
 
@@ -252,8 +305,17 @@ func (o *Orchestrator) Execute(ctx context.Context, jobDef *models.JobDefinition
 			continue
 		}
 
+		// Resolve placeholders in step config before passing to manager
+		resolvedStep := step
+		if step.Config != nil {
+			resolvedStep.Config = o.resolvePlaceholders(ctx, step.Config)
+			parentLogger.Debug().
+				Str("step_name", step.Name).
+				Msg("Resolved placeholders in step config")
+		}
+
 		// Execute step via manager (creates parent job and orchestrates children)
-		childJobID, err := mgr.CreateParentJob(ctx, step, jobDef, parentJobID)
+		childJobID, err := mgr.CreateParentJob(ctx, resolvedStep, jobDef, parentJobID)
 		if err != nil {
 			parentLogger.Error().
 				Err(err).

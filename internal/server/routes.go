@@ -84,6 +84,12 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/connectors", s.handleConnectorsRoute)
 	mux.HandleFunc("/api/connectors/", s.handleConnectorRoutes)
 
+	// API routes - GitHub Jobs (repo and actions collectors)
+	mux.HandleFunc("/api/github/repo/preview", s.app.GitHubJobsHandler.PreviewRepoFilesHandler)
+	mux.HandleFunc("/api/github/repo/start", s.app.GitHubJobsHandler.StartRepoCollectorHandler)
+	mux.HandleFunc("/api/github/actions/preview", s.app.GitHubJobsHandler.PreviewActionRunsHandler)
+	mux.HandleFunc("/api/github/actions/start", s.app.GitHubJobsHandler.StartActionsCollectorHandler)
+
 	// API routes - System
 	mux.HandleFunc("/api/version", s.app.APIHandler.VersionHandler)
 	mux.HandleFunc("/api/health", s.app.APIHandler.HealthHandler)
