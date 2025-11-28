@@ -21,8 +21,8 @@ func TestIndex(t *testing.T) {
 	defer env.Cleanup()
 
 	// Create a timeout context
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelTimeout()
 
 	// Create allocator context
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
@@ -30,12 +30,18 @@ func TestIndex(t *testing.T) {
 		chromedp.Flag("disable-gpu", true),
 		chromedp.WindowSize(1920, 1080),
 	)
-	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer cancel()
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+	defer cancelAlloc()
 
 	// Create browser context
-	ctx, cancel = chromedp.NewContext(allocCtx)
-	defer cancel()
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer func() {
+		// Properly close browser before canceling context
+		// This ensures Chrome processes are terminated on Windows
+		chromedp.Cancel(browserCtx)
+		cancelBrowser()
+	}()
+	ctx = browserCtx
 
 	// Base URL
 	baseURL := env.GetBaseURL()

@@ -21,19 +21,25 @@ func TestConnectorUI_NoConnectorsMessage(t *testing.T) {
 	defer env.Cleanup()
 
 	// Create browser context
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelTimeout()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.WindowSize(1920, 1080),
 	)
-	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer cancel()
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+	defer cancelAlloc()
 
-	ctx, cancel = chromedp.NewContext(allocCtx)
-	defer cancel()
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer func() {
+		// Properly close browser before canceling context
+		// This ensures Chrome processes are terminated on Windows
+		chromedp.Cancel(browserCtx)
+		cancelBrowser()
+	}()
+	ctx = browserCtx
 
 	// Navigate to Settings > Connectors page
 	baseURL := env.GetBaseURL()
@@ -116,19 +122,25 @@ func TestConnectorUI_ConnectorDetails(t *testing.T) {
 	}
 
 	// Create browser context
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancelTimeout()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.WindowSize(1920, 1080),
 	)
-	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
-	defer cancel()
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+	defer cancelAlloc()
 
-	ctx, cancel = chromedp.NewContext(allocCtx)
-	defer cancel()
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer func() {
+		// Properly close browser before canceling context
+		// This ensures Chrome processes are terminated on Windows
+		chromedp.Cancel(browserCtx)
+		cancelBrowser()
+	}()
+	ctx = browserCtx
 
 	// Navigate to Settings > Connectors page
 	baseURL := env.GetBaseURL()

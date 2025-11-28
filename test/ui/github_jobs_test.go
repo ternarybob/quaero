@@ -57,6 +57,12 @@ func newGitHubTestContext(t *testing.T, timeout time.Duration) (*githubTestConte
 
 	// Return cleanup function
 	cleanup := func() {
+		// Properly close the browser before canceling contexts
+		// This ensures Chrome processes are terminated on Windows
+		if err := chromedp.Cancel(browserCtx); err != nil {
+			// Log but don't fail - browser may already be closed
+			t.Logf("Warning: browser cancel returned: %v", err)
+		}
 		cancelBrowser()
 		cancelAlloc()
 		cancelTimeout()

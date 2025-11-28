@@ -84,11 +84,24 @@ func verifyServiceConnectivity() error {
 	}
 
 	// Test 2: Homepage loads in browser
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
+	// Create allocator to ensure proper browser process cleanup on Windows
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
+		append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("headless", true),
+			chromedp.Flag("disable-gpu", true),
+		)...,
+	)
+	defer cancelAlloc()
 
-	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+	defer func() {
+		// Properly close browser before canceling context
+		chromedp.Cancel(browserCtx)
+		cancelBrowser()
+	}()
+
+	ctx, cancelTimeout := context.WithTimeout(browserCtx, 10*time.Second)
+	defer cancelTimeout()
 
 	var title string
 	err = chromedp.Run(ctx,

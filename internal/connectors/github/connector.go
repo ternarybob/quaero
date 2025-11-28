@@ -15,6 +15,7 @@ import (
 // Connector implements interfaces.GitHubConnector
 type Connector struct {
 	client *github.Client
+	token  string // Store token for GraphQL requests
 }
 
 // NewConnector creates a new GitHub connector from a generic connector model
@@ -39,7 +40,10 @@ func NewConnector(c *models.Connector) (*Connector, error) {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
-	return &Connector{client: client}, nil
+	return &Connector{
+		client: client,
+		token:  config.Token,
+	}, nil
 }
 
 // TestConnection verifies the token works by getting the authenticated user
