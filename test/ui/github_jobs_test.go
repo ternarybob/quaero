@@ -471,3 +471,89 @@ func TestGitHubActionsCollector(t *testing.T) {
 
 	gtc.env.LogTest(t, "✓ Test completed successfully")
 }
+
+// createGitHubConnectorWithoutKV creates a GitHub connector but does NOT store ID in KV store
+// This is used for testing connector_name resolution (the job uses connector_name instead of {connector_id})
+func (gtc *githubTestContext) createGitHubConnectorWithoutKV() error {
+	token := gtc.env.EnvVars["github_test_token"]
+	if token == "" {
+		return fmt.Errorf("github_test_token not found in .env.test")
+	}
+
+	gtc.env.LogTest(gtc.t, "Creating GitHub connector (without KV store)...")
+
+	// Create connector via API
+	helper := gtc.env.NewHTTPTestHelper(gtc.t)
+
+	body := map[string]interface{}{
+		"name": "Test GitHub Connector",
+		"type": "github",
+		"config": map[string]interface{}{
+			"token": token,
+		},
+	}
+
+	resp, err := helper.POST("/api/connectors", body)
+	if err != nil {
+		return fmt.Errorf("failed to create connector: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("connector creation failed with status: %d", resp.StatusCode)
+	}
+
+	var connector map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &connector); err != nil {
+		return fmt.Errorf("failed to parse connector response: %w", err)
+	}
+
+	connectorID, ok := connector["id"].(string)
+	if !ok {
+		return fmt.Errorf("connector ID not found in response")
+	}
+
+	gtc.connectorID = connectorID
+	gtc.env.LogTest(gtc.t, "✓ Created GitHub connector: %s (name: 'Test GitHub Connector')", connectorID)
+	gtc.env.LogTest(gtc.t, "  Note: Not storing in KV - job will resolve by name")
+
+	return nil
+}
+
+// TestGitHubRepoCollectorByName tests the GitHub Repository Collector using connector_name
+// This validates that jobs can resolve connectors by name instead of ID
+func TestGitHubRepoCollectorByName(t *testing.T) {
+	gtc, cleanup := newGitHubTestContext(t, 5*time.Minute)
+	defer cleanup()
+
+	gtc.env.LogTest(t, "--- Starting Test: GitHub Repository Collector (By Name) ---")
+	gtc.env.LogTest(t, "This test validates connector_name resolution (instead of connector_id)")
+
+	// Create GitHub connector WITHOUT storing in KV
+	// The job definition uses connector_name = "Test GitHub Connector" instead of {github_connector_id}
+	if err := gtc.createGitHubConnectorWithoutKV(); err != nil {
+		t.Fatalf("Failed to create GitHub connector: %v", err)
+	}
+
+	jobName := "GitHub Repository Collector (By Name)"
+
+	// Take screenshot before triggering job
+	if err := chromedp.Run(gtc.ctx, chromedp.Navigate(gtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	if err := gtc.env.TakeScreenshot(gtc.ctx, "github_repo_by_name_before"); err != nil {
+		gtc.env.LogTest(gtc.t, "Failed to take before screenshot: %v", err)
+	}
+
+	// Trigger the job
+	if err := gtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger %s: %v", jobName, err)
+	}
+
+	// Monitor the job (3 minute timeout for repo fetching)
+	if err := gtc.monitorJob(jobName, 3*time.Minute, true); err != nil {
+		t.Fatalf("Job monitoring failed: %v", err)
+	}
+
+	gtc.env.LogTest(t, "✓ Test completed successfully - connector_name resolution works!")
+}

@@ -543,21 +543,25 @@ func (s *QueueStorage) UpdateJobHeartbeat(ctx context.Context, jobID string) err
 func (s *QueueStorage) GetStaleJobs(ctx context.Context, staleThresholdMinutes int) ([]*models.QueueJob, error) {
 	threshold := time.Now().Add(-time.Duration(staleThresholdMinutes) * time.Minute)
 
-	// Find status records that are running and haven't heartbeat since threshold
+	// Find all running status records
+	// Note: We avoid using IsNil() in queries as it can cause reflect panics with pointer fields
+	var runningRecords []JobStatusRecord
+	err := s.db.Store().Find(&runningRecords, badgerhold.Where("Status").Eq("running"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter stale records in-memory to avoid IsNil() reflection panic
 	var staleRecords []JobStatusRecord
-	err := s.db.Store().Find(&staleRecords, badgerhold.Where("Status").Eq("running").And("LastHeartbeat").Lt(threshold))
-	if err != nil {
-		return nil, err
+	for _, record := range runningRecords {
+		if record.LastHeartbeat != nil && record.LastHeartbeat.Before(threshold) {
+			// Job has heartbeat but it's stale
+			staleRecords = append(staleRecords, record)
+		} else if record.LastHeartbeat == nil && record.StartedAt != nil && record.StartedAt.Before(threshold) {
+			// Job has no heartbeat and started before threshold
+			staleRecords = append(staleRecords, record)
+		}
 	}
-
-	// Also check for running jobs with NO heartbeat that started before threshold
-	var noHeartbeatRecords []JobStatusRecord
-	err = s.db.Store().Find(&noHeartbeatRecords, badgerhold.Where("Status").Eq("running").And("LastHeartbeat").IsNil().And("StartedAt").Lt(threshold))
-	if err != nil {
-		return nil, err
-	}
-
-	staleRecords = append(staleRecords, noHeartbeatRecords...)
 
 	// Fetch QueueJobs
 	var result []*models.QueueJob

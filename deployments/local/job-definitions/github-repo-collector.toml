@@ -47,9 +47,12 @@ extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".tom
 # Paths to exclude from fetching                                                                                                                                              
 exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/"]                                                                                                      
                                                                                                                                                                               
-# Maximum number of files to fetch per execution                                                                                                                              
-max_files = 1000                                                                                                                                                              
-                                                                                                                                                                              
+# Maximum number of files to fetch per execution
+max_files = 1000
+
+# Number of concurrent file fetch workers
+concurrency = 10
+
 # Error tolerance configuration                                                                                                                                               
 [error_tolerance]                                                                                                                                                             
 max_child_failures = 50                                                                                                                                                       

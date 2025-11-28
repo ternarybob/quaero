@@ -56,11 +56,12 @@ func (m *GitHubRepoManager) CreateParentJob(ctx context.Context, step models.Job
 
 	// Extract required config
 	connectorID := getStringConfig(stepConfig, "connector_id", "")
+	connectorName := getStringConfig(stepConfig, "connector_name", "")
 	owner := getStringConfig(stepConfig, "owner", "")
 	repo := getStringConfig(stepConfig, "repo", "")
 
-	if connectorID == "" {
-		return "", fmt.Errorf("connector_id is required")
+	if connectorID == "" && connectorName == "" {
+		return "", fmt.Errorf("connector_id or connector_name is required")
 	}
 	if owner == "" {
 		return "", fmt.Errorf("owner is required")
@@ -78,16 +79,28 @@ func (m *GitHubRepoManager) CreateParentJob(ctx context.Context, step models.Job
 	m.logger.Debug().
 		Str("step_name", step.Name).
 		Str("connector_id", connectorID).
+		Str("connector_name", connectorName).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
 		Msg("Creating GitHub repo parent job")
 
-	// Get GitHub connector
-	connector, err := m.connectorService.GetConnector(ctx, connectorID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get connector: %w", err)
+	// Get GitHub connector - by ID or by name
+	var connector *models.Connector
+	var err error
+	if connectorID != "" {
+		connector, err = m.connectorService.GetConnector(ctx, connectorID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by ID: %w", err)
+		}
+	} else {
+		connector, err = m.connectorService.GetConnectorByName(ctx, connectorName)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by name '%s': %w", connectorName, err)
+		}
+		// Set connectorID for downstream use (metadata, child jobs)
+		connectorID = connector.ID
 	}
 
 	ghConnector, err := github.NewConnector(connector)

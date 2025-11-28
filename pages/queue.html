@@ -1318,7 +1318,15 @@
 
         // Cancel a running job
         async function cancelJob(jobId, evt) {
-            if (!confirm(`Cancel job ${jobId.substring(0, 8)}?\n\nThe job will be stopped immediately.`)) {
+            // Use modal confirmation instead of native confirm()
+            const confirmed = await window.confirmAction({
+                title: 'Cancel Job',
+                message: `Are you sure you want to cancel job ${jobId.substring(0, 8)}? The job will be stopped immediately.`,
+                confirmText: 'Cancel Job',
+                type: 'warning'
+            });
+
+            if (!confirmed) {
                 return;
             }
 
@@ -1341,12 +1349,13 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to cancel job');
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || 'Failed to cancel job');
                 }
 
                 window.showNotification('Job cancelled successfully', 'success');
                 loadStats();
-                // Note: loadJobs() removed - WebSocket will update job status automatically
+                loadJobs(); // Refresh job list to reflect cancelled status
             } catch (error) {
                 console.error('Error cancelling job:', error);
                 window.showNotification('Failed to cancel job: ' + error.message, 'error');

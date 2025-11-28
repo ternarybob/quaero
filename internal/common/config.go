@@ -172,7 +172,7 @@ func NewDefaultConfig() *Config {
 		},
 		Queue: QueueConfig{
 			PollInterval:      "1s",
-			Concurrency:       2, // Reduced from 3 to minimize database lock contention
+			Concurrency:       10, // Global job processor concurrency - how many jobs run in parallel
 			VisibilityTimeout: "5m",
 			MaxReceive:        3,
 			QueueName:         "quaero_jobs",

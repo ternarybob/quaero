@@ -558,3 +558,345 @@ func TestNewsCrawlerCrash(t *testing.T) {
 
 	qtc.env.LogTest(t, "✓ Test completed successfully - Service remained responsive")
 }
+
+// TestJobCancel tests cancelling a running job via the Queue UI
+func TestJobCancel(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 5*time.Minute)
+	defer cleanup()
+
+	jobName := "News Crawler"
+
+	qtc.env.LogTest(t, "--- Starting Test: Job Cancel ---")
+
+	// Navigate to Queue page first to take a "before" screenshot
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	if err := qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_before"); err != nil {
+		qtc.env.LogTest(qtc.t, "Failed to take before screenshot: %v", err)
+	}
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger %s: %v", jobName, err)
+	}
+
+	// Navigate to Queue page and wait for job to appear
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("queue page did not load: %v", err)
+	}
+
+	// Wait for job to appear in the queue
+	qtc.env.LogTest(t, "Waiting for job to appear in queue...")
+	var jobFound bool
+	pollErr := chromedp.Run(qtc.ctx,
+		chromedp.Poll(
+			fmt.Sprintf(`
+				(() => {
+					const element = document.querySelector('[x-data="jobList"]');
+					if (!element) return false;
+					const component = Alpine.$data(element);
+					if (!component || !component.allJobs) return false;
+					return component.allJobs.some(j => j.name && j.name.includes('%s'));
+				})()
+			`, jobName),
+			&jobFound,
+			chromedp.WithPollingTimeout(15*time.Second),
+			chromedp.WithPollingInterval(1*time.Second),
+		),
+	)
+	if pollErr != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_not_found")
+		t.Fatalf("job %s not found in queue after 15s: %v", jobName, pollErr)
+	}
+	qtc.env.LogTest(t, "✓ Job found in queue")
+
+	// Wait for job to start running (status = running)
+	qtc.env.LogTest(t, "Waiting for job to start running...")
+	var jobRunning bool
+	runningErr := chromedp.Run(qtc.ctx,
+		chromedp.Poll(
+			fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge && statusBadge.getAttribute('data-status') === 'running') {
+								return true;
+							}
+						}
+					}
+					return false;
+				})()
+			`, jobName),
+			&jobRunning,
+			chromedp.WithPollingTimeout(30*time.Second),
+			chromedp.WithPollingInterval(1*time.Second),
+		),
+	)
+	if runningErr != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_not_running")
+		t.Fatalf("job %s did not start running: %v", jobName, runningErr)
+	}
+	qtc.env.LogTest(t, "✓ Job is running")
+	qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_running")
+
+	// Find and click the cancel button for this job
+	qtc.env.LogTest(t, "Clicking cancel button...")
+	cancelBtnSelector := fmt.Sprintf(`
+		(() => {
+			const cards = document.querySelectorAll('.card');
+			for (const card of cards) {
+				const titleEl = card.querySelector('.card-title');
+				if (titleEl && titleEl.textContent.includes('%s')) {
+					const cancelBtn = card.querySelector('button[title="Cancel Job"]');
+					if (cancelBtn) {
+						cancelBtn.click();
+						return true;
+					}
+				}
+			}
+			return false;
+		})()
+	`, jobName)
+
+	var cancelClicked bool
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(cancelBtnSelector, &cancelClicked),
+	); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_button_click_failed")
+		t.Fatalf("failed to click cancel button: %v", err)
+	}
+
+	if !cancelClicked {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_button_not_found")
+		t.Fatalf("cancel button not found for job %s", jobName)
+	}
+	qtc.env.LogTest(t, "✓ Cancel button clicked")
+
+	// Wait for confirmation modal to appear
+	qtc.env.LogTest(t, "Waiting for confirmation modal...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+	); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_modal_not_found")
+		t.Fatalf("confirmation modal did not appear: %v", err)
+	}
+	qtc.env.TakeScreenshot(qtc.ctx, "cancel_confirmation_modal")
+	qtc.env.LogTest(t, "✓ Confirmation modal appeared")
+
+	// Click the confirm button in the modal
+	qtc.env.LogTest(t, "Confirming cancellation...")
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_confirm_click_failed")
+		t.Fatalf("failed to confirm cancellation: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Cancellation confirmed")
+
+	// Wait for job status to change to cancelled
+	qtc.env.LogTest(t, "Waiting for job to be cancelled...")
+
+	// Wait a moment for the cancel action to fully propagate
+	time.Sleep(2 * time.Second)
+
+	// Manually trigger a data refresh
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(`
+			(() => {
+				if (typeof loadJobs === 'function') {
+					loadJobs();
+				}
+			})()
+		`, nil),
+	); err != nil {
+		qtc.env.LogTest(t, "Warning: Failed to trigger loadJobs: %v", err)
+	}
+
+	// Wait for refresh to complete
+	time.Sleep(2 * time.Second)
+
+	var jobCancelled bool
+	cancelledErr := chromedp.Run(qtc.ctx,
+		chromedp.Poll(
+			fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge && statusBadge.getAttribute('data-status') === 'cancelled') {
+								return true;
+							}
+						}
+					}
+					return false;
+				})()
+			`, jobName),
+			&jobCancelled,
+			chromedp.WithPollingTimeout(30*time.Second),
+			chromedp.WithPollingInterval(1*time.Second),
+		),
+	)
+	if cancelledErr != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_status_not_cancelled")
+		t.Fatalf("job %s was not cancelled: %v", jobName, cancelledErr)
+	}
+	qtc.env.LogTest(t, "✓ Job status changed to cancelled")
+
+	// Take final screenshot
+	qtc.env.TakeScreenshot(qtc.ctx, "cancel_job_after")
+
+	qtc.env.LogTest(t, "✓ Test completed successfully - Job cancelled via UI")
+}
+
+// TestNewsCrawlerConcurrency tests that the News Crawler job runs with proper concurrency
+// This verifies that the global queue concurrency setting (default: 10) allows multiple
+// child jobs to run in parallel, not just 2.
+func TestNewsCrawlerConcurrency(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	jobName := "News Crawler"
+	minExpectedRunning := 3 // We expect at least 3 concurrent jobs with concurrency=10
+
+	qtc.env.LogTest(t, "--- Starting Test: News Crawler Concurrency ---")
+
+	// Navigate to Queue page first to take a "before" screenshot
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	if err := qtc.env.TakeScreenshot(qtc.ctx, "concurrency_before"); err != nil {
+		qtc.env.LogTest(qtc.t, "Failed to take before screenshot: %v", err)
+	}
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger %s: %v", jobName, err)
+	}
+
+	// Navigate to Queue page and wait for job to appear
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("queue page did not load: %v", err)
+	}
+
+	// Wait for job to start running
+	qtc.env.LogTest(t, "Waiting for job to start running...")
+	var jobRunning bool
+	runningErr := chromedp.Run(qtc.ctx,
+		chromedp.Poll(
+			fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge && statusBadge.getAttribute('data-status') === 'running') {
+								return true;
+							}
+						}
+					}
+					return false;
+				})()
+			`, jobName),
+			&jobRunning,
+			chromedp.WithPollingTimeout(30*time.Second),
+			chromedp.WithPollingInterval(1*time.Second),
+		),
+	)
+	if runningErr != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "concurrency_job_not_running")
+		t.Fatalf("job %s did not start running: %v", jobName, runningErr)
+	}
+	qtc.env.LogTest(t, "✓ Job is running")
+
+	// Wait a bit for child jobs to spawn
+	time.Sleep(5 * time.Second)
+
+	// Poll for at least minExpectedRunning concurrent running children
+	// We check the Progress text in the job card which shows "X pending, Y running, Z completed"
+	qtc.env.LogTest(t, "Checking for concurrent running child jobs (expecting >= %d)...", minExpectedRunning)
+
+	var maxRunningObserved int
+	var concurrencyMet bool
+
+	// Poll multiple times to catch peak concurrency
+	for attempt := 0; attempt < 30 && !concurrencyMet; attempt++ {
+		var runningCount int
+		if err := chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					// Find the News Crawler job card and extract running count from Progress text
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							// Find the Progress line which shows "X pending, Y running, Z completed"
+							const progressEl = card.querySelector('.job-progress-text, [class*="progress"]');
+							if (progressEl) {
+								const text = progressEl.textContent;
+								const match = text.match(/(\d+)\s*running/i);
+								if (match) return parseInt(match[1]);
+							}
+							// Fallback: search all text in the card
+							const cardText = card.innerText;
+							const match = cardText.match(/(\d+)\s*running/i);
+							if (match) return parseInt(match[1]);
+						}
+					}
+					return 0;
+				})()
+			`, jobName), &runningCount),
+		); err != nil {
+			qtc.env.LogTest(t, "Warning: Failed to get running count: %v", err)
+		}
+
+		if runningCount > maxRunningObserved {
+			maxRunningObserved = runningCount
+			qtc.env.LogTest(t, "Running child jobs: %d (new max)", runningCount)
+		}
+
+		if runningCount >= minExpectedRunning {
+			concurrencyMet = true
+			qtc.env.TakeScreenshot(qtc.ctx, "concurrency_achieved")
+			qtc.env.LogTest(t, "✓ Concurrency requirement met: %d running (expected >= %d)", runningCount, minExpectedRunning)
+		}
+
+		if !concurrencyMet {
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if !concurrencyMet {
+		qtc.env.TakeScreenshot(qtc.ctx, "concurrency_not_met")
+		t.Fatalf("Concurrency requirement not met: max observed %d running child jobs, expected >= %d", maxRunningObserved, minExpectedRunning)
+	}
+
+	// Take final screenshot
+	qtc.env.TakeScreenshot(qtc.ctx, "concurrency_after")
+
+	qtc.env.LogTest(t, "✓ Test completed successfully - Concurrency verified (max %d running)", maxRunningObserved)
+}

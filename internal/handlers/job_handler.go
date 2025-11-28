@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -35,12 +36,13 @@ type JobHandler struct {
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
 	jobManager       interfaces.JobManager
+	eventService     interfaces.EventService
 	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, eventService interfaces.EventService, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
@@ -48,6 +50,7 @@ func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueS
 		schedulerService: schedulerService,
 		logService:       logService,
 		jobManager:       jobManager,
+		eventService:     eventService,
 		config:           config,
 		logger:           logger,
 	}
@@ -772,6 +775,8 @@ func (h *JobHandler) RerunJobHandler(w http.ResponseWriter, r *http.Request) {
 // CancelJobHandler cancels a running job
 // POST /api/jobs/{id}/cancel
 func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	// Extract job ID from path: /api/jobs/{id}/cancel
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 3 {
@@ -785,14 +790,78 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try crawler service first (for legacy crawler jobs in activeJobs)
 	err := h.crawlerService.CancelJob(jobID)
-	if err != nil {
-		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel job")
+	if err == nil {
+		h.logger.Debug().Str("job_id", jobID).Msg("Job cancelled via crawler service")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"job_id":  jobID,
+			"message": "Job cancelled successfully",
+		})
+		return
+	}
+
+	// Crawler service failed - try queue-based cancellation
+	h.logger.Debug().Err(err).Str("job_id", jobID).Msg("Crawler service cancel failed, trying queue-based cancellation")
+
+	// Get job from storage to verify it exists and is running
+	jobInterface, storageErr := h.jobStorage.GetJob(ctx, jobID)
+	if storageErr != nil {
+		h.logger.Error().Err(storageErr).Str("job_id", jobID).Msg("Job not found in storage")
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	// Type assert to QueueJobState
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type - expected QueueJobState")
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
+	}
+
+	// Check if job is in a cancellable state
+	if jobState.Status != models.JobStatusRunning && jobState.Status != models.JobStatusPending {
+		h.logger.Warn().Str("job_id", jobID).Str("status", string(jobState.Status)).Msg("Job is not in a cancellable state")
+		http.Error(w, fmt.Sprintf("Job is not running (status: %s)", jobState.Status), http.StatusBadRequest)
+		return
+	}
+
+	// Cancel the job via storage
+	if err := h.jobStorage.UpdateJobStatus(ctx, jobID, string(models.JobStatusCancelled), "Cancelled by user"); err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel job in storage")
 		http.Error(w, "Failed to cancel job", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Debug().Str("job_id", jobID).Msg("Job cancelled")
+	// Cancel all child jobs if this is a parent job
+	if jobState.Type == "parent" {
+		childrenCancelled, childErr := h.jobManager.StopAllChildJobs(ctx, jobID)
+		if childErr != nil {
+			h.logger.Warn().Err(childErr).Str("job_id", jobID).Msg("Failed to cancel child jobs")
+		} else if childrenCancelled > 0 {
+			h.logger.Debug().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
+		}
+	}
+
+	// Publish EventJobCancelled for WebSocket broadcast
+	if h.eventService != nil {
+		cancelledEvent := interfaces.Event{
+			Type: interfaces.EventJobCancelled,
+			Payload: map[string]interface{}{
+				"job_id":    jobID,
+				"status":    "cancelled",
+				"name":      jobState.Name,
+				"timestamp": time.Now(),
+			},
+		}
+		if err := h.eventService.Publish(ctx, cancelledEvent); err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job cancelled event")
+		}
+	}
+
+	h.logger.Debug().Str("job_id", jobID).Msg("Job cancelled via storage")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
