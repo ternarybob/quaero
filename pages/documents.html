@@ -360,11 +360,29 @@
                     <tr id="detail-${doc.id}" class="detail-row" style="display: none;">
                         <td colspan="5" style="padding: 0;">
                             <div class="detail-content">
-                                <div style="margin-bottom: 0.5rem;">
-                                    <span class="label label-primary">${doc.id}</span>
-                                    <span class="text-gray text-small ml-2">Click row to collapse</span>
+                                <div style="margin-bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between;">
+                                    <div>
+                                        <span class="label label-primary">${doc.id}</span>
+                                        <span class="text-gray text-small ml-2">Click row to collapse</span>
+                                    </div>
                                 </div>
-                                <pre><code id="code-${doc.id}" class="language-json">Loading content...</code></pre>
+                                <!-- Spectre CSS Tabs -->
+                                <ul class="tab" style="margin-bottom: 0.5rem;">
+                                    <li class="tab-item active" id="tab-json-${doc.id}">
+                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'json')">JSON</a>
+                                    </li>
+                                    <li class="tab-item" id="tab-markdown-${doc.id}">
+                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'markdown')">Markdown</a>
+                                    </li>
+                                </ul>
+                                <!-- JSON Tab Content -->
+                                <div id="content-json-${doc.id}" class="tab-content">
+                                    <pre><code id="code-${doc.id}" class="language-json">Loading content...</code></pre>
+                                </div>
+                                <!-- Markdown Tab Content -->
+                                <div id="content-markdown-${doc.id}" class="tab-content" style="display: none;">
+                                    <div id="markdown-${doc.id}" class="markdown-content">Loading markdown...</div>
+                                </div>
                             </div>
                         </td>
                     </tr>
@@ -388,12 +406,16 @@
             detailRow.style.display = 'table-row';
 
             const codeBlock = document.getElementById(`code-${docId}`);
+            const markdownBlock = document.getElementById(`markdown-${docId}`);
             if (!codeBlock || codeBlock.dataset.loaded === 'true') return;
 
             // Fetch full document details
             try {
                 // Show loading state
                 codeBlock.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Loading full content...';
+                if (markdownBlock) {
+                    markdownBlock.innerHTML = '<i class="fas fa-spinner fa-pulse"></i> Loading markdown...';
+                }
 
                 const response = await fetch(`/api/documents/${docId}`);
                 if (!response.ok) {
@@ -416,6 +438,7 @@
                     updated_at: doc.updated_at
                 };
 
+                // Render JSON tab
                 const jsonString = JSON.stringify(clean, null, 2);
                 codeBlock.textContent = jsonString;
                 codeBlock.dataset.loaded = 'true';
@@ -423,9 +446,58 @@
                 if (typeof hljs !== 'undefined') {
                     hljs.highlightElement(codeBlock);
                 }
+
+                // Render Markdown tab
+                if (markdownBlock) {
+                    if (doc.content_markdown && doc.content_markdown.trim()) {
+                        // Configure marked for safe rendering
+                        if (typeof marked !== 'undefined') {
+                            marked.setOptions({
+                                breaks: true,
+                                gfm: true
+                            });
+                            markdownBlock.innerHTML = marked.parse(doc.content_markdown);
+
+                            // Apply syntax highlighting to code blocks in markdown
+                            if (typeof hljs !== 'undefined') {
+                                markdownBlock.querySelectorAll('pre code').forEach((block) => {
+                                    hljs.highlightElement(block);
+                                });
+                            }
+                        } else {
+                            // Fallback: show raw markdown if marked.js not loaded
+                            markdownBlock.textContent = doc.content_markdown;
+                        }
+                    } else {
+                        markdownBlock.innerHTML = '<div class="markdown-empty">No markdown content available</div>';
+                    }
+                }
             } catch (error) {
                 console.error('Error loading document details:', error);
                 codeBlock.innerHTML = `<span class="text-error">Error loading content: ${error.message}</span>`;
+                if (markdownBlock) {
+                    markdownBlock.innerHTML = `<span class="text-error">Error loading content: ${error.message}</span>`;
+                }
+            }
+        }
+
+        // Switch between JSON and Markdown tabs
+        function switchTab(docId, tabName) {
+            const jsonTab = document.getElementById(`tab-json-${docId}`);
+            const markdownTab = document.getElementById(`tab-markdown-${docId}`);
+            const jsonContent = document.getElementById(`content-json-${docId}`);
+            const markdownContent = document.getElementById(`content-markdown-${docId}`);
+
+            if (tabName === 'json') {
+                jsonTab.classList.add('active');
+                markdownTab.classList.remove('active');
+                jsonContent.style.display = 'block';
+                markdownContent.style.display = 'none';
+            } else if (tabName === 'markdown') {
+                jsonTab.classList.remove('active');
+                markdownTab.classList.add('active');
+                jsonContent.style.display = 'none';
+                markdownContent.style.display = 'block';
             }
         }
 
