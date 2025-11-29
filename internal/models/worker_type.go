@@ -1,0 +1,54 @@
+// -----------------------------------------------------------------------
+// Last Modified: Friday, 29th November 2025 12:00:00 pm
+// Modified By: Claude Code
+// -----------------------------------------------------------------------
+
+package models
+
+// WorkerType represents the type of worker that handles a job definition step.
+// This provides explicit type-safety for routing steps to the appropriate worker.
+type WorkerType string
+
+// WorkerType constants define all supported worker types for job execution
+const (
+	WorkerTypeAgent               WorkerType = "agent"
+	WorkerTypeCrawler             WorkerType = "crawler"
+	WorkerTypePlacesSearch        WorkerType = "places_search"
+	WorkerTypeWebSearch           WorkerType = "web_search"
+	WorkerTypeGitHubRepo          WorkerType = "github_repo"
+	WorkerTypeGitHubActions       WorkerType = "github_actions"
+	WorkerTypeTransform           WorkerType = "transform"
+	WorkerTypeReindex             WorkerType = "reindex"
+	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
+)
+
+// IsValid checks if the WorkerType is a known, valid type
+func (w WorkerType) IsValid() bool {
+	switch w {
+	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
+		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeTransform,
+		WorkerTypeReindex, WorkerTypeDatabaseMaintenance:
+		return true
+	}
+	return false
+}
+
+// String returns the string representation of the WorkerType
+func (w WorkerType) String() string {
+	return string(w)
+}
+
+// AllWorkerTypes returns a slice of all valid WorkerType values
+func AllWorkerTypes() []WorkerType {
+	return []WorkerType{
+		WorkerTypeAgent,
+		WorkerTypeCrawler,
+		WorkerTypePlacesSearch,
+		WorkerTypeWebSearch,
+		WorkerTypeGitHubRepo,
+		WorkerTypeGitHubActions,
+		WorkerTypeTransform,
+		WorkerTypeReindex,
+		WorkerTypeDatabaseMaintenance,
+	}
+}

@@ -73,7 +73,7 @@ const (
 // JobStep represents a single execution step in a job definition
 type JobStep struct {
 	Name        string                 `json:"name"`                  // Step identifier/name
-	Type        StepType               `json:"type"`                  // Step type for routing to appropriate worker (required)
+	Type        WorkerType             `json:"type"`                  // Worker type for routing to appropriate worker (required)
 	Description string                 `json:"description,omitempty"` // Human-readable description of what this step does
 	Config      map[string]interface{} `json:"config"`                // Step-specific configuration parameters (flat structure)
 	OnError     ErrorStrategy          `json:"on_error"`              // Error handling strategy
@@ -259,12 +259,12 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Type field is required - this is the primary routing mechanism
 	if step.Type == "" {
-		return errors.New("step type is required")
+		return errors.New("worker type is required")
 	}
 
-	// Validate that Type is a known StepType
+	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid step type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance)", step.Type)
 	}
 
 	// Validate error strategy if provided

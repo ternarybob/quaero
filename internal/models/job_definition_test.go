@@ -86,7 +86,7 @@ func TestJobDefinition_ValidateWithPlaceholders(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -103,7 +103,7 @@ func TestJobDefinition_ValidateWithPlaceholders(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -124,7 +124,7 @@ func TestJobDefinition_ValidateWithPlaceholders(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -142,7 +142,7 @@ func TestJobDefinition_ValidateWithPlaceholders(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -164,7 +164,7 @@ func TestJobDefinition_ValidateWithPlaceholders(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -211,59 +211,59 @@ func findInString(s, substr string) bool {
 	return false
 }
 
-// TestStepType_IsValid tests the StepType.IsValid() method
-func TestStepType_IsValid(t *testing.T) {
+// TestWorkerType_IsValid tests the WorkerType.IsValid() method
+func TestWorkerType_IsValid(t *testing.T) {
 	tests := []struct {
-		name     string
-		stepType StepType
-		expected bool
+		name       string
+		workerType WorkerType
+		expected   bool
 	}{
-		{"agent is valid", StepTypeAgent, true},
-		{"crawler is valid", StepTypeCrawler, true},
-		{"places_search is valid", StepTypePlacesSearch, true},
-		{"web_search is valid", StepTypeWebSearch, true},
-		{"github_repo is valid", StepTypeGitHubRepo, true},
-		{"github_actions is valid", StepTypeGitHubActions, true},
-		{"transform is valid", StepTypeTransform, true},
-		{"reindex is valid", StepTypeReindex, true},
-		{"database_maintenance is valid", StepTypeDatabaseMaintenance, true},
-		{"empty string is invalid", StepType(""), false},
-		{"unknown type is invalid", StepType("unknown"), false},
-		{"typo is invalid", StepType("crawl"), false},
+		{"agent is valid", WorkerTypeAgent, true},
+		{"crawler is valid", WorkerTypeCrawler, true},
+		{"places_search is valid", WorkerTypePlacesSearch, true},
+		{"web_search is valid", WorkerTypeWebSearch, true},
+		{"github_repo is valid", WorkerTypeGitHubRepo, true},
+		{"github_actions is valid", WorkerTypeGitHubActions, true},
+		{"transform is valid", WorkerTypeTransform, true},
+		{"reindex is valid", WorkerTypeReindex, true},
+		{"database_maintenance is valid", WorkerTypeDatabaseMaintenance, true},
+		{"empty string is invalid", WorkerType(""), false},
+		{"unknown type is invalid", WorkerType("unknown"), false},
+		{"typo is invalid", WorkerType("crawl"), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.stepType.IsValid()
+			result := tt.workerType.IsValid()
 			if result != tt.expected {
-				t.Errorf("StepType(%q).IsValid() = %v, want %v", tt.stepType, result, tt.expected)
+				t.Errorf("WorkerType(%q).IsValid() = %v, want %v", tt.workerType, result, tt.expected)
 			}
 		})
 	}
 }
 
-// TestStepType_String tests the StepType.String() method
-func TestStepType_String(t *testing.T) {
+// TestWorkerType_String tests the WorkerType.String() method
+func TestWorkerType_String(t *testing.T) {
 	tests := []struct {
-		stepType StepType
-		expected string
+		workerType WorkerType
+		expected   string
 	}{
-		{StepTypeAgent, "agent"},
-		{StepTypeCrawler, "crawler"},
-		{StepTypePlacesSearch, "places_search"},
-		{StepTypeWebSearch, "web_search"},
-		{StepTypeGitHubRepo, "github_repo"},
-		{StepTypeGitHubActions, "github_actions"},
-		{StepTypeTransform, "transform"},
-		{StepTypeReindex, "reindex"},
-		{StepTypeDatabaseMaintenance, "database_maintenance"},
+		{WorkerTypeAgent, "agent"},
+		{WorkerTypeCrawler, "crawler"},
+		{WorkerTypePlacesSearch, "places_search"},
+		{WorkerTypeWebSearch, "web_search"},
+		{WorkerTypeGitHubRepo, "github_repo"},
+		{WorkerTypeGitHubActions, "github_actions"},
+		{WorkerTypeTransform, "transform"},
+		{WorkerTypeReindex, "reindex"},
+		{WorkerTypeDatabaseMaintenance, "database_maintenance"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			result := tt.stepType.String()
+			result := tt.workerType.String()
 			if result != tt.expected {
-				t.Errorf("StepType.String() = %q, want %q", result, tt.expected)
+				t.Errorf("WorkerType.String() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -291,7 +291,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 				},
 			},
 			shouldError: true,
-			errorMsg:    "step type is required",
+			errorMsg:    "worker type is required",
 		},
 		{
 			name: "step with invalid type fails validation",
@@ -302,13 +302,13 @@ func TestJobStep_TypeValidation(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepType("invalid_type"),
+						Type:    WorkerType("invalid_type"),
 						OnError: ErrorStrategyContinue,
 					},
 				},
 			},
 			shouldError: true,
-			errorMsg:    "invalid step type",
+			errorMsg:    "invalid worker type",
 		},
 		{
 			name: "step with valid type passes validation",
@@ -319,7 +319,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:    "test-step",
-						Type:    StepTypeCrawler,
+						Type:    WorkerTypeCrawler,
 						OnError: ErrorStrategyContinue,
 					},
 				},
@@ -335,7 +335,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 				Steps: []JobStep{
 					{
 						Name:        "keyword-extraction",
-						Type:        StepTypeAgent,
+						Type:        WorkerTypeAgent,
 						Description: "Extract keywords from document content",
 						Config: map[string]interface{}{
 							"agent_type": "keyword_extractor",
@@ -367,45 +367,45 @@ func TestJobStep_TypeValidation(t *testing.T) {
 	}
 }
 
-// TestAllStepTypes tests that AllStepTypes returns all expected step types
-func TestAllStepTypes(t *testing.T) {
-	allTypes := AllStepTypes()
+// TestAllWorkerTypes tests that AllWorkerTypes returns all expected worker types
+func TestAllWorkerTypes(t *testing.T) {
+	allTypes := AllWorkerTypes()
 
 	expectedCount := 9
 	if len(allTypes) != expectedCount {
-		t.Errorf("AllStepTypes() returned %d types, expected %d", len(allTypes), expectedCount)
+		t.Errorf("AllWorkerTypes() returned %d types, expected %d", len(allTypes), expectedCount)
 	}
 
 	// Verify all types are valid
 	for _, st := range allTypes {
 		if !st.IsValid() {
-			t.Errorf("AllStepTypes() contains invalid type: %q", st)
+			t.Errorf("AllWorkerTypes() contains invalid type: %q", st)
 		}
 	}
 
 	// Verify expected types are present
-	expectedTypes := map[StepType]bool{
-		StepTypeAgent:               true,
-		StepTypeCrawler:             true,
-		StepTypePlacesSearch:        true,
-		StepTypeWebSearch:           true,
-		StepTypeGitHubRepo:          true,
-		StepTypeGitHubActions:       true,
-		StepTypeTransform:           true,
-		StepTypeReindex:             true,
-		StepTypeDatabaseMaintenance: true,
+	expectedTypes := map[WorkerType]bool{
+		WorkerTypeAgent:               true,
+		WorkerTypeCrawler:             true,
+		WorkerTypePlacesSearch:        true,
+		WorkerTypeWebSearch:           true,
+		WorkerTypeGitHubRepo:          true,
+		WorkerTypeGitHubActions:       true,
+		WorkerTypeTransform:           true,
+		WorkerTypeReindex:             true,
+		WorkerTypeDatabaseMaintenance: true,
 	}
 
 	for _, st := range allTypes {
 		if !expectedTypes[st] {
-			t.Errorf("AllStepTypes() contains unexpected type: %q", st)
+			t.Errorf("AllWorkerTypes() contains unexpected type: %q", st)
 		}
 		delete(expectedTypes, st)
 	}
 
 	if len(expectedTypes) > 0 {
 		for st := range expectedTypes {
-			t.Errorf("AllStepTypes() missing expected type: %q", st)
+			t.Errorf("AllWorkerTypes() missing expected type: %q", st)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// GitHub Actions Worker - Unified worker implementing both StepWorker and JobWorker
-// - StepWorker: Creates parent jobs and spawns child jobs for workflow runs
+// GitHub Actions Worker - Unified worker implementing both DefinitionWorker and JobWorker
+// - DefinitionWorker: Creates parent jobs and spawns child jobs for workflow runs
 // - JobWorker: Processes individual GitHub action log jobs
 // -----------------------------------------------------------------------
 
@@ -20,8 +20,8 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// GitHubLogWorker handles GitHub Action Log jobs and implements both StepWorker and JobWorker interfaces.
-// - StepWorker: Creates parent jobs and spawns child jobs for workflow runs
+// GitHubLogWorker handles GitHub Action Log jobs and implements both DefinitionWorker and JobWorker interfaces.
+// - DefinitionWorker: Creates parent jobs and spawns child jobs for workflow runs
 // - JobWorker: Processes individual GitHub action log jobs
 type GitHubLogWorker struct {
 	connectorService interfaces.ConnectorService
@@ -33,10 +33,10 @@ type GitHubLogWorker struct {
 }
 
 // Compile-time assertions: GitHubLogWorker implements both interfaces
-var _ interfaces.StepWorker = (*GitHubLogWorker)(nil)
+var _ interfaces.DefinitionWorker = (*GitHubLogWorker)(nil)
 var _ interfaces.JobWorker = (*GitHubLogWorker)(nil)
 
-// NewGitHubLogWorker creates a new GitHub log worker that implements both StepWorker and JobWorker interfaces
+// NewGitHubLogWorker creates a new GitHub log worker that implements both DefinitionWorker and JobWorker interfaces
 func NewGitHubLogWorker(
 	connectorService interfaces.ConnectorService,
 	jobManager *queue.Manager,
@@ -302,12 +302,12 @@ func (w *GitHubLogWorker) findGitHubConnector(ctx context.Context) (*models.Conn
 }
 
 // ============================================================================
-// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// DEFINITIONWORKER INTERFACE METHODS (for job definition step handling)
 // ============================================================================
 
-// GetType returns StepTypeGitHubActions for the StepWorker interface
-func (w *GitHubLogWorker) GetType() models.StepType {
-	return models.StepTypeGitHubActions
+// GetType returns WorkerTypeGitHubActions for the DefinitionWorker interface
+func (w *GitHubLogWorker) GetType() models.WorkerType {
+	return models.WorkerTypeGitHubActions
 }
 
 // CreateJobs creates a parent job and spawns child jobs for each workflow run.
@@ -514,8 +514,8 @@ func (w *GitHubLogWorker) ReturnsChildJobs() bool {
 	return true
 }
 
-// ValidateStep validates step configuration for GitHub Actions type (StepWorker interface)
-func (w *GitHubLogWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for GitHub Actions type (DefinitionWorker interface)
+func (w *GitHubLogWorker) ValidateConfig(step models.JobStep) error {
 	// Validate step config exists
 	if step.Config == nil {
 		return fmt.Errorf("github_actions step requires config")

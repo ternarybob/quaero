@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Crawler Worker - Unified worker implementing both StepWorker and JobWorker
-// - StepWorker: Creates parent crawl jobs via crawler service
+// Crawler Worker - Unified worker implementing both DefinitionWorker and JobWorker
+// - DefinitionWorker: Creates parent crawl jobs via crawler service
 // - JobWorker: Processes individual crawler jobs with ChromeDP rendering and content processing
 // -----------------------------------------------------------------------
 
@@ -44,10 +44,10 @@ type CrawlerWorker struct {
 }
 
 // Compile-time assertions: CrawlerWorker implements both interfaces
-var _ interfaces.StepWorker = (*CrawlerWorker)(nil)
+var _ interfaces.DefinitionWorker = (*CrawlerWorker)(nil)
 var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
 
-// NewCrawlerWorker creates a new crawler worker that implements both StepWorker and JobWorker interfaces
+// NewCrawlerWorker creates a new crawler worker that implements both DefinitionWorker and JobWorker interfaces
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,
 	jobMgr *queue.Manager,
@@ -1498,12 +1498,12 @@ func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *mod
 }
 
 // ============================================================================
-// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// DEFINITIONWORKER INTERFACE METHODS (for job definition step handling)
 // ============================================================================
 
-// GetType returns StepTypeCrawler for the StepWorker interface
-func (w *CrawlerWorker) GetType() models.StepType {
-	return models.StepTypeCrawler
+// GetType returns WorkerTypeCrawler for the DefinitionWorker interface
+func (w *CrawlerWorker) GetType() models.WorkerType {
+	return models.WorkerTypeCrawler
 }
 
 // CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
@@ -1613,8 +1613,8 @@ func (w *CrawlerWorker) ReturnsChildJobs() bool {
 	return true
 }
 
-// ValidateStep validates step configuration for crawler type (StepWorker interface)
-func (w *CrawlerWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for crawler type (DefinitionWorker interface)
+func (w *CrawlerWorker) ValidateConfig(step models.JobStep) error {
 	// Crawler is agnostic - any configuration is valid
 	// Validation happens during execution by the crawler service
 	return nil

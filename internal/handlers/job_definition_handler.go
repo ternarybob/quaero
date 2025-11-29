@@ -891,7 +891,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		Steps: []models.JobStep{
 			{
 				Name:    "crawl",
-				Type:    models.StepTypeCrawler,
+				Type:    models.WorkerTypeCrawler,
 				Config:  crawlStepConfig,
 				OnError: models.ErrorStrategyFail,
 			},

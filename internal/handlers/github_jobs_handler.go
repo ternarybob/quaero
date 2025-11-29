@@ -359,7 +359,7 @@ func (h *GitHubJobsHandler) StartRepoCollectorHandler(w http.ResponseWriter, r *
 		Steps: []models.JobStep{
 			{
 				Name:    "fetch_repo_content",
-				Type:    models.StepTypeGitHubRepo,
+				Type:    models.WorkerTypeGitHubRepo,
 				OnError: "continue",
 				Config: map[string]interface{}{
 					"connector_id":  connector.ID,
@@ -445,7 +445,7 @@ func (h *GitHubJobsHandler) StartActionsCollectorHandler(w http.ResponseWriter, 
 		Steps: []models.JobStep{
 			{
 				Name:    "fetch_action_logs",
-				Type:    models.StepTypeGitHubActions,
+				Type:    models.WorkerTypeGitHubActions,
 				OnError: "continue",
 				Config: map[string]interface{}{
 					"connector_id":  connector.ID,

@@ -47,7 +47,7 @@ max_results = 20
 		t.Errorf("Expected step name 'search_nearby_restaurants', got '%s'", step.Name)
 	}
 
-	if step.Type != models.StepTypePlacesSearch {
+	if step.Type != models.WorkerTypePlacesSearch {
 		t.Errorf("Expected type 'places_search', got '%s'", step.Type)
 	}
 
@@ -102,7 +102,7 @@ filter_tags = ["technical"]
 	step := jobDef.Steps[0]
 
 	// Verify Type field is set correctly
-	if step.Type != models.StepTypeAgent {
+	if step.Type != models.WorkerTypeAgent {
 		t.Errorf("Expected step type 'agent', got '%s'", step.Type)
 	}
 

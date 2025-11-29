@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// GitHub Repo Worker - Unified worker implementing both StepWorker and JobWorker
-// - StepWorker: Creates parent jobs and spawns child jobs for repository files
+// GitHub Repo Worker - Unified worker implementing both DefinitionWorker and JobWorker
+// - DefinitionWorker: Creates parent jobs and spawns child jobs for repository files
 // - JobWorker: Processes individual GitHub repo file jobs
 // -----------------------------------------------------------------------
 
@@ -20,8 +20,8 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// GitHubRepoWorker handles GitHub repository jobs and implements both StepWorker and JobWorker interfaces.
-// - StepWorker: Creates parent jobs and spawns child jobs for repository files
+// GitHubRepoWorker handles GitHub repository jobs and implements both DefinitionWorker and JobWorker interfaces.
+// - DefinitionWorker: Creates parent jobs and spawns child jobs for repository files
 // - JobWorker: Processes individual GitHub repo file jobs
 type GitHubRepoWorker struct {
 	connectorService interfaces.ConnectorService
@@ -33,10 +33,10 @@ type GitHubRepoWorker struct {
 }
 
 // Compile-time assertions: GitHubRepoWorker implements both interfaces
-var _ interfaces.StepWorker = (*GitHubRepoWorker)(nil)
+var _ interfaces.DefinitionWorker = (*GitHubRepoWorker)(nil)
 var _ interfaces.JobWorker = (*GitHubRepoWorker)(nil)
 
-// NewGitHubRepoWorker creates a new GitHub repo worker that implements both StepWorker and JobWorker interfaces
+// NewGitHubRepoWorker creates a new GitHub repo worker that implements both DefinitionWorker and JobWorker interfaces
 func NewGitHubRepoWorker(
 	connectorService interfaces.ConnectorService,
 	jobManager *queue.Manager,
@@ -238,12 +238,12 @@ func mergeTags(baseTags []string, additionalTags []string) []string {
 }
 
 // ============================================================================
-// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// DEFINITIONWORKER INTERFACE METHODS (for job definition step handling)
 // ============================================================================
 
-// GetType returns StepTypeGitHubRepo for the StepWorker interface
-func (w *GitHubRepoWorker) GetType() models.StepType {
-	return models.StepTypeGitHubRepo
+// GetType returns WorkerTypeGitHubRepo for the DefinitionWorker interface
+func (w *GitHubRepoWorker) GetType() models.WorkerType {
+	return models.WorkerTypeGitHubRepo
 }
 
 // CreateJobs creates a parent job and spawns child jobs for each file in the repository.
@@ -456,8 +456,8 @@ func (w *GitHubRepoWorker) ReturnsChildJobs() bool {
 	return true
 }
 
-// ValidateStep validates step configuration for GitHub repo type (StepWorker interface)
-func (w *GitHubRepoWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for GitHub repo type (DefinitionWorker interface)
+func (w *GitHubRepoWorker) ValidateConfig(step models.JobStep) error {
 	// Validate step config exists
 	if step.Config == nil {
 		return fmt.Errorf("github_repo step requires config")

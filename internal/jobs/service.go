@@ -85,7 +85,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 			condition, _ := stepData["condition"].(string)
 
 			// Validate that we have a valid type
-			stepType := models.StepType(typeStr)
+			stepType := models.WorkerType(typeStr)
 			if stepType == "" {
 				return nil, fmt.Errorf("step '%s': 'type' field is required", name)
 			}
@@ -145,7 +145,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 
 		step := models.JobStep{
 			Name:    "crawl",
-			Type:    models.StepTypeCrawler,
+			Type:    models.WorkerTypeCrawler,
 			Config:  config,
 			OnError: models.ErrorStrategyContinue,
 		}
@@ -180,7 +180,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 func (s *Service) ConvertToTOML(jobDef *models.JobDefinition) ([]byte, error) {
 	// Extract crawler configuration from first step
 	var crawlConfig map[string]interface{}
-	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Type == models.StepTypeCrawler {
+	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Type == models.WorkerTypeCrawler {
 		crawlConfig = jobDef.Steps[0].Config
 	} else {
 		crawlConfig = make(map[string]interface{})
@@ -303,7 +303,7 @@ func (s *Service) ValidateRuntimeDependencies(jobDef *models.JobDefinition) {
 	// Check each step for dependencies
 	for _, step := range jobDef.Steps {
 		switch step.Type {
-		case models.StepTypeAgent:
+		case models.WorkerTypeAgent:
 			// Agent steps require agent service
 			if s.agentService == nil {
 				jobDef.RuntimeStatus = "disabled"

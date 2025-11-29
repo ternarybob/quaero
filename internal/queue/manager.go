@@ -11,16 +11,16 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// Manager handles job metadata, lifecycle, and step routing.
-// This is the single manager for the queue system - it routes steps to workers.
+// Manager handles job metadata, lifecycle, and worker routing.
+// This is the single manager for the queue system - it routes job definition steps to workers.
 type Manager struct {
 	jobStorage    interfaces.QueueStorage
 	jobLogStorage interfaces.JobLogStorage
 	queue         interfaces.QueueManager
 	eventService  interfaces.EventService // Optional: may be nil for testing
 
-	// Worker registry for step routing
-	workers   map[models.StepType]interfaces.StepWorker
+	// Worker registry for definition worker routing
+	workers   map[models.WorkerType]interfaces.DefinitionWorker
 	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
 }
 
@@ -30,7 +30,7 @@ func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.Job
 		jobLogStorage: jobLogStorage,
 		queue:         queue,
 		eventService:  eventService,
-		workers:       make(map[models.StepType]interfaces.StepWorker),
+		workers:       make(map[models.WorkerType]interfaces.DefinitionWorker),
 	}
 }
 
@@ -40,24 +40,24 @@ func (m *Manager) SetKVStorage(kvStorage interfaces.KeyValueStorage) {
 	m.kvStorage = kvStorage
 }
 
-// RegisterWorker registers a StepWorker for its declared StepType.
+// RegisterWorker registers a DefinitionWorker for its declared WorkerType.
 // If a worker for the same type is already registered, it will be replaced.
-func (m *Manager) RegisterWorker(worker interfaces.StepWorker) {
+func (m *Manager) RegisterWorker(worker interfaces.DefinitionWorker) {
 	if worker == nil {
 		return
 	}
 	m.workers[worker.GetType()] = worker
 }
 
-// HasWorker checks if a worker is registered for the given StepType.
-func (m *Manager) HasWorker(stepType models.StepType) bool {
-	_, exists := m.workers[stepType]
+// HasWorker checks if a worker is registered for the given WorkerType.
+func (m *Manager) HasWorker(workerType models.WorkerType) bool {
+	_, exists := m.workers[workerType]
 	return exists
 }
 
-// GetWorker returns the worker registered for the given StepType, or nil if not found.
-func (m *Manager) GetWorker(stepType models.StepType) interfaces.StepWorker {
-	return m.workers[stepType]
+// GetWorker returns the worker registered for the given WorkerType, or nil if not found.
+func (m *Manager) GetWorker(workerType models.WorkerType) interfaces.DefinitionWorker {
+	return m.workers[workerType]
 }
 
 // Job represents job metadata
@@ -902,7 +902,7 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		}
 
 		// Validate step configuration
-		if err := worker.ValidateStep(resolvedStep); err != nil {
+		if err := worker.ValidateConfig(resolvedStep); err != nil {
 			m.AddJobLog(ctx, parentJobID, "error", fmt.Sprintf("Step validation failed: %v", err))
 
 			if step.OnError == models.ErrorStrategyFail {

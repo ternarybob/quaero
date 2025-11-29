@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------
-// Agent Worker - Unified worker implementing both StepWorker and JobWorker
-// - StepWorker: Creates and enqueues agent jobs for documents
+// Agent Worker - Unified worker implementing both DefinitionWorker and JobWorker
+// - DefinitionWorker: Creates and enqueues agent jobs for documents
 // - JobWorker: Executes individual agent jobs with document processing
 // -----------------------------------------------------------------------
 
@@ -19,8 +19,8 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// AgentWorker processes agent jobs and implements both StepWorker and JobWorker interfaces.
-// - StepWorker: Creates and enqueues agent jobs for documents matching filter criteria
+// AgentWorker processes agent jobs and implements both DefinitionWorker and JobWorker interfaces.
+// - DefinitionWorker: Creates and enqueues agent jobs for documents matching filter criteria
 // - JobWorker: Executes individual agent jobs from the queue (document processing with AI agents)
 type AgentWorker struct {
 	agentService    interfaces.AgentService
@@ -34,10 +34,10 @@ type AgentWorker struct {
 }
 
 // Compile-time assertions: AgentWorker implements both interfaces
-var _ interfaces.StepWorker = (*AgentWorker)(nil)
+var _ interfaces.DefinitionWorker = (*AgentWorker)(nil)
 var _ interfaces.JobWorker = (*AgentWorker)(nil)
 
-// NewAgentWorker creates a new agent worker that implements both StepWorker and JobWorker interfaces
+// NewAgentWorker creates a new agent worker that implements both DefinitionWorker and JobWorker interfaces
 func NewAgentWorker(
 	agentService interfaces.AgentService,
 	jobMgr *queue.Manager,
@@ -327,12 +327,12 @@ func (w *AgentWorker) publishAgentJobLog(ctx context.Context, jobID, level, mess
 }
 
 // ============================================================================
-// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// DEFINITIONWORKER INTERFACE METHODS (for job definition step handling)
 // ============================================================================
 
-// GetType returns StepTypeAgent for the StepWorker interface
-func (w *AgentWorker) GetType() models.StepType {
-	return models.StepTypeAgent
+// GetType returns WorkerTypeAgent for the DefinitionWorker interface
+func (w *AgentWorker) GetType() models.WorkerType {
+	return models.WorkerTypeAgent
 }
 
 // CreateJobs creates agent jobs for documents matching the filter criteria.
@@ -454,8 +454,8 @@ func (w *AgentWorker) ReturnsChildJobs() bool {
 	return true
 }
 
-// ValidateStep validates step configuration for agent type (StepWorker interface)
-func (w *AgentWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for agent type (DefinitionWorker interface)
+func (w *AgentWorker) ValidateConfig(step models.JobStep) error {
 	// Validate step config exists
 	if step.Config == nil {
 		return fmt.Errorf("agent step requires config")

@@ -94,11 +94,7 @@ func verifyServiceConnectivity() error {
 	defer cancelAlloc()
 
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer func() {
-		// Properly close browser before canceling context
-		chromedp.Cancel(browserCtx)
-		cancelBrowser()
-	}()
+	defer cancelBrowser()
 
 	ctx, cancelTimeout := context.WithTimeout(browserCtx, 10*time.Second)
 	defer cancelTimeout()

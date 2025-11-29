@@ -27,8 +27,8 @@ type WebSearchWorker struct {
 	logger          arbor.ILogger
 }
 
-// Compile-time assertion: WebSearchWorker implements StepWorker interface
-var _ interfaces.StepWorker = (*WebSearchWorker)(nil)
+// Compile-time assertion: WebSearchWorker implements DefinitionWorker interface
+var _ interfaces.DefinitionWorker = (*WebSearchWorker)(nil)
 
 // WebSearchResults holds the results of a web search
 type WebSearchResults struct {
@@ -65,9 +65,9 @@ func NewWebSearchWorker(
 	}
 }
 
-// GetType returns StepTypeWebSearch
-func (w *WebSearchWorker) GetType() models.StepType {
-	return models.StepTypeWebSearch
+// GetType returns WorkerTypeWebSearch for the DefinitionWorker interface
+func (w *WebSearchWorker) GetType() models.WorkerType {
+	return models.WorkerTypeWebSearch
 }
 
 // CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
@@ -213,8 +213,8 @@ func (w *WebSearchWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateStep validates step configuration for web search type
-func (w *WebSearchWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for web search type
+func (w *WebSearchWorker) ValidateConfig(step models.JobStep) error {
 	// Validate step config exists
 	if step.Config == nil {
 		return fmt.Errorf("web_search step requires config")

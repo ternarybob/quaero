@@ -27,8 +27,8 @@ type PlacesWorker struct {
 	logger          arbor.ILogger
 }
 
-// Compile-time assertion: PlacesWorker implements StepWorker interface
-var _ interfaces.StepWorker = (*PlacesWorker)(nil)
+// Compile-time assertion: PlacesWorker implements DefinitionWorker interface
+var _ interfaces.DefinitionWorker = (*PlacesWorker)(nil)
 
 // NewPlacesWorker creates a new places search worker
 func NewPlacesWorker(
@@ -47,9 +47,9 @@ func NewPlacesWorker(
 	}
 }
 
-// GetType returns StepTypePlacesSearch
-func (w *PlacesWorker) GetType() models.StepType {
-	return models.StepTypePlacesSearch
+// GetType returns WorkerTypePlacesSearch for the DefinitionWorker interface
+func (w *PlacesWorker) GetType() models.WorkerType {
+	return models.WorkerTypePlacesSearch
 }
 
 // CreateJobs executes a places search operation using the Google Places API.
@@ -280,8 +280,8 @@ func (w *PlacesWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// ValidateStep validates step configuration for places search type
-func (w *PlacesWorker) ValidateStep(step models.JobStep) error {
+// ValidateConfig validates step configuration for places search type
+func (w *PlacesWorker) ValidateConfig(step models.JobStep) error {
 	// Validate step config exists
 	if step.Config == nil {
 		return fmt.Errorf("places_search step requires config")
