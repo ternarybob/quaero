@@ -20,7 +20,6 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/logs"
 	"github.com/ternarybob/quaero/internal/queue"
-	"github.com/ternarybob/quaero/internal/queue/managers"
 	"github.com/ternarybob/quaero/internal/queue/state"
 	"github.com/ternarybob/quaero/internal/queue/workers"
 	"github.com/ternarybob/quaero/internal/services/agents"
@@ -70,7 +69,7 @@ type App struct {
 	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
 	JobManager   *queue.Manager
 	JobProcessor *workers.JobProcessor
-	Orchestrator *queue.Orchestrator
+	JobMonitor   interfaces.JobMonitor
 	JobService   *jobsvc.Service
 
 	// Source-agnostic services
@@ -458,42 +457,8 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Msg("Crawler service initialized")
 
 	// 6.6. Register job executors with job processor
-
-	// Register crawler_url worker (ChromeDP rendering and content processing)
-	crawlerWorker := workers.NewCrawlerWorker(
-		a.CrawlerService,
-		jobMgr,
-		queueMgr,
-		a.StorageManager.DocumentStorage(),
-		a.StorageManager.AuthStorage(),
-		a.StorageManager.JobDefinitionStorage(),
-		a.Logger,
-		a.EventService,
-	)
-	jobProcessor.RegisterExecutor(crawlerWorker)
-	a.Logger.Debug().Msg("Crawler URL worker registered")
-
-	// Register GitHub Log worker
-	githubLogWorker := workers.NewGitHubLogWorker(
-		a.ConnectorService,
-		jobMgr,
-		a.StorageManager.DocumentStorage(),
-		a.EventService,
-		a.Logger,
-	)
-	jobProcessor.RegisterExecutor(githubLogWorker)
-	a.Logger.Debug().Msg("GitHub Log worker registered")
-
-	// Register GitHub Repo file worker
-	githubRepoWorker := workers.NewGitHubRepoWorker(
-		a.ConnectorService,
-		jobMgr,
-		a.StorageManager.DocumentStorage(),
-		a.EventService,
-		a.Logger,
-	)
-	jobProcessor.RegisterExecutor(githubRepoWorker)
-	a.Logger.Debug().Msg("GitHub Repo worker registered")
+	// NOTE: Unified workers are created later after managers are initialized
+	// This is just a placeholder comment - actual worker registration happens after manager creation
 
 	// Create job monitor for monitoring parent job lifecycle
 	// NOTE: Parent jobs are NOT registered with JobProcessor - they run in separate goroutines
@@ -503,7 +468,11 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
+	a.JobMonitor = jobMonitor
 	a.Logger.Debug().Msg("Job monitor created")
+
+	// Set KV storage on JobManager for placeholder resolution
+	jobMgr.SetKVStorage(a.StorageManager.KeyValueStorage())
 
 	// Register database maintenance worker (ARCH-008)
 	// Note: BadgerDB handles maintenance automatically, operations are no-ops
@@ -565,84 +534,95 @@ func (a *App) initServices() error {
 			a.Logger.Info().Msg("To enable agents, provide a valid Google Gemini API key")
 		} else {
 			a.Logger.Debug().Msg("Agent service initialized and health check passed")
-
-			// Register agent worker immediately after successful initialization
-			agentWorker := workers.NewAgentWorker(
-				a.AgentService,
-				jobMgr,
-				a.StorageManager.DocumentStorage(),
-				a.Logger,
-				a.EventService,
-			)
-			jobProcessor.RegisterExecutor(agentWorker)
-			a.Logger.Debug().Msg("Agent worker registered")
 		}
 	}
 
-	// 6.9. Initialize Orchestrator for job definition execution (ARCH-009)
-	// Pass jobMonitor so it can start monitoring goroutines for crawler jobs
-	// Pass kvStorage for resolving {key-name} placeholders in step configs
-	a.Orchestrator = queue.NewOrchestrator(jobMgr, jobMonitor, a.StorageManager.KeyValueStorage(), a.Logger)
+	// ============================================================================
+	// UNIFIED WORKER REGISTRATION (CONSOLIDATED QUEUE ARCHITECTURE)
+	// Register workers directly with JobManager for step routing
+	// Workers implement both StepWorker (CreateJobs) and JobWorker (Execute)
+	// ============================================================================
 
-	// Register managers for job definition steps
-	crawlerManager := managers.NewCrawlerManager(a.CrawlerService, a.Logger)
-	a.Orchestrator.RegisterStepExecutor(crawlerManager)
-	a.Logger.Debug().Msg("Crawler manager registered")
+	// Register crawler worker (implements both StepWorker and JobWorker)
+	crawlerWorker := workers.NewCrawlerWorker(
+		a.CrawlerService,
+		jobMgr,
+		queueMgr,
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.AuthStorage(),
+		a.StorageManager.JobDefinitionStorage(),
+		a.Logger,
+		a.EventService,
+	)
+	jobMgr.RegisterWorker(crawlerWorker)         // Register with JobManager for step routing
+	jobProcessor.RegisterExecutor(crawlerWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", crawlerWorker.GetType().String()).Str("job_type", crawlerWorker.GetWorkerType()).Msg("Crawler worker registered")
 
-	transformManager := managers.NewTransformManager(a.TransformService, a.JobManager, a.Logger)
-	a.Orchestrator.RegisterStepExecutor(transformManager)
-	a.Logger.Debug().Msg("Transform manager registered")
+	// Register GitHub Repo worker (implements both StepWorker and JobWorker)
+	githubRepoWorker := workers.NewGitHubRepoWorker(
+		a.ConnectorService,
+		jobMgr,
+		queueMgr,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	jobMgr.RegisterWorker(githubRepoWorker)         // Register with JobManager for step routing
+	jobProcessor.RegisterExecutor(githubRepoWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", githubRepoWorker.GetType().String()).Str("job_type", githubRepoWorker.GetWorkerType()).Msg("GitHub Repo worker registered")
 
-	reindexManager := managers.NewReindexManager(a.StorageManager.DocumentStorage(), a.JobManager, a.Logger)
-	a.Orchestrator.RegisterStepExecutor(reindexManager)
-	a.Logger.Debug().Msg("Reindex manager registered")
+	// Register GitHub Actions worker (implements both StepWorker and JobWorker)
+	githubLogWorker := workers.NewGitHubLogWorker(
+		a.ConnectorService,
+		jobMgr,
+		queueMgr,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	jobMgr.RegisterWorker(githubLogWorker)         // Register with JobManager for step routing
+	jobProcessor.RegisterExecutor(githubLogWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", githubLogWorker.GetType().String()).Str("job_type", githubLogWorker.GetWorkerType()).Msg("GitHub Actions worker registered")
 
-	dbMaintenanceManager := managers.NewDatabaseMaintenanceManager(a.JobManager, queueMgr, jobMonitor, a.Logger)
-	a.Orchestrator.RegisterStepExecutor(dbMaintenanceManager)
-	a.Logger.Debug().Msg("Database maintenance manager registered")
+	// Register agent worker if AgentService is available (implements both StepWorker and JobWorker)
+	if a.AgentService != nil {
+		agentWorker := workers.NewAgentWorker(
+			a.AgentService,
+			jobMgr,
+			queueMgr,
+			a.SearchService,
+			a.StorageManager.KeyValueStorage(),
+			a.StorageManager.DocumentStorage(),
+			a.Logger,
+			a.EventService,
+		)
+		jobMgr.RegisterWorker(agentWorker)         // Register with JobManager for step routing
+		jobProcessor.RegisterExecutor(agentWorker) // Register with JobProcessor for job execution
+		a.Logger.Debug().Str("step_type", agentWorker.GetType().String()).Str("job_type", agentWorker.GetWorkerType()).Msg("Agent worker registered")
+	}
 
-	placesSearchManager := managers.NewPlacesSearchManager(a.PlacesService, a.DocumentService, a.EventService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.Logger)
-	a.Orchestrator.RegisterStepExecutor(placesSearchManager)
-	a.Logger.Debug().Msg("Places search manager registered")
+	// Register Places search worker (synchronous execution, no child jobs)
+	placesWorker := workers.NewPlacesWorker(
+		a.PlacesService,
+		a.DocumentService,
+		a.EventService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
+	jobMgr.RegisterWorker(placesWorker) // Register with JobManager for step routing
+	a.Logger.Debug().Str("step_type", placesWorker.GetType().String()).Msg("Places search worker registered")
 
-	// Register Web Search manager (Gemini SDK with GoogleSearch grounding)
-	webSearchManager := managers.NewWebSearchManager(
+	// Register Web search worker (synchronous execution, no child jobs)
+	webSearchWorker := workers.NewWebSearchWorker(
 		a.StorageManager.DocumentStorage(),
 		a.EventService,
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
 	)
-	a.Orchestrator.RegisterStepExecutor(webSearchManager)
-	a.Logger.Debug().Msg("Web search manager registered")
+	jobMgr.RegisterWorker(webSearchWorker) // Register with JobManager for step routing
+	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
-	// Register GitHub Repo manager
-	githubRepoManager := managers.NewGitHubRepoManager(
-		a.ConnectorService,
-		jobMgr,
-		queueMgr,
-		a.Logger,
-	)
-	a.Orchestrator.RegisterStepExecutor(githubRepoManager)
-	a.Logger.Debug().Msg("GitHub Repo manager registered")
-
-	// Register GitHub Actions manager
-	githubActionsManager := managers.NewGitHubActionsManager(
-		a.ConnectorService,
-		jobMgr,
-		queueMgr,
-		a.Logger,
-	)
-	a.Orchestrator.RegisterStepExecutor(githubActionsManager)
-	a.Logger.Debug().Msg("GitHub Actions manager registered")
-
-	// Register AI manager (if agent service is available)
-	if a.AgentService != nil {
-		agentManager := managers.NewAgentManager(jobMgr, queueMgr, a.SearchService, a.StorageManager.KeyValueStorage(), a.StorageManager.AuthStorage(), a.EventService, a.Logger)
-		a.Orchestrator.RegisterStepExecutor(agentManager)
-		a.Logger.Debug().Msg("Agent manager registered")
-	}
-
-	a.Logger.Debug().Msg("Orchestrator initialized with all managers")
+	a.Logger.Debug().Msg("All workers registered with JobManager")
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
@@ -664,7 +644,7 @@ func (a *App) initServices() error {
 		a.CrawlerService,
 		a.StorageManager.QueueStorage(),
 		a.StorageManager.JobDefinitionStorage(),
-		nil, // Orchestrator temporarily disabled
+		nil, // JobManager handles job execution via ExecuteJobDefinition
 	)
 
 	// NOTE: Scheduler triggers event-driven processing:
@@ -762,7 +742,7 @@ func (a *App) initHandlers() error {
 		a.ConnectorService,
 		a.JobManager,
 		a.QueueManager,
-		a.Orchestrator,
+		a.JobMonitor,
 		a.Logger,
 	)
 
@@ -770,11 +750,12 @@ func (a *App) initHandlers() error {
 	a.PageHandler = handlers.NewPageHandler(a.Logger, a.Config.Logging.ClientDebug)
 
 	// Initialize job definition handler
-	// Note: JobExecutor and JobRegistry are nil during queue refactor, but handler can work without them
+	// Note: JobManager handles job execution via ExecuteJobDefinition
 	a.JobDefinitionHandler = handlers.NewJobDefinitionHandler(
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.QueueStorage(),
-		a.Orchestrator,
+		a.JobManager,
+		a.JobMonitor,
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)

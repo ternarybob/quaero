@@ -1,3 +1,9 @@
+// -----------------------------------------------------------------------
+// GitHub Repo Worker - Unified worker implementing both StepWorker and JobWorker
+// - StepWorker: Creates parent jobs and spawns child jobs for repository files
+// - JobWorker: Processes individual GitHub repo file jobs
+// -----------------------------------------------------------------------
+
 package workers
 
 import (
@@ -14,22 +20,27 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// GitHubRepoWorker handles GitHub repository file jobs
+// GitHubRepoWorker handles GitHub repository jobs and implements both StepWorker and JobWorker interfaces.
+// - StepWorker: Creates parent jobs and spawns child jobs for repository files
+// - JobWorker: Processes individual GitHub repo file jobs
 type GitHubRepoWorker struct {
 	connectorService interfaces.ConnectorService
 	jobManager       *queue.Manager
+	queueMgr         interfaces.QueueManager
 	documentStorage  interfaces.DocumentStorage
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
 }
 
-// Compile-time assertion: GitHubRepoWorker implements JobWorker interface
+// Compile-time assertions: GitHubRepoWorker implements both interfaces
+var _ interfaces.StepWorker = (*GitHubRepoWorker)(nil)
 var _ interfaces.JobWorker = (*GitHubRepoWorker)(nil)
 
-// NewGitHubRepoWorker creates a new GitHub repo worker
+// NewGitHubRepoWorker creates a new GitHub repo worker that implements both StepWorker and JobWorker interfaces
 func NewGitHubRepoWorker(
 	connectorService interfaces.ConnectorService,
 	jobManager *queue.Manager,
+	queueMgr interfaces.QueueManager,
 	documentStorage interfaces.DocumentStorage,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
@@ -37,6 +48,7 @@ func NewGitHubRepoWorker(
 	return &GitHubRepoWorker{
 		connectorService: connectorService,
 		jobManager:       jobManager,
+		queueMgr:         queueMgr,
 		documentStorage:  documentStorage,
 		eventService:     eventService,
 		logger:           logger,
@@ -223,4 +235,292 @@ func mergeTags(baseTags []string, additionalTags []string) []string {
 	}
 
 	return result
+}
+
+// ============================================================================
+// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// ============================================================================
+
+// GetType returns StepTypeGitHubRepo for the StepWorker interface
+func (w *GitHubRepoWorker) GetType() models.StepType {
+	return models.StepTypeGitHubRepo
+}
+
+// CreateJobs creates a parent job and spawns child jobs for each file in the repository.
+func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+	stepConfig := step.Config
+	if stepConfig == nil {
+		stepConfig = make(map[string]interface{})
+	}
+
+	// Extract required config
+	connectorID := getStringConfig(stepConfig, "connector_id", "")
+	connectorName := getStringConfig(stepConfig, "connector_name", "")
+	owner := getStringConfig(stepConfig, "owner", "")
+	repo := getStringConfig(stepConfig, "repo", "")
+
+	if connectorID == "" && connectorName == "" {
+		return "", fmt.Errorf("connector_id or connector_name is required")
+	}
+	if owner == "" {
+		return "", fmt.Errorf("owner is required")
+	}
+	if repo == "" {
+		return "", fmt.Errorf("repo is required")
+	}
+
+	// Extract optional config with defaults
+	branches := getStringSliceConfig(stepConfig, "branches", []string{"main"})
+	extensions := getStringSliceConfig(stepConfig, "extensions", []string{".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"})
+	excludePaths := getStringSliceConfig(stepConfig, "exclude_paths", []string{"vendor/", "node_modules/", ".git/", "dist/", "build/"})
+	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("connector_id", connectorID).
+		Str("connector_name", connectorName).
+		Str("owner", owner).
+		Str("repo", repo).
+		Strs("branches", branches).
+		Int("max_files", maxFiles).
+		Msg("Creating GitHub repo parent job")
+
+	// Get GitHub connector - by ID or by name
+	var connector *models.Connector
+	var err error
+	if connectorID != "" {
+		connector, err = w.connectorService.GetConnector(ctx, connectorID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by ID: %w", err)
+		}
+	} else {
+		connector, err = w.connectorService.GetConnectorByName(ctx, connectorName)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by name '%s': %w", connectorName, err)
+		}
+		connectorID = connector.ID
+	}
+
+	ghConnector, err := github.NewConnector(connector)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GitHub connector: %w", err)
+	}
+
+	// Create parent job first
+	parentJob := models.NewQueueJob(
+		"github_repo_parent",
+		fmt.Sprintf("GitHub Repo: %s/%s", owner, repo),
+		map[string]interface{}{
+			"owner":    owner,
+			"repo":     repo,
+			"branches": branches,
+		},
+		map[string]interface{}{
+			"connector_id":      connectorID,
+			"job_definition_id": jobDef.ID,
+			"tags":              jobDef.Tags,
+		},
+	)
+	parentJob.ParentID = &parentJobID
+
+	// Serialize parent job to JSON
+	parentPayloadBytes, err := parentJob.ToJSON()
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize parent job: %w", err)
+	}
+
+	// Create parent job record in database
+	if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
+		ID:              parentJob.ID,
+		ParentID:        parentJob.ParentID,
+		Type:            parentJob.Type,
+		Name:            parentJob.Name,
+		Phase:           "execution",
+		Status:          "pending",
+		CreatedAt:       parentJob.CreatedAt,
+		ProgressCurrent: 0,
+		ProgressTotal:   0,
+		Payload:         string(parentPayloadBytes),
+	}); err != nil {
+		return "", fmt.Errorf("failed to create parent job record: %w", err)
+	}
+
+	// List and enqueue files for each branch
+	totalFilesEnqueued := 0
+
+	for _, branch := range branches {
+		files, err := ghConnector.ListFiles(ctx, owner, repo, branch, extensions, excludePaths)
+		if err != nil {
+			w.logger.Warn().Err(err).
+				Str("branch", branch).
+				Msg("Failed to list files for branch, skipping")
+			continue
+		}
+
+		for _, file := range files {
+			if totalFilesEnqueued >= maxFiles {
+				w.logger.Warn().
+					Int("max_files", maxFiles).
+					Msg("Reached max_files limit, stopping file enumeration")
+				break
+			}
+
+			// Create child job for each file
+			childJob := models.NewQueueJobChild(
+				parentJob.ID,
+				models.JobTypeGitHubRepoFile,
+				fmt.Sprintf("Fetch: %s@%s:%s", repo, branch, file.Path),
+				map[string]interface{}{
+					"owner":  owner,
+					"repo":   repo,
+					"branch": branch,
+					"path":   file.Path,
+					"folder": file.Folder,
+					"sha":    file.SHA,
+				},
+				map[string]interface{}{
+					"connector_id":   connectorID,
+					"tags":           jobDef.Tags,
+					"root_parent_id": parentJobID, // Root parent for document count tracking
+				},
+				parentJob.Depth+1,
+			)
+
+			// Serialize child job to JSON
+			childPayloadBytes, err := childJob.ToJSON()
+			if err != nil {
+				w.logger.Warn().Err(err).
+					Str("file", file.Path).
+					Msg("Failed to serialize child job, skipping")
+				continue
+			}
+
+			// Create child job record in database
+			if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
+				ID:              childJob.ID,
+				ParentID:        childJob.ParentID,
+				Type:            childJob.Type,
+				Name:            childJob.Name,
+				Phase:           "execution",
+				Status:          "pending",
+				CreatedAt:       childJob.CreatedAt,
+				ProgressCurrent: 0,
+				ProgressTotal:   1,
+				Payload:         string(childPayloadBytes),
+			}); err != nil {
+				w.logger.Warn().Err(err).
+					Str("file", file.Path).
+					Msg("Failed to create child job record, skipping")
+				continue
+			}
+
+			// Create queue message and enqueue
+			queueMsg := models.QueueMessage{
+				JobID:   childJob.ID,
+				Type:    childJob.Type,
+				Payload: childPayloadBytes,
+			}
+
+			if err := w.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+				w.logger.Warn().Err(err).
+					Str("file", file.Path).
+					Msg("Failed to enqueue file job, skipping")
+				continue
+			}
+
+			totalFilesEnqueued++
+		}
+
+		if totalFilesEnqueued >= maxFiles {
+			break
+		}
+	}
+
+	w.logger.Info().
+		Str("parent_job_id", parentJob.ID).
+		Str("owner", owner).
+		Str("repo", repo).
+		Int("files_enqueued", totalFilesEnqueued).
+		Msg("GitHub repo parent job created, child jobs enqueued")
+
+	// Update parent job with total count
+	if err := w.jobManager.UpdateJobProgress(ctx, parentJob.ID, 0, totalFilesEnqueued); err != nil {
+		w.logger.Warn().Err(err).Msg("Failed to update parent job progress")
+	}
+
+	return parentJob.ID, nil
+}
+
+// ReturnsChildJobs returns true since GitHub repo creates child jobs for each file
+func (w *GitHubRepoWorker) ReturnsChildJobs() bool {
+	return true
+}
+
+// ValidateStep validates step configuration for GitHub repo type (StepWorker interface)
+func (w *GitHubRepoWorker) ValidateStep(step models.JobStep) error {
+	// Validate step config exists
+	if step.Config == nil {
+		return fmt.Errorf("github_repo step requires config")
+	}
+
+	// Validate connector_id or connector_name
+	connectorID, hasConnectorID := step.Config["connector_id"].(string)
+	connectorName, hasConnectorName := step.Config["connector_name"].(string)
+
+	if (!hasConnectorID || connectorID == "") && (!hasConnectorName || connectorName == "") {
+		return fmt.Errorf("github_repo step requires either 'connector_id' or 'connector_name' in config")
+	}
+
+	// Validate required owner field
+	owner, ok := step.Config["owner"].(string)
+	if !ok || owner == "" {
+		return fmt.Errorf("github_repo step requires 'owner' in config")
+	}
+
+	// Validate required repo field
+	repo, ok := step.Config["repo"].(string)
+	if !ok || repo == "" {
+		return fmt.Errorf("github_repo step requires 'repo' in config")
+	}
+
+	return nil
+}
+
+// ============================================================================
+// HELPER FUNCTIONS FOR CONFIG EXTRACTION
+// ============================================================================
+
+func getStringConfig(config map[string]interface{}, key, defaultValue string) string {
+	if v, ok := config[key].(string); ok {
+		return v
+	}
+	return defaultValue
+}
+
+func getIntConfig(config map[string]interface{}, key string, defaultValue int) int {
+	if v, ok := config[key].(float64); ok {
+		return int(v)
+	}
+	if v, ok := config[key].(int); ok {
+		return v
+	}
+	return defaultValue
+}
+
+func getStringSliceConfig(config map[string]interface{}, key string, defaultValue []string) []string {
+	if v, ok := config[key].([]string); ok {
+		return v
+	}
+	if v, ok := config[key].([]interface{}); ok {
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return defaultValue
 }

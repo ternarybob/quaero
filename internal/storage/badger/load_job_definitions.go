@@ -52,7 +52,11 @@ func LoadJobDefinitionsFromFiles(ctx context.Context, jobDefStorage interfaces.J
 		}
 
 		// Convert to JobDefinition model
-		jobDef := jobFile.ToJobDefinition()
+		jobDef, err := jobFile.ToJobDefinition()
+		if err != nil {
+			logger.Warn().Err(err).Str("file", entry.Name()).Msg("Failed to convert job definition TOML")
+			continue
+		}
 
 		// Store raw TOML content
 		jobDef.TOML = string(tomlBytes)

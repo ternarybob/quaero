@@ -11,12 +11,17 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// Manager handles job metadata and lifecycle.
+// Manager handles job metadata, lifecycle, and step routing.
+// This is the single manager for the queue system - it routes steps to workers.
 type Manager struct {
 	jobStorage    interfaces.QueueStorage
 	jobLogStorage interfaces.JobLogStorage
 	queue         interfaces.QueueManager
 	eventService  interfaces.EventService // Optional: may be nil for testing
+
+	// Worker registry for step routing
+	workers   map[models.StepType]interfaces.StepWorker
+	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
 }
 
 func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService) *Manager {
@@ -25,7 +30,34 @@ func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.Job
 		jobLogStorage: jobLogStorage,
 		queue:         queue,
 		eventService:  eventService,
+		workers:       make(map[models.StepType]interfaces.StepWorker),
 	}
+}
+
+// SetKVStorage sets the key-value storage for resolving placeholders in step configs.
+// This should be called during initialization if placeholder resolution is needed.
+func (m *Manager) SetKVStorage(kvStorage interfaces.KeyValueStorage) {
+	m.kvStorage = kvStorage
+}
+
+// RegisterWorker registers a StepWorker for its declared StepType.
+// If a worker for the same type is already registered, it will be replaced.
+func (m *Manager) RegisterWorker(worker interfaces.StepWorker) {
+	if worker == nil {
+		return
+	}
+	m.workers[worker.GetType()] = worker
+}
+
+// HasWorker checks if a worker is registered for the given StepType.
+func (m *Manager) HasWorker(stepType models.StepType) bool {
+	_, exists := m.workers[stepType]
+	return exists
+}
+
+// GetWorker returns the worker registered for the given StepType, or nil if not found.
+func (m *Manager) GetWorker(stepType models.StepType) interfaces.StepWorker {
+	return m.workers[stepType]
 }
 
 // Job represents job metadata
@@ -770,4 +802,234 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 	}
 
 	return count, nil
+}
+
+// ============================================================================
+// Job Definition Execution (Step Orchestration)
+// ============================================================================
+
+// ExecuteJobDefinition executes a job definition by routing steps to workers.
+// Creates a parent job record and orchestrates step execution sequentially.
+// Returns the parent job ID for tracking.
+func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor) (string, error) {
+	// Generate parent job ID
+	parentJobID := uuid.New().String()
+
+	// Create parent job record in database
+	parentJob := &Job{
+		ID:              parentJobID,
+		ParentID:        nil,
+		Type:            "parent",
+		Name:            jobDef.Name,
+		Phase:           "execution",
+		Status:          "pending",
+		CreatedAt:       time.Now(),
+		ProgressCurrent: 0,
+		ProgressTotal:   len(jobDef.Steps),
+	}
+
+	if err := m.CreateJobRecord(ctx, parentJob); err != nil {
+		return "", fmt.Errorf("failed to create parent job: %w", err)
+	}
+
+	// Persist metadata immediately after job creation
+	parentMetadata := make(map[string]interface{})
+	if jobDef.AuthID != "" {
+		parentMetadata["auth_id"] = jobDef.AuthID
+	}
+	if jobDef.ID != "" {
+		parentMetadata["job_definition_id"] = jobDef.ID
+	}
+	parentMetadata["phase"] = "execution"
+
+	if err := m.UpdateJobMetadata(ctx, parentJobID, parentMetadata); err != nil {
+		// Log warning but continue
+	}
+
+	// Add initial job log
+	initialLog := fmt.Sprintf("Starting job definition execution: %s (ID: %s, Steps: %d)",
+		jobDef.Name, jobDef.ID, len(jobDef.Steps))
+	m.AddJobLog(ctx, parentJobID, "info", initialLog)
+
+	// Build job definition config for parent job
+	jobDefConfig := make(map[string]interface{})
+	for i, step := range jobDef.Steps {
+		stepKey := fmt.Sprintf("step_%d_%s", i+1, step.Type.String())
+		jobDefConfig[stepKey] = step.Config
+	}
+	jobDefConfig["job_definition_id"] = jobDef.ID
+	jobDefConfig["source_type"] = jobDef.SourceType
+	jobDefConfig["base_url"] = jobDef.BaseURL
+	jobDefConfig["schedule"] = jobDef.Schedule
+	jobDefConfig["timeout"] = jobDef.Timeout
+	jobDefConfig["enabled"] = jobDef.Enabled
+	if jobDef.AuthID != "" {
+		jobDefConfig["auth_id"] = jobDef.AuthID
+	}
+
+	if err := m.UpdateJobConfig(ctx, parentJobID, jobDefConfig); err != nil {
+		// Log warning but continue
+	}
+
+	// Mark parent job as running
+	if err := m.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
+		// Log warning but continue
+	}
+
+	// Track if any child jobs were created
+	hasChildJobs := false
+
+	// Execute steps sequentially
+	for i, step := range jobDef.Steps {
+		// Resolve placeholders in step config
+		resolvedStep := step
+		if step.Config != nil && m.kvStorage != nil {
+			resolvedStep.Config = m.resolvePlaceholders(ctx, step.Config)
+		}
+
+		// Get worker for this step type
+		worker := m.GetWorker(step.Type)
+		if worker == nil {
+			err := fmt.Errorf("no worker registered for step type: %s", step.Type.String())
+			m.AddJobLog(ctx, parentJobID, "error", err.Error())
+
+			// Handle based on error strategy
+			if step.OnError == models.ErrorStrategyFail {
+				m.SetJobError(ctx, parentJobID, err.Error())
+				return parentJobID, err
+			}
+			continue
+		}
+
+		// Validate step configuration
+		if err := worker.ValidateStep(resolvedStep); err != nil {
+			m.AddJobLog(ctx, parentJobID, "error", fmt.Sprintf("Step validation failed: %v", err))
+
+			if step.OnError == models.ErrorStrategyFail {
+				m.SetJobError(ctx, parentJobID, err.Error())
+				return parentJobID, fmt.Errorf("step %s validation failed: %w", step.Name, err)
+			}
+			continue
+		}
+
+		// Execute step via worker
+		childJobID, err := worker.CreateJobs(ctx, resolvedStep, *jobDef, parentJobID)
+		if err != nil {
+			m.AddJobLog(ctx, parentJobID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err))
+			m.SetJobError(ctx, parentJobID, err.Error())
+
+			if step.OnError == models.ErrorStrategyFail {
+				return parentJobID, fmt.Errorf("step %s failed: %w", step.Name, err)
+			}
+
+			// Check error tolerance
+			if jobDef.ErrorTolerance != nil {
+				shouldStop, _ := m.checkErrorTolerance(ctx, parentJobID, jobDef.ErrorTolerance)
+				if shouldStop {
+					m.UpdateJobStatus(ctx, parentJobID, "failed")
+					return parentJobID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
+				}
+			}
+			continue
+		}
+
+		// Track child jobs
+		if worker.ReturnsChildJobs() {
+			hasChildJobs = true
+		}
+
+		m.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Step %s completed (job: %s)", step.Name, childJobID))
+
+		// Update progress
+		if err := m.UpdateJobProgress(ctx, parentJobID, i+1, len(jobDef.Steps)); err != nil {
+			// Log warning but continue
+		}
+	}
+
+	// Handle completion based on job type
+	if hasChildJobs && jobMonitor != nil {
+		// Start monitoring for jobs with children
+		m.AddJobLog(ctx, parentJobID, "info", "Child jobs detected - starting parent job monitoring")
+
+		parentQueueJob := &models.QueueJob{
+			ID:        parentJobID,
+			ParentID:  nil,
+			Type:      "parent",
+			Name:      jobDef.Name,
+			Config:    jobDefConfig,
+			Metadata:  parentMetadata,
+			CreatedAt: time.Now(),
+			Depth:     0,
+		}
+
+		jobMonitor.StartMonitoring(ctx, parentQueueJob)
+	} else {
+		// Mark as completed immediately for jobs without children
+		m.AddJobLog(ctx, parentJobID, "info", "Job completed (no child jobs)")
+		m.UpdateJobStatus(ctx, parentJobID, "completed")
+		m.SetJobFinished(ctx, parentJobID)
+	}
+
+	return parentJobID, nil
+}
+
+// resolvePlaceholders recursively resolves {key-name} placeholders in step config values
+func (m *Manager) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
+	if config == nil || m.kvStorage == nil {
+		return config
+	}
+
+	resolved := make(map[string]interface{})
+	for key, value := range config {
+		resolved[key] = m.resolveValue(ctx, value)
+	}
+	return resolved
+}
+
+// resolveValue recursively resolves placeholders in a single value
+func (m *Manager) resolveValue(ctx context.Context, value interface{}) interface{} {
+	switch v := value.(type) {
+	case string:
+		if len(v) > 2 && v[0] == '{' && v[len(v)-1] == '}' {
+			keyName := v[1 : len(v)-1]
+			kvValue, err := m.kvStorage.Get(ctx, keyName)
+			if err == nil && kvValue != "" {
+				return kvValue
+			}
+		}
+		return v
+	case map[string]interface{}:
+		return m.resolvePlaceholders(ctx, v)
+	case []interface{}:
+		resolved := make([]interface{}, len(v))
+		for i, item := range v {
+			resolved[i] = m.resolveValue(ctx, item)
+		}
+		return resolved
+	default:
+		return v
+	}
+}
+
+// checkErrorTolerance checks if the error tolerance threshold has been exceeded
+func (m *Manager) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
+	if tolerance == nil || tolerance.MaxChildFailures == 0 {
+		return false, nil
+	}
+
+	failedCount, err := m.GetFailedChildCount(ctx, parentJobID)
+	if err != nil {
+		return false, fmt.Errorf("failed to query failed job count: %w", err)
+	}
+
+	if failedCount >= tolerance.MaxChildFailures {
+		switch tolerance.FailureAction {
+		case "stop_all":
+			return true, nil
+		default:
+			return false, nil
+		}
+	}
+
+	return false, nil
 }

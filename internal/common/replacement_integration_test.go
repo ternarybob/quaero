@@ -278,8 +278,8 @@ func TestReplaceInStruct_RealJobDefinition(t *testing.T) {
 		Tags:     []string{"{test-tag}", "integration-test"},
 		Steps: []models.JobStep{
 			{
-				Name:   "Step 1",
-				Action: "crawl",
+				Name: "Step 1",
+				Type: models.StepTypeCrawler,
 				Config: map[string]interface{}{
 					"url":     "{api-url}/endpoint",
 					"method":  "GET",

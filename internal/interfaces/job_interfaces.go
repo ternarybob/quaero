@@ -63,3 +63,32 @@ type JobSpawner interface {
 	// The child job will be linked to the parent via ParentID
 	SpawnChildJob(ctx context.Context, parentJob *models.QueueJob, childType, childName string, config map[string]interface{}) error
 }
+
+// StepWorker is the unified interface for type-defined workers.
+// Each StepWorker handles a specific StepType and provides type-safe routing.
+// This interface supersedes action-string-based routing with explicit type definitions.
+type StepWorker interface {
+	// GetType returns the StepType this worker handles.
+	// Used by GenericStepManager for routing steps to the correct worker.
+	GetType() models.StepType
+
+	// CreateJobs creates queue jobs for the step and returns the parent job ID.
+	// The worker is responsible for creating job records and enqueueing work items.
+	// Parameters:
+	//   - ctx: Context for cancellation and timeouts
+	//   - step: The job step definition containing configuration
+	//   - jobDef: The parent job definition containing source info
+	//   - parentJobID: The ID of the parent orchestration job for hierarchy tracking
+	// Returns the job ID for tracking (may be same as parentJobID for inline steps)
+	CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error)
+
+	// ReturnsChildJobs indicates if this worker creates async child jobs.
+	// If true, the orchestrator will start job monitoring for completion tracking.
+	// If false, the step is considered complete when CreateJobs returns.
+	ReturnsChildJobs() bool
+
+	// ValidateStep validates step configuration before execution.
+	// Called by GenericStepManager before CreateJobs to fail fast on misconfigurations.
+	// Should check for required config fields and valid values.
+	ValidateStep(step models.JobStep) error
+}

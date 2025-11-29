@@ -71,26 +71,37 @@ func ParseTOML(content []byte) (*JobDefinitionFile, error) {
 }
 
 // ToJobDefinition converts the file structure to the internal model
-func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
+func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 	var steps []models.JobStep
 
 	// Parse [step.{name}] tables
 	if len(f.Step) > 0 {
 		for name, stepData := range f.Step {
 			// Extract known fields from the step map
-			action, _ := stepData["action"].(string)
+			typeStr, _ := stepData["type"].(string)
+			description, _ := stepData["description"].(string)
 			onError, _ := stepData["on_error"].(string)
 			depends, _ := stepData["depends"].(string)
 			condition, _ := stepData["condition"].(string)
 
+			// Validate that we have a valid type
+			stepType := models.StepType(typeStr)
+			if stepType == "" {
+				return nil, fmt.Errorf("step '%s': 'type' field is required", name)
+			}
+
+			if !stepType.IsValid() {
+				return nil, fmt.Errorf("step '%s': invalid type '%s' - must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance", name, stepType)
+			}
+
 			// Build config from all remaining fields (excluding known step metadata)
 			config := make(map[string]interface{})
 			knownFields := map[string]bool{
-				"action":      true,
+				"type":        true,
+				"description": true,
 				"on_error":    true,
 				"depends":     true,
 				"condition":   true,
-				"description": true,
 			}
 			for k, v := range stepData {
 				if !knownFields[k] {
@@ -99,12 +110,13 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 			}
 
 			step := models.JobStep{
-				Name:      name,
-				Action:    action,
-				Config:    config,
-				OnError:   models.ErrorStrategy(onError),
-				Depends:   depends,
-				Condition: condition,
+				Name:        name,
+				Type:        stepType,
+				Description: description,
+				Config:      config,
+				OnError:     models.ErrorStrategy(onError),
+				Depends:     depends,
+				Condition:   condition,
 			}
 			// Default OnError if empty
 			if step.OnError == "" {
@@ -133,7 +145,7 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 
 		step := models.JobStep{
 			Name:    "crawl",
-			Action:  "crawl",
+			Type:    models.StepTypeCrawler,
 			Config:  config,
 			OnError: models.ErrorStrategyContinue,
 		}
@@ -161,14 +173,14 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		Steps:       steps,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
-	}
+	}, nil
 }
 
 // ConvertToTOML converts a JobDefinition to simplified TOML format for export
 func (s *Service) ConvertToTOML(jobDef *models.JobDefinition) ([]byte, error) {
 	// Extract crawler configuration from first step
 	var crawlConfig map[string]interface{}
-	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Action == "crawl" {
+	if len(jobDef.Steps) > 0 && jobDef.Steps[0].Type == models.StepTypeCrawler {
 		crawlConfig = jobDef.Steps[0].Config
 	} else {
 		crawlConfig = make(map[string]interface{})
@@ -290,16 +302,16 @@ func (s *Service) ValidateRuntimeDependencies(jobDef *models.JobDefinition) {
 
 	// Check each step for dependencies
 	for _, step := range jobDef.Steps {
-		switch step.Action {
-		case "agent":
+		switch step.Type {
+		case models.StepTypeAgent:
 			// Agent steps require agent service
 			if s.agentService == nil {
 				jobDef.RuntimeStatus = "disabled"
 				jobDef.RuntimeError = "Google API key is required for agent service (set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config)"
 				return
 			}
-			// Add more action types here as needed
-			// case "places_search":
+			// Add more step types here as needed
+			// case models.StepTypePlacesSearch:
 			//     if s.placesService == nil {
 			//         jobDef.RuntimeStatus = "disabled"
 			//         jobDef.RuntimeError = "Google Places API key required"

@@ -1,3 +1,9 @@
+// -----------------------------------------------------------------------
+// GitHub Actions Worker - Unified worker implementing both StepWorker and JobWorker
+// - StepWorker: Creates parent jobs and spawns child jobs for workflow runs
+// - JobWorker: Processes individual GitHub action log jobs
+// -----------------------------------------------------------------------
+
 package workers
 
 import (
@@ -14,22 +20,27 @@ import (
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// GitHubLogWorker handles GitHub Action Log jobs
+// GitHubLogWorker handles GitHub Action Log jobs and implements both StepWorker and JobWorker interfaces.
+// - StepWorker: Creates parent jobs and spawns child jobs for workflow runs
+// - JobWorker: Processes individual GitHub action log jobs
 type GitHubLogWorker struct {
 	connectorService interfaces.ConnectorService
 	jobManager       *queue.Manager
+	queueMgr         interfaces.QueueManager
 	documentStorage  interfaces.DocumentStorage
 	eventService     interfaces.EventService
 	logger           arbor.ILogger
 }
 
-// Compile-time assertion: GitHubLogWorker implements JobWorker interface
+// Compile-time assertions: GitHubLogWorker implements both interfaces
+var _ interfaces.StepWorker = (*GitHubLogWorker)(nil)
 var _ interfaces.JobWorker = (*GitHubLogWorker)(nil)
 
-// NewGitHubLogWorker creates a new GitHub log worker
+// NewGitHubLogWorker creates a new GitHub log worker that implements both StepWorker and JobWorker interfaces
 func NewGitHubLogWorker(
 	connectorService interfaces.ConnectorService,
 	jobManager *queue.Manager,
+	queueMgr interfaces.QueueManager,
 	documentStorage interfaces.DocumentStorage,
 	eventService interfaces.EventService,
 	logger arbor.ILogger,
@@ -37,6 +48,7 @@ func NewGitHubLogWorker(
 	return &GitHubLogWorker{
 		connectorService: connectorService,
 		jobManager:       jobManager,
+		queueMgr:         queueMgr,
 		documentStorage:  documentStorage,
 		eventService:     eventService,
 		logger:           logger,
@@ -287,4 +299,286 @@ func (w *GitHubLogWorker) findGitHubConnector(ctx context.Context) (*models.Conn
 	}
 
 	return nil, fmt.Errorf("no GitHub connector found")
+}
+
+// ============================================================================
+// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// ============================================================================
+
+// GetType returns StepTypeGitHubActions for the StepWorker interface
+func (w *GitHubLogWorker) GetType() models.StepType {
+	return models.StepTypeGitHubActions
+}
+
+// CreateJobs creates a parent job and spawns child jobs for each workflow run.
+func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+	stepConfig := step.Config
+	if stepConfig == nil {
+		stepConfig = make(map[string]interface{})
+	}
+
+	// Extract required config
+	connectorID := getLogStringConfig(stepConfig, "connector_id", "")
+	connectorName := getLogStringConfig(stepConfig, "connector_name", "")
+	owner := getLogStringConfig(stepConfig, "owner", "")
+	repo := getLogStringConfig(stepConfig, "repo", "")
+
+	if connectorID == "" && connectorName == "" {
+		return "", fmt.Errorf("connector_id or connector_name is required")
+	}
+	if owner == "" {
+		return "", fmt.Errorf("owner is required")
+	}
+	if repo == "" {
+		return "", fmt.Errorf("repo is required")
+	}
+
+	// Extract optional config with defaults
+	workflowFiles := getLogStringSliceConfig(stepConfig, "workflow_files", []string{})
+	_ = workflowFiles // TODO: filter by workflow files not yet implemented
+	status := getLogStringConfig(stepConfig, "status", "failure")
+	maxRuns := getLogIntConfig(stepConfig, "max_runs", 100)
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("connector_id", connectorID).
+		Str("connector_name", connectorName).
+		Str("owner", owner).
+		Str("repo", repo).
+		Strs("workflow_files", workflowFiles).
+		Str("status", status).
+		Int("max_runs", maxRuns).
+		Msg("Creating GitHub Actions parent job")
+
+	// Get GitHub connector - by ID or by name
+	var connector *models.Connector
+	var err error
+	if connectorID != "" {
+		connector, err = w.connectorService.GetConnector(ctx, connectorID)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by ID: %w", err)
+		}
+	} else {
+		connector, err = w.connectorService.GetConnectorByName(ctx, connectorName)
+		if err != nil {
+			return "", fmt.Errorf("failed to get connector by name '%s': %w", connectorName, err)
+		}
+		connectorID = connector.ID
+	}
+
+	ghConnector, err := github.NewConnector(connector)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GitHub connector: %w", err)
+	}
+
+	// Create parent job first
+	parentJob := models.NewQueueJob(
+		"github_actions_parent",
+		fmt.Sprintf("GitHub Actions: %s/%s", owner, repo),
+		map[string]interface{}{
+			"owner":          owner,
+			"repo":           repo,
+			"workflow_files": workflowFiles,
+			"status":         status,
+		},
+		map[string]interface{}{
+			"connector_id":      connectorID,
+			"job_definition_id": jobDef.ID,
+			"tags":              jobDef.Tags,
+		},
+	)
+	parentJob.ParentID = &parentJobID
+
+	// Serialize parent job to JSON
+	parentPayloadBytes, err := parentJob.ToJSON()
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize parent job: %w", err)
+	}
+
+	// Create parent job record in database
+	if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
+		ID:              parentJob.ID,
+		ParentID:        parentJob.ParentID,
+		Type:            parentJob.Type,
+		Name:            parentJob.Name,
+		Phase:           "execution",
+		Status:          "pending",
+		CreatedAt:       parentJob.CreatedAt,
+		ProgressCurrent: 0,
+		ProgressTotal:   0,
+		Payload:         string(parentPayloadBytes),
+	}); err != nil {
+		return "", fmt.Errorf("failed to create parent job record: %w", err)
+	}
+
+	// List workflow runs matching the criteria
+	runs, err := ghConnector.ListWorkflowRuns(ctx, owner, repo, maxRuns, status, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to list workflow runs: %w", err)
+	}
+
+	// Create child jobs for each run
+	totalRunsEnqueued := 0
+
+	for _, run := range runs {
+		if totalRunsEnqueued >= maxRuns {
+			break
+		}
+
+		// Create child job for each run
+		childJob := models.NewQueueJobChild(
+			parentJob.ID,
+			models.JobTypeGitHubActionLog,
+			fmt.Sprintf("Fetch Logs: %s/%s Run #%d", repo, run.WorkflowName, run.ID),
+			map[string]interface{}{
+				"owner":         owner,
+				"repo":          repo,
+				"run_id":        run.ID,
+				"run_attempt":   run.RunAttempt,
+				"workflow_name": run.WorkflowName,
+				"status":        run.Status,
+				"conclusion":    run.Conclusion,
+				"url":           run.URL,
+				"started_at":    run.RunStartedAt.Format(time.RFC3339),
+			},
+			map[string]interface{}{
+				"connector_id":   connectorID,
+				"tags":           jobDef.Tags,
+				"root_parent_id": parentJobID,
+			},
+			parentJob.Depth+1,
+		)
+
+		// Serialize child job to JSON
+		childPayloadBytes, err := childJob.ToJSON()
+		if err != nil {
+			w.logger.Warn().Err(err).
+				Int64("run_id", run.ID).
+				Msg("Failed to serialize child job, skipping")
+			continue
+		}
+
+		// Create child job record in database
+		if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
+			ID:              childJob.ID,
+			ParentID:        childJob.ParentID,
+			Type:            childJob.Type,
+			Name:            childJob.Name,
+			Phase:           "execution",
+			Status:          "pending",
+			CreatedAt:       childJob.CreatedAt,
+			ProgressCurrent: 0,
+			ProgressTotal:   1,
+			Payload:         string(childPayloadBytes),
+		}); err != nil {
+			w.logger.Warn().Err(err).
+				Int64("run_id", run.ID).
+				Msg("Failed to create child job record, skipping")
+			continue
+		}
+
+		// Create queue message and enqueue
+		queueMsg := models.QueueMessage{
+			JobID:   childJob.ID,
+			Type:    childJob.Type,
+			Payload: childPayloadBytes,
+		}
+
+		if err := w.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+			w.logger.Warn().Err(err).
+				Int64("run_id", run.ID).
+				Msg("Failed to enqueue run job, skipping")
+			continue
+		}
+
+		totalRunsEnqueued++
+	}
+
+	w.logger.Info().
+		Str("parent_job_id", parentJob.ID).
+		Str("owner", owner).
+		Str("repo", repo).
+		Int("runs_enqueued", totalRunsEnqueued).
+		Msg("GitHub Actions parent job created, child jobs enqueued")
+
+	// Update parent job with total count
+	if err := w.jobManager.UpdateJobProgress(ctx, parentJob.ID, 0, totalRunsEnqueued); err != nil {
+		w.logger.Warn().Err(err).Msg("Failed to update parent job progress")
+	}
+
+	return parentJob.ID, nil
+}
+
+// ReturnsChildJobs returns true since GitHub Actions creates child jobs for each workflow run
+func (w *GitHubLogWorker) ReturnsChildJobs() bool {
+	return true
+}
+
+// ValidateStep validates step configuration for GitHub Actions type (StepWorker interface)
+func (w *GitHubLogWorker) ValidateStep(step models.JobStep) error {
+	// Validate step config exists
+	if step.Config == nil {
+		return fmt.Errorf("github_actions step requires config")
+	}
+
+	// Validate connector_id or connector_name
+	connectorID, hasConnectorID := step.Config["connector_id"].(string)
+	connectorName, hasConnectorName := step.Config["connector_name"].(string)
+
+	if (!hasConnectorID || connectorID == "") && (!hasConnectorName || connectorName == "") {
+		return fmt.Errorf("github_actions step requires either 'connector_id' or 'connector_name' in config")
+	}
+
+	// Validate required owner field
+	owner, ok := step.Config["owner"].(string)
+	if !ok || owner == "" {
+		return fmt.Errorf("github_actions step requires 'owner' in config")
+	}
+
+	// Validate required repo field
+	repo, ok := step.Config["repo"].(string)
+	if !ok || repo == "" {
+		return fmt.Errorf("github_actions step requires 'repo' in config")
+	}
+
+	return nil
+}
+
+// ============================================================================
+// HELPER FUNCTIONS FOR CONFIG EXTRACTION
+// ============================================================================
+
+func getLogStringConfig(config map[string]interface{}, key, defaultValue string) string {
+	if v, ok := config[key].(string); ok {
+		return v
+	}
+	return defaultValue
+}
+
+func getLogIntConfig(config map[string]interface{}, key string, defaultValue int) int {
+	if v, ok := config[key].(float64); ok {
+		return int(v)
+	}
+	if v, ok := config[key].(int); ok {
+		return v
+	}
+	return defaultValue
+}
+
+func getLogStringSliceConfig(config map[string]interface{}, key string, defaultValue []string) []string {
+	if v, ok := config[key].([]string); ok {
+		return v
+	}
+	if v, ok := config[key].([]interface{}); ok {
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
+	}
+	return defaultValue
 }

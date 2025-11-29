@@ -1,4 +1,8 @@
-package managers
+// -----------------------------------------------------------------------
+// PlacesWorker - Worker for Google Places API search operations
+// -----------------------------------------------------------------------
+
+package workers
 
 import (
 	"context"
@@ -13,42 +17,45 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// PlacesSearchManager orchestrates Google Places API search workflows and document creation
-type PlacesSearchManager struct {
+// PlacesWorker handles Google Places API search operations.
+// This worker executes places search jobs synchronously (no child jobs).
+type PlacesWorker struct {
 	placesService   interfaces.PlacesService
 	documentService interfaces.DocumentService
 	eventService    interfaces.EventService
 	kvStorage       interfaces.KeyValueStorage
-	authStorage     interfaces.AuthStorage
 	logger          arbor.ILogger
 }
 
-// Compile-time assertion: PlacesSearchManager implements StepManager interface
-var _ interfaces.StepManager = (*PlacesSearchManager)(nil)
+// Compile-time assertion: PlacesWorker implements StepWorker interface
+var _ interfaces.StepWorker = (*PlacesWorker)(nil)
 
-// NewPlacesSearchManager creates a new places search manager for orchestrating Google Places API searches
-func NewPlacesSearchManager(
+// NewPlacesWorker creates a new places search worker
+func NewPlacesWorker(
 	placesService interfaces.PlacesService,
 	documentService interfaces.DocumentService,
 	eventService interfaces.EventService,
 	kvStorage interfaces.KeyValueStorage,
-	authStorage interfaces.AuthStorage,
 	logger arbor.ILogger,
-) *PlacesSearchManager {
-	return &PlacesSearchManager{
+) *PlacesWorker {
+	return &PlacesWorker{
 		placesService:   placesService,
 		documentService: documentService,
 		eventService:    eventService,
 		kvStorage:       kvStorage,
-		authStorage:     authStorage,
 		logger:          logger,
 	}
 }
 
-// CreateParentJob executes a places search operation using the Google Places API.
+// GetType returns StepTypePlacesSearch
+func (w *PlacesWorker) GetType() models.StepType {
+	return models.StepTypePlacesSearch
+}
+
+// CreateJobs executes a places search operation using the Google Places API.
 // Searches for places matching the query and creates documents for each result.
-// Returns a placeholder job ID since places search doesn't create async jobs.
-func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+// Returns the parent job ID since places search executes synchronously.
+func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return "", fmt.Errorf("step config is required for places_search")
@@ -77,18 +84,18 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		if strings.HasPrefix(apiKeyValue, "{") && strings.HasSuffix(apiKeyValue, "}") {
 			// Variable reference - resolve from KV store
 			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
-			resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, cleanAPIKeyName, "")
+			resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
 			if err != nil {
 				return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 			}
-			m.logger.Info().
+			w.logger.Info().
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
 				Msg("Resolved API key from storage for places search execution")
 			stepConfig["resolved_api_key"] = resolvedAPIKey
 		} else {
 			// Actual API key value (already substituted) - use directly
-			m.logger.Info().
+			w.logger.Info().
 				Str("step_name", step.Name).
 				Msg("Using pre-substituted API key for places search execution")
 			stepConfig["resolved_api_key"] = apiKeyValue
@@ -114,8 +121,6 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 	}
 
 	// Extract location for nearby_search
-	// Supports both flat fields (location_latitude, location_longitude, location_radius)
-	// and nested location map (location: {latitude, longitude, radius})
 	if searchType == "nearby_search" {
 		var latitude, longitude float64
 		var radius int
@@ -176,7 +181,7 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		req.Filters = filters
 	}
 
-	m.logger.Info().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("search_query", req.SearchQuery).
 		Str("search_type", req.SearchType).
@@ -184,7 +189,7 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		Msg("Orchestrating places search")
 
 	// Execute search
-	result, err := m.placesService.SearchPlaces(ctx, parentJobID, req)
+	result, err := w.placesService.SearchPlaces(ctx, parentJobID, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to search places: %w", err)
 	}
@@ -195,19 +200,19 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		return "", fmt.Errorf("failed to marshal places result: %w", err)
 	}
 
-	m.logger.Debug().
+	w.logger.Debug().
 		Str("step_name", step.Name).
 		Str("result_json", string(resultJSON)).
 		Msg("Places search result marshaled")
 
-	m.logger.Info().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Int("total_results", result.TotalResults).
 		Str("parent_job_id", parentJobID).
 		Msg("Places search orchestration completed successfully")
 
 	// Create individual documents for each place
-	docs, err := m.createPlaceDocuments(result, parentJobID, jobDef.Tags)
+	docs, err := w.createPlaceDocuments(result, parentJobID, jobDef.Tags)
 	if err != nil {
 		return "", fmt.Errorf("failed to create place documents: %w", err)
 	}
@@ -215,8 +220,8 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 	// Save each document to database and publish events
 	savedCount := 0
 	for _, doc := range docs {
-		if err := m.documentService.SaveDocument(ctx, doc); err != nil {
-			m.logger.Warn().
+		if err := w.documentService.SaveDocument(ctx, doc); err != nil {
+			w.logger.Warn().
 				Err(err).
 				Str("document_id", doc.ID).
 				Str("place_name", doc.Title).
@@ -226,17 +231,16 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 
 		savedCount++
 
-		m.logger.Debug().
+		w.logger.Debug().
 			Str("document_id", doc.ID).
 			Str("place_name", doc.Title).
 			Msg("Place document saved successfully")
 
 		// Publish document_saved event for each document
-		// This is a generic, job-type agnostic event that ANY manager can publish
-		if m.eventService != nil && parentJobID != "" {
+		if w.eventService != nil && parentJobID != "" {
 			docID := doc.ID // Capture for goroutine
 			payload := map[string]interface{}{
-				"job_id":        parentJobID, // For places jobs, the parent job is the job itself
+				"job_id":        parentJobID,
 				"parent_job_id": parentJobID,
 				"document_id":   docID,
 				"source_type":   "places",
@@ -247,14 +251,14 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 				Payload: payload,
 			}
 			// Publish synchronously to ensure document count is updated before job completes
-			if err := m.eventService.PublishSync(context.Background(), event); err != nil {
-				m.logger.Warn().
+			if err := w.eventService.PublishSync(context.Background(), event); err != nil {
+				w.logger.Warn().
 					Err(err).
 					Str("document_id", docID).
 					Str("parent_job_id", parentJobID).
 					Msg("Failed to publish document_saved event")
 			} else {
-				m.logger.Debug().
+				w.logger.Debug().
 					Str("document_id", docID).
 					Str("parent_job_id", parentJobID).
 					Msg("Published document_saved event for parent job document count")
@@ -262,7 +266,7 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		}
 	}
 
-	m.logger.Info().
+	w.logger.Info().
 		Int("documents_created", savedCount).
 		Int("total_results", result.TotalResults).
 		Msg("Places search results saved as individual documents")
@@ -271,18 +275,59 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 	return parentJobID, nil
 }
 
-// GetManagerType returns "places_search" - the action type this manager handles
-func (m *PlacesSearchManager) GetManagerType() string {
-	return "places_search"
-}
-
-// ReturnsChildJobs returns false since places search is synchronous
-func (m *PlacesSearchManager) ReturnsChildJobs() bool {
+// ReturnsChildJobs returns false since places search executes synchronously
+func (w *PlacesWorker) ReturnsChildJobs() bool {
 	return false
 }
 
+// ValidateStep validates step configuration for places search type
+func (w *PlacesWorker) ValidateStep(step models.JobStep) error {
+	// Validate step config exists
+	if step.Config == nil {
+		return fmt.Errorf("places_search step requires config")
+	}
+
+	// Validate required search_query field
+	searchQuery, ok := step.Config["search_query"].(string)
+	if !ok || searchQuery == "" {
+		return fmt.Errorf("places_search step requires 'search_query' in config")
+	}
+
+	// Validate optional search_type field
+	if searchType, ok := step.Config["search_type"].(string); ok {
+		if searchType != "text_search" && searchType != "nearby_search" {
+			return fmt.Errorf("places_search step search_type must be 'text_search' or 'nearby_search', got: %s", searchType)
+		}
+
+		// If nearby_search, validate location fields
+		if searchType == "nearby_search" {
+			hasLocation := false
+
+			// Check for flat location fields (new format)
+			if _, ok := step.Config["location_latitude"].(float64); ok {
+				hasLocation = true
+			}
+
+			// Fallback to nested location map (legacy format)
+			if !hasLocation {
+				if locationMap, ok := step.Config["location"].(map[string]interface{}); ok {
+					if _, ok := locationMap["latitude"].(float64); ok {
+						hasLocation = true
+					}
+				}
+			}
+
+			if !hasLocation {
+				return fmt.Errorf("places_search step with search_type 'nearby_search' requires location fields (location_latitude/location_longitude or location map)")
+			}
+		}
+	}
+
+	return nil
+}
+
 // createPlaceDocuments creates individual documents for each place in the search results
-func (m *PlacesSearchManager) createPlaceDocuments(result *models.PlacesSearchResult, jobID string, tags []string) ([]*models.Document, error) {
+func (w *PlacesWorker) createPlaceDocuments(result *models.PlacesSearchResult, jobID string, tags []string) ([]*models.Document, error) {
 	docs := make([]*models.Document, 0, len(result.Places))
 	now := time.Now()
 

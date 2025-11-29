@@ -33,7 +33,8 @@ tags = ["agent", "keyword-extraction", "nlp"]
 # ============================================================================
 
 [step.extract_keywords]
-action = "agent"
+type = "agent"
+description = "Extract keywords from documents using Google Gemini AI"
 agent_type = "keyword_extractor"
 api_key = "{google_gemini_api_key}"
 filter_limit = 100

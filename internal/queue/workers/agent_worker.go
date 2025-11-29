@@ -1,5 +1,7 @@
 // -----------------------------------------------------------------------
-// Agent Worker - Individual agent job execution with document processing
+// Agent Worker - Unified worker implementing both StepWorker and JobWorker
+// - StepWorker: Creates and enqueues agent jobs for documents
+// - JobWorker: Executes individual agent jobs with document processing
 // -----------------------------------------------------------------------
 
 package workers
@@ -7,32 +9,41 @@ package workers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 )
 
-// AgentWorker processes individual agent jobs from the queue, loading documents, executing AI agents,
-// and updating document metadata with results
+// AgentWorker processes agent jobs and implements both StepWorker and JobWorker interfaces.
+// - StepWorker: Creates and enqueues agent jobs for documents matching filter criteria
+// - JobWorker: Executes individual agent jobs from the queue (document processing with AI agents)
 type AgentWorker struct {
-	// Core dependencies
 	agentService    interfaces.AgentService
 	jobMgr          *queue.Manager
+	queueMgr        interfaces.QueueManager
+	searchService   interfaces.SearchService
+	kvStorage       interfaces.KeyValueStorage
 	documentStorage interfaces.DocumentStorage
 	logger          arbor.ILogger
 	eventService    interfaces.EventService
 }
 
-// Compile-time assertion: AgentWorker implements JobWorker interface
+// Compile-time assertions: AgentWorker implements both interfaces
+var _ interfaces.StepWorker = (*AgentWorker)(nil)
 var _ interfaces.JobWorker = (*AgentWorker)(nil)
 
-// NewAgentWorker creates a new agent worker for processing individual agent jobs from the queue
+// NewAgentWorker creates a new agent worker that implements both StepWorker and JobWorker interfaces
 func NewAgentWorker(
 	agentService interfaces.AgentService,
 	jobMgr *queue.Manager,
+	queueMgr interfaces.QueueManager,
+	searchService interfaces.SearchService,
+	kvStorage interfaces.KeyValueStorage,
 	documentStorage interfaces.DocumentStorage,
 	logger arbor.ILogger,
 	eventService interfaces.EventService,
@@ -40,6 +51,9 @@ func NewAgentWorker(
 	return &AgentWorker{
 		agentService:    agentService,
 		jobMgr:          jobMgr,
+		queueMgr:        queueMgr,
+		searchService:   searchService,
+		kvStorage:       kvStorage,
 		documentStorage: documentStorage,
 		logger:          logger,
 		eventService:    eventService,
@@ -308,6 +322,403 @@ func (w *AgentWorker) publishAgentJobLog(ctx context.Context, jobID, level, mess
 	go func() {
 		if err := w.eventService.Publish(ctx, event); err != nil {
 			w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish agent job log event")
+		}
+	}()
+}
+
+// ============================================================================
+// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// ============================================================================
+
+// GetType returns StepTypeAgent for the StepWorker interface
+func (w *AgentWorker) GetType() models.StepType {
+	return models.StepTypeAgent
+}
+
+// CreateJobs creates agent jobs for documents matching the filter criteria.
+// Queries documents based on job definition, creates child jobs for each document,
+// and enqueues them for processing.
+func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+	// Parse step config
+	stepConfig := step.Config
+	if stepConfig == nil {
+		stepConfig = make(map[string]interface{})
+	}
+
+	// Extract agent type from step config
+	agentType, ok := stepConfig["agent_type"].(string)
+	if !ok || agentType == "" {
+		return "", fmt.Errorf("missing required config field: agent_type")
+	}
+
+	// Check for API key in step config and resolve it from KV store
+	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
+		// Strip curly braces if present (e.g., "{google_gemini_api_key}" -> "google_gemini_api_key")
+		cleanAPIKeyName := strings.Trim(apiKeyName, "{}")
+
+		resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+		}
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Str("api_key_name", cleanAPIKeyName).
+			Msg("Resolved API key from storage for agent execution")
+		stepConfig["resolved_api_key"] = resolvedAPIKey
+	}
+
+	// Extract document filter from step config (optional)
+	// New format uses flat filter_* fields instead of nested document_filter
+	documentFilter := make(map[string]interface{})
+	for k, v := range stepConfig {
+		if len(k) > 7 && k[:7] == "filter_" {
+			filterKey := k[7:] // e.g., "filter_limit" -> "limit"
+			documentFilter[filterKey] = v
+		}
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Str("parent_job_id", parentJobID).
+		Msg("Creating agent jobs for documents")
+
+	// Query documents to process
+	documents, err := w.queryDocuments(ctx, &jobDef, documentFilter)
+	if err != nil {
+		return "", fmt.Errorf("failed to query documents for agent processing: %w", err)
+	}
+
+	if len(documents) == 0 {
+		w.logger.Warn().
+			Str("step_name", step.Name).
+			Str("source_type", jobDef.SourceType).
+			Msg("No documents found for agent processing - check if documents exist with matching filters")
+		return parentJobID, nil // No documents to process, but not an error
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("document_count", len(documents)).
+		Msg("Found documents for agent processing")
+
+	// Create and enqueue agent jobs for each document
+	jobIDs := make([]string, 0, len(documents))
+	for _, doc := range documents {
+		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, parentJobID)
+		if err != nil {
+			w.logger.Warn().
+				Err(err).
+				Str("document_id", doc.ID).
+				Str("agent_type", agentType).
+				Msg("Failed to create agent job for document")
+			continue
+		}
+		jobIDs = append(jobIDs, jobID)
+	}
+
+	if len(jobIDs) == 0 {
+		errMsg := fmt.Sprintf("Failed to create any agent jobs for step %s", step.Name)
+
+		// Publish error event for real-time display
+		if w.eventService != nil {
+			w.publishJobError(ctx, parentJobID, errMsg)
+		}
+
+		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("jobs_created", len(jobIDs)).
+		Msg("Agent jobs created and enqueued")
+
+	// Poll for job completion (wait for all agent jobs to complete)
+	if err := w.pollJobCompletion(ctx, jobIDs); err != nil {
+		return "", fmt.Errorf("agent jobs did not complete successfully: %w", err)
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("jobs_completed", len(jobIDs)).
+		Msg("Agent job orchestration completed successfully")
+
+	return parentJobID, nil
+}
+
+// ReturnsChildJobs returns true since agent creates child jobs for each document
+func (w *AgentWorker) ReturnsChildJobs() bool {
+	return true
+}
+
+// ValidateStep validates step configuration for agent type (StepWorker interface)
+func (w *AgentWorker) ValidateStep(step models.JobStep) error {
+	// Validate step config exists
+	if step.Config == nil {
+		return fmt.Errorf("agent step requires config")
+	}
+
+	// Validate required agent_type field
+	agentType, ok := step.Config["agent_type"].(string)
+	if !ok || agentType == "" {
+		return fmt.Errorf("agent step requires 'agent_type' in config")
+	}
+
+	// Validate known agent types
+	validAgentTypes := map[string]bool{
+		"keyword_extractor":   true,
+		"document_generator":  true,
+		"web_enricher":        true,
+		"content_summarizer":  true,
+		"metadata_enricher":   true,
+		"sentiment_analyzer":  true,
+		"entity_recognizer":   true,
+		"category_classifier": true,
+		"relation_extractor":  true,
+		"question_answerer":   true,
+	}
+
+	if !validAgentTypes[agentType] {
+		return fmt.Errorf("unknown agent_type: %s", agentType)
+	}
+
+	return nil
+}
+
+// ============================================================================
+// HELPER METHODS FOR JOB CREATION
+// ============================================================================
+
+// queryDocuments queries documents to process based on job definition and filter
+func (w *AgentWorker) queryDocuments(ctx context.Context, jobDef *models.JobDefinition, filter map[string]interface{}) ([]*models.Document, error) {
+	// Build search options based on job definition and filter
+	opts := interfaces.SearchOptions{
+		Limit: 1000, // Process up to 1000 documents per step
+	}
+
+	// Only filter by source type if specified in job definition
+	if jobDef.SourceType != "" {
+		opts.SourceTypes = []string{jobDef.SourceType}
+	}
+
+	// Apply additional filters if specified
+	if filter != nil {
+		// Support source_type override in filter
+		if sourceType, ok := filter["source_type"].(string); ok && sourceType != "" {
+			opts.SourceTypes = []string{sourceType}
+		}
+
+		// Support tags filter - only return documents with ALL specified tags
+		if tags, ok := filter["tags"].([]interface{}); ok && len(tags) > 0 {
+			tagStrings := make([]string, 0, len(tags))
+			for _, tag := range tags {
+				if tagStr, ok := tag.(string); ok {
+					tagStrings = append(tagStrings, tagStr)
+				}
+			}
+			if len(tagStrings) > 0 {
+				opts.Tags = tagStrings
+			}
+		} else if tags, ok := filter["tags"].([]string); ok && len(tags) > 0 {
+			opts.Tags = tags
+		}
+
+		// Support limit override
+		if limit, ok := filter["limit"].(int); ok && limit > 0 {
+			opts.Limit = limit
+		} else if limitFloat, ok := filter["limit"].(float64); ok && limitFloat > 0 {
+			opts.Limit = int(limitFloat)
+		}
+
+		// Support created_after date filter
+		if createdAfter, ok := filter["created_after"].(string); ok && createdAfter != "" {
+			opts.CreatedAfter = createdAfter
+		}
+
+		// Support updated_after date filter
+		if updatedAfter, ok := filter["updated_after"].(string); ok && updatedAfter != "" {
+			opts.UpdatedAfter = updatedAfter
+		}
+	}
+
+	// Search documents (empty query returns all documents matching filters)
+	results, err := w.searchService.Search(ctx, "", opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search documents: %w", err)
+	}
+
+	return results, nil
+}
+
+// createAgentJob creates and enqueues an agent job for a document
+func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string) (string, error) {
+	// Build job config
+	jobConfig := map[string]interface{}{
+		"agent_type":  agentType,
+		"document_id": documentID,
+	}
+
+	// Copy optional parameters from step config
+	if maxKeywords, ok := stepConfig["max_keywords"]; ok {
+		jobConfig["max_keywords"] = maxKeywords
+	}
+
+	// Copy Gemini settings from step config (allows per-job override)
+	if resolvedAPIKey, ok := stepConfig["resolved_api_key"].(string); ok && resolvedAPIKey != "" {
+		jobConfig["gemini_api_key"] = resolvedAPIKey
+	}
+	if model, ok := stepConfig["model"].(string); ok && model != "" {
+		jobConfig["gemini_model"] = model
+	}
+	if timeout, ok := stepConfig["timeout"].(string); ok && timeout != "" {
+		jobConfig["gemini_timeout"] = timeout
+	}
+	if rateLimit, ok := stepConfig["rate_limit"].(string); ok && rateLimit != "" {
+		jobConfig["gemini_rate_limit"] = rateLimit
+	}
+
+	// Create queue job
+	queueJob := models.NewQueueJobChild(
+		parentJobID,
+		"agent", // Agent job type for AI-powered document processing
+		fmt.Sprintf("AI: %s (document: %s)", agentType, documentID),
+		jobConfig,
+		map[string]interface{}{}, // metadata (must be non-nil)
+		0,                        // depth (not used for AI jobs)
+	)
+
+	// Validate queue job
+	if err := queueJob.Validate(); err != nil {
+		return "", fmt.Errorf("invalid queue job: %w", err)
+	}
+
+	// Serialize queue job to JSON
+	payloadBytes, err := queueJob.ToJSON()
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize queue job: %w", err)
+	}
+
+	// Create job record in database
+	if err := w.jobMgr.CreateJobRecord(ctx, &queue.Job{
+		ID:              queueJob.ID,
+		ParentID:        queueJob.ParentID,
+		Type:            queueJob.Type,
+		Name:            queueJob.Name,
+		Phase:           "execution",
+		Status:          "pending",
+		CreatedAt:       queueJob.CreatedAt,
+		ProgressCurrent: 0,
+		ProgressTotal:   1,
+		Payload:         string(payloadBytes),
+	}); err != nil {
+		return "", fmt.Errorf("failed to create job record: %w", err)
+	}
+
+	// Enqueue job
+	queueMsg := queue.Message{
+		JobID:   queueJob.ID,
+		Type:    queueJob.Type,
+		Payload: payloadBytes,
+	}
+
+	if err := w.queueMgr.Enqueue(ctx, queueMsg); err != nil {
+		return "", fmt.Errorf("failed to enqueue job: %w", err)
+	}
+
+	w.logger.Debug().
+		Str("job_id", queueJob.ID).
+		Str("parent_job_id", parentJobID).
+		Str("agent_type", agentType).
+		Str("document_id", documentID).
+		Msg("Agent job created and enqueued")
+
+	return queueJob.ID, nil
+}
+
+// pollJobCompletion polls for job completion with timeout
+func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) error {
+	timeout := time.After(10 * time.Minute) // 10 minute timeout for agent jobs
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	w.logger.Debug().
+		Int("job_count", len(jobIDs)).
+		Msg("Polling for agent job completion")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for agent jobs to complete")
+		case <-ticker.C:
+			// Check job statuses
+			allCompleted := true
+			anyFailed := false
+			for _, jobID := range jobIDs {
+				jobInterface, err := w.jobMgr.GetJob(ctx, jobID)
+				if err != nil {
+					w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get job status")
+					continue
+				}
+
+				// Type assert to *models.QueueJobState
+				jobState, ok := jobInterface.(*models.QueueJobState)
+				if !ok {
+					w.logger.Warn().Str("job_id", jobID).Msg("Failed to type assert job to QueueJobState")
+					continue
+				}
+
+				status := string(jobState.Status)
+				if status == "failed" {
+					w.logger.Error().Str("job_id", jobID).Msg("Agent job failed")
+					anyFailed = true
+				}
+
+				if status != "completed" && status != "failed" {
+					allCompleted = false
+				}
+			}
+
+			if anyFailed {
+				return fmt.Errorf("one or more agent jobs failed")
+			}
+
+			if allCompleted {
+				w.logger.Debug().
+					Int("job_count", len(jobIDs)).
+					Msg("All agent jobs completed successfully")
+				return nil
+			}
+		}
+	}
+}
+
+// publishJobError publishes a job error event for real-time display
+func (w *AgentWorker) publishJobError(ctx context.Context, jobID, errorMessage string) {
+	if w.eventService == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"job_id":        jobID,
+		"parent_job_id": jobID,
+		"error_message": errorMessage,
+		"timestamp":     time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    interfaces.EventJobError,
+		Payload: payload,
+	}
+
+	// Publish asynchronously to avoid blocking
+	go func() {
+		if err := w.eventService.Publish(ctx, event); err != nil {
+			w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job error event")
 		}
 	}()
 }

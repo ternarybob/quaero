@@ -14,7 +14,8 @@ auto_start = false
 tags = ["news", "australia", "web-content"]
 
 [step.crawl_news_sites]
-action = "crawl"
+type = "crawler"
+description = "Crawl news websites and extract article content"
 on_error = "fail"
 start_urls = ["https://stockhead.com.au/just-in", "https://www.abc.net.au/news"]
 include_patterns = ["article", "news", "post"]

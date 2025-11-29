@@ -1,4 +1,8 @@
-package managers
+// -----------------------------------------------------------------------
+// WebSearchWorker - Worker for Gemini-powered web search operations
+// -----------------------------------------------------------------------
+
+package workers
 
 import (
 	"context"
@@ -14,25 +18,46 @@ import (
 	"google.golang.org/genai"
 )
 
-// WebSearchManager orchestrates web search jobs using Gemini SDK with GoogleSearch grounding
-type WebSearchManager struct {
+// WebSearchWorker handles web search operations using Gemini SDK with GoogleSearch grounding.
+// This worker executes web search jobs synchronously (no child jobs).
+type WebSearchWorker struct {
 	documentStorage interfaces.DocumentStorage
 	eventService    interfaces.EventService
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
 }
 
-// Compile-time assertion: WebSearchManager implements StepManager interface
-var _ interfaces.StepManager = (*WebSearchManager)(nil)
+// Compile-time assertion: WebSearchWorker implements StepWorker interface
+var _ interfaces.StepWorker = (*WebSearchWorker)(nil)
 
-// NewWebSearchManager creates a new web search manager for orchestrating Gemini-powered web searches
-func NewWebSearchManager(
+// WebSearchResults holds the results of a web search
+type WebSearchResults struct {
+	Query           string
+	Content         string
+	Sources         []WebSearchSource
+	ResultCount     int
+	SearchQueries   []string
+	SearchDate      time.Time
+	Depth           int
+	Breadth         int
+	Errors          []string
+	FollowUpQueries []string
+}
+
+// WebSearchSource represents a source URL and title from the search
+type WebSearchSource struct {
+	URL   string
+	Title string
+}
+
+// NewWebSearchWorker creates a new web search worker
+func NewWebSearchWorker(
 	documentStorage interfaces.DocumentStorage,
 	eventService interfaces.EventService,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
-) *WebSearchManager {
-	return &WebSearchManager{
+) *WebSearchWorker {
+	return &WebSearchWorker{
 		documentStorage: documentStorage,
 		eventService:    eventService,
 		kvStorage:       kvStorage,
@@ -40,10 +65,15 @@ func NewWebSearchManager(
 	}
 }
 
-// CreateParentJob executes a web search using Gemini SDK with GoogleSearch grounding.
+// GetType returns StepTypeWebSearch
+func (w *WebSearchWorker) GetType() models.StepType {
+	return models.StepTypeWebSearch
+}
+
+// CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
 // Creates a document with the search results and source URLs.
 // Returns the parent job ID since web search executes synchronously.
-func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobStep, jobDef *models.JobDefinition, parentJobID string) (string, error) {
+func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return "", fmt.Errorf("step config is required for web_search")
@@ -84,27 +114,25 @@ func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobS
 	}
 
 	// Get API key from step config
-	// The orchestrator already resolves {placeholders} before calling CreateParentJob,
-	// so the api_key value should already be the actual key, not a placeholder
 	var apiKey string
 	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
 		// Check if it's still a placeholder (orchestrator failed to resolve)
 		if len(apiKeyValue) > 2 && apiKeyValue[0] == '{' && apiKeyValue[len(apiKeyValue)-1] == '}' {
 			// Try to resolve the placeholder manually
 			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
-			resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, cleanAPIKeyName, "")
+			resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
 			if err != nil {
 				return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 			}
 			apiKey = resolvedAPIKey
-			m.logger.Info().
+			w.logger.Info().
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
 				Msg("Resolved API key placeholder from storage")
 		} else {
 			// Use the already-resolved API key value directly
 			apiKey = apiKeyValue
-			m.logger.Debug().
+			w.logger.Debug().
 				Str("step_name", step.Name).
 				Msg("Using pre-resolved API key from orchestrator")
 		}
@@ -114,7 +142,7 @@ func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobS
 		return "", fmt.Errorf("api_key is required for web_search")
 	}
 
-	m.logger.Info().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("query", query).
 		Int("depth", depth).
@@ -132,31 +160,31 @@ func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobS
 	}
 
 	// Execute web search
-	results, err := m.executeWebSearch(ctx, client, query, depth, breadth, parentJobID)
+	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, parentJobID)
 	if err != nil {
-		m.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
+		w.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
 		return "", fmt.Errorf("web search failed: %w", err)
 	}
 
 	// Create document from results
-	doc, err := m.createDocument(results, query, jobDef, parentJobID)
+	doc, err := w.createDocument(results, query, &jobDef, parentJobID)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
 
 	// Save document
-	if err := m.documentStorage.SaveDocument(doc); err != nil {
+	if err := w.documentStorage.SaveDocument(doc); err != nil {
 		return "", fmt.Errorf("failed to save document: %w", err)
 	}
 
-	m.logger.Info().
+	w.logger.Info().
 		Str("document_id", doc.ID).
 		Str("query", query).
 		Int("result_count", results.ResultCount).
 		Msg("Web search completed, document saved")
 
 	// Publish document saved event for parent job document count tracking
-	if m.eventService != nil && parentJobID != "" {
+	if w.eventService != nil && parentJobID != "" {
 		payload := map[string]interface{}{
 			"job_id":        parentJobID,
 			"parent_job_id": parentJobID,
@@ -168,8 +196,8 @@ func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobS
 			Type:    interfaces.EventDocumentSaved,
 			Payload: payload,
 		}
-		if err := m.eventService.PublishSync(context.Background(), event); err != nil {
-			m.logger.Warn().
+		if err := w.eventService.PublishSync(context.Background(), event); err != nil {
+			w.logger.Warn().
 				Err(err).
 				Str("document_id", doc.ID).
 				Str("parent_job_id", parentJobID).
@@ -180,38 +208,51 @@ func (m *WebSearchManager) CreateParentJob(ctx context.Context, step models.JobS
 	return parentJobID, nil
 }
 
-// GetManagerType returns "web_search" - the action type this manager handles
-func (m *WebSearchManager) GetManagerType() string {
-	return "web_search"
-}
-
-// ReturnsChildJobs returns false - web search executes synchronously
-func (m *WebSearchManager) ReturnsChildJobs() bool {
+// ReturnsChildJobs returns false since web search executes synchronously
+func (w *WebSearchWorker) ReturnsChildJobs() bool {
 	return false
 }
 
-// WebSearchResults holds the collected search results
-type WebSearchResults struct {
-	Query           string
-	Content         string
-	Sources         []WebSearchSource
-	ResultCount     int
-	SearchQueries   []string
-	SearchDate      time.Time
-	Depth           int
-	Breadth         int
-	Errors          []string
-	FollowUpQueries []string
-}
+// ValidateStep validates step configuration for web search type
+func (w *WebSearchWorker) ValidateStep(step models.JobStep) error {
+	// Validate step config exists
+	if step.Config == nil {
+		return fmt.Errorf("web_search step requires config")
+	}
 
-// WebSearchSource represents a source URL and title from the search
-type WebSearchSource struct {
-	URL   string
-	Title string
+	// Validate required query field
+	query, ok := step.Config["query"].(string)
+	if !ok || query == "" {
+		return fmt.Errorf("web_search step requires 'query' in config")
+	}
+
+	// Validate optional depth field
+	if depth, ok := step.Config["depth"].(float64); ok {
+		if depth < 1 || depth > 10 {
+			return fmt.Errorf("web_search step depth must be between 1 and 10, got: %.0f", depth)
+		}
+	} else if depth, ok := step.Config["depth"].(int); ok {
+		if depth < 1 || depth > 10 {
+			return fmt.Errorf("web_search step depth must be between 1 and 10, got: %d", depth)
+		}
+	}
+
+	// Validate optional breadth field
+	if breadth, ok := step.Config["breadth"].(float64); ok {
+		if breadth < 1 || breadth > 5 {
+			return fmt.Errorf("web_search step breadth must be between 1 and 5, got: %.0f", breadth)
+		}
+	} else if breadth, ok := step.Config["breadth"].(int); ok {
+		if breadth < 1 || breadth > 5 {
+			return fmt.Errorf("web_search step breadth must be between 1 and 5, got: %d", breadth)
+		}
+	}
+
+	return nil
 }
 
 // executeWebSearch performs the web search using Gemini SDK with GoogleSearch grounding
-func (m *WebSearchManager) executeWebSearch(ctx context.Context, client *genai.Client, query string, depth, breadth int, parentJobID string) (*WebSearchResults, error) {
+func (w *WebSearchWorker) executeWebSearch(ctx context.Context, client *genai.Client, query string, depth, breadth int, parentJobID string) (*WebSearchResults, error) {
 	results := &WebSearchResults{
 		Query:      query,
 		SearchDate: time.Now(),
@@ -237,7 +278,7 @@ Query: %s`, breadth, query)
 	searchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	m.logger.Debug().
+	w.logger.Debug().
 		Str("query", query).
 		Str("parent_job_id", parentJobID).
 		Msg("Executing Gemini web search")
@@ -290,14 +331,14 @@ Query: %s`, breadth, query)
 
 	// Execute follow-up searches if depth > 1
 	if depth > 1 && len(results.SearchQueries) > 0 {
-		m.executeFollowUpSearches(searchCtx, client, config, results, depth-1, breadth, parentJobID)
+		w.executeFollowUpSearches(searchCtx, client, config, results, depth-1, breadth, parentJobID)
 	}
 
 	return results, nil
 }
 
 // executeFollowUpSearches performs follow-up searches to explore the topic in depth
-func (m *WebSearchManager) executeFollowUpSearches(ctx context.Context, client *genai.Client, config *genai.GenerateContentConfig, results *WebSearchResults, remainingDepth, breadth int, parentJobID string) {
+func (w *WebSearchWorker) executeFollowUpSearches(ctx context.Context, client *genai.Client, config *genai.GenerateContentConfig, results *WebSearchResults, remainingDepth, breadth int, parentJobID string) {
 	if remainingDepth <= 0 {
 		return
 	}
@@ -309,7 +350,7 @@ func (m *WebSearchManager) executeFollowUpSearches(ctx context.Context, client *
 	}
 
 	for _, followUpQuery := range followUpQueries {
-		m.logger.Debug().
+		w.logger.Debug().
 			Str("follow_up_query", followUpQuery).
 			Int("remaining_depth", remainingDepth).
 			Str("parent_job_id", parentJobID).
@@ -355,7 +396,7 @@ func (m *WebSearchManager) executeFollowUpSearches(ctx context.Context, client *
 }
 
 // createDocument creates a Document from the search results
-func (m *WebSearchManager) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string) (*models.Document, error) {
+func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string, jobDef *models.JobDefinition, parentJobID string) (*models.Document, error) {
 	// Build markdown content
 	var content strings.Builder
 	content.WriteString(fmt.Sprintf("# Web Search Results: %s\n\n", query))

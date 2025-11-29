@@ -1,5 +1,7 @@
 // -----------------------------------------------------------------------
-// Crawler Worker - Processes individual crawler jobs from the queue with ChromeDP rendering, content processing, and child job spawning
+// Crawler Worker - Unified worker implementing both StepWorker and JobWorker
+// - StepWorker: Creates parent crawl jobs via crawler service
+// - JobWorker: Processes individual crawler jobs with ChromeDP rendering and content processing
 // -----------------------------------------------------------------------
 
 package workers
@@ -24,10 +26,10 @@ import (
 	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
-// CrawlerWorker processes individual crawler jobs from the queue, rendering pages with ChromeDP,
-// extracting content, and spawning child jobs for discovered links
+// CrawlerWorker processes crawler jobs and implements both StepWorker and JobWorker interfaces.
+// - StepWorker: Creates parent crawl jobs via crawler service
+// - JobWorker: Processes individual crawler jobs with ChromeDP rendering and content processing
 type CrawlerWorker struct {
-	// Core dependencies
 	crawlerService  *crawler.Service
 	jobMgr          *queue.Manager
 	queueMgr        interfaces.QueueManager
@@ -41,10 +43,11 @@ type CrawlerWorker struct {
 	contentProcessor *crawler.ContentProcessor
 }
 
-// Compile-time assertion: CrawlerWorker implements JobWorker interface
+// Compile-time assertions: CrawlerWorker implements both interfaces
+var _ interfaces.StepWorker = (*CrawlerWorker)(nil)
 var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
 
-// NewCrawlerWorker creates a new crawler worker for processing individual crawler jobs from the queue
+// NewCrawlerWorker creates a new crawler worker that implements both StepWorker and JobWorker interfaces
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,
 	jobMgr *queue.Manager,
@@ -1492,4 +1495,238 @@ func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *mod
 			w.logger.Warn().Err(err).Str("parent_job_id", parentJob.ID).Str("child_job_id", childJobID).Msg("Failed to publish job spawn event")
 		}
 	})
+}
+
+// ============================================================================
+// STEPWORKER INTERFACE METHODS (for step-level job creation)
+// ============================================================================
+
+// GetType returns StepTypeCrawler for the StepWorker interface
+func (w *CrawlerWorker) GetType() models.StepType {
+	return models.StepTypeCrawler
+}
+
+// CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
+// The crawler service will create child jobs for each URL discovered.
+func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+	// Parse step config map into CrawlConfig struct
+	stepConfig := step.Config
+	if stepConfig == nil {
+		stepConfig = make(map[string]interface{})
+	}
+
+	// Extract entity type from config (default to "issues" for jira, "pages" for confluence)
+	entityType := "all"
+	if et, ok := stepConfig["entity_type"].(string); ok {
+		entityType = et
+	} else {
+		// Infer from source type
+		switch jobDef.SourceType {
+		case "jira":
+			entityType = "issues"
+		case "confluence":
+			entityType = "pages"
+		}
+	}
+
+	// Build CrawlConfig struct from map with proper defaults
+	crawlConfig := w.buildCrawlConfig(stepConfig)
+
+	// Apply tags from job definition to all documents created by this crawl
+	crawlConfig.Tags = jobDef.Tags
+
+	// Build seed URLs - prioritize start_urls from step config, fallback to source type
+	var seedURLs []string
+	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {
+		for _, url := range startURLs {
+			if urlStr, ok := url.(string); ok {
+				seedURLs = append(seedURLs, urlStr)
+			}
+		}
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Using start_urls from job definition config")
+	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
+		seedURLs = startURLsStr
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Using start_urls from job definition config")
+	} else {
+		seedURLs = w.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Str("source_type", jobDef.SourceType).
+			Str("base_url", jobDef.BaseURL).
+			Strs("generated_urls", seedURLs).
+			Msg("Using generated URLs based on source type (no start_urls in config)")
+	}
+
+	// Default source_type to "web" for generic crawler jobs
+	sourceType := jobDef.SourceType
+	if sourceType == "" {
+		sourceType = "web"
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Msg("No source_type specified, defaulting to 'web' for generic web crawling")
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("source_type", sourceType).
+		Str("base_url", jobDef.BaseURL).
+		Str("entity_type", entityType).
+		Int("seed_url_count", len(seedURLs)).
+		Int("max_depth", crawlConfig.MaxDepth).
+		Int("max_pages", crawlConfig.MaxPages).
+		Msg("Creating parent crawler job")
+
+	// Start crawl job with properly typed config
+	jobID, err := w.crawlerService.StartCrawl(
+		sourceType,
+		entityType,
+		seedURLs,
+		crawlConfig,   // Pass CrawlConfig struct
+		jobDef.AuthID, // sourceID - use auth_id as source identifier
+		false,         // refreshSource
+		nil,           // sourceConfigSnapshot
+		nil,           // authSnapshot
+		parentJobID,   // jobDefinitionID - link to parent
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("job_id", jobID).
+		Str("parent_job_id", parentJobID).
+		Msg("Parent crawler job created")
+
+	return jobID, nil
+}
+
+// ReturnsChildJobs returns true since crawler creates child jobs for each URL
+func (w *CrawlerWorker) ReturnsChildJobs() bool {
+	return true
+}
+
+// ValidateStep validates step configuration for crawler type (StepWorker interface)
+func (w *CrawlerWorker) ValidateStep(step models.JobStep) error {
+	// Crawler is agnostic - any configuration is valid
+	// Validation happens during execution by the crawler service
+	return nil
+}
+
+// buildCrawlConfig constructs a CrawlConfig struct from a config map
+func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
+	config := crawler.CrawlConfig{
+		MaxDepth:      2,
+		MaxPages:      100,
+		Concurrency:   5,
+		RateLimit:     time.Second,
+		RetryAttempts: 3,
+		RetryBackoff:  time.Second,
+		FollowLinks:   true,
+		DetailLevel:   "full",
+	}
+
+	// Override with values from config map
+	if v, ok := configMap["max_depth"].(float64); ok {
+		config.MaxDepth = int(v)
+	} else if v, ok := configMap["max_depth"].(int); ok {
+		config.MaxDepth = v
+	}
+
+	if v, ok := configMap["max_pages"].(float64); ok {
+		config.MaxPages = int(v)
+	} else if v, ok := configMap["max_pages"].(int); ok {
+		config.MaxPages = v
+	}
+
+	if v, ok := configMap["concurrency"].(float64); ok {
+		config.Concurrency = int(v)
+	} else if v, ok := configMap["concurrency"].(int); ok {
+		config.Concurrency = v
+	}
+
+	if v, ok := configMap["rate_limit"].(float64); ok {
+		config.RateLimit = time.Duration(v) * time.Millisecond
+	} else if v, ok := configMap["rate_limit"].(int); ok {
+		config.RateLimit = time.Duration(v) * time.Millisecond
+	}
+
+	if v, ok := configMap["retry_attempts"].(float64); ok {
+		config.RetryAttempts = int(v)
+	} else if v, ok := configMap["retry_attempts"].(int); ok {
+		config.RetryAttempts = v
+	}
+
+	if v, ok := configMap["retry_backoff"].(float64); ok {
+		config.RetryBackoff = time.Duration(v) * time.Millisecond
+	} else if v, ok := configMap["retry_backoff"].(int); ok {
+		config.RetryBackoff = time.Duration(v) * time.Millisecond
+	}
+
+	if v, ok := configMap["follow_links"].(bool); ok {
+		config.FollowLinks = v
+	}
+
+	if v, ok := configMap["detail_level"].(string); ok {
+		config.DetailLevel = v
+	}
+
+	if v, ok := configMap["include_patterns"].([]string); ok {
+		config.IncludePatterns = v
+	} else if v, ok := configMap["include_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(v))
+		for _, pattern := range v {
+			if s, ok := pattern.(string); ok {
+				patterns = append(patterns, s)
+			}
+		}
+		config.IncludePatterns = patterns
+	}
+
+	if v, ok := configMap["exclude_patterns"].([]string); ok {
+		config.ExcludePatterns = v
+	} else if v, ok := configMap["exclude_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(v))
+		for _, pattern := range v {
+			if s, ok := pattern.(string); ok {
+				patterns = append(patterns, s)
+			}
+		}
+		config.ExcludePatterns = patterns
+	}
+
+	return config
+}
+
+// buildSeedURLs constructs seed URLs based on source type and entity type
+func (w *CrawlerWorker) buildSeedURLs(baseURL, sourceType, entityType string) []string {
+	switch sourceType {
+	case "jira":
+		switch entityType {
+		case "projects":
+			return []string{baseURL + "/rest/api/2/project"}
+		case "issues":
+			return []string{baseURL + "/rest/api/2/search"}
+		default:
+			return []string{baseURL + "/rest/api/2/project"}
+		}
+	case "confluence":
+		switch entityType {
+		case "spaces":
+			return []string{baseURL + "/rest/api/space"}
+		case "pages":
+			return []string{baseURL + "/rest/api/content"}
+		default:
+			return []string{baseURL + "/rest/api/space"}
+		}
+	default:
+		return []string{baseURL}
+	}
 }

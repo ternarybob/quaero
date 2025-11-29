@@ -11,7 +11,8 @@ enabled = true
 tags = ["test", "agent", "keyword-extraction"]
 
 [step.extract_keywords]
-action = "agent"
+type = "agent"
+description = "Test keyword extraction using agent framework"
 agent_type = "keyword_extractor"
 max_keywords = 10
 filter_limit = 10

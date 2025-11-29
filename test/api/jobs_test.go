@@ -1055,8 +1055,8 @@ func TestJobDefinition_Create(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "crawl-step",
-				"action": "crawl",
+				"name": "crawl-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls":  []string{"https://example.com"},
 					"max_depth":   2,
@@ -1093,8 +1093,8 @@ func TestJobDefinition_Create(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "crawl-step",
-				"action": "crawl",
+				"name": "crawl-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls": []string{"https://example.com"},
 				},
@@ -1114,8 +1114,8 @@ func TestJobDefinition_Create(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "crawl-step",
-				"action": "crawl",
+				"name": "crawl-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls": []string{"https://example.com"},
 				},
@@ -1217,8 +1217,8 @@ func TestJobDefinition_Update(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "updated-step",
-				"action": "crawl",
+				"name": "updated-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls":  []string{"https://updated.example.com"},
 					"max_depth":   3,
@@ -1366,8 +1366,8 @@ func TestJobDefinition_Execute(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "crawl-step",
-				"action": "crawl",
+				"name": "crawl-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls": []string{"https://example.com"},
 				},
@@ -1860,8 +1860,8 @@ func TestJobDefinition_SystemJobProtection(t *testing.T) {
 		"type": "crawler",
 		"steps": []map[string]interface{}{
 			{
-				"name":   "test-step",
-				"action": "crawl",
+				"name": "test-step",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls": []string{"https://example.com"},
 				},

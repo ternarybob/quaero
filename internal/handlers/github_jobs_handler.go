@@ -20,7 +20,7 @@ type GitHubJobsHandler struct {
 	connectorService interfaces.ConnectorService
 	jobMgr           *queue.Manager
 	queueMgr         interfaces.QueueManager
-	orchestrator     *queue.Orchestrator
+	jobMonitor       interfaces.JobMonitor
 	logger           arbor.ILogger
 }
 
@@ -29,14 +29,14 @@ func NewGitHubJobsHandler(
 	connectorService interfaces.ConnectorService,
 	jobMgr *queue.Manager,
 	queueMgr interfaces.QueueManager,
-	orchestrator *queue.Orchestrator,
+	jobMonitor interfaces.JobMonitor,
 	logger arbor.ILogger,
 ) *GitHubJobsHandler {
 	return &GitHubJobsHandler{
 		connectorService: connectorService,
 		jobMgr:           jobMgr,
 		queueMgr:         queueMgr,
-		orchestrator:     orchestrator,
+		jobMonitor:       jobMonitor,
 		logger:           logger,
 	}
 }
@@ -359,7 +359,7 @@ func (h *GitHubJobsHandler) StartRepoCollectorHandler(w http.ResponseWriter, r *
 		Steps: []models.JobStep{
 			{
 				Name:    "fetch_repo_content",
-				Action:  "github_repo_fetch",
+				Type:    models.StepTypeGitHubRepo,
 				OnError: "continue",
 				Config: map[string]interface{}{
 					"connector_id":  connector.ID,
@@ -374,8 +374,8 @@ func (h *GitHubJobsHandler) StartRepoCollectorHandler(w http.ResponseWriter, r *
 		},
 	}
 
-	// Execute the job definition
-	jobID, err := h.orchestrator.Execute(r.Context(), jobDef)
+	// Execute the job definition via JobManager
+	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub repo collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)
@@ -445,7 +445,7 @@ func (h *GitHubJobsHandler) StartActionsCollectorHandler(w http.ResponseWriter, 
 		Steps: []models.JobStep{
 			{
 				Name:    "fetch_action_logs",
-				Action:  "github_actions_fetch",
+				Type:    models.StepTypeGitHubActions,
 				OnError: "continue",
 				Config: map[string]interface{}{
 					"connector_id":  connector.ID,
@@ -459,8 +459,8 @@ func (h *GitHubJobsHandler) StartActionsCollectorHandler(w http.ResponseWriter, 
 		},
 	}
 
-	// Execute the job definition
-	jobID, err := h.orchestrator.Execute(r.Context(), jobDef)
+	// Execute the job definition via JobManager
+	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub actions collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)

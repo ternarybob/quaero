@@ -15,7 +15,8 @@ enabled = true
 auto_start = false
 
 [step.fetch_repo_content]
-action = "github_repo_fetch"
+type = "github_repo"
+description = "Fetch repository files and import as searchable documents"
 on_error = "continue"
 connector_id = "{github_connector_id}"
 owner = "ternarybob"

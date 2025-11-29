@@ -13,7 +13,8 @@ enabled = false
 auto_start = false
 
 [step.enrich_with_web_content]
-action = "web_enrichment"
+type = "agent"
+description = "Enrich documents with web-sourced information via AI analysis"
 on_error = "continue"
 operation_type = "enrich"
 agent_type = "web_enricher"

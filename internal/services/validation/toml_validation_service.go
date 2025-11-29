@@ -138,8 +138,8 @@ func (s *TOMLValidationService) crawlerJobToJobDefinition(c *CrawlerJobDefinitio
 		AuthID:      c.Authentication,
 		Steps: []models.JobStep{
 			{
-				Name:   "crawl",
-				Action: "crawl",
+				Name: "crawl",
+				Type: models.StepTypeCrawler,
 				Config: map[string]interface{}{
 					"start_urls":       c.StartURLs,
 					"include_patterns": c.IncludePatterns,

@@ -72,12 +72,13 @@ const (
 
 // JobStep represents a single execution step in a job definition
 type JobStep struct {
-	Name      string                 `json:"name"`                // Step identifier/name
-	Action    string                 `json:"action"`              // Action type (e.g., "crawl", "transform", "embed", "scan", "summarize")
-	Config    map[string]interface{} `json:"config"`              // Step-specific configuration parameters (flat structure)
-	OnError   ErrorStrategy          `json:"on_error"`            // Error handling strategy
-	Depends   string                 `json:"depends,omitempty"`   // Comma-separated list of step names this step depends on
-	Condition string                 `json:"condition,omitempty"` // Optional conditional execution expression (for future use)
+	Name        string                 `json:"name"`                  // Step identifier/name
+	Type        StepType               `json:"type"`                  // Step type for routing to appropriate worker (required)
+	Description string                 `json:"description,omitempty"` // Human-readable description of what this step does
+	Config      map[string]interface{} `json:"config"`                // Step-specific configuration parameters (flat structure)
+	OnError     ErrorStrategy          `json:"on_error"`              // Error handling strategy
+	Depends     string                 `json:"depends,omitempty"`     // Comma-separated list of step names this step depends on
+	Condition   string                 `json:"condition,omitempty"`   // Optional conditional execution expression (for future use)
 }
 
 // ErrorTolerance defines failure threshold management for parent jobs
@@ -101,7 +102,7 @@ type ErrorTolerance struct {
 // Example:
 //   {
 //     "name": "crawl",
-//     "action": "crawl",
+//     "type": "crawler",
 //     "config": {
 //       "start_urls": ["https://company.atlassian.net/browse"],
 //       "include_patterns": ["/browse/[A-Z]+-[0-9]+", "/projects/"],
@@ -255,8 +256,15 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 	if step.Name == "" {
 		return errors.New("step name is required")
 	}
-	if step.Action == "" {
-		return errors.New("step action is required")
+
+	// Type field is required - this is the primary routing mechanism
+	if step.Type == "" {
+		return errors.New("step type is required")
+	}
+
+	// Validate that Type is a known StepType
+	if !step.Type.IsValid() {
+		return fmt.Errorf("invalid step type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance)", step.Type)
 	}
 
 	// Validate error strategy if provided

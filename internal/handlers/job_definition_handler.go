@@ -27,7 +27,8 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 type JobDefinitionHandler struct {
 	jobDefStorage     interfaces.JobDefinitionStorage
 	jobStorage        interfaces.QueueStorage
-	orchestrator      *queue.Orchestrator
+	jobMgr            *queue.Manager
+	jobMonitor        interfaces.JobMonitor
 	authStorage       interfaces.AuthStorage
 	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService *validation.TOMLValidationService
@@ -39,7 +40,8 @@ type JobDefinitionHandler struct {
 func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.QueueStorage,
-	orchestrator *queue.Orchestrator,
+	jobMgr *queue.Manager,
+	jobMonitor interfaces.JobMonitor,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
@@ -51,8 +53,8 @@ func NewJobDefinitionHandler(
 	if jobStorage == nil {
 		panic("jobStorage cannot be nil")
 	}
-	if orchestrator == nil {
-		panic("orchestrator cannot be nil")
+	if jobMgr == nil {
+		panic("jobMgr cannot be nil")
 	}
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
@@ -64,12 +66,13 @@ func NewJobDefinitionHandler(
 		panic("logger cannot be nil")
 	}
 
-	logger.Debug().Msg("Job definition handler initialized with orchestrator and auth storage (ARCH-009)")
+	logger.Debug().Msg("Job definition handler initialized with JobManager and JobMonitor")
 
 	return &JobDefinitionHandler{
 		jobDefStorage:     jobDefStorage,
 		jobStorage:        jobStorage,
-		orchestrator:      orchestrator,
+		jobMgr:            jobMgr,
+		jobMonitor:        jobMonitor,
 		authStorage:       authStorage,
 		kvStorage:         kvStorage,
 		validationService: validation.NewTOMLValidationService(logger),
@@ -489,7 +492,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.orchestrator.Execute(bgCtx, jobDef)
+		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -638,7 +641,12 @@ func (h *JobDefinitionHandler) UploadJobDefinitionTOMLHandler(w http.ResponseWri
 	}
 
 	// Convert to full JobDefinition model
-	jobDef := jobFile.ToJobDefinition()
+	jobDef, err := jobFile.ToJobDefinition()
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to convert TOML to JobDefinition")
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("TOML conversion failed: %v", err))
+		return
+	}
 
 	// Store raw TOML content
 	jobDef.TOML = string(tomlContent)
@@ -883,7 +891,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		Steps: []models.JobStep{
 			{
 				Name:    "crawl",
-				Action:  "crawl",
+				Type:    models.StepTypeCrawler,
 				Config:  crawlStepConfig,
 				OnError: models.ErrorStrategyFail,
 			},
@@ -919,7 +927,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.orchestrator.Execute(bgCtx, jobDef)
+		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).

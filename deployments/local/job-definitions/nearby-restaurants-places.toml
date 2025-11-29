@@ -12,7 +12,8 @@ enabled = true
 auto_start = true
 
 [step.search_nearby_restaurants]
-action = "places_search"
+type = "places_search"
+description = "Search for nearby restaurants using Google Places API"
 on_error = "fail"
 search_query = "restaurants near Wheelers Hill"
 search_type = "nearby_search"

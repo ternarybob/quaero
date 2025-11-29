@@ -13,7 +13,8 @@ enabled = false
 auto_start = false
 
 [step.generate_summaries]
-action = "create_summaries"
+type = "agent"
+description = "Generate executive summaries from technical documentation using AI"
 on_error = "fail"
 operation_type = "generate"
 agent_type = "summary_generator"
