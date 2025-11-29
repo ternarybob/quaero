@@ -34,6 +34,10 @@ type Service struct {
 	rateLimit   time.Duration
 	lastRequest time.Time
 	mu          sync.Mutex
+
+	// Client cache for per-request API key overrides
+	clientCache   map[string]*genai.Client
+	clientCacheMu sync.RWMutex
 }
 
 // NewService creates a new agent service with Google Gemini API integration.
@@ -117,13 +121,14 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 
 	// Create service instance
 	service := &Service{
-		config:    config,
-		logger:    logger,
-		client:    genaiClient,
-		modelName: config.AgentModel,
-		agents:    make(map[string]AgentExecutor),
-		timeout:   timeout,
-		rateLimit: rateLimit,
+		config:      config,
+		logger:      logger,
+		client:      genaiClient,
+		modelName:   config.AgentModel,
+		agents:      make(map[string]AgentExecutor),
+		timeout:     timeout,
+		rateLimit:   rateLimit,
+		clientCache: make(map[string]*genai.Client),
 	}
 
 	// Register built-in agents
@@ -158,10 +163,17 @@ func (s *Service) RegisterAgent(agent AgentExecutor) {
 //
 // The execution flow:
 //  1. Look up agent executor by type
-//  2. Create timeout context
-//  3. Call agent's Execute method with model and input
-//  4. Return agent output or error
-//  5. Log execution duration and result
+//  2. Extract any per-request Gemini overrides from input
+//  3. Create timeout context
+//  4. Call agent's Execute method with model and input
+//  5. Return agent output or error
+//  6. Log execution duration and result
+//
+// Per-request overrides (optional in input):
+//   - gemini_api_key: Override the global API key for this request
+//   - gemini_model: Override the global model for this request
+//   - gemini_timeout: Override the global timeout for this request
+//   - gemini_rate_limit: Override the global rate limit for this request
 //
 // Parameters:
 //   - ctx: Context for cancellation control
@@ -183,15 +195,58 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 		return nil, fmt.Errorf("unknown agent type: %s", agentType)
 	}
 
+	// Extract per-request overrides from input
+	client := s.client
+	modelName := s.modelName
+	timeout := s.timeout
+	rateLimit := s.rateLimit
+
+	// Check for API key override
+	if apiKey, ok := input["gemini_api_key"].(string); ok && apiKey != "" {
+		var err error
+		client, err = s.getOrCreateClient(ctx, apiKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create client with override API key: %w", err)
+		}
+		s.logger.Debug().Msg("Using per-request API key override")
+		// Remove from input so it's not passed to the agent
+		delete(input, "gemini_api_key")
+	}
+
+	// Check for model override
+	if model, ok := input["gemini_model"].(string); ok && model != "" {
+		modelName = model
+		s.logger.Debug().Str("model", model).Msg("Using per-request model override")
+		delete(input, "gemini_model")
+	}
+
+	// Check for timeout override
+	if timeoutStr, ok := input["gemini_timeout"].(string); ok && timeoutStr != "" {
+		if parsed, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsed
+			s.logger.Debug().Dur("timeout", timeout).Msg("Using per-request timeout override")
+		}
+		delete(input, "gemini_timeout")
+	}
+
+	// Check for rate limit override
+	if rateLimitStr, ok := input["gemini_rate_limit"].(string); ok && rateLimitStr != "" {
+		if parsed, err := time.ParseDuration(rateLimitStr); err == nil {
+			rateLimit = parsed
+			s.logger.Debug().Dur("rate_limit", rateLimit).Msg("Using per-request rate limit override")
+		}
+		delete(input, "gemini_rate_limit")
+	}
+
 	// Create timeout context
-	timeoutCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Enforce rate limit
 	s.mu.Lock()
 	timeSinceLast := time.Since(s.lastRequest)
-	if timeSinceLast < s.rateLimit {
-		sleepDuration := s.rateLimit - timeSinceLast
+	if timeSinceLast < rateLimit {
+		sleepDuration := rateLimit - timeSinceLast
 		s.logger.Debug().
 			Dur("sleep_duration", sleepDuration).
 			Msg("Rate limit enforcing delay")
@@ -204,9 +259,10 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 	startTime := time.Now()
 	s.logger.Debug().
 		Str("agent_type", agentType).
+		Str("model", modelName).
 		Msg("Starting agent execution")
 
-	output, err := agent.Execute(timeoutCtx, s.client, s.modelName, input)
+	output, err := agent.Execute(timeoutCtx, client, modelName, input)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -224,6 +280,41 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 		Msg("Agent execution completed successfully")
 
 	return output, nil
+}
+
+// getOrCreateClient returns a cached client for the given API key or creates a new one
+func (s *Service) getOrCreateClient(ctx context.Context, apiKey string) (*genai.Client, error) {
+	// Check cache first with read lock
+	s.clientCacheMu.RLock()
+	if client, ok := s.clientCache[apiKey]; ok {
+		s.clientCacheMu.RUnlock()
+		return client, nil
+	}
+	s.clientCacheMu.RUnlock()
+
+	// Create new client with write lock
+	s.clientCacheMu.Lock()
+	defer s.clientCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if client, ok := s.clientCache[apiKey]; ok {
+		return client, nil
+	}
+
+	// Create new client
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache it
+	s.clientCache[apiKey] = client
+	s.logger.Debug().Msg("Created and cached new genai client for API key override")
+
+	return client, nil
 }
 
 // HealthCheck verifies the agent service is operational.

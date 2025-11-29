@@ -368,20 +368,21 @@
                                 </div>
                                 <!-- Spectre CSS Tabs -->
                                 <ul class="tab" style="margin-bottom: 0.5rem;">
-                                    <li class="tab-item active" id="tab-json-${doc.id}">
-                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'json')">JSON</a>
-                                    </li>
-                                    <li class="tab-item" id="tab-markdown-${doc.id}">
+                                    <li class="tab-item active" id="tab-markdown-${doc.id}">
                                         <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'markdown')">Markdown</a>
                                     </li>
+                                    <li class="tab-item" id="tab-json-${doc.id}">
+                                        <a href="#" onclick="event.preventDefault(); switchTab('${doc.id}', 'json')">JSON</a>
+                                    </li>
                                 </ul>
-                                <!-- JSON Tab Content -->
-                                <div id="content-json-${doc.id}" class="tab-content">
-                                    <pre><code id="code-${doc.id}" class="language-json">Loading content...</code></pre>
-                                </div>
-                                <!-- Markdown Tab Content -->
-                                <div id="content-markdown-${doc.id}" class="tab-content" style="display: none;">
+                                <!-- Markdown Tab Content (default) -->
+                                <div id="content-markdown-${doc.id}" class="tab-content">
+                                    <div id="tags-${doc.id}" class="markdown-tags"></div>
                                     <div id="markdown-${doc.id}" class="markdown-content">Loading markdown...</div>
+                                </div>
+                                <!-- JSON Tab Content -->
+                                <div id="content-json-${doc.id}" class="tab-content" style="display: none;">
+                                    <pre><code id="code-${doc.id}" class="language-json">Loading content...</code></pre>
                                 </div>
                             </div>
                         </td>
@@ -445,6 +446,28 @@
 
                 if (typeof hljs !== 'undefined') {
                     hljs.highlightElement(codeBlock);
+                }
+
+                // Render tags and keywords as chips
+                const tagsBlock = document.getElementById(`tags-${docId}`);
+                if (tagsBlock) {
+                    const tags = doc.tags || [];
+                    const keywords = doc.metadata?.keywords || [];
+                    let html = '';
+
+                    if (tags.length > 0) {
+                        html += `<div class="chip-group"><span class="chip-label">Tags:</span>`;
+                        html += tags.map(tag => `<span class="chip">${tag}</span>`).join('');
+                        html += `</div>`;
+                    }
+
+                    if (keywords.length > 0) {
+                        html += `<div class="chip-group"><span class="chip-label">Keywords:</span>`;
+                        html += keywords.map(kw => `<span class="chip">${kw}</span>`).join('');
+                        html += `</div>`;
+                    }
+
+                    tagsBlock.innerHTML = html;
                 }
 
                 // Render Markdown tab

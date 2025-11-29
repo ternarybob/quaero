@@ -1,56 +1,23 @@
 # Agent Web Enricher Job Definition
-# This file demonstrates web enrichment using agents to add external information to documents
-# Place .toml files in job-definitions/ directory to auto-load at startup
+# Demonstrates web enrichment using agents to add external information to documents
 
 id = "agent-web-enricher"
 name = "Agent Web Enricher"
-type = "agent"  # Agent job type for AI-powered document processing
+type = "agent"
 job_type = "user"
-source_type = ""  # Agent jobs don't require source_type
 description = "Enriches documents with web-sourced information using Google Gemini ADK"
-
-# Tags to apply to all documents processed by this job
 tags = ["agent", "enrichment", "web"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time (e.g., "10m", "30m", "1h")
 timeout = "15m"
-
-# Whether this job is enabled
-enabled = false  # Disabled by default (example job)
-
-# Whether to auto-start when scheduler initializes
+enabled = false
 auto_start = false
 
-# Job steps definition
-[[steps]]
-name = "enrich_with_web_content"
-action = "web_enrichment"  # Free-text action name (agent jobs support custom action names)
-on_error = "continue"  # Continue processing other documents even if one fails
-
-[steps.config]
-# Agent operation type: "enrich" adds external information to documents
+[step.enrich_with_web_content]
+action = "web_enrichment"
+on_error = "continue"
 operation_type = "enrich"
-
-# Agent type for web enrichment
 agent_type = "web_enricher"
-
-# API key for web searches (resolved from KV store)
 api_key = "{google_search_api_key}"
-
-# Filter documents to enrich
-# This step processes all documents matching the filter criteria
-[steps.config.document_filter]
-tags = ["needs-enrichment"]  # Only process documents tagged for enrichment
-limit = 50  # Process up to 50 documents per run
-created_after = "2025-01-01T00:00:00Z"  # Only process documents created this year
-
-# Usage Notes:
-# - This job demonstrates the "enrich" operation type
-# - Enrich operations add external information (e.g., from web searches) to documents
-# - Results are stored in document metadata without modifying the original content
-# - Tags filter allows processing specific document sets
-# - API key is resolved from KV store using {key-name} syntax
-# - Example use case: Add market data, news articles, or research papers related to document topics
+filter_tags = ["needs-enrichment"]
+filter_limit = 50
+filter_created_after = "2025-01-01T00:00:00Z"

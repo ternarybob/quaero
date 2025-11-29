@@ -33,34 +33,32 @@ func NewService(
 	}
 }
 
-// JobStepFile represents a step in the TOML file
-type JobStepFile struct {
-	Name      string                 `toml:"name"`
-	Action    string                 `toml:"action"`
-	Config    map[string]interface{} `toml:"config"`
-	OnError   string                 `toml:"on_error"`
-	Condition string                 `toml:"condition"`
-}
-
 // JobDefinitionFile represents the TOML file structure for job definitions
+// Uses [step.{name}] format for step definitions
 type JobDefinitionFile struct {
-	ID              string        `toml:"id"`
-	Name            string        `toml:"name"`
-	Type            string        `toml:"type"`
-	Description     string        `toml:"description"`
-	Schedule        string        `toml:"schedule"`
-	Timeout         string        `toml:"timeout"`
-	Enabled         bool          `toml:"enabled"`
-	AutoStart       bool          `toml:"auto_start"`
-	AuthID          string        `toml:"authentication"`
-	StartURLs       []string      `toml:"start_urls"`
-	IncludePatterns []string      `toml:"include_patterns"`
-	ExcludePatterns []string      `toml:"exclude_patterns"`
-	MaxDepth        int           `toml:"max_depth"`
-	MaxPages        int           `toml:"max_pages"`
-	Concurrency     int           `toml:"concurrency"`
-	FollowLinks     bool          `toml:"follow_links"`
-	Steps           []JobStepFile `toml:"steps"`
+	ID          string   `toml:"id"`
+	Name        string   `toml:"name"`
+	Type        string   `toml:"type"`
+	JobType     string   `toml:"job_type"`
+	Description string   `toml:"description"`
+	Schedule    string   `toml:"schedule"`
+	Timeout     string   `toml:"timeout"`
+	Enabled     bool     `toml:"enabled"`
+	AutoStart   bool     `toml:"auto_start"`
+	AuthID      string   `toml:"authentication"`
+	Tags        []string `toml:"tags"`
+
+	// Crawler shorthand fields (creates default crawl step if no [step.*] defined)
+	StartURLs       []string `toml:"start_urls"`
+	IncludePatterns []string `toml:"include_patterns"`
+	ExcludePatterns []string `toml:"exclude_patterns"`
+	MaxDepth        int      `toml:"max_depth"`
+	MaxPages        int      `toml:"max_pages"`
+	Concurrency     int      `toml:"concurrency"`
+	FollowLinks     bool     `toml:"follow_links"`
+
+	// Step definitions: [step.{name}] tables - use map[string]interface{} to capture all fields
+	Step map[string]map[string]interface{} `toml:"step"`
 }
 
 // ParseTOML parses TOML content into a JobDefinitionFile
@@ -76,15 +74,37 @@ func ParseTOML(content []byte) (*JobDefinitionFile, error) {
 func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 	var steps []models.JobStep
 
-	// If steps are explicitly defined, use them
-	if len(f.Steps) > 0 {
-		for _, s := range f.Steps {
+	// Parse [step.{name}] tables
+	if len(f.Step) > 0 {
+		for name, stepData := range f.Step {
+			// Extract known fields from the step map
+			action, _ := stepData["action"].(string)
+			onError, _ := stepData["on_error"].(string)
+			depends, _ := stepData["depends"].(string)
+			condition, _ := stepData["condition"].(string)
+
+			// Build config from all remaining fields (excluding known step metadata)
+			config := make(map[string]interface{})
+			knownFields := map[string]bool{
+				"action":      true,
+				"on_error":    true,
+				"depends":     true,
+				"condition":   true,
+				"description": true,
+			}
+			for k, v := range stepData {
+				if !knownFields[k] {
+					config[k] = v
+				}
+			}
+
 			step := models.JobStep{
-				Name:      s.Name,
-				Action:    s.Action,
-				Config:    s.Config,
-				OnError:   models.ErrorStrategy(s.OnError),
-				Condition: s.Condition,
+				Name:      name,
+				Action:    action,
+				Config:    config,
+				OnError:   models.ErrorStrategy(onError),
+				Depends:   depends,
+				Condition: condition,
 			}
 			// Default OnError if empty
 			if step.OnError == "" {
@@ -93,8 +113,7 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 			steps = append(steps, step)
 		}
 	} else {
-		// Legacy/Simplified mode: Create default crawl step from flat config
-		// Create config map for crawler
+		// Crawler shorthand: Create default crawl step from flat config fields
 		config := make(map[string]interface{})
 
 		if len(f.StartURLs) > 0 {
@@ -112,7 +131,6 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		config["concurrency"] = f.Concurrency
 		config["follow_links"] = f.FollowLinks
 
-		// Create step
 		step := models.JobStep{
 			Name:    "crawl",
 			Action:  "crawl",
@@ -122,18 +140,25 @@ func (f *JobDefinitionFile) ToJobDefinition() *models.JobDefinition {
 		steps = append(steps, step)
 	}
 
+	// Determine job type
+	jobType := models.JobOwnerTypeUser
+	if f.JobType == "system" {
+		jobType = models.JobOwnerTypeSystem
+	}
+
 	return &models.JobDefinition{
 		ID:          f.ID,
 		Name:        f.Name,
 		Type:        models.JobDefinitionType(f.Type),
+		JobType:     jobType,
 		Description: f.Description,
 		Schedule:    f.Schedule,
 		Timeout:     f.Timeout,
 		Enabled:     f.Enabled,
 		AutoStart:   f.AutoStart,
 		AuthID:      f.AuthID,
+		Tags:        f.Tags,
 		Steps:       steps,
-		JobType:     models.JobOwnerTypeUser,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}

@@ -147,6 +147,20 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		agentInput["max_keywords"] = maxKeywords
 	}
 
+	// Add Gemini override settings from job config (allows per-job API key, model, etc.)
+	if apiKey, ok := job.Config["gemini_api_key"].(string); ok && apiKey != "" {
+		agentInput["gemini_api_key"] = apiKey
+	}
+	if model, ok := job.Config["gemini_model"].(string); ok && model != "" {
+		agentInput["gemini_model"] = model
+	}
+	if timeout, ok := job.Config["gemini_timeout"].(string); ok && timeout != "" {
+		agentInput["gemini_timeout"] = timeout
+	}
+	if rateLimit, ok := job.Config["gemini_rate_limit"].(string); ok && rateLimit != "" {
+		agentInput["gemini_rate_limit"] = rateLimit
+	}
+
 	// Step 3: Execute agent
 	jobLogger.Trace().Str("agent_type", agentType).Msg("Executing agent")
 	w.publishAgentJobLog(ctx, parentID, "debug", fmt.Sprintf("Executing %s agent", agentType), map[string]interface{}{

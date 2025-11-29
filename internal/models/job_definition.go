@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -73,8 +74,9 @@ const (
 type JobStep struct {
 	Name      string                 `json:"name"`                // Step identifier/name
 	Action    string                 `json:"action"`              // Action type (e.g., "crawl", "transform", "embed", "scan", "summarize")
-	Config    map[string]interface{} `json:"config"`              // Step-specific configuration parameters
+	Config    map[string]interface{} `json:"config"`              // Step-specific configuration parameters (flat structure)
 	OnError   ErrorStrategy          `json:"on_error"`            // Error handling strategy
+	Depends   string                 `json:"depends,omitempty"`   // Comma-separated list of step names this step depends on
 	Condition string                 `json:"condition,omitempty"` // Optional conditional execution expression (for future use)
 }
 
@@ -267,6 +269,23 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 		}
 	}
 
+	// Validate depends field - check referenced steps exist
+	if step.Depends != "" {
+		dependsList := splitAndTrim(step.Depends)
+		stepNames := make(map[string]bool)
+		for _, s := range j.Steps {
+			stepNames[s.Name] = true
+		}
+		for _, dep := range dependsList {
+			if dep == step.Name {
+				return fmt.Errorf("step '%s' cannot depend on itself", step.Name)
+			}
+			if !stepNames[dep] {
+				return fmt.Errorf("step '%s' depends on unknown step '%s'", step.Name, dep)
+			}
+		}
+	}
+
 	// Agent-specific validation for agent job types
 	if j.Type == JobDefinitionTypeAgent {
 		if step.Config == nil {
@@ -297,46 +316,60 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 			return errors.New("agent_type is required in step config for agent job steps")
 		}
 
-		// Validate document_filter if provided (optional)
-		if filter, ok := step.Config["document_filter"].(map[string]interface{}); ok {
-			// Validate tags filter if provided
-			if tags, ok := filter["tags"].([]interface{}); ok {
-				for i, tag := range tags {
-					if _, ok := tag.(string); !ok {
-						return fmt.Errorf("document_filter.tags[%d] must be a string", i)
-					}
+		// Validate flat filter fields (new format: filter_* instead of document_filter.*)
+		// Validate filter_tags if provided
+		if tags, ok := step.Config["filter_tags"].([]interface{}); ok {
+			for i, tag := range tags {
+				if _, ok := tag.(string); !ok {
+					return fmt.Errorf("filter_tags[%d] must be a string", i)
 				}
-			} else if tags, ok := filter["tags"].([]string); ok {
-				// Already validated as string array
-				_ = tags
 			}
+		}
 
-			// Validate date filters format if provided
-			if createdAfter, ok := filter["created_after"].(string); ok && createdAfter != "" {
-				if _, err := time.Parse(time.RFC3339, createdAfter); err != nil {
-					return fmt.Errorf("document_filter.created_after must be in RFC3339 format: %w", err)
-				}
+		// Validate date filters format if provided
+		if createdAfter, ok := step.Config["filter_created_after"].(string); ok && createdAfter != "" {
+			if _, err := time.Parse(time.RFC3339, createdAfter); err != nil {
+				return fmt.Errorf("filter_created_after must be in RFC3339 format: %w", err)
 			}
-			if updatedAfter, ok := filter["updated_after"].(string); ok && updatedAfter != "" {
-				if _, err := time.Parse(time.RFC3339, updatedAfter); err != nil {
-					return fmt.Errorf("document_filter.updated_after must be in RFC3339 format: %w", err)
-				}
+		}
+		if updatedAfter, ok := step.Config["filter_updated_after"].(string); ok && updatedAfter != "" {
+			if _, err := time.Parse(time.RFC3339, updatedAfter); err != nil {
+				return fmt.Errorf("filter_updated_after must be in RFC3339 format: %w", err)
 			}
+		}
 
-			// Validate limit if provided
-			if limit, ok := filter["limit"].(float64); ok {
-				if limit < 1 {
-					return errors.New("document_filter.limit must be >= 1")
-				}
-			} else if limit, ok := filter["limit"].(int); ok {
-				if limit < 1 {
-					return errors.New("document_filter.limit must be >= 1")
-				}
+		// Validate filter_limit if provided
+		if limit, ok := step.Config["filter_limit"].(float64); ok {
+			if limit < 1 {
+				return errors.New("filter_limit must be >= 1")
+			}
+		} else if limit, ok := step.Config["filter_limit"].(int); ok {
+			if limit < 1 {
+				return errors.New("filter_limit must be >= 1")
+			}
+		} else if limit, ok := step.Config["filter_limit"].(int64); ok {
+			if limit < 1 {
+				return errors.New("filter_limit must be >= 1")
 			}
 		}
 	}
 
 	return nil
+}
+
+// splitAndTrim splits a comma-separated string and trims whitespace from each element
+func splitAndTrim(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := make([]string, 0)
+	for _, p := range strings.Split(s, ",") {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
 }
 
 // MarshalSteps serializes the steps array to JSON string for database storage

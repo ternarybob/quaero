@@ -8,32 +8,15 @@ type = "web_search"
 job_type = "user"
 description = "Search for latest information on ASX listed company ASX:GNP"
 tags = ["web-search", "asx", "stocks", "gnp"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time
 timeout = "5m"
-
-# Whether this job is enabled
 enabled = true
-
-# Whether to auto-start when scheduler initializes
 auto_start = false
 
-# Job steps definition
-[[steps]]
-name = "search_asx_gnp"
+[step.search_asx_gnp]
 action = "web_search"
 on_error = "fail"
-
-[steps.config]
-# Natural language search query
 query = "find me latest information on ASX listed company ASX:GNP"
-
-# API Key (loaded from KV store)
 api_key = "{google_gemini_api_key}"
-
-# Search parameters (keep within limits for quick test)
-depth = 3    # Number of follow-up exploration queries (max 10)
-breadth = 3  # Number of results per query (max 5)
+depth = 3
+breadth = 3

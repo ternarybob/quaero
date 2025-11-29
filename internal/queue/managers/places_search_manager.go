@@ -71,21 +71,28 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 		return "", fmt.Errorf("search_type must be one of: text_search, nearby_search")
 	}
 
-	// Check for API key in step config and resolve it from KV store
-	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
-		// Strip curly braces if present (e.g., "{google_places_api_key}" → "google_places_api_key")
-		// This handles cases where variable substitution didn't happen during job definition loading
-		cleanAPIKeyName := strings.Trim(apiKeyName, "{}")
-
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, cleanAPIKeyName, "")
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+	// Check for API key in step config
+	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
+		// Check if this is a variable reference (wrapped in {}) or an actual API key
+		if strings.HasPrefix(apiKeyValue, "{") && strings.HasSuffix(apiKeyValue, "}") {
+			// Variable reference - resolve from KV store
+			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
+			resolvedAPIKey, err := common.ResolveAPIKey(ctx, m.kvStorage, cleanAPIKeyName, "")
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+			}
+			m.logger.Info().
+				Str("step_name", step.Name).
+				Str("api_key_name", cleanAPIKeyName).
+				Msg("Resolved API key from storage for places search execution")
+			stepConfig["resolved_api_key"] = resolvedAPIKey
+		} else {
+			// Actual API key value (already substituted) - use directly
+			m.logger.Info().
+				Str("step_name", step.Name).
+				Msg("Using pre-substituted API key for places search execution")
+			stepConfig["resolved_api_key"] = apiKeyValue
 		}
-		m.logger.Info().
-			Str("step_name", step.Name).
-			Str("api_key_name", cleanAPIKeyName).
-			Msg("Resolved API key from storage for places search execution")
-		stepConfig["resolved_api_key"] = resolvedAPIKey
 	}
 
 	// Build search request
@@ -107,32 +114,60 @@ func (m *PlacesSearchManager) CreateParentJob(ctx context.Context, step models.J
 	}
 
 	// Extract location for nearby_search
+	// Supports both flat fields (location_latitude, location_longitude, location_radius)
+	// and nested location map (location: {latitude, longitude, radius})
 	if searchType == "nearby_search" {
-		locationMap, ok := stepConfig["location"].(map[string]interface{})
-		if !ok {
-			return "", fmt.Errorf("location is required for nearby_search")
+		var latitude, longitude float64
+		var radius int
+		var hasLocation bool
+
+		// Try flat fields first (new format)
+		if lat, ok := stepConfig["location_latitude"].(float64); ok {
+			latitude = lat
+			hasLocation = true
+		} else if lat, ok := stepConfig["location_latitude"].(int64); ok {
+			latitude = float64(lat)
+			hasLocation = true
 		}
 
-		latitude, ok := locationMap["latitude"].(float64)
-		if !ok {
-			return "", fmt.Errorf("location.latitude is required for nearby_search")
+		if lon, ok := stepConfig["location_longitude"].(float64); ok {
+			longitude = lon
+		} else if lon, ok := stepConfig["location_longitude"].(int64); ok {
+			longitude = float64(lon)
 		}
 
-		longitude, ok := locationMap["longitude"].(float64)
-		if !ok {
-			return "", fmt.Errorf("location.longitude is required for nearby_search")
+		if rad, ok := stepConfig["location_radius"].(float64); ok {
+			radius = int(rad)
+		} else if rad, ok := stepConfig["location_radius"].(int64); ok {
+			radius = int(rad)
+		}
+
+		// Fallback to nested location map (legacy format)
+		if !hasLocation {
+			if locationMap, ok := stepConfig["location"].(map[string]interface{}); ok {
+				if lat, ok := locationMap["latitude"].(float64); ok {
+					latitude = lat
+					hasLocation = true
+				}
+				if lon, ok := locationMap["longitude"].(float64); ok {
+					longitude = lon
+				}
+				if rad, ok := locationMap["radius"].(float64); ok {
+					radius = int(rad)
+				} else if rad, ok := locationMap["radius"].(int); ok {
+					radius = rad
+				}
+			}
+		}
+
+		if !hasLocation {
+			return "", fmt.Errorf("location is required for nearby_search (use location_latitude/location_longitude or location map)")
 		}
 
 		req.Location = &models.Location{
 			Latitude:  latitude,
 			Longitude: longitude,
-		}
-
-		// Optional radius
-		if radius, ok := locationMap["radius"].(float64); ok {
-			req.Location.Radius = int(radius)
-		} else if radius, ok := locationMap["radius"].(int); ok {
-			req.Location.Radius = radius
+			Radius:    radius,
 		}
 	}
 

@@ -8,56 +8,25 @@ type = "fetch"
 job_type = "user"
 source_type = "github"
 description = "Fetches repository content using GraphQL bulk fetch for improved performance"
-
-# Tags to apply to all documents created by this job
 tags = ["github", "source-code", "repository", "batch-mode"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time
 timeout = "30m"
-
-# Whether this job is enabled
 enabled = true
-
-# Whether to auto-start when scheduler initializes
 auto_start = false
 
-# Job steps definition
-[[steps]]
-name = "fetch_repo_content_batch"
+[step.fetch_repo_content_batch]
 action = "github_repo_fetch"
 on_error = "continue"
-
-[steps.config]
-# GitHub connector - can use connector_name instead of connector_id
 connector_name = "github"
-
-# Repository details
 owner = "ternarybob"
 repo = "quaero"
-
-# Branches to fetch
 branches = ["main"]
-
-# File extensions to include
 extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]
-
-# Paths to exclude from fetching
 exclude_paths = ["vendor/", "node_modules/", ".git/", "dist/", "build/"]
-
-# Maximum number of files to fetch per execution
 max_files = 100
-
-# BATCH MODE SETTINGS
-# Enable GraphQL bulk fetch instead of individual REST calls
 batch_mode = true
-
-# Number of files per GraphQL request (max 100)
 batch_size = 50
 
-# Error tolerance configuration
 [error_tolerance]
 max_child_failures = 50
 failure_action = "continue"

@@ -410,17 +410,17 @@ func (m *WebSearchManager) createDocument(results *WebSearchResults, query strin
 
 	// Build metadata
 	metadata := map[string]interface{}{
-		"query":            query,
-		"search_date":      results.SearchDate.Format(time.RFC3339),
-		"result_count":     results.ResultCount,
-		"depth":            results.Depth,
-		"breadth":          results.Breadth,
-		"source_count":     len(results.Sources),
-		"search_queries":   results.SearchQueries,
-		"follow_up_count":  len(results.FollowUpQueries),
-		"parent_job_id":    parentJobID,
-		"has_errors":       len(results.Errors) > 0,
-		"error_count":      len(results.Errors),
+		"query":           query,
+		"search_date":     results.SearchDate.Format(time.RFC3339),
+		"result_count":    results.ResultCount,
+		"depth":           results.Depth,
+		"breadth":         results.Breadth,
+		"source_count":    len(results.Sources),
+		"search_queries":  results.SearchQueries,
+		"follow_up_count": len(results.FollowUpQueries),
+		"parent_job_id":   parentJobID,
+		"has_errors":      len(results.Errors) > 0,
+		"error_count":     len(results.Errors),
 	}
 	if len(results.Errors) > 0 {
 		metadata["errors"] = results.Errors

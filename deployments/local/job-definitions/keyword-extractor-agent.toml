@@ -1,83 +1,21 @@
 # Keyword Extractor AI Job Definition
 # This file demonstrates keyword extraction using AI with document processing
-# Place .toml files in job-definitions/ directory to auto-load at startup
 
 id = "keyword-extractor-agent"
 name = "Keyword Extractor AI"
-type = "agent"  # Agent job type for AI-powered document processing
+type = "agent"
 job_type = "user"
-source_type = ""  # AI jobs don't require source_type
 description = "Extracts keywords from documents using Google Gemini ADK"
-
-# Tags to apply to all documents processed by this agent (for filtering/categorization)
 tags = ["agent", "keywords", "nlp"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time (e.g., "10m", "30m", "1h")
 timeout = "10m"
-
-# Whether this job is enabled
 enabled = true
-
-# Whether to auto-start when scheduler initializes
 auto_start = true
 
-# Job steps definition
-[[steps]]
-name = "extract_keywords"
-action = "scan_keywords"  # Free-text action name (AI jobs support custom action names)
+[step.extract_keywords]
+action = "scan_keywords"
 on_error = "fail"
-
-[steps.config]
-# AI operation type: "scan" adds metadata/tags without modifying document content
 operation_type = "scan"
-
-# Agent type (must match KeywordExtractor.GetType())
 agent_type = "keyword_extractor"
-
-# Filter documents to process
-# This step processes all documents matching the filter criteria
-# Available filters: source_type, tags, limit, created_after, updated_after
-[steps.config.document_filter]
-source_type = "crawler" # Process documents from crawler jobs
-# tags = ["wheelers-hill"] # Example: Only process documents with specific tags
-# created_after = "2025-01-01T00:00:00Z" # Example: Only process documents created after this date
-# updated_after = "2025-11-01T00:00:00Z" # Example: Only process documents updated after this date
-# limit = 100 # Example: Only process first 100 documents
-
-# Optional: Maximum keywords to extract (default: 10, range: 5-15)
+filter_source_type = "crawler"
 max_keywords = 10
-
-# Example: Chain keyword extraction with summarization (future agent)
-# [[steps]]
-# name = "generate_summary"
-# action = "agent"
-# on_error = "fail"
-#
-# [steps.config]
-# agent_type = "summarizer"  # Future agent type
-#
-# [steps.config.document_filter]
-# source_type = "crawler"
-#
-# # Use keywords from previous step
-# # Each agent stores results in document.Metadata[agentType]
-# # Next agent can access previous results via metadata
-# # Example: Summarizer reads metadata["keyword_extractor"]["keywords"]
-# use_keywords = true
-
-# Usage Notes:
-# - This job definition processes existing documents (requires documents in database)
-# - To test: First run a crawler job to populate documents, then run this agent job
-# - Agent requires Google API key configured in quaero.toml under [agent] section
-# - Results stored in document metadata under "keyword_extractor" key
-# - View results via GET /api/documents/{id} endpoint
-# - Metadata structure:
-#   {
-#     "keyword_extractor": {
-#       "keywords": ["keyword1", "keyword2", ...],
-#       "confidence": {"keyword1": 0.95, "keyword2": 0.87, ...}
-#     }
-#   }

@@ -21,40 +21,19 @@
 # Job metadata
 id = "keyword-extractor-agent"
 name = "Keyword Extraction"
-type = "agent"  # Agent job type for AI-powered document processing
+type = "agent"
 job_type = "user"
 description = "Extracts keywords from crawled documents using Google Gemini"
-enabled = true  # Set to true to enable automatic execution
+enabled = true
 auto_start = true
-
-# Optional: Schedule for automatic execution
-# schedule = "0 0 * * *"  # Run daily at midnight
-
-# Optional: Tags for categorization
 tags = ["agent", "keyword-extraction", "nlp"]
 
 # ============================================================================
-# Job Steps
+# Job Steps - New format: [step.{name}]
 # ============================================================================
 
-[[steps]]
-name = "Extract Keywords from Confluence Pages"
+[step.extract_keywords]
 action = "agent"
-
-# Step configuration
-[steps.config]
-# Agent type to execute (registered in agent service)
 agent_type = "keyword_extractor"
-
-# API Key (loaded from variables)
 api_key = "{google_gemini_api_key}"
-
-# Optional: Maximum number of keywords to extract per document
-# max_keywords = 10
-
-# Optional: Filter documents to process
-[steps.config.document_filter]
-# Limit number of documents to process
-limit = 100
-
-
+filter_limit = 100

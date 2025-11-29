@@ -1,62 +1,25 @@
 # Agent Document Generator Job Definition
-# This file demonstrates document generation using agents to create new documents from existing ones
-# Place .toml files in job-definitions/ directory to auto-load at startup
+# Demonstrates document generation using agents to create new documents from existing ones
 
 id = "agent-document-generator"
 name = "Agent Document Generator"
-type = "agent"  # Agent job type for AI-powered document processing
+type = "agent"
 job_type = "user"
-source_type = ""  # Agent jobs don't require source_type
 description = "Generates summary documents from existing documents using Google Gemini ADK"
-
-# Tags to apply to all generated documents
 tags = ["agent", "generated", "summary"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time (e.g., "10m", "30m", "1h")
 timeout = "20m"
-
-# Whether this job is enabled
-enabled = false  # Disabled by default (example job)
-
-# Whether to auto-start when scheduler initializes
+enabled = false
 auto_start = false
 
-# Job steps definition
-[[steps]]
-name = "generate_summaries"
-action = "create_summaries"  # Free-text action name (agent jobs support custom action names)
-on_error = "fail"  # Fail if document generation fails
-
-[steps.config]
-# Agent operation type: "generate" creates new documents from existing ones
+[step.generate_summaries]
+action = "create_summaries"
+on_error = "fail"
 operation_type = "generate"
-
-# Agent type for document generation
 agent_type = "summary_generator"
-
-# API key for LLM (resolved from KV store)
 api_key = "{google_gemini_api_key}"
-
-# Custom prompt for generation (optional)
 prompt = "Generate a comprehensive executive summary based on the following documents. Focus on key insights, trends, and actionable recommendations."
-
-# Filter source documents for generation
-# This step processes all documents matching the filter criteria
-[steps.config.document_filter]
-source_type = "crawler"  # Generate summaries from crawler documents
-tags = ["technical-documentation"]  # Only process technical docs
-limit = 20  # Process up to 20 documents per batch
-updated_after = "2025-10-01T00:00:00Z"  # Only process recently updated documents
-
-# Usage Notes:
-# - This job demonstrates the "generate" operation type
-# - Generate operations create entirely new documents based on existing ones
-# - Examples: summaries, reports, indexes, catalogs, documentation sets
-# - Generated documents are saved with source_type = "ai_generated"
-# - Custom prompts can guide the generation process
-# - Tags filter allows focusing on specific document categories
-# - Generated documents inherit tags from the job definition
-# - Example use case: Daily executive summaries, weekly reports, documentation indexes
+filter_source_type = "crawler"
+filter_tags = ["technical-documentation"]
+filter_limit = 20
+filter_updated_after = "2025-10-01T00:00:00Z"

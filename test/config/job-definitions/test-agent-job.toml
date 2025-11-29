@@ -2,32 +2,16 @@
 # This job definition is used to test that agent jobs appear in the UI
 # even when the agent service is unavailable (no Google API key configured).
 
-# Job metadata
 id = "test-keyword-extractor"
 name = "Test Keyword Extraction"
-type = "agent"  # Agent job type for AI-powered document processing
+type = "agent"
 job_type = "user"
 description = "Test agent job for keyword extraction (requires Google Gemini API key)"
 enabled = true
-
-# Tags for categorization
 tags = ["test", "agent", "keyword-extraction"]
 
-# Job Steps
-[[steps]]
-name = "Extract Keywords"
-action = "agent"  # Step action is "agent" (requires agent service)
-
-# Step configuration
-[steps.config]
-# Agent type to execute (registered in agent service)
+[step.extract_keywords]
+action = "agent"
 agent_type = "keyword_extractor"
-
-# Maximum number of keywords to extract per document
 max_keywords = 10
-
-# Filter documents to process
-[steps.config.document_filter]
-# Limit number of documents to process
-limit = 10
-
+filter_limit = 10

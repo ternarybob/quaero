@@ -82,9 +82,14 @@ func (m *AgentManager) CreateParentJob(ctx context.Context, step models.JobStep,
 
 	// Extract document filter from step config (optional)
 	// If not specified, process all documents for the job definition's source
-	var documentFilter map[string]interface{}
-	if filter, ok := stepConfig["document_filter"].(map[string]interface{}); ok {
-		documentFilter = filter
+	// New format uses flat filter_* fields instead of nested document_filter
+	documentFilter := make(map[string]interface{})
+	for k, v := range stepConfig {
+		if len(k) > 7 && k[:7] == "filter_" {
+			// Convert filter_* to the key name without prefix
+			filterKey := k[7:] // e.g., "filter_limit" -> "limit"
+			documentFilter[filterKey] = v
+		}
 	}
 
 	m.logger.Debug().
@@ -248,6 +253,21 @@ func (m *AgentManager) createAgentJob(ctx context.Context, agentType, documentID
 	// Copy optional parameters from step config
 	if maxKeywords, ok := stepConfig["max_keywords"]; ok {
 		jobConfig["max_keywords"] = maxKeywords
+	}
+
+	// Copy Gemini settings from step config (allows per-job override)
+	// These settings will be passed to the agent service for per-request configuration
+	if resolvedAPIKey, ok := stepConfig["resolved_api_key"].(string); ok && resolvedAPIKey != "" {
+		jobConfig["gemini_api_key"] = resolvedAPIKey
+	}
+	if model, ok := stepConfig["model"].(string); ok && model != "" {
+		jobConfig["gemini_model"] = model
+	}
+	if timeout, ok := stepConfig["timeout"].(string); ok && timeout != "" {
+		jobConfig["gemini_timeout"] = timeout
+	}
+	if rateLimit, ok := stepConfig["rate_limit"].(string); ok && rateLimit != "" {
+		jobConfig["gemini_rate_limit"] = rateLimit
 	}
 
 	// Create queue job

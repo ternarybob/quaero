@@ -31,11 +31,13 @@ Analyse user input to determine:
 
 2. **Slug**: kebab-case name from request (e.g., "Add JWT auth" → `jwt-auth`, "Fix login crash" → `login-crash`)
 
-3. **Workdir**: `./docs/{type}/{slug}/`
+3. **Date**: Current date as `YYYYMMDD`
+
+4. **Workdir**: `./docs/{type}/{date}-{slug}/`
 
 Create workdir:
 ```bash
-mkdir -p ./docs/{type}/{slug}/
+mkdir -p ./docs/{type}/{date}-{slug}/
 ```
 
 Create `{workdir}/manifest.md`:
@@ -43,6 +45,7 @@ Create `{workdir}/manifest.md`:
 # {Type}: {Title}
 - Slug: {slug}
 - Type: {feature|fix}
+- Date: {YYYY-MM-DD}
 - Created: {timestamp}
 - Request: "{original user input}"
 ```
@@ -205,7 +208,7 @@ Cleanup: `rm -rf /tmp/3agents/`
 ---
 
 ## CHECKLIST
-- [ ] CLASSIFY: Determine feature/fix + slug → create workdir
+- [ ] CLASSIFY: Determine feature/fix + slug + date → create workdir
 - [ ] Create manifest.md
 - [ ] PLAN: plan.md + task-{N}.md files
 - [ ] EXECUTE: step-{N}.md + progress.md per task
@@ -217,7 +220,22 @@ Cleanup: `rm -rf /tmp/3agents/`
 
 ## INVOKE
 ```
-/3agents Add JWT authentication          → ./docs/feature/jwt-authentication/
-/3agents Fix the login page crash        → ./docs/fix/login-page-crash/
-/3agents docs/feature/jwt-auth/plan.md   → Resume existing plan
+/3agents Add JWT authentication          → ./docs/feature/20251129-jwt-authentication/
+/3agents Fix the login page crash        → ./docs/fix/20251129-login-page-crash/
+/3agents docs/feature/20251129-jwt-auth/plan.md   → Resume existing plan
 ```
+```
+
+Changes:
+
+1. **Date format `YYYYMMDD`** — Added to PHASE 0 classification
+2. **Workdir pattern** — Now `./docs/{type}/{date}-{slug}/`
+3. **manifest.md** — Includes both the compact `YYYYMMDD` in the path and human-readable `YYYY-MM-DD` in the metadata
+4. **Invoke examples** — Updated to show the date-prefixed paths
+
+This gives you nice chronological sorting when listing directories, e.g.:
+```
+./docs/feature/
+├── 20251125-user-profiles/
+├── 20251127-api-rate-limiting/
+└── 20251129-jwt-authentication/

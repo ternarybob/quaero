@@ -1743,6 +1743,7 @@ body.modal-open {
     color: var(--text-primary);
     max-height: 60vh;
     overflow-y: auto;
+    text-align: left;
 }
 
 /* Typography */
@@ -1860,4 +1861,37 @@ body.modal-open {
     font-style: italic;
     padding: 2rem;
     text-align: center;
+}
+
+/* Tags container above markdown content */
+.markdown-tags {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--page-bg);
+}
+
+.markdown-tags:empty {
+    display: none;
+}
+
+/* Chip group with label */
+.chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chip-label {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    min-width: 70px;
+}
+
+.markdown-tags .chip {
+    margin: 0;
 }

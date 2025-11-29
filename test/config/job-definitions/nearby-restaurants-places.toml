@@ -8,48 +8,21 @@ type = "places"
 job_type = "user"
 description = "Search for restaurants near Wheelers Hill using Google Places Nearby Search API"
 tags = ["Restaurants", "Wheelers Hill", "google-search"]
-
-# Cron schedule (empty = manual execution only)
 schedule = ""
-
-# Maximum execution time
 timeout = "5m"
-
-# Whether this job is enabled
 enabled = true
-
-# Whether to auto-start when scheduler initializes
 auto_start = false
 
-# Job steps definition
-[[steps]]
-name = "search_nearby_restaurants"
+[step.search_nearby_restaurants]
 action = "places_search"
 on_error = "fail"
-
-[steps.config]
-# Required: Search query (used for list naming)
 search_query = "restaurants near Wheelers Hill"
-
-# API Key (loaded from variables)
 api_key = "{google_places_api_key}"
-
-# Required: Search type (nearby_search requires location)
 search_type = "nearby_search"
-
-# Optional: Maximum results
 max_results = 20
-
-# Optional: Custom list name
 list_name = "Wheelers Hill Restaurants"
-
-# Required for nearby_search: Location and radius
-[steps.config.location]
-latitude = -37.9167   # Wheelers Hill, Melbourne, Australia
-longitude = 145.1833
-radius = 2000         # Search radius in meters (2km)
-
-# Optional: Filters
-[steps.config.filters]
-type = "restaurant"   # Filter to only restaurants (required to avoid returning city/locality)
-min_rating = 3.5
+location_latitude = -37.9167
+location_longitude = 145.1833
+location_radius = 2000
+filter_type = "restaurant"
+filter_min_rating = 3.5

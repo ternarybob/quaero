@@ -146,6 +146,8 @@ func (qtc *queueTestContext) triggerJob(jobName string) error {
 // timeout: how long to wait for job completion
 // expectDocs: whether to expect documents > 0
 // validateAllProcessed: whether to require completed + failed = total documents
+// Note: This function returns an error if the job fails (status="failed").
+// For jobs expected to fail, use monitorJobAllowFailure instead.
 func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, expectDocs bool, validateAllProcessed bool) error {
 	qtc.env.LogTest(qtc.t, "Monitoring job: %s (timeout: %v)", jobName, timeout)
 
@@ -309,6 +311,42 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 	}
 
 	qtc.env.LogTest(qtc.t, "✓ Final job status: %s", currentStatus)
+
+	// Fail if job failed (unless explicitly expected)
+	if currentStatus == "failed" {
+		// Try to get the failure reason from the UI
+		var failureReason string
+		chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							// Look for job-error-alert div which contains the failure reason
+							const errorAlert = card.querySelector('.job-error-alert');
+							if (errorAlert) {
+								// Get the error text (after "Failure Reason:")
+								const text = errorAlert.textContent;
+								const match = text.match(/Failure Reason:\s*(.+)/);
+								if (match) return match[1].trim();
+								return errorAlert.textContent.trim();
+							}
+							// Fallback: search for "Failure Reason:" in card text
+							const text = card.innerText;
+							const match = text.match(/Failure Reason:\s*(.+?)(?:\n|$)/);
+							if (match) return match[1].trim();
+						}
+					}
+					return '';
+				})()
+			`, jobName), &failureReason),
+		)
+		if failureReason != "" {
+			return fmt.Errorf("job %s failed: %s", jobName, failureReason)
+		}
+		return fmt.Errorf("job %s failed (no failure reason found in UI)", jobName)
+	}
 
 	// Wait for UI to refresh with final document count
 	// The job completion might be detected before the UI has fetched updated document counts
@@ -1206,4 +1244,60 @@ func TestWebSearchJob(t *testing.T) {
 	qtc.env.TakeScreenshot(qtc.ctx, "web_search_job_completed")
 
 	qtc.env.LogTest(t, "✓ Test completed successfully - Web search job completed with documents")
+}
+
+// TestNearbyRestaurantsJob tests the Nearby Restaurants (Places) job
+// This test verifies:
+// 1. Job can be triggered via the UI
+// 2. Job executes and either completes or fails
+// 3. If job fails, the failure reason is displayed in the UI
+// 4. The test properly detects and reports failure via monitorJob
+func TestNearbyRestaurantsJob(t *testing.T) {
+	qtc, cleanup := newQueueTestContext(t, 5*time.Minute)
+	defer cleanup()
+
+	// Check if a valid Google Places API key is available
+	// The job definition uses {google_places_api_key}
+	hasPlacesKey := false
+	for _, keyName := range []string{"google_places_api_key", "QUAERO_PLACES_GOOGLE_API_KEY", "GOOGLE_PLACES_API_KEY"} {
+		if key := qtc.env.EnvVars[keyName]; key != "" && !strings.HasPrefix(key, "fake-") {
+			hasPlacesKey = true
+			qtc.env.LogTest(t, "Found Google Places API key: %s", keyName)
+			break
+		}
+	}
+
+	if !hasPlacesKey {
+		t.Skip("Skipping Nearby Restaurants test - no valid google_places_api_key found in .env.test")
+	}
+
+	qtc.env.LogTest(t, "--- Starting Test: Nearby Restaurants Job ---")
+
+	jobName := "Nearby Restaurants (Wheelers Hill)"
+
+	// Take screenshot before triggering job
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	if err := qtc.env.TakeScreenshot(qtc.ctx, "nearby_restaurants_before"); err != nil {
+		qtc.env.LogTest(qtc.t, "Failed to take before screenshot: %v", err)
+	}
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Job triggered")
+
+	// Monitor job - this will fail if the job fails (which tests error detection)
+	err := qtc.monitorJob(jobName, 2*time.Minute, true, false)
+	if err != nil {
+		// Job failed - take screenshot and report
+		qtc.env.TakeScreenshot(qtc.ctx, "nearby_restaurants_failed")
+		t.Fatalf("Job failed: %v", err)
+	}
+
+	// Take screenshot after job completes
+	qtc.env.TakeScreenshot(qtc.ctx, "nearby_restaurants_completed")
+	qtc.env.LogTest(t, "✓ Test completed successfully - Job completed")
 }
