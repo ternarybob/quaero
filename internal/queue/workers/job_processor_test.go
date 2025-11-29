@@ -31,25 +31,27 @@ func (m *mockQueueManager) Enqueue(ctx context.Context, msg models.QueueMessage)
 }
 
 func (m *mockQueueManager) Receive(ctx context.Context) (*models.QueueMessage, func() error, error) {
+	// Track that a worker is polling (means a goroutine is running)
+	m.receiveCount.Add(1)
+
+	// Track concurrent workers polling
+	current := m.currentActive.Add(1)
+	defer m.currentActive.Add(-1)
+
+	// Update max concurrent
+	for {
+		old := m.concurrentMax.Load()
+		if current <= old || m.concurrentMax.CompareAndSwap(old, current) {
+			break
+		}
+	}
+
+	// Simulate realistic queue polling - block for a short time to allow
+	// concurrent workers to overlap, then return "no message" error
 	select {
 	case <-ctx.Done():
 		return nil, nil, ctx.Err()
-	default:
-		// Track that a worker is polling (means a goroutine is running)
-		m.receiveCount.Add(1)
-
-		// Track concurrent workers polling
-		current := m.currentActive.Add(1)
-		defer m.currentActive.Add(-1)
-
-		// Update max concurrent
-		for {
-			old := m.concurrentMax.Load()
-			if current <= old || m.concurrentMax.CompareAndSwap(old, current) {
-				break
-			}
-		}
-
+	case <-time.After(50 * time.Millisecond):
 		// Return timeout - simulates no messages available
 		return nil, nil, context.DeadlineExceeded
 	}
@@ -117,8 +119,10 @@ func TestJobProcessorStartsMultipleGoroutines(t *testing.T) {
 			jp.Start()
 
 			// Give the goroutines time to start polling
-			// Each goroutine has a 1-second receive timeout, so we need to wait for multiple poll cycles
-			time.Sleep(200 * time.Millisecond)
+			// Workers now have backoff (100ms-5s) when queue is empty, so we need to wait
+			// long enough for all workers to have polled at least once.
+			// Initial backoff is 100ms, so waiting 500ms should be sufficient.
+			time.Sleep(500 * time.Millisecond)
 
 			// Check that the expected number of goroutines are polling
 			// The concurrentMax should be at least the concurrency level

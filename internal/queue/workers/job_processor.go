@@ -103,6 +103,12 @@ func (jp *JobProcessor) Stop() {
 	jp.logger.Info().Msg("Job processor stopped")
 }
 
+// Backoff configuration for idle polling
+const (
+	minBackoff = 100 * time.Millisecond // Initial backoff when queue is empty
+	maxBackoff = 5 * time.Second        // Maximum backoff duration
+)
+
 // processJobs is the main job processing loop.
 // workerID identifies which worker goroutine this is (for logging).
 func (jp *JobProcessor) processJobs(workerID int) {
@@ -125,6 +131,9 @@ func (jp *JobProcessor) processJobs(workerID int) {
 		Int("worker_id", workerID).
 		Msg("Job processor worker started")
 
+	// Backoff tracking for idle polling - reduces CPU when queue is empty
+	currentBackoff := minBackoff
+
 	for {
 		select {
 		case <-jp.ctx.Done():
@@ -133,7 +142,25 @@ func (jp *JobProcessor) processJobs(workerID int) {
 				Msg("Job processor worker stopping")
 			return
 		default:
-			jp.processNextJob(workerID)
+			jobProcessed := jp.processNextJob(workerID)
+
+			if jobProcessed {
+				// Reset backoff when we successfully process a job
+				currentBackoff = minBackoff
+			} else {
+				// No job available - apply backoff to reduce CPU usage
+				select {
+				case <-jp.ctx.Done():
+					return
+				case <-time.After(currentBackoff):
+				}
+
+				// Exponential backoff: double the wait time up to max
+				currentBackoff = currentBackoff * 2
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+			}
 		}
 	}
 }
@@ -147,7 +174,8 @@ func getStackTrace() string {
 
 // processNextJob processes the next job from the queue, routing it to the appropriate worker based on job type.
 // workerID identifies which worker goroutine is processing (for logging).
-func (jp *JobProcessor) processNextJob(workerID int) {
+// Returns true if a job was processed, false if no job was available.
+func (jp *JobProcessor) processNextJob(workerID int) bool {
 	// Create a timeout context for receiving messages
 	ctx, cancel := context.WithTimeout(jp.ctx, 1*time.Second)
 	defer cancel()
@@ -155,6 +183,7 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 	var msg *queue.Message
 	var deleteFn func() error
 	var err error
+	jobProcessed := false
 
 	// Panic recovery for individual job processing
 	defer func() {
@@ -183,9 +212,12 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 	// Receive next message from queue
 	msg, deleteFn, err = jp.queueMgr.Receive(ctx)
 	if err != nil {
-		// No message available or timeout - just return
-		return
+		// No message available or timeout - return false to trigger backoff
+		return false
 	}
+
+	// Mark that we received a job (for backoff reset)
+	jobProcessed = true
 
 	// Track job start time for duration calculation
 	jobStartTime := time.Now()
@@ -215,7 +247,7 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 		if err := deleteFn(); err != nil {
 			jp.logger.Error().Err(err).Msg("Failed to delete malformed message")
 		}
-		return
+		return jobProcessed
 	}
 
 	// Validate queue job
@@ -229,7 +261,7 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 		if err := deleteFn(); err != nil {
 			jp.logger.Error().Err(err).Msg("Failed to delete invalid message")
 		}
-		return
+		return jobProcessed
 	}
 
 	// Get worker for job type
@@ -249,7 +281,7 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 		if err := deleteFn(); err != nil {
 			jp.logger.Error().Err(err).Msg("Failed to delete message")
 		}
-		return
+		return jobProcessed
 	}
 
 	// Validate queue job with worker
@@ -268,7 +300,7 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 		if err := deleteFn(); err != nil {
 			jp.logger.Error().Err(err).Msg("Failed to delete message")
 		}
-		return
+		return jobProcessed
 	}
 
 	// Execute the job using the worker
@@ -325,4 +357,6 @@ func (jp *JobProcessor) processNextJob(workerID int) {
 			Str("job_id", msg.JobID).
 			Msg("Failed to delete message from queue")
 	}
+
+	return jobProcessed
 }
