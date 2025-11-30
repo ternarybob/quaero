@@ -3,6 +3,7 @@
 
 id = "news-crawler"
 name = "News Crawler"
+type = "crawler"
 description = "Crawler job that crawls a news website and filters for specific content"
 schedule = ""
 timeout = "30m"

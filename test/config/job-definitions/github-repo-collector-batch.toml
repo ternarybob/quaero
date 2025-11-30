@@ -4,6 +4,7 @@
 
 id = "github-repo-collector-batch"
 name = "GitHub Repository Collector (Batch Mode)"
+type = "fetch"
 description = "Fetches repository content using GraphQL bulk fetch for improved performance"
 tags = ["github", "source-code", "repository", "batch-mode"]
 schedule = ""

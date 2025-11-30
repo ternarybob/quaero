@@ -1117,6 +1117,24 @@
                         }));
                     }
 
+                    // Handle job step progress events (multi-step job definitions)
+                    if (message.type === 'job_step_progress' && message.payload) {
+                        const stepProgress = message.payload;
+                        // Update job with step progress data
+                        window.dispatchEvent(new CustomEvent('jobList:updateJobProgress', {
+                            detail: {
+                                job_id: stepProgress.job_id,
+                                progress_text: `Step ${stepProgress.current_step}/${stepProgress.total_steps}: ${stepProgress.step_name} (${stepProgress.step_status})`,
+                                step_name: stepProgress.step_name,
+                                step_type: stepProgress.step_type,
+                                current_step: stepProgress.current_step,
+                                total_steps: stepProgress.total_steps,
+                                step_status: stepProgress.step_status,
+                                timestamp: stepProgress.timestamp
+                            }
+                        }));
+                    }
+
                     // Handle job spawn events
                     if (message.type === 'job_spawn' && message.payload) {
                         const spawnData = message.payload;
@@ -2677,6 +2695,15 @@
                     }
                     if (progress.warnings) {
                         job.status_report.warnings = progress.warnings;
+                    }
+
+                    // Update step progress fields (for multi-step job definitions)
+                    if (progress.current_step !== undefined) {
+                        job.status_report.current_step = progress.current_step;
+                        job.status_report.total_steps = progress.total_steps;
+                        job.status_report.step_name = progress.step_name;
+                        job.status_report.step_type = progress.step_type;
+                        job.status_report.step_status = progress.step_status;
                     }
 
                     // Update progress object

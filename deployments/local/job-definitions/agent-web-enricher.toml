@@ -3,6 +3,7 @@
 
 id = "agent-web-enricher"
 name = "Agent Web Enricher"
+type = "agent"
 description = "Enriches documents with web-sourced information using Google Gemini ADK"
 tags = ["agent", "enrichment", "web"]
 schedule = ""

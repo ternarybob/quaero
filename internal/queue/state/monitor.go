@@ -150,8 +150,11 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 	ticker := time.NewTicker(5 * time.Second) // Check every 5 seconds
 	defer ticker.Stop()
 
-	maxWaitTime := 30 * time.Minute // Maximum time to wait for child jobs
+	maxWaitTime := 30 * time.Minute           // Maximum time to wait for child jobs
+	noChildrenGracePeriod := 30 * time.Second // Grace period for jobs that spawn no children
 	timeout := time.After(maxWaitTime)
+	monitorStartTime := time.Now()
+	hasSeenChildren := false // Track if we've ever seen child jobs
 
 	for {
 		select {
@@ -176,10 +179,37 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 
 		case <-ticker.C:
 			// Check child job progress
-			completed, err := m.checkChildJobProgress(ctx, job.ID, jobLogger)
+			completed, childCount, err := m.checkChildJobProgressWithCount(ctx, job.ID, jobLogger)
 			if err != nil {
 				jobLogger.Error().Err(err).Msg("Failed to check child job progress")
 				continue
+			}
+
+			// Track if we've seen any children
+			if childCount > 0 {
+				hasSeenChildren = true
+			}
+
+			// If no children have been spawned after the grace period, complete the job
+			// This handles cases where workers return ReturnsChildJobs()=true but don't actually create any jobs
+			if !hasSeenChildren && time.Since(monitorStartTime) > noChildrenGracePeriod {
+				jobLogger.Debug().
+					Dur("elapsed", time.Since(monitorStartTime)).
+					Msg("No child jobs spawned after grace period, completing parent job")
+
+				m.jobMgr.AddJobLog(ctx, job.ID, "info", "Job completed (no child jobs were spawned)")
+
+				if err := m.jobMgr.UpdateJobStatus(ctx, job.ID, "completed"); err != nil {
+					jobLogger.Warn().Err(err).Msg("Failed to update job status to completed")
+					return fmt.Errorf("failed to update job status: %w", err)
+				}
+
+				if err := m.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+					jobLogger.Warn().Err(err).Msg("Failed to set finished_at timestamp")
+				}
+
+				m.publishParentJobProgress(ctx, job, "completed", "Job completed (no child jobs)")
+				return nil
 			}
 
 			if completed {
@@ -232,19 +262,22 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 	}
 }
 
-// checkChildJobProgress checks the progress of child jobs and returns true if all are complete
-func (m *jobMonitor) checkChildJobProgress(ctx context.Context, parentJobID string, logger arbor.ILogger) (bool, error) {
+// checkChildJobProgressWithCount checks the progress of child jobs and returns:
+// - completed: true if all children are in terminal state
+// - childCount: total number of child jobs found
+// - error: any error encountered
+func (m *jobMonitor) checkChildJobProgressWithCount(ctx context.Context, parentJobID string, logger arbor.ILogger) (bool, int, error) {
 	// Get child job statistics
 	childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{parentJobID})
 	if err != nil {
-		return false, fmt.Errorf("failed to get child job stats: %w", err)
+		return false, 0, fmt.Errorf("failed to get child job stats: %w", err)
 	}
 
 	// Extract stats for this parent job
 	interfaceStats, ok := childStatsMap[parentJobID]
 	if !ok || interfaceStats == nil {
 		// No children yet, keep waiting
-		return false, nil
+		return false, 0, nil
 	}
 
 	// Convert interfaces.JobChildStats to local ChildJobStats
@@ -286,11 +319,11 @@ func (m *jobMonitor) checkChildJobProgress(ctx context.Context, parentJobID stri
 	// This ensures we wait until all children (including grandchildren) are done
 	// and no more children are being spawned
 	if childStats.TotalChildren > 0 {
-		return terminalChildren >= childStats.TotalChildren, nil
+		return terminalChildren >= childStats.TotalChildren, childStats.TotalChildren, nil
 	}
 
 	// If no child jobs exist yet, keep waiting
-	return false, nil
+	return false, 0, nil
 }
 
 // publishParentJobProgress publishes a parent job progress update for real-time monitoring

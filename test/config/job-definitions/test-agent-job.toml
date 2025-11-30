@@ -4,6 +4,7 @@
 
 id = "test-keyword-extractor"
 name = "Test Keyword Extraction"
+type = "agent"
 description = "Test agent job for keyword extraction (requires Google Gemini API key)"
 enabled = true
 tags = ["test", "agent", "keyword-extraction"]

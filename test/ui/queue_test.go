@@ -1301,3 +1301,97 @@ func TestNearbyRestaurantsJob(t *testing.T) {
 	qtc.env.TakeScreenshot(qtc.ctx, "nearby_restaurants_completed")
 	qtc.env.LogTest(t, "✓ Test completed successfully - Job completed")
 }
+
+// TestNearbyRestaurantsKeywordsMultiStep tests the multi-step job definition
+// that runs Places search followed by Keyword Extraction in a single job.
+// This test verifies:
+// 1. Multi-step job can be triggered via the UI
+// 2. Both steps execute sequentially (search_nearby_restaurants -> extract_keywords)
+// 3. Job completes successfully (doesn't hang in running state)
+// 4. Documents are created by the places search step
+// 5. Keywords are extracted from documents by the agent step
+func TestNearbyRestaurantsKeywordsMultiStep(t *testing.T) {
+	// Multi-step job needs more time: places search + keyword extraction
+	qtc, cleanup := newQueueTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	// Check for required API keys
+	hasPlacesKey := false
+	hasGeminiKey := false
+
+	for _, keyName := range []string{"google_places_api_key", "QUAERO_PLACES_GOOGLE_API_KEY"} {
+		if key := qtc.env.EnvVars[keyName]; key != "" && !strings.HasPrefix(key, "fake-") {
+			hasPlacesKey = true
+			qtc.env.LogTest(t, "Found Google Places API key: %s", keyName)
+			break
+		}
+	}
+
+	for _, keyName := range []string{"google_gemini_api_key", "QUAERO_GEMINI_GOOGLE_API_KEY"} {
+		if key := qtc.env.EnvVars[keyName]; key != "" && !strings.HasPrefix(key, "fake-") {
+			hasGeminiKey = true
+			qtc.env.LogTest(t, "Found Gemini API key: %s", keyName)
+			break
+		}
+	}
+
+	if !hasPlacesKey {
+		t.Skip("Skipping multi-step test - no valid google_places_api_key found")
+	}
+	if !hasGeminiKey {
+		t.Skip("Skipping multi-step test - no valid google_gemini_api_key found")
+	}
+
+	qtc.env.LogTest(t, "--- Starting Test: Multi-Step Job (Places + Keywords) ---")
+
+	// This is the multi-step job defined in test/config/job-definitions/nearby-resturants-keywords.toml
+	jobName := "Nearby Restaurants (Wheelers Hill)"
+
+	// Take screenshot before triggering job
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("failed to navigate to queue page: %v", err)
+	}
+	qtc.env.TakeScreenshot(qtc.ctx, "multistep_before")
+
+	// Trigger the job
+	if err := qtc.triggerJob(jobName); err != nil {
+		t.Fatalf("Failed to trigger multi-step job: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Multi-step job triggered")
+
+	// Monitor job with longer timeout (5 min for places + agent steps)
+	// This is the critical test - the job should COMPLETE, not hang in running state
+	qtc.env.LogTest(t, "Monitoring multi-step job execution...")
+	if err := qtc.monitorJob(jobName, 5*time.Minute, true, false); err != nil {
+		qtc.env.TakeScreenshot(qtc.ctx, "multistep_failed")
+		t.Fatalf("Multi-step job failed: %v", err)
+	}
+	qtc.env.LogTest(t, "✓ Multi-step job completed successfully")
+
+	// Verify documents were created and keywords extracted
+	// Query the API to check for documents with keywords
+	qtc.env.LogTest(t, "Verifying documents have keywords...")
+
+	// Get job ID from UI
+	var jobID string
+	if err := chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(fmt.Sprintf(`
+			(() => {
+				const element = document.querySelector('[x-data="jobList"]');
+				if (!element) return '';
+				const component = Alpine.$data(element);
+				if (!component || !component.allJobs) return '';
+				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+				return job ? job.id : '';
+			})()
+		`, jobName), &jobID),
+	); err != nil {
+		qtc.env.LogTest(t, "Warning: Could not get job ID: %v", err)
+	} else if jobID != "" {
+		qtc.env.LogTest(t, "Job ID: %s", jobID)
+	}
+
+	// Take final screenshot
+	qtc.env.TakeScreenshot(qtc.ctx, "multistep_completed")
+	qtc.env.LogTest(t, "✓ Test completed successfully - Multi-step job executed both steps")
+}

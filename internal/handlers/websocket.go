@@ -1067,6 +1067,67 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		return nil
 	})
 
+	// Subscribe to job step progress events for real-time monitoring of multi-step jobs
+	h.eventService.Subscribe(interfaces.EventJobProgress, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid job_progress event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_progress"] {
+			return nil
+		}
+
+		// Create WebSocket message for step progress
+		wsPayload := map[string]interface{}{
+			"job_id":       getString(payload, "job_id"),
+			"job_name":     getString(payload, "job_name"),
+			"step_index":   getInt(payload, "step_index"),
+			"step_name":    getString(payload, "step_name"),
+			"step_type":    getString(payload, "step_type"),
+			"current_step": getInt(payload, "current_step"),
+			"total_steps":  getInt(payload, "total_steps"),
+			"step_status":  getString(payload, "step_status"),
+			"timestamp":    getString(payload, "timestamp"),
+		}
+
+		// Broadcast to all clients
+		msg := WSMessage{
+			Type:    "job_step_progress",
+			Payload: wsPayload,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal job step progress message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to send job step progress to client")
+			}
+		}
+
+		return nil
+	})
+
 	// Subscribe to crawler job log events for real-time log streaming
 	h.eventService.Subscribe("crawler_job_log", func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})

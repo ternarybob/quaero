@@ -3,6 +3,7 @@
 
 id = "keyword-extractor-agent"
 name = "Keyword Extractor AI"
+type = "agent"
 description = "Extracts keywords from documents using Google Gemini ADK"
 tags = ["agent", "keywords", "nlp"]
 schedule = ""

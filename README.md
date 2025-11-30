@@ -133,17 +133,13 @@ type = "badger"
 [storage.badger]
 path = "./data/quaero.badger"
 
-# LLM configuration
-[llm]
-google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for Google ADK
-embed_model_name = "gemini-embedding-001"      # Default embedding model
-chat_model_name = "gemini-2.0-flash"           # Default chat model
-timeout = "5m"                                  # Operation timeout
-embed_dimension = 768                           # Must match storage config
-
-[llm.audit]
-enabled = true      # Enable audit logging
-log_queries = false # Don't log query text (PII protection)
+# Gemini API configuration (required for all AI features)
+[gemini]
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all AI operations
+agent_model = "gemini-2.0-flash"               # Model for agent operations
+chat_model = "gemini-2.0-flash"                # Model for chat operations
+timeout = "5m"                                 # Operation timeout
+rate_limit = "4s"                              # Rate limit (4s = 15 RPM free tier)
 
 # Search configuration
 [search]
@@ -198,15 +194,15 @@ docker-compose -f deployments/docker/docker-compose.yml up
 4. Select the `cmd/quaero-chrome-extension/` directory
 5. **Configure server URL** in extension settings if not using default `http://localhost:8080`
 
-## LLM Setup (Google ADK)
+## LLM Setup (Google Gemini)
 
-**Google ADK Integration**: Quaero uses Google ADK (Agent Development Kit) with Gemini models for embeddings and chat. All LLM processing happens through Google's cloud APIs.
+**Google Gemini Integration**: Quaero uses Google Gemini models for AI-powered features including chat, agents, and document processing. All AI operations use Google's cloud APIs.
 
-⚠️ **Important**: A valid Google API key is required for LLM functionality. Without an API key, the service will fail to initialize and LLM features will be unavailable.
+⚠️ **Important**: A valid Google API key is required for AI functionality. Without an API key, the service will start but AI features (chat, agents, keyword extraction) will be unavailable.
 
 ### Prerequisites
 
-To use Quaero's LLM capabilities, you need:
+To use Quaero's AI capabilities, you need:
 - A Google Gemini API key
 - Internet connection for API calls
 - No local model files or binaries required
@@ -220,7 +216,7 @@ To use Quaero's LLM capabilities, you need:
 3. Click "Create API Key"
 4. Copy the generated API key
 
-**Free Tier Limits** (as of 2024):
+**Free Tier Limits** (as of 2025):
 - 15 requests per minute
 - 1500 requests per day
 - Sufficient for personal knowledge base use
@@ -230,12 +226,12 @@ To use Quaero's LLM capabilities, you need:
 Add the API key to your `quaero.toml` configuration:
 
 ```toml
-[llm]
+[gemini]
 google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"
-embed_model_name = "gemini-embedding-001"  # 768-dimension embeddings
-chat_model_name = "gemini-2.0-flash"       # Fast, cost-effective chat
-timeout = "5m"                             # Operation timeout
-embed_dimension = 768                           # Must match storage config
+agent_model = "gemini-2.0-flash"   # Model for agent operations
+chat_model = "gemini-2.0-flash"    # Model for chat operations
+timeout = "5m"                     # Operation timeout
+rate_limit = "4s"                  # Rate limit (4s = 15 RPM free tier)
 ```
 
 #### 3. Environment Variable Override (Optional)
@@ -243,13 +239,8 @@ embed_dimension = 768                           # Must match storage config
 You can also set the API key via environment variable (takes precedence):
 
 ```bash
-export QUAERO_LLM_GOOGLE_API_KEY="YOUR_GOOGLE_GEMINI_API_KEY"
+export QUAERO_GEMINI_GOOGLE_API_KEY="YOUR_GOOGLE_GEMINI_API_KEY"
 ```
-
-Other environment variables:
-- `QUAERO_LLM_EMBED_MODEL_NAME` - Override embedding model
-- `QUAERO_LLM_CHAT_MODEL_NAME` - Override chat model
-- `QUAERO_LLM_TIMEOUT` - Override timeout
 
 #### 4. Verification
 
@@ -263,37 +254,34 @@ Agent service initialized with Google ADK
 
 **❌ Failure** - If you see this message, the API key is missing or invalid:
 ```
-Failed to initialize LLM service - agent features will be unavailable
+To enable LLM features, set QUAERO_GEMINI_GOOGLE_API_KEY or gemini.google_api_key in config
 ```
 
-#### 5. Test LLM Functionality
+#### 5. Test AI Functionality
 
 1. Start Quaero: `.\scripts\build.ps1 -Run`
 2. Navigate to the Chat page in the web UI
 3. Send a test message to verify chat functionality works
-4. Create a crawl job to test embedding generation
+4. Create an agent job to test AI document processing
 
 ### Model Details
 
-**Embedding Model**: `gemini-embedding-001`
-- Output dimensions: 768 (matches database schema)
-- Optimized for semantic search and RAG
-- Supports multilingual content
-
-**Chat Model**: `gemini-2.0-flash`
+**Default Model**: `gemini-2.0-flash`
 - Fast response times
 - Cost-effective for regular use
-- Suitable for document summarization and chat
+- Used for both chat and agent operations
+- Suitable for document summarization, keyword extraction, and chat
 
 ### Troubleshooting
 
 **API Key Not Found**:
-- Ensure `google_api_key` is set in `quaero.toml`
-- Or set `QUAERO_LLM_GOOGLE_API_KEY` environment variable
+- Ensure `google_api_key` is set in `[gemini]` section of `quaero.toml`
+- Or set `QUAERO_GEMINI_GOOGLE_API_KEY` environment variable
 - Get API key from: https://aistudio.google.com/app/apikey
 
 **API Rate Limits**:
 - Free tier: 15 requests/minute, 1500/day
+- Adjust `rate_limit` in config (default: "4s" = 15 RPM)
 - Reduce concurrency in `[queue]` configuration
 - Consider upgrading to paid tier for higher limits
 
@@ -301,15 +289,6 @@ Failed to initialize LLM service - agent features will be unavailable
 - Increase timeout in config: `timeout = "10m"`
 - Large documents may take longer to process
 - Check Gemini API status: https://status.ai.google.dev/
-
-**Embedding Dimension Mismatch**:
-- Ensure `embed_dimension = 768` in `[llm]`
-- Storage schema requires 768-dimension embeddings
-
-**No Embeddings Generated**:
-- Check that scheduler is running (logs every 5 minutes)
-- Verify API key is valid and not rate-limited
-- Check for `EventEmbeddingTriggered` events in logs
 
 See AGENTS.md for developer-focused debug steps and agent-specific troubleshooting.
 
@@ -565,8 +544,8 @@ quaero version
 - Not suitable for highly sensitive or classified data
 
 ```toml
-[llm]
-google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
+[gemini]
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all AI features
 ```
 
 **API Key Security:**
@@ -583,21 +562,21 @@ google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
 
 ⚠️ **Important**: If you require 100% local processing, this configuration is not suitable. Consider alternative solutions with local LLM inference.
 
-### Audit Logging
+### Logging
 
-Quaero includes audit logging for compliance:
+Quaero includes comprehensive logging for debugging and monitoring:
 
 ```toml
-[llm.audit]
-enabled = true      # Log all LLM interactions
-log_queries = false # Disable to protect PII in queries
+[logging]
+level = "info"           # Log level: debug, info, warn, error
+min_event_level = "info" # Minimum level for real-time UI events
 ```
 
-Audit logs are stored in Badger and include:
-- Timestamp and request ID
-- Model used and token counts
-- Response metadata (not content if `log_queries=false`)
-- User context (if multi-user support enabled)
+Logs include:
+- API request/response metadata
+- Job execution status and progress
+- Error details with context
+- Real-time WebSocket events for UI
 
 ### Authentication Security
 
@@ -1242,16 +1221,12 @@ port = 8085
 # See job-definitions/ for examples of Jira/Confluence/GitHub crawlers.
 # Legacy sections removed: [sources.jira], [sources.confluence], [sources.github]
 
-[llm]
-google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all LLM features
-embed_model_name = "gemini-embedding-001"       # Default embedding model
-chat_model_name = "gemini-2.0-flash"            # Default chat model
-timeout = "5m"                                   # Operation timeout
-embed_dimension = 768                           # Must match storage config
-
-[llm.audit]
-enabled = true
-log_queries = false  # PII protection
+[gemini]
+google_api_key = "YOUR_GOOGLE_GEMINI_API_KEY"  # Required for all AI features
+agent_model = "gemini-2.0-flash"               # Model for agent operations
+chat_model = "gemini-2.0-flash"                # Model for chat operations
+timeout = "5m"                                 # Operation timeout
+rate_limit = "4s"                              # Rate limit (4s = 15 RPM free tier)
 
 [jobs]
 # Default jobs configuration

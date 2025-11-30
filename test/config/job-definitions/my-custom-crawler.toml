@@ -3,6 +3,7 @@
 
 id = "my-custom-crawler"
 name = "My Custom Crawler"
+type = "crawler"
 description = "User-created custom crawler that should persist across builds"
 
 schedule = ""

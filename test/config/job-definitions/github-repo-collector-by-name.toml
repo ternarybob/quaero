@@ -4,6 +4,7 @@
 
 id = "github-repo-collector-by-name"
 name = "GitHub Repository Collector (By Name)"
+type = "fetch"
 description = "Fetches repository content using connector_name instead of connector_id"
 tags = ["github", "source-code", "repository", "by-name-test"]
 schedule = ""

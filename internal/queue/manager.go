@@ -881,6 +881,31 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
+		// Publish step starting event for WebSocket clients
+		if m.eventService != nil {
+			payload := map[string]interface{}{
+				"job_id":       parentJobID,
+				"job_name":     jobDef.Name,
+				"step_index":   i,
+				"step_name":    step.Name,
+				"step_type":    step.Type.String(),
+				"current_step": i + 1,
+				"total_steps":  len(jobDef.Steps),
+				"step_status":  "running",
+				"timestamp":    time.Now().Format(time.RFC3339),
+			}
+			event := interfaces.Event{
+				Type:    interfaces.EventJobProgress,
+				Payload: payload,
+			}
+			// Publish asynchronously
+			go func() {
+				if err := m.eventService.Publish(ctx, event); err != nil {
+					// Log but don't fail
+				}
+			}()
+		}
+
 		// Resolve placeholders in step config
 		resolvedStep := step
 		if step.Config != nil && m.kvStorage != nil {
@@ -943,6 +968,31 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		// Update progress
 		if err := m.UpdateJobProgress(ctx, parentJobID, i+1, len(jobDef.Steps)); err != nil {
 			// Log warning but continue
+		}
+
+		// Publish step progress event for WebSocket clients
+		if m.eventService != nil {
+			payload := map[string]interface{}{
+				"job_id":       parentJobID,
+				"job_name":     jobDef.Name,
+				"step_index":   i,
+				"step_name":    step.Name,
+				"step_type":    step.Type.String(),
+				"current_step": i + 1,
+				"total_steps":  len(jobDef.Steps),
+				"step_status":  "completed",
+				"timestamp":    time.Now().Format(time.RFC3339),
+			}
+			event := interfaces.Event{
+				Type:    interfaces.EventJobProgress,
+				Payload: payload,
+			}
+			// Publish asynchronously to avoid blocking step execution
+			go func() {
+				if err := m.eventService.Publish(ctx, event); err != nil {
+					// Log but don't fail
+				}
+			}()
 		}
 	}
 
