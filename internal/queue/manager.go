@@ -871,6 +871,25 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		// Log warning but continue
 	}
 
+	// Build step_definitions for UI display
+	// This allows the queue UI to show step progress even before steps start executing
+	stepDefs := make([]map[string]interface{}, len(jobDef.Steps))
+	for i, step := range jobDef.Steps {
+		stepDefs[i] = map[string]interface{}{
+			"name":        step.Name,
+			"type":        step.Type.String(),
+			"description": step.Description,
+		}
+	}
+	initialMetadata := map[string]interface{}{
+		"step_definitions": stepDefs,
+		"total_steps":      len(jobDef.Steps),
+		"current_step":     0,
+	}
+	if err := m.UpdateJobMetadata(ctx, parentJobID, initialMetadata); err != nil {
+		// Log warning but continue
+	}
+
 	// Mark parent job as running
 	if err := m.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
 		// Log warning but continue
@@ -879,8 +898,33 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 	// Track if any child jobs were created
 	hasChildJobs := false
 
+	// Track per-step statistics for UI display
+	// Store cumulative child counts at step completion to calculate per-step deltas
+	stepStats := make([]map[string]interface{}, len(jobDef.Steps))
+	var prevChildCount int
+
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
+		// Get child stats BEFORE step execution (for delta calculation after completion)
+		var childCountBefore int
+		if stats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID}); err == nil {
+			if s := stats[parentJobID]; s != nil {
+				childCountBefore = s.ChildCount
+			}
+		}
+
+		// Update job metadata with current step info (persisted for UI on page reload)
+		stepMetadata := map[string]interface{}{
+			"current_step":        i + 1,
+			"current_step_name":   step.Name,
+			"current_step_type":   step.Type.String(),
+			"current_step_status": "running",
+			"total_steps":         len(jobDef.Steps),
+		}
+		if err := m.UpdateJobMetadata(ctx, parentJobID, stepMetadata); err != nil {
+			// Log but continue
+		}
+
 		// Publish step starting event for WebSocket clients
 		if m.eventService != nil {
 			payload := map[string]interface{}{
@@ -970,18 +1014,56 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			// Log warning but continue
 		}
 
+		// Get child stats AFTER step execution (for per-step statistics)
+		var childCountAfter int
+		if stats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID}); err == nil {
+			if s := stats[parentJobID]; s != nil {
+				childCountAfter = s.ChildCount
+			}
+		}
+
+		// Calculate children created by this step (delta)
+		stepChildCount := childCountAfter - childCountBefore
+
+		// Store step statistics for UI
+		stepStats[i] = map[string]interface{}{
+			"step_index":       i,
+			"step_name":        step.Name,
+			"step_type":        step.Type.String(),
+			"child_count":      stepChildCount,
+			"cumulative_count": childCountAfter,
+		}
+
+		// Update metadata with completed step status and step statistics
+		completedStepMetadata := map[string]interface{}{
+			"current_step":        i + 1,
+			"current_step_name":   step.Name,
+			"current_step_type":   step.Type.String(),
+			"current_step_status": "completed",
+			"completed_steps":     i + 1,
+			"step_stats":          stepStats[:i+1], // Include all completed step stats
+		}
+		if err := m.UpdateJobMetadata(ctx, parentJobID, completedStepMetadata); err != nil {
+			// Log but continue
+		}
+
+		// Track cumulative count for next iteration
+		prevChildCount = childCountAfter
+		_ = prevChildCount // Used in next iteration
+
 		// Publish step progress event for WebSocket clients
 		if m.eventService != nil {
 			payload := map[string]interface{}{
-				"job_id":       parentJobID,
-				"job_name":     jobDef.Name,
-				"step_index":   i,
-				"step_name":    step.Name,
-				"step_type":    step.Type.String(),
-				"current_step": i + 1,
-				"total_steps":  len(jobDef.Steps),
-				"step_status":  "completed",
-				"timestamp":    time.Now().Format(time.RFC3339),
+				"job_id":           parentJobID,
+				"job_name":         jobDef.Name,
+				"step_index":       i,
+				"step_name":        step.Name,
+				"step_type":        step.Type.String(),
+				"current_step":     i + 1,
+				"total_steps":      len(jobDef.Steps),
+				"step_status":      "completed",
+				"step_child_count": stepChildCount,
+				"timestamp":        time.Now().Format(time.RFC3339),
 			}
 			event := interfaces.Event{
 				Type:    interfaces.EventJobProgress,

@@ -17,7 +17,6 @@ type = "places_search"
 description = "Search for restaurants near Wheelers Hill using Google Places API"
 on_error = "fail"
 search_query = "restaurants near Wheelers Hill"
-api_key = "{google_places_api_key}"
 search_type = "nearby_search"
 max_results = 20
 list_name = "Wheelers Hill Restaurants"

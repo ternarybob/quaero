@@ -17,6 +17,5 @@ type = "web_search"
 description = "Search web for ASX:GNP company information using Gemini with Google Search grounding"
 on_error = "fail"
 query = "find me latest information on ASX listed company ASX:GNP"
-api_key = "{google_gemini_api_key}"
 depth = 3
 breadth = 3

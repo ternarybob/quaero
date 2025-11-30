@@ -17,124 +17,98 @@ paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents/" }
 - Tests: `/test/api`, `/test/ui` only
 - Binaries: `go build -o /tmp/` - never in root
 - Make technical decisions - only stop for architecture choices
-- Document as you go - write all output files
+- **EVERY run creates NEW workdir** - even continuations of previous work
+- **NO phase proceeds without its document written first**
 
 ---
 
-## PHASE 0: CLASSIFY
+## PHASE 0: CLASSIFY (MANDATORY)
 
-Analyse user input to determine:
+**GATE: Cannot proceed to Phase 1 until manifest.md exists**
 
-1. **Type**: `feature` or `fix`
-   - `feature`: New functionality, enhancements, additions
-   - `fix`: Bug repairs, corrections, patches, resolving issues
-
-2. **Slug**: kebab-case name from request (e.g., "Add JWT auth" → `jwt-auth`, "Fix login crash" → `login-crash`)
-
-3. **Date**: Current date as `YYYYMMDD`
-
+1. **Type**: `feature` | `fix`
+2. **Slug**: kebab-case from request
+3. **Date**: `YYYYMMDD` (today)
 4. **Workdir**: `./docs/{type}/{date}-{slug}/`
-
-Create workdir:
 ```bash
 mkdir -p ./docs/{type}/{date}-{slug}/
 ```
 
-Create `{workdir}/manifest.md`:
+**WRITE `{workdir}/manifest.md`:**
 ```markdown
 # {Type}: {Title}
-- Slug: {slug}
-- Type: {feature|fix}
-- Date: {YYYY-MM-DD}
-- Created: {timestamp}
-- Request: "{original user input}"
+- Slug: {slug} | Type: {type} | Date: {YYYY-MM-DD}
+- Request: "{original input}"
+- Prior: {link to previous workdir if continuation, else "none"}
 ```
 
 ---
 
 ## PHASE 1: PLAN (opus)
 
-Create `{workdir}/plan.md`:
+**GATE: Cannot proceed to Phase 2 until plan.md + all task-N.md exist**
+
+**WRITE `{workdir}/plan.md`:**
 ```markdown
 # Plan: {task}
+Type: {feature|fix} | Workdir: {workdir}
 
-## Classification
-- Type: {feature|fix}
-- Workdir: {workdir}
-
-## Analysis
-{deps, approach, risks}
-
-## Groups
-| Task | Desc | Depends | Critical | Complexity | Model |
-|------|------|---------|----------|------------|-------|
-| 1 | ... | none | no | low | sonnet |
-| 2 | ... | 1 | yes:security | high | opus |
+## Tasks
+| # | Desc | Depends | Critical | Model |
+|---|------|---------|----------|-------|
+| 1 | ... | - | no | sonnet |
 
 ## Order
-Sequential: [1] → Concurrent: [2,3,4] → Sequential: [5] → Review
+[1] → [2,3,4] → [5]
 ```
 
-Create `{workdir}/task-{N}.md` for each:
+**WRITE `{workdir}/task-{N}.md`** for each task:
 ```markdown
 # Task {N}: {desc}
-- Group: {N} | Mode: sequential|concurrent | Model: sonnet|opus
-- Skill: @{skill} | Critical: no|yes:{trigger} | Depends: {ids}
-- Sandbox: /tmp/3agents/task-{N}/ | Source: {root}/ | Output: {workdir}/
+Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus}
 
-## Files
-- `{path}` - {action}
+## Do
+- {action}
 
-## Requirements
-{what to do}
-
-## Acceptance
+## Accept
 - [ ] {criterion}
-- [ ] Compiles
-- [ ] Tests pass
 ```
 
 ---
 
-## PHASE 2: EXECUTE (sonnet default, opus if complex)
+## PHASE 2: EXECUTE (sonnet/opus per task)
+
+**GATE: Each task writes step-N.md IMMEDIATELY after completion**
 
 For each task in dependency order:
-1. Read `task-{N}.md`
-2. `mkdir -p /tmp/3agents/task-{N}/` + copy files
-3. Execute in sandbox
-4. `go build -o /tmp/test ./...`
-5. Copy changed files back to source
-6. Write `step-{N}.md` + update `progress.md`
+1. Read task-{N}.md
+2. Work in `/tmp/3agents/task-{N}/`
+3. Execute + verify compiles
+4. Copy results to source
+5. **WRITE step-N.md BEFORE next task**
 
-Create `{workdir}/step-{N}.md`:
+**WRITE `{workdir}/step-{N}.md`:**
 ```markdown
 # Step {N}: {desc}
-- Task: task-{N}.md | Group: {N} | Model: {used}
+Model: {used} | Status: ✅|⚠️|❌
 
-## Actions
-1. {did}
+## Done
+- {action}: {outcome}
 
-## Files
-- `{path}` - {change}
-
-## Decisions
-- {choice}: {why}
+## Files Changed
+- `{path}` - {what}
 
 ## Verify
-Compile: ✅|❌ | Tests: ✅|❌|⚙️
-
-## Status: ✅ COMPLETE | ⚠️ PARTIAL | ❌ BLOCKED
+Build: ✅|❌ | Tests: ✅|❌|⏭️
 ```
 
-Update `{workdir}/progress.md`:
+**UPDATE `{workdir}/progress.md`** after each step:
 ```markdown
 # Progress
-| Task | Status | Notes |
-|------|--------|-------|
-| 1 | ✅ | |
-| 2 | 🔄 | in progress |
-
-Deps: [x] 1→[2,3,4] [ ] 4→[5]
+| Task | Status | Note |
+|------|--------|------|
+| 1 | ✅ | done |
+| 2 | 🔄 | wip |
 ```
 
 ---
@@ -144,98 +118,88 @@ Deps: [x] 1→[2,3,4] [ ] 4→[5]
 go build -o /tmp/final ./...
 go test ./test/api/... ./test/ui/...
 ```
-Update progress.md with results.
+
+Update progress.md with final build/test status.
 
 ---
 
-## PHASE 4: REVIEW (opus)
+## PHASE 4: REVIEW (opus) — if any critical tasks
 
-Run if any `Critical: yes:{trigger}` in plan.
-
-Create `{workdir}/final-review.md`:
+**WRITE `{workdir}/review.md`:**
 ```markdown
-# Review: {task}
-Triggers: {list} | Files: {N}
+# Review
+Triggers: {list}
 
-## Security
-Critical: {issues|None} | Warnings: {list}
+## Issues
+- {issue or "None"}
 
-## Architecture
-Breaking: {assessment} | Migration: {steps}
-
-## Verdict
-**Status:** ✅ APPROVED | ⚠️ APPROVED_WITH_NOTES | ❌ CHANGES_REQUIRED
-Actions: 1. {item}
+## Verdict: ✅ APPROVED | ⚠️ NOTES | ❌ CHANGES_REQUIRED
+- {action item}
 ```
 
 ---
 
-## PHASE 5: SUMMARY (sonnet)
+## PHASE 5: SUMMARY
 
-Create `{workdir}/summary.md`:
+**GATE: Cannot complete until summary.md exists**
+
+**WRITE `{workdir}/summary.md`:**
 ```markdown
 # Complete: {task}
+Type: {feature|fix} | Tasks: {N} | Files: {N}
 
-## Classification
-- Type: {feature|fix}
-- Location: {workdir}
+## Result
+{1-2 sentences}
 
-{one paragraph overview}
-
-## Stats
-Tasks: {N} | Files: {N} | Duration: {time}
-Models: Planning=opus, Workers={N}×sonnet/{N}×opus, Review=opus
-
-## Tasks
-- Task 1: {summary}
-- Task 2-4 (concurrent): {summaries}
-
-## Review: {verdict}
-Actions: {list}
+## Review: {verdict or "N/A"}
 
 ## Verify
-go build ✅ | go test ✅ {N} passed
+Build: ✅ | Tests: ✅ ({N} passed)
 ```
 
 Cleanup: `rm -rf /tmp/3agents/`
 
 ---
 
-## STOP
-**Stop:** User decision | `CHANGES_REQUIRED` | Ambiguous requirements
-**Continue:** Next step | Compile/test errors (fix or document) | `APPROVED_WITH_NOTES`
+## ENFORCEMENT
+```
+PHASE 0 → manifest.md EXISTS? → PHASE 1
+PHASE 1 → plan.md + task-*.md EXIST? → PHASE 2  
+PHASE 2 → step-N.md after EACH task → progress.md updated
+PHASE 3 → progress.md updated with results
+PHASE 4 → review.md if critical
+PHASE 5 → summary.md EXISTS? → DONE
+```
+
+**HARD STOPS:**
+- User decision needed
+- `CHANGES_REQUIRED` verdict
+- Ambiguous requirements
+
+**NOT STOPS (fix and continue):**
+- Compile errors
+- Test failures
+- `APPROVED_WITH_NOTES`
 
 ---
 
-## CHECKLIST
-- [ ] CLASSIFY: Determine feature/fix + slug + date → create workdir
-- [ ] Create manifest.md
-- [ ] PLAN: plan.md + task-{N}.md files
-- [ ] EXECUTE: step-{N}.md + progress.md per task
-- [ ] VALIDATE: full build + test
-- [ ] REVIEW: final-review.md (if critical)
-- [ ] SUMMARY: summary.md + cleanup
+## CHECKLIST (verify before declaring done)
+- [ ] manifest.md created
+- [ ] plan.md created
+- [ ] task-{N}.md for each task
+- [ ] step-{N}.md for each completed task
+- [ ] progress.md current
+- [ ] review.md (if critical)
+- [ ] summary.md created
+- [ ] /tmp/3agents/ cleaned
 
-**Do not stop until summary.md exists.**
+**Run stops when summary.md is written. Not before.**
+
+---
 
 ## INVOKE
 ```
-/3agents Add JWT authentication          → ./docs/feature/20251129-jwt-authentication/
-/3agents Fix the login page crash        → ./docs/fix/20251129-login-page-crash/
-/3agents docs/feature/20251129-jwt-auth/plan.md   → Resume existing plan
+/3agents Add JWT authentication          → ./docs/feature/20251201-jwt-authentication/
+/3agents Fix the login page crash        → ./docs/fix/20251201-login-page-crash/
+/3agents Continue jwt-auth work          → ./docs/feature/20251201-jwt-auth-continued/
 ```
-```
-
-Changes:
-
-1. **Date format `YYYYMMDD`** — Added to PHASE 0 classification
-2. **Workdir pattern** — Now `./docs/{type}/{date}-{slug}/`
-3. **manifest.md** — Includes both the compact `YYYYMMDD` in the path and human-readable `YYYY-MM-DD` in the metadata
-4. **Invoke examples** — Updated to show the date-prefixed paths
-
-This gives you nice chronological sorting when listing directories, e.g.:
-```
-./docs/feature/
-├── 20251125-user-profiles/
-├── 20251127-api-rate-limiting/
-└── 20251129-jwt-authentication/

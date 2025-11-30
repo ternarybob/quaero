@@ -1082,15 +1082,16 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 
 		// Create WebSocket message for step progress
 		wsPayload := map[string]interface{}{
-			"job_id":       getString(payload, "job_id"),
-			"job_name":     getString(payload, "job_name"),
-			"step_index":   getInt(payload, "step_index"),
-			"step_name":    getString(payload, "step_name"),
-			"step_type":    getString(payload, "step_type"),
-			"current_step": getInt(payload, "current_step"),
-			"total_steps":  getInt(payload, "total_steps"),
-			"step_status":  getString(payload, "step_status"),
-			"timestamp":    getString(payload, "timestamp"),
+			"job_id":           getString(payload, "job_id"),
+			"job_name":         getString(payload, "job_name"),
+			"step_index":       getInt(payload, "step_index"),
+			"step_name":        getString(payload, "step_name"),
+			"step_type":        getString(payload, "step_type"),
+			"current_step":     getInt(payload, "current_step"),
+			"total_steps":      getInt(payload, "total_steps"),
+			"step_status":      getString(payload, "step_status"),
+			"step_child_count": getInt(payload, "step_child_count"),
+			"timestamp":        getString(payload, "timestamp"),
 		}
 
 		// Broadcast to all clients

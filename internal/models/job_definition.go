@@ -20,11 +20,12 @@ func init() {
 	// Register types for gob encoding (required for BadgerHold storage of interface{} fields)
 	gob.Register(map[string]interface{}{})
 	gob.Register([]interface{}{})
-	gob.Register(map[string]float64{}) // Used by keyword extractor agent for keyword scores
-	gob.Register(map[string]string{})  // Used in document metadata (open_graph, meta, etc.)
-	gob.Register([]string{})           // Used by agents for keyword lists
-	gob.Register(time.Time{})          // Used in document timestamps and job metadata
-	gob.Register(CrawlConfig{})        // Used in crawler job configs
+	gob.Register([]map[string]interface{}{}) // Used for step_definitions in job metadata
+	gob.Register(map[string]float64{})       // Used by keyword extractor agent for keyword scores
+	gob.Register(map[string]string{})        // Used in document metadata (open_graph, meta, etc.)
+	gob.Register([]string{})                 // Used by agents for keyword lists
+	gob.Register(time.Time{})                // Used in document timestamps and job metadata
+	gob.Register(CrawlConfig{})              // Used in crawler job configs
 }
 
 // JobDefinitionType represents the type of job definition
@@ -71,6 +72,22 @@ const (
 )
 
 // JobStep represents a single execution step in a job definition
+//
+// Step Config Keys (common across all step types):
+//   - filter_tags ([]string): Document filter by tags. Only process documents that have ALL specified tags.
+//     If not provided, the step is executed against all documents. This enables multi-step pipelines
+//     where each step processes different document subsets.
+//   - filter_created_after (string): RFC3339 timestamp. Only process documents created after this time.
+//   - filter_updated_after (string): RFC3339 timestamp. Only process documents updated after this time.
+//   - filter_limit (int): Maximum number of documents to process. Useful for testing or batching.
+//
+// Example TOML:
+//
+//	[step.extract_keywords]
+//	type = "agent"
+//	agent_type = "keyword_extractor"
+//	filter_tags = ["technical", "needs-processing"]
+//	filter_limit = 100
 type JobStep struct {
 	Name        string                 `json:"name"`                  // Step identifier/name
 	Type        WorkerType             `json:"type"`                  // Worker type for routing to appropriate worker (required)

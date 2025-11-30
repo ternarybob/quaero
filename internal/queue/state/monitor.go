@@ -506,6 +506,22 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 				Msg("Incremented document count for parent job")
 		}
 
+		// Also increment the CHILD job's document_count so it can display its own count
+		// This allows the UI to show how many documents each child job created
+		if jobID != "" && jobID != parentJobID {
+			if err := m.jobMgr.IncrementDocumentCount(ctx, jobID); err != nil {
+				m.logger.Debug().Err(err).
+					Str("job_id", jobID).
+					Str("document_id", documentID).
+					Msg("Failed to increment document count for child job")
+			} else {
+				m.logger.Trace().
+					Str("job_id", jobID).
+					Str("document_id", documentID).
+					Msg("Incremented document count for child job")
+			}
+		}
+
 		return nil
 	}); err != nil {
 		m.logger.Error().Err(err).Msg("Failed to subscribe to EventDocumentSaved")
@@ -513,7 +529,11 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 	}
 
 	// Subscribe to document_updated events for agent jobs (e.g. keyword extraction)
-	// We only increment count for agent jobs here because crawler jobs use document_saved
+	// NOTE: We do NOT increment the parent job's document_count for updates.
+	// Document updates modify existing documents, they don't create new ones.
+	// The document_count should reflect UNIQUE documents, not total operations.
+	// Example: If Step 1 creates 20 docs and Step 2 updates those same 20 docs,
+	// the count should remain 20 (unique documents), not 40 (operations).
 	if err := m.eventService.Subscribe(interfaces.EventDocumentUpdated, func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
@@ -526,30 +546,13 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		documentID := getStringFromPayload(payload, "document_id")
 		jobID := getStringFromPayload(payload, "job_id")
 
-		if parentJobID == "" {
-			m.logger.Debug().
-				Str("job_id", jobID).
-				Str("document_id", documentID).
-				Msg("EventDocumentUpdated received but no parent_job_id, skipping increment")
-			return nil
-		}
-
-		// Increment document count synchronously to ensure count is updated before
-		// PublishSync returns. This is critical for agent jobs where the worker uses
-		// PublishSync and expects the count to be incremented before job completion.
-		if err := m.jobMgr.IncrementDocumentCount(ctx, parentJobID); err != nil {
-			m.logger.Error().Err(err).
-				Str("parent_job_id", parentJobID).
-				Str("document_id", documentID).
-				Str("job_id", jobID).
-				Msg("Failed to increment document count for agent job")
-		} else {
-			m.logger.Debug().
-				Str("parent_job_id", parentJobID).
-				Str("document_id", documentID).
-				Str("job_id", jobID).
-				Msg("Incremented document count for agent job (EventDocumentUpdated)")
-		}
+		// Log the document update for debugging, but don't increment count
+		// Document updates don't create new documents, so count stays the same
+		m.logger.Debug().
+			Str("parent_job_id", parentJobID).
+			Str("document_id", documentID).
+			Str("job_id", jobID).
+			Msg("Document updated (count not incremented - updates don't create new documents)")
 
 		return nil
 	}); err != nil {

@@ -342,23 +342,42 @@ func setupTestEnvironmentInternal(testName string, includeEnv bool, customConfig
 		EnvVars:        make(map[string]string), // Initialize empty map
 	}
 
-	// Load environment variables from .env.test file (if includeEnv is true)
+	// Load environment variables from .env files (if includeEnv is true)
+	// Priority: root .env < test/config/.env.test (later files override earlier)
+	// Both files are gitignored and should contain API keys locally
 	if includeEnv {
-		envFilePath := "../config/.env.test"
-		envVars, err := loadEnvFile(envFilePath)
-		if err != nil {
-			logFile.Close()
-			testLogFile.Close()
-			return nil, fmt.Errorf("failed to load .env file: %w", err)
-		}
-		env.EnvVars = envVars
+		env.EnvVars = make(map[string]string)
 
-		// Log loaded environment variables (keys only, not values for security)
-		if len(envVars) > 0 {
-			fmt.Fprintf(logFile, "Loaded %d environment variable(s) from %s\n", len(envVars), envFilePath)
-			for key := range envVars {
+		// First load from root .env file
+		rootEnvPath := "../../.env"
+		if rootEnvVars, err := loadEnvFile(rootEnvPath); err == nil && len(rootEnvVars) > 0 {
+			for k, v := range rootEnvVars {
+				if v != "" {
+					env.EnvVars[k] = v
+				}
+			}
+			fmt.Fprintf(logFile, "Loaded %d environment variable(s) from %s\n", len(rootEnvVars), rootEnvPath)
+			for key := range rootEnvVars {
 				fmt.Fprintf(logFile, "  - %s\n", key)
 			}
+		}
+
+		// Then load from test/config/.env (can override root .env)
+		testEnvPath := "../config/.env"
+		if testEnvVars, err := loadEnvFile(testEnvPath); err == nil && len(testEnvVars) > 0 {
+			for k, v := range testEnvVars {
+				if v != "" {
+					env.EnvVars[k] = v
+				}
+			}
+			fmt.Fprintf(logFile, "Loaded %d environment variable(s) from %s\n", len(testEnvVars), testEnvPath)
+			for key := range testEnvVars {
+				fmt.Fprintf(logFile, "  - %s\n", key)
+			}
+		}
+
+		if len(env.EnvVars) == 0 {
+			fmt.Fprintf(logFile, "No API keys loaded - tests requiring API access may fail\n")
 		}
 	} else {
 		fmt.Fprintf(logFile, "Environment variable loading disabled (includeEnv=false)\n")
