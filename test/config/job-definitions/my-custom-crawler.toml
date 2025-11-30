@@ -5,18 +5,19 @@ id = "my-custom-crawler"
 name = "My Custom Crawler"
 description = "User-created custom crawler that should persist across builds"
 
-start_urls = ["https://mycustomsite.com"]
-
 schedule = ""
 timeout = "1h"
 enabled = true
 auto_start = false
 
+[step.crawl]
+type = "crawler"
+description = "Crawl custom site and extract content"
+on_error = "fail"
+start_urls = ["https://mycustomsite.com"]
 include_patterns = ["custom"]
 exclude_patterns = []
-
 max_depth = 3
 max_pages = 200
 concurrency = 10
 follow_links = true
-

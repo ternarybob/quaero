@@ -1683,6 +1683,11 @@
                 pendingUpdatesMaxSize: 1000, // Maximum size of pending updates queue
                 lastUpdateTime: null, // Timestamp of last successful update
 
+                // Throttled rendering state
+                _renderPending: false,
+                _renderTimeout: null,
+                _renderThrottleMs: 100, // Throttle renders to max 10/second during rapid updates
+
                 init() {
                     // Add event listeners for external commands
                     window.addEventListener('jobList:load', () => this.loadJobs());
@@ -1942,6 +1947,22 @@
                     // Also update pagination
                     const totalPages = Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
                     window.renderPagination(totalPages, this.currentPage);
+                },
+
+                // Throttled version of renderJobs to prevent UI thrashing during rapid updates
+                throttledRenderJobs() {
+                    if (this._renderPending) return;
+                    
+                    this._renderPending = true;
+                    if (this._renderTimeout) {
+                        clearTimeout(this._renderTimeout);
+                    }
+                    
+                    this._renderTimeout = setTimeout(() => {
+                        this._renderPending = false;
+                        this._renderTimeout = null;
+                        this.renderJobs();
+                    }, this._renderThrottleMs);
                 },
 
 
@@ -2593,8 +2614,8 @@
                         this.filteredJobs.length = this.pageSize;
                     }
 
-                    // Re-render jobs
-                    this.renderJobs();
+                    // Re-render jobs (throttled to prevent UI thrashing during rapid updates)
+                    this.throttledRenderJobs();
                 },
 
                 // Reload job statistics from backend API (triggered by WebSocket updates)
@@ -2666,8 +2687,8 @@
                         job.progress.percentage = progress.overall_progress * 100;
                     }
 
-                    // Re-render to show updated progress
-                    this.renderJobs();
+                    // Re-render to show updated progress (throttled)
+                    this.throttledRenderJobs();
                 },
 
                 // Debounced parent refresh to reduce load under high child job churn

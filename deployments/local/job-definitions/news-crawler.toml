@@ -3,9 +3,6 @@
 
 id = "news-crawler"
 name = "News Crawler"
-type = "crawler"
-job_type = "user"
-source_type = "web"
 description = "Crawler job that crawls a news website and filters for specific content"
 schedule = ""
 timeout = "30m"

@@ -4,9 +4,6 @@
 
 id = "github-repo-collector"
 name = "GitHub Repository Collector"
-type = "fetch"
-job_type = "user"
-source_type = "github"
 description = "Fetches repository content from specified branches and imports as searchable documents"
 tags = ["github", "source-code", "repository"]
 schedule = ""

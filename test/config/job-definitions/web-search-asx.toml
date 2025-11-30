@@ -4,8 +4,6 @@
 
 id = "web-search-asx-gnp"
 name = "Web Search: ASX:GNP Company Info"
-type = "web_search"
-job_type = "user"
 description = "Search for latest information on ASX listed company ASX:GNP"
 tags = ["web-search", "asx", "stocks", "gnp"]
 schedule = ""

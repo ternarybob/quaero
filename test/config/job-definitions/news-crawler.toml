@@ -4,12 +4,7 @@
 
 id = "news-crawler"
 name = "News Crawler"
-type = "crawler"
-job_type = "user"
 description = "Crawler job that crawls a news website and filters for specific content"
-
-# Initial URLs to start crawling from
-start_urls = ["https://www.abc.net.au/news"]
 
 schedule = ""
 
@@ -22,12 +17,16 @@ enabled = true
 # Whether to start automatically on service startup
 auto_start = false
 
+[step.crawl_news]
+type = "crawler"
+description = "Crawl ABC News and extract article content"
+on_error = "fail"
+# Initial URLs to start crawling from
+start_urls = ["https://www.abc.net.au/news"]
 # URL patterns to include (regex patterns)
 include_patterns = ["abc\\.net\\.au/news"]
-
 # URL patterns to exclude (regex patterns)
 exclude_patterns = ["/video/", "/audio/", "/live-blog/"]
-
 # Crawler behavior
 max_depth = 3       # Maximum depth to follow links
 max_pages = 50      # Maximum number of pages to crawl

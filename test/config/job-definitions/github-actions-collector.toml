@@ -4,9 +4,6 @@
 
 id = "github-actions-collector"
 name = "GitHub Actions Log Collector"
-type = "fetch"
-job_type = "user"
-source_type = "github"
 description = "Fetches GitHub Actions workflow logs with metadata including timestamps and workflow info"
 tags = ["github", "actions", "ci-cd", "logs"]
 schedule = ""

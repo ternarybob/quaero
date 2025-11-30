@@ -3,8 +3,6 @@
 
 id = "places-nearby-restaurants"
 name = "Nearby Restaurants (Wheelers Hill)"
-type = "places"
-job_type = "user"
 description = "Search for restaurants near Wheelers Hill using Google Places Nearby Search API"
 schedule = ""
 timeout = "5m"
