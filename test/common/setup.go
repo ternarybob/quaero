@@ -1076,7 +1076,7 @@ func (env *TestEnvironment) WaitForWebSocketConnection(ctx context.Context, time
 	return nil
 }
 
-// Cleanup stops the service and closes resources
+// Cleanup stops the service, kills browser processes, and closes resources
 func (env *TestEnvironment) Cleanup() {
 	// Write test completion marker
 	if env.TestLog != nil {
@@ -1088,17 +1088,51 @@ func (env *TestEnvironment) Cleanup() {
 		env.outputCapture.Stop()
 	}
 
+	// Stop the service first
 	if env.Cmd != nil && env.Cmd.Process != nil {
 		fmt.Fprintf(env.LogFile, "Stopping service (PID: %d)...\n", env.Cmd.Process.Pid)
 		env.Cmd.Process.Kill()
 		env.Cmd.Wait()
 		fmt.Fprintf(env.LogFile, "Service stopped\n")
 	}
+
+	// Force kill any lingering Chrome processes spawned by tests (Windows specific)
+	// This ensures no browser processes leak memory between test runs
+	if runtime.GOOS == "windows" {
+		env.killLingeringProcesses()
+	}
+
 	if env.LogFile != nil {
 		env.LogFile.Close()
 	}
 	if env.TestLog != nil {
 		env.TestLog.Close()
+	}
+}
+
+// killLingeringProcesses forcefully terminates only test-spawned service processes
+// NOTE: We intentionally do NOT kill chrome.exe as this would affect the user's browser.
+// chromedp.Cancel() handles browser cleanup; this only handles the quaero service.
+func (env *TestEnvironment) killLingeringProcesses() {
+	// Only kill the test service, not Chrome (user may have their own browser open)
+	// chromedp handles its own browser cleanup via chromedp.Cancel()
+	processNames := []string{"quaero.exe"}
+
+	for _, procName := range processNames {
+		// Use taskkill /F to forcefully kill processes
+		// /F = Force terminate, /IM = Image name
+		cmd := exec.Command("taskkill", "/F", "/IM", procName)
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			if env.LogFile != nil {
+				fmt.Fprintf(env.LogFile, "Killed lingering process: %s\n", procName)
+			}
+		} else if !strings.Contains(string(output), "not found") && !strings.Contains(string(output), "No tasks") {
+			// Only log if it's not a "process not found" error
+			if env.LogFile != nil {
+				fmt.Fprintf(env.LogFile, "Note: Could not kill %s (may not be running): %v\n", procName, err)
+			}
+		}
 	}
 }
 

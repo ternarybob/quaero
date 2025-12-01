@@ -15,6 +15,7 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // PlacesWorker handles Google Places API search operations.
@@ -25,6 +26,7 @@ type PlacesWorker struct {
 	eventService    interfaces.EventService
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
+	jobMgr          *queue.Manager // For unified job logging
 }
 
 // Compile-time assertion: PlacesWorker implements DefinitionWorker interface
@@ -37,6 +39,7 @@ func NewPlacesWorker(
 	eventService interfaces.EventService,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
+	jobMgr *queue.Manager,
 ) *PlacesWorker {
 	return &PlacesWorker{
 		placesService:   placesService,
@@ -44,6 +47,7 @@ func NewPlacesWorker(
 		eventService:    eventService,
 		kvStorage:       kvStorage,
 		logger:          logger,
+		jobMgr:          jobMgr,
 	}
 }
 
@@ -188,9 +192,19 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Int("max_results", req.MaxResults).
 		Msg("Orchestrating places search")
 
+	// Log step start for UI
+	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+		fmt.Sprintf("Starting places search: %s", req.SearchQuery),
+		map[string]interface{}{
+			"search_type": req.SearchType,
+			"max_results": req.MaxResults,
+		})
+
 	// Execute search
 	result, err := w.placesService.SearchPlaces(ctx, parentJobID, req)
 	if err != nil {
+		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+			fmt.Sprintf("Places search failed: %v", err), nil)
 		return "", fmt.Errorf("failed to search places: %w", err)
 	}
 
@@ -270,6 +284,14 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Int("documents_created", savedCount).
 		Int("total_results", result.TotalResults).
 		Msg("Places search results saved as individual documents")
+
+	// Log completion for UI
+	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+		fmt.Sprintf("Places search completed: created %d documents", savedCount),
+		map[string]interface{}{
+			"documents_created": savedCount,
+			"total_results":     result.TotalResults,
+		})
 
 	// Return parent job ID as placeholder since this is a synchronous operation
 	return parentJobID, nil
@@ -401,4 +423,22 @@ func (w *PlacesWorker) createPlaceDocuments(result *models.PlacesSearchResult, j
 	}
 
 	return docs, nil
+}
+
+// logJobEvent logs a job event for real-time UI display using the unified logging system
+func (w *PlacesWorker) logJobEvent(ctx context.Context, parentJobID, stepName, level, message string, metadata map[string]interface{}) {
+	if w.jobMgr == nil {
+		return
+	}
+
+	opts := &queue.JobLogOptions{
+		ParentJobID: parentJobID,
+		StepName:    stepName,
+		SourceType:  "places_search",
+		Metadata:    metadata,
+	}
+
+	if err := w.jobMgr.AddJobLogWithEvent(ctx, parentJobID, level, message, opts); err != nil {
+		w.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to log job event")
+	}
 }

@@ -124,6 +124,9 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 			}
 			steps = append(steps, step)
 		}
+
+		// Sort steps by dependencies using topological sort
+		steps = sortStepsByDependencies(steps)
 	} else {
 		// Crawler shorthand: Create default crawl step from flat config fields
 		config := make(map[string]interface{})
@@ -345,4 +348,117 @@ func (s *Service) ValidateAPIKeys(jobDef *models.JobDefinition) {
 			}
 		}
 	}
+}
+
+// sortStepsByDependencies sorts steps using topological sort based on the depends field
+// Steps with no dependencies come first, followed by steps in dependency order
+func sortStepsByDependencies(steps []models.JobStep) []models.JobStep {
+	if len(steps) <= 1 {
+		return steps
+	}
+
+	// Build name to step map and adjacency list
+	nameToStep := make(map[string]models.JobStep)
+	inDegree := make(map[string]int)
+
+	for _, step := range steps {
+		nameToStep[step.Name] = step
+		inDegree[step.Name] = 0
+	}
+
+	// Calculate in-degrees based on dependencies
+	for _, step := range steps {
+		if step.Depends != "" {
+			// Split comma-separated dependencies
+			deps := splitAndTrimDeps(step.Depends)
+			for _, dep := range deps {
+				if _, exists := nameToStep[dep]; exists {
+					inDegree[step.Name]++
+				}
+			}
+		}
+	}
+
+	// Kahn's algorithm for topological sort
+	var queue []string
+	for name, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, name)
+		}
+	}
+
+	var sorted []models.JobStep
+	for len(queue) > 0 {
+		// Pop first element
+		name := queue[0]
+		queue = queue[1:]
+
+		step := nameToStep[name]
+		sorted = append(sorted, step)
+
+		// Reduce in-degree for dependent steps
+		for _, s := range steps {
+			if s.Depends != "" {
+				deps := splitAndTrimDeps(s.Depends)
+				for _, dep := range deps {
+					if dep == name {
+						inDegree[s.Name]--
+						if inDegree[s.Name] == 0 {
+							queue = append(queue, s.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If we couldn't sort all steps (cycle detected), return original order
+	if len(sorted) != len(steps) {
+		return steps
+	}
+
+	return sorted
+}
+
+// splitAndTrimDeps splits a comma-separated dependency string and trims whitespace
+func splitAndTrimDeps(depends string) []string {
+	if depends == "" {
+		return nil
+	}
+	parts := make([]string, 0)
+	for _, p := range splitString(depends, ",") {
+		trimmed := trimWhitespace(p)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+// splitString splits a string by a separator
+func splitString(s, sep string) []string {
+	var result []string
+	start := 0
+	for i := 0; i <= len(s)-len(sep); i++ {
+		if s[i:i+len(sep)] == sep {
+			result = append(result, s[start:i])
+			start = i + len(sep)
+			i += len(sep) - 1
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+// trimWhitespace trims leading and trailing whitespace from a string
+func trimWhitespace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }

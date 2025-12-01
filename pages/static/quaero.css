@@ -1895,3 +1895,120 @@ body.modal-open {
 .markdown-tags .chip {
     margin: 0;
 }
+
+/* 17. STEP EVENTS PANEL STYLES
+   ========================================================================== */
+
+/* Step row label styles */
+.step-label-sm {
+    font-size: 0.7rem;
+}
+
+/* Step name header */
+.step-name {
+    font-weight: 500;
+}
+
+.step-status-label {
+    font-size: 0.7rem;
+    text-transform: capitalize;
+}
+
+/* Step description text */
+.step-description {
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: #666;
+}
+
+/* Step progress text */
+.step-progress-text {
+    font-size: 0.75rem;
+    color: #666;
+}
+
+/* Step events panel container */
+.step-events-panel {
+    margin-top: 0.5rem;
+}
+
+/* Step events toggle button */
+.step-events-btn {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+.step-events-btn i.fa-stream {
+    margin-left: 0.25rem;
+}
+
+/* Step logs container */
+.step-logs-container {
+    margin-top: 0.25rem;
+    margin-left: 1.5rem;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Step logs empty state */
+.step-logs-empty {
+    color: #888;
+    font-size: 0.8rem;
+    padding: 0.25rem 0;
+}
+
+/* Step log entry */
+.step-log-entry {
+    padding: 0.15rem 0;
+    font-size: 0.8rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    border-bottom: 1px solid #eee;
+}
+
+.step-log-entry:last-child {
+    border-bottom: none;
+}
+
+/* Step log timestamp */
+.step-log-time {
+    color: #888;
+    white-space: nowrap;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.75rem;
+}
+
+/* Step log level icon container */
+.step-log-level {
+    white-space: nowrap;
+}
+
+/* Step log source type label */
+.step-log-source {
+    font-size: 0.65rem;
+}
+
+/* Step log message */
+.step-log-message {
+    color: #333;
+    word-break: break-word;
+}
+
+/* Scrollbar styling for step logs container */
+.step-logs-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.step-logs-container::-webkit-scrollbar-track {
+    background: var(--page-bg);
+}
+
+.step-logs-container::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.step-logs-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
+}

@@ -400,6 +400,7 @@ func (a *App) initServices() error {
 		a.StorageManager.JobLogStorage(),
 		queueMgr,
 		a.EventService,
+		a.Logger,
 	)
 	a.JobManager = jobMgr
 	a.Logger.Debug().Msg("Job manager initialized")
@@ -608,6 +609,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
+		jobMgr,
 	)
 	jobMgr.RegisterWorker(placesWorker) // Register with JobManager for step routing
 	a.Logger.Debug().Str("step_type", placesWorker.GetType().String()).Msg("Places search worker registered")
@@ -618,6 +620,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.StorageManager.KeyValueStorage(),
 		a.Logger,
+		jobMgr,
 	)
 	jobMgr.RegisterWorker(webSearchWorker) // Register with JobManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")

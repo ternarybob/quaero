@@ -15,6 +15,7 @@ import (
 	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/queue"
 	"google.golang.org/genai"
 )
 
@@ -25,6 +26,7 @@ type WebSearchWorker struct {
 	eventService    interfaces.EventService
 	kvStorage       interfaces.KeyValueStorage
 	logger          arbor.ILogger
+	jobMgr          *queue.Manager // For unified job logging
 }
 
 // Compile-time assertion: WebSearchWorker implements DefinitionWorker interface
@@ -56,12 +58,14 @@ func NewWebSearchWorker(
 	eventService interfaces.EventService,
 	kvStorage interfaces.KeyValueStorage,
 	logger arbor.ILogger,
+	jobMgr *queue.Manager,
 ) *WebSearchWorker {
 	return &WebSearchWorker{
 		documentStorage: documentStorage,
 		eventService:    eventService,
 		kvStorage:       kvStorage,
 		logger:          logger,
+		jobMgr:          jobMgr,
 	}
 }
 
@@ -150,12 +154,22 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("parent_job_id", parentJobID).
 		Msg("Starting web search")
 
+	// Log step start for UI
+	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+		fmt.Sprintf("Starting web search: %s", query),
+		map[string]interface{}{
+			"depth":   depth,
+			"breadth": breadth,
+		})
+
 	// Initialize Gemini client
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
+		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+			fmt.Sprintf("Failed to create Gemini client: %v", err), nil)
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
@@ -163,6 +177,8 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, parentJobID)
 	if err != nil {
 		w.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
+		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+			fmt.Sprintf("Web search failed: %v", err), nil)
 		return "", fmt.Errorf("web search failed: %w", err)
 	}
 
@@ -182,6 +198,15 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("query", query).
 		Int("result_count", results.ResultCount).
 		Msg("Web search completed, document saved")
+
+	// Log completion for UI
+	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+		fmt.Sprintf("Web search completed: %d results, %d sources", results.ResultCount, len(results.Sources)),
+		map[string]interface{}{
+			"document_id":  doc.ID,
+			"result_count": results.ResultCount,
+			"source_count": len(results.Sources),
+		})
 
 	// Publish document saved event for parent job document count tracking
 	if w.eventService != nil && parentJobID != "" {
@@ -483,4 +508,22 @@ func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string
 	}
 
 	return doc, nil
+}
+
+// logJobEvent logs a job event for real-time UI display using the unified logging system
+func (w *WebSearchWorker) logJobEvent(ctx context.Context, parentJobID, stepName, level, message string, metadata map[string]interface{}) {
+	if w.jobMgr == nil {
+		return
+	}
+
+	opts := &queue.JobLogOptions{
+		ParentJobID: parentJobID,
+		StepName:    stepName,
+		SourceType:  "web_search",
+		Metadata:    metadata,
+	}
+
+	if err := w.jobMgr.AddJobLogWithEvent(ctx, parentJobID, level, message, opts); err != nil {
+		w.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to log job event")
+	}
 }

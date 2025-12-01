@@ -222,6 +222,19 @@ const (
 	//   - warning_message: string (warning message to display)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventJobWarning EventType = "job_warning"
+
+	// EventJobLog is published when a job logs an event for real-time UI display.
+	// This is the unified event type for all job types (agent, places, web_search, etc.)
+	// Payload:
+	//   - job_id: string (ID of the job that logged the event)
+	//   - parent_job_id: string (parent job ID - used for aggregation)
+	//   - level: string (log level: debug, info, warn, error)
+	//   - message: string (log message to display)
+	//   - step_name: string (optional - name of the step that generated this log)
+	//   - source_type: string (optional - type of worker: agent, places_search, web_search)
+	//   - metadata: map (optional - additional context data)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobLog EventType = "job_log"
 )
 
 // Event represents a system event

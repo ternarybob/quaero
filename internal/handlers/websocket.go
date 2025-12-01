@@ -1153,6 +1153,73 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		h.StreamCrawlerJobLog(jobID, level, message, metadata)
 		return nil
 	})
+
+	// Subscribe to unified job log events (EventJobLog) for all job types
+	// This is the unified event type for agent, places_search, web_search workers
+	h.eventService.Subscribe(interfaces.EventJobLog, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid job_log event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_log"] {
+			return nil
+		}
+
+		// Create WebSocket message for job log
+		wsPayload := map[string]interface{}{
+			"job_id":        getString(payload, "job_id"),
+			"parent_job_id": getString(payload, "parent_job_id"),
+			"level":         getString(payload, "level"),
+			"message":       getString(payload, "message"),
+			"step_name":     getString(payload, "step_name"),
+			"source_type":   getString(payload, "source_type"),
+			"timestamp":     getString(payload, "timestamp"),
+		}
+
+		// Include metadata if present
+		if metadataRaw, ok := payload["metadata"]; ok {
+			if metadataMap, ok := metadataRaw.(map[string]interface{}); ok {
+				wsPayload["metadata"] = metadataMap
+			}
+		}
+
+		// Broadcast to all clients
+		msg := WSMessage{
+			Type:    "job_log",
+			Payload: wsPayload,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal job log message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to send job log to client")
+			}
+		}
+
+		return nil
+	})
 }
 
 // Helper functions for safe type conversion from map[string]interface{}

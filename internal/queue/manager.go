@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -18,18 +19,20 @@ type Manager struct {
 	jobLogStorage interfaces.JobLogStorage
 	queue         interfaces.QueueManager
 	eventService  interfaces.EventService // Optional: may be nil for testing
+	logger        arbor.ILogger
 
 	// Worker registry for definition worker routing
 	workers   map[models.WorkerType]interfaces.DefinitionWorker
 	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
 }
 
-func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService) *Manager {
+func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService, logger arbor.ILogger) *Manager {
 	return &Manager{
 		jobStorage:    jobStorage,
 		jobLogStorage: jobLogStorage,
 		queue:         queue,
 		eventService:  eventService,
+		logger:        logger,
 		workers:       make(map[models.WorkerType]interfaces.DefinitionWorker),
 	}
 }
@@ -105,6 +108,24 @@ func (m *Manager) CreateJobRecord(ctx context.Context, job *Job) error {
 	}
 
 	config := make(map[string]interface{})
+
+	// Extract metadata from Payload JSON if present (e.g., step_name from child jobs)
+	if job.Payload != "" {
+		var payloadData struct {
+			Metadata map[string]interface{} `json:"metadata"`
+			Config   map[string]interface{} `json:"config"`
+		}
+		if err := json.Unmarshal([]byte(job.Payload), &payloadData); err == nil {
+			// Merge extracted metadata with base metadata
+			for k, v := range payloadData.Metadata {
+				metadata[k] = v
+			}
+			// Merge extracted config
+			for k, v := range payloadData.Config {
+				config[k] = v
+			}
+		}
+	}
 
 	queueJob := &models.QueueJob{
 		ID:        job.ID,
@@ -648,6 +669,100 @@ func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) e
 	return m.jobLogStorage.AppendLog(ctx, jobID, entry)
 }
 
+// JobLogOptions contains optional metadata for job log events
+type JobLogOptions struct {
+	ParentJobID string                 // Parent job ID for aggregation (if different from jobID)
+	StepName    string                 // Name of the step that generated this log
+	SourceType  string                 // Type of worker (agent, places_search, web_search, etc.)
+	Metadata    map[string]interface{} // Additional context data
+}
+
+// AddJobLogWithEvent adds a log entry and publishes an event for real-time UI updates.
+// This is the preferred method for workers to log events that should appear in the UI.
+func (m *Manager) AddJobLogWithEvent(ctx context.Context, jobID, level, message string, opts *JobLogOptions) error {
+	now := time.Now()
+
+	// Store the log entry with optional step metadata
+	entry := models.JobLogEntry{
+		AssociatedJobID: jobID,
+		Timestamp:       now.Format("15:04:05"),
+		FullTimestamp:   now.Format(time.RFC3339),
+		Level:           level,
+		Message:         message,
+	}
+
+	// Add step metadata if provided
+	if opts != nil {
+		if opts.StepName != "" {
+			entry.StepName = opts.StepName
+		}
+		if opts.SourceType != "" {
+			entry.SourceType = opts.SourceType
+		}
+	}
+
+	if err := m.jobLogStorage.AppendLog(ctx, jobID, entry); err != nil {
+		return fmt.Errorf("failed to append log: %w", err)
+	}
+
+	// Also log to parent if different
+	parentJobID := jobID
+	if opts != nil && opts.ParentJobID != "" && opts.ParentJobID != jobID {
+		parentJobID = opts.ParentJobID
+		// Store a copy in parent's log for aggregation
+		parentEntry := models.JobLogEntry{
+			AssociatedJobID: parentJobID,
+			Timestamp:       now.Format("15:04:05"),
+			FullTimestamp:   now.Format(time.RFC3339),
+			Level:           level,
+			Message:         fmt.Sprintf("[%s] %s", jobID[:8], message), // Prefix with child job ID
+			StepName:        opts.StepName,
+			SourceType:      opts.SourceType,
+		}
+		if err := m.jobLogStorage.AppendLog(ctx, parentJobID, parentEntry); err != nil {
+			// Log warning but don't fail - the primary log was stored
+			m.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to append log to parent")
+		}
+	}
+
+	// Publish event for real-time UI updates
+	if m.eventService != nil {
+		payload := map[string]interface{}{
+			"job_id":        jobID,
+			"parent_job_id": parentJobID,
+			"level":         level,
+			"message":       message,
+			"timestamp":     now.Format(time.RFC3339),
+		}
+
+		if opts != nil {
+			if opts.StepName != "" {
+				payload["step_name"] = opts.StepName
+			}
+			if opts.SourceType != "" {
+				payload["source_type"] = opts.SourceType
+			}
+			if opts.Metadata != nil {
+				payload["metadata"] = opts.Metadata
+			}
+		}
+
+		event := interfaces.Event{
+			Type:    interfaces.EventJobLog,
+			Payload: payload,
+		}
+
+		// Publish asynchronously to avoid blocking job execution
+		go func() {
+			if err := m.eventService.Publish(context.Background(), event); err != nil {
+				m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job log event")
+			}
+		}()
+	}
+
+	return nil
+}
+
 // UpdateJobProgress updates job progress
 func (m *Manager) UpdateJobProgress(ctx context.Context, jobID string, current, total int) error {
 	progress := &models.JobProgress{
@@ -913,6 +1028,9 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			}
 		}
 
+		// Get document count BEFORE step execution (for delta calculation)
+		docCountBefore, _ := m.GetDocumentCount(ctx, parentJobID)
+
 		// Update job metadata with current step info (persisted for UI on page reload)
 		stepMetadata := map[string]interface{}{
 			"current_step":        i + 1,
@@ -1022,8 +1140,14 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			}
 		}
 
+		// Get document count AFTER step execution
+		docCountAfter, _ := m.GetDocumentCount(ctx, parentJobID)
+
 		// Calculate children created by this step (delta)
 		stepChildCount := childCountAfter - childCountBefore
+
+		// Calculate documents created by this step (delta)
+		stepDocCount := docCountAfter - docCountBefore
 
 		// Store step statistics for UI
 		stepStats[i] = map[string]interface{}{
@@ -1032,6 +1156,7 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 			"step_type":        step.Type.String(),
 			"child_count":      stepChildCount,
 			"cumulative_count": childCountAfter,
+			"document_count":   stepDocCount,
 		}
 
 		// Update metadata with completed step status and step statistics
