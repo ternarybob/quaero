@@ -1,13 +1,17 @@
 ---
 name: 3agents
-description: Opus plans/reviews, Sonnet executes. Dependency-aware task execution.
+description: Opus plans/reviews, Sonnet implements, Sonnet validates against user intent.
 ---
 
 Execute: $ARGUMENTS
 
 ## CONFIG
 ```yaml
-models: { planner: opus, worker: sonnet, validator: sonnet, reviewer: opus }
+models: 
+  planner: opus      # PHASE 1: breaks down request
+  worker: sonnet     # PHASE 2: implements tasks
+  validator: sonnet  # PHASE 3: checks work matches user request
+  reviewer: opus     # PHASE 4: security/architecture review
 opus_override: [security, authentication, crypto, state-machine, architectural-change]
 critical_triggers: [security, authentication, authorization, payments, data-migration, crypto, api-breaking, database-schema]
 paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents/" }
@@ -40,6 +44,13 @@ mkdir -p ./docs/{type}/{date}-{slug}/
 - Slug: {slug} | Type: {type} | Date: {YYYY-MM-DD}
 - Request: "{original input}"
 - Prior: {link to previous workdir if continuation, else "none"}
+
+## User Intent
+{Restate what user wants in clear terms - this is the validation target}
+
+## Success Criteria
+- [ ] {measurable criterion from user request}
+- [ ] {another criterion}
 ```
 
 ---
@@ -52,6 +63,9 @@ mkdir -p ./docs/{type}/{date}-{slug}/
 ```markdown
 # Plan: {task}
 Type: {feature|fix} | Workdir: {workdir}
+
+## User Intent (from manifest)
+{copy from manifest - validator will check against this}
 
 ## Tasks
 | # | Desc | Depends | Critical | Model |
@@ -67,6 +81,9 @@ Type: {feature|fix} | Workdir: {workdir}
 # Task {N}: {desc}
 Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus}
 
+## Addresses User Intent
+{which part of user request this task fulfills}
+
 ## Do
 - {action}
 
@@ -76,7 +93,7 @@ Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus}
 
 ---
 
-## PHASE 2: EXECUTE (sonnet/opus per task)
+## PHASE 2: IMPLEMENT (sonnet - worker)
 
 **GATE: Each task writes step-N.md IMMEDIATELY after completion**
 
@@ -98,28 +115,71 @@ Model: {used} | Status: ✅|⚠️|❌
 ## Files Changed
 - `{path}` - {what}
 
-## Verify
+## Build Check
 Build: ✅|❌ | Tests: ✅|❌|⏭️
 ```
 
 **UPDATE `{workdir}/progress.md`** after each step:
 ```markdown
 # Progress
-| Task | Status | Note |
-|------|--------|------|
-| 1 | ✅ | done |
-| 2 | 🔄 | wip |
+| Task | Status | Validated | Note |
+|------|--------|-----------|------|
+| 1 | ✅ | ⏳ | done, awaiting validation |
+| 2 | 🔄 | - | wip |
 ```
 
 ---
 
-## PHASE 3: VALIDATE (sonnet)
-```bash
-go build -o /tmp/final ./...
-go test ./test/api/... ./test/ui/...
+## PHASE 3: VALIDATE (sonnet - validator)
+
+**Purpose: Verify implementation matches user's original request**
+
+After all tasks complete (or after each task group):
+
+1. **Re-read manifest.md** - get User Intent + Success Criteria
+2. **Read all step-N.md** - what was actually done
+3. **Compare implementation to intent**
+4. **Run build/tests** for technical validation
+
+**WRITE `{workdir}/validation.md`:**
+```markdown
+# Validation
+Validator: sonnet | Date: {timestamp}
+
+## User Request
+"{original request from manifest}"
+
+## User Intent
+{from manifest}
+
+## Success Criteria Check
+- [ ] {criterion 1}: ✅ MET | ⚠️ PARTIAL | ❌ NOT MET - {evidence}
+- [ ] {criterion 2}: ✅ MET | ⚠️ PARTIAL | ❌ NOT MET - {evidence}
+
+## Implementation Review
+| Task | Intent | Implemented | Match |
+|------|--------|-------------|-------|
+| 1 | {what it should do} | {what it did} | ✅|⚠️|❌ |
+| 2 | ... | ... | ... |
+
+## Gaps
+- {missing functionality}
+- {deviation from request}
+- {scope creep - did more than asked}
+
+## Technical Check
+Build: ✅|❌ | Tests: ✅|❌ ({N} passed, {N} failed)
+
+## Verdict: ✅ MATCHES | ⚠️ PARTIAL | ❌ MISMATCH
+{summary of how well implementation matches user intent}
+
+## Required Fixes (if not ✅)
+1. {fix needed}
 ```
 
-Update progress.md with final build/test status.
+**Update progress.md** - mark tasks as validated.
+
+**If MISMATCH:** Create fix tasks, return to PHASE 2.
 
 ---
 
@@ -130,7 +190,7 @@ Update progress.md with final build/test status.
 # Review
 Triggers: {list}
 
-## Issues
+## Security/Architecture Issues
 - {issue or "None"}
 
 ## Verdict: ✅ APPROVED | ⚠️ NOTES | ❌ CHANGES_REQUIRED
@@ -148,8 +208,14 @@ Triggers: {list}
 # Complete: {task}
 Type: {feature|fix} | Tasks: {N} | Files: {N}
 
+## User Request
+"{original}"
+
 ## Result
-{1-2 sentences}
+{1-2 sentences - what was delivered}
+
+## Validation: {verdict}
+{from validation.md}
 
 ## Review: {verdict or "N/A"}
 
@@ -161,12 +227,53 @@ Cleanup: `rm -rf /tmp/3agents/`
 
 ---
 
+## AGENT ROLES
+```
+┌─────────────────────────────────────────────────────┐
+│ USER REQUEST                                        │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 0: CLASSIFY                                   │
+│ Extract intent + success criteria → manifest.md     │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 1: PLAN (opus)                                │
+│ Break into tasks, each linked to user intent        │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 2: IMPLEMENT (sonnet - worker)                │
+│ Execute tasks, write code, step-N.md for each       │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 3: VALIDATE (sonnet - validator)              │
+│ Compare implementation to user intent               │
+│ Check success criteria met                          │
+│ ❌ MISMATCH → loop back to PHASE 2 with fixes      │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 4: REVIEW (opus) - if critical                │
+│ Security/architecture review                        │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 5: SUMMARY                                    │
+│ Final report with validation status                 │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
 ## ENFORCEMENT
 ```
-PHASE 0 → manifest.md EXISTS? → PHASE 1
+PHASE 0 → manifest.md (with intent + criteria) EXISTS? → PHASE 1
 PHASE 1 → plan.md + task-*.md EXIST? → PHASE 2  
 PHASE 2 → step-N.md after EACH task → progress.md updated
-PHASE 3 → progress.md updated with results
+PHASE 3 → validation.md written → MATCHES? continue : fix loop
 PHASE 4 → review.md if critical
 PHASE 5 → summary.md EXISTS? → DONE
 ```
@@ -175,20 +282,23 @@ PHASE 5 → summary.md EXISTS? → DONE
 - User decision needed
 - `CHANGES_REQUIRED` verdict
 - Ambiguous requirements
+- `MISMATCH` after 2 fix attempts
 
 **NOT STOPS (fix and continue):**
 - Compile errors
 - Test failures
 - `APPROVED_WITH_NOTES`
+- `PARTIAL` match (with notes)
 
 ---
 
 ## CHECKLIST (verify before declaring done)
-- [ ] manifest.md created
-- [ ] plan.md created
+- [ ] manifest.md with intent + success criteria
+- [ ] plan.md with tasks linked to intent
 - [ ] task-{N}.md for each task
 - [ ] step-{N}.md for each completed task
 - [ ] progress.md current
+- [ ] **validation.md with intent comparison**
 - [ ] review.md (if critical)
 - [ ] summary.md created
 - [ ] /tmp/3agents/ cleaned

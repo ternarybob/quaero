@@ -76,8 +76,9 @@ func (w *WebSearchWorker) GetType() models.WorkerType {
 
 // CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
 // Creates a document with the search results and source URLs.
-// Returns the parent job ID since web search executes synchronously.
-func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// Returns the step job ID since web search executes synchronously.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return "", fmt.Errorf("step config is required for web_search")
@@ -151,11 +152,11 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
-		Str("parent_job_id", parentJobID).
+		Str("step_id", stepID).
 		Msg("Starting web search")
 
 	// Log step start for UI
-	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, step.Name, "info",
 		fmt.Sprintf("Starting web search: %s", query),
 		map[string]interface{}{
 			"depth":   depth,
@@ -168,22 +169,22 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
-		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+		w.logJobEvent(ctx, stepID, step.Name, "error",
 			fmt.Sprintf("Failed to create Gemini client: %v", err), nil)
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
 	// Execute web search
-	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, parentJobID)
+	results, err := w.executeWebSearch(ctx, client, query, depth, breadth, stepID)
 	if err != nil {
 		w.logger.Error().Err(err).Str("query", query).Msg("Web search failed")
-		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+		w.logJobEvent(ctx, stepID, step.Name, "error",
 			fmt.Sprintf("Web search failed: %v", err), nil)
 		return "", fmt.Errorf("web search failed: %w", err)
 	}
 
 	// Create document from results
-	doc, err := w.createDocument(results, query, &jobDef, parentJobID)
+	doc, err := w.createDocument(results, query, &jobDef, stepID)
 	if err != nil {
 		return "", fmt.Errorf("failed to create document: %w", err)
 	}
@@ -200,7 +201,7 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Msg("Web search completed, document saved")
 
 	// Log completion for UI
-	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, step.Name, "info",
 		fmt.Sprintf("Web search completed: %d results, %d sources", results.ResultCount, len(results.Sources)),
 		map[string]interface{}{
 			"document_id":  doc.ID,
@@ -208,14 +209,14 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			"source_count": len(results.Sources),
 		})
 
-	// Publish document saved event for parent job document count tracking
-	if w.eventService != nil && parentJobID != "" {
+	// Publish document saved event for step job document count tracking
+	if w.eventService != nil && stepID != "" {
 		payload := map[string]interface{}{
-			"job_id":        parentJobID,
-			"parent_job_id": parentJobID,
-			"document_id":   doc.ID,
-			"source_type":   "web_search",
-			"timestamp":     time.Now().Format(time.RFC3339),
+			"job_id":      stepID,
+			"step_id":     stepID,
+			"document_id": doc.ID,
+			"source_type": "web_search",
+			"timestamp":   time.Now().Format(time.RFC3339),
 		}
 		event := interfaces.Event{
 			Type:    interfaces.EventDocumentSaved,
@@ -225,12 +226,12 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			w.logger.Warn().
 				Err(err).
 				Str("document_id", doc.ID).
-				Str("parent_job_id", parentJobID).
+				Str("step_id", stepID).
 				Msg("Failed to publish document_saved event")
 		}
 	}
 
-	return parentJobID, nil
+	return stepID, nil
 }
 
 // ReturnsChildJobs returns false since web search executes synchronously

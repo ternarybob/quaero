@@ -20,11 +20,16 @@ const (
 	JobStatusCancelled JobStatus = "cancelled"
 )
 
-// JobType represents the type of a crawl job in the hierarchy
+// JobType represents the type of a job in the hierarchy
 type JobType string
 
 const (
-	JobTypeParent        JobType = "parent"         // Parent job that spawns child jobs
+	// New 3-level hierarchy: Manager -> Steps -> Jobs
+	JobTypeManager JobType = "manager" // Top-level orchestrator (contains steps)
+	JobTypeStep    JobType = "step"    // Step container (monitors its spawned jobs)
+
+	// Legacy types (kept for backward compatibility)
+	JobTypeParent        JobType = "parent"         // Parent job that spawns child jobs (deprecated, use JobTypeManager)
 	JobTypePreValidation JobType = "pre_validation" // Pre-flight validation job
 	JobTypeCrawlerURL    JobType = "crawler_url"    // Individual URL crawling job
 	JobTypePostSummary   JobType = "post_summary"   // Post-processing summarization job

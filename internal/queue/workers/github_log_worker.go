@@ -311,7 +311,8 @@ func (w *GitHubLogWorker) GetType() models.WorkerType {
 }
 
 // CreateJobs creates a parent job and spawns child jobs for each workflow run.
-func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -387,7 +388,7 @@ func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			"tags":              jobDef.Tags,
 		},
 	)
-	parentJob.ParentID = &parentJobID
+	parentJob.ParentID = &stepID
 
 	// Serialize parent job to JSON
 	parentPayloadBytes, err := parentJob.ToJSON()
@@ -444,7 +445,7 @@ func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			map[string]interface{}{
 				"connector_id":   connectorID,
 				"tags":           jobDef.Tags,
-				"root_parent_id": parentJobID,
+				"root_parent_id": stepID,
 			},
 			parentJob.Depth+1,
 		)

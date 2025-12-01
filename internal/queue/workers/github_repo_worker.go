@@ -112,8 +112,11 @@ func (w *GitHubRepoWorker) Execute(ctx context.Context, job *models.QueueJob) er
 		return fmt.Errorf("failed to create GitHub connector: %w", err)
 	}
 
-	// Fetch file content
-	file, err := ghConnector.GetFileContent(ctx, owner, repo, branch, path)
+	// Fetch file content with timeout to prevent hanging on rate limits
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	file, err := ghConnector.GetFileContent(fetchCtx, owner, repo, branch, path)
 	if err != nil {
 		return fmt.Errorf("failed to fetch file content: %w", err)
 	}
@@ -247,7 +250,8 @@ func (w *GitHubRepoWorker) GetType() models.WorkerType {
 }
 
 // CreateJobs creates a parent job and spawns child jobs for each file in the repository.
-func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -321,7 +325,7 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 			"tags":              jobDef.Tags,
 		},
 	)
-	parentJob.ParentID = &parentJobID
+	parentJob.ParentID = &stepID
 
 	// Serialize parent job to JSON
 	parentPayloadBytes, err := parentJob.ToJSON()
@@ -381,7 +385,7 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 				map[string]interface{}{
 					"connector_id":   connectorID,
 					"tags":           jobDef.Tags,
-					"root_parent_id": parentJobID, // Root parent for document count tracking
+					"root_parent_id": stepID, // Root parent for document count tracking
 				},
 				parentJob.Depth+1,
 			)

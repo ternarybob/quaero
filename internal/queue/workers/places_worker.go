@@ -58,8 +58,9 @@ func (w *PlacesWorker) GetType() models.WorkerType {
 
 // CreateJobs executes a places search operation using the Google Places API.
 // Searches for places matching the query and creates documents for each result.
-// Returns the parent job ID since places search executes synchronously.
-func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// Returns the step job ID since places search executes synchronously.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		return "", fmt.Errorf("step config is required for places_search")
@@ -193,7 +194,7 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Msg("Orchestrating places search")
 
 	// Log step start for UI
-	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, step.Name, "info",
 		fmt.Sprintf("Starting places search: %s", req.SearchQuery),
 		map[string]interface{}{
 			"search_type": req.SearchType,
@@ -201,9 +202,9 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		})
 
 	// Execute search
-	result, err := w.placesService.SearchPlaces(ctx, parentJobID, req)
+	result, err := w.placesService.SearchPlaces(ctx, stepID, req)
 	if err != nil {
-		w.logJobEvent(ctx, parentJobID, step.Name, "error",
+		w.logJobEvent(ctx, stepID, step.Name, "error",
 			fmt.Sprintf("Places search failed: %v", err), nil)
 		return "", fmt.Errorf("failed to search places: %w", err)
 	}
@@ -222,11 +223,11 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 	w.logger.Info().
 		Str("step_name", step.Name).
 		Int("total_results", result.TotalResults).
-		Str("parent_job_id", parentJobID).
+		Str("step_id", stepID).
 		Msg("Places search orchestration completed successfully")
 
 	// Create individual documents for each place
-	docs, err := w.createPlaceDocuments(result, parentJobID, jobDef.Tags)
+	docs, err := w.createPlaceDocuments(result, stepID, jobDef.Tags)
 	if err != nil {
 		return "", fmt.Errorf("failed to create place documents: %w", err)
 	}
@@ -251,14 +252,14 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 			Msg("Place document saved successfully")
 
 		// Publish document_saved event for each document
-		if w.eventService != nil && parentJobID != "" {
+		if w.eventService != nil && stepID != "" {
 			docID := doc.ID // Capture for goroutine
 			payload := map[string]interface{}{
-				"job_id":        parentJobID,
-				"parent_job_id": parentJobID,
-				"document_id":   docID,
-				"source_type":   "places",
-				"timestamp":     time.Now().Format(time.RFC3339),
+				"job_id":      stepID,
+				"step_id":     stepID,
+				"document_id": docID,
+				"source_type": "places",
+				"timestamp":   time.Now().Format(time.RFC3339),
 			}
 			event := interfaces.Event{
 				Type:    interfaces.EventDocumentSaved,
@@ -269,13 +270,13 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 				w.logger.Warn().
 					Err(err).
 					Str("document_id", docID).
-					Str("parent_job_id", parentJobID).
+					Str("step_id", stepID).
 					Msg("Failed to publish document_saved event")
 			} else {
 				w.logger.Debug().
 					Str("document_id", docID).
-					Str("parent_job_id", parentJobID).
-					Msg("Published document_saved event for parent job document count")
+					Str("step_id", stepID).
+					Msg("Published document_saved event for step job document count")
 			}
 		}
 	}
@@ -286,15 +287,15 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Msg("Places search results saved as individual documents")
 
 	// Log completion for UI
-	w.logJobEvent(ctx, parentJobID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, step.Name, "info",
 		fmt.Sprintf("Places search completed: created %d documents", savedCount),
 		map[string]interface{}{
 			"documents_created": savedCount,
 			"total_results":     result.TotalResults,
 		})
 
-	// Return parent job ID as placeholder since this is a synchronous operation
-	return parentJobID, nil
+	// Return step job ID as placeholder since this is a synchronous operation
+	return stepID, nil
 }
 
 // ReturnsChildJobs returns false since places search executes synchronously

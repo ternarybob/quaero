@@ -109,5 +109,5 @@ func (m *Manager) LoadJobDefinitionsFromFiles(ctx context.Context, dirPath strin
 
 // LoadConnectorsFromFiles loads connectors from TOML files
 func (m *Manager) LoadConnectorsFromFiles(ctx context.Context, dirPath string) error {
-	return LoadConnectorsFromFiles(ctx, m.connector, dirPath, m.logger)
+	return LoadConnectorsFromFiles(ctx, m.connector, m.kv, dirPath, m.logger)
 }

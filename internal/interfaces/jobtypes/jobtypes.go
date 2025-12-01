@@ -25,3 +25,17 @@ type JobChildStats struct {
 	PendingChildren   int
 	RunningChildren   int
 }
+
+// StepStats holds aggregate statistics for step jobs under a manager
+// Used by ManagerMonitor to track overall progress of multi-step job definitions
+type StepStats struct {
+	TotalSteps     int // Total number of step jobs under the manager
+	CompletedSteps int // Steps that have finished (all children completed)
+	RunningSteps   int // Steps currently running (monitoring children)
+	PendingSteps   int // Steps waiting to start
+	FailedSteps    int // Steps that failed
+	CancelledSteps int // Steps that were cancelled
+	TotalJobs      int // Total jobs across all steps (leaf job count)
+	CompletedJobs  int // Total completed jobs across all steps
+	FailedJobs     int // Total failed jobs across all steps
+}

@@ -91,13 +91,17 @@ func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.QueueJob) 
 
 // validate validates that the queue job is compatible with this monitor
 func (m *jobMonitor) validate(job *models.QueueJob) error {
-	if job.Type != string(models.JobTypeParent) {
-		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeParent, job.Type)
+	// Accept both parent (deprecated) and manager (new architecture) types
+	if job.Type != string(models.JobTypeParent) && job.Type != string(models.JobTypeManager) {
+		return fmt.Errorf("invalid job type: expected %s or %s, got %s", models.JobTypeParent, models.JobTypeManager, job.Type)
 	}
 
-	// Validate required config fields
-	if _, ok := job.Config["source_type"]; !ok {
-		return fmt.Errorf("missing required config field: source_type")
+	// source_type is required for parent jobs, optional for manager jobs
+	// Manager jobs use step-based config instead
+	if job.Type == string(models.JobTypeParent) {
+		if _, ok := job.Config["source_type"]; !ok {
+			return fmt.Errorf("missing required config field: source_type")
+		}
 	}
 
 	// entity_type is optional (not required for generic web crawlers)
@@ -111,23 +115,28 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 	// Create job-specific logger for consistent logging
 	jobLogger := m.logger.WithCorrelationId(job.ID)
 
-	// Extract configuration
+	// Extract configuration (may be empty for manager jobs)
 	sourceType, _ := job.GetConfigString("source_type")
 	entityType, _ := job.GetConfigString("entity_type")
 
-	// Build log message based on available fields
+	// Build log message based on job type and available fields
 	var logMsg string
-	if entityType != "" {
+	if job.Type == string(models.JobTypeManager) {
+		logMsg = fmt.Sprintf("Starting manager job: %s", job.Name)
+	} else if entityType != "" {
 		logMsg = fmt.Sprintf("Starting parent job for %s %s", sourceType, entityType)
-	} else {
+	} else if sourceType != "" {
 		logMsg = fmt.Sprintf("Starting parent job for %s", sourceType)
+	} else {
+		logMsg = fmt.Sprintf("Starting job: %s", job.Name)
 	}
 
 	jobLogger.Debug().
 		Str("job_id", job.ID).
+		Str("job_type", job.Type).
 		Str("source_type", sourceType).
 		Str("entity_type", entityType).
-		Msg("Starting parent job execution")
+		Msg("Starting job monitoring")
 
 	// Update job status to running
 	if err := m.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
@@ -229,6 +238,19 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 
 				// Add final job log
 				m.jobMgr.AddJobLog(ctx, job.ID, "info", "Parent job completed successfully")
+
+				// Update step status to "completed" now that all children are done
+				// This is important for steps that spawn child jobs - they start as "spawned"
+				// and should only be marked "completed" when all children finish
+				stepCompletedMetadata := map[string]interface{}{
+					"current_step_status": "completed",
+				}
+				if err := m.jobMgr.UpdateJobMetadata(ctx, job.ID, stepCompletedMetadata); err != nil {
+					jobLogger.Warn().Err(err).Msg("Failed to update step status to completed")
+				}
+
+				// Publish job_step_progress event so UI updates step status in real-time
+				m.publishStepCompletedEvent(ctx, job.ID, jobLogger)
 
 				// Publish completion event with full stats (including document_count)
 				// Get fresh child stats for final progress update
@@ -793,4 +815,55 @@ func (m *jobMonitor) getJobErrorsAndWarnings(ctx context.Context, jobID string) 
 	}
 
 	return errors, warnings
+}
+
+// publishStepCompletedEvent publishes a job_step_progress event with step_status="completed"
+// This is called when all child jobs finish to update the UI step status in real-time
+func (m *jobMonitor) publishStepCompletedEvent(ctx context.Context, jobID string, logger arbor.ILogger) {
+	if m.eventService == nil {
+		return
+	}
+
+	// Get job metadata to read step info
+	jobInterface, err := m.jobMgr.GetJob(ctx, jobID)
+	if err != nil {
+		logger.Warn().Err(err).Msg("Failed to get job for step completed event")
+		return
+	}
+
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		logger.Warn().Msg("Failed to type assert job for step completed event")
+		return
+	}
+
+	// Extract step info from metadata
+	metadata := jobState.Metadata
+	currentStep, _ := metadata["current_step"].(float64)
+	totalSteps, _ := metadata["total_steps"].(float64)
+	stepName, _ := metadata["current_step_name"].(string)
+	stepType, _ := metadata["current_step_type"].(string)
+
+	payload := map[string]interface{}{
+		"job_id":       jobID,
+		"step_index":   int(currentStep) - 1,
+		"step_name":    stepName,
+		"step_type":    stepType,
+		"current_step": int(currentStep),
+		"total_steps":  int(totalSteps),
+		"step_status":  "completed",
+		"timestamp":    time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    "job_step_progress",
+		Payload: payload,
+	}
+
+	// Publish asynchronously
+	go func() {
+		if err := m.eventService.Publish(ctx, event); err != nil {
+			logger.Warn().Err(err).Msg("Failed to publish step completed event")
+		}
+	}()
 }

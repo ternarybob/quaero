@@ -14,33 +14,39 @@ import (
 
 // QueueJob represents the immutable job sent to the queue and stored in the database.
 // Once created and enqueued, this job should not be modified.
-// All job types (parent, child, crawler, summarizer, etc.) use this common structure.
+// All job types (manager, step, job, crawler, summarizer, etc.) use this common structure.
+//
+// Job Hierarchy (3-level):
+//   - Manager (type="manager"): Top-level orchestrator, monitors steps
+//   - Step (type="step"): Step container, monitors its spawned jobs
+//   - Job (type=various): Individual work units, children of steps
 //
 // Job State Lifecycle:
 //  1. Job/JobDefinition (jobs page) - User-defined workflow
 //  2. QueueJob (this struct) - Immutable job sent to queue for execution
 //  3. QueueJobState - In-memory runtime state during execution (Status, Progress)
-//  4. Job logs/events - Runtime state changes tracked via JobMonitor
+//  4. Job logs/events - Runtime state changes tracked via JobMonitor/StepMonitor
 type QueueJob struct {
 	// Core identification
-	ID       string  `json:"id"`        // Unique job ID (UUID)
-	ParentID *string `json:"parent_id"` // Parent job ID for child jobs (nil for root jobs)
+	ID        string  `json:"id"`                   // Unique job ID (UUID)
+	ParentID  *string `json:"parent_id"`            // Parent job ID (step for jobs, manager for steps, nil for managers)
+	ManagerID *string `json:"manager_id,omitempty"` // Top-level manager ID (allows jobs to reference manager directly)
 
 	// Job classification
-	Type string `json:"type"` // Job type: "database_maintenance", "crawler", "summarizer", etc.
+	Type string `json:"type"` // Job type: "manager", "step", "crawler", "summarizer", etc.
 	Name string `json:"name"` // Human-readable job name
 
 	// Configuration (immutable snapshot at creation time)
 	Config map[string]interface{} `json:"config"` // Job-specific configuration
 
 	// Metadata
-	Metadata map[string]interface{} `json:"metadata"` // Additional metadata (job_definition_id, etc.)
+	Metadata map[string]interface{} `json:"metadata"` // Additional metadata (job_definition_id, step_name, etc.)
 
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"` // Job creation timestamp
 
 	// Hierarchy tracking
-	Depth int `json:"depth"` // Depth in job tree (0 for root, 1 for direct children, etc.)
+	Depth int `json:"depth"` // Depth in job tree (0=manager, 1=step, 2=job)
 }
 
 const (
@@ -67,7 +73,7 @@ func NewQueueJob(jobType, name string, config, metadata map[string]interface{}) 
 	}
 }
 
-// NewQueueJobChild creates a new child queued job
+// NewQueueJobChild creates a new child queued job (legacy - use NewQueueJobForStep for new code)
 func NewQueueJobChild(parentID string, jobType JobType, name string, config, metadata map[string]interface{}, depth int) *QueueJob {
 	return &QueueJob{
 		ID:        uuid.New().String(),
@@ -81,9 +87,69 @@ func NewQueueJobChild(parentID string, jobType JobType, name string, config, met
 	}
 }
 
-// IsRootJob returns true if this is a root job (no parent)
+// NewQueueManager creates a new manager job (top-level orchestrator)
+func NewQueueManager(name string, config, metadata map[string]interface{}) *QueueJob {
+	return &QueueJob{
+		ID:        uuid.New().String(),
+		ParentID:  nil,
+		ManagerID: nil, // Manager has no manager
+		Type:      string(JobTypeManager),
+		Name:      name,
+		Config:    config,
+		Metadata:  metadata,
+		CreatedAt: time.Now(),
+		Depth:     0, // Manager is at depth 0
+	}
+}
+
+// NewQueueStep creates a new step job (child of manager, parent of jobs)
+func NewQueueStep(managerID, stepName string, config, metadata map[string]interface{}) *QueueJob {
+	return &QueueJob{
+		ID:        uuid.New().String(),
+		ParentID:  &managerID,
+		ManagerID: &managerID,
+		Type:      string(JobTypeStep),
+		Name:      stepName,
+		Config:    config,
+		Metadata:  metadata,
+		CreatedAt: time.Now(),
+		Depth:     1, // Step is at depth 1
+	}
+}
+
+// NewQueueJobForStep creates a new job under a step
+func NewQueueJobForStep(stepID, managerID string, jobType JobType, name string, config, metadata map[string]interface{}) *QueueJob {
+	return &QueueJob{
+		ID:        uuid.New().String(),
+		ParentID:  &stepID,
+		ManagerID: &managerID,
+		Type:      string(jobType),
+		Name:      name,
+		Config:    config,
+		Metadata:  metadata,
+		CreatedAt: time.Now(),
+		Depth:     2, // Job is at depth 2
+	}
+}
+
+// IsRootJob returns true if this is a root job (no parent) - same as IsManager
 func (j *QueueJob) IsRootJob() bool {
 	return j.ParentID == nil
+}
+
+// IsManager returns true if this is a manager job (top-level orchestrator)
+func (j *QueueJob) IsManager() bool {
+	return j.Type == string(JobTypeManager)
+}
+
+// IsStep returns true if this is a step job
+func (j *QueueJob) IsStep() bool {
+	return j.Type == string(JobTypeStep)
+}
+
+// IsJob returns true if this is a work job (not manager or step)
+func (j *QueueJob) IsJob() bool {
+	return !j.IsManager() && !j.IsStep()
 }
 
 // GetParentID returns the parent ID or empty string if root job
@@ -92,6 +158,14 @@ func (j *QueueJob) GetParentID() string {
 		return ""
 	}
 	return *j.ParentID
+}
+
+// GetManagerID returns the manager ID or empty string if not set
+func (j *QueueJob) GetManagerID() string {
+	if j.ManagerID == nil {
+		return ""
+	}
+	return *j.ManagerID
 }
 
 // ToJSON serializes the queued job to JSON for queue storage
@@ -152,6 +226,7 @@ func (j *QueueJob) Clone() *QueueJob {
 	clone := &QueueJob{
 		ID:        j.ID,
 		ParentID:  j.ParentID,
+		ManagerID: j.ManagerID,
 		Type:      j.Type,
 		Name:      j.Name,
 		Config:    configCopy,
@@ -263,18 +338,24 @@ type JobProgress struct {
 // This combines the immutable QueueJob fields with mutable runtime state
 // Runtime state (Status, Progress) should be tracked via job logs/events, not stored in database
 //
+// Job Hierarchy (3-level):
+//   - Manager (type="manager"): Top-level orchestrator, monitors steps
+//   - Step (type="step"): Step container, monitors its spawned jobs
+//   - Job (type=various): Individual work units, children of steps
+//
 // Job State Lifecycle:
 //  1. Job/JobDefinition (jobs page) - User-defined workflow
 //  2. QueueJob - Immutable job sent to queue for execution (stored in database)
 //  3. QueueJobState (this struct) - In-memory runtime state during execution
-//  4. Job logs/events - Runtime state changes tracked via JobMonitor
+//  4. Job logs/events - Runtime state changes tracked via JobMonitor/StepMonitor
 type QueueJobState struct {
 	// Core identification (from QueueJob)
-	ID       string  `json:"id"`        // Unique job ID (UUID)
-	ParentID *string `json:"parent_id"` // Parent job ID for child jobs (nil for root jobs)
+	ID        string  `json:"id"`                   // Unique job ID (UUID)
+	ParentID  *string `json:"parent_id"`            // Parent job ID (step for jobs, manager for steps, nil for managers)
+	ManagerID *string `json:"manager_id,omitempty"` // Top-level manager ID
 
 	// Job classification (from QueueJob)
-	Type string `json:"type"` // Job type: "database_maintenance", "crawler", "summarizer", etc.
+	Type string `json:"type"` // Job type: "manager", "step", "crawler", "summarizer", etc.
 	Name string `json:"name"` // Human-readable job name
 
 	// Configuration (from QueueJob)
@@ -285,7 +366,7 @@ type QueueJobState struct {
 	CreatedAt time.Time `json:"created_at"` // Job creation timestamp
 
 	// Hierarchy tracking (from QueueJob)
-	Depth int `json:"depth"` // Depth in job tree (0 for root, 1 for direct children, etc.)
+	Depth int `json:"depth"` // Depth in job tree (0=manager, 1=step, 2=job)
 
 	// Mutable runtime state (tracked via job logs/events)
 	Status        JobStatus   `json:"status"`
@@ -315,6 +396,7 @@ func NewQueueJobState(queued *QueueJob) *QueueJobState {
 		// Copy fields from QueueJob
 		ID:        queued.ID,
 		ParentID:  queued.ParentID,
+		ManagerID: queued.ManagerID,
 		Type:      queued.Type,
 		Name:      queued.Name,
 		Config:    config,
@@ -334,6 +416,7 @@ func (j *QueueJobState) ToQueueJob() *QueueJob {
 	return &QueueJob{
 		ID:        j.ID,
 		ParentID:  j.ParentID,
+		ManagerID: j.ManagerID,
 		Type:      j.Type,
 		Name:      j.Name,
 		Config:    j.Config,

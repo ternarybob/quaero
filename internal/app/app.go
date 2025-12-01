@@ -70,6 +70,7 @@ type App struct {
 	JobManager   *queue.Manager
 	JobProcessor *workers.JobProcessor
 	JobMonitor   interfaces.JobMonitor
+	StepMonitor  interfaces.StepMonitor
 	JobService   *jobsvc.Service
 
 	// Source-agnostic services
@@ -472,6 +473,15 @@ func (a *App) initServices() error {
 	a.JobMonitor = jobMonitor
 	a.Logger.Debug().Msg("Job monitor created")
 
+	// Create step monitor for monitoring step job children (ARCH: Manager -> Steps -> Jobs)
+	stepMonitor := state.NewStepMonitor(
+		jobMgr,
+		a.EventService,
+		a.Logger,
+	)
+	a.StepMonitor = stepMonitor
+	a.Logger.Debug().Msg("Step monitor created")
+
 	// Set KV storage on JobManager for placeholder resolution
 	jobMgr.SetKVStorage(a.StorageManager.KeyValueStorage())
 
@@ -746,6 +756,7 @@ func (a *App) initHandlers() error {
 		a.JobManager,
 		a.QueueManager,
 		a.JobMonitor,
+		a.StepMonitor,
 		a.Logger,
 	)
 
@@ -759,6 +770,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.QueueStorage(),
 		a.JobManager,
 		a.JobMonitor,
+		a.StepMonitor,
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)

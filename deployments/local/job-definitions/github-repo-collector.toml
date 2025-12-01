@@ -17,7 +17,9 @@ type = "github_repo"
 description = "Fetch repository content from specified branches and file types"
 on_error = "continue"
 connector_id = "{github_connector_id}"
+# REQUIRED: GitHub organization or username that owns the repository
 owner = ""
+# REQUIRED: Repository name (without owner prefix)
 repo = ""
 branches = ["main"]
 extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]

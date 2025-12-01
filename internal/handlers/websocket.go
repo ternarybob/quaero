@@ -1129,6 +1129,54 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		return nil
 	})
 
+	// Subscribe to step progress events from StepMonitor (for step-level progress updates)
+	h.eventService.Subscribe(interfaces.EventStepProgress, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid step_progress event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["step_progress"] {
+			return nil
+		}
+
+		// Broadcast to all clients
+		msg := WSMessage{
+			Type:    "step_progress",
+			Payload: payload,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal step progress message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to send step progress to client")
+			}
+		}
+
+		return nil
+	})
+
 	// Subscribe to crawler job log events for real-time log streaming
 	h.eventService.Subscribe("crawler_job_log", func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})

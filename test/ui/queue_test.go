@@ -414,7 +414,7 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 				if (!card) return null;
 
 				const cardText = card.textContent;
-				const docsMatch = cardText.match(/(\d+)\s+Documents?/i);
+				const docsMatch = cardText.match(/(\d+)\s+(?:Documents?|docs)/i);
 				const completedMatch = cardText.match(/(\d+)\s+completed/i);
 				const failedMatch = cardText.match(/(\d+)\s+failed/i);
 
@@ -431,6 +431,16 @@ func (qtc *queueTestContext) monitorJob(jobName string, timeout time.Duration, e
 		docs := int(stats["documents"].(float64))
 		completed := int(stats["completed"].(float64))
 		failed := int(stats["failed"].(float64))
+
+		// For multi-step jobs, document count may not be in card text - use Alpine data as fallback
+		if docs == 0 && refreshData != nil {
+			if alpineDocCount, ok := refreshData["documentCount"]; ok && alpineDocCount != nil {
+				if docFloat, ok := alpineDocCount.(float64); ok && docFloat > 0 {
+					docs = int(docFloat)
+					qtc.env.LogTest(qtc.t, "Using Alpine data for document count: %d", docs)
+				}
+			}
+		}
 
 		qtc.env.LogTest(qtc.t, "Job statistics: %d documents, %d completed, %d failed", docs, completed, failed)
 
@@ -1696,7 +1706,7 @@ func TestNearbyRestaurantsKeywordsMultiStep(t *testing.T) {
 		// Events panel shows logs/events for each step
 		var initialState map[string]interface{}
 		err := chromedp.Run(qtc.ctx,
-			chromedp.Evaluate(fmt.Sprintf(`
+			chromedp.Evaluate(`
 				(() => {
 					// Find step rows with Events button
 					const stepEventsPanels = document.querySelectorAll('.step-events-panel');
@@ -1735,7 +1745,7 @@ func TestNearbyRestaurantsKeywordsMultiStep(t *testing.T) {
 					}
 					return { buttonFound: false };
 				})()
-			`, jobName), &initialState),
+			`, &initialState),
 		)
 
 		if err != nil {

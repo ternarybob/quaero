@@ -10,6 +10,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
@@ -18,20 +19,34 @@ import (
 // Format:
 // [connector_name]
 // type = "github"
-// token = "ghp_xxx"
+// token = "ghp_xxx" or token = "{variable_name}"
 type ConnectorFile struct {
 	Type  string `toml:"type"`
 	Token string `toml:"token"`
 }
 
 // LoadConnectorsFromFiles loads connectors from TOML files in the specified directory
-func LoadConnectorsFromFiles(ctx context.Context, connectorStorage interfaces.ConnectorStorage, dirPath string, logger arbor.ILogger) error {
+// It supports variable substitution using {variable_name} syntax in the token field
+func LoadConnectorsFromFiles(ctx context.Context, connectorStorage interfaces.ConnectorStorage, kvStorage interfaces.KeyValueStorage, dirPath string, logger arbor.ILogger) error {
 	logger.Debug().Str("dir", dirPath).Msg("Loading connectors from files")
 
 	// Check if directory exists
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		logger.Debug().Str("dir", dirPath).Msg("Connectors directory does not exist, skipping")
 		return nil
+	}
+
+	// Load KV map for variable substitution
+	var kvMap map[string]string
+	if kvStorage != nil {
+		var err error
+		kvMap, err = kvStorage.GetAll(ctx)
+		if err != nil {
+			logger.Warn().Err(err).Msg("Failed to load KV map for connector variable substitution")
+			kvMap = make(map[string]string)
+		}
+	} else {
+		kvMap = make(map[string]string)
 	}
 
 	// Read directory entries
@@ -80,7 +95,7 @@ func LoadConnectorsFromFiles(ctx context.Context, connectorStorage interfaces.Co
 				continue
 			}
 
-			// Validate token
+			// Validate token (before substitution)
 			if connFile.Token == "" {
 				logger.Warn().
 					Str("file", entry.Name()).
@@ -90,8 +105,20 @@ func LoadConnectorsFromFiles(ctx context.Context, connectorStorage interfaces.Co
 				continue
 			}
 
-			// Create config JSON
-			configJSON, err := json.Marshal(map[string]string{"token": connFile.Token})
+			// Perform variable substitution on token using {variable_name} syntax
+			token := common.ReplaceKeyReferences(connFile.Token, kvMap, logger)
+
+			// Validate token after substitution - if it still contains {var} pattern, variable wasn't found
+			if strings.Contains(token, "{") && strings.Contains(token, "}") {
+				logger.Warn().
+					Str("file", entry.Name()).
+					Str("connector", name).
+					Str("token_pattern", connFile.Token).
+					Msg("Token contains unresolved variable reference")
+			}
+
+			// Create config JSON with substituted token
+			configJSON, err := json.Marshal(map[string]string{"token": token})
 			if err != nil {
 				logger.Warn().Err(err).
 					Str("file", entry.Name()).

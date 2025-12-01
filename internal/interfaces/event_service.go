@@ -235,6 +235,40 @@ const (
 	//   - metadata: map (optional - additional context data)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventJobLog EventType = "job_log"
+
+	// EventStepProgress is published by StepMonitor to report step progress.
+	// Published periodically as child jobs complete under a step.
+	// Payload structure: map[string]interface{} with keys:
+	//   - step_id: string (step job ID)
+	//   - manager_id: string (parent manager job ID)
+	//   - step_name: string (name of the step)
+	//   - status: string ("running", "completed", "failed")
+	//   - total_jobs: int (total child jobs under this step)
+	//   - pending_jobs: int (jobs waiting to run)
+	//   - running_jobs: int (jobs currently running)
+	//   - completed_jobs: int (jobs successfully completed)
+	//   - failed_jobs: int (jobs that failed)
+	//   - cancelled_jobs: int (jobs that were cancelled)
+	//   - progress_text: string (human-readable progress summary)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventStepProgress EventType = "step_progress"
+
+	// EventManagerProgress is published by ManagerMonitor to report overall job progress.
+	// Published periodically as steps complete under a manager job.
+	// Payload structure: map[string]interface{} with keys:
+	//   - manager_id: string (manager job ID)
+	//   - job_name: string (name of the job definition)
+	//   - status: string ("running", "completed", "failed")
+	//   - total_steps: int (total steps in the job)
+	//   - completed_steps: int (steps that have finished)
+	//   - running_steps: int (steps currently running)
+	//   - pending_steps: int (steps waiting to run)
+	//   - total_jobs: int (total jobs across all steps)
+	//   - completed_jobs: int (total completed jobs)
+	//   - failed_jobs: int (total failed jobs)
+	//   - document_count: int (total documents created)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventManagerProgress EventType = "manager_progress"
 )
 
 // Event represents a system event

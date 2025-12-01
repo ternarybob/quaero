@@ -72,6 +72,10 @@ type DocumentStorage interface {
 // This is a type alias to jobtypes.JobChildStats for backward compatibility
 type JobChildStats = jobtypes.JobChildStats
 
+// StepStats holds aggregate statistics for step jobs under a manager
+// This is a type alias to jobtypes.StepStats for backward compatibility
+type StepStats = jobtypes.StepStats
+
 // QueueStorage - interface for queue execution and state persistence
 // Handles QueueJob (immutable queued work) and QueueJobState (runtime execution state)
 // This is separate from JobDefinitionStorage which handles job definitions
@@ -85,6 +89,13 @@ type QueueStorage interface {
 	// Returns jobs ordered by created_at DESC (newest first)
 	// Returns empty slice if parent has no children or parent doesn't exist
 	GetChildJobs(ctx context.Context, parentID string) ([]*models.QueueJob, error)
+	// GetStepStats returns aggregate statistics for step jobs under a manager
+	// Used by ManagerMonitor to track overall progress of multi-step job definitions
+	// Returns stats for all step jobs (type="step") with the given manager as parent
+	GetStepStats(ctx context.Context, managerID string) (*StepStats, error)
+	// ListStepJobs returns all step jobs under a manager
+	// Returns jobs with type="step" and parent_id=managerID, ordered by created_at ASC (execution order)
+	ListStepJobs(ctx context.Context, managerID string) ([]*models.QueueJob, error)
 	GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error)
 	UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error
 	UpdateJobProgress(ctx context.Context, jobID string, progressJSON string) error

@@ -303,7 +303,8 @@ func (w *AgentWorker) GetType() models.WorkerType {
 // CreateJobs creates agent jobs for documents matching the filter criteria.
 // Queries documents based on job definition, creates child jobs for each document,
 // and enqueues them for processing.
-func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	// Parse step config
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -345,7 +346,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	w.logger.Debug().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
-		Str("parent_job_id", parentJobID).
+		Str("step_id", stepID).
 		Msg("Creating agent jobs for documents")
 
 	// Query documents to process
@@ -359,7 +360,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Msg("No documents found for agent processing - check if documents exist with matching filters")
-		return parentJobID, nil // No documents to process, but not an error
+		return stepID, nil // No documents to process, but not an error
 	}
 
 	w.logger.Debug().
@@ -371,7 +372,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	// Create and enqueue agent jobs for each document
 	jobIDs := make([]string, 0, len(documents))
 	for _, doc := range documents {
-		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, parentJobID, step.Name)
+		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, stepID, step.Name)
 		if err != nil {
 			w.logger.Warn().
 				Err(err).
@@ -388,7 +389,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 
 		// Publish error event for real-time display
 		if w.eventService != nil {
-			w.publishJobError(ctx, parentJobID, errMsg)
+			w.publishJobError(ctx, stepID, errMsg)
 		}
 
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
@@ -411,7 +412,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Int("jobs_completed", len(jobIDs)).
 		Msg("Agent job orchestration completed successfully")
 
-	return parentJobID, nil
+	return stepID, nil
 }
 
 // ReturnsChildJobs returns true since agent creates child jobs for each document

@@ -451,6 +451,8 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse level query parameter for server-side filtering
+	// Default: return INFO+ logs (excludes debug/trace) to reduce UI noise
+	// Use level=all to get all logs including debug, or level=debug to get only debug logs
 	level := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("level")))
 
 	// Normalize level aliases to match storage layer conventions
@@ -462,31 +464,47 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		level = normalized
 	}
 
-	// Fetch logs with optional level filtering
+	// Fetch logs with level filtering
 	var logs []models.JobLogEntry
 	var err error
 
-	// If level is specified and valid, use level filtering
-	if level != "" && level != "all" {
-		// Validate level is one of: error, warn, info, debug (and accept aliases)
-		validLevels := map[string]bool{
-			"error": true,
-			"warn":  true,
-			"info":  true,
-			"debug": true,
-		}
+	// Validate level is one of: error, warn, info, debug, all (and accept aliases)
+	validLevels := map[string]bool{
+		"error": true,
+		"warn":  true,
+		"info":  true,
+		"debug": true,
+		"all":   true,
+		"":      true, // Empty = default to info
+	}
 
-		if !validLevels[level] {
-			h.logger.Warn().Str("job_id", jobID).Str("level", level).Msg("Invalid log level requested")
-			http.Error(w, "Invalid log level. Valid levels are: error, warn/warning, info, debug, all", http.StatusBadRequest)
+	if !validLevels[level] {
+		h.logger.Warn().Str("job_id", jobID).Str("level", level).Msg("Invalid log level requested")
+		http.Error(w, "Invalid log level. Valid levels are: error, warn/warning, info, debug, all", http.StatusBadRequest)
+		return
+	}
+
+	if level == "all" {
+		// Fetch ALL logs including debug (explicit request)
+		logs, err = h.logService.GetLogs(ctx, jobID, 1000)
+		if err != nil {
+			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
+			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
 			return
 		}
+	} else {
+		// Default to INFO+ if no level specified (excludes debug/trace for cleaner UI)
+		// Or use specific level if provided
+		filterLevel := level
+		if filterLevel == "" {
+			filterLevel = "info" // Default: INFO and above (excludes debug)
+		}
 
-		h.logger.Debug().Str("job_id", jobID).Str("level", level).Msg("Fetching logs with level filter")
-		logs, err = h.logService.GetLogsByLevel(ctx, jobID, level, 1000)
+		h.logger.Debug().Str("job_id", jobID).Str("level", filterLevel).Msg("Fetching logs with level filter")
+		logs, err = h.logService.GetLogsByLevel(ctx, jobID, filterLevel, 1000)
 		if err != nil {
 			// Fall back to all logs if level filtering fails
-			h.logger.Warn().Err(err).Str("job_id", jobID).Str("level", level).Msg("Failed to get logs by level, falling back to all logs")
+			h.logger.Warn().Err(err).Str("job_id", jobID).Str("level", filterLevel).Msg("Failed to get logs by level, falling back to all logs")
 			logs, err = h.logService.GetLogs(ctx, jobID, 1000)
 			if err != nil {
 				h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
@@ -494,17 +512,8 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			level = "all" // Update level to reflect actual response
-		}
-	} else {
-		// Fetch all logs (no filtering)
-		logs, err = h.logService.GetLogs(ctx, jobID, 1000) // Limit to 1000 most recent logs
-		if err != nil {
-			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
-			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
-			return
-		}
-		if level == "" {
-			level = "all" // Set default value for response
+		} else if level == "" {
+			level = "info" // Set default value for response
 		}
 	}
 

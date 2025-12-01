@@ -72,11 +72,11 @@ func newGitHubTestContext(t *testing.T, timeout time.Duration) (*githubTestConte
 	return gtc, cleanup
 }
 
-// createGitHubConnector creates a GitHub connector for tests using the token from .env.test
+// createGitHubConnector creates a GitHub connector for tests using the token from .env
 func (gtc *githubTestContext) createGitHubConnector() error {
-	token := gtc.env.EnvVars["github_test_token"]
+	token := gtc.env.EnvVars["github_token"]
 	if token == "" {
-		return fmt.Errorf("github_test_token not found in .env.test")
+		return fmt.Errorf("github_token not found in test/config/.env")
 	}
 
 	gtc.env.LogTest(gtc.t, "Creating GitHub connector...")
@@ -292,6 +292,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 	lastStatus := ""
 	checkCount := 0
 	lastProgressLog := time.Now()
+	lastScreenshotTime := time.Now()
 	var currentStatus string
 	pollStart := time.Now()
 
@@ -304,7 +305,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 
 		// Check if we've exceeded the timeout
 		if time.Since(pollStart) > timeout {
-			gtc.env.TakeScreenshot(gtc.ctx, "job_not_completed_"+jobName)
+			gtc.env.TakeFullScreenshot(gtc.ctx, "job_not_completed_"+jobName)
 			return fmt.Errorf("job %s did not complete within %v (last status: %s, checks: %d): timeout", jobName, timeout, lastStatus, checkCount)
 		}
 
@@ -313,6 +314,18 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 			elapsed := time.Since(startTime)
 			gtc.env.LogTest(gtc.t, "  [%v] Still monitoring... (status: %s, checks: %d)", elapsed.Round(time.Second), lastStatus, checkCount)
 			lastProgressLog = time.Now()
+		}
+
+		// Take full page screenshot every 30 seconds (captures all child rows)
+		if time.Since(lastScreenshotTime) >= 30*time.Second {
+			elapsed := time.Since(startTime)
+			screenshotName := fmt.Sprintf("monitor_%s_%ds", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"), int(elapsed.Seconds()))
+			if err := gtc.env.TakeFullScreenshot(gtc.ctx, screenshotName); err != nil {
+				gtc.env.LogTest(gtc.t, "  Warning: Failed to take periodic screenshot: %v", err)
+			} else {
+				gtc.env.LogTest(gtc.t, "  Captured periodic screenshot: %s", screenshotName)
+			}
+			lastScreenshotTime = time.Now()
 		}
 
 		// Trigger a data refresh
@@ -356,7 +369,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 			if gtc.ctx.Err() != nil {
 				return fmt.Errorf("context cancelled while checking status (checks: %d): %w", checkCount, gtc.ctx.Err())
 			}
-			gtc.env.TakeScreenshot(gtc.ctx, "status_check_failed_"+jobName)
+			gtc.env.TakeFullScreenshot(gtc.ctx, "status_check_failed_"+jobName)
 			return fmt.Errorf("failed to check job status: %w", err)
 		}
 
@@ -370,9 +383,9 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 			}
 			lastStatus = currentStatus
 
-			// Take screenshot on status change
+			// Take full page screenshot on status change for debugging (captures all child rows)
 			screenshotName := fmt.Sprintf("status_%s_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"), currentStatus)
-			gtc.env.TakeScreenshot(gtc.ctx, screenshotName)
+			gtc.env.TakeFullScreenshot(gtc.ctx, screenshotName)
 		}
 
 		// Check if job is done
@@ -387,8 +400,8 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 
 	gtc.env.LogTest(gtc.t, "✓ Final job status: %s", currentStatus)
 
-	// Take final screenshot
-	gtc.env.TakeScreenshot(gtc.ctx, fmt.Sprintf("final_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_")))
+	// Take final full page screenshot
+	gtc.env.TakeFullScreenshot(gtc.ctx, fmt.Sprintf("final_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_")))
 
 	// Verify document count via API if expectDocs is true
 	if expectDocs {
@@ -481,9 +494,9 @@ func TestGitHubActionsCollector(t *testing.T) {
 // createGitHubConnectorWithoutKV creates a GitHub connector but does NOT store ID in KV store
 // This is used for testing connector_name resolution (the job uses connector_name instead of {connector_id})
 func (gtc *githubTestContext) createGitHubConnectorWithoutKV() error {
-	token := gtc.env.EnvVars["github_test_token"]
+	token := gtc.env.EnvVars["github_token"]
 	if token == "" {
-		return fmt.Errorf("github_test_token not found in .env.test")
+		return fmt.Errorf("github_token not found in test/config/.env")
 	}
 
 	gtc.env.LogTest(gtc.t, "Creating GitHub connector (without KV store)...")
@@ -529,7 +542,7 @@ func (gtc *githubTestContext) createGitHubConnectorWithoutKV() error {
 // TestGitHubRepoCollectorByName tests the GitHub Repository Collector using connector_name
 // This validates that jobs can resolve connectors by name instead of ID
 func TestGitHubRepoCollectorByName(t *testing.T) {
-	gtc, cleanup := newGitHubTestContext(t, 5*time.Minute)
+	gtc, cleanup := newGitHubTestContext(t, 7*time.Minute)
 	defer cleanup()
 
 	gtc.env.LogTest(t, "--- Starting Test: GitHub Repository Collector (By Name) ---")
@@ -556,8 +569,8 @@ func TestGitHubRepoCollectorByName(t *testing.T) {
 		t.Fatalf("Failed to trigger %s: %v", jobName, err)
 	}
 
-	// Monitor the job (3 minute timeout for repo fetching)
-	if err := gtc.monitorJob(jobName, 3*time.Minute, true); err != nil {
+	// Monitor the job (5 minute timeout for repo fetching - may have many child jobs)
+	if err := gtc.monitorJob(jobName, 5*time.Minute, true); err != nil {
 		t.Fatalf("Job monitoring failed: %v", err)
 	}
 

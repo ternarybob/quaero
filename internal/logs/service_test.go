@@ -200,6 +200,27 @@ func (m *MockJobStorage) CountJobsWithFilters(ctx context.Context, opts *interfa
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockJobStorage) GetStepStats(ctx context.Context, managerID string) (*interfaces.StepStats, error) {
+	args := m.Called(ctx, managerID)
+	if stats, ok := args.Get(0).(*interfaces.StepStats); ok {
+		return stats, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockJobStorage) ListStepJobs(ctx context.Context, managerID string) ([]*models.QueueJob, error) {
+	args := m.Called(ctx, managerID)
+	if jobs, ok := args.Get(0).([]*models.QueueJob); ok {
+		return jobs, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockJobStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error) {
+	args := m.Called(ctx, jobID)
+	return args.Int(0), args.Error(1)
+}
+
 func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
 	ctx := context.Background()
 	logger := arbor.NewLogger()

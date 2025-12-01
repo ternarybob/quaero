@@ -21,6 +21,7 @@ type GitHubJobsHandler struct {
 	jobMgr           *queue.Manager
 	queueMgr         interfaces.QueueManager
 	jobMonitor       interfaces.JobMonitor
+	stepMonitor      interfaces.StepMonitor
 	logger           arbor.ILogger
 }
 
@@ -30,6 +31,7 @@ func NewGitHubJobsHandler(
 	jobMgr *queue.Manager,
 	queueMgr interfaces.QueueManager,
 	jobMonitor interfaces.JobMonitor,
+	stepMonitor interfaces.StepMonitor,
 	logger arbor.ILogger,
 ) *GitHubJobsHandler {
 	return &GitHubJobsHandler{
@@ -37,6 +39,7 @@ func NewGitHubJobsHandler(
 		jobMgr:           jobMgr,
 		queueMgr:         queueMgr,
 		jobMonitor:       jobMonitor,
+		stepMonitor:      stepMonitor,
 		logger:           logger,
 	}
 }
@@ -375,7 +378,7 @@ func (h *GitHubJobsHandler) StartRepoCollectorHandler(w http.ResponseWriter, r *
 	}
 
 	// Execute the job definition via JobManager
-	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor)
+	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub repo collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)
@@ -460,7 +463,7 @@ func (h *GitHubJobsHandler) StartActionsCollectorHandler(w http.ResponseWriter, 
 	}
 
 	// Execute the job definition via JobManager
-	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor)
+	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub actions collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)

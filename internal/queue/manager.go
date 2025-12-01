@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -675,6 +676,27 @@ type JobLogOptions struct {
 	StepName    string                 // Name of the step that generated this log
 	SourceType  string                 // Type of worker (agent, places_search, web_search, etc.)
 	Metadata    map[string]interface{} // Additional context data
+	PublishToUI *bool                  // Override UI publishing (nil=auto filter by level, true=force publish, false=skip)
+}
+
+// shouldPublishLogToUI determines if a log should be published to the UI based on level.
+// By default, only INFO and above are published. Debug and trace logs are filtered out.
+func shouldPublishLogToUI(level string, opts *JobLogOptions) bool {
+	// Check for explicit override
+	if opts != nil && opts.PublishToUI != nil {
+		return *opts.PublishToUI
+	}
+
+	// Default: filter by level - only INFO and above go to UI
+	switch strings.ToLower(level) {
+	case "info", "warn", "warning", "error", "fatal", "panic":
+		return true
+	case "debug", "trace", "dbg", "trc":
+		return false
+	default:
+		// Unknown level - publish to be safe
+		return true
+	}
 }
 
 // AddJobLogWithEvent adds a log entry and publishes an event for real-time UI updates.
@@ -725,8 +747,9 @@ func (m *Manager) AddJobLogWithEvent(ctx context.Context, jobID, level, message 
 		}
 	}
 
-	// Publish event for real-time UI updates
-	if m.eventService != nil {
+	// Publish event for real-time UI updates (filtered by log level)
+	// Only INFO and above are published to UI by default to reduce noise
+	if m.eventService != nil && shouldPublishLogToUI(level, opts) {
 		payload := map[string]interface{}{
 			"job_id":        jobID,
 			"parent_job_id": parentJobID,
@@ -796,6 +819,18 @@ func (m *Manager) GetFailedChildCount(ctx context.Context, parentID string) (int
 // GetJobChildStats retrieves child job statistics for multiple parent jobs
 func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
 	return m.jobStorage.GetJobChildStats(ctx, parentIDs)
+}
+
+// GetStepStats retrieves aggregate statistics for step jobs under a manager
+// Used by ManagerMonitor to track overall progress of multi-step job definitions
+func (m *Manager) GetStepStats(ctx context.Context, managerID string) (*interfaces.StepStats, error) {
+	return m.jobStorage.GetStepStats(ctx, managerID)
+}
+
+// ListStepJobs returns all step jobs under a manager
+// Used for displaying step-level hierarchy in the UI
+func (m *Manager) ListStepJobs(ctx context.Context, managerID string) ([]*models.QueueJob, error) {
+	return m.jobStorage.ListStepJobs(ctx, managerID)
 }
 
 // IncrementDocumentCount atomically increments the document_count for a job
@@ -924,17 +959,24 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 // ============================================================================
 
 // ExecuteJobDefinition executes a job definition by routing steps to workers.
-// Creates a parent job record and orchestrates step execution sequentially.
-// Returns the parent job ID for tracking.
-func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor) (string, error) {
-	// Generate parent job ID
-	parentJobID := uuid.New().String()
+// Creates a manager job that orchestrates steps. Each step becomes a step job
+// that monitors its spawned child jobs.
+//
+// Hierarchy: Manager -> Steps -> Jobs
+//   - Manager (type="manager"): Top-level orchestrator, monitors steps
+//   - Step (type="step"): Step container, monitors its spawned jobs
+//   - Job (type=various): Individual work units, children of steps
+//
+// Returns the manager job ID for tracking.
+func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
+	// Generate manager job ID (top-level orchestrator)
+	managerID := uuid.New().String()
 
-	// Create parent job record in database
-	parentJob := &Job{
-		ID:              parentJobID,
+	// Create manager job record in database
+	managerJob := &Job{
+		ID:              managerID,
 		ParentID:        nil,
-		Type:            "parent",
+		Type:            string(models.JobTypeManager),
 		Name:            jobDef.Name,
 		Phase:           "execution",
 		Status:          "pending",
@@ -943,30 +985,30 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		ProgressTotal:   len(jobDef.Steps),
 	}
 
-	if err := m.CreateJobRecord(ctx, parentJob); err != nil {
-		return "", fmt.Errorf("failed to create parent job: %w", err)
+	if err := m.CreateJobRecord(ctx, managerJob); err != nil {
+		return "", fmt.Errorf("failed to create manager job: %w", err)
 	}
 
 	// Persist metadata immediately after job creation
-	parentMetadata := make(map[string]interface{})
+	managerMetadata := make(map[string]interface{})
 	if jobDef.AuthID != "" {
-		parentMetadata["auth_id"] = jobDef.AuthID
+		managerMetadata["auth_id"] = jobDef.AuthID
 	}
 	if jobDef.ID != "" {
-		parentMetadata["job_definition_id"] = jobDef.ID
+		managerMetadata["job_definition_id"] = jobDef.ID
 	}
-	parentMetadata["phase"] = "execution"
+	managerMetadata["phase"] = "execution"
 
-	if err := m.UpdateJobMetadata(ctx, parentJobID, parentMetadata); err != nil {
+	if err := m.UpdateJobMetadata(ctx, managerID, managerMetadata); err != nil {
 		// Log warning but continue
 	}
 
 	// Add initial job log
 	initialLog := fmt.Sprintf("Starting job definition execution: %s (ID: %s, Steps: %d)",
 		jobDef.Name, jobDef.ID, len(jobDef.Steps))
-	m.AddJobLog(ctx, parentJobID, "info", initialLog)
+	m.AddJobLog(ctx, managerID, "info", initialLog)
 
-	// Build job definition config for parent job
+	// Build job definition config for manager job
 	jobDefConfig := make(map[string]interface{})
 	for i, step := range jobDef.Steps {
 		stepKey := fmt.Sprintf("step_%d_%s", i+1, step.Type.String())
@@ -982,7 +1024,7 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		jobDefConfig["auth_id"] = jobDef.AuthID
 	}
 
-	if err := m.UpdateJobConfig(ctx, parentJobID, jobDefConfig); err != nil {
+	if err := m.UpdateJobConfig(ctx, managerID, jobDefConfig); err != nil {
 		// Log warning but continue
 	}
 
@@ -1001,52 +1043,97 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		"total_steps":      len(jobDef.Steps),
 		"current_step":     0,
 	}
-	if err := m.UpdateJobMetadata(ctx, parentJobID, initialMetadata); err != nil {
+	if err := m.UpdateJobMetadata(ctx, managerID, initialMetadata); err != nil {
 		// Log warning but continue
 	}
 
-	// Mark parent job as running
-	if err := m.UpdateJobStatus(ctx, parentJobID, "running"); err != nil {
+	// Mark manager job as running
+	if err := m.UpdateJobStatus(ctx, managerID, "running"); err != nil {
 		// Log warning but continue
 	}
 
-	// Track if any child jobs were created
+	// Track if any steps have child jobs
 	hasChildJobs := false
+
+	// Track validation errors that were skipped due to on_error="continue"
+	var lastValidationError string
 
 	// Track per-step statistics for UI display
 	// Store cumulative child counts at step completion to calculate per-step deltas
 	stepStats := make([]map[string]interface{}, len(jobDef.Steps))
-	var prevChildCount int
+
+	// Track step job IDs for monitoring
+	stepJobIDs := make([]string, len(jobDef.Steps))
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
-		// Get child stats BEFORE step execution (for delta calculation after completion)
-		var childCountBefore int
-		if stats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID}); err == nil {
-			if s := stats[parentJobID]; s != nil {
-				childCountBefore = s.ChildCount
-			}
+		// Create step job (child of manager, parent of spawned jobs)
+		stepID := uuid.New().String()
+		stepJobIDs[i] = stepID
+
+		stepConfig := make(map[string]interface{})
+		for k, v := range step.Config {
+			stepConfig[k] = v
+		}
+		stepConfig["step_index"] = i
+		stepConfig["step_name"] = step.Name
+		stepConfig["step_type"] = step.Type.String()
+
+		stepJob := &Job{
+			ID:              stepID,
+			ParentID:        &managerID,
+			Type:            string(models.JobTypeStep),
+			Name:            step.Name,
+			Phase:           "execution",
+			Status:          "pending",
+			CreatedAt:       time.Now(),
+			ProgressCurrent: 0,
+			ProgressTotal:   0, // Will be updated when jobs are created
+		}
+
+		if err := m.CreateJobRecord(ctx, stepJob); err != nil {
+			m.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Failed to create step job: %v", err))
+			continue
+		}
+
+		// Store step metadata
+		stepJobMetadata := map[string]interface{}{
+			"manager_id":  managerID,
+			"step_index":  i,
+			"step_name":   step.Name,
+			"step_type":   step.Type.String(),
+			"description": step.Description,
+		}
+		if err := m.UpdateJobMetadata(ctx, stepID, stepJobMetadata); err != nil {
+			// Log but continue
+		}
+
+		// Mark step as running
+		if err := m.UpdateJobStatus(ctx, stepID, "running"); err != nil {
+			// Log but continue
 		}
 
 		// Get document count BEFORE step execution (for delta calculation)
-		docCountBefore, _ := m.GetDocumentCount(ctx, parentJobID)
+		docCountBefore, _ := m.GetDocumentCount(ctx, managerID)
 
-		// Update job metadata with current step info (persisted for UI on page reload)
-		stepMetadata := map[string]interface{}{
+		// Update manager metadata with current step info (persisted for UI on page reload)
+		managerStepMetadata := map[string]interface{}{
 			"current_step":        i + 1,
 			"current_step_name":   step.Name,
 			"current_step_type":   step.Type.String(),
 			"current_step_status": "running",
+			"current_step_id":     stepID,
 			"total_steps":         len(jobDef.Steps),
 		}
-		if err := m.UpdateJobMetadata(ctx, parentJobID, stepMetadata); err != nil {
+		if err := m.UpdateJobMetadata(ctx, managerID, managerStepMetadata); err != nil {
 			// Log but continue
 		}
 
 		// Publish step starting event for WebSocket clients
 		if m.eventService != nil {
 			payload := map[string]interface{}{
-				"job_id":       parentJobID,
+				"job_id":       managerID,
+				"step_id":      stepID,
 				"job_name":     jobDef.Name,
 				"step_index":   i,
 				"step_name":    step.Name,
@@ -1078,115 +1165,160 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		worker := m.GetWorker(step.Type)
 		if worker == nil {
 			err := fmt.Errorf("no worker registered for step type: %s", step.Type.String())
-			m.AddJobLog(ctx, parentJobID, "error", err.Error())
+			m.AddJobLog(ctx, managerID, "error", err.Error())
+			m.AddJobLog(ctx, stepID, "error", err.Error())
+			m.UpdateJobStatus(ctx, stepID, "failed")
 
 			// Handle based on error strategy
 			if step.OnError == models.ErrorStrategyFail {
-				m.SetJobError(ctx, parentJobID, err.Error())
-				return parentJobID, err
+				m.SetJobError(ctx, managerID, err.Error())
+				return managerID, err
 			}
 			continue
 		}
 
 		// Validate step configuration
 		if err := worker.ValidateConfig(resolvedStep); err != nil {
-			m.AddJobLog(ctx, parentJobID, "error", fmt.Sprintf("Step validation failed: %v", err))
+			m.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Step validation failed: %v", err))
+			m.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Validation failed: %v", err))
+			m.UpdateJobStatus(ctx, stepID, "failed")
 
 			if step.OnError == models.ErrorStrategyFail {
-				m.SetJobError(ctx, parentJobID, err.Error())
-				return parentJobID, fmt.Errorf("step %s validation failed: %w", step.Name, err)
+				m.SetJobError(ctx, managerID, err.Error())
+				return managerID, fmt.Errorf("step %s validation failed: %w", step.Name, err)
 			}
+			// Track last validation error for final status check
+			lastValidationError = fmt.Sprintf("Step %s validation failed: %v", step.Name, err)
 			continue
 		}
 
 		// Execute step via worker
-		childJobID, err := worker.CreateJobs(ctx, resolvedStep, *jobDef, parentJobID)
+		// Pass stepID so worker creates jobs under the step (not manager)
+		childJobID, err := worker.CreateJobs(ctx, resolvedStep, *jobDef, stepID)
 		if err != nil {
-			m.AddJobLog(ctx, parentJobID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err))
-			m.SetJobError(ctx, parentJobID, err.Error())
+			m.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err))
+			m.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err))
+			m.SetJobError(ctx, managerID, err.Error())
+			m.UpdateJobStatus(ctx, stepID, "failed")
 
 			if step.OnError == models.ErrorStrategyFail {
-				return parentJobID, fmt.Errorf("step %s failed: %w", step.Name, err)
+				return managerID, fmt.Errorf("step %s failed: %w", step.Name, err)
 			}
 
 			// Check error tolerance
 			if jobDef.ErrorTolerance != nil {
-				shouldStop, _ := m.checkErrorTolerance(ctx, parentJobID, jobDef.ErrorTolerance)
+				shouldStop, _ := m.checkErrorTolerance(ctx, managerID, jobDef.ErrorTolerance)
 				if shouldStop {
-					m.UpdateJobStatus(ctx, parentJobID, "failed")
-					return parentJobID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
+					m.UpdateJobStatus(ctx, managerID, "failed")
+					return managerID, fmt.Errorf("execution stopped: error tolerance threshold exceeded")
 				}
 			}
 			continue
 		}
 
-		// Track child jobs
+		// Track child jobs for this step
 		if worker.ReturnsChildJobs() {
 			hasChildJobs = true
+			m.AddJobLog(ctx, managerID, "info", fmt.Sprintf("Step %s spawned child jobs", step.Name))
+			m.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawned child jobs (job: %s)", childJobID))
+		} else {
+			m.AddJobLog(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name))
+			m.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID))
 		}
 
-		m.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Step %s completed (job: %s)", step.Name, childJobID))
-
-		// Update progress
-		if err := m.UpdateJobProgress(ctx, parentJobID, i+1, len(jobDef.Steps)); err != nil {
+		// Update manager progress
+		if err := m.UpdateJobProgress(ctx, managerID, i+1, len(jobDef.Steps)); err != nil {
 			// Log warning but continue
 		}
 
-		// Get child stats AFTER step execution (for per-step statistics)
-		var childCountAfter int
-		if stats, err := m.jobStorage.GetJobChildStats(ctx, []string{parentJobID}); err == nil {
-			if s := stats[parentJobID]; s != nil {
-				childCountAfter = s.ChildCount
+		// Get child stats for this step (jobs under step, not manager)
+		var stepChildCount int
+		if stats, err := m.jobStorage.GetJobChildStats(ctx, []string{stepID}); err == nil {
+			if s := stats[stepID]; s != nil {
+				stepChildCount = s.ChildCount
 			}
 		}
 
 		// Get document count AFTER step execution
-		docCountAfter, _ := m.GetDocumentCount(ctx, parentJobID)
-
-		// Calculate children created by this step (delta)
-		stepChildCount := childCountAfter - childCountBefore
+		docCountAfter, _ := m.GetDocumentCount(ctx, managerID)
 
 		// Calculate documents created by this step (delta)
 		stepDocCount := docCountAfter - docCountBefore
 
 		// Store step statistics for UI
 		stepStats[i] = map[string]interface{}{
-			"step_index":       i,
-			"step_name":        step.Name,
-			"step_type":        step.Type.String(),
-			"child_count":      stepChildCount,
-			"cumulative_count": childCountAfter,
-			"document_count":   stepDocCount,
+			"step_index":     i,
+			"step_id":        stepID,
+			"step_name":      step.Name,
+			"step_type":      step.Type.String(),
+			"child_count":    stepChildCount,
+			"document_count": stepDocCount,
 		}
 
-		// Update metadata with completed step status and step statistics
-		completedStepMetadata := map[string]interface{}{
+		// Determine step status based on whether it has child jobs
+		// If step creates child jobs, mark as "spawned" (not completed until children finish)
+		// If step doesn't create children, mark as "completed"
+		stepStatus := "completed"
+		m.logger.Debug().
+			Str("step_id", stepID).
+			Bool("returns_child_jobs", worker.ReturnsChildJobs()).
+			Int("step_child_count", stepChildCount).
+			Bool("step_monitor_nil", stepMonitor == nil).
+			Msg("Determining step status for step monitor")
+		// Log to job events for visibility
+		m.AddJobLog(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
+			worker.ReturnsChildJobs(), stepChildCount, stepMonitor == nil))
+		if worker.ReturnsChildJobs() && stepChildCount > 0 {
+			stepStatus = "spawned" // Children created but not yet finished
+		}
+
+		// Update step job status
+		if stepStatus == "completed" {
+			m.UpdateJobStatus(ctx, stepID, "completed")
+			m.SetJobFinished(ctx, stepID)
+		} else if stepStatus == "spawned" && stepMonitor != nil {
+			// Start StepMonitor for this step - it will monitor children and mark step complete
+			stepQueueJob := &models.QueueJob{
+				ID:        stepID,
+				ParentID:  &managerID,
+				ManagerID: &managerID,
+				Type:      string(models.JobTypeStep),
+				Name:      step.Name,
+				Config:    stepConfig,
+				Metadata:  stepJobMetadata,
+				CreatedAt: time.Now(),
+				Depth:     1,
+			}
+			stepMonitor.StartMonitoring(ctx, stepQueueJob)
+			m.AddJobLog(ctx, stepID, "info", "Step monitor started for spawned children")
+		}
+
+		// Update manager metadata with step progress
+		managerCompletedMetadata := map[string]interface{}{
 			"current_step":        i + 1,
 			"current_step_name":   step.Name,
 			"current_step_type":   step.Type.String(),
-			"current_step_status": "completed",
+			"current_step_status": stepStatus,
+			"current_step_id":     stepID,
 			"completed_steps":     i + 1,
 			"step_stats":          stepStats[:i+1], // Include all completed step stats
 		}
-		if err := m.UpdateJobMetadata(ctx, parentJobID, completedStepMetadata); err != nil {
+		if err := m.UpdateJobMetadata(ctx, managerID, managerCompletedMetadata); err != nil {
 			// Log but continue
 		}
-
-		// Track cumulative count for next iteration
-		prevChildCount = childCountAfter
-		_ = prevChildCount // Used in next iteration
 
 		// Publish step progress event for WebSocket clients
 		if m.eventService != nil {
 			payload := map[string]interface{}{
-				"job_id":           parentJobID,
+				"job_id":           managerID,
+				"step_id":          stepID,
 				"job_name":         jobDef.Name,
 				"step_index":       i,
 				"step_name":        step.Name,
 				"step_type":        step.Type.String(),
 				"current_step":     i + 1,
 				"total_steps":      len(jobDef.Steps),
-				"step_status":      "completed",
+				"step_status":      stepStatus, // "spawned" if children created, "completed" otherwise
 				"step_child_count": stepChildCount,
 				"timestamp":        time.Now().Format(time.RFC3339),
 			}
@@ -1203,31 +1335,49 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 		}
 	}
 
-	// Handle completion based on job type
+	// Handle completion based on whether steps have child jobs
 	if hasChildJobs && jobMonitor != nil {
-		// Start monitoring for jobs with children
-		m.AddJobLog(ctx, parentJobID, "info", "Child jobs detected - starting parent job monitoring")
+		// Start monitoring manager job (monitors steps which monitor their children)
+		m.AddJobLog(ctx, managerID, "info", "Steps have child jobs - starting manager job monitoring")
 
-		parentQueueJob := &models.QueueJob{
-			ID:        parentJobID,
+		// Store step IDs in manager metadata for monitoring
+		stepIDsMetadata := map[string]interface{}{
+			"step_job_ids": stepJobIDs,
+		}
+		if err := m.UpdateJobMetadata(ctx, managerID, stepIDsMetadata); err != nil {
+			// Log but continue
+		}
+
+		managerQueueJob := &models.QueueJob{
+			ID:        managerID,
 			ParentID:  nil,
-			Type:      "parent",
+			ManagerID: nil, // Manager has no manager
+			Type:      string(models.JobTypeManager),
 			Name:      jobDef.Name,
 			Config:    jobDefConfig,
-			Metadata:  parentMetadata,
+			Metadata:  managerMetadata,
 			CreatedAt: time.Now(),
 			Depth:     0,
 		}
 
-		jobMonitor.StartMonitoring(ctx, parentQueueJob)
+		jobMonitor.StartMonitoring(ctx, managerQueueJob)
 	} else {
-		// Mark as completed immediately for jobs without children
-		m.AddJobLog(ctx, parentJobID, "info", "Job completed (no child jobs)")
-		m.UpdateJobStatus(ctx, parentJobID, "completed")
-		m.SetJobFinished(ctx, parentJobID)
+		// Check if validation errors occurred with no children created
+		if lastValidationError != "" {
+			// Mark as failed when validation failed and no children were created
+			m.AddJobLog(ctx, managerID, "error", "Job failed: "+lastValidationError)
+			m.SetJobError(ctx, managerID, lastValidationError)
+			m.UpdateJobStatus(ctx, managerID, "failed")
+			m.SetJobFinished(ctx, managerID)
+		} else {
+			// Mark as completed immediately for jobs without children
+			m.AddJobLog(ctx, managerID, "info", "Job completed (no child jobs)")
+			m.UpdateJobStatus(ctx, managerID, "completed")
+			m.SetJobFinished(ctx, managerID)
+		}
 	}
 
-	return parentJobID, nil
+	return managerID, nil
 }
 
 // resolvePlaceholders recursively resolves {key-name} placeholders in step config values

@@ -1508,7 +1508,8 @@ func (w *CrawlerWorker) GetType() models.WorkerType {
 
 // CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
 // The crawler service will create child jobs for each URL discovered.
-func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
 	// Parse step config map into CrawlConfig struct
 	stepConfig := step.Config
 	if stepConfig == nil {
@@ -1592,7 +1593,7 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		false,         // refreshSource
 		nil,           // sourceConfigSnapshot
 		nil,           // authSnapshot
-		parentJobID,   // jobDefinitionID - link to parent
+		stepID,        // jobDefinitionID - link to step
 	)
 
 	if err != nil {
@@ -1602,7 +1603,7 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	w.logger.Debug().
 		Str("step_name", step.Name).
 		Str("job_id", jobID).
-		Str("parent_job_id", parentJobID).
+		Str("step_id", stepID).
 		Msg("Parent crawler job created")
 
 	return jobID, nil

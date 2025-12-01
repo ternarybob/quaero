@@ -3,6 +3,7 @@ package interfaces
 import (
 	"context"
 
+	"github.com/ternarybob/quaero/internal/interfaces/jobtypes"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -18,6 +19,33 @@ type JobMonitor interface {
 	// SubscribeToJobEvents sets up event subscriptions for real-time child job tracking.
 	// This is called during orchestrator initialization.
 	SubscribeToJobEvents()
+}
+
+// StepMonitor monitors a step job's children (worker jobs) and marks the step
+// as complete when all children finish. Each step with children gets its own
+// StepMonitor running in a goroutine.
+//
+// Hierarchy: Manager -> Steps -> Jobs
+// StepMonitor handles: Step -> Jobs (monitors jobs under a step)
+type StepMonitor interface {
+	// StartMonitoring starts monitoring a step job's children in a background goroutine.
+	// When all children complete, the step is marked as completed.
+	StartMonitoring(ctx context.Context, stepJob *models.QueueJob)
+}
+
+// JobStatusManager provides methods for managing job status and lifecycle.
+// Used by monitors to update job state without creating circular dependencies.
+type JobStatusManager interface {
+	// UpdateJobStatus updates the status of a job
+	UpdateJobStatus(ctx context.Context, jobID string, status string) error
+	// SetJobFinished marks a job as finished
+	SetJobFinished(ctx context.Context, jobID string) error
+	// SetJobError sets an error on a job
+	SetJobError(ctx context.Context, jobID string, errorMsg string) error
+	// AddJobLog adds a log entry to a job
+	AddJobLog(ctx context.Context, jobID string, level string, message string) error
+	// GetJobChildStats returns child job statistics for given job IDs
+	GetJobChildStats(ctx context.Context, jobIDs []string) (map[string]*jobtypes.JobChildStats, error)
 }
 
 // JobWorker defines the interface that all job workers must implement.
@@ -54,20 +82,24 @@ type JobSpawner interface {
 // DefinitionWorker based on WorkerType.
 //
 // This is distinct from JobWorker which executes queue jobs directly.
+//
+// Hierarchy: Manager -> Steps -> Jobs
+// Workers create jobs under their step (parent_id = stepID, manager_id = managerID)
 type DefinitionWorker interface {
 	// GetType returns the WorkerType this worker handles.
 	// Used by the manager for routing steps to the correct worker.
 	GetType() models.WorkerType
 
-	// CreateJobs creates queue jobs for the step and returns the parent job ID.
+	// CreateJobs creates queue jobs for the step and returns the job ID.
 	// The worker is responsible for creating job records and enqueueing work items.
 	// Parameters:
 	//   - ctx: Context for cancellation and timeouts
 	//   - step: The job step definition containing configuration
 	//   - jobDef: The parent job definition containing source info
-	//   - parentJobID: The ID of the parent orchestration job for hierarchy tracking
-	// Returns the job ID for tracking (may be same as parentJobID for inline steps)
-	CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error)
+	//   - stepID: The ID of the step job - jobs should set parent_id = stepID
+	// Returns the job ID for tracking (may be same as stepID for inline steps)
+	// Note: Jobs should retrieve manager_id from step metadata or job context
+	CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error)
 
 	// ReturnsChildJobs indicates if this worker creates async child jobs.
 	// If true, the orchestrator will start job monitoring for completion tracking.

@@ -55,7 +55,7 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 		return fmt.Errorf("job ID is required")
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", j.ID).
 		Str("status", string(j.Status)).
 		Msg("BadgerDB: SaveJob starting")
@@ -64,7 +64,7 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 	// IMPORTANT: Dereference pointer to ensure consistent type with Find operations
 	// BadgerHold uses type name for key prefix; storing *QueueJob vs QueueJob creates different prefixes
 	queueJob := j.ToQueueJob()
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", j.ID).
 		Msg("BadgerDB: Upserting QueueJob")
 	if err := s.db.Store().Upsert(queueJob.ID, *queueJob); err != nil {
@@ -77,12 +77,12 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 	// and must NOT be overwritten when updating job status/metadata
 	existingDocCount := 0
 	var existingRecord JobStatusRecord
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", j.ID).
 		Msg("BadgerDB: Getting existing JobStatusRecord for DocumentCount preservation")
 	if err := s.db.Store().Get(j.ID, &existingRecord); err == nil {
 		existingDocCount = existingRecord.DocumentCount
-		s.logger.Debug().
+		s.logger.Trace().
 			Str("job_id", j.ID).
 			Int("existing_doc_count", existingDocCount).
 			Msg("BadgerDB: Preserving existing DocumentCount")
@@ -103,7 +103,7 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 		UpdatedAt:     time.Now(),
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", j.ID).
 		Str("status", statusRecord.Status).
 		Int("document_count", statusRecord.DocumentCount).
@@ -113,20 +113,20 @@ func (s *QueueStorage) SaveJob(ctx context.Context, job interface{}) error {
 		return fmt.Errorf("failed to save job status: %w", err)
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", j.ID).
 		Msg("BadgerDB: SaveJob completed successfully")
 	return nil
 }
 
 func (s *QueueStorage) GetJob(ctx context.Context, jobID string) (interface{}, error) {
-	s.logger.Debug().Str("job_id", jobID).Msg("BadgerDB: GetJob starting")
+	s.logger.Trace().Str("job_id", jobID).Msg("BadgerDB: GetJob starting")
 
 	// 1. Load QueueJob from storage (immutable queued job)
 	var queueJob models.QueueJob
 	if err := s.db.Store().Get(jobID, &queueJob); err != nil {
 		if err == badgerhold.ErrNotFound {
-			s.logger.Debug().Str("job_id", jobID).Msg("BadgerDB: Job not found")
+			s.logger.Trace().Str("job_id", jobID).Msg("BadgerDB: Job not found")
 			return nil, fmt.Errorf("job not found: %s", jobID)
 		}
 		s.logger.Error().Err(err).Str("job_id", jobID).Msg("BadgerDB: Failed to get QueueJob")
@@ -162,7 +162,7 @@ func (s *QueueStorage) GetJob(ctx context.Context, jobID string) (interface{}, e
 		job.Metadata["document_count"] = float64(statusRecord.DocumentCount)
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Str("status", string(job.Status)).
 		Msg("BadgerDB: GetJob completed")
@@ -373,6 +373,77 @@ func (s *QueueStorage) GetChildJobs(ctx context.Context, parentID string) ([]*mo
 	return result, nil
 }
 
+// GetStepStats returns aggregate statistics for step jobs under a manager
+func (s *QueueStorage) GetStepStats(ctx context.Context, managerID string) (*interfaces.StepStats, error) {
+	// Get all step jobs under this manager
+	stepJobs, err := s.ListStepJobs(ctx, managerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get step jobs: %w", err)
+	}
+
+	stats := &interfaces.StepStats{
+		TotalSteps: len(stepJobs),
+	}
+
+	// For each step, get its status and aggregate child job stats
+	for _, step := range stepJobs {
+		// Get step status
+		var statusRecord JobStatusRecord
+		stepStatus := models.JobStatusPending
+		if err := s.db.Store().Get(step.ID, &statusRecord); err == nil {
+			stepStatus = models.JobStatus(statusRecord.Status)
+		}
+
+		// Count step by status
+		switch stepStatus {
+		case models.JobStatusCompleted:
+			stats.CompletedSteps++
+		case models.JobStatusFailed:
+			stats.FailedSteps++
+		case models.JobStatusRunning:
+			stats.RunningSteps++
+		case models.JobStatusPending:
+			stats.PendingSteps++
+		case models.JobStatusCancelled:
+			stats.CancelledSteps++
+		}
+
+		// Get child job stats for this step
+		childStats, err := s.GetJobChildStats(ctx, []string{step.ID})
+		if err != nil {
+			continue // Log and continue on error
+		}
+		if stepChildStats, ok := childStats[step.ID]; ok {
+			stats.TotalJobs += stepChildStats.ChildCount
+			stats.CompletedJobs += stepChildStats.CompletedChildren
+			stats.FailedJobs += stepChildStats.FailedChildren
+		}
+	}
+
+	return stats, nil
+}
+
+// ListStepJobs returns all step jobs under a manager
+func (s *QueueStorage) ListStepJobs(ctx context.Context, managerID string) ([]*models.QueueJob, error) {
+	var allJobs []models.QueueJob
+	if err := s.db.Store().Find(&allJobs, nil); err != nil {
+		return nil, fmt.Errorf("failed to list step jobs: %w", err)
+	}
+
+	var result []*models.QueueJob
+	for i := range allJobs {
+		// Step jobs have type="step" and parent_id=managerID
+		if allJobs[i].Type == string(models.JobTypeStep) &&
+			allJobs[i].ParentID != nil &&
+			*allJobs[i].ParentID == managerID {
+			result = append(result, &allJobs[i])
+		}
+	}
+
+	// Note: Could sort by CreatedAt ASC for execution order, but skipping for now
+	return result, nil
+}
+
 func (s *QueueStorage) GetJobsByStatus(ctx context.Context, status string) ([]*models.QueueJob, error) {
 	// 1. Find all status records matching the status
 	var statusRecords []JobStatusRecord
@@ -393,7 +464,7 @@ func (s *QueueStorage) GetJobsByStatus(ctx context.Context, status string) ([]*m
 }
 
 func (s *QueueStorage) UpdateJobStatus(ctx context.Context, jobID string, status string, errorMsg string) error {
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Str("new_status", status).
 		Msg("BadgerDB: UpdateJobStatus starting")
@@ -403,7 +474,7 @@ func (s *QueueStorage) UpdateJobStatus(ctx context.Context, jobID string, status
 	err := s.db.Store().Get(jobID, &record)
 	if err == badgerhold.ErrNotFound {
 		// Create new record if not exists
-		s.logger.Debug().Str("job_id", jobID).Msg("BadgerDB: Creating new JobStatusRecord")
+		s.logger.Trace().Str("job_id", jobID).Msg("BadgerDB: Creating new JobStatusRecord")
 		record = JobStatusRecord{
 			JobID: jobID,
 		}
@@ -429,7 +500,7 @@ func (s *QueueStorage) UpdateJobStatus(ctx context.Context, jobID string, status
 		record.CompletedAt = &now
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Str("status", status).
 		Int("document_count", record.DocumentCount).
@@ -439,7 +510,7 @@ func (s *QueueStorage) UpdateJobStatus(ctx context.Context, jobID string, status
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Str("status", status).
 		Msg("BadgerDB: UpdateJobStatus completed")
@@ -488,7 +559,7 @@ func (s *QueueStorage) UpdateProgressCountersAtomic(ctx context.Context, jobID s
 // This is the authoritative source for document_count (not QueueJob.Metadata)
 // Returns the new count after incrementing. Thread-safe for concurrent worker access.
 func (s *QueueStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error) {
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Msg("BadgerDB: IncrementDocumentCountAtomic starting")
 
@@ -496,7 +567,7 @@ func (s *QueueStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID s
 	err := s.db.Store().Get(jobID, &record)
 	if err == badgerhold.ErrNotFound {
 		// Create new record if not exists
-		s.logger.Debug().Str("job_id", jobID).Msg("BadgerDB: Creating new JobStatusRecord for document count")
+		s.logger.Trace().Str("job_id", jobID).Msg("BadgerDB: Creating new JobStatusRecord for document count")
 		record = JobStatusRecord{JobID: jobID, DocumentCount: 0}
 	} else if err != nil {
 		s.logger.Error().Err(err).Str("job_id", jobID).Msg("BadgerDB: Failed to get record for document count increment")
@@ -507,7 +578,7 @@ func (s *QueueStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID s
 	record.DocumentCount++
 	record.UpdatedAt = time.Now()
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Int("old_count", oldCount).
 		Int("new_count", record.DocumentCount).
@@ -517,7 +588,7 @@ func (s *QueueStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID s
 		return 0, fmt.Errorf("failed to increment document count: %w", err)
 	}
 
-	s.logger.Debug().
+	s.logger.Trace().
 		Str("job_id", jobID).
 		Int("document_count", record.DocumentCount).
 		Msg("BadgerDB: IncrementDocumentCountAtomic completed")

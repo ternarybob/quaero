@@ -29,6 +29,7 @@ type JobDefinitionHandler struct {
 	jobStorage        interfaces.QueueStorage
 	jobMgr            *queue.Manager
 	jobMonitor        interfaces.JobMonitor
+	stepMonitor       interfaces.StepMonitor
 	authStorage       interfaces.AuthStorage
 	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService *validation.TOMLValidationService
@@ -42,6 +43,7 @@ func NewJobDefinitionHandler(
 	jobStorage interfaces.QueueStorage,
 	jobMgr *queue.Manager,
 	jobMonitor interfaces.JobMonitor,
+	stepMonitor interfaces.StepMonitor,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
@@ -73,6 +75,7 @@ func NewJobDefinitionHandler(
 		jobStorage:        jobStorage,
 		jobMgr:            jobMgr,
 		jobMonitor:        jobMonitor,
+		stepMonitor:       stepMonitor,
 		authStorage:       authStorage,
 		kvStorage:         kvStorage,
 		validationService: validation.NewTOMLValidationService(logger),
@@ -492,7 +495,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor)
+		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -927,7 +930,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor)
+		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).

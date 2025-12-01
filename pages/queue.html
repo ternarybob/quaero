@@ -164,13 +164,15 @@
                                                         'text-warning': item.step.status === 'running',
                                                         'text-success': item.step.status === 'completed',
                                                         'text-error': item.step.status === 'failed',
-                                                        'text-gray': item.step.status === 'pending'
+                                                        'text-gray': item.step.status === 'pending',
+                                                        'text-primary': item.step.status === 'spawned'
                                                     }">
                                                         <i class="fas" :class="{
                                                             'fa-spinner fa-pulse': item.step.status === 'running',
                                                             'fa-check-circle': item.step.status === 'completed',
                                                             'fa-times-circle': item.step.status === 'failed',
-                                                            'fa-clock': item.step.status === 'pending'
+                                                            'fa-clock': item.step.status === 'pending',
+                                                            'fa-sitemap': item.step.status === 'spawned'
                                                         }"></i>
                                                     </span>
                                                     <span class="step-name">
@@ -178,12 +180,13 @@
                                                         <span x-text="item.step.name"></span>
                                                     </span>
                                                     <span class="label label-secondary step-label-sm" x-text="item.step.stepType"></span>
-                                                    <!-- Only show status badge for terminal states -->
-                                                    <template x-if="item.step.status === 'completed' || item.step.status === 'failed' || item.step.status === 'cancelled'">
+                                                    <!-- Show status badge for terminal states and spawned -->
+                                                    <template x-if="item.step.status === 'completed' || item.step.status === 'failed' || item.step.status === 'cancelled' || item.step.status === 'spawned'">
                                                         <span class="label step-status-label" :class="{
                                                             'label-success': item.step.status === 'completed',
                                                             'label-error': item.step.status === 'failed',
-                                                            'bg-gray': item.step.status === 'cancelled'
+                                                            'bg-gray': item.step.status === 'cancelled',
+                                                            'label-primary': item.step.status === 'spawned'
                                                         }" x-text="item.step.status"></span>
                                                     </template>
                                                     <template x-if="item.step.documentCount > 0">
@@ -1306,6 +1309,49 @@
                         }));
                     }
 
+                    // Handle step progress events (from StepMonitor - monitors jobs under a step)
+                    if (message.type === 'step_progress' && message.payload) {
+                        const stepProgress = message.payload;
+                        // Update step job with progress data
+                        window.dispatchEvent(new CustomEvent('jobList:updateStepProgress', {
+                            detail: {
+                                step_id: stepProgress.step_id,
+                                manager_id: stepProgress.manager_id,
+                                status: stepProgress.status,
+                                total_jobs: stepProgress.total_jobs || 0,
+                                pending_jobs: stepProgress.pending_jobs || 0,
+                                running_jobs: stepProgress.running_jobs || 0,
+                                completed_jobs: stepProgress.completed_jobs || 0,
+                                failed_jobs: stepProgress.failed_jobs || 0,
+                                cancelled_jobs: stepProgress.cancelled_jobs || 0,
+                                progress_text: stepProgress.progress_text,
+                                timestamp: stepProgress.timestamp
+                            }
+                        }));
+                    }
+
+                    // Handle manager progress events (from ManagerMonitor - monitors steps under a manager)
+                    if (message.type === 'manager_progress' && message.payload) {
+                        const managerProgress = message.payload;
+                        // Update manager job with overall progress
+                        window.dispatchEvent(new CustomEvent('jobList:updateManagerProgress', {
+                            detail: {
+                                manager_id: managerProgress.manager_id,
+                                job_name: managerProgress.job_name,
+                                status: managerProgress.status,
+                                total_steps: managerProgress.total_steps || 0,
+                                completed_steps: managerProgress.completed_steps || 0,
+                                running_steps: managerProgress.running_steps || 0,
+                                pending_steps: managerProgress.pending_steps || 0,
+                                total_jobs: managerProgress.total_jobs || 0,
+                                completed_jobs: managerProgress.completed_jobs || 0,
+                                failed_jobs: managerProgress.failed_jobs || 0,
+                                document_count: managerProgress.document_count || 0,
+                                timestamp: managerProgress.timestamp
+                            }
+                        }));
+                    }
+
                     // Handle job spawn events
                     if (message.type === 'job_spawn' && message.payload) {
                         const spawnData = message.payload;
@@ -1925,6 +1971,9 @@
                     window.addEventListener('jobList:recalculateStats', () => this.recalculateStats());
                     window.addEventListener('jobList:updateJobProgress', (e) => this.updateJobProgress(e.detail));
                     window.addEventListener('jobList:jobLog', (e) => this.handleJobLog(e.detail));
+                    // Step hierarchy progress updates
+                    window.addEventListener('jobList:updateStepProgress', (e) => this.updateStepProgress(e.detail));
+                    window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
 
                     // Set initial load flag
                     this.isInitialLoad = true;
@@ -2462,7 +2511,15 @@
                     // Render parent jobs with step rows for multi-step jobs
                     // Also render child jobs as separate rows under their parent
                     const itemsToRender = [];
-                    this.filteredJobs.filter(job => !job.parent_id).forEach(parentJob => {
+
+                    try {
+                    // Guard against empty/undefined filteredJobs
+                    if (!this.filteredJobs || !Array.isArray(this.filteredJobs)) {
+                        console.warn('[Queue] renderJobs: filteredJobs is not an array, skipping render');
+                        return;
+                    }
+
+                    this.filteredJobs.filter(job => job && !job.parent_id).forEach(parentJob => {
                         // Add parent job row
                         itemsToRender.push({ type: 'parent', job: parentJob });
 
@@ -2600,9 +2657,9 @@
                                     }
                                 });
 
-                                // Auto-expand step logs for running or failed steps
+                                // Auto-expand step logs for running, spawned, or failed steps
                                 const stepLogsKey = `${parentJob.id}:${stepDef.name}`;
-                                if ((status === 'running' || status === 'failed') && !this.expandedStepLogs[stepLogsKey]) {
+                                if ((status === 'running' || status === 'spawned' || status === 'failed') && !this.expandedStepLogs[stepLogsKey]) {
                                     this.expandedStepLogs = { ...this.expandedStepLogs, [stepLogsKey]: true };
                                 }
 
@@ -2650,11 +2707,31 @@
                         }
                     });
 
+                    // Safety check: if we built an empty array but have jobs, something is wrong
+                    if (itemsToRender.length === 0 && this.filteredJobs.length > 0) {
+                        console.error('[Queue] renderJobs: Built empty itemsToRender but have', this.filteredJobs.length, 'filtered jobs');
+                        console.error('[Queue] filteredJobs sample:', this.filteredJobs.slice(0, 3).map(j => ({id: j.id?.substring(0,8), parent_id: j.parent_id, status: j.status})));
+                        // Trigger reload to recover
+                        this._autoRecoveryCount = (this._autoRecoveryCount || 0) + 1;
+                        if (this._autoRecoveryCount <= 3) {
+                            console.warn('[Queue] Triggering auto-recovery reload (attempt', this._autoRecoveryCount, ')');
+                            setTimeout(() => this.loadJobs(), 500);
+                        }
+                        return; // Don't clear existing display
+                    }
+
+                    this._autoRecoveryCount = 0; // Reset on successful render
                     this.itemsToRender = itemsToRender;
 
                     // Also update pagination
                     const totalPages = Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
                     window.renderPagination(totalPages, this.currentPage);
+
+                    } catch (error) {
+                        console.error('[Queue] renderJobs error:', error);
+                        // On error, preserve existing itemsToRender to prevent blank screen
+                        // Don't set itemsToRender = [] which would clear the display
+                    }
                 },
 
                 // Throttled version of renderJobs to prevent UI thrashing during rapid updates
@@ -3296,20 +3373,27 @@
                         this.filteredJobs[filteredIndex] = job;
                     } else {
                         // For NEW jobs that are not yet in filteredJobs, apply filters as normal
-                        const matchesFilters = window.matchesActiveFilters(job);
+                        // IMPORTANT: Only add PARENT jobs to filteredJobs (child jobs are in allJobs only)
+                        // filteredJobs is used for pagination of parent jobs; child jobs display under parents
+                        if (job.parent_id) {
+                            // Child job - don't add to filteredJobs, just update allJobs (already done above)
+                            console.debug('[Queue] Skipping child job from filteredJobs:', job.id?.substring(0,8));
+                        } else {
+                            const matchesFilters = window.matchesActiveFilters(job);
 
-                        if (matchesFilters) {
-                            // Insert at correct position (sorted by created_at DESC)
-                            const insertIndex = this.filteredJobs.findIndex(j => {
-                                return new Date(j.created_at) < new Date(job.created_at);
-                            });
-                            if (insertIndex >= 0) {
-                                this.filteredJobs.splice(insertIndex, 0, job);
-                            } else {
-                                this.filteredJobs.push(job);
+                            if (matchesFilters) {
+                                // Insert at correct position (sorted by created_at DESC)
+                                const insertIndex = this.filteredJobs.findIndex(j => {
+                                    return new Date(j.created_at) < new Date(job.created_at);
+                                });
+                                if (insertIndex >= 0) {
+                                    this.filteredJobs.splice(insertIndex, 0, job);
+                                } else {
+                                    this.filteredJobs.push(job);
+                                }
                             }
+                            // If doesn't match filters, don't add to filteredJobs (as before)
                         }
-                        // If doesn't match filters, don't add to filteredJobs (as before)
                     }
 
                     // If child job updated, refresh parent stats (debounced per parent_id)
@@ -3488,6 +3572,83 @@
                     if (progress.overall_progress !== undefined) {
                         job.progress.percentage = progress.overall_progress * 100;
                     }
+
+                    // Re-render to show updated progress (throttled)
+                    this.throttledRenderJobs();
+                },
+
+                // Update step progress from step_progress WebSocket event (from StepMonitor)
+                // Steps are job type="step" that monitor their child jobs
+                updateStepProgress(progress) {
+                    const stepIndex = this.allJobs.findIndex(j => j.id === progress.step_id);
+                    if (stepIndex < 0) {
+                        return; // Step not in current view
+                    }
+
+                    const step = this.allJobs[stepIndex];
+
+                    // Update step status
+                    if (progress.status) {
+                        step.status = progress.status;
+                    }
+
+                    // Update child job statistics for this step
+                    step.child_count = progress.total_jobs || 0;
+                    step.completed_children = progress.completed_jobs || 0;
+                    step.failed_children = progress.failed_jobs || 0;
+                    step.cancelled_children = progress.cancelled_jobs || 0;
+                    step.pending_children = progress.pending_jobs || 0;
+                    step.running_children = progress.running_jobs || 0;
+
+                    // Update status_report with progress text
+                    if (!step.status_report) {
+                        step.status_report = {};
+                    }
+                    if (progress.progress_text) {
+                        step.status_report.progress_text = progress.progress_text;
+                    }
+
+                    // Re-render to show updated progress (throttled)
+                    this.throttledRenderJobs();
+                },
+
+                // Update manager progress from manager_progress WebSocket event (from ManagerMonitor)
+                // Managers are job type="manager" that orchestrate steps
+                updateManagerProgress(progress) {
+                    const managerIndex = this.allJobs.findIndex(j => j.id === progress.manager_id);
+                    if (managerIndex < 0) {
+                        return; // Manager not in current view
+                    }
+
+                    const manager = this.allJobs[managerIndex];
+
+                    // Update manager status
+                    if (progress.status) {
+                        manager.status = progress.status;
+                    }
+
+                    // Update document count
+                    if (progress.document_count !== undefined) {
+                        manager.document_count = progress.document_count;
+                    }
+
+                    // Store step progress in metadata
+                    if (!manager.metadata) {
+                        manager.metadata = {};
+                    }
+                    manager.metadata.total_steps = progress.total_steps || 0;
+                    manager.metadata.completed_steps = progress.completed_steps || 0;
+                    manager.metadata.running_steps = progress.running_steps || 0;
+                    manager.metadata.pending_steps = progress.pending_steps || 0;
+                    manager.metadata.total_jobs = progress.total_jobs || 0;
+                    manager.metadata.completed_jobs = progress.completed_jobs || 0;
+                    manager.metadata.failed_jobs = progress.failed_jobs || 0;
+
+                    // Update status_report with progress text
+                    if (!manager.status_report) {
+                        manager.status_report = {};
+                    }
+                    manager.status_report.progress_text = `${progress.completed_steps || 0}/${progress.total_steps || 0} steps, ${progress.completed_jobs || 0}/${progress.total_jobs || 0} jobs`;
 
                     // Re-render to show updated progress (throttled)
                     this.throttledRenderJobs();
