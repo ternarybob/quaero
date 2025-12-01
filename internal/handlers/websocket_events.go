@@ -196,6 +196,7 @@ func (s *EventSubscriber) handleJobCreated(ctx context.Context, event interfaces
 
 	update := JobStatusUpdate{
 		JobID:      getStringWithFallback(payload, "job_id", "jobId"),
+		ParentID:   getStringWithFallback(payload, "parent_id", "parentId"),
 		Status:     getString(payload, "status"),
 		SourceType: getStringWithFallback(payload, "source_type", "sourceType"),
 		EntityType: getStringWithFallback(payload, "entity_type", "entityType"),
@@ -220,6 +221,7 @@ func (s *EventSubscriber) handleJobStarted(ctx context.Context, event interfaces
 
 	update := JobStatusUpdate{
 		JobID:      getStringWithFallback(payload, "job_id", "jobId"),
+		ParentID:   getStringWithFallback(payload, "parent_id", "parentId"),
 		Status:     getString(payload, "status"),
 		SourceType: getStringWithFallback(payload, "source_type", "sourceType"),
 		EntityType: getStringWithFallback(payload, "entity_type", "entityType"),
@@ -251,6 +253,7 @@ func (s *EventSubscriber) handleJobCompleted(ctx context.Context, event interfac
 
 	update := JobStatusUpdate{
 		JobID:         getStringWithFallback(payload, "job_id", "jobId"),
+		ParentID:      getStringWithFallback(payload, "parent_id", "parentId"),
 		Status:        getString(payload, "status"),
 		SourceType:    getStringWithFallback(payload, "source_type", "sourceType"),
 		EntityType:    getStringWithFallback(payload, "entity_type", "entityType"),
@@ -319,6 +322,7 @@ func (s *EventSubscriber) handleJobFailed(ctx context.Context, event interfaces.
 
 	update := JobStatusUpdate{
 		JobID:             getStringWithFallback(payload, "job_id", "jobId"),
+		ParentID:          getStringWithFallback(payload, "parent_id", "parentId"),
 		Status:            getString(payload, "status"),
 		SourceType:        getStringWithFallback(payload, "source_type", "sourceType"),
 		EntityType:        getStringWithFallback(payload, "entity_type", "entityType"),
@@ -356,6 +360,7 @@ func (s *EventSubscriber) handleJobCancelled(ctx context.Context, event interfac
 
 	update := JobStatusUpdate{
 		JobID:         getStringWithFallback(payload, "job_id", "jobId"),
+		ParentID:      getStringWithFallback(payload, "parent_id", "parentId"),
 		Status:        getString(payload, "status"),
 		SourceType:    getStringWithFallback(payload, "source_type", "sourceType"),
 		EntityType:    getStringWithFallback(payload, "entity_type", "entityType"),

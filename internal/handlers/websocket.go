@@ -175,6 +175,7 @@ type JobSpawnUpdate struct {
 
 type JobStatusUpdate struct {
 	JobID             string    `json:"job_id"`
+	ParentID          string    `json:"parent_id,omitempty"`           // Parent job ID (for child job identification)
 	Status            string    `json:"status"`                        // "pending", "running", "completed", "failed", "cancelled"
 	SourceType        string    `json:"source_type"`                   // "jira", "confluence", "github"
 	EntityType        string    `json:"entity_type"`                   // "project", "issue", "space", "page"

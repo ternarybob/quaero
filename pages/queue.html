@@ -3278,8 +3278,19 @@
                     let jobIndex = this.allJobs.findIndex(job => job.id === update.job_id);
                     let job = jobIndex >= 0 ? this.allJobs[jobIndex] : null;
 
-                    // If job not found, fetch full job data regardless of status
+                    // If job not found, check if we should fetch it
+                    // IMPORTANT: Child jobs (worker jobs under steps) are NOT individually fetched
+                    // because with 1000+ child jobs, this causes browser resource exhaustion.
+                    // Child job stats are tracked via aggregated step_progress/parent_job_progress events.
                     if (!job) {
+                        // Check if this is a child job (has parent_id in the update)
+                        // Child jobs are tracked via aggregated events, not individual fetches
+                        if (update.parent_id) {
+                            console.debug('[Queue] Skipping individual fetch for child job:', update.job_id?.substring(0, 8), 'parent:', update.parent_id?.substring(0, 8));
+                            return;
+                        }
+
+                        // Only fetch for root-level jobs (managers/parents without parent_id)
                         try {
                             const response = await fetch(`/api/jobs/${update.job_id}`);
 
