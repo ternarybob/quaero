@@ -19,7 +19,6 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
-	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -132,37 +131,22 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	crawlConfig, err := w.extractCrawlConfig(job.Config)
 	if err != nil {
 		jobLogger.Error().Err(err).Msg("Failed to extract crawl config")
-		w.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to extract crawl config: %v", err), map[string]interface{}{
-			"url":        seedURL,
-			"depth":      job.Depth,
-			"child_id":   job.ID,
-			"discovered": job.Metadata["discovered_by"],
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - invalid config", seedURL))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid crawl config: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to extract crawl config: %w", err)
 	}
-
-	// Note: Per-URL job start logging removed to reduce log volume
-	// Progress is tracked via real-time events instead
-
-	// Publish real-time log for job start (under parent context)
-	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Starting URL: %s (depth: %d)", seedURL, job.Depth), map[string]interface{}{
-		"url":          seedURL,
-		"depth":        job.Depth,
-		"max_depth":    crawlConfig.MaxDepth,
-		"follow_links": crawlConfig.FollowLinks,
-		"child_id":     job.ID,
-		"discovered":   job.Metadata["discovered_by"],
-	})
 
 	// Update job status to running
 	if err := w.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
 		jobLogger.Warn().Err(err).Msg("Failed to update job status to running")
 	}
 
-	// Add job log for execution start
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Starting crawl of URL: %s (depth: %d)", seedURL, job.Depth))
+	// Record start time for duration tracking
+	jobStartTime := time.Now()
+
+	// Publish JOB START event for real-time UI display
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("▶ Started: %s", seedURL))
 
 	// Publish initial progress update
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
@@ -192,79 +176,42 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	defer browserCancel()
 
 	jobLogger.Trace().Msg("Created fresh browser instance")
-	w.publishCrawlerJobLog(ctx, parentID, "debug", "Created fresh browser instance", map[string]interface{}{
-		"url":      seedURL,
-		"depth":    job.Depth,
-		"child_id": job.ID,
-	})
 
 	// Step 1.5: Load and inject authentication cookies into browser
 	if err := w.injectAuthCookies(ctx, browserCtx, parentID, seedURL, jobLogger); err != nil {
 		jobLogger.Warn().Err(err).Msg("Failed to inject authentication cookies - continuing without authentication")
-		w.publishCrawlerJobLog(ctx, parentID, "warn", fmt.Sprintf("Failed to inject authentication cookies: %v", err), map[string]interface{}{
-			"url":      seedURL,
-			"depth":    job.Depth,
-			"child_id": job.ID,
-			"error":    err.Error(),
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to inject authentication cookies: %v", err))
 	}
 
 	// Step 2: Navigate to URL and render JavaScript
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Rendering page with JavaScript", seedURL)
-	startTime := time.Now()
+	renderStartTime := time.Now()
 	htmlContent, statusCode, err := w.renderPageWithChromeDp(ctx, browserCtx, seedURL, jobLogger)
 	if err != nil {
+		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to render page with ChromeDP")
-		w.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to render page with ChromeDP: %v", err), map[string]interface{}{
-			"url":      seedURL,
-			"depth":    job.Depth,
-			"child_id": job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - render error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Page rendering failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to render page: %w", err)
 	}
-	renderTime := time.Since(startTime)
+	renderTime := time.Since(renderStartTime)
 
-	// Note: Per-URL success logging removed to reduce log volume
-	// Render stats are captured in real-time events instead
-
-	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime), map[string]interface{}{
-		"url":         seedURL,
-		"depth":       job.Depth,
-		"status_code": statusCode,
-		"html_length": len(htmlContent),
-		"render_time": renderTime.String(),
-		"child_id":    job.ID,
-	})
+	w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Rendered page (status: %d, size: %d bytes, time: %v)", statusCode, len(htmlContent), renderTime))
 
 	// Step 3: Process HTML content and convert to markdown
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Processing HTML content and converting to markdown", seedURL)
 	processedContent, err := w.contentProcessor.ProcessHTML(htmlContent, seedURL)
 	if err != nil {
+		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to process HTML content")
-		w.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to process HTML content: %v", err), map[string]interface{}{
-			"url":      seedURL,
-			"depth":    job.Depth,
-			"child_id": job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - content processing error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Content processing failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to process content: %w", err)
 	}
 
-	// Note: Per-URL success logging removed to reduce log volume
-	// Content stats are captured in real-time events instead
-
-	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Processed content: '%s' (%d bytes, %d links)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links)), map[string]interface{}{
-		"url":          seedURL,
-		"depth":        job.Depth,
-		"title":        processedContent.Title,
-		"content_size": processedContent.ContentSize,
-		"links_found":  len(processedContent.Links),
-		"process_time": processedContent.ProcessTime.String(),
-		"child_id":     job.ID,
-	})
+	w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Processed content: '%s' (%d bytes, %d links)", processedContent.Title, processedContent.ContentSize, len(processedContent.Links)))
 
 	// Step 4: Create crawled document with comprehensive metadata
 	parentJobID := job.GetParentID()
@@ -286,13 +233,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Saving document to storage", seedURL)
 	docPersister := crawler.NewDocumentPersister(w.documentStorage, w.eventService, jobLogger)
 	if err := docPersister.SaveCrawledDocument(crawledDoc); err != nil {
+		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to save crawled document")
-		w.publishCrawlerJobLog(ctx, parentID, "error", fmt.Sprintf("Failed to save crawled document: %v", err), map[string]interface{}{
-			"url":         seedURL,
-			"depth":       job.Depth,
-			"document_id": crawledDoc.ID,
-			"child_id":    job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - storage error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Document storage failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to save document: %w", err)
@@ -300,18 +243,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 	// Note: Per-document success logging removed to reduce log volume
 
-	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Document saved: %s (%d bytes)", crawledDoc.Title, crawledDoc.ContentSize), map[string]interface{}{
-		"url":          seedURL,
-		"depth":        job.Depth,
-		"document_id":  crawledDoc.ID,
-		"title":        crawledDoc.Title,
-		"content_size": crawledDoc.ContentSize,
-		"child_id":     job.ID,
-	})
-
-	// Add job log for successful document storage
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Document saved: %s (%d bytes, %s)",
-		crawledDoc.Title, crawledDoc.ContentSize, crawledDoc.ID))
+	// Add job log for successful document storage (context auto-resolved, published to WebSocket)
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Document saved: %s (%d bytes) - %s",
+		crawledDoc.Title, crawledDoc.ContentSize, seedURL))
 
 	// Step 6: Link discovery and filtering with child job spawning
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Discovering and filtering links", seedURL)
@@ -333,14 +267,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 		// Note: Per-URL link filtering logging removed to reduce log volume
 
-		w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Links: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded), map[string]interface{}{
-			"url":            seedURL,
-			"depth":          job.Depth,
-			"links_found":    filterResult.Found,
-			"links_filtered": filterResult.Filtered,
-			"links_excluded": filterResult.Excluded,
-			"child_id":       job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Links: %d found, %d filtered, %d excluded", filterResult.Found, filterResult.Filtered, filterResult.Excluded))
 
 		// Check depth limits for child job spawning
 		if job.Depth < crawlConfig.MaxDepth && len(filterResult.FilteredLinks) > 0 {
@@ -355,13 +282,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 						Int("max_pages", crawlConfig.MaxPages).
 						Int("skipped", linkStats.Skipped).
 						Msg("Reached max pages limit, skipping remaining links")
-					w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped), map[string]interface{}{
-						"url":       seedURL,
-						"depth":     job.Depth,
-						"max_pages": crawlConfig.MaxPages,
-						"skipped":   linkStats.Skipped,
-						"child_id":  job.ID,
-					})
+					w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped))
 					break
 				}
 
@@ -370,13 +291,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 						Err(err).
 						Str("child_url", link).
 						Msg("Failed to spawn child job for discovered link")
-					w.publishCrawlerJobLog(ctx, parentID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link), map[string]interface{}{
-						"url":       seedURL,
-						"depth":     job.Depth,
-						"child_url": link,
-						"error":     err.Error(),
-						"child_id":  job.ID,
-					})
+					w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link))
 					continue
 				}
 				childJobsSpawned++
@@ -386,13 +301,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 			// Note: Per-URL child spawn logging removed to reduce log volume
 
-			w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Spawned %d child jobs", childJobsSpawned), map[string]interface{}{
-				"url":                seedURL,
-				"depth":              job.Depth,
-				"max_depth":          crawlConfig.MaxDepth,
-				"child_jobs_spawned": childJobsSpawned,
-				"child_id":           job.ID,
-			})
+			w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Spawned %d child jobs", childJobsSpawned))
 		} else if job.Depth >= crawlConfig.MaxDepth {
 			// All filtered links are skipped due to depth limit
 			linkStats.Skipped = filterResult.Filtered
@@ -402,12 +311,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 				Int("links_skipped", linkStats.Skipped).
 				Msg("Reached maximum depth, skipping all discovered links")
 
-			w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped), map[string]interface{}{
-				"url":           seedURL,
-				"current_depth": job.Depth,
-				"max_depth":     crawlConfig.MaxDepth,
-				"links_skipped": linkStats.Skipped,
-			})
+			w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Reached maximum depth (%d), skipping %d discovered links", crawlConfig.MaxDepth, linkStats.Skipped))
 		}
 
 		// Update crawler metadata with final link statistics
@@ -425,12 +329,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 			Msg("Link following disabled, skipping child job spawning")
 	}
 
-	// Publish comprehensive link processing results
-	w.publishLinkDiscoveryEvent(ctx, job, linkStats, seedURL)
-
-	// Log comprehensive link processing results
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Links found: %d | filtered: %d | followed: %d",
-		linkStats.Found, linkStats.Filtered, linkStats.Followed))
+	// Log comprehensive link processing results (context auto-resolved, published to WebSocket)
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Links found: %d | filtered: %d | followed: %d | skipped: %d",
+		linkStats.Found, linkStats.Filtered, linkStats.Followed, linkStats.Skipped))
 
 	// Update job status to completed
 	w.publishCrawlerProgressUpdate(ctx, job, "completed", "Job completed successfully", seedURL)
@@ -439,19 +340,11 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	totalTime := time.Since(startTime)
-	// Note: Per-URL completion logging removed to reduce log volume
+	// Calculate total job duration
+	jobDuration := time.Since(jobStartTime)
 
-	w.publishCrawlerJobLog(ctx, parentID, "debug", fmt.Sprintf("URL completed in %v", totalTime), map[string]interface{}{
-		"url":        seedURL,
-		"depth":      job.Depth,
-		"total_time": totalTime.String(),
-		"status":     "completed",
-		"child_id":   job.ID,
-	})
-
-	// Add final job log
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Crawl completed successfully in %v", totalTime))
+	// Publish JOB END event for real-time UI display (success)
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("✓ Completed: %s (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 
 	return nil
 }
@@ -1261,11 +1154,8 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 	}
 	// ===== END PHASE 2 =====
 
-	w.publishCrawlerJobLog(ctx, parentJobID, "info", fmt.Sprintf("Injected %d authentication cookies into browser", len(chromeDPCookies)), map[string]interface{}{
-		"cookie_count":  len(chromeDPCookies),
-		"site_domain":   authCreds.SiteDomain,
-		"target_domain": targetURLParsed.Host,
-	})
+	// Log cookie injection using Job Manager's uniform logging
+	w.jobMgr.AddJobLog(ctx, parentJobID, "info", fmt.Sprintf("Injected %d authentication cookies into browser (domain: %s)", len(chromeDPCookies), targetURLParsed.Host))
 
 	return nil
 }
@@ -1286,13 +1176,28 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 	// Create child job metadata
 	childMetadata := make(map[string]interface{})
 	if parentJob.Metadata != nil {
-		// Copy parent metadata
+		// Copy parent metadata (includes step_id, step_name, manager_id if present)
 		for k, v := range parentJob.Metadata {
 			childMetadata[k] = v
 		}
 	}
 	childMetadata["discovered_by"] = parentJob.ID
 	childMetadata["link_index"] = linkIndex
+
+	// Ensure step context is propagated to child jobs for proper event aggregation
+	// If not already in metadata, try to resolve from parent chain
+	if _, hasStepID := childMetadata["step_id"]; !hasStepID {
+		sc := w.extractStepContext(ctx, parentJob)
+		if sc.stepID != "" {
+			childMetadata["step_id"] = sc.stepID
+		}
+		if sc.stepName != "" {
+			childMetadata["step_name"] = sc.stepName
+		}
+		if sc.managerID != "" {
+			childMetadata["manager_id"] = sc.managerID
+		}
+	}
 
 	// Create child queue job with incremented depth
 	childJob := models.NewQueueJobChild(
@@ -1353,148 +1258,83 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 		Int("link_index", linkIndex).
 		Msg("Child job spawned and enqueued for discovered link")
 
-	// Publish job spawn event for real-time monitoring
-	w.publishJobSpawnEvent(ctx, parentJob, childJob.ID, childURL)
+	// Log job spawn event
+	w.jobMgr.AddJobLog(ctx, parentJob.ID, "debug", fmt.Sprintf("Spawned child job %s for URL: %s (depth: %d)", childJob.ID[:8], childURL, parentJob.Depth+1))
 
 	return nil
 }
 
 // ============================================================================
-// REAL-TIME EVENT PUBLISHING
+// STEP CONTEXT HELPERS
 // ============================================================================
 
-// publishCrawlerJobLog publishes a crawler job log event for real-time streaming
-func (w *CrawlerWorker) publishCrawlerJobLog(ctx context.Context, jobID, level, message string, metadata map[string]interface{}) {
-	if w.eventService == nil {
-		return
-	}
-
-	payload := map[string]interface{}{
-		"job_id":    jobID,
-		"level":     level,
-		"message":   message,
-		"timestamp": time.Now().Format(time.RFC3339),
-	}
-
-	if metadata != nil {
-		payload["metadata"] = metadata
-	}
-
-	event := interfaces.Event{
-		Type:    "crawler_job_log",
-		Payload: payload,
-	}
-
-	// Publish asynchronously to avoid blocking job execution
-	common.SafeGo(w.logger, "publishCrawlerJobLog", func() {
-		if err := w.eventService.Publish(ctx, event); err != nil {
-			w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish crawler job log event")
-		}
-	})
+// stepContext holds step-related information for event publishing
+type stepContext struct {
+	stepID    string
+	stepName  string
+	managerID string
 }
 
-// publishCrawlerProgressUpdate publishes a crawler job progress update for real-time monitoring
+// extractStepContext extracts step context from job metadata or parent chain
+func (w *CrawlerWorker) extractStepContext(ctx context.Context, job *models.QueueJob) *stepContext {
+	sc := &stepContext{}
+
+	// Try to get step context from job metadata first
+	if job.Metadata != nil {
+		if stepID, ok := job.Metadata["step_id"].(string); ok {
+			sc.stepID = stepID
+		}
+		if stepName, ok := job.Metadata["step_name"].(string); ok {
+			sc.stepName = stepName
+		}
+		if managerID, ok := job.Metadata["manager_id"].(string); ok {
+			sc.managerID = managerID
+		}
+	}
+
+	// If step context not in metadata, try to resolve from parent chain
+	if sc.stepName == "" {
+		parentID := job.GetParentID()
+		if parentID != "" {
+			parentJob, err := w.jobMgr.GetJob(ctx, parentID)
+			if err == nil {
+				if parentState, ok := parentJob.(*models.QueueJobState); ok {
+					// Check if parent is a step job
+					if parentState.Type == "step" {
+						sc.stepID = parentState.ID
+						sc.stepName = parentState.Name
+						// Get manager_id from step job's parent
+						if parentState.ParentID != nil && *parentState.ParentID != "" {
+							sc.managerID = *parentState.ParentID
+						}
+					} else if parentState.Metadata != nil {
+						// Parent is not a step, but might have step context in metadata
+						if stepID, ok := parentState.Metadata["step_id"].(string); ok {
+							sc.stepID = stepID
+						}
+						if stepName, ok := parentState.Metadata["step_name"].(string); ok {
+							sc.stepName = stepName
+						}
+						if managerID, ok := parentState.Metadata["manager_id"].(string); ok {
+							sc.managerID = managerID
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return sc
+}
+
+// publishCrawlerProgressUpdate logs a crawler job progress update.
+// Uses debug level to reduce UI noise while tracking activity.
 func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *models.QueueJob, status, activity, currentURL string) {
-	if w.eventService == nil {
-		return
+	message := fmt.Sprintf("[%s] %s", status, activity)
+	if currentURL != "" {
+		message = fmt.Sprintf("[%s] %s: %s", status, activity, currentURL)
 	}
-
-	// Get current progress statistics from job manager
-	parentJobID := job.GetParentID()
-	if parentJobID == "" {
-		parentJobID = job.ID // For root jobs, use self as parent
-	}
-
-	// Create basic progress payload
-	payload := map[string]interface{}{
-		"job_id":           job.ID,
-		"parent_id":        parentJobID,
-		"status":           status,
-		"job_type":         job.Type,
-		"current_url":      currentURL,
-		"current_activity": activity,
-		"timestamp":        time.Now().Format(time.RFC3339),
-		"depth":            job.Depth,
-	}
-
-	// Add source information
-	if sourceType, ok := job.GetConfigString("source_type"); ok {
-		payload["source_type"] = sourceType
-	}
-	if entityType, ok := job.GetConfigString("entity_type"); ok {
-		payload["entity_type"] = entityType
-	}
-
-	event := interfaces.Event{
-		Type:    "crawler_job_progress",
-		Payload: payload,
-	}
-
-	// Publish asynchronously to avoid blocking job execution
-	common.SafeGo(w.logger, "publishCrawlerProgress", func() {
-		if err := w.eventService.Publish(ctx, event); err != nil {
-			w.logger.Warn().Err(err).Str("job_id", job.ID).Msg("Failed to publish crawler progress event")
-		}
-	})
-}
-
-// publishLinkDiscoveryEvent publishes link discovery and following statistics
-func (w *CrawlerWorker) publishLinkDiscoveryEvent(ctx context.Context, job *models.QueueJob, linkStats *crawler.LinkProcessingResult, currentURL string) {
-	if w.eventService == nil {
-		return
-	}
-
-	// Use parent ID for log aggregation
-	parentID := job.GetParentID()
-	if parentID == "" {
-		parentID = job.ID
-	}
-
-	w.publishCrawlerJobLog(ctx, parentID, "info", fmt.Sprintf("Links found: %d | filtered: %d | followed: %d | skipped: %d",
-		linkStats.Found, linkStats.Filtered, linkStats.Followed, linkStats.Skipped), map[string]interface{}{
-		"url":            currentURL,
-		"depth":          job.Depth,
-		"links_found":    linkStats.Found,
-		"links_filtered": linkStats.Filtered,
-		"links_followed": linkStats.Followed,
-		"links_skipped":  linkStats.Skipped,
-		"child_id":       job.ID,
-	})
-}
-
-// publishJobSpawnEvent publishes a job spawn event when child jobs are created
-func (w *CrawlerWorker) publishJobSpawnEvent(ctx context.Context, parentJob *models.QueueJob, childJobID, childURL string) {
-	if w.eventService == nil {
-		return
-	}
-
-	// Get root parent ID for hierarchy tracking
-	rootParentID := parentJob.GetParentID()
-	if rootParentID == "" {
-		rootParentID = parentJob.ID // This job is the root parent
-	}
-
-	payload := map[string]interface{}{
-		"parent_job_id": rootParentID, // Root parent for flat hierarchy
-		"discovered_by": parentJob.ID, // Immediate parent that discovered this link
-		"child_job_id":  childJobID,
-		"job_type":      "crawler_url",
-		"url":           childURL,
-		"depth":         parentJob.Depth + 1,
-		"timestamp":     time.Now().Format(time.RFC3339),
-	}
-
-	event := interfaces.Event{
-		Type:    interfaces.EventJobSpawn,
-		Payload: payload,
-	}
-
-	// Publish asynchronously
-	common.SafeGo(w.logger, "publishJobSpawn", func() {
-		if err := w.eventService.Publish(ctx, event); err != nil {
-			w.logger.Warn().Err(err).Str("parent_job_id", parentJob.ID).Str("child_job_id", childJobID).Msg("Failed to publish job spawn event")
-		}
-	})
+	w.jobMgr.AddJobLog(ctx, job.ID, "debug", message)
 }
 
 // ============================================================================
@@ -1516,6 +1356,15 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		stepConfig = make(map[string]interface{})
 	}
 
+	// Get manager_id from step job's parent_id for event aggregation
+	// Step jobs have parent_id = manager_id in the 3-level hierarchy
+	managerID := ""
+	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
+		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+			managerID = *stepJob.ParentID
+		}
+	}
+
 	// Extract entity type from config (default to "issues" for jira, "pages" for confluence)
 	entityType := "all"
 	if et, ok := stepConfig["entity_type"].(string); ok {
@@ -1535,6 +1384,10 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 
 	// Apply tags from job definition to all documents created by this crawl
 	crawlConfig.Tags = jobDef.Tags
+
+	// Set step context for job_log event aggregation in UI
+	crawlConfig.StepName = step.Name
+	crawlConfig.ManagerID = managerID
 
 	// Build seed URLs - prioritize start_urls from step config, fallback to source type
 	var seedURLs []string

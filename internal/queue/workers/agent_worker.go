@@ -96,14 +96,6 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	}
 	jobLogger := w.logger.WithCorrelationId(parentID)
 
-	// Extract step_name from metadata for event filtering
-	stepName := ""
-	if job.Metadata != nil {
-		if sn, ok := job.Metadata["step_name"].(string); ok {
-			stepName = sn
-		}
-	}
-
 	// Extract configuration
 	documentID, _ := job.GetConfigString("document_id")
 	agentType, _ := job.GetConfigString("agent_type")
@@ -114,12 +106,8 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		Str("agent_type", agentType).
 		Msg("Starting agent job execution")
 
-	// Publish real-time log for job start - format: "AI: agent_type (document: doc_id)"
-	w.publishAgentJobLog(ctx, parentID, stepName, "info", fmt.Sprintf("AI: %s (document: %s) - starting", agentType, documentID), map[string]interface{}{
-		"document_id": documentID,
-		"agent_type":  agentType,
-		"job_id":      job.ID,
-	})
+	// Log job start
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s (document: %s) - starting", agentType, documentID))
 
 	// Update job status to running
 	if err := w.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
@@ -132,10 +120,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	doc, err := w.documentStorage.GetDocument(documentID)
 	if err != nil {
 		jobLogger.Error().Err(err).Str("document_id", documentID).Msg("Failed to load document")
-		w.publishAgentJobLog(ctx, parentID, stepName, "error", fmt.Sprintf("AI: %s (document: %s) - failed to load document: %v", agentType, documentID, err), map[string]interface{}{
-			"document_id": documentID,
-			"job_id":      job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed to load document: %v", agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Document load failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to load document: %w", err)
@@ -181,11 +166,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 
 	if err != nil {
 		jobLogger.Error().Err(err).Str("agent_type", agentType).Msg("Agent execution failed")
-		w.publishAgentJobLog(ctx, parentID, stepName, "error", fmt.Sprintf("AI: %s (document: %s) - failed: %v", agentType, documentID, err), map[string]interface{}{
-			"document_id": documentID,
-			"agent_type":  agentType,
-			"job_id":      job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed: %v", agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Agent execution failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("agent execution failed: %w", err)
@@ -210,10 +191,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	// Update document in storage
 	if err := w.documentStorage.UpdateDocument(doc); err != nil {
 		jobLogger.Error().Err(err).Str("document_id", documentID).Msg("Failed to update document metadata")
-		w.publishAgentJobLog(ctx, parentID, stepName, "error", fmt.Sprintf("AI: %s (document: %s) - failed to save: %v", agentType, documentID, err), map[string]interface{}{
-			"document_id": documentID,
-			"job_id":      job.ID,
-		})
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed to save: %v", agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Metadata update failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to update document metadata: %w", err)
@@ -223,29 +201,9 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		Str("document_id", documentID).
 		Msg("Document metadata updated successfully")
 
-	// Add job log for successful completion
+	// Add job log for successful completion (auto-resolves step context and publishes to WebSocket)
 	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Agent processing completed: %s (document: %s)",
 		agentType, documentID))
-
-	// Step 5: Publish DocumentUpdated event (agent jobs update existing documents)
-	// Use PublishSync to ensure document count is incremented before job completes
-	// This matches the pattern used by places_search_manager.go
-	if w.eventService != nil {
-		event := interfaces.Event{
-			Type: interfaces.EventDocumentUpdated,
-			Payload: map[string]interface{}{
-				"job_id":        job.ID,
-				"parent_job_id": parentID,
-				"document_id":   documentID,
-				"source_url":    doc.URL,
-				"timestamp":     time.Now().Format(time.RFC3339),
-			},
-		}
-
-		if err := w.eventService.PublishSync(ctx, event); err != nil {
-			jobLogger.Warn().Err(err).Msg("Failed to publish DocumentUpdated event")
-		}
-	}
 
 	// Update job status to completed
 	if err := w.jobMgr.UpdateJobStatus(ctx, job.ID, "completed"); err != nil {
@@ -261,34 +219,10 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		Dur("total_time", totalTime).
 		Msg("Agent job execution completed successfully")
 
-	w.publishAgentJobLog(ctx, parentID, stepName, "info", fmt.Sprintf("AI: %s (document: %s) - completed in %v", agentType, documentID, totalTime), map[string]interface{}{
-		"document_id": documentID,
-		"agent_type":  agentType,
-		"total_time":  totalTime.String(),
-		"status":      "completed",
-		"job_id":      job.ID,
-	})
+	// Log completion with timing (context auto-resolved)
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s (document: %s) - completed in %v", agentType, documentID, totalTime))
 
 	return nil
-}
-
-// publishAgentJobLog logs an agent job event using the unified logging system.
-// Stores log in job_logs table and publishes EventJobLog for real-time UI updates.
-func (w *AgentWorker) publishAgentJobLog(ctx context.Context, jobID, stepName, level, message string, metadata map[string]interface{}) {
-	if w.jobMgr == nil {
-		return
-	}
-
-	opts := &queue.JobLogOptions{
-		ParentJobID: jobID, // Agent jobs use jobID as parent for aggregation
-		StepName:    stepName,
-		SourceType:  "agent",
-		Metadata:    metadata,
-	}
-
-	if err := w.jobMgr.AddJobLogWithEvent(ctx, jobID, level, message, opts); err != nil {
-		w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to log agent job event")
-	}
 }
 
 // ============================================================================
@@ -309,6 +243,15 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
+	}
+
+	// Get manager_id from step job's parent_id for event aggregation
+	// Step jobs have parent_id = manager_id in the 3-level hierarchy
+	managerID := ""
+	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
+		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+			managerID = *stepJob.ParentID
+		}
 	}
 
 	// Extract agent type from step config
@@ -372,7 +315,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	// Create and enqueue agent jobs for each document
 	jobIDs := make([]string, 0, len(documents))
 	for _, doc := range documents {
-		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, stepID, step.Name)
+		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, stepID, step.Name, managerID)
 		if err != nil {
 			w.logger.Warn().
 				Err(err).
@@ -386,12 +329,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 
 	if len(jobIDs) == 0 {
 		errMsg := fmt.Sprintf("Failed to create any agent jobs for step %s", step.Name)
-
-		// Publish error event for real-time display
-		if w.eventService != nil {
-			w.publishJobError(ctx, stepID, errMsg)
-		}
-
+		w.jobMgr.AddJobLog(ctx, stepID, "error", errMsg)
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
 	}
 
@@ -520,7 +458,7 @@ func (w *AgentWorker) queryDocuments(ctx context.Context, jobDef *models.JobDefi
 }
 
 // createAgentJob creates and enqueues an agent job for a document
-func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string, stepName string) (string, error) {
+func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string, stepName string, managerID string) (string, error) {
 	// Build job config
 	jobConfig := map[string]interface{}{
 		"agent_type":  agentType,
@@ -546,9 +484,14 @@ func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID 
 		jobConfig["gemini_rate_limit"] = rateLimit
 	}
 
-	// Create queue job with step_name in metadata so UI can filter by step
+	// Create queue job with metadata for UI filtering and event aggregation
+	// - step_name: Human-readable step name (for UI grouping)
+	// - step_id: The step job's ID (parent_id for hierarchy tracking)
+	// - manager_id: The manager job's ID (for top-level event aggregation)
 	metadata := map[string]interface{}{
-		"step_name": stepName, // Used by UI to group children under step rows
+		"step_name":  stepName,    // Used by UI to group children under step rows
+		"step_id":    parentJobID, // Used by step_progress events
+		"manager_id": managerID,   // Used by job_log events for aggregation
 	}
 	queueJob := models.NewQueueJobChild(
 		parentJobID,
@@ -666,28 +609,3 @@ func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) er
 	}
 }
 
-// publishJobError publishes a job error event for real-time display
-func (w *AgentWorker) publishJobError(ctx context.Context, jobID, errorMessage string) {
-	if w.eventService == nil {
-		return
-	}
-
-	payload := map[string]interface{}{
-		"job_id":        jobID,
-		"parent_job_id": jobID,
-		"error_message": errorMessage,
-		"timestamp":     time.Now().Format(time.RFC3339),
-	}
-
-	event := interfaces.Event{
-		Type:    interfaces.EventJobError,
-		Payload: payload,
-	}
-
-	// Publish asynchronously to avoid blocking
-	go func() {
-		if err := w.eventService.Publish(ctx, event); err != nil {
-			w.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job error event")
-		}
-	}()
-}

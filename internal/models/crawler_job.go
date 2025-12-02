@@ -176,6 +176,10 @@ type CrawlConfig struct {
 	FollowLinks     bool          `json:"follow_links"`     // Whether to follow discovered links
 	DetailLevel     string        `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
 	Tags            []string      `json:"tags"`             // Tags to apply to all documents created by this crawl
+
+	// Step context for job_log event aggregation (set by crawler_worker for definition-triggered jobs)
+	StepName  string `json:"step_name,omitempty"`  // Human-readable step name for UI grouping
+	ManagerID string `json:"manager_id,omitempty"` // Manager job ID for event aggregation
 }
 
 // CrawlProgress tracks crawl job progress

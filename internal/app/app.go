@@ -68,6 +68,8 @@ type App struct {
 	LogService   interfaces.LogService
 	LogConsumer  *logs.Consumer // Log consumer for arbor context channel
 	JobManager   *queue.Manager
+	StepManager  *queue.StepManager
+	Orchestrator *queue.Orchestrator
 	JobProcessor *workers.JobProcessor
 	JobMonitor   interfaces.JobMonitor
 	StepMonitor  interfaces.StepMonitor
@@ -406,6 +408,11 @@ func (a *App) initServices() error {
 	a.JobManager = jobMgr
 	a.Logger.Debug().Msg("Job manager initialized")
 
+	// 5.8.1 Initialize StepManager
+	stepMgr := queue.NewStepManager(a.Logger)
+	a.StepManager = stepMgr
+	a.Logger.Debug().Msg("Step manager initialized")
+
 	// 5.9. Initialize job processor (replaces worker pool)
 	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)
 	a.JobProcessor = jobProcessor
@@ -565,7 +572,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		a.EventService,
 	)
-	jobMgr.RegisterWorker(crawlerWorker)         // Register with JobManager for step routing
+	a.StepManager.RegisterWorker(crawlerWorker)  // Register with StepManager for step routing
 	jobProcessor.RegisterExecutor(crawlerWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", crawlerWorker.GetType().String()).Str("job_type", crawlerWorker.GetWorkerType()).Msg("Crawler worker registered")
 
@@ -578,7 +585,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
-	jobMgr.RegisterWorker(githubRepoWorker)         // Register with JobManager for step routing
+	a.StepManager.RegisterWorker(githubRepoWorker)  // Register with StepManager for step routing
 	jobProcessor.RegisterExecutor(githubRepoWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", githubRepoWorker.GetType().String()).Str("job_type", githubRepoWorker.GetWorkerType()).Msg("GitHub Repo worker registered")
 
@@ -591,7 +598,7 @@ func (a *App) initServices() error {
 		a.EventService,
 		a.Logger,
 	)
-	jobMgr.RegisterWorker(githubLogWorker)         // Register with JobManager for step routing
+	a.StepManager.RegisterWorker(githubLogWorker)  // Register with StepManager for step routing
 	jobProcessor.RegisterExecutor(githubLogWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", githubLogWorker.GetType().String()).Str("job_type", githubLogWorker.GetWorkerType()).Msg("GitHub Actions worker registered")
 
@@ -607,7 +614,7 @@ func (a *App) initServices() error {
 			a.Logger,
 			a.EventService,
 		)
-		jobMgr.RegisterWorker(agentWorker)         // Register with JobManager for step routing
+		a.StepManager.RegisterWorker(agentWorker)  // Register with StepManager for step routing
 		jobProcessor.RegisterExecutor(agentWorker) // Register with JobProcessor for job execution
 		a.Logger.Debug().Str("step_type", agentWorker.GetType().String()).Str("job_type", agentWorker.GetWorkerType()).Msg("Agent worker registered")
 	}
@@ -621,7 +628,7 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 	)
-	jobMgr.RegisterWorker(placesWorker) // Register with JobManager for step routing
+	a.StepManager.RegisterWorker(placesWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", placesWorker.GetType().String()).Msg("Places search worker registered")
 
 	// Register Web search worker (synchronous execution, no child jobs)
@@ -632,10 +639,19 @@ func (a *App) initServices() error {
 		a.Logger,
 		jobMgr,
 	)
-	jobMgr.RegisterWorker(webSearchWorker) // Register with JobManager for step routing
+	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
-	a.Logger.Debug().Msg("All workers registered with JobManager")
+	a.Logger.Debug().Msg("All workers registered with StepManager")
+
+	// Initialize Orchestrator
+	a.Orchestrator = queue.NewOrchestrator(
+		jobMgr,
+		a.StepManager,
+		a.EventService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+	)
 
 	// NOTE: Job processor will be started AFTER scheduler initialization to avoid deadlock
 
@@ -754,6 +770,7 @@ func (a *App) initHandlers() error {
 	a.GitHubJobsHandler = handlers.NewGitHubJobsHandler(
 		a.ConnectorService,
 		a.JobManager,
+		a.Orchestrator,
 		a.QueueManager,
 		a.JobMonitor,
 		a.StepMonitor,
@@ -769,6 +786,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.JobDefinitionStorage(),
 		a.StorageManager.QueueStorage(),
 		a.JobManager,
+		a.Orchestrator,
 		a.JobMonitor,
 		a.StepMonitor,
 		a.StorageManager.AuthStorage(),

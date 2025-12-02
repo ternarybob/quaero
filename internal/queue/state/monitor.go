@@ -476,15 +476,20 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 		// Generate progress text in required format
 		progressText := m.formatProgressText(stats)
 
-		// Add job log for parent job
-		m.jobMgr.AddJobLog(ctx, parentID, "info",
+		// Add job log for parent job with empty originator (system/monitor log)
+		m.jobMgr.AddJobLogWithOriginator(ctx, parentID, "info",
 			fmt.Sprintf("Child job %s → %s. %s",
 				jobID[:8], // Short job ID for readability
 				status,
-				progressText))
+				progressText),
+			"") // Empty originator for monitor-generated logs
 
 		// Publish parent job progress update
 		m.publishParentJobProgressUpdate(ctx, parentID, stats, progressText)
+
+		// Check if this job belongs to a step (has step_id in metadata)
+		// If so, publish step_progress event for real-time step UI updates
+		m.publishStepProgressOnChildChange(ctx, jobID)
 
 		return nil
 	}); err != nil {
@@ -542,6 +547,29 @@ func (m *jobMonitor) SubscribeToJobEvents() {
 					Str("document_id", documentID).
 					Msg("Incremented document count for child job")
 			}
+		}
+
+		// Publish progress update to reflect new document count
+		// Get fresh child job stats
+		childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{parentJobID})
+		if err != nil {
+			m.logger.Warn().Err(err).
+				Str("parent_id", parentJobID).
+				Msg("Failed to get child job stats after document save")
+		} else if interfaceStats, ok := childStatsMap[parentJobID]; ok && interfaceStats != nil {
+			// Convert to local stats struct
+			stats := &ChildJobStats{
+				TotalChildren:     interfaceStats.ChildCount,
+				CompletedChildren: interfaceStats.CompletedChildren,
+				FailedChildren:    interfaceStats.FailedChildren,
+				CancelledChildren: interfaceStats.CancelledChildren,
+				RunningChildren:   interfaceStats.RunningChildren,
+				PendingChildren:   interfaceStats.PendingChildren,
+			}
+			progressText := m.formatProgressText(stats)
+
+			// Publish parent job progress update which includes the new document_count
+			m.publishParentJobProgressUpdate(ctx, parentJobID, stats, progressText)
 		}
 
 		return nil
@@ -864,6 +892,154 @@ func (m *jobMonitor) publishStepCompletedEvent(ctx context.Context, jobID string
 	go func() {
 		if err := m.eventService.Publish(ctx, event); err != nil {
 			logger.Warn().Err(err).Msg("Failed to publish step completed event")
+		}
+	}()
+}
+
+// publishStepProgressOnChildChange publishes a step_progress event when a child job changes status.
+// This provides real-time step progress updates without waiting for the 5-second polling interval.
+func (m *jobMonitor) publishStepProgressOnChildChange(ctx context.Context, jobID string) {
+	if m.eventService == nil {
+		return
+	}
+
+	// Get job to check for step_id in metadata or parent_id
+	jobInterface, err := m.jobMgr.GetJob(ctx, jobID)
+	if err != nil {
+		// Don't log error - this is best-effort real-time update
+		return
+	}
+
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		return
+	}
+
+	// Check if job has step_id in metadata (agent worker sets this)
+	stepID, ok := jobState.Metadata["step_id"].(string)
+	if !ok || stepID == "" {
+		// Fallback: Check if parent_id points to a step job (crawler worker uses parent_id)
+		if jobState.ParentID != nil && *jobState.ParentID != "" {
+			parentInterface, err := m.jobMgr.GetJob(ctx, *jobState.ParentID)
+			if err == nil {
+				if parentJob, ok := parentInterface.(*models.QueueJobState); ok && parentJob.Type == "step" {
+					stepID = *jobState.ParentID
+				}
+			}
+		}
+	}
+
+	if stepID == "" {
+		// Not a step child job, nothing to do
+		return
+	}
+
+	// Get manager_id from metadata, or from step job's parent_id
+	managerID, _ := jobState.Metadata["manager_id"].(string)
+	if managerID == "" {
+		// Try to get manager_id from step job's parent_id
+		stepInterface, err := m.jobMgr.GetJob(ctx, stepID)
+		if err == nil {
+			if stepJob, ok := stepInterface.(*models.QueueJobState); ok && stepJob.ParentID != nil {
+				managerID = *stepJob.ParentID
+			}
+		}
+	}
+
+	// Get step_name from job metadata, or from step job's name
+	stepName, _ := jobState.Metadata["step_name"].(string)
+	if stepName == "" {
+		// Try to get step_name from step job
+		stepInterface, err := m.jobMgr.GetJob(ctx, stepID)
+		if err == nil {
+			if stepJob, ok := stepInterface.(*models.QueueJobState); ok {
+				stepName = stepJob.Name
+			}
+		}
+	}
+
+	// Get fresh step child stats
+	childStatsMap, err := m.jobMgr.GetJobChildStats(ctx, []string{stepID})
+	if err != nil {
+		m.logger.Debug().Err(err).
+			Str("step_id", stepID).
+			Msg("Failed to get step child stats for real-time update")
+		return
+	}
+
+	// Extract stats for this step
+	interfaceStats, ok := childStatsMap[stepID]
+	if !ok || interfaceStats == nil {
+		return
+	}
+
+	// Convert to ChildJobStats
+	stats := &ChildJobStats{
+		TotalChildren:     interfaceStats.ChildCount,
+		CompletedChildren: interfaceStats.CompletedChildren,
+		FailedChildren:    interfaceStats.FailedChildren,
+		CancelledChildren: interfaceStats.CancelledChildren,
+		RunningChildren:   interfaceStats.RunningChildren,
+		PendingChildren:   interfaceStats.PendingChildren,
+	}
+
+	// Calculate step status based on child states
+	stepStatus := "running"
+	terminalCount := stats.CompletedChildren + stats.FailedChildren + stats.CancelledChildren
+	if stats.TotalChildren > 0 && terminalCount >= stats.TotalChildren {
+		// All children in terminal state - determine final status
+		if stats.FailedChildren > 0 && stats.CompletedChildren == 0 {
+			// All failed, none completed
+			stepStatus = "failed"
+		} else if stats.FailedChildren > 0 {
+			// Some failed, some completed - partial failure
+			stepStatus = "completed" // Mark as completed but with failures noted
+		} else if stats.CancelledChildren > 0 && stats.CompletedChildren == 0 {
+			// All cancelled
+			stepStatus = "cancelled"
+		} else {
+			// All completed successfully
+			stepStatus = "completed"
+		}
+	}
+
+	// Build progress text
+	progressText := fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
+		stats.PendingChildren, stats.RunningChildren, stats.CompletedChildren, stats.FailedChildren)
+
+	// Publish step_progress event
+	payload := map[string]interface{}{
+		"step_id":        stepID,
+		"manager_id":     managerID,
+		"step_name":      stepName, // Step name for UI aggregation by step
+		"status":         stepStatus,
+		"total_jobs":     stats.TotalChildren,
+		"pending_jobs":   stats.PendingChildren,
+		"running_jobs":   stats.RunningChildren,
+		"completed_jobs": stats.CompletedChildren,
+		"failed_jobs":    stats.FailedChildren,
+		"cancelled_jobs": stats.CancelledChildren,
+		"progress_text":  progressText,
+		"timestamp":      time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    interfaces.EventStepProgress,
+		Payload: payload,
+	}
+
+	// Publish asynchronously to avoid blocking the status change handler
+	go func() {
+		if err := m.eventService.Publish(ctx, event); err != nil {
+			m.logger.Debug().Err(err).
+				Str("step_id", stepID).
+				Msg("Failed to publish real-time step progress event")
+		} else {
+			m.logger.Trace().
+				Str("step_id", stepID).
+				Str("status", stepStatus).
+				Str("progress", progressText).
+				Msg("Published real-time step progress event")
 		}
 	}()
 }

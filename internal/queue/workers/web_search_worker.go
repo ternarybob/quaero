@@ -209,26 +209,10 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			"source_count": len(results.Sources),
 		})
 
-	// Publish document saved event for step job document count tracking
-	if w.eventService != nil && stepID != "" {
-		payload := map[string]interface{}{
-			"job_id":      stepID,
-			"step_id":     stepID,
-			"document_id": doc.ID,
-			"source_type": "web_search",
-			"timestamp":   time.Now().Format(time.RFC3339),
-		}
-		event := interfaces.Event{
-			Type:    interfaces.EventDocumentSaved,
-			Payload: payload,
-		}
-		if err := w.eventService.PublishSync(context.Background(), event); err != nil {
-			w.logger.Warn().
-				Err(err).
-				Str("document_id", doc.ID).
-				Str("step_id", stepID).
-				Msg("Failed to publish document_saved event")
-		}
+	// Log document saved via Job Manager's unified logging
+	if w.jobMgr != nil && stepID != "" {
+		message := fmt.Sprintf("Document saved: %s (ID: %s)", doc.Title, doc.ID[:8])
+		w.jobMgr.AddJobLog(context.Background(), stepID, "info", message)
 	}
 
 	return stepID, nil
@@ -512,19 +496,9 @@ func (w *WebSearchWorker) createDocument(results *WebSearchResults, query string
 }
 
 // logJobEvent logs a job event for real-time UI display using the unified logging system
-func (w *WebSearchWorker) logJobEvent(ctx context.Context, parentJobID, stepName, level, message string, metadata map[string]interface{}) {
+func (w *WebSearchWorker) logJobEvent(ctx context.Context, parentJobID, _, level, message string, _ map[string]interface{}) {
 	if w.jobMgr == nil {
 		return
 	}
-
-	opts := &queue.JobLogOptions{
-		ParentJobID: parentJobID,
-		StepName:    stepName,
-		SourceType:  "web_search",
-		Metadata:    metadata,
-	}
-
-	if err := w.jobMgr.AddJobLogWithEvent(ctx, parentJobID, level, message, opts); err != nil {
-		w.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to log job event")
-	}
+	w.jobMgr.AddJobLog(ctx, parentJobID, level, message)
 }

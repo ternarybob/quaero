@@ -43,4 +43,5 @@ type JobLogEntry struct {
 	AssociatedJobID string `json:"job_id"`                // ID of the job that generated this log (populated during aggregation)
 	StepName        string `json:"step_name,omitempty"`   // Name of the step that generated this log (for multi-step jobs)
 	SourceType      string `json:"source_type,omitempty"` // Type of worker (agent, places_search, web_search, etc.)
+	Originator      string `json:"originator,omitempty"`  // Log originator: "manager", "step", "worker" - identifies the architectural layer
 }

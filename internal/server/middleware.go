@@ -106,9 +106,9 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			logMsg = "HTTP request - client error"
 			logEvent = s.app.Logger.Warn()
 		default:
-			// Success (2xx, 3xx) - log as debug (routine operation)
+			// Success (2xx, 3xx) - log as trace (routine operation)
 			logMsg = "HTTP request"
-			logEvent = s.app.Logger.Debug()
+			logEvent = s.app.Logger.Trace()
 		}
 
 		// Build structured log event with fields

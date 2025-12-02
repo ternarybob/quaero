@@ -19,6 +19,7 @@ import (
 type GitHubJobsHandler struct {
 	connectorService interfaces.ConnectorService
 	jobMgr           *queue.Manager
+	orchestrator     *queue.Orchestrator
 	queueMgr         interfaces.QueueManager
 	jobMonitor       interfaces.JobMonitor
 	stepMonitor      interfaces.StepMonitor
@@ -29,6 +30,7 @@ type GitHubJobsHandler struct {
 func NewGitHubJobsHandler(
 	connectorService interfaces.ConnectorService,
 	jobMgr *queue.Manager,
+	orchestrator *queue.Orchestrator,
 	queueMgr interfaces.QueueManager,
 	jobMonitor interfaces.JobMonitor,
 	stepMonitor interfaces.StepMonitor,
@@ -37,6 +39,7 @@ func NewGitHubJobsHandler(
 	return &GitHubJobsHandler{
 		connectorService: connectorService,
 		jobMgr:           jobMgr,
+		orchestrator:     orchestrator,
 		queueMgr:         queueMgr,
 		jobMonitor:       jobMonitor,
 		stepMonitor:      stepMonitor,
@@ -377,8 +380,8 @@ func (h *GitHubJobsHandler) StartRepoCollectorHandler(w http.ResponseWriter, r *
 		},
 	}
 
-	// Execute the job definition via JobManager
-	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
+	// Execute the job definition via Orchestrator
+	jobID, err := h.orchestrator.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub repo collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)
@@ -462,8 +465,8 @@ func (h *GitHubJobsHandler) StartActionsCollectorHandler(w http.ResponseWriter, 
 		},
 	}
 
-	// Execute the job definition via JobManager
-	jobID, err := h.jobMgr.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
+	// Execute the job definition via Orchestrator
+	jobID, err := h.orchestrator.ExecuteJobDefinition(r.Context(), jobDef, h.jobMonitor, h.stepMonitor)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("Failed to execute GitHub actions collector job")
 		http.Error(w, fmt.Sprintf("Failed to start job: %v", err), http.StatusInternalServerError)

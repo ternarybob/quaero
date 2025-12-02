@@ -77,14 +77,11 @@
                             <h3>Job Queue</h3>
                         </section>
                         <section class="navbar-section">
-                            <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()"
-                                title="Delete Selected" style="display: none; margin-left: 0.5rem;">
+                            <button id="delete-selected-btn" class="btn btn-sm btn-error" onclick="deleteSelectedJobs()" title="Delete Selected" style="display: none; margin-left: 0.5rem;">
                                 <i class="fa-solid fa-trash"></i>
                                 <span id="delete-selected-text">Delete Selected</span>
                             </button>
-                            <button class="btn btn-sm"
-                                onclick="event.preventDefault(); window.dispatchEvent(new CustomEvent('jobList:load'))"
-                                title="Refresh Jobs">
+                            <button class="btn btn-sm" onclick="event.preventDefault(); window.dispatchEvent(new CustomEvent('jobList:load'))" title="Refresh Jobs">
                                 <i class="fa-solid fa-rotate-right"></i>
                             </button>
                         </section>
@@ -109,22 +106,19 @@
 
                     <!-- Error Display -->
                     <template x-if="loadError">
-                        <div class="toast toast-error"
-                            style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #ef4444; border-radius: 4px;">
+                        <div class="toast toast-error" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #ef4444; border-radius: 4px;">
                             <i class="fas fa-exclamation-circle"></i>
                             <span x-text="'Failed to load jobs: ' + loadError"></span>
                             <button class="btn btn-sm btn-primary" @click="retryLoadJobs()" style="margin-left: 1rem;">
                                 <i class="fas fa-redo"></i> Retry
                             </button>
-                            <span x-show="retryCount > 0" x-text="'(Attempt ' + retryCount + '/' + maxRetries + ')'"
-                                style="margin-left: 0.5rem; font-size: 0.85rem;"></span>
+                            <span x-show="retryCount > 0" x-text="'(Attempt ' + retryCount + '/' + maxRetries + ')'" style="margin-left: 0.5rem; font-size: 0.85rem;"></span>
                         </div>
                     </template>
 
                     <!-- Stale Data Indicator -->
                     <template x-if="loadError && lastSuccessfulJobs.length > 0">
-                        <div class="toast toast-warning"
-                            style="margin-bottom: 1rem; padding: 0.75rem; border: 1px solid #fbbf24; border-radius: 4px; background-color: #fef3c7;">
+                        <div class="toast toast-warning" style="margin-bottom: 1rem; padding: 0.75rem; border: 1px solid #fbbf24; border-radius: 4px; background-color: #fef3c7;">
                             <i class="fas fa-exclamation-triangle" style="color: #92400e;"></i>
                             <span style="color: #92400e; margin-left: 0.5rem;">Showing cached data. Data may be
                                 outdated.</span>
@@ -147,8 +141,7 @@
                                 <!-- Loading indicator for expanding parents -->
                                 <template x-if="item.type === 'loading'">
 
-                                    <div class="loading-children"
-                                        style="margin-left: 2rem; margin-bottom: 0.8rem; padding: 0.5rem; color: #888;">
+                                    <div class="loading-children" style="margin-left: 2rem; margin-bottom: 0.8rem; padding: 0.5rem; color: #888;">
                                         <i class="fas fa-spinner fa-pulse"></i>
                                         <span>Loading children...</span>
                                     </div>
@@ -208,12 +201,11 @@
                                                     <div class="step-description" x-text="item.step.description"></div>
                                                 </template>
                                                 <!-- Step Events Panel -->
-                                                <div class="step-events-panel">
-                                                    <button class="btn btn-sm step-events-btn"
-                                                        @click.stop="toggleStepLogsExpand(item.job.id, item.step.name)">
+                                                <div class="step-events-panel" :data-step-events-panel="item.job.id + ':' + item.step.name">
+                                                    <button class="btn btn-sm step-events-btn" :data-events-count="getStepLogs(item.job.id, item.step.name).length" @click.stop="toggleStepLogsExpand(item.job.id, item.step.name)">
                                                         <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                         <i class="fas fa-stream"></i>
-                                                        <span x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + ')'"></span>
+                                                        <span class="events-count-text" x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + ')'"></span>
                                                     </button>
                                                     <!-- Expanded step logs list -->
                                                     <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
@@ -224,14 +216,12 @@
                                                                 </div>
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
-                                                                <div class="step-log-entry">
+                                                                <div class="step-log-entry" :data-log-index="logIndex">
                                                                     <span class="step-log-time" x-text="formatLogTime(log.timestamp)"></span>
                                                                     <span class="step-log-level" :class="getLogLevelClass(log.level)">
                                                                         <i class="fas" :class="getLogLevelIcon(log.level)"></i>
                                                                     </span>
-                                                                    <template x-if="log.source_type">
-                                                                        <span class="label label-secondary step-log-source" x-text="log.source_type"></span>
-                                                                    </template>
+                                                                    <span class="step-log-originator" x-show="log.originator" x-text="'[' + log.originator + ']'"></span>
                                                                     <span class="step-log-message" x-text="log.message"></span>
                                                                 </div>
                                                             </template>
@@ -245,7 +235,8 @@
 
                                 <!-- Child job row - compact display for child jobs under parent -->
                                 <template x-if="item.type === 'child'">
-                                    <div class="child-row" :data-type="item.type" :data-job-id="item.job?.id" style="margin-left: 2rem; margin-bottom: 0.5rem; padding: 0.75rem 1rem; background-color: #fafafa; border-left: 3px solid #17a2b8; border-radius: 4px;">
+                                    <div class="child-row" :data-type="item.type" :data-job-id="item.job?.id"
+                                        style="margin-left: 2rem; margin-bottom: 0.5rem; padding: 0.75rem 1rem; background-color: #fafafa; border-left: 3px solid #17a2b8; border-radius: 4px;">
                                         <div class="columns" style="align-items: center;">
                                             <div class="column">
                                                 <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
@@ -320,49 +311,37 @@
                                             'job-card-parent': item.type === 'parent',
                                             'job-card-child': item.type === 'child',
                                             'job-card-flat': item.type === 'flat'
-                                        }" style="margin-bottom: 0.8rem; cursor: pointer;" :data-job-id="item.job.id"
-                                        @click="navigateToJobDetails(item.job.id)">
+                                        }" style="margin-bottom: 0.8rem; cursor: pointer;" :data-job-id="item.job.id" @click="navigateToJobDetails(item.job.id)">
                                         <div class="card-body">
                                             <div class="columns" style="gap: 0.5rem;">
                                                 <!-- Left side: Checkbox and Content -->
                                                 <div class="column col-auto" @click.stop style="padding-right: 0;">
                                                     <label class="form-checkbox" style="margin: 0;">
-                                                        <input type="checkbox" class="job-checkbox"
-                                                            :data-job-id="item.job.id"
-                                                            @change="toggleJobSelection(item.job.id)"
-                                                            :checked="selectedJobIds.has(item.job.id)">
+                                                        <input type="checkbox" class="job-checkbox" :data-job-id="item.job.id" @change="toggleJobSelection(item.job.id)" :checked="selectedJobIds.has(item.job.id)">
                                                         <i class="form-icon"></i>
                                                     </label>
                                                 </div>
                                                 <div class="column col-9" style="padding-left: 0;padding-right: 0;">
-                                                    <div class="card-title h5"
-                                                        :title="'Job ID: ' + (item.job.id || 'N/A')">
+                                                    <div class="card-title h5" :title="'Job ID: ' + (item.job.id || 'N/A')">
                                                         <i class="fas" :class="{
                                                     'fa-file job-type-icon child-icon': item.type === 'child',
                                                     'fa-folder job-type-icon parent-icon': item.type === 'parent'
                                                 }"></i>
-                                                        <span
-                                                            x-text="item.job.name || ('Job ' + (item.job.id ? item.job.id.substring(0, 8) : 'N/A'))"></span>
-                                                        <span class="text-gray"
-                                                            style="font-size: 0.8rem; font-weight: normal;">
-                                                            (<span
-                                                                x-text="item.job.id ? item.job.id.substring(0, 8) : 'N/A'"></span>)
+                                                        <span x-text="item.job.name || ('Job ' + (item.job.id ? item.job.id.substring(0, 8) : 'N/A'))"></span>
+                                                        <span class="text-gray" style="font-size: 0.8rem; font-weight: normal;">
+                                                            (<span x-text="item.job.id ? item.job.id.substring(0, 8) : 'N/A'"></span>)
                                                         </span>
                                                         <template x-if="item.type === 'parent'">
                                                             <span class="parent-job-badge">PARENT</span>
                                                         </template>
-                                                        <template
-                                                            x-if="item.type === 'parent' && item.job.entity_type === 'job_definition'">
-                                                            <span class="label label-info"
-                                                                style="margin-left: 0.5rem; font-size: 0.7rem;">JOB
+                                                        <template x-if="item.type === 'parent' && item.job.entity_type === 'job_definition'">
+                                                            <span class="label label-info" style="margin-left: 0.5rem; font-size: 0.7rem;">JOB
                                                                 DEFINITION</span>
                                                         </template>
                                                         <!-- Expand/Collapse button for parent jobs with children (only for non-multi-step jobs) -->
                                                         <!-- For multi-step jobs, children expand under their respective step rows -->
                                                         <template x-if="item.type === 'parent' && item.job.child_count > 0 && !(item.job.metadata?.step_definitions?.length > 0)">
-                                                            <button class="btn btn-sm"
-                                                                style="margin-left: 0.5rem; padding: 0.1rem 0.5rem; font-size: 0.75rem;"
-                                                                @click.stop="toggleParentExpand(item.job.id)"
+                                                            <button class="btn btn-sm" style="margin-left: 0.5rem; padding: 0.1rem 0.5rem; font-size: 0.75rem;" @click.stop="toggleParentExpand(item.job.id)"
                                                                 :title="isParentExpanded(item.job.id) ? 'Collapse children' : 'Expand children'">
                                                                 <i class="fas" :class="isParentExpanded(item.job.id) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                                 <span x-text="item.job.child_count + ' children'"></span>
@@ -372,73 +351,43 @@
                                                     <!-- Source field removed - redundant for parent jobs -->
 
                                                     <!-- URL Display for Crawler Jobs -->
-                                                    <template
-                                                        x-if="item.job.seed_urls && item.job.seed_urls.length > 0">
-                                                        <div
-                                                            style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
+                                                    <template x-if="item.job.seed_urls && item.job.seed_urls.length > 0">
+                                                        <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
                                                             <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                                            <a :href="item.job.seed_urls[0]" target="_blank"
-                                                                rel="noopener noreferrer" class="text-primary"
-                                                                style="text-decoration: none;" @click.stop>
-                                                                <span
-                                                                    style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;"
-                                                                    :title="item.job.seed_urls[0]"
-                                                                    x-text="item.job.seed_urls[0]"></span>
-                                                                <i class="fas fa-external-link-alt"
-                                                                    style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
+                                                            <a :href="item.job.seed_urls[0]" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;" @click.stop>
+                                                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;" :title="item.job.seed_urls[0]" x-text="item.job.seed_urls[0]"></span>
+                                                                <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                                             </a>
                                                             <template x-if="item.job.seed_urls.length > 1">
-                                                                <span class="text-gray"
-                                                                    style="font-size: 0.8rem; margin-left: 0.5rem;"
-                                                                    x-text="'+' + (item.job.seed_urls.length - 1) + ' more'"></span>
+                                                                <span class="text-gray" style="font-size: 0.8rem; margin-left: 0.5rem;" x-text="'+' + (item.job.seed_urls.length - 1) + ' more'"></span>
                                                             </template>
                                                         </div>
                                                     </template>
-                                                    <template
-                                                        x-if="(!item.job.seed_urls || item.job.seed_urls.length === 0) && item.job.progress && item.job.progress.current_url">
-                                                        <div
-                                                            style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
+                                                    <template x-if="(!item.job.seed_urls || item.job.seed_urls.length === 0) && item.job.progress && item.job.progress.current_url">
+                                                        <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: #555;">
                                                             <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                                            <a :href="item.job.progress.current_url" target="_blank"
-                                                                rel="noopener noreferrer" class="text-primary"
-                                                                style="text-decoration: none;" @click.stop>
-                                                                <span
-                                                                    style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;"
-                                                                    :title="item.job.progress.current_url"
-                                                                    x-text="item.job.progress.current_url"></span>
-                                                                <i class="fas fa-external-link-alt"
-                                                                    style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
+                                                            <a :href="item.job.progress.current_url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;" @click.stop>
+                                                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 600px;" :title="item.job.progress.current_url" x-text="item.job.progress.current_url"></span>
+                                                                <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                                             </a>
                                                         </div>
                                                     </template>
 
                                                     <!-- Metadata -->
-                                                    <div
-                                                        style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                                    <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
                                                         <!-- Status Badge -->
                                                         <div>
-                                                            <span class="label"
-                                                                :class="getStatusBadgeClass(item.type, item.job.status, item.job)"
-                                                                :data-job-id="item.job.id"
-                                                                :data-status="item.job.status">
-                                                                <i class="fas"
-                                                                    :class="getStatusIcon(item.type === 'parent' && item.job.child_count > 0 ? deriveParentStatus(item.job).status : item.job.status)"
-                                                                    style="margin-right: 0.25rem;"></i>
-                                                                <span
-                                                                    x-text="getStatusBadgeText(item.type, item.job.status, item.job)"></span>
+                                                            <span class="label" :class="getStatusBadgeClass(item.type, item.job.status, item.job)" :data-job-id="item.job.id" :data-status="item.job.status">
+                                                                <i class="fas" :class="getStatusIcon(item.type === 'parent' && item.job.child_count > 0 ? deriveParentStatus(item.job).status : item.job.status)" style="margin-right: 0.25rem;"></i>
+                                                                <span x-text="getStatusBadgeText(item.type, item.job.status, item.job)"></span>
                                                             </span>
                                                         </div>
                                                         <!-- Job Type Badge -->
-                                                        <template
-                                                            x-if="item.job.job_type && item.job.job_type !== 'parent'">
+                                                        <template x-if="item.job.job_type && item.job.job_type !== 'parent'">
                                                             <div>
-                                                                <span class="label"
-                                                                    :class="window.getJobTypeBadgeClass(item.job.job_type)"
-                                                                    :title="window.getJobTypeDisplayName(item.job.job_type)">
-                                                                    <i class="fas"
-                                                                        :class="window.getJobTypeIcon(item.job.job_type)"></i>
-                                                                    <span
-                                                                        x-text="window.getJobTypeDisplayName(item.job.job_type)"></span>
+                                                                <span class="label" :class="window.getJobTypeBadgeClass(item.job.job_type)" :title="window.getJobTypeDisplayName(item.job.job_type)">
+                                                                    <i class="fas" :class="window.getJobTypeIcon(item.job.job_type)"></i>
+                                                                    <span x-text="window.getJobTypeDisplayName(item.job.job_type)"></span>
                                                                 </span>
                                                             </div>
                                                         </template>
@@ -446,37 +395,31 @@
                                                         <template x-if="!item.job.metadata?.step_definitions || item.job.metadata.step_definitions.length === 0">
                                                             <div>
                                                                 <i class="fas fa-file-alt"></i>
-                                                                <span
-                                                                    x-text="(() => { const count = getDocumentsCount(item.job); return (typeof count === 'number' ? count : 'N/A') + ' Documents'; })()"></span>
+                                                                <span x-text="(() => { const count = getDocumentsCount(item.job); return (typeof count === 'number' ? count : 'N/A') + ' Documents'; })()"></span>
                                                             </div>
                                                         </template>
                                                         <!-- Created Time -->
                                                         <div>
                                                             <i class="fas fa-calendar"></i>
-                                                            <span
-                                                                x-text="'created: ' + getCreatedDate(item.job)"></span>
+                                                            <span x-text="'created: ' + getCreatedDate(item.job)"></span>
                                                         </div>
                                                         <!-- Started Time -->
                                                         <template x-if="item.job.started_at">
                                                             <div>
                                                                 <i class="fas fa-clock"></i>
-                                                                <span
-                                                                    x-text="'started: ' + getStartedDate(item.job)"></span>
+                                                                <span x-text="'started: ' + getStartedDate(item.job)"></span>
                                                             </div>
                                                         </template>
                                                         <!-- Ended Time (for completed/failed/cancelled jobs) -->
-                                                        <template
-                                                            x-if="item.job.finished_at && ['completed', 'failed', 'cancelled'].includes(item.job.status)">
+                                                        <template x-if="item.job.finished_at && ['completed', 'failed', 'cancelled'].includes(item.job.status)">
                                                             <div>
                                                                 <i class="fas fa-flag-checkered"></i>
-                                                                <span
-                                                                    x-text="'ended: ' + getFinishedDate(item.job)"></span>
+                                                                <span x-text="'ended: ' + getFinishedDate(item.job)"></span>
                                                             </div>
                                                         </template>
                                                         <!-- Job Details Link -->
                                                         <div>
-                                                            <a :href="'/job?id=' + item.job.id" class="text-primary"
-                                                                @click.stop>
+                                                            <a :href="'/job?id=' + item.job.id" class="text-primary" @click.stop>
                                                                 <i class="fas fa-info-circle"></i> Job Details
                                                             </a>
                                                         </div>
@@ -484,19 +427,13 @@
 
                                                     <!-- Failure Reason Display - only show for terminal failed state -->
                                                     <template x-if="(item.type === 'parent' ? deriveParentStatus(item.job).status === 'failed' : item.job.status === 'failed') && item.job.error">
-                                                        <div class="job-error-alert"
-                                                            style="margin-top: 0.8rem; padding: 0.75rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
-                                                            <i class="fas fa-exclamation-circle"
-                                                                style="color: var(--color-danger); margin-right: 0.5rem;"></i>
+                                                        <div class="job-error-alert" style="margin-top: 0.8rem; padding: 0.75rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
+                                                            <i class="fas fa-exclamation-circle" style="color: var(--color-danger); margin-right: 0.5rem;"></i>
                                                             <strong>Failure Reason:</strong>
-                                                            <span x-show="item.job.error.length <= 100"
-                                                                x-text="item.job.error"></span>
+                                                            <span x-show="item.job.error.length <= 100" x-text="item.job.error"></span>
                                                             <span x-show="item.job.error.length > 100">
-                                                                <span
-                                                                    x-text="item.job.error.substring(0, 100) + '...'"></span>
-                                                                <a href="#" class="text-primary"
-                                                                    @click.prevent="openErrorDetailsModal(item.job)"
-                                                                    style="margin-left: 0.5rem;">[View Details]</a>
+                                                                <span x-text="item.job.error.substring(0, 100) + '...'"></span>
+                                                                <a href="#" class="text-primary" @click.prevent="openErrorDetailsModal(item.job)" style="margin-left: 0.5rem;">[View Details]</a>
                                                             </span>
                                                         </div>
                                                     </template>
@@ -506,49 +443,33 @@
                                                         <div class="parent-progress-container">
                                                             <!-- Enhanced Crawler Progress Display (Inline) -->
                                                             <template x-if="isCrawlerJob(item.job)">
-                                                                <div class="crawler-progress-inline"
-                                                                    style="margin-top: 0.8rem;">
+                                                                <div class="crawler-progress-inline" style="margin-top: 0.8rem;">
                                                                     <!-- Progress Text Inline -->
-                                                                    <div
-                                                                        style="display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem; align-items: center;">
-                                                                        <div
-                                                                            style="display: flex; align-items: center; gap: 0.5rem;">
-                                                                            <i class="fas fa-tasks"
-                                                                                style="color: #666;"></i>
-                                                                            <span
-                                                                                x-text="getCrawlerProgressText(item.job)"
-                                                                                style="font-weight: 500;"></span>
+                                                                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem; align-items: center;">
+                                                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                                            <i class="fas fa-tasks" style="color: #666;"></i>
+                                                                            <span x-text="getCrawlerProgressText(item.job)" style="font-weight: 500;"></span>
                                                                         </div>
-                                                                        <template
-                                                                            x-if="item.job.progress || item.job.status_report">
-                                                                            <div
-                                                                                style="display: flex; align-items: center; gap: 1rem; font-size: 0.75rem; color: #666;">
+                                                                        <template x-if="item.job.progress || item.job.status_report">
+                                                                            <div style="display: flex; align-items: center; gap: 1rem; font-size: 0.75rem; color: #666;">
                                                                                 <span>
-                                                                                    <i class="fas fa-link"
-                                                                                        style="margin-right: 0.25rem;"></i>
-                                                                                    <span
-                                                                                        x-text="getCrawlerStat(item.job, 'links_found') || '0'"></span>
+                                                                                    <i class="fas fa-link" style="margin-right: 0.25rem;"></i>
+                                                                                    <span x-text="getCrawlerStat(item.job, 'links_found') || '0'"></span>
                                                                                     found
                                                                                 </span>
                                                                                 <span>
-                                                                                    <i class="fas fa-filter"
-                                                                                        style="margin-right: 0.25rem;"></i>
-                                                                                    <span
-                                                                                        x-text="getCrawlerStat(item.job, 'links_filtered') || '0'"></span>
+                                                                                    <i class="fas fa-filter" style="margin-right: 0.25rem;"></i>
+                                                                                    <span x-text="getCrawlerStat(item.job, 'links_filtered') || '0'"></span>
                                                                                     filtered
                                                                                 </span>
                                                                                 <span>
-                                                                                    <i class="fas fa-arrow-right"
-                                                                                        style="margin-right: 0.25rem;"></i>
-                                                                                    <span
-                                                                                        x-text="getCrawlerStat(item.job, 'links_followed') || '0'"></span>
+                                                                                    <i class="fas fa-arrow-right" style="margin-right: 0.25rem;"></i>
+                                                                                    <span x-text="getCrawlerStat(item.job, 'links_followed') || '0'"></span>
                                                                                     followed
                                                                                 </span>
                                                                                 <span>
-                                                                                    <i class="fas fa-layer-group"
-                                                                                        style="margin-right: 0.25rem;"></i>
-                                                                                    depth <span
-                                                                                        x-text="getCrawlerStat(item.job, 'max_depth') || '1'"></span>
+                                                                                    <i class="fas fa-layer-group" style="margin-right: 0.25rem;"></i>
+                                                                                    depth <span x-text="getCrawlerStat(item.job, 'max_depth') || '1'"></span>
                                                                                 </span>
                                                                             </div>
                                                                         </template>
@@ -558,38 +479,27 @@
 
                                                             <!-- Standard Progress Display for Non-Crawler Jobs -->
                                                             <template x-if="!isCrawlerJob(item.job)">
-                                                                <div
-                                                                    style="margin-top: 0.8rem; padding: 0.5rem; background-color: #f5f5f5; border-radius: 4px; font-size: 0.875rem;">
+                                                                <div style="margin-top: 0.8rem; padding: 0.5rem; background-color: #f5f5f5; border-radius: 4px; font-size: 0.875rem;">
                                                                     <strong>Progress:</strong>
-                                                                    <template
-                                                                        x-if="item.job.status_report?.progress_text">
-                                                                        <span
-                                                                            x-text="item.job.status_report.progress_text"></span>
+                                                                    <template x-if="item.job.status_report?.progress_text">
+                                                                        <span x-text="item.job.status_report.progress_text"></span>
                                                                     </template>
-                                                                    <template
-                                                                        x-if="!item.job.status_report?.progress_text && item.job.child_count > 0">
-                                                                        <span
-                                                                            x-text="getChildJobsSummary(item.job.id)"></span>
+                                                                    <template x-if="!item.job.status_report?.progress_text && item.job.child_count > 0">
+                                                                        <span x-text="getChildJobsSummary(item.job.id)"></span>
                                                                     </template>
-                                                                    <template
-                                                                        x-if="!item.job.status_report?.progress_text && (!item.job.child_count || item.job.child_count === 0)">
+                                                                    <template x-if="!item.job.status_report?.progress_text && (!item.job.child_count || item.job.child_count === 0)">
                                                                         <span>No progress data</span>
                                                                     </template>
                                                                 </div>
                                                             </template>
 
                                                             <!-- Errors from backend -->
-                                                            <template
-                                                                x-if="item.job.status_report?.errors && item.job.status_report.errors.length > 0">
-                                                                <div
-                                                                    style="margin-top: 0.5rem; padding: 0.5rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
-                                                                    <strong style="color: var(--color-danger);"><i
-                                                                            class="fas fa-exclamation-circle"></i>
+                                                            <template x-if="item.job.status_report?.errors && item.job.status_report.errors.length > 0">
+                                                                <div style="margin-top: 0.5rem; padding: 0.5rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-size: 0.875rem;">
+                                                                    <strong style="color: var(--color-danger);"><i class="fas fa-exclamation-circle"></i>
                                                                         Errors:</strong>
                                                                     <ul style="margin: 0.25rem 0 0 1.5rem; padding: 0;">
-                                                                        <template
-                                                                            x-for="error in item.job.status_report.errors"
-                                                                            :key="error">
+                                                                        <template x-for="error in item.job.status_report.errors" :key="error">
                                                                             <li x-text="error"></li>
                                                                         </template>
                                                                     </ul>
@@ -597,17 +507,12 @@
                                                             </template>
 
                                                             <!-- Warnings from backend -->
-                                                            <template
-                                                                x-if="item.job.status_report?.warnings && item.job.status_report.warnings.length > 0">
-                                                                <div
-                                                                    style="margin-top: 0.5rem; padding: 0.5rem; background-color: #fff3cd; border-left: 4px solid var(--color-warning); border-radius: 4px; font-size: 0.875rem;">
-                                                                    <strong style="color: #856404;"><i
-                                                                            class="fas fa-exclamation-triangle"></i>
+                                                            <template x-if="item.job.status_report?.warnings && item.job.status_report.warnings.length > 0">
+                                                                <div style="margin-top: 0.5rem; padding: 0.5rem; background-color: #fff3cd; border-left: 4px solid var(--color-warning); border-radius: 4px; font-size: 0.875rem;">
+                                                                    <strong style="color: #856404;"><i class="fas fa-exclamation-triangle"></i>
                                                                         Warnings:</strong>
                                                                     <ul style="margin: 0.25rem 0 0 1.5rem; padding: 0;">
-                                                                        <template
-                                                                            x-for="warning in item.job.status_report.warnings"
-                                                                            :key="warning">
+                                                                        <template x-for="warning in item.job.status_report.warnings" :key="warning">
                                                                             <li x-text="warning"></li>
                                                                         </template>
                                                                     </ul>
@@ -623,30 +528,22 @@
                                                 <div class="column col-auto align-right" @click.stop>
                                                     <!-- Refresh button for parent jobs -->
                                                     <template x-if="item.type === 'parent'">
-                                                        <button class="btn btn-sm"
-                                                            @click="refreshParentJob(item.job.id)"
-                                                            title="Refresh Job Stats">
+                                                        <button class="btn btn-sm" @click="refreshParentJob(item.job.id)" title="Refresh Job Stats">
                                                             <i class="fa-solid fa-sync"></i>
                                                         </button>
                                                     </template>
                                                     <template x-if="item.job.status !== 'running'">
-                                                        <button class="btn btn-sm"
-                                                            @click="window.rerunJob(item.job.id, $event)"
-                                                            title="Copy Job and Add to Queue">
+                                                        <button class="btn btn-sm" @click="window.rerunJob(item.job.id, $event)" title="Copy Job and Add to Queue">
                                                             <i class="fa-solid fa-rotate-right"></i>
                                                         </button>
                                                     </template>
                                                     <template x-if="item.job.status === 'running'">
-                                                        <button class="btn btn-sm btn-warning"
-                                                            @click="window.cancelJob(item.job.id, $event)"
-                                                            title="Cancel Job">
+                                                        <button class="btn btn-sm btn-warning" @click="window.cancelJob(item.job.id, $event)" title="Cancel Job">
                                                             <i class="fas fa-stop"></i>
                                                         </button>
                                                     </template>
                                                     <template x-if="item.job.status !== 'running'">
-                                                        <button class="btn btn-sm btn-error"
-                                                            @click="window.deleteJob(item.job.id, $event)"
-                                                            title="Delete Job">
+                                                        <button class="btn btn-sm btn-error" @click="window.deleteJob(item.job.id, $event)" title="Delete Job">
                                                             <i class="fas fa-trash"></i>
                                                         </button>
                                                     </template>
@@ -654,8 +551,7 @@
                                             </div>
 
                                             <!-- Job Configuration (Collapsible JSON) -->
-                                            <div :id="'job-json-' + $id(item.job.id)"
-                                                style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                                            <div :id="'job-json-' + $id(item.job.id)" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
                                                 <pre
                                                     style="background-color: #ffffff; padding: 1rem; border: 1px solid #e0e0e0; border-radius: 4px; overflow-x: auto; max-height: 400px;"><code class="language-json" x-text="JSON.stringify(item.job, null, 2)"></code></pre>
                                             </div>
@@ -668,8 +564,7 @@
                         <!-- No jobs message -->
                         <template x-if="itemsToRender.length === 0 && !isLoading && !loadError">
                             <div class="text-center text-gray" style="padding: 2rem;">
-                                <span
-                                    x-text="filteredJobs.length === 0 ? 'No jobs found matching the current filters.' : ''"></span>
+                                <span x-text="filteredJobs.length === 0 ? 'No jobs found matching the current filters.' : ''"></span>
                             </div>
                         </template>
 
@@ -703,12 +598,10 @@
 
     <!-- Filter Modal -->
     <div id="filter-modal" class="modal">
-        <a href="#close" class="modal-overlay" aria-label="Close"
-            onclick="event.preventDefault(); closeFilterModal()"></a>
+        <a href="#close" class="modal-overlay" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
         <div class="modal-container" role="dialog" aria-modal="true">
             <div class="modal-header">
-                <a href="#close" class="btn btn-clear float-right" aria-label="Close"
-                    onclick="event.preventDefault(); closeFilterModal()"></a>
+                <a href="#close" class="btn btn-clear float-right" aria-label="Close" onclick="event.preventDefault(); closeFilterModal()"></a>
                 <div class="modal-title h5">Filter Crawler Jobs</div>
             </div>
             <div class="modal-body">
@@ -789,16 +682,14 @@
                     <!-- Warning Message -->
                     <div class="toast toast-warning" style="margin-bottom: 1rem;">
                         <i class="fas fa-exclamation-triangle"></i>
-                        <span
-                            x-text="`You are about to delete ${jobs.length} job${jobs.length > 1 ? 's' : ''}. This action cannot be undone.`"></span>
+                        <span x-text="`You are about to delete ${jobs.length} job${jobs.length > 1 ? 's' : ''}. This action cannot be undone.`"></span>
                     </div>
 
                     <!-- Cascade Warning -->
                     <template x-if="totalChildren > 0">
                         <div class="toast toast-error" style="margin-bottom: 1rem;">
                             <i class="fas fa-info-circle"></i>
-                            <span
-                                x-text="`This will also delete ${totalChildren} child job${totalChildren > 1 ? 's' : ''}.`"></span>
+                            <span x-text="`This will also delete ${totalChildren} child job${totalChildren > 1 ? 's' : ''}.`"></span>
                         </div>
                     </template>
 
@@ -870,8 +761,7 @@
 
                         <label class="form-label"><strong>Job Information</strong></label>
 
-                        <div
-                            style="padding: 0.75rem; background-color: #f5f5f5; border-radius: 4px; margin-bottom: 1rem;">
+                        <div style="padding: 0.75rem; background-color: #f5f5f5; border-radius: 4px; margin-bottom: 1rem;">
                             <div style="margin-bottom: 0.5rem;">
                                 <strong>Job ID:</strong>
                                 <code x-text="job ? job.id.substring(0, 8) : 'N/A'"></code>
@@ -894,11 +784,9 @@
                             </div>
                             <div x-show="job && getJobURL(job)">
                                 <strong>URL:</strong>
-                                <a :href="getJobURL(job)" target="_blank" rel="noopener noreferrer" class="text-primary"
-                                    style="text-decoration: none;">
+                                <a :href="getJobURL(job)" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none;">
                                     <span x-text="getJobURL(job)"></span>
-                                    <i class="fas fa-external-link-alt"
-                                        style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
+                                    <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
                                 </a>
                             </div>
                         </div>
@@ -907,8 +795,7 @@
                     <!-- Error Message -->
                     <div class="form-group">
                         <label class="form-label"><strong>Error Message</strong></label>
-                        <div x-show="job && job.error"
-                            style="padding: 0.75rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">
+                        <div x-show="job && job.error" style="padding: 0.75rem; background-color: #f8d7da; border-left: 4px solid var(--color-danger); border-radius: 4px; font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">
                             <span x-text="job ? job.error : ''"></span>
                         </div>
                         <div x-show="!job || !job.error" style="padding: 0.75rem; color: #666; font-style: italic;">
@@ -1317,6 +1204,7 @@
                             detail: {
                                 step_id: stepProgress.step_id,
                                 manager_id: stepProgress.manager_id,
+                                step_name: stepProgress.step_name, // Step name for UI aggregation
                                 status: stepProgress.status,
                                 total_jobs: stepProgress.total_jobs || 0,
                                 pending_jobs: stepProgress.pending_jobs || 0,
@@ -1376,10 +1264,12 @@
                             detail: {
                                 job_id: logData.job_id,
                                 parent_job_id: logData.parent_job_id,
+                                manager_id: logData.manager_id,
                                 level: logData.level,
                                 message: logData.message,
                                 step_name: logData.step_name,
                                 source_type: logData.source_type,
+                                originator: logData.originator,
                                 metadata: logData.metadata,
                                 timestamp: logData.timestamp
                             }
@@ -1955,7 +1845,7 @@
                     // Handle child job spawn events - fetch children when new children are created
                     window.addEventListener('jobList:childSpawned', (e) => {
                         const { parent_job_id, child_job_id } = e.detail;
-                        console.log('[Queue] Child job spawned:', child_job_id?.substring(0,8), 'for parent:', parent_job_id?.substring(0,8));
+                        console.log('[Queue] Child job spawned:', child_job_id?.substring(0, 8), 'for parent:', parent_job_id?.substring(0, 8));
                         if (parent_job_id) {
                             this.debouncedFetchChildren(parent_job_id);
                         }
@@ -1986,7 +1876,7 @@
                             // Check if we have all children in allJobs
                             const childrenInAllJobs = this.allJobs.filter(j => j.parent_id === parent.id).length;
                             if (childrenInAllJobs < parent.child_count) {
-                                console.log('[Queue] Refreshing children for parent', parent.id.substring(0,8), '- have', childrenInAllJobs, 'of', parent.child_count);
+                                console.log('[Queue] Refreshing children for parent', parent.id.substring(0, 8), '- have', childrenInAllJobs, 'of', parent.child_count);
                                 this.fetchChildrenForParent(parent.id);
                             }
                         });
@@ -2034,7 +1924,7 @@
                     // Reassign the entire object to trigger Alpine.js reactivity
                     const newState = !this.expandedParents[parentId];
                     this.expandedParents = { ...this.expandedParents, [parentId]: newState };
-                    console.log('[Queue] Toggled expand for parent', parentId.substring(0,8), '- now:', newState);
+                    console.log('[Queue] Toggled expand for parent', parentId.substring(0, 8), '- now:', newState);
 
                     // If expanding, fetch children if not already loaded
                     if (newState) {
@@ -2042,10 +1932,10 @@
                         const childCount = parentJob?.child_count || 0;
                         const loadedChildren = this.allJobs.filter(j => j.parent_id === parentId).length;
 
-                        console.log('[Queue] Expanding parent', parentId.substring(0,8), '- childCount:', childCount, 'loadedChildren:', loadedChildren);
+                        console.log('[Queue] Expanding parent', parentId.substring(0, 8), '- childCount:', childCount, 'loadedChildren:', loadedChildren);
 
                         if (childCount > 0 && loadedChildren < childCount) {
-                            console.log('[Queue] Fetching children for parent', parentId.substring(0,8));
+                            console.log('[Queue] Fetching children for parent', parentId.substring(0, 8));
                             await this.fetchChildrenForParent(parentId);
                         }
                     }
@@ -2062,7 +1952,7 @@
                     const key = `${parentId}:${stepName}`;
                     const newState = !this.expandedSteps[key];
                     this.expandedSteps = { ...this.expandedSteps, [key]: newState };
-                    console.log('[Queue] Toggled expand for step', stepName, 'in parent', parentId.substring(0,8), '- now:', newState);
+                    console.log('[Queue] Toggled expand for step', stepName, 'in parent', parentId.substring(0, 8), '- now:', newState);
                     this.renderJobs();
                 },
 
@@ -2075,7 +1965,7 @@
                 toggleJobLogsExpand(jobId) {
                     const newState = !this.expandedJobLogs[jobId];
                     this.expandedJobLogs = { ...this.expandedJobLogs, [jobId]: newState };
-                    console.log('[Queue] Toggled logs panel for job', jobId.substring(0,8), '- now:', newState);
+                    console.log('[Queue] Toggled logs panel for job', jobId.substring(0, 8), '- now:', newState);
                     // Scroll to bottom of logs when expanding
                     if (newState) {
                         this.$nextTick(() => {
@@ -2092,33 +1982,35 @@
                 },
 
                 handleJobLog(logData) {
-                    // Get the parent job ID for aggregation (use parent_job_id if available, otherwise job_id)
-                    const parentId = logData.parent_job_id || logData.job_id;
-                    if (!parentId) return;
+                    // Use manager_id for log aggregation (fallback to parent_job_id for backwards compatibility)
+                    // This allows logs from child jobs under steps to be aggregated at the manager level
+                    const aggregationId = logData.manager_id || logData.parent_job_id || logData.job_id;
+                    if (!aggregationId) return;
                     const stepName = logData.step_name || '';
 
                     // Initialize logs array for this job if needed
-                    if (!this.jobLogs[parentId]) {
-                        this.jobLogs[parentId] = [];
+                    if (!this.jobLogs[aggregationId]) {
+                        this.jobLogs[aggregationId] = [];
                     }
 
                     // Add the new log entry
-                    this.jobLogs[parentId].push({
+                    this.jobLogs[aggregationId].push({
                         level: logData.level || 'info',
                         message: logData.message || '',
                         timestamp: logData.timestamp || new Date().toISOString(),
                         step_name: stepName,
-                        source_type: logData.source_type || ''
+                        source_type: logData.source_type || '',
+                        originator: logData.originator || ''
                     });
 
                     // Limit the number of logs per job
-                    if (this.jobLogs[parentId].length > this.maxLogsPerJob) {
-                        this.jobLogs[parentId] = this.jobLogs[parentId].slice(-this.maxLogsPerJob);
+                    if (this.jobLogs[aggregationId].length > this.maxLogsPerJob) {
+                        this.jobLogs[aggregationId] = this.jobLogs[aggregationId].slice(-this.maxLogsPerJob);
                     }
 
                     // Auto-expand step logs panel when log is received for a step
                     if (stepName) {
-                        const stepLogsKey = `${parentId}:${stepName}`;
+                        const stepLogsKey = `${aggregationId}:${stepName}`;
                         if (!this.expandedStepLogs[stepLogsKey]) {
                             this.expandedStepLogs = { ...this.expandedStepLogs, [stepLogsKey]: true };
                         }
@@ -2129,7 +2021,7 @@
 
                     // Auto-scroll step logs container to bottom
                     if (stepName) {
-                        const stepLogsKey = `${parentId}:${stepName}`;
+                        const stepLogsKey = `${aggregationId}:${stepName}`;
                         this.$nextTick(() => {
                             const logsContainer = document.querySelector(`[data-step-logs-container="${stepLogsKey}"]`);
                             if (logsContainer) {
@@ -2139,9 +2031,9 @@
                     }
 
                     // Also auto-scroll parent logs panel if expanded
-                    if (this.expandedJobLogs[parentId]) {
+                    if (this.expandedJobLogs[aggregationId]) {
                         this.$nextTick(() => {
-                            const logsContainer = document.querySelector(`[data-logs-container="${parentId}"]`);
+                            const logsContainer = document.querySelector(`[data-logs-container="${aggregationId}"]`);
                             if (logsContainer) {
                                 logsContainer.scrollTop = logsContainer.scrollHeight;
                             }
@@ -2156,18 +2048,8 @@
                 // Step-level logs methods
                 getStepLogs(jobId, stepName) {
                     const allLogs = this.jobLogs[jobId] || [];
-                    // Filter by step_name, but if no logs have step_name set, show all logs
-                    const filteredLogs = allLogs.filter(log => log.step_name === stepName);
-                    if (filteredLogs.length > 0) {
-                        return filteredLogs;
-                    }
-                    // Fallback: if no logs match this step, check if ANY logs have step_name
-                    const logsWithStepName = allLogs.filter(log => log.step_name && log.step_name !== '');
-                    if (logsWithStepName.length === 0) {
-                        // No logs have step_name set, show all logs for this parent
-                        return allLogs;
-                    }
-                    return filteredLogs; // Return empty if other steps have logs but this one doesn't
+                    // Filter by step_name - events include step context via uniform job_log events
+                    return allLogs.filter(log => log.step_name === stepName);
                 },
 
                 toggleStepLogsExpand(jobId, stepName) {
@@ -2220,9 +2102,12 @@
                 },
 
                 // Fetch historical logs for a parent job from the API
+                // Uses aggregated endpoint to get logs from all child jobs (steps and workers)
                 async fetchHistoricalLogs(jobId) {
                     try {
-                        const response = await fetch(`/api/jobs/${jobId}/logs?order=asc`);
+                        // Use aggregated endpoint to get logs from manager and all children
+                        // This ensures step logs are available after page refresh
+                        const response = await fetch(`/api/jobs/${jobId}/logs/aggregated?order=asc&include_children=true`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch logs for job', jobId.substring(0, 8));
                             return;
@@ -2243,7 +2128,8 @@
                                 message: log.message || '',
                                 timestamp: log.full_timestamp || log.timestamp,
                                 step_name: log.step_name || '',
-                                source_type: log.source_type || ''
+                                source_type: log.source_type || '',
+                                originator: log.originator || ''
                             }));
 
                         if (newLogs.length > 0) {
@@ -2322,7 +2208,7 @@
 
                         // Fetch children for all parents that have children
                         const parentsWithChildren = parentJobs.filter(job => job.child_count > 0);
-                        console.log('[Queue] Parents with children:', parentsWithChildren.map(p => ({id: p.id.substring(0,8), name: p.name, child_count: p.child_count})));
+                        console.log('[Queue] Parents with children:', parentsWithChildren.map(p => ({ id: p.id.substring(0, 8), name: p.name, child_count: p.child_count })));
                         let allChildren = [];
 
                         if (parentsWithChildren.length > 0) {
@@ -2337,17 +2223,17 @@
                                     childParams.append('order_by', 'created_at');
                                     childParams.append('order_dir', 'ASC'); // Oldest first for execution order
 
-                                    console.log('[Queue] Fetching children for parent:', parent.id.substring(0,8), 'URL:', `/api/jobs?${childParams.toString()}`);
+                                    console.log('[Queue] Fetching children for parent:', parent.id.substring(0, 8), 'URL:', `/api/jobs?${childParams.toString()}`);
                                     const childResponse = await fetch(`/api/jobs?${childParams.toString()}`, {
                                         signal: this.currentFetchController.signal
                                     });
 
                                     if (childResponse.ok) {
                                         const childData = await childResponse.json();
-                                        console.log('[Queue] Got', (childData.jobs || []).length, 'children for parent', parent.id.substring(0,8));
+                                        console.log('[Queue] Got', (childData.jobs || []).length, 'children for parent', parent.id.substring(0, 8));
                                         return childData.jobs || [];
                                     }
-                                    console.warn('[Queue] Child fetch failed for parent', parent.id.substring(0,8), 'status:', childResponse.status);
+                                    console.warn('[Queue] Child fetch failed for parent', parent.id.substring(0, 8), 'status:', childResponse.status);
                                     return [];
                                 } catch (err) {
                                     console.warn('[Queue] Failed to fetch children for parent', parent.id, err);
@@ -2513,219 +2399,245 @@
                     const itemsToRender = [];
 
                     try {
-                    // Guard against empty/undefined filteredJobs
-                    if (!this.filteredJobs || !Array.isArray(this.filteredJobs)) {
-                        console.warn('[Queue] renderJobs: filteredJobs is not an array, skipping render');
-                        return;
-                    }
+                        // Guard against empty/undefined filteredJobs
+                        if (!this.filteredJobs || !Array.isArray(this.filteredJobs)) {
+                            console.warn('[Queue] renderJobs: filteredJobs is not an array, skipping render');
+                            return;
+                        }
 
-                    this.filteredJobs.filter(job => job && !job.parent_id).forEach(parentJob => {
-                        // Add parent job row
-                        itemsToRender.push({ type: 'parent', job: parentJob });
+                        this.filteredJobs.filter(job => job && !job.parent_id).forEach(parentJob => {
+                            // Add parent job row
+                            itemsToRender.push({ type: 'parent', job: parentJob });
 
-                        // Add step rows for multi-step job definitions
-                        const stepDefs = parentJob.metadata?.step_definitions;
-                        if (stepDefs && Array.isArray(stepDefs) && stepDefs.length > 0) {
-                            // Get step status from metadata (persisted) or status_report (WebSocket)
-                            const currentStep = parentJob.metadata?.current_step || parentJob.status_report?.current_step || 0;
-                            const completedSteps = parentJob.metadata?.completed_steps || 0;
-                            const currentStepStatus = parentJob.metadata?.current_step_status || parentJob.status_report?.step_status || 'pending';
-                            const parentStatus = parentJob.status;
+                            // Add step rows for multi-step job definitions
+                            const stepDefs = parentJob.metadata?.step_definitions;
+                            if (stepDefs && Array.isArray(stepDefs) && stepDefs.length > 0) {
+                                // Get step status from metadata (persisted) or status_report (WebSocket)
+                                const currentStep = parentJob.metadata?.current_step || parentJob.status_report?.current_step || 0;
+                                const completedSteps = parentJob.metadata?.completed_steps || 0;
+                                const currentStepStatus = parentJob.metadata?.current_step_status || parentJob.status_report?.step_status || 'pending';
+                                const parentStatus = parentJob.status;
 
-                            // Get per-step statistics from metadata
-                            const stepStats = parentJob.metadata?.step_stats || [];
+                                // Get per-step statistics from metadata
+                                const stepStats = parentJob.metadata?.step_stats || [];
 
-                            // Get all children for this parent (for step expansion)
-                            // Handle parent_id comparison flexibly - may be string or object depending on API response
-                            const parentId = String(parentJob.id);
-                            const allChildJobs = this.allJobs.filter(job => {
-                                if (!job.parent_id) return false;
-                                const childParentId = typeof job.parent_id === 'string' ? job.parent_id : String(job.parent_id);
-                                return childParentId === parentId;
-                            });
-
-                            // Debug: Log children and their step_name metadata
-                            console.log('[Queue] Parent', parentJob.id.substring(0,8), 'child lookup: allJobs=', this.allJobs.length, 'allChildJobs=', allChildJobs.length);
-                            if (allChildJobs.length === 0 && parentJob.child_count > 0) {
-                                console.log('[Queue] WARNING: parent has child_count=', parentJob.child_count, 'but no children found in allJobs');
-                                // Debug: Show parent_id values of all jobs to diagnose matching issue
-                                const childrenByParentId = this.allJobs.filter(j => j.parent_id).map(j => ({
-                                    id: j.id.substring(0,8),
-                                    parent_id: j.parent_id,
-                                    parent_id_type: typeof j.parent_id
-                                }));
-                                console.log('[Queue] Jobs with parent_id:', childrenByParentId.slice(0, 5));
-                                console.log('[Queue] Looking for parent_id matching:', parentJob.id, 'type:', typeof parentJob.id);
-                            }
-                            if (allChildJobs.length > 0) {
-                                console.log('[Queue] Parent', parentJob.id.substring(0,8), 'has', allChildJobs.length, 'children in allJobs');
-                                const childStepNames = allChildJobs.map(c => c.metadata?.step_name).filter(Boolean);
-                                console.log('[Queue] Child step_names:', [...new Set(childStepNames)]);
-                                if (childStepNames.length === 0) {
-                                    console.log('[Queue] First child metadata:', allChildJobs[0]?.metadata);
-                                }
-                            }
-
-                            stepDefs.forEach((stepDef, index) => {
-                                let status = 'pending';
-                                const stepNum = index + 1;
-
-                                // Check if there are still pending or running children
-                                const pendingChildren = parentJob.pending_children || 0;
-                                const runningChildren = parentJob.running_children || 0;
-                                const hasActiveChildren = pendingChildren > 0 || runningChildren > 0;
-
-                                // Determine step status based on completed_steps and current_step
-                                if (stepNum < currentStep) {
-                                    status = 'completed';
-                                } else if (stepNum === currentStep) {
-                                    // Only show terminal status (failed/completed) when all children are done
-                                    if (hasActiveChildren) {
-                                        // Still have active children - show running status
-                                        status = 'running';
-                                    } else if (parentStatus === 'completed') {
-                                        status = 'completed';
-                                    } else if (parentStatus === 'failed' || parentStatus === 'cancelled') {
-                                        status = parentStatus;
-                                    } else {
-                                        // Use current step status from backend
-                                        status = currentStepStatus;
-                                    }
-                                } else if (stepNum <= completedSteps) {
-                                    status = 'completed';
-                                }
-
-                                // Override based on parent status if job is done (no active children)
-                                if (!hasActiveChildren && parentStatus === 'completed' && stepNum <= stepDefs.length) {
-                                    status = 'completed';
-                                }
-
-                                // Get step-specific statistics (child count and document count created by this step)
-                                const stepStat = stepStats.find(s => s && s.step_index === index) || {};
-
-                                // For child count: prefer stepStats, but for running/failed steps count from allChildJobs
-                                // Children have step_name in their metadata to associate them with a step
-                                let childCount = stepStat.child_count || 0;
-                                if (childCount === 0 && allChildJobs.length > 0) {
-                                    // Count children that belong to this step by checking step_name metadata
-                                    childCount = allChildJobs.filter(child => {
-                                        const childStepName = child.metadata?.step_name;
-                                        return childStepName === stepDef.name;
-                                    }).length;
-
-                                    // Fallback: If no children match by step_name and this is an 'agent' step type,
-                                    // assign ALL unassigned children to this step (backwards compatibility for jobs
-                                    // created before step_name was added to child job metadata)
-                                    if (childCount === 0 && stepDef.type === 'agent') {
-                                        // Check if any children have step_name metadata
-                                        const childrenWithStepName = allChildJobs.filter(c => c.metadata?.step_name);
-                                        if (childrenWithStepName.length === 0) {
-                                            // No children have step_name, assign all to this agent step
-                                            childCount = allChildJobs.length;
-                                            console.log('[Queue] Fallback: Assigned', childCount, 'children to agent step', stepDef.name, '(no step_name metadata found)');
-                                        }
-                                    }
-                                }
-
-                                const documentCount = stepStat.document_count || 0;
-
-                                // For running steps, show parent's current child stats as progress
-                                let stepProgress = null;
-                                if (status === 'running' && parentJob.child_count > 0) {
-                                    stepProgress = {
-                                        pending: parentJob.pending_children || 0,
-                                        running: parentJob.running_children || 0,
-                                        completed: parentJob.completed_children || 0,
-                                        failed: parentJob.failed_children || 0
-                                    };
-                                }
-
-                                itemsToRender.push({
-                                    type: 'step',
-                                    job: parentJob,
-                                    step: {
-                                        index: index,
-                                        name: stepDef.name,
-                                        stepType: stepDef.type,
-                                        description: stepDef.description,
-                                        status: status,
-                                        current: stepNum === currentStep,
-                                        totalSteps: stepDefs.length,
-                                        childCount: childCount,
-                                        documentCount: documentCount,
-                                        progress: stepProgress
-                                    }
+                                // Get all children for this parent (for step expansion)
+                                // Handle parent_id comparison flexibly - may be string or object depending on API response
+                                const parentId = String(parentJob.id);
+                                const allChildJobs = this.allJobs.filter(job => {
+                                    if (!job.parent_id) return false;
+                                    const childParentId = typeof job.parent_id === 'string' ? job.parent_id : String(job.parent_id);
+                                    return childParentId === parentId;
                                 });
 
-                                // Auto-expand step logs for running, spawned, or failed steps
-                                const stepLogsKey = `${parentJob.id}:${stepDef.name}`;
-                                if ((status === 'running' || status === 'spawned' || status === 'failed') && !this.expandedStepLogs[stepLogsKey]) {
-                                    this.expandedStepLogs = { ...this.expandedStepLogs, [stepLogsKey]: true };
+                                // Debug: Log children and their step_name metadata
+                                console.log('[Queue] Parent', parentJob.id.substring(0, 8), 'child lookup: allJobs=', this.allJobs.length, 'allChildJobs=', allChildJobs.length);
+                                if (allChildJobs.length === 0 && parentJob.child_count > 0) {
+                                    console.log('[Queue] WARNING: parent has child_count=', parentJob.child_count, 'but no children found in allJobs');
+                                    // Debug: Show parent_id values of all jobs to diagnose matching issue
+                                    const childrenByParentId = this.allJobs.filter(j => j.parent_id).map(j => ({
+                                        id: j.id.substring(0, 8),
+                                        parent_id: j.parent_id,
+                                        parent_id_type: typeof j.parent_id
+                                    }));
+                                    console.log('[Queue] Jobs with parent_id:', childrenByParentId.slice(0, 5));
+                                    console.log('[Queue] Looking for parent_id matching:', parentJob.id, 'type:', typeof parentJob.id);
+                                }
+                                if (allChildJobs.length > 0) {
+                                    console.log('[Queue] Parent', parentJob.id.substring(0, 8), 'has', allChildJobs.length, 'children in allJobs');
+                                    const childStepNames = allChildJobs.map(c => c.metadata?.step_name).filter(Boolean);
+                                    console.log('[Queue] Child step_names:', [...new Set(childStepNames)]);
+                                    if (childStepNames.length === 0) {
+                                        console.log('[Queue] First child metadata:', allChildJobs[0]?.metadata);
+                                    }
                                 }
 
-                                // Add child rows immediately after this step row if step is expanded
-                                const isExpanded = this.isStepExpanded(parentJob.id, stepDef.name);
-                                const stepKey = `${parentJob.id}:${stepDef.name}`;
-                                console.log('[Queue] Step', stepDef.name, 'type:', stepDef.type, 'expanded:', isExpanded, 'childCount:', childCount, 'allChildJobs:', allChildJobs.length);
-                                if (isExpanded) {
-                                    console.log('[Queue] EXPANDING step', stepDef.name, '- adding children');
-                                    // Filter children that belong to this step
-                                    let stepChildren = allChildJobs.filter(child => {
-                                        const childStepName = child.metadata?.step_name;
-                                        return childStepName === stepDef.name;
-                                    });
+                                stepDefs.forEach((stepDef, index) => {
+                                    let status = 'pending';
+                                    const stepNum = index + 1;
 
-                                    // Fallback: If no children match by step_name and this is an 'agent' step type,
-                                    // show ALL children under this step (backwards compatibility)
-                                    if (stepChildren.length === 0 && stepDef.type === 'agent') {
-                                        const childrenWithStepName = allChildJobs.filter(c => c.metadata?.step_name);
-                                        if (childrenWithStepName.length === 0) {
-                                            // No children have step_name, show all under this agent step
-                                            stepChildren = [...allChildJobs];
-                                            console.log('[Queue] Fallback expand: Showing all', stepChildren.length, 'children under agent step', stepDef.name);
+                                    // First, check for real-time status from _stepProgress (WebSocket updates)
+                                    // This is the most accurate source for current step status
+                                    if (parentJob._stepProgress && parentJob._stepProgress[stepDef.name]) {
+                                        const rtProgress = parentJob._stepProgress[stepDef.name];
+                                        if (rtProgress.status) {
+                                            status = rtProgress.status;
                                         }
                                     }
 
-                                    if (stepChildren.length > 0) {
-                                        // Sort children by created_at (oldest first)
-                                        stepChildren.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                                    // If no real-time status, fall back to calculated status
+                                    if (status === 'pending') {
+                                        // Check if there are still pending or running children
+                                        const pendingChildren = parentJob.pending_children || 0;
+                                        const runningChildren = parentJob.running_children || 0;
+                                        const hasActiveChildren = pendingChildren > 0 || runningChildren > 0;
 
-                                        stepChildren.forEach((childJob, childIndex) => {
-                                            itemsToRender.push({
-                                                type: 'child',
-                                                job: childJob,
-                                                parentId: parentJob.id,
-                                                stepName: stepDef.name,
-                                                childIndex: childIndex + 1,
-                                                totalChildren: stepChildren.length
-                                            });
-                                        });
-                                        console.log('[Queue] renderJobs: Added', stepChildren.length, 'child rows for step', stepDef.name, 'in parent', parentJob.id.substring(0,8));
+                                        // Determine step status based on completed_steps and current_step
+                                        if (stepNum < currentStep) {
+                                            status = 'completed';
+                                        } else if (stepNum === currentStep) {
+                                            // Only show terminal status (failed/completed) when all children are done
+                                            if (hasActiveChildren) {
+                                                // Still have active children - show running status
+                                                status = 'running';
+                                            } else if (parentStatus === 'completed') {
+                                                status = 'completed';
+                                            } else if (parentStatus === 'failed' || parentStatus === 'cancelled') {
+                                                status = parentStatus;
+                                            } else {
+                                                // Use current step status from backend
+                                                status = currentStepStatus;
+                                            }
+                                        } else if (stepNum <= completedSteps) {
+                                            status = 'completed';
+                                        }
+
+                                        // Override based on parent status if job is done (no active children)
+                                        if (!hasActiveChildren && parentStatus === 'completed' && stepNum <= stepDefs.length) {
+                                            status = 'completed';
+                                        }
                                     }
-                                }
-                            });
+
+                                    // Get step-specific statistics (child count and document count created by this step)
+                                    const stepStat = stepStats.find(s => s && s.step_index === index) || {};
+
+                                    // For child count: prefer stepStats, but for running/failed steps count from allChildJobs
+                                    // Children have step_name in their metadata to associate them with a step
+                                    let childCount = stepStat.child_count || 0;
+                                    if (childCount === 0 && allChildJobs.length > 0) {
+                                        // Count children that belong to this step by checking step_name metadata
+                                        childCount = allChildJobs.filter(child => {
+                                            const childStepName = child.metadata?.step_name;
+                                            return childStepName === stepDef.name;
+                                        }).length;
+
+                                        // Fallback: If no children match by step_name and this is an 'agent' step type,
+                                        // assign ALL unassigned children to this step (backwards compatibility for jobs
+                                        // created before step_name was added to child job metadata)
+                                        if (childCount === 0 && stepDef.type === 'agent') {
+                                            // Check if any children have step_name metadata
+                                            const childrenWithStepName = allChildJobs.filter(c => c.metadata?.step_name);
+                                            if (childrenWithStepName.length === 0) {
+                                                // No children have step_name, assign all to this agent step
+                                                childCount = allChildJobs.length;
+                                                console.log('[Queue] Fallback: Assigned', childCount, 'children to agent step', stepDef.name, '(no step_name metadata found)');
+                                            }
+                                        }
+                                    }
+
+                                    const documentCount = stepStat.document_count || 0;
+
+                                    // For active or terminal steps, show step-specific child stats as progress
+                                    // First try to get from _stepProgress map (real-time WebSocket updates)
+                                    // Fall back to parent's aggregate child stats if not available
+                                    let stepProgress = null;
+                                    if (status === 'running' || status === 'spawned' || status === 'failed' || status === 'completed') {
+                                        // Check for real-time step progress from WebSocket events
+                                        if (parentJob._stepProgress && parentJob._stepProgress[stepDef.name]) {
+                                            const rtProgress = parentJob._stepProgress[stepDef.name];
+                                            stepProgress = {
+                                                pending: rtProgress.pending || 0,
+                                                running: rtProgress.running || 0,
+                                                completed: rtProgress.completed || 0,
+                                                failed: rtProgress.failed || 0
+                                            };
+                                        } else if (parentJob.child_count > 0) {
+                                            // Fallback: use parent's aggregate child stats
+                                            stepProgress = {
+                                                pending: parentJob.pending_children || 0,
+                                                running: parentJob.running_children || 0,
+                                                completed: parentJob.completed_children || 0,
+                                                failed: parentJob.failed_children || 0
+                                            };
+                                        }
+                                    }
+
+                                    itemsToRender.push({
+                                        type: 'step',
+                                        job: parentJob,
+                                        step: {
+                                            index: index,
+                                            name: stepDef.name,
+                                            stepType: stepDef.type,
+                                            description: stepDef.description,
+                                            status: status,
+                                            current: stepNum === currentStep,
+                                            totalSteps: stepDefs.length,
+                                            childCount: childCount,
+                                            documentCount: documentCount,
+                                            progress: stepProgress
+                                        }
+                                    });
+
+                                    // Auto-expand step logs for running, spawned, or failed steps
+                                    const stepLogsKey = `${parentJob.id}:${stepDef.name}`;
+                                    if ((status === 'running' || status === 'spawned' || status === 'failed') && !this.expandedStepLogs[stepLogsKey]) {
+                                        this.expandedStepLogs = { ...this.expandedStepLogs, [stepLogsKey]: true };
+                                    }
+
+                                    // Add child rows immediately after this step row if step is expanded
+                                    const isExpanded = this.isStepExpanded(parentJob.id, stepDef.name);
+                                    const stepKey = `${parentJob.id}:${stepDef.name}`;
+                                    console.log('[Queue] Step', stepDef.name, 'type:', stepDef.type, 'expanded:', isExpanded, 'childCount:', childCount, 'allChildJobs:', allChildJobs.length);
+                                    if (isExpanded) {
+                                        console.log('[Queue] EXPANDING step', stepDef.name, '- adding children');
+                                        // Filter children that belong to this step
+                                        let stepChildren = allChildJobs.filter(child => {
+                                            const childStepName = child.metadata?.step_name;
+                                            return childStepName === stepDef.name;
+                                        });
+
+                                        // Fallback: If no children match by step_name and this is an 'agent' step type,
+                                        // show ALL children under this step (backwards compatibility)
+                                        if (stepChildren.length === 0 && stepDef.type === 'agent') {
+                                            const childrenWithStepName = allChildJobs.filter(c => c.metadata?.step_name);
+                                            if (childrenWithStepName.length === 0) {
+                                                // No children have step_name, show all under this agent step
+                                                stepChildren = [...allChildJobs];
+                                                console.log('[Queue] Fallback expand: Showing all', stepChildren.length, 'children under agent step', stepDef.name);
+                                            }
+                                        }
+
+                                        if (stepChildren.length > 0) {
+                                            // Sort children by created_at (oldest first)
+                                            stepChildren.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+                                            stepChildren.forEach((childJob, childIndex) => {
+                                                itemsToRender.push({
+                                                    type: 'child',
+                                                    job: childJob,
+                                                    parentId: parentJob.id,
+                                                    stepName: stepDef.name,
+                                                    childIndex: childIndex + 1,
+                                                    totalChildren: stepChildren.length
+                                                });
+                                            });
+                                            console.log('[Queue] renderJobs: Added', stepChildren.length, 'child rows for step', stepDef.name, 'in parent', parentJob.id.substring(0, 8));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+
+                        // Safety check: if we built an empty array but have jobs, something is wrong
+                        if (itemsToRender.length === 0 && this.filteredJobs.length > 0) {
+                            console.error('[Queue] renderJobs: Built empty itemsToRender but have', this.filteredJobs.length, 'filtered jobs');
+                            console.error('[Queue] filteredJobs sample:', this.filteredJobs.slice(0, 3).map(j => ({ id: j.id?.substring(0, 8), parent_id: j.parent_id, status: j.status })));
+                            // Trigger reload to recover
+                            this._autoRecoveryCount = (this._autoRecoveryCount || 0) + 1;
+                            if (this._autoRecoveryCount <= 3) {
+                                console.warn('[Queue] Triggering auto-recovery reload (attempt', this._autoRecoveryCount, ')');
+                                setTimeout(() => this.loadJobs(), 500);
+                            }
+                            return; // Don't clear existing display
                         }
-                    });
 
-                    // Safety check: if we built an empty array but have jobs, something is wrong
-                    if (itemsToRender.length === 0 && this.filteredJobs.length > 0) {
-                        console.error('[Queue] renderJobs: Built empty itemsToRender but have', this.filteredJobs.length, 'filtered jobs');
-                        console.error('[Queue] filteredJobs sample:', this.filteredJobs.slice(0, 3).map(j => ({id: j.id?.substring(0,8), parent_id: j.parent_id, status: j.status})));
-                        // Trigger reload to recover
-                        this._autoRecoveryCount = (this._autoRecoveryCount || 0) + 1;
-                        if (this._autoRecoveryCount <= 3) {
-                            console.warn('[Queue] Triggering auto-recovery reload (attempt', this._autoRecoveryCount, ')');
-                            setTimeout(() => this.loadJobs(), 500);
-                        }
-                        return; // Don't clear existing display
-                    }
+                        this._autoRecoveryCount = 0; // Reset on successful render
+                        this.itemsToRender = itemsToRender;
 
-                    this._autoRecoveryCount = 0; // Reset on successful render
-                    this.itemsToRender = itemsToRender;
-
-                    // Also update pagination
-                    const totalPages = Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
-                    window.renderPagination(totalPages, this.currentPage);
+                        // Also update pagination
+                        const totalPages = Math.max(1, Math.ceil(this.totalJobs / this.pageSize));
+                        window.renderPagination(totalPages, this.currentPage);
 
                     } catch (error) {
                         console.error('[Queue] renderJobs error:', error);
@@ -2737,12 +2649,12 @@
                 // Throttled version of renderJobs to prevent UI thrashing during rapid updates
                 throttledRenderJobs() {
                     if (this._renderPending) return;
-                    
+
                     this._renderPending = true;
                     if (this._renderTimeout) {
                         clearTimeout(this._renderTimeout);
                     }
-                    
+
                     this._renderTimeout = setTimeout(() => {
                         this._renderPending = false;
                         this._renderTimeout = null;
@@ -3388,7 +3300,7 @@
                         // filteredJobs is used for pagination of parent jobs; child jobs display under parents
                         if (job.parent_id) {
                             // Child job - don't add to filteredJobs, just update allJobs (already done above)
-                            console.debug('[Queue] Skipping child job from filteredJobs:', job.id?.substring(0,8));
+                            console.debug('[Queue] Skipping child job from filteredJobs:', job.id?.substring(0, 8));
                         } else {
                             const matchesFilters = window.matchesActiveFilters(job);
 
@@ -3591,32 +3503,55 @@
                 // Update step progress from step_progress WebSocket event (from StepMonitor)
                 // Steps are job type="step" that monitor their child jobs
                 updateStepProgress(progress) {
+                    // Also store step progress on the manager job for renderJobs() to use
+                    // This ensures step progress is available even if step jobs aren't in allJobs
+                    if (progress.manager_id && progress.step_name) {
+                        const managerIndex = this.allJobs.findIndex(j => j.id === progress.manager_id);
+                        if (managerIndex >= 0) {
+                            const manager = this.allJobs[managerIndex];
+                            // Initialize step_progress map if not exists
+                            if (!manager._stepProgress) {
+                                manager._stepProgress = {};
+                            }
+                            // Store progress keyed by step_name
+                            manager._stepProgress[progress.step_name] = {
+                                pending: progress.pending_jobs || 0,
+                                running: progress.running_jobs || 0,
+                                completed: progress.completed_jobs || 0,
+                                failed: progress.failed_jobs || 0,
+                                cancelled: progress.cancelled_jobs || 0,
+                                total: progress.total_jobs || 0,
+                                status: progress.status,
+                                progress_text: progress.progress_text
+                            };
+                            console.log('[Queue] Stored step progress for', progress.step_name, 'on manager', progress.manager_id.substring(0, 8), ':', manager._stepProgress[progress.step_name]);
+                        }
+                    }
+
                     const stepIndex = this.allJobs.findIndex(j => j.id === progress.step_id);
-                    if (stepIndex < 0) {
-                        return; // Step not in current view
-                    }
+                    if (stepIndex >= 0) {
+                        const step = this.allJobs[stepIndex];
 
-                    const step = this.allJobs[stepIndex];
+                        // Update step status
+                        if (progress.status) {
+                            step.status = progress.status;
+                        }
 
-                    // Update step status
-                    if (progress.status) {
-                        step.status = progress.status;
-                    }
+                        // Update child job statistics for this step
+                        step.child_count = progress.total_jobs || 0;
+                        step.completed_children = progress.completed_jobs || 0;
+                        step.failed_children = progress.failed_jobs || 0;
+                        step.cancelled_children = progress.cancelled_jobs || 0;
+                        step.pending_children = progress.pending_jobs || 0;
+                        step.running_children = progress.running_jobs || 0;
 
-                    // Update child job statistics for this step
-                    step.child_count = progress.total_jobs || 0;
-                    step.completed_children = progress.completed_jobs || 0;
-                    step.failed_children = progress.failed_jobs || 0;
-                    step.cancelled_children = progress.cancelled_jobs || 0;
-                    step.pending_children = progress.pending_jobs || 0;
-                    step.running_children = progress.running_jobs || 0;
-
-                    // Update status_report with progress text
-                    if (!step.status_report) {
-                        step.status_report = {};
-                    }
-                    if (progress.progress_text) {
-                        step.status_report.progress_text = progress.progress_text;
+                        // Update status_report with progress text
+                        if (!step.status_report) {
+                            step.status_report = {};
+                        }
+                        if (progress.progress_text) {
+                            step.status_report.progress_text = progress.progress_text;
+                        }
                     }
 
                     // Re-render to show updated progress (throttled)

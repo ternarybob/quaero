@@ -569,6 +569,15 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		}
 		childMetadata["seed_index"] = i
 
+		// Set step context from CrawlConfig (passed by crawler_worker for definition-triggered jobs)
+		// This enables job_log events to be correctly aggregated in the UI step events panel
+		if config.StepName != "" {
+			childMetadata["step_name"] = config.StepName
+		}
+		if config.ManagerID != "" {
+			childMetadata["manager_id"] = config.ManagerID
+		}
+
 		// Determine job type based on source type
 		jobType := string(models.JobTypeCrawlerURL)
 		if sourceType == SourceTypeGitHubActionLog {

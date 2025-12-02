@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/interfaces/jobtypes"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -22,8 +23,7 @@ type Manager struct {
 	eventService  interfaces.EventService // Optional: may be nil for testing
 	logger        arbor.ILogger
 
-	// Worker registry for definition worker routing
-	workers   map[models.WorkerType]interfaces.DefinitionWorker
+	// Worker registry moved to StepManager
 	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
 }
 
@@ -34,7 +34,6 @@ func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.Job
 		queue:         queue,
 		eventService:  eventService,
 		logger:        logger,
-		workers:       make(map[models.WorkerType]interfaces.DefinitionWorker),
 	}
 }
 
@@ -42,26 +41,6 @@ func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.Job
 // This should be called during initialization if placeholder resolution is needed.
 func (m *Manager) SetKVStorage(kvStorage interfaces.KeyValueStorage) {
 	m.kvStorage = kvStorage
-}
-
-// RegisterWorker registers a DefinitionWorker for its declared WorkerType.
-// If a worker for the same type is already registered, it will be replaced.
-func (m *Manager) RegisterWorker(worker interfaces.DefinitionWorker) {
-	if worker == nil {
-		return
-	}
-	m.workers[worker.GetType()] = worker
-}
-
-// HasWorker checks if a worker is registered for the given WorkerType.
-func (m *Manager) HasWorker(workerType models.WorkerType) bool {
-	_, exists := m.workers[workerType]
-	return exists
-}
-
-// GetWorker returns the worker registered for the given WorkerType, or nil if not found.
-func (m *Manager) GetWorker(workerType models.WorkerType) interfaces.DefinitionWorker {
-	return m.workers[workerType]
 }
 
 // Job represents job metadata
@@ -657,117 +636,63 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
-// AddJobLog adds a log entry for a job
+// AddJobLog adds a log entry for a job to the database and publishes to WebSocket.
+// Automatically resolves step context from job metadata/parent chain for UI display.
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
+	// Default behavior: determine originator based on job type
+	return m.AddJobLogWithOriginator(ctx, jobID, level, message, "")
+}
+
+// AddJobLogWithOriginator adds a job log with an explicit originator.
+// Originator values:
+//   - "step" - for StepMonitor logs (e.g., "Starting workers", "Step finished")
+//   - "worker" - for worker-generated logs (e.g., "Document saved", "Started:", "Completed:")
+//   - "" (empty) - for JobMonitor/system logs (e.g., "Child job X → completed")
+//
+// If originator is empty, it will be determined based on job type (legacy behavior).
+func (m *Manager) AddJobLogWithOriginator(ctx context.Context, jobID, level, message, originator string) error {
+	// Resolve step context from job metadata
+	stepName, _, _ := m.resolveJobContext(ctx, jobID)
+	return m.AddJobLogWithContext(ctx, jobID, level, message, stepName, originator)
+}
+
+// AddJobLogWithContext adds a job log with explicit step name and originator.
+// Use this when the caller knows the step context (e.g., StepMonitor).
+func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, message, stepName, originator string) error {
 	now := time.Now()
+
+	// Resolve manager_id from job metadata (we still need this for WebSocket routing)
+	_, managerID, resolvedOriginator := m.resolveJobContext(ctx, jobID)
+
+	// Use explicit originator if provided, otherwise use resolved originator
+	if originator != "" {
+		resolvedOriginator = originator
+	}
+
 	entry := models.JobLogEntry{
 		AssociatedJobID: jobID,
 		Timestamp:       now.Format("15:04:05"),
 		FullTimestamp:   now.Format(time.RFC3339),
 		Level:           level,
 		Message:         message,
-	}
-	return m.jobLogStorage.AppendLog(ctx, jobID, entry)
-}
-
-// JobLogOptions contains optional metadata for job log events
-type JobLogOptions struct {
-	ParentJobID string                 // Parent job ID for aggregation (if different from jobID)
-	StepName    string                 // Name of the step that generated this log
-	SourceType  string                 // Type of worker (agent, places_search, web_search, etc.)
-	Metadata    map[string]interface{} // Additional context data
-	PublishToUI *bool                  // Override UI publishing (nil=auto filter by level, true=force publish, false=skip)
-}
-
-// shouldPublishLogToUI determines if a log should be published to the UI based on level.
-// By default, only INFO and above are published. Debug and trace logs are filtered out.
-func shouldPublishLogToUI(level string, opts *JobLogOptions) bool {
-	// Check for explicit override
-	if opts != nil && opts.PublishToUI != nil {
-		return *opts.PublishToUI
-	}
-
-	// Default: filter by level - only INFO and above go to UI
-	switch strings.ToLower(level) {
-	case "info", "warn", "warning", "error", "fatal", "panic":
-		return true
-	case "debug", "trace", "dbg", "trc":
-		return false
-	default:
-		// Unknown level - publish to be safe
-		return true
-	}
-}
-
-// AddJobLogWithEvent adds a log entry and publishes an event for real-time UI updates.
-// This is the preferred method for workers to log events that should appear in the UI.
-func (m *Manager) AddJobLogWithEvent(ctx context.Context, jobID, level, message string, opts *JobLogOptions) error {
-	now := time.Now()
-
-	// Store the log entry with optional step metadata
-	entry := models.JobLogEntry{
-		AssociatedJobID: jobID,
-		Timestamp:       now.Format("15:04:05"),
-		FullTimestamp:   now.Format(time.RFC3339),
-		Level:           level,
-		Message:         message,
-	}
-
-	// Add step metadata if provided
-	if opts != nil {
-		if opts.StepName != "" {
-			entry.StepName = opts.StepName
-		}
-		if opts.SourceType != "" {
-			entry.SourceType = opts.SourceType
-		}
+		StepName:        stepName,           // Store step_name in DB for post-refresh filtering
+		Originator:      resolvedOriginator, // Store originator for UI display
 	}
 
 	if err := m.jobLogStorage.AppendLog(ctx, jobID, entry); err != nil {
 		return fmt.Errorf("failed to append log: %w", err)
 	}
 
-	// Also log to parent if different
-	parentJobID := jobID
-	if opts != nil && opts.ParentJobID != "" && opts.ParentJobID != jobID {
-		parentJobID = opts.ParentJobID
-		// Store a copy in parent's log for aggregation
-		parentEntry := models.JobLogEntry{
-			AssociatedJobID: parentJobID,
-			Timestamp:       now.Format("15:04:05"),
-			FullTimestamp:   now.Format(time.RFC3339),
-			Level:           level,
-			Message:         fmt.Sprintf("[%s] %s", jobID[:8], message), // Prefix with child job ID
-			StepName:        opts.StepName,
-			SourceType:      opts.SourceType,
-		}
-		if err := m.jobLogStorage.AppendLog(ctx, parentJobID, parentEntry); err != nil {
-			// Log warning but don't fail - the primary log was stored
-			m.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to append log to parent")
-		}
-	}
-
-	// Publish event for real-time UI updates (filtered by log level)
-	// Only INFO and above are published to UI by default to reduce noise
-	if m.eventService != nil && shouldPublishLogToUI(level, opts) {
+	// Publish to WebSocket for real-time UI display (INFO+ levels only)
+	if m.eventService != nil && m.shouldPublishLogLevel(level) {
 		payload := map[string]interface{}{
-			"job_id":        jobID,
-			"parent_job_id": parentJobID,
-			"level":         level,
-			"message":       message,
-			"timestamp":     now.Format(time.RFC3339),
-		}
-
-		if opts != nil {
-			if opts.StepName != "" {
-				payload["step_name"] = opts.StepName
-			}
-			if opts.SourceType != "" {
-				payload["source_type"] = opts.SourceType
-			}
-			if opts.Metadata != nil {
-				payload["metadata"] = opts.Metadata
-			}
+			"job_id":     jobID,
+			"manager_id": managerID,
+			"step_name":  stepName,
+			"originator": resolvedOriginator,
+			"level":      level,
+			"message":    message,
+			"timestamp":  now.Format(time.RFC3339),
 		}
 
 		event := interfaces.Event{
@@ -775,15 +700,58 @@ func (m *Manager) AddJobLogWithEvent(ctx context.Context, jobID, level, message 
 			Payload: payload,
 		}
 
-		// Publish asynchronously to avoid blocking job execution
 		go func() {
-			if err := m.eventService.Publish(context.Background(), event); err != nil {
-				m.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to publish job log event")
+			if err := m.eventService.Publish(ctx, event); err != nil {
+				m.logger.Debug().Err(err).
+					Str("job_id", jobID).
+					Msg("Failed to publish job log event")
 			}
 		}()
 	}
 
 	return nil
+}
+
+// shouldPublishLogLevel returns true if the log level should be published to WebSocket
+func (m *Manager) shouldPublishLogLevel(level string) bool {
+	level = strings.ToLower(level)
+	return level == "info" || level == "warn" || level == "error" || level == "fatal"
+}
+
+// resolveJobContext resolves step_name, manager_id, and originator from job metadata.
+// Originator is determined by job type: "manager", "step", or "worker".
+func (m *Manager) resolveJobContext(ctx context.Context, jobID string) (stepName, managerID, originator string) {
+	jobInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
+		return "", "", ""
+	}
+
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		return "", "", ""
+	}
+
+	// Determine originator based on job type
+	switch jobState.Type {
+	case string(models.JobTypeManager):
+		originator = "manager"
+	case string(models.JobTypeStep):
+		originator = "step"
+	default:
+		originator = "worker"
+	}
+
+	// Check job metadata
+	if jobState.Metadata != nil {
+		if sn, ok := jobState.Metadata["step_name"].(string); ok {
+			stepName = sn
+		}
+		if mid, ok := jobState.Metadata["manager_id"].(string); ok {
+			managerID = mid
+		}
+	}
+
+	return stepName, managerID, originator
 }
 
 // UpdateJobProgress updates job progress
@@ -817,7 +785,7 @@ func (m *Manager) GetFailedChildCount(ctx context.Context, parentID string) (int
 }
 
 // GetJobChildStats retrieves child job statistics for multiple parent jobs
-func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*interfaces.JobChildStats, error) {
+func (m *Manager) GetJobChildStats(ctx context.Context, parentIDs []string) (map[string]*jobtypes.JobChildStats, error) {
 	return m.jobStorage.GetJobChildStats(ctx, parentIDs)
 }
 
@@ -968,6 +936,7 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 //   - Job (type=various): Individual work units, children of steps
 //
 // Returns the manager job ID for tracking.
+/*
 func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDefinition, jobMonitor interfaces.JobMonitor, stepMonitor interfaces.StepMonitor) (string, error) {
 	// Generate manager job ID (top-level orchestrator)
 	managerID := uuid.New().String()
@@ -1379,64 +1348,10 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 
 	return managerID, nil
 }
+*/
 
 // resolvePlaceholders recursively resolves {key-name} placeholders in step config values
-func (m *Manager) resolvePlaceholders(ctx context.Context, config map[string]interface{}) map[string]interface{} {
-	if config == nil || m.kvStorage == nil {
-		return config
-	}
-
-	resolved := make(map[string]interface{})
-	for key, value := range config {
-		resolved[key] = m.resolveValue(ctx, value)
-	}
-	return resolved
-}
 
 // resolveValue recursively resolves placeholders in a single value
-func (m *Manager) resolveValue(ctx context.Context, value interface{}) interface{} {
-	switch v := value.(type) {
-	case string:
-		if len(v) > 2 && v[0] == '{' && v[len(v)-1] == '}' {
-			keyName := v[1 : len(v)-1]
-			kvValue, err := m.kvStorage.Get(ctx, keyName)
-			if err == nil && kvValue != "" {
-				return kvValue
-			}
-		}
-		return v
-	case map[string]interface{}:
-		return m.resolvePlaceholders(ctx, v)
-	case []interface{}:
-		resolved := make([]interface{}, len(v))
-		for i, item := range v {
-			resolved[i] = m.resolveValue(ctx, item)
-		}
-		return resolved
-	default:
-		return v
-	}
-}
 
 // checkErrorTolerance checks if the error tolerance threshold has been exceeded
-func (m *Manager) checkErrorTolerance(ctx context.Context, parentJobID string, tolerance *models.ErrorTolerance) (bool, error) {
-	if tolerance == nil || tolerance.MaxChildFailures == 0 {
-		return false, nil
-	}
-
-	failedCount, err := m.GetFailedChildCount(ctx, parentJobID)
-	if err != nil {
-		return false, fmt.Errorf("failed to query failed job count: %w", err)
-	}
-
-	if failedCount >= tolerance.MaxChildFailures {
-		switch tolerance.FailureAction {
-		case "stop_all":
-			return true, nil
-		default:
-			return false, nil
-		}
-	}
-
-	return false, nil
-}

@@ -66,6 +66,14 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		return "", fmt.Errorf("step config is required for places_search")
 	}
 
+	// Get manager_id from step job's parent_id for event aggregation
+	managerID := ""
+	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
+		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+			managerID = *stepJob.ParentID
+		}
+	}
+
 	// Extract search_query (required)
 	searchQuery, ok := stepConfig["search_query"].(string)
 	if !ok || searchQuery == "" {
@@ -194,7 +202,7 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Msg("Orchestrating places search")
 
 	// Log step start for UI
-	w.logJobEvent(ctx, stepID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, managerID, step.Name, "info",
 		fmt.Sprintf("Starting places search: %s", req.SearchQuery),
 		map[string]interface{}{
 			"search_type": req.SearchType,
@@ -204,7 +212,7 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 	// Execute search
 	result, err := w.placesService.SearchPlaces(ctx, stepID, req)
 	if err != nil {
-		w.logJobEvent(ctx, stepID, step.Name, "error",
+		w.logJobEvent(ctx, stepID, managerID, step.Name, "error",
 			fmt.Sprintf("Places search failed: %v", err), nil)
 		return "", fmt.Errorf("failed to search places: %w", err)
 	}
@@ -251,33 +259,10 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 			Str("place_name", doc.Title).
 			Msg("Place document saved successfully")
 
-		// Publish document_saved event for each document
-		if w.eventService != nil && stepID != "" {
-			docID := doc.ID // Capture for goroutine
-			payload := map[string]interface{}{
-				"job_id":      stepID,
-				"step_id":     stepID,
-				"document_id": docID,
-				"source_type": "places",
-				"timestamp":   time.Now().Format(time.RFC3339),
-			}
-			event := interfaces.Event{
-				Type:    interfaces.EventDocumentSaved,
-				Payload: payload,
-			}
-			// Publish synchronously to ensure document count is updated before job completes
-			if err := w.eventService.PublishSync(context.Background(), event); err != nil {
-				w.logger.Warn().
-					Err(err).
-					Str("document_id", docID).
-					Str("step_id", stepID).
-					Msg("Failed to publish document_saved event")
-			} else {
-				w.logger.Debug().
-					Str("document_id", docID).
-					Str("step_id", stepID).
-					Msg("Published document_saved event for step job document count")
-			}
+		// Log document saved via Job Manager's unified logging
+		if w.jobMgr != nil && stepID != "" {
+			message := fmt.Sprintf("Document saved: %s (ID: %s)", doc.Title, doc.ID[:8])
+			w.jobMgr.AddJobLog(context.Background(), stepID, "info", message)
 		}
 	}
 
@@ -287,7 +272,7 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 		Msg("Places search results saved as individual documents")
 
 	// Log completion for UI
-	w.logJobEvent(ctx, stepID, step.Name, "info",
+	w.logJobEvent(ctx, stepID, managerID, step.Name, "info",
 		fmt.Sprintf("Places search completed: created %d documents", savedCount),
 		map[string]interface{}{
 			"documents_created": savedCount,
@@ -427,19 +412,9 @@ func (w *PlacesWorker) createPlaceDocuments(result *models.PlacesSearchResult, j
 }
 
 // logJobEvent logs a job event for real-time UI display using the unified logging system
-func (w *PlacesWorker) logJobEvent(ctx context.Context, parentJobID, stepName, level, message string, metadata map[string]interface{}) {
+func (w *PlacesWorker) logJobEvent(ctx context.Context, parentJobID, _, _, level, message string, _ map[string]interface{}) {
 	if w.jobMgr == nil {
 		return
 	}
-
-	opts := &queue.JobLogOptions{
-		ParentJobID: parentJobID,
-		StepName:    stepName,
-		SourceType:  "places_search",
-		Metadata:    metadata,
-	}
-
-	if err := w.jobMgr.AddJobLogWithEvent(ctx, parentJobID, level, message, opts); err != nil {
-		w.logger.Warn().Err(err).Str("parent_job_id", parentJobID).Msg("Failed to log job event")
-	}
+	w.jobMgr.AddJobLog(ctx, parentJobID, level, message)
 }

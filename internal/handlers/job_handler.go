@@ -642,6 +642,9 @@ func (h *JobHandler) GetAggregatedJobLogsHandler(w http.ResponseWriter, r *http.
 			"level":          log.Level,
 			"message":        log.Message,
 			"job_id":         log.AssociatedJobID,
+			"step_name":      log.StepName,   // Include step_name for UI filtering
+			"source_type":    log.SourceType, // Include source_type for worker context
+			"originator":     log.Originator, // Include originator for display context
 		}
 
 		// Find metadata for the job that produced this log

@@ -148,30 +148,8 @@ func (w *GitHubRepoWorker) Execute(ctx context.Context, job *models.QueueJob) er
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
-	// Publish event for real-time UI updates
-	if w.eventService != nil {
-		// Use root_parent_id for document count tracking (points to JobDefParent)
-		// Fall back to immediate parent if root_parent_id is not set
-		rootParentID, _ := job.GetMetadataString("root_parent_id")
-		if rootParentID == "" {
-			rootParentID = job.GetParentID()
-		}
-
-		event := interfaces.Event{
-			Type: interfaces.EventDocumentSaved,
-			Payload: map[string]interface{}{
-				"job_id":        job.ID,
-				"parent_job_id": rootParentID, // Root parent (JobDefParent) for document count tracking
-				"document_id":   doc.ID,
-				"title":         doc.Title,
-				"path":          path,
-				"timestamp":     time.Now().Format(time.RFC3339),
-			},
-		}
-		if err := w.eventService.Publish(ctx, event); err != nil {
-			w.logger.Warn().Err(err).Msg("Failed to publish document saved event")
-		}
-	}
+	// Log document saved via Job Manager's unified logging (routes to WebSocket/DB)
+	w.logDocumentSaved(ctx, job, doc.ID, doc.Title, path)
 
 	// Update job status to completed
 	if err := w.jobManager.UpdateJobStatus(ctx, job.ID, string(models.JobStatusCompleted)); err != nil {
@@ -527,4 +505,13 @@ func getStringSliceConfig(config map[string]interface{}, key string, defaultValu
 		}
 	}
 	return defaultValue
+}
+
+// logDocumentSaved logs a document saved event via Job Manager's unified logging.
+func (w *GitHubRepoWorker) logDocumentSaved(ctx context.Context, job *models.QueueJob, docID, title, path string) {
+	message := fmt.Sprintf("Document saved: %s (ID: %s)", title, docID[:8])
+	if path != "" {
+		message = fmt.Sprintf("Document saved: %s - %s (ID: %s)", path, title, docID[:8])
+	}
+	w.jobManager.AddJobLog(ctx, job.ID, "info", message)
 }

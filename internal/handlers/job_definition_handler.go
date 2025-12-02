@@ -28,6 +28,7 @@ type JobDefinitionHandler struct {
 	jobDefStorage     interfaces.JobDefinitionStorage
 	jobStorage        interfaces.QueueStorage
 	jobMgr            *queue.Manager
+	orchestrator      *queue.Orchestrator
 	jobMonitor        interfaces.JobMonitor
 	stepMonitor       interfaces.StepMonitor
 	authStorage       interfaces.AuthStorage
@@ -42,6 +43,7 @@ func NewJobDefinitionHandler(
 	jobDefStorage interfaces.JobDefinitionStorage,
 	jobStorage interfaces.QueueStorage,
 	jobMgr *queue.Manager,
+	orchestrator *queue.Orchestrator,
 	jobMonitor interfaces.JobMonitor,
 	stepMonitor interfaces.StepMonitor,
 	authStorage interfaces.AuthStorage,
@@ -57,6 +59,9 @@ func NewJobDefinitionHandler(
 	}
 	if jobMgr == nil {
 		panic("jobMgr cannot be nil")
+	}
+	if orchestrator == nil {
+		panic("orchestrator cannot be nil")
 	}
 	if authStorage == nil {
 		panic("authStorage cannot be nil")
@@ -74,6 +79,7 @@ func NewJobDefinitionHandler(
 		jobDefStorage:     jobDefStorage,
 		jobStorage:        jobStorage,
 		jobMgr:            jobMgr,
+		orchestrator:      orchestrator,
 		jobMonitor:        jobMonitor,
 		stepMonitor:       stepMonitor,
 		authStorage:       authStorage,
@@ -495,7 +501,7 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).
@@ -930,7 +936,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	go func() {
 		bgCtx := context.Background()
 
-		parentJobID, err := h.jobMgr.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
 		if err != nil {
 			h.logger.Error().
 				Err(err).

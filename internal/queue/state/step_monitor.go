@@ -92,8 +92,8 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 		Str("manager_id", managerID).
 		Msg("Starting step child monitoring")
 
-	// Publish initial progress
-	m.publishStepProgress(ctx, stepJob.ID, managerID, "running", nil)
+	// Publish initial progress (starting message will include worker count once known)
+	m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "running", nil)
 
 	// Monitor child jobs until completion
 	ticker := time.NewTicker(5 * time.Second)
@@ -102,8 +102,9 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 	maxWaitTime := 30 * time.Minute
 	noChildrenGracePeriod := 30 * time.Second
 	timeout := time.After(maxWaitTime)
-	monitorStartTime := time.Now()
+	stepStartTime := time.Now()
 	hasSeenChildren := false
+	hasPublishedStarting := false
 
 	for {
 		select {
@@ -130,46 +131,77 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 
 			if childCount > 0 {
 				hasSeenChildren = true
+				// Publish "Starting N workers..." when we first see children
+				if !hasPublishedStarting {
+					hasPublishedStarting = true
+					m.publishStepLog(ctx, managerID, stepJob.Name, "info", fmt.Sprintf("Starting %d workers...", childCount))
+				}
 			}
 
 			// If no children after grace period, mark step complete
-			if !hasSeenChildren && time.Since(monitorStartTime) > noChildrenGracePeriod {
+			if !hasSeenChildren && time.Since(stepStartTime) > noChildrenGracePeriod {
+				duration := time.Since(stepStartTime)
 				stepLogger.Debug().
-					Dur("elapsed", time.Since(monitorStartTime)).
+					Dur("elapsed", duration).
 					Msg("No child jobs spawned after grace period, completing step")
 
-				m.jobMgr.AddJobLog(ctx, stepJob.ID, "info", "Step completed (no child jobs spawned)")
+				// Publish starting message if not yet published
+				if !hasPublishedStarting {
+					m.publishStepLog(ctx, managerID, stepJob.Name, "info", "Starting workers...")
+				}
+				m.publishStepLog(ctx, managerID, stepJob.Name, "info", fmt.Sprintf("Step completed (no jobs) in %s", formatDuration(duration)))
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, "completed")
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
-				m.publishStepProgress(ctx, stepJob.ID, managerID, "completed", stats)
+				m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "completed", stats)
 				return nil
 			}
 
 			if completed {
 				// All child jobs complete
-				stepLogger.Debug().Msg("All step children completed, marking step complete")
+				duration := time.Since(stepStartTime)
+				stepLogger.Debug().Msg("All step children completed, determining final status")
 
 				// Determine final status based on child outcomes
 				finalStatus := "completed"
-				if stats != nil && stats.FailedChildren > 0 {
-					finalStatus = "completed" // Step completes even if some jobs failed
-					// Could change to "failed" if all children failed
+				logLevel := "info"
+				durationStr := formatDuration(duration)
+				stepLogMsg := fmt.Sprintf("Step finished successfully in %s (%d jobs)", durationStr, childCount)
+
+				if stats != nil {
+					if stats.FailedChildren > 0 && stats.CompletedChildren == 0 {
+						// All failed, none completed
+						finalStatus = "failed"
+						logLevel = "error"
+						stepLogMsg = fmt.Sprintf("Step failed in %s: all %d jobs failed", durationStr, stats.FailedChildren)
+					} else if stats.FailedChildren > 0 {
+						// Some failed, some completed - partial success
+						finalStatus = "completed"
+						logLevel = "warn"
+						stepLogMsg = fmt.Sprintf("Step finished with errors in %s: %d succeeded, %d failed", durationStr, stats.CompletedChildren, stats.FailedChildren)
+					} else if stats.CancelledChildren > 0 && stats.CompletedChildren == 0 {
+						// All cancelled
+						finalStatus = "cancelled"
+						logLevel = "warn"
+						stepLogMsg = fmt.Sprintf("Step cancelled in %s: %d jobs cancelled", durationStr, stats.CancelledChildren)
+					}
 				}
 
-				m.jobMgr.AddJobLog(ctx, stepJob.ID, "info", fmt.Sprintf("Step completed (%d jobs processed)", childCount))
+				// Publish step log to manager for UI step panel (AddJobLog also publishes, so only use one)
+				m.publishStepLog(ctx, managerID, stepJob.Name, logLevel, stepLogMsg)
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, finalStatus)
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
-				m.publishStepProgress(ctx, stepJob.ID, managerID, finalStatus, stats)
+				m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, finalStatus, stats)
 
 				stepLogger.Debug().
 					Str("step_id", stepJob.ID).
 					Int("child_count", childCount).
+					Dur("duration", duration).
 					Msg("Step monitoring completed successfully")
 				return nil
 			}
 
 			// Publish progress update
-			m.publishStepProgress(ctx, stepJob.ID, managerID, "running", stats)
+			m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "running", stats)
 		}
 	}
 }
@@ -223,6 +255,7 @@ func (m *StepMonitor) publishStepProgress(
 	ctx context.Context,
 	stepID string,
 	managerID string,
+	stepName string,
 	status string,
 	stats *ChildJobStats,
 ) {
@@ -233,6 +266,7 @@ func (m *StepMonitor) publishStepProgress(
 	payload := map[string]interface{}{
 		"step_id":    stepID,
 		"manager_id": managerID,
+		"step_name":  stepName, // Critical for UI filtering by step
 		"status":     status,
 		"timestamp":  time.Now().Format(time.RFC3339),
 	}
@@ -260,4 +294,37 @@ func (m *StepMonitor) publishStepProgress(
 				Msg("Failed to publish step progress event")
 		}
 	}()
+}
+
+// publishStepLog stores and publishes a job_log event for a step to the manager's log stream.
+// This ensures step events appear in the UI's step events panel and persist after page refresh.
+func (m *StepMonitor) publishStepLog(ctx context.Context, managerID, stepName, level, message string) {
+	// Store to database with explicit step_name and "step" originator for persistence
+	// This uses AddJobLogWithContext to set the correct step context
+	if m.jobMgr != nil {
+		if err := m.jobMgr.AddJobLogWithContext(ctx, managerID, level, message, stepName, "step"); err != nil {
+			m.logger.Debug().Err(err).
+				Str("manager_id", managerID).
+				Str("step_name", stepName).
+				Msg("Failed to store step log")
+		}
+	}
+}
+
+// formatDuration formats a duration into a human-readable string
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	if d < time.Hour {
+		mins := int(d.Minutes())
+		secs := int(d.Seconds()) % 60
+		if secs > 0 {
+			return fmt.Sprintf("%dm %ds", mins, secs)
+		}
+		return fmt.Sprintf("%dm", mins)
+	}
+	hours := int(d.Hours())
+	mins := int(d.Minutes()) % 60
+	return fmt.Sprintf("%dh %dm", hours, mins)
 }

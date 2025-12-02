@@ -1759,10 +1759,25 @@ body.modal-open {
     color: var(--text-primary);
 }
 
-.markdown-content h1 { font-size: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3rem; }
-.markdown-content h2 { font-size: 1.25rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.3rem; }
-.markdown-content h3 { font-size: 1.1rem; }
-.markdown-content h4 { font-size: 1rem; }
+.markdown-content h1 {
+    font-size: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.3rem;
+}
+
+.markdown-content h2 {
+    font-size: 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.3rem;
+}
+
+.markdown-content h3 {
+    font-size: 1.1rem;
+}
+
+.markdown-content h4 {
+    font-size: 1rem;
+}
 
 .markdown-content p {
     margin-bottom: 1rem;
@@ -1987,6 +2002,15 @@ body.modal-open {
 /* Step log source type label */
 .step-log-source {
     font-size: 0.65rem;
+}
+
+/* Step log originator label */
+.step-log-originator {
+    color: #61AFEF;
+    /* Sky blue to match terminal debug */
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: lowercase;
 }
 
 /* Step log message */
