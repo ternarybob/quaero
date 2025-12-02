@@ -2153,8 +2153,6 @@ func TestStepEventsDisplay(t *testing.T) {
 	// Track events during job execution
 	var eventsCount int
 	var eventMessages []string
-	jobStartTime := time.Now()
-	pageRefreshed := false
 	lastScreenshotTime := time.Now()
 	screenshotCounter := 0
 
@@ -2248,19 +2246,6 @@ func TestStepEventsDisplay(t *testing.T) {
 			lastScreenshotTime = time.Now()
 		}
 
-		// Page refresh after 30 seconds of job run
-		if !pageRefreshed && time.Since(jobStartTime) >= 30*time.Second {
-			qtc.env.LogTest(t, "Refreshing page after 30 seconds...")
-			if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
-				qtc.env.LogTest(t, "Warning: Page refresh failed: %v", err)
-			} else {
-				time.Sleep(2 * time.Second)
-				qtc.env.TakeFullScreenshot(qtc.ctx, "events_after_refresh")
-				qtc.env.LogTest(t, "✓ Page refreshed")
-			}
-			pageRefreshed = true
-		}
-
 		// Check job status and events
 		var result map[string]interface{}
 		chromedp.Run(qtc.ctx,
@@ -2348,6 +2333,68 @@ func TestStepEventsDisplay(t *testing.T) {
 		qtc.env.LogTest(t, "✓ Found 'Starting workers' message")
 	} else {
 		qtc.env.LogTest(t, "⚠ 'Starting workers' message not found (may have been sent before page refresh)")
+	}
+
+	// Verify log format: check for text-based level tags and originator tags
+	var logFormatResult map[string]interface{}
+	chromedp.Run(qtc.ctx,
+		chromedp.Evaluate(`
+			(() => {
+				const stepLogs = document.querySelectorAll('.step-log-entry');
+				let hasLevelTag = false;
+				let hasOriginatorTag = false;
+				let levelTags = [];
+				let originatorTags = [];
+
+				for (const entry of stepLogs) {
+					// Check for text-based level tags [INF], [WRN], [ERR], [DBG]
+					const levelEl = entry.querySelector('.step-log-level');
+					if (levelEl) {
+						const text = levelEl.textContent.trim();
+						if (text.match(/\[(INF|WRN|ERR|DBG)\]/)) {
+							hasLevelTag = true;
+							if (!levelTags.includes(text)) levelTags.push(text);
+						}
+					}
+
+					// Check for originator tags like [step], [worker]
+					const originatorEl = entry.querySelector('.step-log-originator');
+					if (originatorEl && originatorEl.textContent.trim()) {
+						hasOriginatorTag = true;
+						const tag = originatorEl.textContent.trim();
+						if (!originatorTags.includes(tag)) originatorTags.push(tag);
+					}
+				}
+
+				return {
+					hasLevelTag: hasLevelTag,
+					hasOriginatorTag: hasOriginatorTag,
+					levelTags: levelTags,
+					originatorTags: originatorTags,
+					totalLogEntries: stepLogs.length
+				};
+			})()
+		`, &logFormatResult),
+	)
+
+	qtc.env.LogTest(t, "Log format verification:")
+	qtc.env.LogTest(t, "  Total log entries: %v", logFormatResult["totalLogEntries"])
+	qtc.env.LogTest(t, "  Level tags found: %v", logFormatResult["levelTags"])
+	qtc.env.LogTest(t, "  Originator tags found: %v", logFormatResult["originatorTags"])
+
+	// Verify text-based level tags are present
+	if hasLevel, ok := logFormatResult["hasLevelTag"].(bool); ok && hasLevel {
+		qtc.env.LogTest(t, "✓ Text-based level tags ([INF], [WRN], [ERR], [DBG]) are displayed")
+	} else {
+		qtc.env.TakeFullScreenshot(qtc.ctx, "events_no_level_tags")
+		t.Errorf("Expected text-based level tags ([INF], [WRN], [ERR], [DBG]) but none found")
+	}
+
+	// Verify originator tags are present (e.g., [step], [worker])
+	if hasOriginator, ok := logFormatResult["hasOriginatorTag"].(bool); ok && hasOriginator {
+		qtc.env.LogTest(t, "✓ Originator tags ([step], [worker]) are displayed")
+	} else {
+		qtc.env.LogTest(t, "⚠ Originator tags not found (may be optional depending on log source)")
 	}
 
 	qtc.env.TakeFullScreenshot(qtc.ctx, "events_final")

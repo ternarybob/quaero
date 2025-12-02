@@ -494,30 +494,43 @@ func (m *Manager) GetQueueInterface() interfaces.QueueManager {
 
 // UpdateJobStatus updates the job status
 func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) error {
+	m.logger.Debug().
+		Str("job_id", jobID).
+		Str("status", status).
+		Msg("UpdateJobStatus called")
+
 	// Get job details before update to access parent_id and job_type
 	jobEntityInterface, err := m.jobStorage.GetJob(ctx, jobID)
 	if err != nil {
+		m.logger.Error().Err(err).Str("job_id", jobID).Msg("UpdateJobStatus: failed to get job details")
 		return fmt.Errorf("failed to get job details: %w", err)
 	}
 
 	jobState, ok := jobEntityInterface.(*models.QueueJobState)
 	if !ok {
+		m.logger.Error().Str("job_id", jobID).Msg("UpdateJobStatus: invalid job type")
 		return fmt.Errorf("invalid job type")
 	}
 
 	// Update status via storage interface
 	if err := m.jobStorage.UpdateJobStatus(ctx, jobID, status, ""); err != nil {
+		m.logger.Error().Err(err).Str("job_id", jobID).Msg("UpdateJobStatus: failed to update status in storage")
 		return err
 	}
 
 	// Add job log for status change
 	logMessage := fmt.Sprintf("Status changed: %s", status)
 	if err := m.AddJobLog(ctx, jobID, "info", logMessage); err != nil {
+		m.logger.Warn().Err(err).Str("job_id", jobID).Msg("UpdateJobStatus: failed to add job log")
 		// Log error but don't fail the status update (logging is non-critical)
 	}
 
 	// Publish job status change event for parent job monitoring
 	// Only publish if eventService is available (optional dependency)
+	m.logger.Debug().
+		Str("job_id", jobID).
+		Bool("has_event_service", m.eventService != nil).
+		Msg("UpdateJobStatus: checking eventService")
 	if m.eventService != nil {
 		payload := map[string]interface{}{
 			"job_id":    jobID,
@@ -667,6 +680,11 @@ func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, messag
 	// Use explicit originator if provided, otherwise use resolved originator
 	if originator != "" {
 		resolvedOriginator = originator
+	}
+
+	// For manager jobs, manager_id should be the job ID itself (for WebSocket routing)
+	if managerID == "" {
+		managerID = jobID
 	}
 
 	entry := models.JobLogEntry{

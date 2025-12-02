@@ -304,7 +304,16 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 	}
 
 	// Execute the job using the worker
+	jp.logger.Info().
+		Str("job_id", msg.JobID).
+		Str("job_type", msg.Type).
+		Msg("TRACE: About to call worker.Execute")
 	err = worker.Execute(jp.ctx, queueJob)
+	jp.logger.Info().
+		Str("job_id", msg.JobID).
+		Str("job_type", msg.Type).
+		Bool("has_error", err != nil).
+		Msg("TRACE: worker.Execute returned")
 
 	if err != nil {
 		// Job failed - log at Error level with duration

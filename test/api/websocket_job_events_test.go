@@ -3,6 +3,8 @@ package api
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,12 +57,18 @@ func (c *WebSocketEventCollector) Count() int {
 
 // collectWebSocketEvents reads events from WebSocket connection for specified duration
 func collectWebSocketEvents(t *testing.T, conn *websocket.Conn, duration time.Duration) *WebSocketEventCollector {
+	return collectWebSocketEventsWithLogger(nil, t, conn, duration)
+}
+
+// collectWebSocketEventsWithLogger reads events from WebSocket connection for specified duration
+// If logger is provided, uses it; otherwise falls back to t.Logf
+func collectWebSocketEventsWithLogger(logger *common.TestLogger, t *testing.T, conn *websocket.Conn, duration time.Duration) *WebSocketEventCollector {
 	collector := &WebSocketEventCollector{}
 	deadline := time.Now().Add(duration)
 
 	for time.Now().Before(deadline) {
 		remaining := time.Until(deadline)
-		msg, err := readWebSocketMessage(t, conn, remaining)
+		msg, err := readWebSocketMessageWithLogger(logger, t, conn, remaining)
 		if err != nil {
 			// Timeout or connection closed
 			break
@@ -71,210 +79,252 @@ func collectWebSocketEvents(t *testing.T, conn *websocket.Conn, duration time.Du
 	return collector
 }
 
-// TestWebSocketJobEvents_EventContext tests that job events have proper step context
-func TestWebSocketJobEvents_EventContext(t *testing.T) {
+// TestWebSocketJobEvents_CrawlerJobLogEventContext tests that crawler_job_log events have proper step context.
+// This test builds and starts a fresh service instance independently.
+func TestWebSocketJobEvents_CrawlerJobLogEventContext(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
 	helper := env.NewHTTPTestHelper(t)
+	logger := env.NewTestLogger(t)
 
-	t.Run("CrawlerJobLogEventContext", func(t *testing.T) {
-		// Connect WebSocket client
-		conn := connectWebSocket(t, env)
-		defer closeWebSocket(t, conn)
+	// Connect WebSocket client
+	conn := connectWebSocket(t, env)
+	defer closeWebSocketWithLogger(logger, t, conn)
 
-		// Clear initial status message
-		waitForMessageType(t, conn, "status", 2*time.Second)
+	// Clear initial status message
+	waitForMessageTypeWithLogger(logger, t, conn, "status", 2*time.Second)
 
-		// Create a test job to trigger events
-		jobID := createTestJob(t, helper)
-		if jobID == "" {
-			t.Skip("Could not create test job")
-			return
+	// Create a test job to trigger events
+	jobID := createTestJob(t, helper)
+	if jobID == "" {
+		t.Skip("Could not create test job")
+		return
+	}
+	defer deleteJob(t, helper, jobID)
+
+	// Collect events for 10 seconds
+	logger.Log("Collecting WebSocket events...")
+	collector := collectWebSocketEventsWithLogger(logger, t, conn, 10*time.Second)
+
+	logger.Logf("Collected %d total events", collector.Count())
+
+	// Analyze crawler_job_log events
+	crawlerLogEvents := collector.GetEventsByType("crawler_job_log")
+	logger.Logf("Found %d crawler_job_log events", len(crawlerLogEvents))
+
+	// Check each event for required context fields
+	eventsWithStepContext := 0
+	eventsWithoutStepContext := 0
+
+	for i, event := range crawlerLogEvents {
+		payload, ok := event["payload"].(map[string]interface{})
+		if !ok {
+			logger.Logf("Event %d: Missing payload", i)
+			continue
 		}
-		defer deleteJob(t, helper, jobID)
 
-		// Collect events for 10 seconds
-		t.Log("Collecting WebSocket events...")
-		collector := collectWebSocketEvents(t, conn, 10*time.Second)
+		hasStepName := false
+		hasStepID := false
+		hasManagerID := false
 
-		t.Logf("Collected %d total events", collector.Count())
+		if _, exists := payload["step_name"]; exists {
+			hasStepName = true
+		}
+		if _, exists := payload["step_id"]; exists {
+			hasStepID = true
+		}
+		if _, exists := payload["manager_id"]; exists {
+			hasManagerID = true
+		}
 
-		// Analyze crawler_job_log events
-		crawlerLogEvents := collector.GetEventsByType("crawler_job_log")
-		t.Logf("Found %d crawler_job_log events", len(crawlerLogEvents))
+		if hasStepName || hasStepID || hasManagerID {
+			eventsWithStepContext++
+			logger.Logf("Event %d: HAS step context (step_name=%v, step_id=%v, manager_id=%v)",
+				i, hasStepName, hasStepID, hasManagerID)
+		} else {
+			eventsWithoutStepContext++
+			logger.Logf("Event %d: MISSING step context - job_id=%v, message=%v",
+				i, payload["job_id"], payload["message"])
+		}
+	}
 
-		// Check each event for required context fields
-		eventsWithStepContext := 0
-		eventsWithoutStepContext := 0
+	// Log summary
+	logger.Logf("Summary: %d events WITH step context, %d events WITHOUT step context",
+		eventsWithStepContext, eventsWithoutStepContext)
 
-		for i, event := range crawlerLogEvents {
-			payload, ok := event["payload"].(map[string]interface{})
-			if !ok {
-				t.Logf("Event %d: Missing payload", i)
-				continue
+	// This test documents the current behavior - crawler_job_log events are missing step context
+	if eventsWithoutStepContext > 0 && eventsWithStepContext == 0 {
+		logger.Log("ISSUE CONFIRMED: crawler_job_log events are missing step context fields (step_name, step_id, manager_id)")
+	}
+}
+
+// TestWebSocketJobEvents_StepProgressEventContext tests that step_progress events have proper context.
+// This test builds and starts a fresh service instance independently.
+func TestWebSocketJobEvents_StepProgressEventContext(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	require.NoError(t, err, "Failed to setup test environment")
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	logger := env.NewTestLogger(t)
+
+	// Connect WebSocket client
+	conn := connectWebSocket(t, env)
+	defer closeWebSocketWithLogger(logger, t, conn)
+
+	// Clear initial status message
+	waitForMessageTypeWithLogger(logger, t, conn, "status", 2*time.Second)
+
+	// Create a test job
+	jobID := createTestJob(t, helper)
+	if jobID == "" {
+		t.Skip("Could not create test job")
+		return
+	}
+	defer deleteJob(t, helper, jobID)
+
+	// Collect events
+	collector := collectWebSocketEventsWithLogger(logger, t, conn, 10*time.Second)
+
+	// Analyze step_progress events
+	stepProgressEvents := collector.GetEventsByType("step_progress")
+	logger.Logf("Found %d step_progress events", len(stepProgressEvents))
+
+	for i, event := range stepProgressEvents {
+		payload, ok := event["payload"].(map[string]interface{})
+		if !ok {
+			logger.Logf("Event %d: Missing payload", i)
+			continue
+		}
+
+		stepID := payload["step_id"]
+		managerID := payload["manager_id"]
+		stepName := payload["step_name"]
+		status := payload["status"]
+
+		logger.Logf("step_progress event %d: step_id=%v, manager_id=%v, step_name=%v, status=%v",
+			i, stepID, managerID, stepName, status)
+
+		// Verify required fields
+		assert.NotNil(t, stepID, "step_progress event should have step_id")
+		assert.NotNil(t, managerID, "step_progress event should have manager_id")
+	}
+}
+
+// TestWebSocketJobEvents_JobLogEventContext tests that job_log events have proper manager_id context.
+// This test builds and starts a fresh service instance independently.
+func TestWebSocketJobEvents_JobLogEventContext(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	require.NoError(t, err, "Failed to setup test environment")
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	logger := env.NewTestLogger(t)
+
+	// Connect WebSocket client
+	conn := connectWebSocket(t, env)
+	defer closeWebSocketWithLogger(logger, t, conn)
+
+	// Clear initial status message
+	waitForMessageTypeWithLogger(logger, t, conn, "status", 2*time.Second)
+
+	// Create a test job
+	jobID := createTestJob(t, helper)
+	if jobID == "" {
+		t.Skip("Could not create test job")
+		return
+	}
+	defer deleteJob(t, helper, jobID)
+
+	// Collect events
+	collector := collectWebSocketEventsWithLogger(logger, t, conn, 10*time.Second)
+
+	// Analyze job_log events
+	jobLogEvents := collector.GetEventsByType("job_log")
+	logger.Logf("Found %d job_log events", len(jobLogEvents))
+
+	eventsWithManagerID := 0
+	eventsWithoutManagerID := 0
+	eventsWithOriginator := 0
+	eventsWithoutOriginator := 0
+	originatorValues := make(map[string]int)
+
+	for i, event := range jobLogEvents {
+		payload, ok := event["payload"].(map[string]interface{})
+		if !ok {
+			logger.Logf("Event %d: Missing payload", i)
+			continue
+		}
+
+		if _, exists := payload["manager_id"]; exists {
+			eventsWithManagerID++
+		} else {
+			eventsWithoutManagerID++
+			logger.Logf("Event %d: job_log missing manager_id - job_id=%v", i, payload["job_id"])
+		}
+
+		if originator, exists := payload["originator"]; exists && originator != nil && originator != "" {
+			eventsWithOriginator++
+			if originatorStr, ok := originator.(string); ok {
+				originatorValues[originatorStr]++
 			}
-
-			hasStepName := false
-			hasStepID := false
-			hasManagerID := false
-
-			if _, exists := payload["step_name"]; exists {
-				hasStepName = true
-			}
-			if _, exists := payload["step_id"]; exists {
-				hasStepID = true
-			}
-			if _, exists := payload["manager_id"]; exists {
-				hasManagerID = true
-			}
-
-			if hasStepName || hasStepID || hasManagerID {
-				eventsWithStepContext++
-				t.Logf("Event %d: HAS step context (step_name=%v, step_id=%v, manager_id=%v)",
-					i, hasStepName, hasStepID, hasManagerID)
-			} else {
-				eventsWithoutStepContext++
-				t.Logf("Event %d: MISSING step context - job_id=%v, message=%v",
-					i, payload["job_id"], payload["message"])
-			}
+		} else {
+			eventsWithoutOriginator++
 		}
+	}
 
-		// Log summary
-		t.Logf("Summary: %d events WITH step context, %d events WITHOUT step context",
-			eventsWithStepContext, eventsWithoutStepContext)
+	logger.Logf("job_log events: %d with manager_id, %d without manager_id",
+		eventsWithManagerID, eventsWithoutManagerID)
+	logger.Logf("job_log events: %d with originator, %d without originator",
+		eventsWithOriginator, eventsWithoutOriginator)
+	logger.Logf("Originator values found: %v", originatorValues)
+}
 
-		// This test documents the current behavior - crawler_job_log events are missing step context
-		if eventsWithoutStepContext > 0 && eventsWithStepContext == 0 {
-			t.Log("ISSUE CONFIRMED: crawler_job_log events are missing step context fields (step_name, step_id, manager_id)")
+// TestWebSocketJobEvents_AllEventTypeSummary tests and summarizes all WebSocket event types.
+// This test builds and starts a fresh service instance independently.
+func TestWebSocketJobEvents_AllEventTypeSummary(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	require.NoError(t, err, "Failed to setup test environment")
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+	logger := env.NewTestLogger(t)
+
+	// Connect WebSocket client
+	conn := connectWebSocket(t, env)
+	defer closeWebSocketWithLogger(logger, t, conn)
+
+	// Clear initial status message
+	waitForMessageTypeWithLogger(logger, t, conn, "status", 2*time.Second)
+
+	// Create a test job
+	jobID := createTestJob(t, helper)
+	if jobID == "" {
+		t.Skip("Could not create test job")
+		return
+	}
+	defer deleteJob(t, helper, jobID)
+
+	// Wait for job completion
+	waitForJobCompletion(t, helper, jobID, 60*time.Second)
+
+	// Collect remaining events briefly
+	collector := collectWebSocketEventsWithLogger(logger, t, conn, 5*time.Second)
+
+	// Count events by type
+	eventTypes := make(map[string]int)
+	for _, event := range collector.GetEvents() {
+		if eventType, ok := event["type"].(string); ok {
+			eventTypes[eventType]++
 		}
-	})
+	}
 
-	t.Run("StepProgressEventContext", func(t *testing.T) {
-		// Connect WebSocket client
-		conn := connectWebSocket(t, env)
-		defer closeWebSocket(t, conn)
-
-		// Clear initial status message
-		waitForMessageType(t, conn, "status", 2*time.Second)
-
-		// Create a test job
-		jobID := createTestJob(t, helper)
-		if jobID == "" {
-			t.Skip("Could not create test job")
-			return
-		}
-		defer deleteJob(t, helper, jobID)
-
-		// Collect events
-		collector := collectWebSocketEvents(t, conn, 10*time.Second)
-
-		// Analyze step_progress events
-		stepProgressEvents := collector.GetEventsByType("step_progress")
-		t.Logf("Found %d step_progress events", len(stepProgressEvents))
-
-		for i, event := range stepProgressEvents {
-			payload, ok := event["payload"].(map[string]interface{})
-			if !ok {
-				t.Logf("Event %d: Missing payload", i)
-				continue
-			}
-
-			stepID := payload["step_id"]
-			managerID := payload["manager_id"]
-			stepName := payload["step_name"]
-			status := payload["status"]
-
-			t.Logf("step_progress event %d: step_id=%v, manager_id=%v, step_name=%v, status=%v",
-				i, stepID, managerID, stepName, status)
-
-			// Verify required fields
-			assert.NotNil(t, stepID, "step_progress event should have step_id")
-			assert.NotNil(t, managerID, "step_progress event should have manager_id")
-		}
-	})
-
-	t.Run("JobLogEventContext", func(t *testing.T) {
-		// Connect WebSocket client
-		conn := connectWebSocket(t, env)
-		defer closeWebSocket(t, conn)
-
-		// Clear initial status message
-		waitForMessageType(t, conn, "status", 2*time.Second)
-
-		// Create a test job
-		jobID := createTestJob(t, helper)
-		if jobID == "" {
-			t.Skip("Could not create test job")
-			return
-		}
-		defer deleteJob(t, helper, jobID)
-
-		// Collect events
-		collector := collectWebSocketEvents(t, conn, 10*time.Second)
-
-		// Analyze job_log events
-		jobLogEvents := collector.GetEventsByType("job_log")
-		t.Logf("Found %d job_log events", len(jobLogEvents))
-
-		eventsWithManagerID := 0
-		eventsWithoutManagerID := 0
-
-		for i, event := range jobLogEvents {
-			payload, ok := event["payload"].(map[string]interface{})
-			if !ok {
-				t.Logf("Event %d: Missing payload", i)
-				continue
-			}
-
-			if _, exists := payload["manager_id"]; exists {
-				eventsWithManagerID++
-			} else {
-				eventsWithoutManagerID++
-				t.Logf("Event %d: job_log missing manager_id - job_id=%v", i, payload["job_id"])
-			}
-		}
-
-		t.Logf("job_log events: %d with manager_id, %d without manager_id",
-			eventsWithManagerID, eventsWithoutManagerID)
-	})
-
-	t.Run("AllEventTypeSummary", func(t *testing.T) {
-		// Connect WebSocket client
-		conn := connectWebSocket(t, env)
-		defer closeWebSocket(t, conn)
-
-		// Clear initial status message
-		waitForMessageType(t, conn, "status", 2*time.Second)
-
-		// Create a test job
-		jobID := createTestJob(t, helper)
-		if jobID == "" {
-			t.Skip("Could not create test job")
-			return
-		}
-		defer deleteJob(t, helper, jobID)
-
-		// Wait for job completion
-		waitForJobCompletion(t, helper, jobID, 60*time.Second)
-
-		// Collect remaining events briefly
-		collector := collectWebSocketEvents(t, conn, 5*time.Second)
-
-		// Count events by type
-		eventTypes := make(map[string]int)
-		for _, event := range collector.GetEvents() {
-			if eventType, ok := event["type"].(string); ok {
-				eventTypes[eventType]++
-			}
-		}
-
-		t.Log("Event type summary:")
-		for eventType, count := range eventTypes {
-			t.Logf("  %s: %d events", eventType, count)
-		}
-	})
+	logger.Log("Event type summary:")
+	for eventType, count := range eventTypes {
+		logger.Logf("  %s: %d events", eventType, count)
+	}
 }
 
 // TestWebSocketJobEvents_MultiStepJob tests events from a multi-step job
@@ -543,4 +593,205 @@ func TestWebSocketJobEvents_StepNameRouting(t *testing.T) {
 		t.Log("If step_name is present in events, the UI can correctly filter")
 		t.Log("events to display only in the appropriate step panel.")
 	})
+}
+
+// TestWebSocketJobEvents_NewsCrawlerRealTime tests that WebSocket events are received
+// in real-time during News Crawler job execution (no page refresh needed).
+// This test validates that job completion events are broadcast via WebSocket.
+func TestWebSocketJobEvents_NewsCrawlerRealTime(t *testing.T) {
+	env, err := common.SetupTestEnvironment(t.Name())
+	require.NoError(t, err, "Failed to setup test environment")
+	defer env.Cleanup()
+
+	helper := env.NewHTTPTestHelper(t)
+
+	t.Log("=== NEWS CRAWLER REAL-TIME WEBSOCKET EVENTS TEST ===")
+	t.Log("This test validates that WebSocket events are received in real-time")
+	t.Log("during job execution without requiring page refresh.")
+	t.Log("")
+
+	// Step 1: Connect WebSocket BEFORE triggering job
+	t.Log("Step 1: Connecting WebSocket client...")
+	conn := connectWebSocket(t, env)
+	// Note: We close the connection explicitly after collecting events, not via defer
+
+	// Clear initial status message
+	waitForMessageType(t, conn, "status", 5*time.Second)
+	t.Log("✓ WebSocket connected and initial status received")
+
+	// Step 2: Execute the News Crawler job definition
+	t.Log("Step 2: Executing News Crawler job definition...")
+	resp, err := helper.POST("/api/job-definitions/news-crawler/execute", nil)
+	require.NoError(t, err, "Failed to execute News Crawler")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Skipf("News Crawler job definition not available (status %d)", resp.StatusCode)
+		return
+	}
+
+	var execResult map[string]interface{}
+	err = helper.ParseJSONResponse(resp, &execResult)
+	require.NoError(t, err, "Failed to parse execution response")
+
+	jobID, ok := execResult["job_id"].(string)
+	require.True(t, ok, "Response should contain job_id")
+	t.Logf("✓ News Crawler job started: job_id=%s", jobID)
+
+	// Step 3: Collect WebSocket events during job execution
+	t.Log("Step 3: Collecting WebSocket events during job execution...")
+	t.Log("   (Waiting up to 120 seconds for job completion)")
+
+	collector := &WebSocketEventCollector{}
+	jobCompleted := false
+	startTime := time.Now()
+	timeout := 120 * time.Second
+
+	// Collect events until job completes or timeout
+	connectionClosed := false
+	for time.Since(startTime) < timeout && !jobCompleted && !connectionClosed {
+		remaining := timeout - time.Since(startTime)
+		if remaining < 0 {
+			break
+		}
+
+		// Set read deadline
+		err := conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err != nil {
+			t.Logf("Warning: Failed to set read deadline: %v", err)
+			connectionClosed = true
+			break
+		}
+
+		// Read message
+		var msg map[string]interface{}
+		err = conn.ReadJSON(&msg)
+		if err != nil {
+			// Check for connection closed errors
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseAbnormalClosure) {
+				t.Log("WebSocket closed by server")
+				connectionClosed = true
+				break
+			}
+			// Check for other connection errors (e.g., "use of closed network connection")
+			errStr := err.Error()
+			if strings.Contains(errStr, "closed") || strings.Contains(errStr, "EOF") {
+				t.Logf("WebSocket connection error: %v", err)
+				connectionClosed = true
+				break
+			}
+			// Timeout is expected - continue polling
+			continue
+		}
+
+		// Add to collector
+		collector.Add(msg)
+
+		// Log event type
+		eventType, _ := msg["type"].(string)
+		if eventType == "job_log" || eventType == "step_progress" || eventType == "job_status_change" {
+			// Log interesting events
+			if payload, ok := msg["payload"].(map[string]interface{}); ok {
+				if message, ok := payload["message"].(string); ok {
+					t.Logf("   [%s] %s", eventType, truncateMessage(message, 80))
+				} else if status, ok := payload["status"].(string); ok {
+					t.Logf("   [%s] status=%s", eventType, status)
+				}
+			}
+		}
+
+		// Check if job completed
+		if eventType == "job_status_change" {
+			if payload, ok := msg["payload"].(map[string]interface{}); ok {
+				if msgJobID, _ := payload["job_id"].(string); msgJobID == jobID {
+					if status, _ := payload["status"].(string); status == "completed" || status == "failed" {
+						t.Logf("✓ Job reached terminal state: %s", status)
+						jobCompleted = true
+					}
+				}
+			}
+		}
+	}
+
+	// Close WebSocket connection before analyzing results (if not already closed)
+	if !connectionClosed {
+		closeWebSocket(t, conn)
+	}
+
+	elapsed := time.Since(startTime)
+	t.Logf("Step 3 complete: Collected %d events in %v", collector.Count(), elapsed)
+
+	// Step 4: Analyze collected events
+	t.Log("")
+	t.Log("Step 4: Analyzing collected WebSocket events...")
+
+	allEvents := collector.GetEvents()
+	t.Logf("   Total events collected: %d", len(allEvents))
+
+	// Count by type
+	eventCounts := make(map[string]int)
+	for _, event := range allEvents {
+		if eventType, ok := event["type"].(string); ok {
+			eventCounts[eventType]++
+		}
+	}
+
+	t.Log("   Event counts by type:")
+	for eventType, count := range eventCounts {
+		t.Logf("     - %s: %d", eventType, count)
+	}
+
+	// Step 5: Validate real-time events were received
+	t.Log("")
+	t.Log("Step 5: Validating real-time event delivery...")
+
+	// We expect at least some job_log events during execution
+	jobLogCount := eventCounts["job_log"]
+	stepProgressCount := eventCounts["step_progress"]
+	statusChangeCount := eventCounts["job_status_change"]
+
+	t.Logf("   job_log events: %d", jobLogCount)
+	t.Logf("   step_progress events: %d", stepProgressCount)
+	t.Logf("   job_status_change events: %d", statusChangeCount)
+
+	// The key assertion: we should receive events in real-time
+	// If WebSocket is working, we should have received events during job execution
+	// The News Crawler typically generates 100+ child jobs, so we expect many events
+	totalJobEvents := jobLogCount + stepProgressCount + statusChangeCount
+
+	t.Logf("")
+	t.Logf("   Total job-related events: %d", totalJobEvents)
+
+	// Assert we received a reasonable number of events
+	// If only 6-8 events, WebSocket is NOT working properly
+	// If 50+ events, WebSocket IS working properly
+	assert.Greater(t, totalJobEvents, 10,
+		"Should receive more than 10 job-related events via WebSocket in real-time. "+
+			"If only receiving 6-8 events, WebSocket event publishing is broken.")
+
+	// If job completed, verify we got the completion event
+	if jobCompleted {
+		assert.Greater(t, statusChangeCount, 0,
+			"Should receive job_status_change events when job completes")
+	}
+
+	// Clean up
+	deleteJob(t, helper, jobID)
+
+	t.Log("")
+	t.Log("=== NEWS CRAWLER REAL-TIME WEBSOCKET EVENTS TEST COMPLETE ===")
+	if totalJobEvents > 10 {
+		t.Log("✓ SUCCESS: WebSocket events are being received in real-time")
+	} else {
+		t.Log("✗ FAILURE: WebSocket events are NOT being received in real-time")
+		t.Log("  This indicates a bug in the event publishing pipeline.")
+	}
+}
+
+// truncateMessage truncates a message to maxLen characters
+func truncateMessage(msg string, maxLen int) string {
+	if len(msg) <= maxLen {
+		return msg
+	}
+	return msg[:maxLen-3] + "..."
 }

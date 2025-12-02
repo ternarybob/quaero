@@ -209,20 +209,18 @@
                                                     </button>
                                                     <!-- Expanded step logs list -->
                                                     <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
-                                                        <div class="step-logs-container" :data-step-logs-container="item.job.id + ':' + item.step.name">
+                                                        <div class="terminal step-logs-container" :data-step-logs-container="item.job.id + ':' + item.step.name" style="min-height: auto; max-height: 300px;">
                                                             <template x-if="getStepLogs(item.job.id, item.step.name).length === 0">
-                                                                <div class="step-logs-empty">
+                                                                <div class="step-logs-empty" style="color: var(--code-color);">
                                                                     <i class="fas fa-info-circle"></i> No events yet for this step.
                                                                 </div>
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
-                                                                <div class="step-log-entry" :data-log-index="logIndex">
-                                                                    <span class="step-log-time" x-text="formatLogTime(log.timestamp)"></span>
-                                                                    <span class="step-log-level" :class="getLogLevelClass(log.level)">
-                                                                        <i class="fas" :class="getLogLevelIcon(log.level)"></i>
-                                                                    </span>
-                                                                    <span class="step-log-originator" x-show="log.originator" x-text="'[' + log.originator + ']'"></span>
-                                                                    <span class="step-log-message" x-text="log.message"></span>
+                                                                <div class="terminal-line" :data-log-index="logIndex">
+                                                                    <span class="terminal-time" x-text="formatLogTime(log.timestamp)"></span>
+                                                                    <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)"></span>
+                                                                    <span x-show="log.originator" x-text="'[' + log.originator + ']'" style="color: #61AFEF;"></span>
+                                                                    <span x-text="log.message"></span>
                                                                 </div>
                                                             </template>
                                                         </div>
@@ -1993,15 +1991,28 @@
                         this.jobLogs[aggregationId] = [];
                     }
 
-                    // Add the new log entry
-                    this.jobLogs[aggregationId].push({
+                    const newEntry = {
                         level: logData.level || 'info',
                         message: logData.message || '',
                         timestamp: logData.timestamp || new Date().toISOString(),
                         step_name: stepName,
                         source_type: logData.source_type || '',
                         originator: logData.originator || ''
-                    });
+                    };
+
+                    // Dedup: Check if this exact log already exists (by timestamp + message + step_name)
+                    // This prevents duplicate entries from multiple event sources
+                    const isDuplicate = this.jobLogs[aggregationId].some(
+                        log => log.timestamp === newEntry.timestamp &&
+                               log.message === newEntry.message &&
+                               log.step_name === newEntry.step_name
+                    );
+                    if (isDuplicate) {
+                        return; // Skip duplicate log entry
+                    }
+
+                    // Add the new log entry
+                    this.jobLogs[aggregationId].push(newEntry);
 
                     // Limit the number of logs per job
                     if (this.jobLogs[aggregationId].length > this.maxLogsPerJob) {
@@ -2074,15 +2085,37 @@
                 },
 
                 getLogLevelClass(level) {
+                    // Color classes matching Service Logs panel styling
                     switch (level) {
-                        case 'error': return 'text-error';
-                        case 'warn': return 'text-warning';
-                        case 'debug': return 'text-gray';
-                        default: return 'text-primary';
+                        case 'error': return 'log-level-error';
+                        case 'warn': return 'log-level-warn';
+                        case 'debug': return 'log-level-debug';
+                        default: return 'log-level-info';
+                    }
+                },
+
+                getLogLevelTag(level) {
+                    // Text-based level tags matching standard log format
+                    switch (level) {
+                        case 'error': return '[ERR]';
+                        case 'warn': return '[WRN]';
+                        case 'debug': return '[DBG]';
+                        default: return '[INF]';
+                    }
+                },
+
+                getTerminalLevelClass(level) {
+                    // Terminal color classes matching Service Logs panel styling
+                    switch (level) {
+                        case 'error': return 'terminal-error';
+                        case 'warn': return 'terminal-warning';
+                        case 'debug': return 'terminal-debug';
+                        default: return 'terminal-info';
                     }
                 },
 
                 getLogLevelIcon(level) {
+                    // Deprecated: kept for backwards compatibility
                     switch (level) {
                         case 'error': return 'fa-times-circle';
                         case 'warn': return 'fa-exclamation-triangle';

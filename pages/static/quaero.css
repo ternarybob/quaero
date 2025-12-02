@@ -2036,3 +2036,26 @@ body.modal-open {
 .step-logs-container::-webkit-scrollbar-thumb:hover {
     background: var(--text-secondary);
 }
+
+/* Log level colors for step events (light background context)
+   Matching terminal formatter colors for consistency:
+   ERR: #d1242f (red)
+   WRN: #9a6700 (amber)
+   INF: #1a7f37 (green)
+   DBG: #0969da (blue) */
+
+.log-level-error {
+    color: #d1242f;
+}
+
+.log-level-warn {
+    color: #9a6700;
+}
+
+.log-level-info {
+    color: #1a7f37;
+}
+
+.log-level-debug {
+    color: #0969da;
+}

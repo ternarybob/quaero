@@ -113,6 +113,11 @@ func (w *CrawlerWorker) Validate(job *models.QueueJob) error {
 // 4. Link discovery and filtering
 // 5. Child job spawning for discovered links (respecting depth limits)
 func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error {
+	w.logger.Info().
+		Str("job_id", job.ID).
+		Str("job_type", job.Type).
+		Msg("TRACE: CrawlerWorker.Execute called")
+
 	// Create job-specific logger using parent context for log aggregation
 	// All children log under the root parent ID for unified log viewing
 	parentID := job.GetParentID()
@@ -131,7 +136,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	crawlConfig, err := w.extractCrawlConfig(job.Config)
 	if err != nil {
 		jobLogger.Error().Err(err).Msg("Failed to extract crawl config")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - invalid config", seedURL))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed: %s - invalid config", seedURL))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Invalid crawl config: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to extract crawl config: %w", err)
@@ -146,7 +151,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	jobStartTime := time.Now()
 
 	// Publish JOB START event for real-time UI display
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("▶ Started: %s", seedURL))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Started: %s", seedURL))
 
 	// Publish initial progress update
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Acquiring browser from pool", seedURL)
@@ -190,7 +195,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	if err != nil {
 		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to render page with ChromeDP")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - render error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed: %s - render error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Page rendering failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to render page: %w", err)
@@ -205,7 +210,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	if err != nil {
 		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to process HTML content")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - content processing error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed: %s - content processing error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Content processing failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to process content: %w", err)
@@ -235,7 +240,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	if err := docPersister.SaveCrawledDocument(crawledDoc); err != nil {
 		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to save crawled document")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("✗ Failed: %s - storage error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed: %s - storage error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Document storage failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to save document: %w", err)
@@ -272,36 +277,78 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		// Check depth limits for child job spawning
 		if job.Depth < crawlConfig.MaxDepth && len(filterResult.FilteredLinks) > 0 {
 			w.publishCrawlerProgressUpdate(ctx, job, "running", "Spawning child jobs for discovered links", seedURL)
-			// Spawn child jobs for filtered links
-			childJobsSpawned := 0
-			for i, link := range filterResult.FilteredLinks {
-				// Respect max pages limit
-				if crawlConfig.MaxPages > 0 && childJobsSpawned >= crawlConfig.MaxPages {
-					linkStats.Skipped = len(filterResult.FilteredLinks) - childJobsSpawned
+
+			// Get GLOBAL child count under the step/parent job for max_pages enforcement
+			// This ensures max_pages is a GLOBAL limit across the entire crawl, not per-URL
+			globalChildCount := 0
+			skipSpawning := false
+
+			// Debug: Log the max_pages value being used (visible in job logs)
+			w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("DEBUG: max_pages=%d, filtered=%d, depth=%d", crawlConfig.MaxPages, len(filterResult.FilteredLinks), job.Depth))
+
+			if crawlConfig.MaxPages > 0 {
+				parentID := job.GetParentID()
+				if parentID != "" {
+					if stats, err := w.jobMgr.GetJobChildStats(ctx, []string{parentID}); err == nil {
+						if s := stats[parentID]; s != nil {
+							globalChildCount = s.ChildCount
+						}
+					}
+				}
+
+				jobLogger.Debug().
+					Int("max_pages", crawlConfig.MaxPages).
+					Int("global_children", globalChildCount).
+					Str("parent_id", parentID).
+					Msg("Global child count check")
+
+				// Check if we've already hit the global limit
+				if globalChildCount >= crawlConfig.MaxPages {
+					linkStats.Skipped = len(filterResult.FilteredLinks)
 					jobLogger.Debug().
 						Int("max_pages", crawlConfig.MaxPages).
+						Int("global_children", globalChildCount).
 						Int("skipped", linkStats.Skipped).
-						Msg("Reached max pages limit, skipping remaining links")
-					w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Reached max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped))
-					break
+						Msg("Global max pages limit reached, skipping all new links")
+					w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Global max pages limit (%d) reached with %d children, skipping %d links", crawlConfig.MaxPages, globalChildCount, linkStats.Skipped))
+					skipSpawning = true
 				}
-
-				if err := w.spawnChildJob(ctx, job, link, crawlConfig, sourceType, entityType, i, jobLogger); err != nil {
-					jobLogger.Warn().
-						Err(err).
-						Str("child_url", link).
-						Msg("Failed to spawn child job for discovered link")
-					w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link))
-					continue
-				}
-				childJobsSpawned++
 			}
 
-			linkStats.Followed = childJobsSpawned
+			// Spawn child jobs for filtered links (unless global limit already reached)
+			childJobsSpawned := 0
+			if !skipSpawning {
+				for i, link := range filterResult.FilteredLinks {
+					// Respect GLOBAL max pages limit (globalChildCount + childJobsSpawned)
+					if crawlConfig.MaxPages > 0 && (globalChildCount+childJobsSpawned) >= crawlConfig.MaxPages {
+						linkStats.Skipped = len(filterResult.FilteredLinks) - childJobsSpawned
+						jobLogger.Debug().
+							Int("max_pages", crawlConfig.MaxPages).
+							Int("global_children", globalChildCount).
+							Int("spawned_this_job", childJobsSpawned).
+							Int("skipped", linkStats.Skipped).
+							Msg("Reached global max pages limit, skipping remaining links")
+						w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Reached global max pages limit (%d), skipping %d remaining links", crawlConfig.MaxPages, linkStats.Skipped))
+						break
+					}
 
-			// Note: Per-URL child spawn logging removed to reduce log volume
+					if err := w.spawnChildJob(ctx, job, link, crawlConfig, sourceType, entityType, i, jobLogger); err != nil {
+						jobLogger.Warn().
+							Err(err).
+							Str("child_url", link).
+							Msg("Failed to spawn child job for discovered link")
+						w.jobMgr.AddJobLog(ctx, job.ID, "warn", fmt.Sprintf("Failed to spawn child job for link: %s", link))
+						continue
+					}
+					childJobsSpawned++
+				}
 
-			w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Spawned %d child jobs", childJobsSpawned))
+				linkStats.Followed = childJobsSpawned
+
+				// Note: Per-URL child spawn logging removed to reduce log volume
+
+				w.jobMgr.AddJobLog(ctx, job.ID, "debug", fmt.Sprintf("Spawned %d child jobs", childJobsSpawned))
+			}
 		} else if job.Depth >= crawlConfig.MaxDepth {
 			// All filtered links are skipped due to depth limit
 			linkStats.Skipped = filterResult.Filtered
@@ -344,7 +391,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	jobDuration := time.Since(jobStartTime)
 
 	// Publish JOB END event for real-time UI display (success)
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("✓ Completed: %s (%v)", seedURL, jobDuration.Round(time.Millisecond)))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Completed: %s (%v)", seedURL, jobDuration.Round(time.Millisecond)))
 
 	return nil
 }
@@ -354,69 +401,93 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 // ============================================================================
 
 // extractCrawlConfig extracts CrawlConfig from Job.Config map
+// Config can be stored in two formats:
+// 1. Nested: config["crawl_config"] = CrawlConfig{...} (from spawnChildJob)
+// 2. Flat: config["max_depth"], config["max_pages"], etc. (from StartCrawl seed jobs)
 func (w *CrawlerWorker) extractCrawlConfig(config map[string]interface{}) (*models.CrawlConfig, error) {
-	crawlConfigRaw, ok := config["crawl_config"]
-	if !ok {
-		return &models.CrawlConfig{}, nil // Return empty config if not found
+	// First, check if config has nested crawl_config
+	crawlConfigRaw, hasNestedConfig := config["crawl_config"]
+
+	// Determine which map to extract from
+	var configMap map[string]interface{}
+	if hasNestedConfig {
+		// Try direct type assertion for nested config
+		if crawlConfig, ok := crawlConfigRaw.(*models.CrawlConfig); ok {
+			return crawlConfig, nil
+		}
+		// Try non-pointer type assertion
+		if crawlConfig, ok := crawlConfigRaw.(models.CrawlConfig); ok {
+			return &crawlConfig, nil
+		}
+		// Try map[string]interface{} for nested config
+		if nestedMap, ok := crawlConfigRaw.(map[string]interface{}); ok {
+			configMap = nestedMap
+		} else {
+			// Fallback to flat config if nested config is not a valid type
+			configMap = config
+		}
+	} else {
+		// Use flat config (fields are at top level)
+		configMap = config
 	}
 
-	// Try direct type assertion first
-	if crawlConfig, ok := crawlConfigRaw.(*models.CrawlConfig); ok {
-		return crawlConfig, nil
+	// Convert map to CrawlConfig struct
+	crawlConfig := &models.CrawlConfig{}
+
+	// Extract max_depth
+	if maxDepth, ok := configMap["max_depth"].(float64); ok {
+		crawlConfig.MaxDepth = int(maxDepth)
+	} else if maxDepth, ok := configMap["max_depth"].(int); ok {
+		crawlConfig.MaxDepth = maxDepth
+	} else if maxDepth, ok := configMap["max_depth"].(int64); ok {
+		crawlConfig.MaxDepth = int(maxDepth)
 	}
 
-	// Try map[string]interface{} conversion
-	if crawlConfigMap, ok := crawlConfigRaw.(map[string]interface{}); ok {
-		// Convert map to CrawlConfig struct
-		crawlConfig := &models.CrawlConfig{}
+	// Extract max_pages
+	if maxPages, ok := configMap["max_pages"].(float64); ok {
+		crawlConfig.MaxPages = int(maxPages)
+	} else if maxPages, ok := configMap["max_pages"].(int); ok {
+		crawlConfig.MaxPages = maxPages
+	} else if maxPages, ok := configMap["max_pages"].(int64); ok {
+		crawlConfig.MaxPages = int(maxPages)
+	}
 
-		if maxDepth, ok := crawlConfigMap["max_depth"].(float64); ok {
-			crawlConfig.MaxDepth = int(maxDepth)
-		} else if maxDepth, ok := crawlConfigMap["max_depth"].(int); ok {
-			crawlConfig.MaxDepth = maxDepth
-		}
+	// Extract concurrency
+	if concurrency, ok := configMap["concurrency"].(float64); ok {
+		crawlConfig.Concurrency = int(concurrency)
+	} else if concurrency, ok := configMap["concurrency"].(int); ok {
+		crawlConfig.Concurrency = concurrency
+	} else if concurrency, ok := configMap["concurrency"].(int64); ok {
+		crawlConfig.Concurrency = int(concurrency)
+	}
 
-		if maxPages, ok := crawlConfigMap["max_pages"].(float64); ok {
-			crawlConfig.MaxPages = int(maxPages)
-		} else if maxPages, ok := crawlConfigMap["max_pages"].(int); ok {
-			crawlConfig.MaxPages = maxPages
-		}
+	// Extract follow_links
+	if followLinks, ok := configMap["follow_links"].(bool); ok {
+		crawlConfig.FollowLinks = followLinks
+	}
 
-		if concurrency, ok := crawlConfigMap["concurrency"].(float64); ok {
-			crawlConfig.Concurrency = int(concurrency)
-		} else if concurrency, ok := crawlConfigMap["concurrency"].(int); ok {
-			crawlConfig.Concurrency = concurrency
-		}
-
-		if followLinks, ok := crawlConfigMap["follow_links"].(bool); ok {
-			crawlConfig.FollowLinks = followLinks
-		}
-
-		// Extract include/exclude patterns
-		if includePatterns, ok := crawlConfigMap["include_patterns"].([]interface{}); ok {
-			for _, pattern := range includePatterns {
-				if patternStr, ok := pattern.(string); ok {
-					crawlConfig.IncludePatterns = append(crawlConfig.IncludePatterns, patternStr)
-				}
+	// Extract include/exclude patterns
+	if includePatterns, ok := configMap["include_patterns"].([]interface{}); ok {
+		for _, pattern := range includePatterns {
+			if patternStr, ok := pattern.(string); ok {
+				crawlConfig.IncludePatterns = append(crawlConfig.IncludePatterns, patternStr)
 			}
-		} else if includePatterns, ok := crawlConfigMap["include_patterns"].([]string); ok {
-			crawlConfig.IncludePatterns = includePatterns
 		}
-
-		if excludePatterns, ok := crawlConfigMap["exclude_patterns"].([]interface{}); ok {
-			for _, pattern := range excludePatterns {
-				if patternStr, ok := pattern.(string); ok {
-					crawlConfig.ExcludePatterns = append(crawlConfig.ExcludePatterns, patternStr)
-				}
-			}
-		} else if excludePatterns, ok := crawlConfigMap["exclude_patterns"].([]string); ok {
-			crawlConfig.ExcludePatterns = excludePatterns
-		}
-
-		return crawlConfig, nil
+	} else if includePatterns, ok := configMap["include_patterns"].([]string); ok {
+		crawlConfig.IncludePatterns = includePatterns
 	}
 
-	return &models.CrawlConfig{}, nil
+	if excludePatterns, ok := configMap["exclude_patterns"].([]interface{}); ok {
+		for _, pattern := range excludePatterns {
+			if patternStr, ok := pattern.(string); ok {
+				crawlConfig.ExcludePatterns = append(crawlConfig.ExcludePatterns, patternStr)
+			}
+		}
+	} else if excludePatterns, ok := configMap["exclude_patterns"].([]string); ok {
+		crawlConfig.ExcludePatterns = excludePatterns
+	}
+
+	return crawlConfig, nil
 }
 
 // renderPageWithChromeDp renders a page using ChromeDP and returns HTML content and status code
@@ -1488,22 +1559,29 @@ func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawl
 	}
 
 	// Override with values from config map
+	// TOML parser uses int64, JSON uses float64, Go uses int
 	if v, ok := configMap["max_depth"].(float64); ok {
 		config.MaxDepth = int(v)
 	} else if v, ok := configMap["max_depth"].(int); ok {
 		config.MaxDepth = v
+	} else if v, ok := configMap["max_depth"].(int64); ok {
+		config.MaxDepth = int(v)
 	}
 
 	if v, ok := configMap["max_pages"].(float64); ok {
 		config.MaxPages = int(v)
 	} else if v, ok := configMap["max_pages"].(int); ok {
 		config.MaxPages = v
+	} else if v, ok := configMap["max_pages"].(int64); ok {
+		config.MaxPages = int(v)
 	}
 
 	if v, ok := configMap["concurrency"].(float64); ok {
 		config.Concurrency = int(v)
 	} else if v, ok := configMap["concurrency"].(int); ok {
 		config.Concurrency = v
+	} else if v, ok := configMap["concurrency"].(int64); ok {
+		config.Concurrency = int(v)
 	}
 
 	if v, ok := configMap["rate_limit"].(float64); ok {

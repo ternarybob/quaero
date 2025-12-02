@@ -16,17 +16,18 @@ import (
 // createTestJobDefinition creates a minimal valid job definition for testing
 func createTestJobDefinition(t *testing.T, helper *common.HTTPTestHelper, id, name, jobType string) string {
 	body := map[string]interface{}{
-		"id":   id,
-		"name": name,
-		"type": jobType,
+		"id":      id,
+		"name":    name,
+		"type":    jobType,
+		"enabled": true,
 		"steps": []map[string]interface{}{
 			{
 				"name": "test-step",
-				"type": "crawl",
+				"type": "crawler",
 				"config": map[string]interface{}{
 					"start_urls":  []string{"https://example.com"},
 					"max_depth":   1,
-					"max_pages":   5,
+					"max_pages":   3,
 					"concurrency": 1,
 				},
 			},

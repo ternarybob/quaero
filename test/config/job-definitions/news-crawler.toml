@@ -29,7 +29,7 @@ include_patterns = ["abc\\.net\\.au/news"]
 # URL patterns to exclude (regex patterns)
 exclude_patterns = ["/video/", "/audio/", "/live-blog/"]
 # Crawler behavior
-max_depth = 3       # Maximum depth to follow links
-max_pages = 50      # Maximum number of pages to crawl
+max_depth = 2       # Maximum depth to follow links
+max_pages = 10      # Maximum number of pages to crawl (GLOBAL limit)
 concurrency = 5     # Number of concurrent workers
 follow_links = true # Whether to follow discovered links

@@ -36,7 +36,9 @@ func connectWebSocketWithError(t *testing.T, env *common.TestEnvironment) (*webs
 	baseURL := env.GetBaseURL()
 	wsURL := strings.Replace(baseURL, "http://", "ws://", 1) + "/ws"
 
-	t.Logf("Connecting to WebSocket: %s", wsURL)
+	// Use TestLogger to ensure output is captured to test.log
+	logger := env.NewTestLogger(t)
+	logger.Logf("Connecting to WebSocket: %s", wsURL)
 
 	// Dial WebSocket connection
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -51,12 +53,18 @@ func connectWebSocketWithError(t *testing.T, env *common.TestEnvironment) (*webs
 		return nil, err
 	}
 
-	t.Logf("✓ WebSocket connected: %s", wsURL)
+	logger.Logf("✓ WebSocket connected: %s", wsURL)
 	return conn, nil
 }
 
 // readWebSocketMessage reads a single JSON message from WebSocket with timeout
 func readWebSocketMessage(t *testing.T, conn *websocket.Conn, timeout time.Duration) (map[string]interface{}, error) {
+	return readWebSocketMessageWithLogger(nil, t, conn, timeout)
+}
+
+// readWebSocketMessageWithLogger reads a single JSON message from WebSocket with timeout
+// If logger is provided, uses it; otherwise falls back to t.Logf
+func readWebSocketMessageWithLogger(logger *common.TestLogger, t *testing.T, conn *websocket.Conn, timeout time.Duration) (map[string]interface{}, error) {
 	// Set read deadline based on timeout
 	err := conn.SetReadDeadline(time.Now().Add(timeout))
 	if err != nil {
@@ -70,12 +78,22 @@ func readWebSocketMessage(t *testing.T, conn *websocket.Conn, timeout time.Durat
 		return nil, err
 	}
 
-	t.Logf("Received WebSocket message: type=%v", msg["type"])
+	if logger != nil {
+		logger.Logf("Received WebSocket message: type=%v", msg["type"])
+	} else {
+		t.Logf("Received WebSocket message: type=%v", msg["type"])
+	}
 	return msg, nil
 }
 
 // waitForMessageType reads messages until finding one with specified type, or times out
 func waitForMessageType(t *testing.T, conn *websocket.Conn, messageType string, timeout time.Duration) map[string]interface{} {
+	return waitForMessageTypeWithLogger(nil, t, conn, messageType, timeout)
+}
+
+// waitForMessageTypeWithLogger reads messages until finding one with specified type, or times out
+// If logger is provided, uses it; otherwise falls back to t.Logf
+func waitForMessageTypeWithLogger(logger *common.TestLogger, t *testing.T, conn *websocket.Conn, messageType string, timeout time.Duration) map[string]interface{} {
 	deadline := time.Now().Add(timeout)
 
 	for {
@@ -86,7 +104,7 @@ func waitForMessageType(t *testing.T, conn *websocket.Conn, messageType string, 
 
 		// Read next message
 		remaining := time.Until(deadline)
-		msg, err := readWebSocketMessage(t, conn, remaining)
+		msg, err := readWebSocketMessageWithLogger(logger, t, conn, remaining)
 		if err != nil {
 			// If timeout or connection closed, fail
 			require.FailNow(t, fmt.Sprintf("Error waiting for message type '%s': %v", messageType, err))
@@ -94,16 +112,30 @@ func waitForMessageType(t *testing.T, conn *websocket.Conn, messageType string, 
 
 		// Check if this is the message type we're looking for
 		if msgType, ok := msg["type"].(string); ok && msgType == messageType {
-			t.Logf("✓ Found message type '%s'", messageType)
+			if logger != nil {
+				logger.Logf("✓ Found message type '%s'", messageType)
+			} else {
+				t.Logf("✓ Found message type '%s'", messageType)
+			}
 			return msg
 		}
 
-		t.Logf("Skipping message type '%v', waiting for '%s'", msg["type"], messageType)
+		if logger != nil {
+			logger.Logf("Skipping message type '%v', waiting for '%s'", msg["type"], messageType)
+		} else {
+			t.Logf("Skipping message type '%v', waiting for '%s'", msg["type"], messageType)
+		}
 	}
 }
 
 // closeWebSocket gracefully closes a WebSocket connection
 func closeWebSocket(t *testing.T, conn *websocket.Conn) {
+	closeWebSocketWithLogger(nil, t, conn)
+}
+
+// closeWebSocketWithLogger gracefully closes a WebSocket connection
+// If logger is provided, uses it; otherwise falls back to t.Log
+func closeWebSocketWithLogger(logger *common.TestLogger, t *testing.T, conn *websocket.Conn) {
 	if conn == nil {
 		return
 	}
@@ -111,9 +143,17 @@ func closeWebSocket(t *testing.T, conn *websocket.Conn) {
 	err := conn.Close()
 	if err != nil {
 		// Connection might already be closed, log but don't fail
-		t.Logf("Warning: Error closing WebSocket: %v", err)
+		if logger != nil {
+			logger.Logf("Warning: Error closing WebSocket: %v", err)
+		} else {
+			t.Logf("Warning: Error closing WebSocket: %v", err)
+		}
 	} else {
-		t.Log("✓ WebSocket connection closed")
+		if logger != nil {
+			logger.Log("✓ WebSocket connection closed")
+		} else {
+			t.Log("✓ WebSocket connection closed")
+		}
 	}
 }
 

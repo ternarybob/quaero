@@ -1221,10 +1221,12 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 		wsPayload := map[string]interface{}{
 			"job_id":        getString(payload, "job_id"),
 			"parent_job_id": getString(payload, "parent_job_id"),
+			"manager_id":    getString(payload, "manager_id"),
 			"level":         getString(payload, "level"),
 			"message":       getString(payload, "message"),
 			"step_name":     getString(payload, "step_name"),
 			"source_type":   getString(payload, "source_type"),
+			"originator":    getString(payload, "originator"),
 			"timestamp":     getString(payload, "timestamp"),
 		}
 

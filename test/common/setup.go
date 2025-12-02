@@ -36,6 +36,73 @@ var TestMainOutput bytes.Buffer
 var suiteDirectories = make(map[string]string)
 var suiteDirectoriesMutex sync.Mutex
 
+// TestLogger provides logging that writes to both t.Log() and a test log file
+// This ensures all test output is captured for later analysis
+// Log format matches Go's testing framework: "file:line: message"
+type TestLogger struct {
+	T       *testing.T
+	TestLog *os.File
+}
+
+// NewTestLogger creates a TestLogger from an environment
+func NewTestLogger(t *testing.T, testLog *os.File) *TestLogger {
+	return &TestLogger{T: t, TestLog: testLog}
+}
+
+// getCallerLocation returns the file:line prefix for the caller
+// Skip specifies how many stack frames to skip (2 = caller of Log/Logf)
+func getCallerLocation(skip int) string {
+	_, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return "???:0"
+	}
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+// Log writes a message to both the test log file and t.Log()
+// Format in file: "    file:line: message" (matches Go test output)
+func (l *TestLogger) Log(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	if l.TestLog != nil {
+		location := getCallerLocation(2) // Skip Log and getCallerLocation
+		fmt.Fprintf(l.TestLog, "    %s: %s\n", location, msg)
+	}
+	l.T.Log(msg)
+}
+
+// Logf writes a formatted message to both the test log file and t.Logf()
+// Format in file: "    file:line: message" (matches Go test output)
+func (l *TestLogger) Logf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	if l.TestLog != nil {
+		location := getCallerLocation(2) // Skip Logf and getCallerLocation
+		fmt.Fprintf(l.TestLog, "    %s: %s\n", location, msg)
+	}
+	l.T.Log(msg)
+}
+
+// Error writes an error message to both the test log file and t.Error()
+// Format in file: "    file:line: ERROR: message" (matches Go test output)
+func (l *TestLogger) Error(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	if l.TestLog != nil {
+		location := getCallerLocation(2) // Skip Error and getCallerLocation
+		fmt.Fprintf(l.TestLog, "    %s: ERROR: %s\n", location, msg)
+	}
+	l.T.Error(msg)
+}
+
+// Errorf writes a formatted error message to both the test log file and t.Errorf()
+// Format in file: "    file:line: ERROR: message" (matches Go test output)
+func (l *TestLogger) Errorf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	if l.TestLog != nil {
+		location := getCallerLocation(2) // Skip Errorf and getCallerLocation
+		fmt.Fprintf(l.TestLog, "    %s: ERROR: %s\n", location, msg)
+	}
+	l.T.Error(msg)
+}
+
 // OutputCapture captures stdout/stderr and tees it to a file and original output
 type OutputCapture struct {
 	buffer       *bytes.Buffer
@@ -1147,6 +1214,11 @@ func (env *TestEnvironment) GetBaseURL() string {
 	return fmt.Sprintf("http://%s:%d", env.Config.Service.Host, env.Config.Service.Port)
 }
 
+// NewTestLogger creates a TestLogger for the environment
+func (env *TestEnvironment) NewTestLogger(t *testing.T) *TestLogger {
+	return NewTestLogger(t, env.TestLog)
+}
+
 // GetResultsDir returns the results directory for this test run
 func (env *TestEnvironment) GetResultsDir() string {
 	return env.ResultsDir
@@ -1364,6 +1436,29 @@ type HTTPTestHelper struct {
 	BaseURL string
 	Client  *http.Client
 	T       *testing.T
+	TestLog *os.File // Test log file for capturing output
+}
+
+// Log writes a message to both the test log file and t.Log()
+// Format in file: "    file:line: message" (matches Go test output)
+func (h *HTTPTestHelper) Log(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	if h.TestLog != nil {
+		location := getCallerLocation(2) // Skip Log and getCallerLocation
+		fmt.Fprintf(h.TestLog, "    %s: %s\n", location, msg)
+	}
+	h.T.Log(msg)
+}
+
+// Logf writes a formatted message to both the test log file and t.Logf()
+// Format in file: "    file:line: message" (matches Go test output)
+func (h *HTTPTestHelper) Logf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	if h.TestLog != nil {
+		location := getCallerLocation(2) // Skip Logf and getCallerLocation
+		fmt.Fprintf(h.TestLog, "    %s: %s\n", location, msg)
+	}
+	h.T.Log(msg)
 }
 
 // NewHTTPTestHelper creates a new HTTP test helper with the env's base URL
@@ -1372,6 +1467,7 @@ func (env *TestEnvironment) NewHTTPTestHelper(t *testing.T) *HTTPTestHelper {
 		BaseURL: env.GetBaseURL(),
 		Client:  &http.Client{Timeout: 60 * time.Second},
 		T:       t,
+		TestLog: env.TestLog,
 	}
 }
 
@@ -1381,20 +1477,21 @@ func (env *TestEnvironment) NewHTTPTestHelperWithTimeout(t *testing.T, timeout t
 		BaseURL: env.GetBaseURL(),
 		Client:  &http.Client{Timeout: timeout},
 		T:       t,
+		TestLog: env.TestLog,
 	}
 }
 
 // GET makes a GET request and returns the response
 func (h *HTTPTestHelper) GET(path string) (*http.Response, error) {
 	url := h.BaseURL + path
-	h.T.Logf("GET %s", url)
+	h.Logf("GET %s", url)
 	return h.Client.Get(url)
 }
 
 // POST makes a POST request with JSON body
 func (h *HTTPTestHelper) POST(path string, body interface{}) (*http.Response, error) {
 	url := h.BaseURL + path
-	h.T.Logf("POST %s", url)
+	h.Logf("POST %s", url)
 
 	var reqBody io.Reader
 	if body != nil {
@@ -1420,7 +1517,7 @@ func (h *HTTPTestHelper) POST(path string, body interface{}) (*http.Response, er
 // POSTBody makes a POST request with raw byte content and specified content type
 func (h *HTTPTestHelper) POSTBody(path string, contentType string, body []byte) (*http.Response, error) {
 	url := h.BaseURL + path
-	h.T.Logf("POST %s (Content-Type: %s, %d bytes)", url, contentType, len(body))
+	h.Logf("POST %s (Content-Type: %s, %d bytes)", url, contentType, len(body))
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
@@ -1435,7 +1532,7 @@ func (h *HTTPTestHelper) POSTBody(path string, contentType string, body []byte) 
 // PUT makes a PUT request with JSON body
 func (h *HTTPTestHelper) PUT(path string, body interface{}) (*http.Response, error) {
 	url := h.BaseURL + path
-	h.T.Logf("PUT %s", url)
+	h.Logf("PUT %s", url)
 
 	jsonBytes, err := json.Marshal(body)
 	if err != nil {
@@ -1455,7 +1552,7 @@ func (h *HTTPTestHelper) PUT(path string, body interface{}) (*http.Response, err
 // DELETE makes a DELETE request
 func (h *HTTPTestHelper) DELETE(path string) (*http.Response, error) {
 	url := h.BaseURL + path
-	h.T.Logf("DELETE %s", url)
+	h.Logf("DELETE %s", url)
 
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
@@ -1481,7 +1578,7 @@ func (h *HTTPTestHelper) ParseJSONResponse(resp *http.Response, target interface
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	h.T.Logf("Response body: %s", string(body))
+	h.Logf("Response body: %s", string(body))
 
 	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("failed to parse JSON response: %w", err)

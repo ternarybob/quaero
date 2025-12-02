@@ -608,4 +608,3 @@ func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) er
 		}
 	}
 }
-
