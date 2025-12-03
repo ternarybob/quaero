@@ -101,6 +101,15 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/system/logs/files", s.app.SystemLogsHandler.ListLogFilesHandler)
 	mux.HandleFunc("/api/system/logs/content", s.app.SystemLogsHandler.GetLogContentHandler)
 
+	// API routes - Hybrid Scraper (chromedp + extension based scraping)
+	mux.HandleFunc("/api/hybrid-scraper/init", s.app.HybridScraperHandler.InitHandler)
+	mux.HandleFunc("/api/hybrid-scraper/crawl", s.app.HybridScraperHandler.CrawlHandler)
+	mux.HandleFunc("/api/hybrid-scraper/navigate", s.app.HybridScraperHandler.NavigateHandler)
+	mux.HandleFunc("/api/hybrid-scraper/status", s.app.HybridScraperHandler.StatusHandler)
+	mux.HandleFunc("/api/hybrid-scraper/shutdown", s.app.HybridScraperHandler.ShutdownHandler)
+	mux.HandleFunc("/api/hybrid-scraper/inject-stealth", s.app.HybridScraperHandler.InjectStealthHandler)
+	mux.HandleFunc("/api/hybrid-scraper/session/", s.app.HybridScraperHandler.SessionHandler)
+
 	// 404 handler for unmatched API routes
 	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)
 

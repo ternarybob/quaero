@@ -110,22 +110,23 @@ type App struct {
 	ConnectorService interfaces.ConnectorService
 
 	// HTTP handlers
-	APIHandler           *handlers.APIHandler
-	AuthHandler          *handlers.AuthHandler
-	KVHandler            *handlers.KVHandler
-	WSHandler            *handlers.WebSocketHandler
-	DocumentHandler      *handlers.DocumentHandler
-	SearchHandler        *handlers.SearchHandler
-	SchedulerHandler     *handlers.SchedulerHandler
-	MCPHandler           *handlers.MCPHandler
-	JobHandler           *handlers.JobHandler
-	StatusHandler        *handlers.StatusHandler
-	ConfigHandler        *handlers.ConfigHandler
-	PageHandler          *handlers.PageHandler
-	JobDefinitionHandler *handlers.JobDefinitionHandler
-	SystemLogsHandler    *handlers.SystemLogsHandler
-	ConnectorHandler     *handlers.ConnectorHandler
-	GitHubJobsHandler    *handlers.GitHubJobsHandler
+	APIHandler            *handlers.APIHandler
+	AuthHandler           *handlers.AuthHandler
+	KVHandler             *handlers.KVHandler
+	WSHandler             *handlers.WebSocketHandler
+	DocumentHandler       *handlers.DocumentHandler
+	SearchHandler         *handlers.SearchHandler
+	SchedulerHandler      *handlers.SchedulerHandler
+	MCPHandler            *handlers.MCPHandler
+	JobHandler            *handlers.JobHandler
+	StatusHandler         *handlers.StatusHandler
+	ConfigHandler         *handlers.ConfigHandler
+	PageHandler           *handlers.PageHandler
+	JobDefinitionHandler  *handlers.JobDefinitionHandler
+	SystemLogsHandler     *handlers.SystemLogsHandler
+	ConnectorHandler      *handlers.ConnectorHandler
+	GitHubJobsHandler     *handlers.GitHubJobsHandler
+	HybridScraperHandler  *handlers.HybridScraperHandler
 }
 
 // New initializes the application with all dependencies
@@ -795,6 +796,10 @@ func (a *App) initHandlers() error {
 		a.DocumentService,                  // For direct document capture from extension
 		a.Logger,
 	)
+
+	// Initialize hybrid scraper handler (lazy initialization - browser launched on-demand)
+	a.HybridScraperHandler = handlers.NewHybridScraperHandler(a.Logger)
+	a.Logger.Debug().Msg("Hybrid scraper handler initialized")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
