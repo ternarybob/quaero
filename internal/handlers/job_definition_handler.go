@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -1099,17 +1098,85 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			}
 		}
 
-		// Start background HTTP crawl of discovered links
+		// Start background crawl of discovered links using headless chromedp via orchestrator
+		// This ensures proper Job Manager → Step → Worker hierarchy
 		if len(processedContent.Links) > 0 && len(req.Cookies) > 0 {
-			go h.crawlLinksWithHTTP(
-				crawlJobID,
-				req.URL,
-				processedContent.Links,
-				req.Cookies,
-				maxPages-1, // Already saved 1 page
-				includePatterns,
-				excludePatterns,
-			)
+			// Parse URL for auth storage
+			parsedURL, _ := url.Parse(req.URL)
+			baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+
+			// Store cookies as auth credentials
+			authID := fmt.Sprintf("ext_%s_%d", parsedURL.Host, time.Now().UnixNano())
+			cookiesJSON, _ := json.Marshal(req.Cookies)
+			authCreds := &models.AuthCredentials{
+				ID:          authID,
+				Name:        fmt.Sprintf("Extension: %s", parsedURL.Host),
+				SiteDomain:  parsedURL.Host,
+				ServiceType: "generic",
+				BaseURL:     baseURL,
+				Cookies:     cookiesJSON,
+				Tokens:      make(map[string]string),
+				Data:        make(map[string]interface{}),
+				CreatedAt:   time.Now().Unix(),
+				UpdatedAt:   time.Now().Unix(),
+			}
+			if err := h.authStorage.StoreCredentials(ctx, authCreds); err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to store auth credentials for crawl")
+			}
+
+			// Limit links to maxPages
+			linksToUse := processedContent.Links
+			if len(linksToUse) > maxPages-1 {
+				linksToUse = linksToUse[:maxPages-1]
+			}
+
+			// Create ephemeral job definition for orchestrator (headless chromedp)
+			ephemeralJobDef := &models.JobDefinition{
+				ID:          crawlJobID,
+				Name:        fmt.Sprintf("Crawl: %s", parsedURL.Host),
+				Type:        models.JobDefinitionTypeCrawler,
+				Description: fmt.Sprintf("Extension-initiated crawl of %s", parsedURL.Host),
+				BaseURL:     baseURL,
+				SourceType:  "web",
+				AuthID:      authID,
+				Enabled:     true,
+				Timeout:     "30m",
+				Tags:        []string{"extension", "crawl", "headless"},
+				Steps: []models.JobStep{
+					{
+						Name:        "crawl_pages",
+						Type:        models.WorkerTypeCrawler,
+						Description: fmt.Sprintf("Crawl pages from %s using headless browser", parsedURL.Host),
+						OnError:     models.ErrorStrategyContinue,
+						Config: map[string]interface{}{
+							"start_urls":       linksToUse,
+							"max_depth":        0,     // Don't follow links from these pages
+							"max_pages":        len(linksToUse),
+							"concurrency":      3,
+							"follow_links":     false, // Only crawl the provided links
+							"include_patterns": includePatterns,
+							"exclude_patterns": excludePatterns,
+						},
+					},
+				},
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+
+			// Execute via orchestrator (headless chromedp with proper job hierarchy)
+			go func() {
+				bgCtx := context.Background()
+				parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
+				if err != nil {
+					h.logger.Error().Err(err).Str("crawl_job_id", crawlJobID).Msg("Headless crawl execution failed")
+					return
+				}
+				h.logger.Info().
+					Str("crawl_job_id", crawlJobID).
+					Str("parent_job_id", parentJobID).
+					Int("links_count", len(linksToUse)).
+					Msg("Headless crawl started via orchestrator")
+			}()
 		}
 
 		// Return success response immediately
@@ -1119,11 +1186,12 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			"job_id":      crawlJobID,
 			"job_name":    title,
 			"status":      "running",
-			"message":     fmt.Sprintf("Crawl started: 1 page saved, crawling up to %d more links", maxPages-1),
+			"message":     fmt.Sprintf("Crawl started: 1 page saved, crawling up to %d more links (headless)", maxPages-1),
 			"url":         req.URL,
 			"document_id": doc.ID,
 			"links_found": len(processedContent.Links),
 			"max_pages":   maxPages,
+			"mode":        "headless",
 		})
 		return
 	}
@@ -1335,8 +1403,11 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	WriteJSON(w, http.StatusAccepted, response)
 }
 
-// crawlLinksWithHTTP crawls discovered links using HTTP client with captured cookies
-// This runs in the background after the first page is captured from the extension
+// DEPRECATED: crawlLinksWithHTTP - Non-headless HTTP crawling has been replaced with
+// headless chromedp via orchestrator for better JavaScript rendering and authentication support.
+// All capture processes now use the orchestrator pattern (Job Manager → Step → Worker).
+// This function is commented out pending testing completion.
+/*
 func (h *JobDefinitionHandler) crawlLinksWithHTTP(
 	crawlJobID string,
 	sourceURL string,
@@ -1496,6 +1567,7 @@ func (h *JobDefinitionHandler) crawlLinksWithHTTP(
 		Dur("duration", duration).
 		Msg("HTTP crawl completed")
 }
+*/
 
 // GetMatchingConfigHandler handles GET /api/job-definitions/match-config
 // Returns the matching job definition config for a given URL
