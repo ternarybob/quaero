@@ -59,8 +59,8 @@ func DefaultHybridScraperConfig() HybridScraperConfig {
 	}
 }
 
-// HybridHybridCrawlResult represents a single page crawl result from the extension
-type HybridHybridCrawlResult struct {
+// HybridCrawlResult represents a single page crawl result from the extension
+type HybridCrawlResult struct {
 	URL         string                 `json:"url"`
 	HTML        string                 `json:"html"`
 	Title       string                 `json:"title"`
@@ -77,7 +77,7 @@ type CrawlSession struct {
 	ID           string              `json:"id"`
 	StartURL     string              `json:"start_url"`
 	LinksToCrawl []string            `json:"links_to_crawl"`
-	Results      []HybridHybridCrawlResult `json:"results"`
+	Results      []HybridCrawlResult `json:"results"`
 	Status       string              `json:"status"` // "pending", "running", "completed", "failed"
 	StartedAt    time.Time           `json:"started_at"`
 	CompletedAt  *time.Time          `json:"completed_at,omitempty"`
@@ -90,7 +90,7 @@ type CrawlSessionData struct {
 	ID           string              `json:"id"`
 	StartURL     string              `json:"start_url"`
 	LinksToCrawl []string            `json:"links_to_crawl"`
-	Results      []HybridHybridCrawlResult `json:"results"`
+	Results      []HybridCrawlResult `json:"results"`
 	ResultsCount int                 `json:"results_count"`
 	Status       string              `json:"status"`
 	StartedAt    time.Time           `json:"started_at"`
@@ -108,7 +108,7 @@ func (s *CrawlSession) GetData() CrawlSessionData {
 		ID:           s.ID,
 		StartURL:     s.StartURL,
 		LinksToCrawl: append([]string{}, s.LinksToCrawl...),
-		Results:      append([]HybridHybridCrawlResult{}, s.Results...),
+		Results:      append([]HybridCrawlResult{}, s.Results...),
 		ResultsCount: len(s.Results),
 		Status:       s.Status,
 		StartedAt:    s.StartedAt,
