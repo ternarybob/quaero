@@ -141,7 +141,7 @@ func NewService(authService interfaces.AuthService, authStorage interfaces.AuthS
 	poolConfig := ChromeDPPoolConfig{
 		MaxInstances:       config.Crawler.MaxConcurrency,
 		UserAgent:          config.Crawler.UserAgent,
-		Headless:           false, // Non-headless to avoid bot detection
+		Headless:           true,
 		DisableGPU:         true,
 		NoSandbox:          true,
 		JavaScriptWaitTime: config.Crawler.JavaScriptWaitTime,
@@ -179,7 +179,7 @@ func (s *Service) Start() error {
 		poolConfig := ChromeDPPoolConfig{
 			MaxInstances:       s.config.Crawler.MaxConcurrency,
 			UserAgent:          s.config.Crawler.UserAgent,
-			Headless:           false, // Non-headless to avoid bot detection
+			Headless:           true,
 			DisableGPU:         true,
 			NoSandbox:          true,
 			JavaScriptWaitTime: s.config.Crawler.JavaScriptWaitTime,
@@ -679,7 +679,7 @@ func (s *Service) StartCrawl(sourceType, entityType string, seedURLs []string, c
 		poolConfig := ChromeDPPoolConfig{
 			MaxInstances:       config.Concurrency,
 			UserAgent:          s.config.Crawler.UserAgent,
-			Headless:           false, // Non-headless to avoid bot detection
+			Headless:           true,
 			DisableGPU:         true,
 			NoSandbox:          true,
 			JavaScriptWaitTime: s.config.Crawler.JavaScriptWaitTime,

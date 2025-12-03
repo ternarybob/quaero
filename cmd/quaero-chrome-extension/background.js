@@ -12,6 +12,14 @@ if (chrome.runtime.id) {
 }
 
 // ============================================================================
+// Sidepanel as Default Action
+// ============================================================================
+
+// Automatically open sidepanel when extension icon is clicked
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error('Failed to set panel behavior:', error));
+
+// ============================================================================
 // Recording State Management
 // ============================================================================
 
@@ -140,6 +148,69 @@ async function addCapturedUrl(url, docId, title) {
   return true;
 }
 
+/**
+ * Add a failed upload entry
+ * @param {string} url - The URL that failed to upload
+ * @param {string} title - The page title
+ * @param {string} error - The error message
+ * @param {string} html - The captured HTML (for retry)
+ * @returns {Promise<boolean>} Success status
+ */
+async function addFailedUpload(url, title, error, html) {
+  const { failedUploads = [] } = await chrome.storage.local.get('failedUploads');
+
+  const failedEntry = {
+    url: url,
+    title: title,
+    error: error,
+    html: html,
+    timestamp: Date.now()
+  };
+
+  // Keep only most recent 20 failed uploads
+  failedUploads.unshift(failedEntry);
+  if (failedUploads.length > 20) {
+    failedUploads.length = 20;
+  }
+
+  await chrome.storage.local.set({ failedUploads });
+  console.log('Failed upload added:', url, 'error:', error);
+
+  return true;
+}
+
+/**
+ * Get all failed uploads
+ * @returns {Promise<Array>} Array of failed upload entries
+ */
+async function getFailedUploads() {
+  const { failedUploads = [] } = await chrome.storage.local.get('failedUploads');
+  return failedUploads;
+}
+
+/**
+ * Clear a failed upload entry (after successful retry)
+ * @param {string} url - The URL to remove from failed uploads
+ * @returns {Promise<boolean>} Success status
+ */
+async function clearFailedUpload(url) {
+  const { failedUploads = [] } = await chrome.storage.local.get('failedUploads');
+  const filtered = failedUploads.filter(entry => entry.url !== url);
+  await chrome.storage.local.set({ failedUploads: filtered });
+  console.log('Cleared failed upload:', url);
+  return true;
+}
+
+/**
+ * Clear all failed uploads
+ * @returns {Promise<boolean>} Success status
+ */
+async function clearAllFailedUploads() {
+  await chrome.storage.local.set({ failedUploads: [] });
+  console.log('Cleared all failed uploads');
+  return true;
+}
+
 // ============================================================================
 // Message Handlers
 // ============================================================================
@@ -190,6 +261,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep message channel open for async response
+  }
+
+  // Failed uploads handlers
+  if (request.action === 'getFailedUploads') {
+    getFailedUploads()
+      .then(uploads => {
+        sendResponse({ success: true, data: uploads });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (request.action === 'clearFailedUpload') {
+    clearFailedUpload(request.url)
+      .then(success => {
+        sendResponse({ success: success });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (request.action === 'clearAllFailedUploads') {
+    clearAllFailedUploads()
+      .then(success => {
+        sendResponse({ success: success });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (request.action === 'retryFailedUpload') {
+    (async () => {
+      try {
+        const { failedUploads = [] } = await chrome.storage.local.get('failedUploads');
+        const entry = failedUploads.find(e => e.url === request.url);
+        if (!entry) {
+          sendResponse({ success: false, error: 'Entry not found' });
+          return;
+        }
+        // Try to send to backend again
+        const result = await sendCaptureToBackend(entry.html, { title: entry.title, url: entry.url }, entry.url);
+        // Remove from failed uploads on success
+        await clearFailedUpload(entry.url);
+        // Add to captured URLs if recording
+        await addCapturedUrl(entry.url, result.docId, entry.title);
+        sendResponse({ success: true, data: result });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
   }
 
   // Existing auth capture handler
@@ -346,13 +474,13 @@ async function sendCaptureToBackend(html, metadata, url) {
   const serverUrl = await getServerUrl();
   const endpoint = `${serverUrl}/api/documents/capture`;
 
-  // Get auth data for this domain
-  const authData = await captureAuthDataForUrl(url);
-
+  // Build payload matching server's CaptureRequest format
   const payload = {
+    url: url,
     html: html,
-    metadata: metadata,
-    auth: authData
+    title: metadata.title || '',
+    description: metadata.description || '',
+    timestamp: metadata.timestamp || new Date().toISOString()
   };
 
   console.log('Sending capture to backend:', endpoint, 'URL:', url);
@@ -371,7 +499,7 @@ async function sendCaptureToBackend(html, metadata, url) {
   }
 
   const result = await response.json();
-  console.log('Capture sent successfully, docId:', result.docId);
+  console.log('Capture sent successfully, docId:', result.document_id);
 
   return result;
 }
@@ -474,16 +602,22 @@ async function performAutoCapture(tabId, url) {
     console.log('Page captured successfully:', url);
 
     // Send to backend
-    const backendResult = await sendCaptureToBackend(
-      response.html,
-      response.metadata,
-      url
-    );
+    try {
+      const backendResult = await sendCaptureToBackend(
+        response.html,
+        response.metadata,
+        url
+      );
 
-    // Update captured URLs list
-    await addCapturedUrl(url, backendResult.docId, response.metadata.title);
+      // Update captured URLs list
+      await addCapturedUrl(url, backendResult.document_id, response.metadata.title);
 
-    console.log('Auto-capture completed successfully for:', url, 'docId:', backendResult.docId);
+      console.log('Auto-capture completed successfully for:', url, 'docId:', backendResult.document_id);
+    } catch (backendError) {
+      console.error('Backend upload failed for:', url, 'Error:', backendError);
+      // Track the failed upload for retry
+      await addFailedUpload(url, response.metadata.title, backendError.message, response.html);
+    }
 
   } catch (error) {
     console.error('Auto-capture failed for tab:', tabId, 'URL:', url, 'Error:', error);
