@@ -15,10 +15,9 @@ if (chrome.runtime.id) {
 // Sidepanel as Default Action
 // ============================================================================
 
-// Open sidepanel when extension icon is clicked
-chrome.action.onClicked.addListener((tab) => {
-  chrome.sidePanel.open({ windowId: tab.windowId });
-});
+// Automatically open sidepanel when extension icon is clicked
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((error) => console.error('Failed to set panel behavior:', error));
 
 // ============================================================================
 // Recording State Management
