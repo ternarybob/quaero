@@ -140,7 +140,12 @@ func (s *Service) storeAtlassianAuth(authData *interfaces.AtlassianAuthData) err
 	}
 	siteDomain := baseURL.Host
 
+	// Generate deterministic ID from service name and site domain
+	// This allows upsert behavior - same site updates existing credentials
+	credentialsID := fmt.Sprintf("auth:%s:%s", s.serviceName, siteDomain)
+
 	credentials := &models.AuthCredentials{
+		ID:          credentialsID,
 		ServiceType: s.serviceName,
 		SiteDomain:  siteDomain,
 		Cookies:     cookiesJSON,

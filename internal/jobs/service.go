@@ -48,6 +48,10 @@ type JobDefinitionFile struct {
 	AuthID      string   `toml:"authentication"`
 	Tags        []string `toml:"tags"`
 
+	// URL patterns for automatic job matching (wildcards: *.domain.com/*)
+	// Used by quick crawl to find matching job definitions
+	UrlPatterns []string `toml:"url_patterns"`
+
 	// Crawler shorthand fields (creates default crawl step if no [step.*] defined)
 	StartURLs       []string `toml:"start_urls"`
 	IncludePatterns []string `toml:"include_patterns"`
@@ -173,6 +177,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		AutoStart:   f.AutoStart,
 		AuthID:      f.AuthID,
 		Tags:        f.Tags,
+		UrlPatterns: f.UrlPatterns,
 		Steps:       steps,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -199,6 +204,11 @@ func (s *Service) ConvertToTOML(jobDef *models.JobDefinition) ([]byte, error) {
 		"enabled":        jobDef.Enabled,
 		"auto_start":     jobDef.AutoStart,
 		"authentication": jobDef.AuthID, // Include authentication reference
+	}
+
+	// Include URL patterns if set
+	if len(jobDef.UrlPatterns) > 0 {
+		simplified["url_patterns"] = jobDef.UrlPatterns
 	}
 
 	// Extract crawler-specific fields from config

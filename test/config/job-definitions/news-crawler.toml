@@ -18,6 +18,10 @@ enabled = true
 # Whether to start automatically on service startup
 auto_start = false
 
+# URL patterns for automatic job matching (wildcards supported)
+# Quick crawl will use this job definition when the URL matches any pattern
+url_patterns = ["*.abc.net.au/*", "stockhead.com.au/*"]
+
 [step.crawl_news]
 type = "crawler"
 description = "Crawl ABC News and extract article content"

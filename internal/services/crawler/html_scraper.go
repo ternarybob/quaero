@@ -12,6 +12,7 @@ import (
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/common"
@@ -129,12 +130,52 @@ func (s *HTMLScraper) ScrapeURL(ctx context.Context, targetURL string) (*ScrapeR
 		s.logger.Warn().Err(err).Str("url", targetURL).Msg("Failed to setup cookies")
 	}
 
+	// Inject stealth JavaScript to avoid bot detection BEFORE navigation
+	stealthJS := `
+		// Override navigator.webdriver to hide automation
+		Object.defineProperty(navigator, 'webdriver', {
+			get: () => undefined,
+			configurable: true
+		});
+
+		// Override navigator.plugins to appear like a real browser
+		Object.defineProperty(navigator, 'plugins', {
+			get: () => [1, 2, 3, 4, 5],
+			configurable: true
+		});
+
+		// Override navigator.languages
+		Object.defineProperty(navigator, 'languages', {
+			get: () => ['en-US', 'en'],
+			configurable: true
+		});
+
+		// Override chrome.runtime to hide automation
+		if (!window.chrome) {
+			window.chrome = {};
+		}
+		window.chrome.runtime = {};
+
+		// Override permissions query
+		const originalQuery = window.navigator.permissions.query;
+		window.navigator.permissions.query = (parameters) => (
+			parameters.name === 'notifications' ?
+				Promise.resolve({ state: Notification.permission }) :
+				originalQuery(parameters)
+		);
+	`
+
 	// Navigate to URL and wait for JavaScript rendering
 	var htmlContent string
 	var statusCode int64
 	var responseHeaders map[string]interface{}
 
 	err := chromedp.Run(chromedpCtx,
+		// Inject stealth script before any navigation
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := page.AddScriptToEvaluateOnNewDocument(stealthJS).Do(ctx)
+			return err
+		}),
 		chromedp.Navigate(targetURL),
 		chromedp.Sleep(s.config.JavaScriptWaitTime), // Wait for JavaScript to render
 		chromedp.OuterHTML("html", &htmlContent),

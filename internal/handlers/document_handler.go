@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 )
 
 type DocumentHandler struct {
@@ -372,5 +375,117 @@ func (h *DocumentHandler) RebuildIndexHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Search index rebuilt successfully",
+	})
+}
+
+// CaptureRequest represents a page capture request from the Chrome extension
+type CaptureRequest struct {
+	URL         string `json:"url"`
+	HTML        string `json:"html"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Timestamp   string `json:"timestamp"`
+}
+
+// CaptureHandler handles POST /api/documents/capture
+// Receives HTML content directly from Chrome extension and saves as document
+func (h *DocumentHandler) CaptureHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse request body
+	var req CaptureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to decode capture request")
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate required fields
+	if req.URL == "" {
+		WriteError(w, http.StatusBadRequest, "URL is required")
+		return
+	}
+	if req.HTML == "" {
+		WriteError(w, http.StatusBadRequest, "HTML content is required")
+		return
+	}
+
+	h.logger.Debug().
+		Str("url", req.URL).
+		Int("html_size", len(req.HTML)).
+		Str("title", req.Title).
+		Msg("Processing page capture from extension")
+
+	// Process HTML content using ContentProcessor
+	contentProcessor := crawler.NewContentProcessor(h.logger)
+	processedContent, err := contentProcessor.ProcessHTML(req.HTML, req.URL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("url", req.URL).Msg("Failed to process HTML content")
+		WriteError(w, http.StatusInternalServerError, "Failed to process HTML content")
+		return
+	}
+
+	// Generate document ID
+	docID := uuid.New().String()
+
+	// Use title from request or extracted content
+	title := req.Title
+	if title == "" {
+		title = processedContent.Title
+	}
+	if title == "" {
+		title = req.URL
+	}
+
+	// Build metadata
+	metadata := map[string]interface{}{
+		"capture_source":    "chrome_extension",
+		"capture_time":      time.Now().Format(time.RFC3339),
+		"original_url":      req.URL,
+		"content_size":      len(processedContent.Markdown),
+		"links_found":       len(processedContent.Links),
+		"description":       req.Description,
+		"request_timestamp": req.Timestamp,
+	}
+
+	// Create document
+	doc := &models.Document{
+		ID:              docID,
+		SourceType:      "web",
+		SourceID:        "chrome-extension-capture",
+		Title:           title,
+		ContentMarkdown: processedContent.Markdown,
+		URL:             req.URL,
+		Metadata:        metadata,
+		Tags:            []string{"captured", "chrome-extension"},
+	}
+
+	// Save document
+	if err := h.documentService.SaveDocument(ctx, doc); err != nil {
+		h.logger.Error().Err(err).Str("doc_id", docID).Msg("Failed to save captured document")
+		WriteError(w, http.StatusInternalServerError, "Failed to save document")
+		return
+	}
+
+	h.logger.Info().
+		Str("doc_id", docID).
+		Str("url", req.URL).
+		Str("title", title).
+		Int("content_size", len(processedContent.Markdown)).
+		Msg("Page captured and saved from Chrome extension")
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"document_id":  docID,
+		"title":        title,
+		"url":          req.URL,
+		"content_size": len(processedContent.Markdown),
+		"message":      "Page captured successfully",
 	})
 }

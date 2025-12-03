@@ -179,13 +179,18 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			continue
 		}
 
-		// Store step metadata
+		// Store step metadata - include auth_id for child job cookie injection
 		stepJobMetadata := map[string]interface{}{
-			"manager_id":  managerID,
-			"step_index":  i,
-			"step_name":   step.Name,
-			"step_type":   step.Type.String(),
-			"description": step.Description,
+			"manager_id":        managerID,
+			"step_index":        i,
+			"step_name":         step.Name,
+			"step_type":         step.Type.String(),
+			"description":       step.Description,
+			"job_definition_id": jobDef.ID,
+		}
+		// Propagate auth_id to step job so crawler workers can inject cookies
+		if jobDef.AuthID != "" {
+			stepJobMetadata["auth_id"] = jobDef.AuthID
 		}
 		if err := o.jobManager.UpdateJobMetadata(ctx, stepID, stepJobMetadata); err != nil {
 			// Log but continue

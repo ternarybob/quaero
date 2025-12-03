@@ -151,6 +151,7 @@ type JobDefinition struct {
 	PostJobs         []string               `json:"post_jobs"`         // Array of job IDs to execute after this job completes
 	ErrorTolerance   *ErrorTolerance        `json:"error_tolerance"`   // Optional error tolerance configuration for child job failure management
 	Tags             []string               `json:"tags"`              // Tags to apply to all documents created by this job
+	UrlPatterns      []string               `json:"url_patterns"`      // URL patterns for automatic job matching (wildcards: *.domain.com/*)
 	ValidationStatus string                 `json:"validation_status"` // TOML validation status: "valid", "invalid", "unknown"
 	ValidationError  string                 `json:"validation_error"`  // TOML validation error message (if invalid)
 	ValidatedAt      *time.Time             `json:"validated_at"`      // Timestamp of last validation (nil if never validated)

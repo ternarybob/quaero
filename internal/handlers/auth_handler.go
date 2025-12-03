@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -179,6 +181,68 @@ func (h *AuthHandler) GetAuthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // API key handlers removed - API keys are now managed via /api/kv endpoints (Phase 4 cleanup)
+
+// GetAuthCookiesHandler returns cookies for a specific auth credential (debug endpoint)
+// GET /api/auth/{id}/cookies - Returns cookies in curl-compatible format
+func (h *AuthHandler) GetAuthCookiesHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	// Extract ID from path: /api/auth/{id}/cookies
+	path := r.URL.Path
+	// Remove "/api/auth/" prefix and "/cookies" suffix
+	path = strings.TrimPrefix(path, "/api/auth/")
+	id := strings.TrimSuffix(path, "/cookies")
+
+	if id == "" {
+		WriteError(w, http.StatusBadRequest, "Missing auth ID")
+		return
+	}
+
+	cred, err := h.authStorage.GetCredentialsByID(r.Context(), id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("id", id).Msg("Failed to get credentials")
+		WriteError(w, http.StatusInternalServerError, "Failed to get credentials")
+		return
+	}
+
+	if cred == nil {
+		WriteError(w, http.StatusNotFound, "Authentication not found")
+		return
+	}
+
+	// Parse cookies from JSON
+	var cookies []map[string]interface{}
+	if len(cred.Cookies) > 0 {
+		if err := json.Unmarshal(cred.Cookies, &cookies); err != nil {
+			h.logger.Error().Err(err).Msg("Failed to parse cookies")
+			WriteError(w, http.StatusInternalServerError, "Failed to parse cookies")
+			return
+		}
+	}
+
+	// Build curl command
+	var curlCookies []string
+	for _, cookie := range cookies {
+		name, _ := cookie["name"].(string)
+		value, _ := cookie["value"].(string)
+		if name != "" && value != "" {
+			curlCookies = append(curlCookies, fmt.Sprintf("%s=%s", name, value))
+		}
+	}
+
+	response := map[string]interface{}{
+		"id":           cred.ID,
+		"site_domain":  cred.SiteDomain,
+		"cookie_count": len(cookies),
+		"cookies":      cookies,
+		"curl_header":  fmt.Sprintf("Cookie: %s", strings.Join(curlCookies, "; ")),
+		"curl_command": fmt.Sprintf("curl -H \"Cookie: %s\" \"%s\"", strings.Join(curlCookies, "; "), cred.BaseURL),
+	}
+
+	WriteJSON(w, http.StatusOK, response)
+}
 
 // DeleteAuthHandler deletes an authentication credential
 func (h *AuthHandler) DeleteAuthHandler(w http.ResponseWriter, r *http.Request) {

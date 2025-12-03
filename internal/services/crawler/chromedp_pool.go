@@ -135,15 +135,32 @@ func (p *ChromeDPPool) createBrowserInstance(index int, config ChromeDPPoolConfi
 	startTime := time.Now()
 
 	// Create allocator context with configuration options
-	allocatorOpts := append(
-		chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", config.Headless),
+	// Start with minimal options instead of defaults (which include headless)
+	var allocatorOpts []chromedp.ExecAllocatorOption
+
+	if config.Headless {
+		// Use default options which include headless
+		allocatorOpts = append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.Flag("headless", "new"), // Use new headless mode
+		)
+	} else {
+		// Non-headless: MINIMAL options to ensure visible browser window
+		// Using start-maximized to force window visibility on Windows
+		allocatorOpts = []chromedp.ExecAllocatorOption{
+			chromedp.NoFirstRun,
+			chromedp.NoDefaultBrowserCheck,
+			// Force visible window - start-maximized is more reliable than window-position
+			chromedp.Flag("start-maximized", true),
+			// Stealth options to avoid bot detection
+			chromedp.Flag("disable-blink-features", "AutomationControlled"),
+			chromedp.Flag("disable-dev-shm-usage", true),
+		}
+	}
+
+	// Add common options
+	allocatorOpts = append(allocatorOpts,
 		chromedp.Flag("disable-gpu", config.DisableGPU),
 		chromedp.Flag("no-sandbox", config.NoSandbox),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-background-timer-throttling", false),
-		chromedp.Flag("disable-backgrounding-occluded-windows", false),
-		chromedp.Flag("disable-renderer-backgrounding", false),
 		chromedp.UserAgent(config.UserAgent),
 	)
 

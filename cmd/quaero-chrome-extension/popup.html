@@ -255,7 +255,8 @@
     <!-- Actions Section -->
     <div class="actions-group">
       <div class="section-title">Actions</div>
-      <button id="capture-auth-btn" class="button">Capture & Crawl</button>
+      <button id="capture-only-btn" class="button">Capture Page</button>
+      <button id="capture-auth-btn" class="button secondary">Capture & Crawl</button>
       <button id="refresh-status-btn" class="button secondary">Refresh Status</button>
     </div>
 
@@ -272,11 +273,11 @@
     <!-- Instructions -->
     <div class="info-box">
       <strong>📋 Instructions:</strong><br>
-      1. Navigate to any website you want to crawl<br>
+      1. Navigate to any page you want to capture<br>
       2. Log in with your credentials (if required)<br>
-      3. Click "Capture & Crawl" to save auth and start crawling<br>
-      4. Check the web UI (localhost:8085) to monitor progress<br>
-      5. Use the web UI for advanced crawling options
+      3. <strong>Capture Page</strong>: Saves current page directly (fast, no crawler)<br>
+      4. <strong>Capture & Crawl</strong>: Opens browser to re-crawl the page<br>
+      5. View captured documents in the web UI (localhost:8085)
     </div>
   </div>
 

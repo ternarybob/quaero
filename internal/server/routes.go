@@ -51,6 +51,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// API routes - Documents
 	mux.HandleFunc("/api/documents/stats", s.app.DocumentHandler.StatsHandler)
 	mux.HandleFunc("/api/documents/tags", s.app.DocumentHandler.TagsHandler)                    // GET - all unique tags
+	mux.HandleFunc("/api/documents/capture", s.app.DocumentHandler.CaptureHandler)              // POST - capture page from Chrome extension
 	mux.HandleFunc("/api/documents", s.handleDocumentsRoute)                                    // GET (list) and POST (create)
 	mux.HandleFunc("/api/documents/clear-all", s.app.DocumentHandler.DeleteAllDocumentsHandler) // DELETE - danger zone: clear all documents
 	mux.HandleFunc("/api/documents/", s.handleDocumentRoutes)                                   // Handles /api/documents/{id} and subpaths
@@ -198,6 +199,12 @@ func (s *Server) handleAuthRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// API key routes removed - API keys are now managed via /api/kv endpoints (Phase 4 cleanup)
+
+	// Handle /api/auth/{id}/cookies - debug endpoint for cookie testing
+	if strings.HasSuffix(path, "/cookies") && r.Method == "GET" {
+		s.app.AuthHandler.GetAuthCookiesHandler(w, r)
+		return
+	}
 
 	// Handle /api/auth/{id}
 	if len(path) > len("/api/auth/") {

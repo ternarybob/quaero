@@ -210,7 +210,7 @@ func NewDefaultConfig() *Config {
 			Dir: "./connectors", // Default directory for connector files (relative to executable)
 		},
 		Crawler: CrawlerConfig{
-			UserAgent:                 "Quaero/1.0 (Web Crawler)",
+			UserAgent:                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 			UserAgentRotation:         true,
 			MaxConcurrency:            3,
 			RequestDelay:              1 * time.Second,

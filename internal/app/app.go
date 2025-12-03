@@ -792,6 +792,7 @@ func (a *App) initHandlers() error {
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
+		a.DocumentService,                  // For direct document capture from extension
 		a.Logger,
 	)
 

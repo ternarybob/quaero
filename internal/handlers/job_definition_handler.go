@@ -7,17 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	nethttp "net/http"
+	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/jobs"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
 	"github.com/ternarybob/quaero/internal/queue/state"
+	"github.com/ternarybob/quaero/internal/services/crawler"
 	"github.com/ternarybob/quaero/internal/services/validation"
 )
 
@@ -34,7 +39,8 @@ type JobDefinitionHandler struct {
 	authStorage       interfaces.AuthStorage
 	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
 	validationService *validation.TOMLValidationService
-	jobService        *jobs.Service // Business logic for job definitions
+	jobService        *jobs.Service              // Business logic for job definitions
+	documentService   interfaces.DocumentService // For direct document capture
 	logger            arbor.ILogger
 }
 
@@ -49,6 +55,7 @@ func NewJobDefinitionHandler(
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
+	documentService interfaces.DocumentService, // For direct document capture from extension
 	logger arbor.ILogger,
 ) *JobDefinitionHandler {
 	if jobDefStorage == nil {
@@ -86,6 +93,7 @@ func NewJobDefinitionHandler(
 		kvStorage:         kvStorage,
 		validationService: validation.NewTOMLValidationService(logger),
 		jobService:        jobs.NewService(kvStorage, agentService, logger),
+		documentService:   documentService,
 		logger:            logger,
 	}
 }
@@ -748,6 +756,222 @@ func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWr
 	WriteJSON(w, http.StatusCreated, jobDef)
 }
 
+// findMatchingJobDefinition searches crawler job definitions for URL pattern matches
+// Returns the first job definition whose url_patterns match the target URL
+// Patterns support wildcards: * matches any sequence of characters
+// Example patterns: "*.atlassian.net/wiki/*", "abc.net.au/*"
+func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, targetURL string) (*models.JobDefinition, error) {
+	// List all crawler-type job definitions
+	opts := &interfaces.JobDefinitionListOptions{
+		Type:  string(models.JobDefinitionTypeCrawler),
+		Limit: 100, // Reasonable limit for job definitions
+	}
+
+	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list job definitions: %w", err)
+	}
+
+	// Parse target URL to extract host for matching
+	parsedURL, err := url.Parse(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target URL: %w", err)
+	}
+	targetHost := parsedURL.Host
+	targetPath := parsedURL.Path
+
+	// Search for a matching job definition
+	for _, jobDef := range jobDefs {
+		if len(jobDef.UrlPatterns) == 0 {
+			continue
+		}
+
+		for _, pattern := range jobDef.UrlPatterns {
+			if h.matchURLPattern(pattern, targetHost, targetPath, targetURL) {
+				h.logger.Debug().
+					Str("job_def_id", jobDef.ID).
+					Str("pattern", pattern).
+					Str("target_url", targetURL).
+					Msg("Found matching job definition for URL")
+				return jobDef, nil
+			}
+		}
+	}
+
+	h.logger.Debug().
+		Str("target_url", targetURL).
+		Int("job_defs_checked", len(jobDefs)).
+		Msg("No matching job definition found for URL")
+	return nil, nil
+}
+
+// matchURLPattern checks if a URL matches a wildcard pattern
+// Pattern format: "*.domain.com/path/*" where * matches any characters
+func (h *JobDefinitionHandler) matchURLPattern(pattern, targetHost, targetPath, fullURL string) bool {
+	// Convert wildcard pattern to regex
+	// Escape special regex characters except *
+	escaped := regexp.QuoteMeta(pattern)
+	// Replace escaped \* with regex .*
+	regexPattern := strings.ReplaceAll(escaped, `\*`, `.*`)
+	// Anchor the pattern
+	regexPattern = "^" + regexPattern + "$"
+
+	re, err := regexp.Compile(regexPattern)
+	if err != nil {
+		h.logger.Warn().
+			Str("pattern", pattern).
+			Err(err).
+			Msg("Invalid URL pattern, skipping")
+		return false
+	}
+
+	// Try matching against host+path (without scheme)
+	hostPath := targetHost + targetPath
+	if re.MatchString(hostPath) {
+		return true
+	}
+
+	// Also try matching against full URL (with scheme)
+	if re.MatchString(fullURL) {
+		return true
+	}
+
+	return false
+}
+
+// prepareJobDefForExecution creates an in-memory copy of the job definition with runtime overrides.
+// The returned copy has start_urls and auth_id modified, but retains the original ID.
+// This is used when executing an existing job definition without creating a new one.
+// For quick crawl from extension: limits to SINGLE PAGE only (max_depth=0, max_pages=1, follow_links=false)
+func (h *JobDefinitionHandler) prepareJobDefForExecution(template *models.JobDefinition, targetURL string, authID string) *models.JobDefinition {
+	// Create an in-memory copy - keep original ID so it references the existing job definition
+	jobDef := &models.JobDefinition{
+		ID:          template.ID, // Keep original ID
+		Name:        template.Name,
+		Type:        template.Type,
+		JobType:     template.JobType,
+		Schedule:    template.Schedule,
+		Timeout:     template.Timeout,
+		Enabled:     template.Enabled,
+		AutoStart:   template.AutoStart,
+		AuthID:      authID, // Override with fresh auth from extension
+		Tags:        template.Tags,
+		UrlPatterns: template.UrlPatterns,
+		Config:      make(map[string]interface{}),
+		Description: template.Description,
+	}
+
+	// Copy the original config
+	for k, v := range template.Config {
+		jobDef.Config[k] = v
+	}
+
+	// Use default timeout if not set
+	if jobDef.Timeout == "" {
+		jobDef.Timeout = "30m"
+	}
+
+	// Copy and modify steps - override for SINGLE PAGE quick crawl
+	for _, step := range template.Steps {
+		newStep := models.JobStep{
+			Name:        step.Name,
+			Type:        step.Type,
+			Description: step.Description,
+			OnError:     step.OnError,
+			Depends:     step.Depends,
+			Condition:   step.Condition,
+		}
+
+		// Copy config and override for single-page quick crawl
+		newConfig := make(map[string]interface{})
+		for k, v := range step.Config {
+			newConfig[k] = v
+		}
+		// Override start_urls with the requested URL
+		newConfig["start_urls"] = []interface{}{targetURL}
+
+		// QUICK CRAWL OVERRIDES: Limit to single target page only
+		// This prevents opening multiple browsers and crawling irrelevant pages
+		newConfig["max_depth"] = 0        // Don't follow links to other pages
+		newConfig["max_pages"] = 1        // Only crawl the single target page
+		newConfig["follow_links"] = false // Don't follow any links
+		newConfig["concurrency"] = 1      // Single browser instance
+
+		newStep.Config = newConfig
+
+		jobDef.Steps = append(jobDef.Steps, newStep)
+	}
+
+	return jobDef
+}
+
+// createAdHocJobDef creates a new ad-hoc job definition with default crawler settings
+// Used when no matching job definition is found for the URL
+func (h *JobDefinitionHandler) createAdHocJobDef(targetURL, name string, maxDepthPtr, maxPagesPtr *int, includePatterns, excludePatterns []string, authID string) *models.JobDefinition {
+	// Default values
+	maxDepth := 2
+	maxPages := 10
+	if maxDepthPtr != nil {
+		maxDepth = *maxDepthPtr
+	}
+	if maxPagesPtr != nil {
+		maxPages = *maxPagesPtr
+	}
+
+	// Generate name if not provided
+	if name == "" {
+		name = fmt.Sprintf("Capture & Crawl: %s", targetURL)
+	}
+
+	// Build crawler step config
+	crawlStepConfig := map[string]interface{}{
+		"start_urls":   []interface{}{targetURL},
+		"max_depth":    maxDepth,
+		"max_pages":    maxPages,
+		"concurrency":  5,
+		"follow_links": true,
+	}
+
+	// Add optional patterns if provided
+	if len(includePatterns) > 0 {
+		patterns := make([]interface{}, len(includePatterns))
+		for i, p := range includePatterns {
+			patterns[i] = p
+		}
+		crawlStepConfig["include_patterns"] = patterns
+	}
+	if len(excludePatterns) > 0 {
+		patterns := make([]interface{}, len(excludePatterns))
+		for i, p := range excludePatterns {
+			patterns[i] = p
+		}
+		crawlStepConfig["exclude_patterns"] = patterns
+	}
+
+	return &models.JobDefinition{
+		ID:        fmt.Sprintf("capture-crawl-%d", time.Now().UnixNano()),
+		Name:      name,
+		Type:      models.JobDefinitionTypeCrawler,
+		JobType:   models.JobOwnerTypeUser,
+		Schedule:  "", // Manual execution only
+		Timeout:   "30m",
+		Enabled:   true,
+		AutoStart: false,
+		AuthID:    authID,
+		Steps: []models.JobStep{
+			{
+				Name:    "crawl",
+				Type:    models.WorkerTypeCrawler,
+				Config:  crawlStepConfig,
+				OnError: models.ErrorStrategyFail,
+			},
+		},
+		Config:    make(map[string]interface{}),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
 // CreateAndExecuteQuickCrawlHandler handles POST /api/job-definitions/quick-crawl
 // Creates a temporary crawler job definition from the current page URL and executes it immediately
 // This endpoint is designed for the Chrome extension's "Capture & Crawl" button
@@ -758,13 +982,16 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 
 	// Parse request body
 	var req struct {
-		URL             string                   `json:"url"`                        // Current page URL (required)
-		Name            string                   `json:"name,omitempty"`             // Optional custom name
-		MaxDepth        *int                     `json:"max_depth,omitempty"`        // Optional override (defaults to config value)
-		MaxPages        *int                     `json:"max_pages,omitempty"`        // Optional override (defaults to config value)
-		IncludePatterns []string                 `json:"include_patterns,omitempty"` // Optional URL patterns to include
-		ExcludePatterns []string                 `json:"exclude_patterns,omitempty"` // Optional URL patterns to exclude
-		Cookies         []map[string]interface{} `json:"cookies,omitempty"`          // Optional auth cookies from extension
+		URL             string                   `json:"url"`                         // Current page URL (required)
+		Name            string                   `json:"name,omitempty"`              // Optional custom name
+		MaxDepth        *int                     `json:"max_depth,omitempty"`         // Optional override (defaults to config value)
+		MaxPages        *int                     `json:"max_pages,omitempty"`         // Optional override (defaults to config value)
+		IncludePatterns []string                 `json:"include_patterns,omitempty"`  // Optional URL patterns to include
+		ExcludePatterns []string                 `json:"exclude_patterns,omitempty"`  // Optional URL patterns to exclude
+		Cookies         []map[string]interface{} `json:"cookies,omitempty"`           // Optional auth cookies from extension
+		HTML            string                   `json:"html,omitempty"`              // Captured HTML from extension (no browser needed)
+		Title           string                   `json:"title,omitempty"`             // Page title from extension
+		UseCapturedHTML bool                     `json:"use_captured_html,omitempty"` // Use captured HTML instead of crawler
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -781,6 +1008,126 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 	}
 
 	ctx := r.Context()
+
+	// If using captured HTML from extension, save document and optionally crawl links
+	if req.UseCapturedHTML && req.HTML != "" {
+		h.logger.Info().
+			Str("url", req.URL).
+			Int("html_size", len(req.HTML)).
+			Msg("Quick crawl using captured HTML from extension")
+
+		// Process HTML content using ContentProcessor
+		contentProcessor := crawler.NewContentProcessor(h.logger)
+		processedContent, err := contentProcessor.ProcessHTML(req.HTML, req.URL)
+		if err != nil {
+			h.logger.Error().Err(err).Str("url", req.URL).Msg("Failed to process captured HTML")
+			WriteError(w, http.StatusInternalServerError, "Failed to process HTML content")
+			return
+		}
+
+		// Generate crawl job ID
+		crawlJobID := uuid.New().String()
+
+		// Use title from request or extracted content
+		title := req.Title
+		if title == "" {
+			title = processedContent.Title
+		}
+		if title == "" {
+			title = req.URL
+		}
+
+		// Build metadata
+		metadata := map[string]interface{}{
+			"capture_source": "chrome_extension_crawl",
+			"capture_time":   time.Now().Format(time.RFC3339),
+			"original_url":   req.URL,
+			"content_size":   len(processedContent.Markdown),
+			"links_found":    len(processedContent.Links),
+			"crawl_job_id":   crawlJobID,
+		}
+
+		// Create document for the first page
+		doc := &models.Document{
+			ID:              uuid.New().String(),
+			SourceType:      "web",
+			SourceID:        crawlJobID,
+			Title:           title,
+			ContentMarkdown: processedContent.Markdown,
+			URL:             req.URL,
+			Metadata:        metadata,
+			Tags:            []string{"captured", "chrome-extension", "crawl"},
+		}
+
+		// Save first document
+		if err := h.documentService.SaveDocument(ctx, doc); err != nil {
+			h.logger.Error().Err(err).Str("doc_id", doc.ID).Msg("Failed to save captured document")
+			WriteError(w, http.StatusInternalServerError, "Failed to save document")
+			return
+		}
+
+		h.logger.Info().
+			Str("doc_id", doc.ID).
+			Str("url", req.URL).
+			Str("title", title).
+			Int("links_found", len(processedContent.Links)).
+			Msg("First page saved, starting background crawl of links")
+
+		// Get crawl settings from matching job definition (if any)
+		maxPages := 10
+		includePatterns := []string{}
+		excludePatterns := []string{}
+		if matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.URL); matchedJobDef != nil {
+			if len(matchedJobDef.Steps) > 0 {
+				stepConfig := matchedJobDef.Steps[0].Config
+				if mp, ok := stepConfig["max_pages"].(int); ok {
+					maxPages = mp
+				}
+				if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
+					for _, p := range inc {
+						if ps, ok := p.(string); ok {
+							includePatterns = append(includePatterns, ps)
+						}
+					}
+				}
+				if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
+					for _, p := range exc {
+						if ps, ok := p.(string); ok {
+							excludePatterns = append(excludePatterns, ps)
+						}
+					}
+				}
+			}
+		}
+
+		// Start background HTTP crawl of discovered links
+		if len(processedContent.Links) > 0 && len(req.Cookies) > 0 {
+			go h.crawlLinksWithHTTP(
+				crawlJobID,
+				req.URL,
+				processedContent.Links,
+				req.Cookies,
+				maxPages-1, // Already saved 1 page
+				includePatterns,
+				excludePatterns,
+			)
+		}
+
+		// Return success response immediately
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"job_id":      crawlJobID,
+			"job_name":    title,
+			"status":      "running",
+			"message":     fmt.Sprintf("Crawl started: 1 page saved, crawling up to %d more links", maxPages-1),
+			"url":         req.URL,
+			"document_id": doc.ID,
+			"links_found": len(processedContent.Links),
+			"max_pages":   maxPages,
+		})
+		return
+	}
 
 	// Parse URL to extract domain
 	parsedURL, err := url.Parse(req.URL)
@@ -803,8 +1150,9 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			return
 		}
 
-		// Create auth credentials
+		// Create auth credentials with deterministic ID for upsert behavior
 		authCreds := &models.AuthCredentials{
+			ID:          fmt.Sprintf("auth:generic:%s", siteDomain),
 			SiteDomain:  siteDomain,
 			ServiceType: "generic", // Generic web authentication
 			BaseURL:     baseURL,
@@ -841,74 +1189,86 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		}
 	}
 
-	// Generate unique ID for this quick crawl job
-	jobID := fmt.Sprintf("capture-crawl-%d", time.Now().UnixNano())
-
-	// Generate name from URL if not provided
-	name := req.Name
-	if name == "" {
-		name = fmt.Sprintf("Capture & Crawl: %s", req.URL)
+	// Try to find a matching job definition based on URL patterns
+	matchedJobDef, err := h.findMatchingJobDefinition(ctx, req.URL)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("url", req.URL).Msg("Error searching for matching job definition, using defaults")
+		// Continue with ad-hoc job creation
 	}
 
-	// Get crawler defaults from config (need access to config - will use default values for now)
-	// TODO: Pass config through handler initialization or use a config service
-	maxDepth := 2
-	maxPages := 10
-	if req.MaxDepth != nil {
-		maxDepth = *req.MaxDepth
-	}
-	if req.MaxPages != nil {
-		maxPages = *req.MaxPages
-	}
+	// If a matching job definition is found, use it directly (don't create a new job definition)
+	// Only create a new job definition for ad-hoc (no match) cases
+	if matchedJobDef != nil {
+		// Create an in-memory copy with runtime overrides for start_urls and auth_id
+		// This does NOT create a new job definition in storage
+		execJobDef := h.prepareJobDefForExecution(matchedJobDef, req.URL, authID)
 
-	// Build crawler job definition with steps
-	crawlStepConfig := map[string]interface{}{
-		"start_urls":   []interface{}{req.URL},
-		"max_depth":    maxDepth,
-		"max_pages":    maxPages,
-		"concurrency":  5,
-		"follow_links": true,
-	}
+		h.logger.Info().
+			Str("job_def_id", matchedJobDef.ID).
+			Str("job_def_name", matchedJobDef.Name).
+			Str("url", req.URL).
+			Str("auth_id", authID).
+			Msg("Using existing job definition for quick crawl")
 
-	// Add optional patterns if provided
-	if len(req.IncludePatterns) > 0 {
-		patterns := make([]interface{}, len(req.IncludePatterns))
-		for i, p := range req.IncludePatterns {
-			patterns[i] = p
+		// Extract config values for logging
+		var maxDepth, maxPages int
+		if len(execJobDef.Steps) > 0 {
+			if md, ok := execJobDef.Steps[0].Config["max_depth"].(int); ok {
+				maxDepth = md
+			}
+			if mp, ok := execJobDef.Steps[0].Config["max_pages"].(int); ok {
+				maxPages = mp
+			}
 		}
-		crawlStepConfig["include_patterns"] = patterns
-	}
-	if len(req.ExcludePatterns) > 0 {
-		patterns := make([]interface{}, len(req.ExcludePatterns))
-		for i, p := range req.ExcludePatterns {
-			patterns[i] = p
+
+		// Execute the existing job definition with overrides asynchronously
+		go func() {
+			bgCtx := context.Background()
+
+			parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
+			if err != nil {
+				h.logger.Error().
+					Err(err).
+					Str("job_def_id", matchedJobDef.ID).
+					Msg("Quick crawl job execution failed")
+				return
+			}
+
+			h.logger.Debug().
+				Str("job_def_id", matchedJobDef.ID).
+				Str("parent_job_id", parentJobID).
+				Msg("Quick crawl job execution started successfully")
+		}()
+
+		// Return response - use the existing job definition ID
+		response := map[string]interface{}{
+			"job_id":    matchedJobDef.ID,
+			"job_name":  matchedJobDef.Name,
+			"status":    "running",
+			"message":   fmt.Sprintf("Quick crawl started using '%s' job definition", matchedJobDef.Name),
+			"url":       req.URL,
+			"max_depth": maxDepth,
+			"max_pages": maxPages,
 		}
-		crawlStepConfig["exclude_patterns"] = patterns
+
+		WriteJSON(w, http.StatusAccepted, response)
+		return
 	}
 
-	jobDef := &models.JobDefinition{
-		ID:          jobID,
-		Name:        name,
-		Type:        models.JobDefinitionTypeCrawler,
-		JobType:     models.JobOwnerTypeUser,
-		Description: fmt.Sprintf("Capture & Crawl initiated from Chrome extension for %s", req.URL),
-		Schedule:    "", // Manual execution only (no schedule)
-		Timeout:     "30m",
-		Enabled:     true,
-		AutoStart:   false,
-		AuthID:      authID,
-		Steps: []models.JobStep{
-			{
-				Name:    "crawl",
-				Type:    models.WorkerTypeCrawler,
-				Config:  crawlStepConfig,
-				OnError: models.ErrorStrategyFail,
-			},
-		},
-		Config:    make(map[string]interface{}),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	// No matching job definition found - create ad-hoc job definition
+	jobDef := h.createAdHocJobDef(req.URL, req.Name, req.MaxDepth, req.MaxPages, req.IncludePatterns, req.ExcludePatterns, authID)
+	h.logger.Debug().
+		Str("url", req.URL).
+		Msg("No matching job definition found, creating ad-hoc quick crawl job")
+
+	// Ensure job definition has required fields
+	if jobDef.ID == "" {
+		jobDef.ID = fmt.Sprintf("capture-crawl-%d", time.Now().UnixNano())
 	}
+	if jobDef.Name == "" {
+		jobDef.Name = fmt.Sprintf("Capture & Crawl: %s", req.URL)
+	}
+	jobDef.Description = fmt.Sprintf("Capture & Crawl initiated from Chrome extension for %s", req.URL)
 
 	// Validate full job definition
 	if err := jobDef.Validate(); err != nil {
@@ -917,11 +1277,22 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		return
 	}
 
-	// Save job definition
+	// Save ad-hoc job definition
 	if err := h.jobDefStorage.SaveJobDefinition(ctx, jobDef); err != nil {
 		h.logger.Error().Err(err).Str("job_def_id", jobDef.ID).Msg("Failed to save quick crawl job definition")
 		WriteError(w, http.StatusInternalServerError, "Failed to save job definition")
 		return
+	}
+
+	// Extract config values for logging
+	var maxDepth, maxPages int
+	if len(jobDef.Steps) > 0 {
+		if md, ok := jobDef.Steps[0].Config["max_depth"].(int); ok {
+			maxDepth = md
+		}
+		if mp, ok := jobDef.Steps[0].Config["max_pages"].(int); ok {
+			maxPages = mp
+		}
 	}
 
 	h.logger.Debug().
@@ -930,7 +1301,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		Str("url", req.URL).
 		Int("max_depth", maxDepth).
 		Int("max_pages", maxPages).
-		Msg("Quick crawl job definition created")
+		Msg("Ad-hoc quick crawl job definition created")
 
 	// Execute job definition asynchronously
 	go func() {
@@ -956,11 +1327,173 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		"job_id":    jobDef.ID,
 		"job_name":  jobDef.Name,
 		"status":    "running",
-		"message":   "Quick crawl job created and started",
+		"message":   "Ad-hoc quick crawl job created and started",
 		"url":       req.URL,
 		"max_depth": maxDepth,
 		"max_pages": maxPages,
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
+}
+
+// crawlLinksWithHTTP crawls discovered links using HTTP client with captured cookies
+// This runs in the background after the first page is captured from the extension
+func (h *JobDefinitionHandler) crawlLinksWithHTTP(
+	crawlJobID string,
+	sourceURL string,
+	links []string,
+	cookies []map[string]interface{},
+	maxPages int,
+	includePatterns []string,
+	excludePatterns []string,
+) {
+	ctx := context.Background()
+	startTime := time.Now()
+
+	h.logger.Info().
+		Str("crawl_job_id", crawlJobID).
+		Str("source_url", sourceURL).
+		Int("links_count", len(links)).
+		Int("max_pages", maxPages).
+		Msg("Starting HTTP crawl of discovered links")
+
+	// Convert extension cookies to http.Cookie format
+	httpCookies := make([]*nethttp.Cookie, 0, len(cookies))
+	for _, c := range cookies {
+		name, _ := c["name"].(string)
+		value, _ := c["value"].(string)
+		domain, _ := c["domain"].(string)
+		path, _ := c["path"].(string)
+		if name != "" && value != "" {
+			httpCookies = append(httpCookies, &nethttp.Cookie{
+				Name:   name,
+				Value:  value,
+				Domain: domain,
+				Path:   path,
+			})
+		}
+	}
+
+	// Create HTTP client with cookie jar
+	jar, _ := cookiejar.New(nil)
+	client := &nethttp.Client{
+		Jar:     jar,
+		Timeout: 30 * time.Second,
+	}
+
+	// Parse source URL for cookie domain
+	parsedSource, err := url.Parse(sourceURL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("source_url", sourceURL).Msg("Failed to parse source URL")
+		return
+	}
+
+	// Set cookies on the jar
+	jar.SetCookies(parsedSource, httpCookies)
+
+	// Create link extractor for filtering
+	linkExtractor := crawler.NewLinkExtractor(h.logger)
+
+	// Filter links using patterns
+	filteredLinks := links
+	if len(includePatterns) > 0 || len(excludePatterns) > 0 {
+		filterResult := linkExtractor.FilterLinks(links, includePatterns, excludePatterns)
+		filteredLinks = filterResult.FilteredLinks
+		h.logger.Debug().
+			Int("original", len(links)).
+			Int("filtered", len(filteredLinks)).
+			Msg("Links filtered by patterns")
+	}
+
+	// Limit to maxPages
+	if len(filteredLinks) > maxPages {
+		filteredLinks = filteredLinks[:maxPages]
+	}
+
+	// Track crawled URLs to avoid duplicates
+	crawledURLs := make(map[string]bool)
+	crawledURLs[sourceURL] = true
+
+	contentProcessor := crawler.NewContentProcessor(h.logger)
+	successCount := 0
+	failCount := 0
+
+	for _, link := range filteredLinks {
+		// Skip already crawled
+		if crawledURLs[link] {
+			continue
+		}
+		crawledURLs[link] = true
+
+		// Fetch the page
+		resp, err := client.Get(link)
+		if err != nil {
+			h.logger.Debug().Err(err).Str("url", link).Msg("Failed to fetch link")
+			failCount++
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			h.logger.Debug().Int("status", resp.StatusCode).Str("url", link).Msg("Non-200 response")
+			failCount++
+			continue
+		}
+
+		// Read body
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			h.logger.Debug().Err(err).Str("url", link).Msg("Failed to read response body")
+			failCount++
+			continue
+		}
+
+		// Process HTML
+		processedContent, err := contentProcessor.ProcessHTML(string(body), link)
+		if err != nil {
+			h.logger.Debug().Err(err).Str("url", link).Msg("Failed to process HTML")
+			failCount++
+			continue
+		}
+
+		// Create and save document
+		doc := &models.Document{
+			ID:              uuid.New().String(),
+			SourceType:      "web",
+			SourceID:        crawlJobID,
+			Title:           processedContent.Title,
+			ContentMarkdown: processedContent.Markdown,
+			URL:             link,
+			Metadata: map[string]interface{}{
+				"capture_source": "http_crawl",
+				"capture_time":   time.Now().Format(time.RFC3339),
+				"crawl_job_id":   crawlJobID,
+				"content_size":   len(processedContent.Markdown),
+			},
+			Tags: []string{"captured", "http-crawl"},
+		}
+
+		if err := h.documentService.SaveDocument(ctx, doc); err != nil {
+			h.logger.Debug().Err(err).Str("url", link).Msg("Failed to save document")
+			failCount++
+			continue
+		}
+
+		successCount++
+		h.logger.Debug().
+			Str("url", link).
+			Str("title", processedContent.Title).
+			Int("size", len(processedContent.Markdown)).
+			Msg("Crawled and saved page")
+	}
+
+	duration := time.Since(startTime)
+	h.logger.Info().
+		Str("crawl_job_id", crawlJobID).
+		Int("success", successCount).
+		Int("failed", failCount).
+		Int("total_links", len(filteredLinks)).
+		Dur("duration", duration).
+		Msg("HTTP crawl completed")
 }

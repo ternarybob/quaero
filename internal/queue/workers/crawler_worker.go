@@ -17,6 +17,7 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/log"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
@@ -159,28 +160,36 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	jobLogger.Trace().Msg("About to create browser instance")
 
 	// Step 1: Create a fresh ChromeDP browser instance for this request
-	// TEMPORARY: Bypassing pool to debug context cancellation issue
+	// Using NON-HEADLESS mode with stealth options to avoid bot detection
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
 
 	jobLogger.Trace().Msg("Published progress update for browser creation")
 
+	// Non-headless with stealth settings - NO headless flag to show visible browser window
+	allocatorOpts := []chromedp.ExecAllocatorOption{
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		// Force visible window
+		chromedp.Flag("start-maximized", true),
+		// Stealth options to avoid bot detection
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		// Realistic user agent
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+	}
+
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
 		context.Background(),
-		append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.Flag("headless", true),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-			chromedp.Flag("disable-dev-shm-usage", true),
-			chromedp.UserAgent("Quaero/1.0 (Web Crawler)"),
-		)...,
+		allocatorOpts...,
 	)
 	defer allocatorCancel()
 
 	browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
 	defer browserCancel()
 
-	jobLogger.Trace().Msg("Created fresh browser instance")
+	jobLogger.Trace().Msg("Created fresh browser instance (non-headless)")
 
 	// Step 1.5: Load and inject authentication cookies into browser
 	if err := w.injectAuthCookies(ctx, browserCtx, parentID, seedURL, jobLogger); err != nil {
@@ -675,9 +684,43 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	})
 	// ===== END PHASE 3 PART 1.5 =====
 
+	// Inject stealth JavaScript to avoid bot detection BEFORE navigation
+	stealthJS := `
+		// Override navigator.webdriver to hide automation
+		Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+		// Override navigator.plugins to appear like a real browser
+		Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5], configurable: true });
+		// Override navigator.languages
+		Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+		// Override chrome.runtime to hide automation
+		if (!window.chrome) { window.chrome = {}; }
+		window.chrome.runtime = {};
+		// Override permissions query
+		const originalQuery = window.navigator.permissions.query;
+		window.navigator.permissions.query = (parameters) => (
+			parameters.name === 'notifications' ?
+				Promise.resolve({ state: Notification.permission }) :
+				originalQuery(parameters)
+		);
+		// Set realistic screen dimensions
+		Object.defineProperty(screen, 'width', { get: () => 1920 });
+		Object.defineProperty(screen, 'height', { get: () => 1080 });
+		Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
+		Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
+		Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+		Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+	`
+
 	// Navigate to URL and wait for JavaScript rendering
 	// Use the browserCtx (ChromeDP context) for ChromeDP operations
 	err = chromedp.Run(browserCtx,
+		// Inject stealth script before any navigation
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := page.AddScriptToEvaluateOnNewDocument(stealthJS).Do(ctx)
+			return err
+		}),
+		// Set viewport to realistic size
+		chromedp.EmulateViewport(1920, 1080),
 		chromedp.Navigate(url),
 		chromedp.Sleep(2*time.Second), // Wait for JavaScript to render
 		chromedp.OuterHTML("html", &htmlContent),
@@ -1005,8 +1048,8 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 		if cookieDomain == "" {
 			cookieDomain = targetURLParsed.Host
 		}
-		// Remove leading dot if present (ChromeDP doesn't like it)
-		cookieDomain = strings.TrimPrefix(cookieDomain, ".")
+		// Keep leading dot for subdomain cookies (e.g., .atlassian.net)
+		// ChromeDP network.SetCookie handles this correctly
 
 		chromeDPCookie := &network.CookieParam{
 			Name:     c.Name,
@@ -1062,9 +1105,10 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 			successCount := 0
 			failCount := 0
 
-			// Set all cookies
+			// Set all cookies with URL parameter for proper domain association
 			for _, cookie := range chromeDPCookies {
 				if err := network.SetCookie(cookie.Name, cookie.Value).
+					WithURL(targetURL).
 					WithDomain(cookie.Domain).
 					WithPath(cookie.Path).
 					WithSecure(cookie.Secure).
