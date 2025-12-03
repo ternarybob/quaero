@@ -382,3 +382,308 @@ setInterval(async () => {
   await loadRecordingState();
   await loadFailedUploads();
 }, 5000);
+
+// ============================================================================
+// Crawl & Capture
+// ============================================================================
+
+let currentCrawlConfig = null;
+let currentLinks = [];
+let isCrawling = false;
+
+// Initialize crawl section when panel opens
+document.addEventListener('DOMContentLoaded', async () => {
+  // Set up crawl event listeners
+  document.getElementById('start-crawl-btn').addEventListener('click', startCrawl);
+  document.getElementById('refresh-links-btn').addEventListener('click', refreshLinksAndConfig);
+
+  // Initial load
+  await refreshLinksAndConfig();
+});
+
+// Check for matching config and extract links from current page
+async function refreshLinksAndConfig() {
+  const configIndicator = document.getElementById('config-indicator');
+  const configName = document.getElementById('config-name');
+  const startBtn = document.getElementById('start-crawl-btn');
+  const linksPreview = document.getElementById('crawl-links-preview');
+
+  configIndicator.className = 'config-indicator';
+  configName.textContent = 'Checking...';
+  startBtn.disabled = true;
+
+  try {
+    // Get current tab URL
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url) {
+      configName.textContent = 'No active tab';
+      return;
+    }
+
+    const serverUrl = document.getElementById('server-url').value;
+
+    // Get matching config from server
+    const configResponse = await fetch(
+      `${serverUrl}/api/job-definitions/match-config?url=${encodeURIComponent(tab.url)}`
+    );
+
+    if (!configResponse.ok) {
+      throw new Error('Failed to get config');
+    }
+
+    currentCrawlConfig = await configResponse.json();
+
+    // Update UI based on match
+    if (currentCrawlConfig.matched) {
+      configIndicator.className = 'config-indicator matched';
+      configName.textContent = currentCrawlConfig.job_definition.name;
+    } else {
+      configIndicator.className = 'config-indicator no-match';
+      configName.textContent = 'Default config (no match)';
+    }
+
+    // Extract links from current page
+    await extractLinksFromPage(tab.id);
+
+    // Enable start button if we have links
+    startBtn.disabled = currentLinks.length === 0;
+    linksPreview.style.display = 'block';
+
+  } catch (error) {
+    console.error('Error refreshing config:', error);
+    configIndicator.className = 'config-indicator';
+    configName.textContent = 'Error loading config';
+  }
+}
+
+// Extract links from the current page and filter them
+async function extractLinksFromPage(tabId) {
+  const linksList = document.getElementById('crawl-links-list');
+  const linksCount = document.getElementById('links-count');
+
+  try {
+    // Inject script to extract links
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: () => {
+        const links = [];
+        const seen = new Set();
+
+        document.querySelectorAll('a[href]').forEach(a => {
+          const href = a.getAttribute('href');
+          if (!href) return;
+
+          // Skip non-http links
+          if (href.startsWith('javascript:') ||
+              href.startsWith('mailto:') ||
+              href.startsWith('tel:') ||
+              href.startsWith('#')) {
+            return;
+          }
+
+          try {
+            const absoluteUrl = new URL(href, window.location.href).href;
+            // Only same-origin links
+            if (new URL(absoluteUrl).origin === window.location.origin) {
+              if (!seen.has(absoluteUrl)) {
+                seen.add(absoluteUrl);
+                links.push(absoluteUrl);
+              }
+            }
+          } catch (e) {
+            // Invalid URL
+          }
+        });
+
+        return links;
+      }
+    });
+
+    let extractedLinks = results[0]?.result || [];
+
+    // Apply include/exclude patterns if we have config
+    if (currentCrawlConfig?.crawl_config) {
+      extractedLinks = filterLinks(
+        extractedLinks,
+        currentCrawlConfig.crawl_config.include_patterns || [],
+        currentCrawlConfig.crawl_config.exclude_patterns || []
+      );
+    }
+
+    currentLinks = extractedLinks;
+
+    // Update UI
+    linksCount.textContent = `${currentLinks.length} links found`;
+    linksList.innerHTML = '';
+
+    if (currentLinks.length === 0) {
+      linksList.innerHTML = '<div class="link-item">No matching links found</div>';
+    } else {
+      // Show first 20 links
+      const displayLinks = currentLinks.slice(0, 20);
+      displayLinks.forEach(link => {
+        const item = document.createElement('div');
+        item.className = 'link-item';
+        item.textContent = link;
+        item.title = link;
+        linksList.appendChild(item);
+      });
+
+      if (currentLinks.length > 20) {
+        const more = document.createElement('div');
+        more.className = 'link-item';
+        more.style.color = '#7f8c8d';
+        more.textContent = `... and ${currentLinks.length - 20} more`;
+        linksList.appendChild(more);
+      }
+    }
+
+  } catch (error) {
+    console.error('Error extracting links:', error);
+    linksCount.textContent = 'Error extracting links';
+    linksList.innerHTML = '<div class="link-item">Failed to extract links</div>';
+    currentLinks = [];
+  }
+}
+
+// Filter links using include/exclude patterns
+function filterLinks(links, includePatterns, excludePatterns) {
+  return links.filter(link => {
+    // Check exclude patterns first
+    for (const pattern of excludePatterns) {
+      if (matchPattern(link, pattern)) {
+        return false;
+      }
+    }
+
+    // If no include patterns, include all non-excluded
+    if (includePatterns.length === 0) {
+      return true;
+    }
+
+    // Check include patterns
+    for (const pattern of includePatterns) {
+      if (matchPattern(link, pattern)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
+// Match URL against a pattern (simple substring match for now)
+function matchPattern(url, pattern) {
+  // Convert simple patterns to work as substring matches
+  // Patterns like "/wiki/spaces/" should match if URL contains it
+  if (pattern.startsWith('/')) {
+    // Path pattern - check if URL path contains it
+    try {
+      const urlPath = new URL(url).pathname;
+      return urlPath.includes(pattern);
+    } catch {
+      return false;
+    }
+  }
+
+  // Otherwise do simple substring match
+  return url.includes(pattern);
+}
+
+// Start the crawl
+async function startCrawl() {
+  if (isCrawling || currentLinks.length === 0) return;
+
+  const startBtn = document.getElementById('start-crawl-btn');
+  const btnText = document.getElementById('crawl-btn-text');
+  const progressDiv = document.getElementById('crawl-progress');
+  const progressFill = document.getElementById('crawl-progress-fill');
+  const progressText = document.getElementById('crawl-progress-text');
+  const includeCurrentPage = document.getElementById('include-current-page').checked;
+
+  isCrawling = true;
+  startBtn.disabled = true;
+  btnText.textContent = 'Crawling...';
+  progressDiv.style.display = 'block';
+  progressFill.style.width = '0%';
+  progressText.textContent = 'Starting crawl...';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active tab');
+
+    const serverUrl = document.getElementById('server-url').value;
+
+    // Get cookies for authentication
+    const cookies = await chrome.cookies.getAll({ url: tab.url });
+
+    // Get current page HTML if including it
+    let html = '';
+    let title = tab.title || '';
+
+    if (includeCurrentPage) {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => document.documentElement.outerHTML
+      });
+      html = results[0]?.result || '';
+    }
+
+    // Start crawl
+    const response = await fetch(`${serverUrl}/api/job-definitions/crawl-links`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start_url: tab.url,
+        links: currentLinks,
+        job_definition_id: currentCrawlConfig?.job_definition?.id || '',
+        cookies: cookies.map(c => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path
+        })),
+        html: html,
+        title: title,
+        include_current_page: includeCurrentPage
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to start crawl');
+    }
+
+    const result = await response.json();
+
+    progressFill.style.width = '100%';
+    progressText.textContent = result.message;
+    showSuccess(`Crawl started: ${result.links_to_crawl} pages queued`);
+
+    // Reset after delay
+    setTimeout(() => {
+      progressDiv.style.display = 'none';
+      btnText.textContent = 'Start Crawl';
+      startBtn.disabled = false;
+      isCrawling = false;
+    }, 3000);
+
+  } catch (error) {
+    console.error('Crawl error:', error);
+    showError(`Crawl failed: ${error.message}`);
+    progressDiv.style.display = 'none';
+    btnText.textContent = 'Start Crawl';
+    startBtn.disabled = false;
+    isCrawling = false;
+  }
+}
+
+// Refresh crawl config when tab changes
+chrome.tabs.onActivated.addListener(async () => {
+  await refreshLinksAndConfig();
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete') {
+    await refreshLinksAndConfig();
+  }
+});

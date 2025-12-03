@@ -296,6 +296,18 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check for /match-config (find matching job config for URL)
+	if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/match-config") {
+		s.app.JobDefinitionHandler.GetMatchingConfigHandler(w, r)
+		return
+	}
+
+	// Check for /crawl-links suffix (crawl with provided links from extension)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/crawl-links") {
+		s.app.JobDefinitionHandler.CrawlWithLinksHandler(w, r)
+		return
+	}
+
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)

@@ -1497,3 +1497,273 @@ func (h *JobDefinitionHandler) crawlLinksWithHTTP(
 		Dur("duration", duration).
 		Msg("HTTP crawl completed")
 }
+
+// GetMatchingConfigHandler handles GET /api/job-definitions/match-config
+// Returns the matching job definition config for a given URL
+// Used by Chrome extension to find crawl settings before starting a crawl
+func (h *JobDefinitionHandler) GetMatchingConfigHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "GET") {
+		return
+	}
+
+	targetURL := r.URL.Query().Get("url")
+	if targetURL == "" {
+		WriteError(w, http.StatusBadRequest, "URL parameter is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Find matching job definition
+	matchedJobDef, err := h.findMatchingJobDefinition(ctx, targetURL)
+	if err != nil {
+		h.logger.Error().Err(err).Str("url", targetURL).Msg("Error finding matching job definition")
+		WriteError(w, http.StatusInternalServerError, "Error searching job definitions")
+		return
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"url":     targetURL,
+		"matched": matchedJobDef != nil,
+	}
+
+	if matchedJobDef != nil {
+		response["job_definition"] = map[string]interface{}{
+			"id":           matchedJobDef.ID,
+			"name":         matchedJobDef.Name,
+			"description":  matchedJobDef.Description,
+			"url_patterns": matchedJobDef.UrlPatterns,
+			"tags":         matchedJobDef.Tags,
+		}
+
+		// Extract crawler config from first step
+		if len(matchedJobDef.Steps) > 0 {
+			stepConfig := matchedJobDef.Steps[0].Config
+
+			crawlConfig := map[string]interface{}{}
+
+			// Extract relevant settings
+			if md, ok := stepConfig["max_depth"]; ok {
+				crawlConfig["max_depth"] = md
+			}
+			if mp, ok := stepConfig["max_pages"]; ok {
+				crawlConfig["max_pages"] = mp
+			}
+			if fl, ok := stepConfig["follow_links"]; ok {
+				crawlConfig["follow_links"] = fl
+			}
+			if c, ok := stepConfig["concurrency"]; ok {
+				crawlConfig["concurrency"] = c
+			}
+
+			// Extract patterns
+			includePatterns := []string{}
+			excludePatterns := []string{}
+
+			if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
+				for _, p := range inc {
+					if ps, ok := p.(string); ok {
+						includePatterns = append(includePatterns, ps)
+					}
+				}
+			}
+			if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
+				for _, p := range exc {
+					if ps, ok := p.(string); ok {
+						excludePatterns = append(excludePatterns, ps)
+					}
+				}
+			}
+
+			crawlConfig["include_patterns"] = includePatterns
+			crawlConfig["exclude_patterns"] = excludePatterns
+
+			response["crawl_config"] = crawlConfig
+		}
+
+		h.logger.Debug().
+			Str("url", targetURL).
+			Str("job_def_id", matchedJobDef.ID).
+			Str("job_def_name", matchedJobDef.Name).
+			Msg("Found matching job definition for URL")
+	} else {
+		// Return default config when no match
+		response["crawl_config"] = map[string]interface{}{
+			"max_depth":        2,
+			"max_pages":        10,
+			"follow_links":     true,
+			"concurrency":      5,
+			"include_patterns": []string{},
+			"exclude_patterns": []string{},
+		}
+
+		h.logger.Debug().
+			Str("url", targetURL).
+			Msg("No matching job definition found, returning defaults")
+	}
+
+	WriteJSON(w, http.StatusOK, response)
+}
+
+// CrawlWithLinksHandler handles POST /api/job-definitions/crawl-links
+// Starts a crawl job with a specific list of links provided by the extension
+// The extension extracts links from the page and applies include/exclude patterns client-side
+func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "POST") {
+		return
+	}
+
+	var req struct {
+		StartURL        string                   `json:"start_url"`                   // Current page URL
+		Links           []string                 `json:"links"`                       // Pre-filtered links to crawl
+		JobDefinitionID string                   `json:"job_definition_id,omitempty"` // Optional: use existing job def
+		Cookies         []map[string]interface{} `json:"cookies,omitempty"`           // Auth cookies from extension
+		HTML            string                   `json:"html,omitempty"`              // Current page HTML
+		Title           string                   `json:"title,omitempty"`             // Current page title
+		IncludeCurrentPage bool                  `json:"include_current_page"`        // Save current page too
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error().Err(err).Msg("Failed to decode crawl-links request")
+		WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	defer r.Body.Close()
+
+	if req.StartURL == "" {
+		WriteError(w, http.StatusBadRequest, "start_url is required")
+		return
+	}
+
+	ctx := r.Context()
+	crawlJobID := uuid.New().String()
+	startTime := time.Now()
+
+	h.logger.Info().
+		Str("crawl_job_id", crawlJobID).
+		Str("start_url", req.StartURL).
+		Int("links_count", len(req.Links)).
+		Bool("include_current", req.IncludeCurrentPage).
+		Msg("Starting crawl with provided links")
+
+	// Get config from matching job definition or use defaults
+	var includePatterns, excludePatterns []string
+	maxPages := 50
+
+	if req.JobDefinitionID != "" {
+		// Load specified job definition
+		jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, req.JobDefinitionID)
+		if err == nil && jobDef != nil && len(jobDef.Steps) > 0 {
+			stepConfig := jobDef.Steps[0].Config
+			if mp, ok := stepConfig["max_pages"].(int); ok {
+				maxPages = mp
+			}
+			if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
+				for _, p := range inc {
+					if ps, ok := p.(string); ok {
+						includePatterns = append(includePatterns, ps)
+					}
+				}
+			}
+			if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
+				for _, p := range exc {
+					if ps, ok := p.(string); ok {
+						excludePatterns = append(excludePatterns, ps)
+					}
+				}
+			}
+		}
+	} else {
+		// Try to find matching config
+		if matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.StartURL); matchedJobDef != nil && len(matchedJobDef.Steps) > 0 {
+			stepConfig := matchedJobDef.Steps[0].Config
+			if mp, ok := stepConfig["max_pages"].(int); ok {
+				maxPages = mp
+			}
+			if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
+				for _, p := range inc {
+					if ps, ok := p.(string); ok {
+						includePatterns = append(includePatterns, ps)
+					}
+				}
+			}
+			if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
+				for _, p := range exc {
+					if ps, ok := p.(string); ok {
+						excludePatterns = append(excludePatterns, ps)
+					}
+				}
+			}
+		}
+	}
+
+	savedCount := 0
+
+	// Save current page if requested and HTML provided
+	if req.IncludeCurrentPage && req.HTML != "" {
+		contentProcessor := crawler.NewContentProcessor(h.logger)
+		processedContent, err := contentProcessor.ProcessHTML(req.HTML, req.StartURL)
+		if err == nil {
+			title := req.Title
+			if title == "" {
+				title = processedContent.Title
+			}
+			if title == "" {
+				title = req.StartURL
+			}
+
+			doc := &models.Document{
+				ID:              uuid.New().String(),
+				SourceType:      "web",
+				SourceID:        crawlJobID,
+				Title:           title,
+				ContentMarkdown: processedContent.Markdown,
+				URL:             req.StartURL,
+				Metadata: map[string]interface{}{
+					"capture_source": "chrome_extension_crawl",
+					"capture_time":   startTime.Format(time.RFC3339),
+					"crawl_job_id":   crawlJobID,
+					"is_start_page":  true,
+				},
+				Tags: []string{"captured", "chrome-extension", "crawl"},
+			}
+
+			if err := h.documentService.SaveDocument(ctx, doc); err == nil {
+				savedCount++
+				h.logger.Debug().Str("url", req.StartURL).Msg("Saved start page")
+			}
+		}
+	}
+
+	// Limit links to maxPages
+	linksToProcess := req.Links
+	if len(linksToProcess) > maxPages-savedCount {
+		linksToProcess = linksToProcess[:maxPages-savedCount]
+	}
+
+	// Start background HTTP crawl if we have cookies and links
+	if len(linksToProcess) > 0 && len(req.Cookies) > 0 {
+		go h.crawlLinksWithHTTP(
+			crawlJobID,
+			req.StartURL,
+			linksToProcess,
+			req.Cookies,
+			len(linksToProcess),
+			includePatterns,
+			excludePatterns,
+		)
+	}
+
+	response := map[string]interface{}{
+		"job_id":         crawlJobID,
+		"status":         "running",
+		"start_url":      req.StartURL,
+		"links_to_crawl": len(linksToProcess),
+		"pages_saved":    savedCount,
+		"max_pages":      maxPages,
+		"message":        fmt.Sprintf("Crawl started: %d pages queued for crawling", len(linksToProcess)),
+	}
+
+	WriteJSON(w, http.StatusAccepted, response)
+}

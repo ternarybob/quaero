@@ -386,6 +386,128 @@
       color: #e74c3c;
       text-decoration: underline;
     }
+
+    /* Crawl & Capture Styles */
+    .config-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .config-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #95a5a6;
+    }
+
+    .config-indicator.matched {
+      background: #27ae60;
+    }
+
+    .config-indicator.no-match {
+      background: #f39c12;
+    }
+
+    .links-preview {
+      margin-bottom: 10px;
+    }
+
+    .links-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 12px;
+      color: #7f8c8d;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+
+    .checkbox-label input {
+      cursor: pointer;
+    }
+
+    .links-list {
+      max-height: 120px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      background: #fafafa;
+      font-size: 11px;
+    }
+
+    .link-item {
+      padding: 6px 10px;
+      border-bottom: 1px solid #eee;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #2980b9;
+    }
+
+    .link-item:last-child {
+      border-bottom: none;
+    }
+
+    .link-item.excluded {
+      color: #95a5a6;
+      text-decoration: line-through;
+    }
+
+    .crawl-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .crawl-actions .button {
+      flex: 1;
+    }
+
+    .crawl-progress {
+      margin-top: 10px;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: #e0e0e0;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #27ae60;
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    .progress-text {
+      font-size: 11px;
+      color: #7f8c8d;
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    .button:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+
+    .button:disabled:hover {
+      background: #bdc3c7;
+    }
   </style>
 </head>
 <body>
@@ -434,6 +556,37 @@
           <div class="stat-value error" id="failed-count">0</div>
           <div class="stat-label">Failed</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Crawl & Capture Card -->
+    <div class="card" id="crawl-capture-card">
+      <div class="section-title">Crawl & Capture</div>
+      <div id="crawl-config-status" class="config-status">
+        <span class="config-indicator" id="config-indicator"></span>
+        <span id="config-name">Checking for matching config...</span>
+      </div>
+      <div id="crawl-links-preview" class="links-preview" style="display: none;">
+        <div class="links-header">
+          <span id="links-count">0 links found</span>
+          <label class="checkbox-label">
+            <input type="checkbox" id="include-current-page" checked>
+            Include current page
+          </label>
+        </div>
+        <div class="links-list" id="crawl-links-list"></div>
+      </div>
+      <div class="crawl-actions">
+        <button class="button" id="start-crawl-btn" disabled>
+          <span id="crawl-btn-text">Start Crawl</span>
+        </button>
+        <button class="button secondary small" id="refresh-links-btn">Refresh</button>
+      </div>
+      <div id="crawl-progress" class="crawl-progress" style="display: none;">
+        <div class="progress-bar">
+          <div class="progress-fill" id="crawl-progress-fill"></div>
+        </div>
+        <div class="progress-text" id="crawl-progress-text">Crawling...</div>
       </div>
     </div>
 
