@@ -448,6 +448,12 @@
       font-size: 11px;
     }
 
+    .crawl-options {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #eee;
+    }
+
     .link-item {
       padding: 6px 10px;
       border-bottom: 1px solid #eee;
@@ -575,6 +581,12 @@
           </label>
         </div>
         <div class="links-list" id="crawl-links-list"></div>
+        <div class="crawl-options">
+          <label class="checkbox-label">
+            <input type="checkbox" id="download-images">
+            Download images locally
+          </label>
+        </div>
       </div>
       <div class="crawl-actions">
         <button class="button" id="start-crawl-btn" disabled>

@@ -600,6 +600,7 @@ async function startCrawl() {
   const progressFill = document.getElementById('crawl-progress-fill');
   const progressText = document.getElementById('crawl-progress-text');
   const includeCurrentPage = document.getElementById('include-current-page').checked;
+  const downloadImages = document.getElementById('download-images').checked;
 
   isCrawling = true;
   startBtn.disabled = true;
@@ -645,7 +646,8 @@ async function startCrawl() {
         })),
         html: html,
         title: title,
-        include_current_page: includeCurrentPage
+        include_current_page: includeCurrentPage,
+        download_images: downloadImages
       })
     });
 
