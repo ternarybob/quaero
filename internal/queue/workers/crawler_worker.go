@@ -499,6 +499,17 @@ func (w *CrawlerWorker) extractCrawlConfig(config map[string]interface{}) (*mode
 		crawlConfig.ExcludePatterns = excludePatterns
 	}
 
+	// Extract tags to apply to documents
+	if tags, ok := configMap["tags"].([]interface{}); ok {
+		for _, tag := range tags {
+			if tagStr, ok := tag.(string); ok {
+				crawlConfig.Tags = append(crawlConfig.Tags, tagStr)
+			}
+		}
+	} else if tags, ok := configMap["tags"].([]string); ok {
+		crawlConfig.Tags = tags
+	}
+
 	return crawlConfig, nil
 }
 
@@ -1679,6 +1690,19 @@ func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawl
 			}
 		}
 		config.ExcludePatterns = patterns
+	}
+
+	// Extract tags to apply to documents
+	if v, ok := configMap["tags"].([]string); ok {
+		config.Tags = v
+	} else if v, ok := configMap["tags"].([]interface{}); ok {
+		tags := make([]string, 0, len(v))
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		config.Tags = tags
 	}
 
 	return config
