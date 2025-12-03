@@ -1802,9 +1802,15 @@ func (h *JobDefinitionHandler) executeCrawlJob(
 
 	// Helper to update job status
 	updateJobStatus := func(status models.JobStatus, docCount int, errMsg string) {
-		jobState, err := h.jobStorage.GetJob(ctx, jobID)
+		jobStateInterface, err := h.jobStorage.GetJob(ctx, jobID)
 		if err != nil {
 			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job for status update")
+			return
+		}
+
+		jobState, ok := jobStateInterface.(*models.QueueJobState)
+		if !ok {
+			h.logger.Error().Str("job_id", jobID).Msg("Failed to cast job state")
 			return
 		}
 
@@ -1830,12 +1836,12 @@ func (h *JobDefinitionHandler) executeCrawlJob(
 
 	// Add log entry
 	addLog := func(level, message string) {
-		log := models.JobLog{
-			ID:        uuid.New().String(),
-			JobID:     jobID,
-			Level:     level,
-			Message:   message,
-			Timestamp: time.Now(),
+		now := time.Now()
+		log := models.JobLogEntry{
+			Timestamp:     now.Format("15:04:05"),
+			FullTimestamp: now.Format(time.RFC3339),
+			Level:         level,
+			Message:       message,
 		}
 		if err := h.jobStorage.AppendJobLog(ctx, jobID, log); err != nil {
 			h.logger.Warn().Err(err).Msg("Failed to append job log")
