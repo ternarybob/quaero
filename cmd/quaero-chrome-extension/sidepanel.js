@@ -74,12 +74,22 @@ function connectWebSocket() {
     };
 
     ws.onerror = function(error) {
-      console.error('WebSocket error:', error);
+      // Only log as error if actively crawling, otherwise it's just a normal disconnect
+      if (isCrawling) {
+        console.error('WebSocket error during active crawl:', error);
+      } else {
+        console.warn('WebSocket connection issue (will reconnect):', error);
+      }
       updateServerStatus(false);
     };
 
     ws.onclose = function() {
-      console.log('WebSocket disconnected');
+      // Only log as error if disconnected during active crawl
+      if (isCrawling) {
+        console.error('WebSocket disconnected during active crawl');
+      } else {
+        console.log('WebSocket disconnected (will reconnect)');
+      }
       updateServerStatus(false);
 
       // Reconnect after 3 seconds
