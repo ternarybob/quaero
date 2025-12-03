@@ -1607,8 +1607,8 @@ func (h *JobDefinitionHandler) GetMatchingConfigHandler(w http.ResponseWriter, r
 }
 
 // CrawlWithLinksHandler handles POST /api/job-definitions/crawl-links
-// Starts a crawl job with a specific list of links provided by the extension
-// Creates a proper job in the queue system for history and tracking
+// Starts a crawl job using the proper Job Manager → Step → Worker pattern
+// This ensures jobs appear in the queue with proper hierarchy and tracking
 func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "POST") {
 		return
@@ -1638,450 +1638,213 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 	}
 
 	ctx := r.Context()
-	startTime := time.Now()
 
-	// Generate job name from URL
-	parsedURL, _ := url.Parse(req.StartURL)
-	jobName := "Extension Crawl"
-	if parsedURL != nil {
-		jobName = fmt.Sprintf("Crawl: %s", parsedURL.Host)
+	// Parse URL for job naming and base URL
+	parsedURL, err := url.Parse(req.StartURL)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "Invalid start_url")
+		return
 	}
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
 
-	// Get config from matching job definition or use defaults
-	var includePatterns, excludePatterns []string
-	var matchedJobDefName string
-	maxPages := 50
+	// Try to find or create a job definition
+	var jobDef *models.JobDefinition
 
 	if req.JobDefinitionID != "" {
-		// Load specified job definition
-		jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, req.JobDefinitionID)
-		if err == nil && jobDef != nil && len(jobDef.Steps) > 0 {
-			matchedJobDefName = jobDef.Name
-			stepConfig := jobDef.Steps[0].Config
-			if mp, ok := stepConfig["max_pages"].(int); ok {
-				maxPages = mp
-			}
-			if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
-				for _, p := range inc {
-					if ps, ok := p.(string); ok {
-						includePatterns = append(includePatterns, ps)
-					}
-				}
-			}
-			if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
-				for _, p := range exc {
-					if ps, ok := p.(string); ok {
-						excludePatterns = append(excludePatterns, ps)
-					}
+		// Use specified job definition
+		jobDef, err = h.jobDefStorage.GetJobDefinition(ctx, req.JobDefinitionID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_def_id", req.JobDefinitionID).Msg("Failed to load job definition, using defaults")
+		}
+	}
+
+	if jobDef == nil {
+		// Try to find matching job definition
+		jobDef, _ = h.findMatchingJobDefinition(ctx, req.StartURL)
+	}
+
+	// Store cookies as authentication if provided
+	var authID string
+	if len(req.Cookies) > 0 {
+		// Generate auth ID based on domain
+		authID = fmt.Sprintf("ext_%s_%d", parsedURL.Host, time.Now().UnixNano())
+
+		// Marshal cookies to JSON
+		cookiesJSON, err := json.Marshal(req.Cookies)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal cookies")
+			WriteError(w, http.StatusInternalServerError, "Failed to store authentication")
+			return
+		}
+
+		// Create auth credentials
+		authCreds := &models.AuthCredentials{
+			ID:          authID,
+			Name:        fmt.Sprintf("Extension: %s", parsedURL.Host),
+			Type:        models.AuthTypeCookies,
+			Cookies:     string(cookiesJSON),
+			Description: fmt.Sprintf("Auto-captured from Chrome extension for %s", parsedURL.Host),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+
+		if err := h.authStorage.SaveAuth(ctx, authCreds); err != nil {
+			h.logger.Error().Err(err).Msg("Failed to save auth credentials")
+			WriteError(w, http.StatusInternalServerError, "Failed to store authentication")
+			return
+		}
+
+		h.logger.Debug().
+			Str("auth_id", authID).
+			Str("domain", parsedURL.Host).
+			Int("cookies_count", len(req.Cookies)).
+			Msg("Stored extension cookies as auth credentials")
+	}
+
+	// Build crawl config from job definition or defaults
+	maxPages := 50
+	maxDepth := 2
+	concurrency := 3
+	followLinks := true
+	var includePatterns, excludePatterns []string
+
+	if jobDef != nil && len(jobDef.Steps) > 0 {
+		stepConfig := jobDef.Steps[0].Config
+		if mp, ok := stepConfig["max_pages"].(int); ok {
+			maxPages = mp
+		}
+		if md, ok := stepConfig["max_depth"].(int); ok {
+			maxDepth = md
+		}
+		if cc, ok := stepConfig["concurrency"].(int); ok {
+			concurrency = cc
+		}
+		if fl, ok := stepConfig["follow_links"].(bool); ok {
+			followLinks = fl
+		}
+		if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
+			for _, p := range inc {
+				if ps, ok := p.(string); ok {
+					includePatterns = append(includePatterns, ps)
 				}
 			}
 		}
-	} else {
-		// Try to find matching config
-		if matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.StartURL); matchedJobDef != nil && len(matchedJobDef.Steps) > 0 {
-			matchedJobDefName = matchedJobDef.Name
-			stepConfig := matchedJobDef.Steps[0].Config
-			if mp, ok := stepConfig["max_pages"].(int); ok {
-				maxPages = mp
-			}
-			if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
-				for _, p := range inc {
-					if ps, ok := p.(string); ok {
-						includePatterns = append(includePatterns, ps)
-					}
-				}
-			}
-			if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
-				for _, p := range exc {
-					if ps, ok := p.(string); ok {
-						excludePatterns = append(excludePatterns, ps)
-					}
+		if exc, ok := stepConfig["exclude_patterns"].([]interface{}); ok {
+			for _, p := range exc {
+				if ps, ok := p.(string); ok {
+					excludePatterns = append(excludePatterns, ps)
 				}
 			}
 		}
 	}
 
-	// Limit links to maxPages
-	linksToProcess := req.Links
-	if len(linksToProcess) > maxPages {
-		linksToProcess = linksToProcess[:maxPages]
+	// Create an ephemeral job definition for the orchestrator
+	ephemeralJobDef := &models.JobDefinition{
+		ID:          fmt.Sprintf("ext_crawl_%d", time.Now().UnixNano()),
+		Name:        fmt.Sprintf("Crawl: %s", parsedURL.Host),
+		Type:        models.JobDefinitionTypeCrawler,
+		Description: fmt.Sprintf("Extension-initiated crawl of %s", parsedURL.Host),
+		BaseURL:     baseURL,
+		SourceType:  "web",
+		AuthID:      authID,
+		Enabled:     true,
+		Timeout:     "30m",
+		Tags:        []string{"extension", "crawl"},
+		Steps: []models.JobStep{
+			{
+				Name:        "crawl_pages",
+				Type:        models.StepTypeCrawler,
+				Description: fmt.Sprintf("Crawl pages from %s", parsedURL.Host),
+				OnError:     "continue",
+				Config: map[string]interface{}{
+					"start_urls":       []string{req.StartURL},
+					"max_depth":        maxDepth,
+					"max_pages":        maxPages,
+					"concurrency":      concurrency,
+					"follow_links":     followLinks,
+					"include_patterns": includePatterns,
+					"exclude_patterns": excludePatterns,
+				},
+			},
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
-	totalPages := len(linksToProcess)
+	// If we have pre-filtered links, use them as seed URLs instead of discovery
+	if len(req.Links) > 0 {
+		// Limit links to maxPages
+		linksToUse := req.Links
+		if len(linksToUse) > maxPages {
+			linksToUse = linksToUse[:maxPages]
+		}
+
+		// Include start URL if requested
+		seedURLs := linksToUse
+		if req.IncludeCurrentPage && req.StartURL != "" {
+			// Prepend start URL
+			seedURLs = append([]string{req.StartURL}, linksToUse...)
+		}
+
+		ephemeralJobDef.Steps[0].Config["start_urls"] = seedURLs
+		ephemeralJobDef.Steps[0].Config["follow_links"] = false // Don't discover more links
+		ephemeralJobDef.Steps[0].Config["max_depth"] = 1        // Flat crawl of provided links
+	}
+
+	h.logger.Info().
+		Str("job_def_id", ephemeralJobDef.ID).
+		Str("job_name", ephemeralJobDef.Name).
+		Str("start_url", req.StartURL).
+		Int("links_count", len(req.Links)).
+		Bool("include_current", req.IncludeCurrentPage).
+		Str("auth_id", authID).
+		Msg("Starting extension crawl via orchestrator")
+
+	// Execute via orchestrator (proper Manager → Step → Worker pattern)
+	go func() {
+		bgCtx := context.Background()
+
+		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, ephemeralJobDef, h.jobMonitor, h.stepMonitor)
+		if err != nil {
+			h.logger.Error().
+				Err(err).
+				Str("job_def_id", ephemeralJobDef.ID).
+				Msg("Extension crawl execution failed")
+			return
+		}
+
+		h.logger.Info().
+			Str("job_def_id", ephemeralJobDef.ID).
+			Str("parent_job_id", parentJobID).
+			Msg("Extension crawl started successfully")
+	}()
+
+	// Calculate total pages
+	totalPages := len(req.Links)
 	if req.IncludeCurrentPage {
 		totalPages++
 	}
-
-	// Create a job record in the queue for tracking
-	jobConfig := map[string]interface{}{
-		"start_url":           req.StartURL,
-		"links_count":         len(linksToProcess),
-		"include_current":     req.IncludeCurrentPage,
-		"download_images":     req.DownloadImages,
-		"job_definition_name": matchedJobDefName,
-		"max_pages":           maxPages,
+	if totalPages == 0 {
+		totalPages = 1 // At least start URL
 	}
-
-	jobMetadata := map[string]interface{}{
-		"phase":          "extension_crawl",
-		"source":         "chrome_extension",
-		"document_count": 0,
-		"total_pages":    totalPages,
-	}
-
-	queueJob := models.NewQueueJob("extension_crawl", jobName, jobConfig, jobMetadata)
-	jobState := models.NewQueueJobState(queueJob)
-	jobState.Status = models.JobStatusRunning
-	jobState.StartedAt = &startTime
-
-	// Save job to storage
-	if err := h.jobStorage.SaveJob(ctx, jobState); err != nil {
-		h.logger.Error().Err(err).Msg("Failed to create job record")
-		WriteError(w, http.StatusInternalServerError, "Failed to create job")
-		return
-	}
-
-	crawlJobID := queueJob.ID
-
-	h.logger.Info().
-		Str("job_id", crawlJobID).
-		Str("job_name", jobName).
-		Str("start_url", req.StartURL).
-		Int("links_count", len(linksToProcess)).
-		Bool("include_current", req.IncludeCurrentPage).
-		Bool("download_images", req.DownloadImages).
-		Msg("Created crawl job from extension")
-
-	// Start background crawl with job tracking
-	go h.executeCrawlJob(
-		crawlJobID,
-		req.StartURL,
-		req.Title,
-		req.HTML,
-		linksToProcess,
-		req.Cookies,
-		req.IncludeCurrentPage,
-		req.DownloadImages,
-		includePatterns,
-		excludePatterns,
-	)
 
 	response := map[string]interface{}{
-		"job_id":         crawlJobID,
-		"job_name":       jobName,
+		"job_id":         ephemeralJobDef.ID,
+		"job_name":       ephemeralJobDef.Name,
 		"status":         "running",
 		"start_url":      req.StartURL,
-		"links_to_crawl": len(linksToProcess),
-		"total_pages":    totalPages,
+		"links_to_crawl": totalPages,
 		"max_pages":      maxPages,
-		"message":        fmt.Sprintf("Crawl job started: %d pages to process", totalPages),
+		"message":        fmt.Sprintf("Crawl job started via orchestrator: %d pages to process", totalPages),
 	}
 
-	if matchedJobDefName != "" {
-		response["matched_config"] = matchedJobDefName
+	if jobDef != nil {
+		response["matched_config"] = jobDef.Name
+	}
+	if authID != "" {
+		response["auth_id"] = authID
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
 }
 
-// executeCrawlJob runs the crawl job with proper status tracking
-func (h *JobDefinitionHandler) executeCrawlJob(
-	jobID string,
-	startURL string,
-	title string,
-	html string,
-	links []string,
-	cookies []map[string]interface{},
-	includeCurrentPage bool,
-	downloadImages bool,
-	includePatterns []string,
-	excludePatterns []string,
-) {
-	ctx := context.Background()
-	startTime := time.Now()
-
-	// Helper to update job status
-	updateJobStatus := func(status models.JobStatus, docCount int, errMsg string) {
-		jobStateInterface, err := h.jobStorage.GetJob(ctx, jobID)
-		if err != nil {
-			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job for status update")
-			return
-		}
-
-		jobState, ok := jobStateInterface.(*models.QueueJobState)
-		if !ok {
-			h.logger.Error().Str("job_id", jobID).Msg("Failed to cast job state")
-			return
-		}
-
-		jobState.Status = status
-		if jobState.Metadata == nil {
-			jobState.Metadata = make(map[string]interface{})
-		}
-		jobState.Metadata["document_count"] = docCount
-
-		if status == models.JobStatusCompleted || status == models.JobStatusFailed {
-			now := time.Now()
-			jobState.CompletedAt = &now
-		}
-
-		if errMsg != "" {
-			jobState.Error = errMsg
-		}
-
-		if err := h.jobStorage.SaveJob(ctx, jobState); err != nil {
-			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to update job status")
-		}
-	}
-
-	// Add log entry
-	addLog := func(level, message string) {
-		now := time.Now()
-		log := models.JobLogEntry{
-			Timestamp:     now.Format("15:04:05"),
-			FullTimestamp: now.Format(time.RFC3339),
-			Level:         level,
-			Message:       message,
-		}
-		if err := h.jobStorage.AppendJobLog(ctx, jobID, log); err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to append job log")
-		}
-	}
-
-	addLog("info", fmt.Sprintf("Starting crawl job: %s", startURL))
-
-	// Initialize image storage if needed
-	var imageStorage *crawler.ImageStorageService
-	if downloadImages {
-		var err error
-		imageStorage, err = crawler.NewImageStorageService(crawler.DefaultImageStorageConfig(), h.logger)
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to initialize image storage, continuing without image download")
-			addLog("warn", "Image storage initialization failed, images will not be downloaded")
-		} else {
-			addLog("info", "Image storage initialized, images will be downloaded")
-		}
-	}
-
-	// Convert cookies
-	httpCookies := make([]*nethttp.Cookie, 0, len(cookies))
-	for _, c := range cookies {
-		name, _ := c["name"].(string)
-		value, _ := c["value"].(string)
-		domain, _ := c["domain"].(string)
-		path, _ := c["path"].(string)
-		if name != "" && value != "" {
-			httpCookies = append(httpCookies, &nethttp.Cookie{
-				Name:   name,
-				Value:  value,
-				Domain: domain,
-				Path:   path,
-			})
-		}
-	}
-
-	// Create HTTP client with cookie jar
-	jar, _ := cookiejar.New(nil)
-	client := &nethttp.Client{
-		Jar:     jar,
-		Timeout: 30 * time.Second,
-	}
-
-	// Parse source URL for cookie domain
-	parsedSource, err := url.Parse(startURL)
-	if err != nil {
-		h.logger.Error().Err(err).Str("url", startURL).Msg("Failed to parse source URL")
-		updateJobStatus(models.JobStatusFailed, 0, "Invalid start URL")
-		addLog("error", fmt.Sprintf("Invalid start URL: %v", err))
-		return
-	}
-
-	// Set cookies on the jar
-	jar.SetCookies(parsedSource, httpCookies)
-
-	contentProcessor := crawler.NewContentProcessor(h.logger)
-	linkExtractor := crawler.NewLinkExtractor(h.logger)
-
-	// Track progress
-	successCount := 0
-	failCount := 0
-	crawledURLs := make(map[string]bool)
-	crawledURLs[startURL] = true
-
-	// Process current page first if requested
-	if includeCurrentPage && html != "" {
-		addLog("info", fmt.Sprintf("Processing current page: %s", startURL))
-
-		processedHTML := html
-
-		// Download images if enabled
-		if imageStorage != nil {
-			modifiedHTML, storedImages, err := imageStorage.ProcessHTMLImages(ctx, html, startURL, httpCookies)
-			if err != nil {
-				h.logger.Warn().Err(err).Str("url", startURL).Msg("Image processing failed")
-				addLog("warn", fmt.Sprintf("Image processing failed for %s: %v", startURL, err))
-			} else {
-				processedHTML = modifiedHTML
-				downloadedCount := 0
-				for _, img := range storedImages {
-					if img.Error == "" {
-						downloadedCount++
-					}
-				}
-				if downloadedCount > 0 {
-					addLog("info", fmt.Sprintf("Downloaded %d images from %s", downloadedCount, startURL))
-				}
-			}
-		}
-
-		processedContent, err := contentProcessor.ProcessHTML(processedHTML, startURL)
-		if err == nil {
-			pageTitle := title
-			if pageTitle == "" {
-				pageTitle = processedContent.Title
-			}
-			if pageTitle == "" {
-				pageTitle = startURL
-			}
-
-			doc := &models.Document{
-				ID:              uuid.New().String(),
-				SourceType:      "web",
-				SourceID:        jobID,
-				Title:           pageTitle,
-				ContentMarkdown: processedContent.Markdown,
-				URL:             startURL,
-				Metadata: map[string]interface{}{
-					"capture_source":  "chrome_extension_crawl",
-					"capture_time":    startTime.Format(time.RFC3339),
-					"crawl_job_id":    jobID,
-					"is_start_page":   true,
-					"images_localized": downloadImages && imageStorage != nil,
-				},
-				Tags: []string{"captured", "chrome-extension", "crawl"},
-			}
-
-			if err := h.documentService.SaveDocument(ctx, doc); err == nil {
-				successCount++
-				addLog("info", fmt.Sprintf("Saved: %s", pageTitle))
-			} else {
-				h.logger.Error().Err(err).Str("url", startURL).Msg("Failed to save document")
-				addLog("error", fmt.Sprintf("Failed to save %s: %v", startURL, err))
-			}
-		}
-
-		updateJobStatus(models.JobStatusRunning, successCount, "")
-	}
-
-	// Filter links using patterns
-	filteredLinks := links
-	if len(includePatterns) > 0 || len(excludePatterns) > 0 {
-		filterResult := linkExtractor.FilterLinks(links, includePatterns, excludePatterns)
-		filteredLinks = filterResult.FilteredLinks
-		addLog("info", fmt.Sprintf("Filtered links: %d -> %d", len(links), len(filteredLinks)))
-	}
-
-	// Crawl remaining links
-	for i, link := range filteredLinks {
-		if crawledURLs[link] {
-			continue
-		}
-		crawledURLs[link] = true
-
-		addLog("info", fmt.Sprintf("[%d/%d] Crawling: %s", i+1, len(filteredLinks), link))
-
-		// Fetch the page
-		resp, err := client.Get(link)
-		if err != nil {
-			failCount++
-			addLog("warn", fmt.Sprintf("Failed to fetch %s: %v", link, err))
-			continue
-		}
-
-		if resp.StatusCode != nethttp.StatusOK {
-			resp.Body.Close()
-			failCount++
-			addLog("warn", fmt.Sprintf("HTTP %d for %s", resp.StatusCode, link))
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			failCount++
-			addLog("warn", fmt.Sprintf("Failed to read %s: %v", link, err))
-			continue
-		}
-
-		htmlContent := string(body)
-
-		// Download images if enabled
-		if imageStorage != nil {
-			modifiedHTML, storedImages, err := imageStorage.ProcessHTMLImages(ctx, htmlContent, link, httpCookies)
-			if err == nil {
-				htmlContent = modifiedHTML
-				downloadedCount := 0
-				for _, img := range storedImages {
-					if img.Error == "" {
-						downloadedCount++
-					}
-				}
-				if downloadedCount > 0 {
-					addLog("debug", fmt.Sprintf("Downloaded %d images from %s", downloadedCount, link))
-				}
-			}
-		}
-
-		// Process content
-		processedContent, err := contentProcessor.ProcessHTML(htmlContent, link)
-		if err != nil {
-			failCount++
-			addLog("warn", fmt.Sprintf("Failed to process %s: %v", link, err))
-			continue
-		}
-
-		// Create document
-		doc := &models.Document{
-			ID:              uuid.New().String(),
-			SourceType:      "web",
-			SourceID:        jobID,
-			Title:           processedContent.Title,
-			ContentMarkdown: processedContent.Markdown,
-			URL:             link,
-			Metadata: map[string]interface{}{
-				"capture_source":   "chrome_extension_crawl",
-				"capture_time":     time.Now().Format(time.RFC3339),
-				"crawl_job_id":     jobID,
-				"images_localized": downloadImages && imageStorage != nil,
-			},
-			Tags: []string{"captured", "chrome-extension", "crawl"},
-		}
-
-		if err := h.documentService.SaveDocument(ctx, doc); err != nil {
-			failCount++
-			addLog("error", fmt.Sprintf("Failed to save %s: %v", link, err))
-			continue
-		}
-
-		successCount++
-		updateJobStatus(models.JobStatusRunning, successCount, "")
-	}
-
-	// Complete the job
-	duration := time.Since(startTime)
-	summary := fmt.Sprintf("Crawl completed: %d pages saved, %d failed, duration: %s", successCount, failCount, duration.Round(time.Second))
-	addLog("info", summary)
-
-	if failCount > 0 && successCount == 0 {
-		updateJobStatus(models.JobStatusFailed, successCount, "All pages failed to crawl")
-	} else {
-		updateJobStatus(models.JobStatusCompleted, successCount, "")
-	}
-
-	h.logger.Info().
-		Str("job_id", jobID).
-		Int("success", successCount).
-		Int("failed", failCount).
-		Dur("duration", duration).
-		Msg("Extension crawl job completed")
-}
