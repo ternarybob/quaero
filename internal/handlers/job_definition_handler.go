@@ -673,7 +673,7 @@ func (h *JobDefinitionHandler) ReloadJobDefinitionsHandler(w http.ResponseWriter
 	}
 
 	// Count loaded definitions
-	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx)
+	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx, nil)
 	loaded := 0
 	if err == nil {
 		loaded = len(jobDefs)
