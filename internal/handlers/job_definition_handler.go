@@ -1075,7 +1075,12 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		maxPages := 10
 		includePatterns := []string{}
 		excludePatterns := []string{}
+		crawlTags := []string{"extension", "crawl", "headless"} // Default tags
 		if matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.URL); matchedJobDef != nil {
+			// Use tags from matched job definition if available
+			if len(matchedJobDef.Tags) > 0 {
+				crawlTags = matchedJobDef.Tags
+			}
 			if len(matchedJobDef.Steps) > 0 {
 				stepConfig := matchedJobDef.Steps[0].Config
 				if mp, ok := stepConfig["max_pages"].(int); ok {
@@ -1141,7 +1146,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 				AuthID:      authID,
 				Enabled:     true,
 				Timeout:     "30m",
-				Tags:        []string{"extension", "crawl", "headless"},
+				Tags:        crawlTags,
 				Steps: []models.JobStep{
 					{
 						Name:        "crawl_pages",
@@ -1781,6 +1786,7 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 	concurrency := 3
 	followLinks := true
 	var includePatterns, excludePatterns []string
+	var tags []string
 
 	if jobDef != nil && len(jobDef.Steps) > 0 {
 		stepConfig := jobDef.Steps[0].Config
@@ -1810,6 +1816,13 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 				}
 			}
 		}
+		// Use tags from matched job definition
+		tags = jobDef.Tags
+	}
+
+	// Default tags if no job definition match or no tags specified
+	if len(tags) == 0 {
+		tags = []string{"extension", "crawl"}
 	}
 
 	// Create an ephemeral job definition for the orchestrator
@@ -1823,7 +1836,7 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		AuthID:      authID,
 		Enabled:     true,
 		Timeout:     "30m",
-		Tags:        []string{"extension", "crawl"},
+		Tags:        tags,
 		Steps: []models.JobStep{
 			{
 				Name:        "crawl_pages",
