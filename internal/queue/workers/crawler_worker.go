@@ -160,22 +160,25 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	jobLogger.Trace().Msg("About to create browser instance")
 
 	// Step 1: Create a fresh ChromeDP browser instance for this request
-	// Using NON-HEADLESS mode with stealth options to avoid bot detection
+	// Using HEADLESS mode with stealth options to avoid bot detection
 	w.publishCrawlerProgressUpdate(ctx, job, "running", "Creating browser instance", seedURL)
 
 	jobLogger.Trace().Msg("Published progress update for browser creation")
 
-	// Non-headless with stealth settings - NO headless flag to show visible browser window
+	// Headless mode with stealth settings for background crawling
 	allocatorOpts := []chromedp.ExecAllocatorOption{
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
-		// Force visible window
-		chromedp.Flag("start-maximized", true),
+		// Enable headless mode for background operation
+		chromedp.Headless,
+		chromedp.Flag("headless", "new"), // Use new headless mode (Chrome 112+)
 		// Stealth options to avoid bot detection
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		// Set window size for consistent rendering in headless mode
+		chromedp.WindowSize(1920, 1080),
 		// Realistic user agent
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	}
@@ -189,7 +192,7 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	browserCtx, browserCancel := chromedp.NewContext(allocatorCtx)
 	defer browserCancel()
 
-	jobLogger.Trace().Msg("Created fresh browser instance (non-headless)")
+	jobLogger.Trace().Msg("Created fresh browser instance (headless)")
 
 	// Step 1.5: Load and inject authentication cookies into browser
 	if err := w.injectAuthCookies(ctx, browserCtx, parentID, seedURL, jobLogger); err != nil {
