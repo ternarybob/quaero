@@ -474,13 +474,13 @@ async function sendCaptureToBackend(html, metadata, url) {
   const serverUrl = await getServerUrl();
   const endpoint = `${serverUrl}/api/documents/capture`;
 
-  // Get auth data for this domain
-  const authData = await captureAuthDataForUrl(url);
-
+  // Build payload matching server's CaptureRequest format
   const payload = {
+    url: url,
     html: html,
-    metadata: metadata,
-    auth: authData
+    title: metadata.title || '',
+    description: metadata.description || '',
+    timestamp: metadata.timestamp || new Date().toISOString()
   };
 
   console.log('Sending capture to backend:', endpoint, 'URL:', url);
@@ -499,7 +499,7 @@ async function sendCaptureToBackend(html, metadata, url) {
   }
 
   const result = await response.json();
-  console.log('Capture sent successfully, docId:', result.docId);
+  console.log('Capture sent successfully, docId:', result.document_id);
 
   return result;
 }
@@ -610,9 +610,9 @@ async function performAutoCapture(tabId, url) {
       );
 
       // Update captured URLs list
-      await addCapturedUrl(url, backendResult.docId, response.metadata.title);
+      await addCapturedUrl(url, backendResult.document_id, response.metadata.title);
 
-      console.log('Auto-capture completed successfully for:', url, 'docId:', backendResult.docId);
+      console.log('Auto-capture completed successfully for:', url, 'docId:', backendResult.document_id);
     } catch (backendError) {
       console.error('Backend upload failed for:', url, 'Error:', backendError);
       // Track the failed upload for retry
