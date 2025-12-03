@@ -540,6 +540,31 @@ async function captureAuthDataForUrl(url) {
 }
 
 /**
+ * Check if URL has a matching job definition config
+ * @param {string} url - The URL to check
+ * @returns {Promise<boolean>} True if URL has matching config
+ */
+async function hasMatchingConfig(url) {
+  try {
+    const serverUrl = await getServerUrl();
+    const response = await fetch(
+      `${serverUrl}/api/job-definitions/match-config?url=${encodeURIComponent(url)}`
+    );
+
+    if (!response.ok) {
+      console.warn('Failed to check matching config for URL:', url);
+      return false;
+    }
+
+    const config = await response.json();
+    return config.matched === true;
+  } catch (error) {
+    console.warn('Error checking matching config:', error);
+    return false;
+  }
+}
+
+/**
  * Perform auto-capture for a tab
  * @param {number} tabId - The tab ID
  * @param {string} url - The tab URL
@@ -558,6 +583,13 @@ async function performAutoCapture(tabId, url) {
     const recordingState = await getRecordingState();
     if (!recordingState.recording) {
       console.log('Auto-capture skipped - recording not enabled');
+      return;
+    }
+
+    // Check if URL has a matching job definition config
+    const hasConfig = await hasMatchingConfig(url);
+    if (!hasConfig) {
+      console.log('Auto-capture skipped - no matching job definition config for URL:', url);
       return;
     }
 

@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('recording-toggle').addEventListener('change', toggleRecording);
   document.getElementById('stop-recording-btn').addEventListener('click', stopRecordingFromBanner);
   document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+  document.getElementById('refresh-config-btn').addEventListener('click', refreshServerConfig);
   document.getElementById('clear-failed-btn').addEventListener('click', clearAllFailed);
 });
 
@@ -41,6 +42,38 @@ async function saveSettings() {
     ws.close();
   }
   connectWebSocket();
+}
+
+async function refreshServerConfig() {
+  const serverUrl = document.getElementById('server-url').value;
+  const btn = document.getElementById('refresh-config-btn');
+
+  btn.disabled = true;
+  btn.textContent = 'Refreshing...';
+
+  try {
+    // Call server to reload job definitions
+    const response = await fetch(`${serverUrl}/api/job-definitions/reload`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to reload config');
+    }
+
+    const result = await response.json();
+    showSuccess(`Config reloaded: ${result.loaded || 0} job definitions`);
+
+    // Refresh the current page's config display
+    await refreshLinksAndConfig();
+
+  } catch (error) {
+    console.error('Error refreshing config:', error);
+    showError('Failed to refresh config: ' + error.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh Config';
+  }
 }
 
 // ============================================================================
@@ -610,7 +643,6 @@ async function startCrawl() {
   const progressFill = document.getElementById('crawl-progress-fill');
   const progressText = document.getElementById('crawl-progress-text');
   const includeCurrentPage = document.getElementById('include-current-page').checked;
-  const downloadImages = document.getElementById('download-images').checked;
 
   isCrawling = true;
   startBtn.disabled = true;
@@ -656,8 +688,7 @@ async function startCrawl() {
         })),
         html: html,
         title: title,
-        include_current_page: includeCurrentPage,
-        download_images: downloadImages
+        include_current_page: includeCurrentPage
       })
     });
 

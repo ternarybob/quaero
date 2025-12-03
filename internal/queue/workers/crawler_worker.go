@@ -443,8 +443,10 @@ func (w *CrawlerWorker) extractCrawlConfig(config map[string]interface{}) (*mode
 		configMap = config
 	}
 
-	// Convert map to CrawlConfig struct
-	crawlConfig := &models.CrawlConfig{}
+	// Convert map to CrawlConfig struct with sensible defaults
+	crawlConfig := &models.CrawlConfig{
+		DownloadImages: true, // Default to downloading images
+	}
 
 	// Extract max_depth
 	if maxDepth, ok := configMap["max_depth"].(float64); ok {
@@ -1611,14 +1613,15 @@ func (w *CrawlerWorker) ValidateConfig(step models.JobStep) error {
 // buildCrawlConfig constructs a CrawlConfig struct from a config map
 func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
 	config := crawler.CrawlConfig{
-		MaxDepth:      2,
-		MaxPages:      100,
-		Concurrency:   5,
-		RateLimit:     time.Second,
-		RetryAttempts: 3,
-		RetryBackoff:  time.Second,
-		FollowLinks:   true,
-		DetailLevel:   "full",
+		MaxDepth:       2,
+		MaxPages:       100,
+		Concurrency:    5,
+		RateLimit:      time.Second,
+		RetryAttempts:  3,
+		RetryBackoff:   time.Second,
+		FollowLinks:    true,
+		DetailLevel:    "full",
+		DownloadImages: true, // Default to downloading images
 	}
 
 	// Override with values from config map

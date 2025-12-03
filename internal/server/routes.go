@@ -308,6 +308,12 @@ func (s *Server) handleJobDefinitionRoutes(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Check for /reload suffix (reload job definitions from disk)
+	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/reload") {
+		s.app.JobDefinitionHandler.ReloadJobDefinitionsHandler(w, r)
+		return
+	}
+
 	// Check for /execute suffix first
 	if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/execute") {
 		s.app.JobDefinitionHandler.ExecuteJobDefinitionHandler(w, r)

@@ -28,18 +28,20 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage     interfaces.JobDefinitionStorage
-	jobStorage        interfaces.QueueStorage
-	jobMgr            *queue.Manager
-	orchestrator      *queue.Orchestrator
-	jobMonitor        interfaces.JobMonitor
-	stepMonitor       interfaces.StepMonitor
-	authStorage       interfaces.AuthStorage
-	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
-	validationService *validation.TOMLValidationService
-	jobService        *jobs.Service              // Business logic for job definitions
-	documentService   interfaces.DocumentService // For direct document capture
-	logger            arbor.ILogger
+	jobDefStorage      interfaces.JobDefinitionStorage
+	jobStorage         interfaces.QueueStorage
+	jobMgr             *queue.Manager
+	orchestrator       *queue.Orchestrator
+	jobMonitor         interfaces.JobMonitor
+	stepMonitor        interfaces.StepMonitor
+	authStorage        interfaces.AuthStorage
+	kvStorage          interfaces.KeyValueStorage // For {key-name} replacement in job definitions
+	storageManager     interfaces.StorageManager  // For reloading job definitions from disk
+	definitionsDir     string                     // Path to job definitions directory
+	validationService  *validation.TOMLValidationService
+	jobService         *jobs.Service              // Business logic for job definitions
+	documentService    interfaces.DocumentService // For direct document capture
+	logger             arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler
@@ -52,6 +54,8 @@ func NewJobDefinitionHandler(
 	stepMonitor interfaces.StepMonitor,
 	authStorage interfaces.AuthStorage,
 	kvStorage interfaces.KeyValueStorage, // For {key-name} replacement in job definitions
+	storageManager interfaces.StorageManager, // For reloading job definitions from disk
+	definitionsDir string, // Path to job definitions directory
 	agentService interfaces.AgentService, // Optional: can be nil if agent service unavailable
 	documentService interfaces.DocumentService, // For direct document capture from extension
 	logger arbor.ILogger,
@@ -81,18 +85,20 @@ func NewJobDefinitionHandler(
 	logger.Debug().Msg("Job definition handler initialized with JobManager and JobMonitor")
 
 	return &JobDefinitionHandler{
-		jobDefStorage:     jobDefStorage,
-		jobStorage:        jobStorage,
-		jobMgr:            jobMgr,
-		orchestrator:      orchestrator,
-		jobMonitor:        jobMonitor,
-		stepMonitor:       stepMonitor,
-		authStorage:       authStorage,
-		kvStorage:         kvStorage,
-		validationService: validation.NewTOMLValidationService(logger),
-		jobService:        jobs.NewService(kvStorage, agentService, logger),
-		documentService:   documentService,
-		logger:            logger,
+		jobDefStorage:      jobDefStorage,
+		jobStorage:         jobStorage,
+		jobMgr:             jobMgr,
+		orchestrator:       orchestrator,
+		jobMonitor:         jobMonitor,
+		stepMonitor:        stepMonitor,
+		authStorage:        authStorage,
+		kvStorage:          kvStorage,
+		storageManager:     storageManager,
+		definitionsDir:     definitionsDir,
+		validationService:  validation.NewTOMLValidationService(logger),
+		jobService:         jobs.NewService(kvStorage, agentService, logger),
+		documentService:    documentService,
+		logger:             logger,
 	}
 }
 
@@ -633,6 +639,53 @@ func (h *JobDefinitionHandler) ValidateJobDefinitionTOMLHandler(w http.ResponseW
 		h.logger.Warn().Str("error", result.Error).Msg("TOML validation failed")
 		WriteJSON(w, http.StatusBadRequest, result)
 	}
+}
+
+// ReloadJobDefinitionsHandler handles POST /api/job-definitions/reload
+// Reloads job definitions from disk (TOML files in the definitions directory)
+func (h *JobDefinitionHandler) ReloadJobDefinitionsHandler(w http.ResponseWriter, r *http.Request) {
+	if !RequireMethod(w, r, "POST") {
+		return
+	}
+
+	ctx := r.Context()
+
+	h.logger.Info().Str("dir", h.definitionsDir).Msg("Reloading job definitions from disk")
+
+	// Check if storage manager and definitions dir are configured
+	if h.storageManager == nil {
+		h.logger.Error().Msg("Storage manager not configured for reload")
+		WriteError(w, http.StatusInternalServerError, "Storage manager not configured")
+		return
+	}
+
+	if h.definitionsDir == "" {
+		h.logger.Error().Msg("Definitions directory not configured for reload")
+		WriteError(w, http.StatusInternalServerError, "Definitions directory not configured")
+		return
+	}
+
+	// Reload job definitions from disk
+	if err := h.storageManager.LoadJobDefinitionsFromFiles(ctx, h.definitionsDir); err != nil {
+		h.logger.Error().Err(err).Str("dir", h.definitionsDir).Msg("Failed to reload job definitions")
+		WriteError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to reload: %s", err.Error()))
+		return
+	}
+
+	// Count loaded definitions
+	jobDefs, err := h.jobDefStorage.ListJobDefinitions(ctx)
+	loaded := 0
+	if err == nil {
+		loaded = len(jobDefs)
+	}
+
+	h.logger.Info().Int("loaded", loaded).Str("dir", h.definitionsDir).Msg("Job definitions reloaded successfully")
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"loaded":  loaded,
+		"message": fmt.Sprintf("Reloaded %d job definitions from %s", loaded, h.definitionsDir),
+	})
 }
 
 // UploadJobDefinitionTOMLHandler handles POST /api/job-definitions/upload

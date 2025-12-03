@@ -792,6 +792,8 @@ func (a *App) initHandlers() error {
 		a.StepMonitor,
 		a.StorageManager.AuthStorage(),
 		a.StorageManager.KeyValueStorage(), // For {key-name} replacement in job definitions
+		a.StorageManager,                   // For reloading job definitions from disk
+		a.Config.Jobs.DefinitionsDir,       // Path to job definitions directory
 		a.AgentService,                     // Pass agent service for runtime validation (can be nil)
 		a.DocumentService,                  // For direct document capture from extension
 		a.Logger,
