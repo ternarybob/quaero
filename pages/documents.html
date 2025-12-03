@@ -221,6 +221,9 @@
                     document.getElementById('stat-tags').textContent = '0';
                 }
 
+                // Also refresh the documents list
+                await loadDocuments();
+
             } catch (error) {
                 console.error('Error loading stats:', error);
                 document.getElementById('stat-total').textContent = 'Error';
