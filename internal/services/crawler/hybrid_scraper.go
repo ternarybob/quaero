@@ -59,8 +59,8 @@ func DefaultHybridScraperConfig() HybridScraperConfig {
 	}
 }
 
-// CrawlResult represents a single page crawl result from the extension
-type CrawlResult struct {
+// HybridHybridCrawlResult represents a single page crawl result from the extension
+type HybridHybridCrawlResult struct {
 	URL         string                 `json:"url"`
 	HTML        string                 `json:"html"`
 	Title       string                 `json:"title"`
@@ -74,29 +74,29 @@ type CrawlResult struct {
 
 // CrawlSession represents an active crawl session
 type CrawlSession struct {
-	ID           string        `json:"id"`
-	StartURL     string        `json:"start_url"`
-	LinksToCrawl []string      `json:"links_to_crawl"`
-	Results      []CrawlResult `json:"results"`
-	Status       string        `json:"status"` // "pending", "running", "completed", "failed"
-	StartedAt    time.Time     `json:"started_at"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	ID           string              `json:"id"`
+	StartURL     string              `json:"start_url"`
+	LinksToCrawl []string            `json:"links_to_crawl"`
+	Results      []HybridHybridCrawlResult `json:"results"`
+	Status       string              `json:"status"` // "pending", "running", "completed", "failed"
+	StartedAt    time.Time           `json:"started_at"`
+	CompletedAt  *time.Time          `json:"completed_at,omitempty"`
+	Error        string              `json:"error,omitempty"`
 	mu           sync.Mutex
 }
 
 // CrawlSessionData is a thread-safe snapshot of session data for external use
 type CrawlSessionData struct {
-	ID           string        `json:"id"`
-	StartURL     string        `json:"start_url"`
-	LinksToCrawl []string      `json:"links_to_crawl"`
-	Results      []CrawlResult `json:"results"`
-	ResultsCount int           `json:"results_count"`
-	Status       string        `json:"status"`
-	StartedAt    time.Time     `json:"started_at"`
-	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
-	Duration     string        `json:"duration,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	ID           string              `json:"id"`
+	StartURL     string              `json:"start_url"`
+	LinksToCrawl []string            `json:"links_to_crawl"`
+	Results      []HybridHybridCrawlResult `json:"results"`
+	ResultsCount int                 `json:"results_count"`
+	Status       string              `json:"status"`
+	StartedAt    time.Time           `json:"started_at"`
+	CompletedAt  *time.Time          `json:"completed_at,omitempty"`
+	Duration     string              `json:"duration,omitempty"`
+	Error        string              `json:"error,omitempty"`
 }
 
 // GetData returns a thread-safe snapshot of the session
@@ -108,7 +108,7 @@ func (s *CrawlSession) GetData() CrawlSessionData {
 		ID:           s.ID,
 		StartURL:     s.StartURL,
 		LinksToCrawl: append([]string{}, s.LinksToCrawl...),
-		Results:      append([]CrawlResult{}, s.Results...),
+		Results:      append([]HybridHybridCrawlResult{}, s.Results...),
 		ResultsCount: len(s.Results),
 		Status:       s.Status,
 		StartedAt:    s.StartedAt,
@@ -140,7 +140,7 @@ type HybridScraper struct {
 	sessionsMu sync.RWMutex
 
 	// Results channel for streaming results
-	resultsChan chan CrawlResult
+	resultsChan chan HybridCrawlResult
 
 	// State
 	initialized bool
@@ -153,7 +153,7 @@ func NewHybridScraper(config HybridScraperConfig, logger arbor.ILogger) *HybridS
 		config:      config,
 		logger:      logger,
 		sessions:    make(map[string]*CrawlSession),
-		resultsChan: make(chan CrawlResult, 100),
+		resultsChan: make(chan HybridCrawlResult, 100),
 	}
 }
 
@@ -343,7 +343,7 @@ func (h *HybridScraper) handleCrawlData(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var result CrawlResult
+	var result HybridCrawlResult
 	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to decode crawl result")
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -417,7 +417,7 @@ func (h *HybridScraper) handleSessionStatus(w http.ResponseWriter, r *http.Reque
 }
 
 // addResultToSession adds a crawl result to a session
-func (h *HybridScraper) addResultToSession(sessionID string, result CrawlResult) {
+func (h *HybridScraper) addResultToSession(sessionID string, result HybridCrawlResult) {
 	h.sessionsMu.RLock()
 	session, exists := h.sessions[sessionID]
 	h.sessionsMu.RUnlock()
@@ -453,7 +453,7 @@ func (h *HybridScraper) StartCrawlSession(ctx context.Context, startURL string, 
 		ID:           sessionID,
 		StartURL:     startURL,
 		LinksToCrawl: linksToCrawl,
-		Results:      []CrawlResult{},
+		Results:      []HybridCrawlResult{},
 		Status:       "pending",
 		StartedAt:    time.Now(),
 	}
@@ -556,7 +556,7 @@ func (h *HybridScraper) executeCrawlSession(ctx context.Context, session *CrawlS
 		return
 	}
 
-	h.logger.Debug().Interface("result", result).Msg("startCrawl called")
+	h.logger.Debug().Msg("startCrawl function called successfully")
 
 	// Wait for crawl to complete (extension will POST results back)
 	// We wait for all expected results or timeout
@@ -606,7 +606,7 @@ func (h *HybridScraper) executeCrawlSession(ctx context.Context, session *CrawlS
 }
 
 // NavigateAndCrawl navigates to a URL and extracts content using the extension
-func (h *HybridScraper) NavigateAndCrawl(ctx context.Context, targetURL string) (*CrawlResult, error) {
+func (h *HybridScraper) NavigateAndCrawl(ctx context.Context, targetURL string) (*HybridCrawlResult, error) {
 	h.mu.Lock()
 	if !h.initialized {
 		h.mu.Unlock()
@@ -648,7 +648,7 @@ func (h *HybridScraper) NavigateAndCrawl(ctx context.Context, targetURL string) 
 		return nil, fmt.Errorf("content extraction failed: %w", err)
 	}
 
-	result := &CrawlResult{
+	result := &HybridCrawlResult{
 		URL:         targetURL,
 		HTML:        html,
 		Title:       title,
@@ -669,7 +669,7 @@ func (h *HybridScraper) GetSession(sessionID string) (*CrawlSession, bool) {
 }
 
 // GetResultsChannel returns the channel for streaming results
-func (h *HybridScraper) GetResultsChannel() <-chan CrawlResult {
+func (h *HybridScraper) GetResultsChannel() <-chan HybridCrawlResult {
 	return h.resultsChan
 }
 
