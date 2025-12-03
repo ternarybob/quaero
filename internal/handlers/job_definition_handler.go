@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	nethttp "net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
@@ -1358,14 +1357,14 @@ func (h *JobDefinitionHandler) crawlLinksWithHTTP(
 		Msg("Starting HTTP crawl of discovered links")
 
 	// Convert extension cookies to http.Cookie format
-	httpCookies := make([]*nethttp.Cookie, 0, len(cookies))
+	httpCookies := make([]*http.Cookie, 0, len(cookies))
 	for _, c := range cookies {
 		name, _ := c["name"].(string)
 		value, _ := c["value"].(string)
 		domain, _ := c["domain"].(string)
 		path, _ := c["path"].(string)
 		if name != "" && value != "" {
-			httpCookies = append(httpCookies, &nethttp.Cookie{
+			httpCookies = append(httpCookies, &http.Cookie{
 				Name:   name,
 				Value:  value,
 				Domain: domain,
@@ -1376,7 +1375,7 @@ func (h *JobDefinitionHandler) crawlLinksWithHTTP(
 
 	// Create HTTP client with cookie jar
 	jar, _ := cookiejar.New(nil)
-	client := &nethttp.Client{
+	client := &http.Client{
 		Jar:     jar,
 		Timeout: 30 * time.Second,
 	}
@@ -1681,14 +1680,17 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		authCreds := &models.AuthCredentials{
 			ID:          authID,
 			Name:        fmt.Sprintf("Extension: %s", parsedURL.Host),
-			Type:        models.AuthTypeCookies,
-			Cookies:     string(cookiesJSON),
-			Description: fmt.Sprintf("Auto-captured from Chrome extension for %s", parsedURL.Host),
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			SiteDomain:  parsedURL.Host,
+			ServiceType: "generic",
+			BaseURL:     baseURL,
+			Cookies:     cookiesJSON,
+			Tokens:      make(map[string]string),
+			Data:        make(map[string]interface{}),
+			CreatedAt:   time.Now().Unix(),
+			UpdatedAt:   time.Now().Unix(),
 		}
 
-		if err := h.authStorage.SaveAuth(ctx, authCreds); err != nil {
+		if err := h.authStorage.StoreCredentials(ctx, authCreds); err != nil {
 			h.logger.Error().Err(err).Msg("Failed to save auth credentials")
 			WriteError(w, http.StatusInternalServerError, "Failed to store authentication")
 			return
@@ -1753,9 +1755,9 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		Steps: []models.JobStep{
 			{
 				Name:        "crawl_pages",
-				Type:        models.StepTypeCrawler,
+				Type:        models.WorkerTypeCrawler,
 				Description: fmt.Sprintf("Crawl pages from %s", parsedURL.Host),
-				OnError:     "continue",
+				OnError:     models.ErrorStrategyContinue,
 				Config: map[string]interface{}{
 					"start_urls":       []string{req.StartURL},
 					"max_depth":        maxDepth,
