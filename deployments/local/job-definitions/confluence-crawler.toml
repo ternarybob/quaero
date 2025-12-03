@@ -26,6 +26,7 @@ max_depth = 2
 max_pages = 20
 concurrency = 3
 follow_links = true
+download_images = true  # Download and store images locally
 
 # Confluence-specific URL patterns
 # Include patterns: URLs must contain one of these to be crawled

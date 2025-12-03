@@ -510,6 +510,11 @@ func (w *CrawlerWorker) extractCrawlConfig(config map[string]interface{}) (*mode
 		crawlConfig.Tags = tags
 	}
 
+	// Extract download_images setting
+	if downloadImages, ok := configMap["download_images"].(bool); ok {
+		crawlConfig.DownloadImages = downloadImages
+	}
+
 	return crawlConfig, nil
 }
 
@@ -1703,6 +1708,11 @@ func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawl
 			}
 		}
 		config.Tags = tags
+	}
+
+	// Extract download_images setting
+	if v, ok := configMap["download_images"].(bool); ok {
+		config.DownloadImages = v
 	}
 
 	return config

@@ -755,9 +755,10 @@ func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWr
 }
 
 // findMatchingJobDefinition searches crawler job definitions for URL pattern matches
-// Returns the first job definition whose url_patterns match the target URL
+// Returns the MOST SPECIFIC job definition whose url_patterns match the target URL
+// When multiple patterns match, the one with highest specificity wins (more literal characters)
 // Patterns support wildcards: * matches any sequence of characters
-// Example patterns: "*.atlassian.net/wiki/*", "abc.net.au/*"
+// Example: "*.atlassian.net/wiki/*" is more specific than "*.*" and will be preferred
 func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, targetURL string) (*models.JobDefinition, error) {
 	// List all crawler-type job definitions
 	opts := &interfaces.JobDefinitionListOptions{
@@ -778,7 +779,14 @@ func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, ta
 	targetHost := parsedURL.Host
 	targetPath := parsedURL.Path
 
-	// Search for a matching job definition
+	// Find ALL matching job definitions and track their specificity
+	type matchResult struct {
+		jobDef      *models.JobDefinition
+		pattern     string
+		specificity int // Higher = more specific (more literal characters)
+	}
+	var matches []matchResult
+
 	for _, jobDef := range jobDefs {
 		if len(jobDef.UrlPatterns) == 0 {
 			continue
@@ -786,14 +794,33 @@ func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, ta
 
 		for _, pattern := range jobDef.UrlPatterns {
 			if h.matchURLPattern(pattern, targetHost, targetPath, targetURL) {
-				h.logger.Debug().
-					Str("job_def_id", jobDef.ID).
-					Str("pattern", pattern).
-					Str("target_url", targetURL).
-					Msg("Found matching job definition for URL")
-				return jobDef, nil
+				// Calculate pattern specificity: count non-wildcard characters
+				specificity := h.calculatePatternSpecificity(pattern)
+				matches = append(matches, matchResult{
+					jobDef:      jobDef,
+					pattern:     pattern,
+					specificity: specificity,
+				})
 			}
 		}
+	}
+
+	// Return the most specific match (highest specificity score)
+	if len(matches) > 0 {
+		bestMatch := matches[0]
+		for _, m := range matches[1:] {
+			if m.specificity > bestMatch.specificity {
+				bestMatch = m
+			}
+		}
+		h.logger.Debug().
+			Str("job_def_id", bestMatch.jobDef.ID).
+			Str("pattern", bestMatch.pattern).
+			Int("specificity", bestMatch.specificity).
+			Int("total_matches", len(matches)).
+			Str("target_url", targetURL).
+			Msg("Found best matching job definition for URL")
+		return bestMatch.jobDef, nil
 	}
 
 	h.logger.Debug().
@@ -835,6 +862,40 @@ func (h *JobDefinitionHandler) matchURLPattern(pattern, targetHost, targetPath, 
 	}
 
 	return false
+}
+
+// calculatePatternSpecificity calculates how specific a URL pattern is
+// Higher scores indicate more specific patterns (preferred over generic ones)
+// Score is based on:
+// - Number of literal (non-wildcard) characters
+// - Patterns with more literal content are more specific
+// Example: "*.atlassian.net/wiki/*" is more specific than "*.*"
+func (h *JobDefinitionHandler) calculatePatternSpecificity(pattern string) int {
+	specificity := 0
+
+	// Count literal characters (non-wildcards)
+	for _, char := range pattern {
+		if char != '*' {
+			specificity++
+		}
+	}
+
+	// Bonus for patterns with more path segments (more '/')
+	specificity += strings.Count(pattern, "/") * 2
+
+	// Bonus for patterns with specific domain parts (more '.')
+	specificity += strings.Count(pattern, ".") * 2
+
+	// Penalty for patterns that are mostly wildcards
+	wildcardCount := strings.Count(pattern, "*")
+	if wildcardCount > 0 && len(pattern) > 0 {
+		wildcardRatio := float64(wildcardCount) / float64(len(pattern))
+		if wildcardRatio > 0.5 {
+			specificity = specificity / 2 // Heavy penalty for mostly-wildcard patterns
+		}
+	}
+
+	return specificity
 }
 
 // prepareJobDefForExecution creates an in-memory copy of the job definition with runtime overrides.
@@ -1071,12 +1132,18 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 			Int("links_found", len(processedContent.Links)).
 			Msg("First page saved, starting background crawl of links")
 
-		// Get crawl settings from matching job definition (if any)
+		// Get crawl settings from matching job definition - required for link crawling
+		matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.URL)
+
+		// Only start background crawl if we have a matching job definition
 		maxPages := 10
 		includePatterns := []string{}
 		excludePatterns := []string{}
+		downloadImages := false
 		crawlTags := []string{"extension", "crawl", "headless"} // Default tags
-		if matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.URL); matchedJobDef != nil {
+		canCrawlLinks := matchedJobDef != nil
+
+		if matchedJobDef != nil {
 			// Use tags from matched job definition if available
 			if len(matchedJobDef.Tags) > 0 {
 				crawlTags = matchedJobDef.Tags
@@ -1085,6 +1152,9 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 				stepConfig := matchedJobDef.Steps[0].Config
 				if mp, ok := stepConfig["max_pages"].(int); ok {
 					maxPages = mp
+				}
+				if di, ok := stepConfig["download_images"].(bool); ok {
+					downloadImages = di
 				}
 				if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
 					for _, p := range inc {
@@ -1105,7 +1175,8 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 
 		// Start background crawl of discovered links using headless chromedp via orchestrator
 		// This ensures proper Job Manager → Step → Worker hierarchy
-		if len(processedContent.Links) > 0 && len(req.Cookies) > 0 {
+		// Only crawl if we have a matching job definition (canCrawlLinks)
+		if len(processedContent.Links) > 0 && len(req.Cookies) > 0 && canCrawlLinks {
 			// Parse URL for auth storage
 			parsedURL, _ := url.Parse(req.URL)
 			baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
@@ -1159,6 +1230,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 							"max_pages":        len(linksToUse),
 							"concurrency":      3,
 							"follow_links":     false, // Only crawl the provided links
+							"download_images":  downloadImages,
 							"include_patterns": includePatterns,
 							"exclude_patterns": excludePatterns,
 						},
@@ -1739,6 +1811,15 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		jobDef, _ = h.findMatchingJobDefinition(ctx, req.StartURL)
 	}
 
+	// Require a matching job definition - don't allow crawling without config
+	if jobDef == nil {
+		h.logger.Warn().
+			Str("url", req.StartURL).
+			Msg("No matching job definition found for URL - crawling disabled")
+		WriteError(w, http.StatusBadRequest, "No matching job definition found for this URL. Create a job definition with matching url_patterns to enable crawling.")
+		return
+	}
+
 	// Store cookies as authentication if provided
 	var authID string
 	if len(req.Cookies) > 0 {
@@ -1780,15 +1861,16 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 			Msg("Stored extension cookies as auth credentials")
 	}
 
-	// Build crawl config from job definition or defaults
+	// Build crawl config from job definition (guaranteed to have match at this point)
 	maxPages := 50
 	maxDepth := 2
 	concurrency := 3
 	followLinks := true
+	downloadImages := req.DownloadImages // Use request value as default, can be overridden by config
 	var includePatterns, excludePatterns []string
-	var tags []string
+	tags := jobDef.Tags
 
-	if jobDef != nil && len(jobDef.Steps) > 0 {
+	if len(jobDef.Steps) > 0 {
 		stepConfig := jobDef.Steps[0].Config
 		if mp, ok := stepConfig["max_pages"].(int); ok {
 			maxPages = mp
@@ -1801,6 +1883,9 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		}
 		if fl, ok := stepConfig["follow_links"].(bool); ok {
 			followLinks = fl
+		}
+		if di, ok := stepConfig["download_images"].(bool); ok {
+			downloadImages = di
 		}
 		if inc, ok := stepConfig["include_patterns"].([]interface{}); ok {
 			for _, p := range inc {
@@ -1816,11 +1901,9 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 				}
 			}
 		}
-		// Use tags from matched job definition
-		tags = jobDef.Tags
 	}
 
-	// Default tags if no job definition match or no tags specified
+	// Default tags if empty
 	if len(tags) == 0 {
 		tags = []string{"extension", "crawl"}
 	}
@@ -1849,6 +1932,7 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 					"max_pages":        maxPages,
 					"concurrency":      concurrency,
 					"follow_links":     followLinks,
+					"download_images":  downloadImages,
 					"include_patterns": includePatterns,
 					"exclude_patterns": excludePatterns,
 				},

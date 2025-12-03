@@ -174,6 +174,7 @@ type CrawlConfig struct {
 	IncludePatterns []string      `json:"include_patterns"` // URL patterns to include (regex)
 	ExcludePatterns []string      `json:"exclude_patterns"` // URL patterns to exclude (regex)
 	FollowLinks     bool          `json:"follow_links"`     // Whether to follow discovered links
+	DownloadImages  bool          `json:"download_images"`  // Whether to download images locally
 	DetailLevel     string        `json:"detail_level"`     // "metadata" or "full" for Firecrawl-style layered crawling
 	Tags            []string      `json:"tags"`             // Tags to apply to all documents created by this crawl
 
