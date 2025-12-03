@@ -168,6 +168,144 @@
       color: #2c3e50;
       margin-bottom: 12px;
     }
+
+    /* Recording Toggle Styles */
+    .recording-section {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .recording-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .recording-label-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .recording-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #95a5a6;
+      transition: background 0.3s;
+    }
+    .recording-indicator.active {
+      background: #27ae60;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.1); }
+    }
+    .recording-label {
+      font-weight: 500;
+      font-size: 14px;
+      color: #2c3e50;
+    }
+    /* iOS-style Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 26px;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 26px;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: '';
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+    input:checked + .toggle-slider {
+      background-color: #2980b9;
+    }
+    input:checked + .toggle-slider:before {
+      transform: translateX(22px);
+    }
+    input:disabled + .toggle-slider {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .capture-counter {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 14px;
+    }
+    .capture-counter-label {
+      color: #666;
+      font-weight: 500;
+    }
+    .capture-counter-value {
+      color: #2980b9;
+      font-weight: 600;
+    }
+    /* Capture History Styles */
+    .capture-history-container {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      background: #fafafa;
+    }
+    .capture-history-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid #e0e0e0;
+      transition: background 0.2s;
+    }
+    .capture-history-item:last-child {
+      border-bottom: none;
+    }
+    .capture-history-item:hover {
+      background: #f0f0f0;
+    }
+    .capture-item-title {
+      font-size: 13px;
+      color: #2c3e50;
+      font-weight: 500;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .capture-item-time {
+      font-size: 11px;
+      color: #7f8c8d;
+    }
+    .empty-state {
+      padding: 20px;
+      text-align: center;
+      color: #95a5a6;
+      font-size: 13px;
+      font-style: italic;
+    }
   </style>
 </head>
 <body>
@@ -194,6 +332,35 @@
       <div class="status-item">
         <span class="status-label">Last Capture</span>
         <span class="status-value" id="last-capture">Never</span>
+      </div>
+    </div>
+
+
+    <!-- Recording Section -->
+    <div class="recording-section">
+      <div class="section-title">Recording</div>
+      <div class="recording-controls">
+        <div class="recording-label-wrapper">
+          <div class="recording-indicator" id="recording-indicator"></div>
+          <span class="recording-label">Session Recording</span>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="recording-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="capture-counter">
+        <span class="capture-counter-label">Captured:</span>
+        <span class="capture-counter-value" id="capture-count">0 pages</span>
+      </div>
+    </div>
+
+
+    <!-- Captured Pages Section -->
+    <div class="recording-section">
+      <div class="section-title">Captured Pages</div>
+      <div class="capture-history-container" id="capture-history-list">
+        <div class="empty-state">No pages captured yet</div>
       </div>
     </div>
 

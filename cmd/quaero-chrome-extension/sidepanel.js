@@ -10,10 +10,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updatePageInfo();
   connectWebSocket();
 
+  // Load recording state on init
+  await loadRecordingState();
+
   // Set up event listeners
   document.getElementById('capture-auth-btn').addEventListener('click', captureAndCrawl);
   document.getElementById('refresh-status-btn').addEventListener('click', refreshStatus);
   document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+  document.getElementById('recording-toggle').addEventListener('change', toggleRecording);
 });
 
 // Load settings from storage
@@ -307,4 +311,262 @@ function showError(message) {
   setTimeout(() => {
     element.style.display = 'none';
   }, 5000);
+}
+
+
+// ============================================================================
+// Recording Management Functions
+// ============================================================================
+
+/**
+ * Load recording state from background and update UI
+ */
+async function loadRecordingState() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getRecordingState' });
+
+    if (response.success) {
+      updateRecordingUI(response.data);
+      
+      // Update capture history display
+      if (response.data.capturedUrls) {
+        updateCaptureHistory(response.data.capturedUrls);
+      }
+    } else {
+      console.error('Failed to load recording state:', response.error);
+    }
+  } catch (error) {
+    console.error('Error loading recording state:', error);
+  }
+}
+
+/**
+ * Toggle recording on/off
+ */
+async function toggleRecording() {
+  const toggle = document.getElementById('recording-toggle');
+  const isRecording = toggle.checked;
+
+  try {
+    const action = isRecording ? 'startRecording' : 'stopRecording';
+    const response = await chrome.runtime.sendMessage({ action });
+
+    if (response.success) {
+      if (isRecording) {
+        showSuccess(`Recording started! Session: ${response.data.sessionId}`);
+      } else {
+        showSuccess(`Recording stopped. Captured ${response.data.capturedUrls.length} pages.`);
+      }
+
+      // Update UI to reflect new state
+      updateRecordingUI({
+        recording: isRecording,
+        sessionId: response.data.sessionId,
+        captureCount: isRecording ? 0 : response.data.capturedUrls.length
+      });
+    } else {
+      // Revert toggle if failed
+      toggle.checked = !isRecording;
+      showError(`Failed to ${action}: ${response.error}`);
+    }
+  } catch (error) {
+    // Revert toggle if failed
+    toggle.checked = !isRecording;
+    showError(`Error toggling recording: ${error.message}`);
+  }
+}
+
+/**
+ * Update recording UI elements based on state
+ * @param {Object} state - Recording state object
+ * @param {boolean} state.recording - Whether recording is active
+ * @param {number} state.captureCount - Number of pages captured
+ * @param {string} state.sessionId - Current session ID (if recording)
+ */
+function updateRecordingUI(state) {
+  const indicator = document.getElementById('recording-indicator');
+  const toggle = document.getElementById('recording-toggle');
+  const captureCount = document.getElementById('capture-count');
+
+  // Update recording indicator
+  if (state.recording) {
+    indicator.classList.add('active');
+  } else {
+    indicator.classList.remove('active');
+  }
+
+  // Update toggle checkbox
+  toggle.checked = state.recording;
+
+  // Update capture count display
+  const count = state.captureCount || 0;
+  captureCount.textContent = `${count} page${count !== 1 ? 's' : ''}`;
+}
+
+/**
+ * Capture the current page with embedded images
+ */
+async function captureCurrentPage() {
+  try {
+    // Get current tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.url) {
+      throw new Error('No active tab found');
+    }
+
+    // Check if recording is active
+    const stateResponse = await chrome.runtime.sendMessage({ action: 'getRecordingState' });
+    if (!stateResponse.success || !stateResponse.data.recording) {
+      showError('Recording is not active. Please start recording first.');
+      return;
+    }
+
+    console.log('Capturing page:', tab.url);
+
+    // Inject content script if needed
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+    } catch (injectError) {
+      // Script might already be injected, continue
+      console.log('Content script injection note:', injectError.message);
+    }
+
+    // Send message to content script to capture page with images
+    const captureResponse = await chrome.tabs.sendMessage(tab.id, {
+      action: 'capturePageWithImages'
+    });
+
+    if (!captureResponse.success) {
+      throw new Error(captureResponse.error || 'Failed to capture page content');
+    }
+
+    console.log('Page content captured, sending to server...');
+
+    // Get cookies for authentication
+    const url = new URL(tab.url);
+    const baseURL = `${url.protocol}//${url.host}`;
+    const cookies = await chrome.cookies.getAll({ url: baseURL });
+
+    // Prepare capture payload
+    const capturePayload = {
+      url: captureResponse.metadata.url,
+      title: captureResponse.metadata.title,
+      html: captureResponse.html,
+      metadata: {
+        ...captureResponse.metadata,
+        capturedAt: new Date().toISOString(),
+        sessionId: stateResponse.data.sessionId
+      },
+      cookies: cookies
+    };
+
+    // Post to server
+    const serverUrl = document.getElementById('server-url').value;
+    const serverResponse = await fetch(`${serverUrl}/api/documents/capture`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(capturePayload)
+    });
+
+    if (!serverResponse.ok) {
+      const errorData = await serverResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server error: ${serverResponse.status}`);
+    }
+
+    const result = await serverResponse.json();
+    console.log('Page captured successfully:', result);
+
+    // Track captured URL in background
+    await chrome.runtime.sendMessage({
+      action: 'addCapturedUrl',
+      url: tab.url,
+      docId: result.doc_id || result.id || 'unknown',
+      title: captureResponse.metadata.title
+    });
+
+    // Refresh recording state to update capture count and history
+    await loadRecordingState();
+
+    showSuccess(`Page captured successfully! Doc ID: ${result.doc_id || result.id}`);
+
+  } catch (error) {
+    console.error('Capture error:', error);
+    showError(`Failed to capture page: ${error.message}`);
+  }
+}
+
+
+// ============================================================================
+// Capture History Functions
+// ============================================================================
+
+/**
+ * Format relative time for display (e.g., "2 min ago", "1 hour ago")
+ * @param {number} timestamp - Unix timestamp in milliseconds
+ * @returns {string} Formatted relative time string
+ */
+function formatRelativeTime(timestamp) {
+  const now = Date.now();
+  const diffMs = now - timestamp;
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
+
+  if (diffSec < 60) {
+    return 'Just now';
+  } else if (diffMin < 60) {
+    return `${diffMin} min${diffMin !== 1 ? 's' : ''} ago`;
+  } else if (diffHour < 24) {
+    return `${diffHour} hour${diffHour !== 1 ? 's' : ''} ago`;
+  } else {
+    return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`;
+  }
+}
+
+/**
+ * Update the capture history display
+ * @param {Array} capturedUrls - Array of captured URL objects with {url, docId, title, timestamp}
+ */
+function updateCaptureHistory(capturedUrls) {
+  const container = document.getElementById('capture-history-list');
+  
+  if (!container) {
+    console.warn('Capture history container not found');
+    return;
+  }
+
+  // Clear existing content
+  container.innerHTML = '';
+
+  // Check if there are any captures
+  if (!capturedUrls || capturedUrls.length === 0) {
+    container.innerHTML = '<div class="empty-state">No pages captured yet</div>';
+    return;
+  }
+
+  // Render each capture as a list item
+  capturedUrls.forEach(capture => {
+    const item = document.createElement('div');
+    item.className = 'capture-history-item';
+    
+    const title = document.createElement('div');
+    title.className = 'capture-item-title';
+    title.textContent = capture.title || capture.url || 'Untitled Page';
+    title.title = capture.title || capture.url; // Tooltip for truncated text
+    
+    const time = document.createElement('div');
+    time.className = 'capture-item-time';
+    time.textContent = formatRelativeTime(capture.timestamp);
+    
+    item.appendChild(title);
+    item.appendChild(time);
+    container.appendChild(item);
+  });
 }
