@@ -200,7 +200,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 	}
 
 	// Log final batch results
-	w.jobManager.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("[run] Batch complete: %d saved, %d errors", savedCount, errorCount))
+	w.jobManager.AddJobLogWithPhase(ctx, job.ID, "info", fmt.Sprintf("Batch complete: %d saved, %d errors", savedCount, errorCount), "", "run")
 
 	w.logger.Info().
 		Str("job_id", job.ID).
@@ -561,11 +561,11 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Msg("[run] Creating batched queue jobs")
 
 	// Add step logs for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Cloned '%s/%s@%s'", owner, repo, branch))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Scanned %d files: %d excluded by path, %d by extension, %d by binary",
-		totalFilesScanned, excludedByPath, excludedByExtension, excludedByBinary))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Matched %d files, creating %d batch jobs (%d files per batch)",
-		matchedFiles, batchCount, batchSize))
+	w.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Cloned '%s/%s@%s'", owner, repo, branch), "", "run")
+	w.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Scanned %d files: %d excluded by path, %d by extension, %d by binary",
+		totalFilesScanned, excludedByPath, excludedByExtension, excludedByBinary), "", "run")
+	w.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Matched %d files, creating %d batch jobs (%d files per batch)",
+		matchedFiles, batchCount, batchSize), "", "run")
 
 	// Get tags for documents
 	baseTags := jobDef.Tags
@@ -669,7 +669,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("failed to create any batch jobs")
 	}
 
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Created %d batch jobs for %d files", len(jobIDs), totalFiles))
+	w.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Created %d batch jobs for %d files", len(jobIDs), totalFiles), "", "run")
 
 	w.logger.Info().
 		Str("step_name", step.Name).

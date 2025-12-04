@@ -653,7 +653,19 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 // Automatically resolves step context from job metadata/parent chain for UI display.
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	// Default behavior: determine originator based on job type
-	return m.AddJobLogWithOriginator(ctx, jobID, level, message, "")
+	return m.AddJobLogWithPhase(ctx, jobID, level, message, "", "")
+}
+
+// AddJobLogWithPhase adds a job log with an explicit execution phase.
+// Phase values:
+//   - "init" - initialization/assessment phase (cloning, scanning, assessing work)
+//   - "run" - execution/job creation phase (creating jobs, processing files)
+//   - "orchestrator" - orchestrator coordination (step monitoring, job tracking)
+//   - "" (empty) - no specific phase
+func (m *Manager) AddJobLogWithPhase(ctx context.Context, jobID, level, message, originator, phase string) error {
+	// Resolve step context from job metadata
+	stepName, _, _ := m.resolveJobContext(ctx, jobID)
+	return m.AddJobLogFull(ctx, jobID, level, message, stepName, originator, phase)
 }
 
 // AddJobLogWithOriginator adds a job log with an explicit originator.
@@ -666,12 +678,18 @@ func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) e
 func (m *Manager) AddJobLogWithOriginator(ctx context.Context, jobID, level, message, originator string) error {
 	// Resolve step context from job metadata
 	stepName, _, _ := m.resolveJobContext(ctx, jobID)
-	return m.AddJobLogWithContext(ctx, jobID, level, message, stepName, originator)
+	return m.AddJobLogFull(ctx, jobID, level, message, stepName, originator, "")
 }
 
 // AddJobLogWithContext adds a job log with explicit step name and originator.
 // Use this when the caller knows the step context (e.g., StepMonitor).
 func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, message, stepName, originator string) error {
+	return m.AddJobLogFull(ctx, jobID, level, message, stepName, originator, "")
+}
+
+// AddJobLogFull adds a job log with all explicit parameters.
+// This is the most flexible logging function - use when you need full control.
+func (m *Manager) AddJobLogFull(ctx context.Context, jobID, level, message, stepName, originator, phase string) error {
 	now := time.Now()
 
 	// Resolve manager_id from job metadata (we still need this for WebSocket routing)
@@ -695,6 +713,7 @@ func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, messag
 		Message:         message,
 		StepName:        stepName,           // Store step_name in DB for post-refresh filtering
 		Originator:      resolvedOriginator, // Store originator for UI display
+		Phase:           phase,              // Store execution phase for UI display
 	}
 
 	if err := m.jobLogStorage.AppendLog(ctx, jobID, entry); err != nil {
@@ -708,6 +727,7 @@ func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, messag
 			"manager_id": managerID,
 			"step_name":  stepName,
 			"originator": resolvedOriginator,
+			"phase":      phase,
 			"level":      level,
 			"message":    message,
 			"timestamp":  now.Format(time.RFC3339),

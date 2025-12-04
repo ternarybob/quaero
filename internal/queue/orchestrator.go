@@ -253,11 +253,11 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		o.jobManager.AddJobLog(ctx, stepID, "info", stepStartLog)
 
 		// Phase 1: Initialize step worker to assess work
-		o.jobManager.AddJobLog(ctx, stepID, "info", "[init] Initializing worker...")
+		o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Initializing worker...", "", "init")
 		initResult, err := o.stepManager.Init(ctx, resolvedStep, *jobDef)
 		if err != nil {
-			o.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("[init] Step %s init failed: %v", step.Name, err))
-			o.jobManager.AddJobLog(ctx, stepID, "error", fmt.Sprintf("[init] Init failed: %v", err))
+			o.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s init failed: %v", step.Name, err), "", "init")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Init failed: %v", err), "", "init")
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
@@ -269,16 +269,16 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		}
 
 		// Log init result for visibility
-		initLogMsg := fmt.Sprintf("[init] Worker initialized: %d work items, strategy=%s",
+		initLogMsg := fmt.Sprintf("Worker initialized: %d work items, strategy=%s",
 			initResult.TotalCount, initResult.Strategy)
-		o.jobManager.AddJobLog(ctx, stepID, "info", initLogMsg)
+		o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", initLogMsg, "", "init")
 
 		// Phase 2: Create jobs based on init result
 		// Execute step via StepManager, passing the init result
 		childJobID, err := o.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID, initResult)
 		if err != nil {
-			o.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("[run] Step %s failed: %v", step.Name, err))
-			o.jobManager.AddJobLog(ctx, stepID, "error", fmt.Sprintf("[run] Failed: %v", err))
+			o.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err), "", "run")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
@@ -322,11 +322,11 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 
 		if returnsChildJobs {
 			hasChildJobs = true
-			o.jobManager.AddJobLog(ctx, managerID, "info", fmt.Sprintf("[run] Step %s spawned child jobs", step.Name))
-			o.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Spawned child jobs (job: %s)", childJobID))
+			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawned child jobs", step.Name), "", "run")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Spawned child jobs (job: %s)", childJobID), "", "run")
 		} else {
-			o.jobManager.AddJobLog(ctx, managerID, "info", fmt.Sprintf("[run] Step %s completed", step.Name))
-			o.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[run] Completed (job: %s)", childJobID))
+			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name), "", "run")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID), "", "run")
 		}
 
 		// Update manager progress
@@ -367,8 +367,8 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			Bool("step_monitor_nil", stepMonitor == nil).
 			Msg("[orchestrator] Determining step status for step monitor")
 
-		o.jobManager.AddJobLog(ctx, managerID, "info", fmt.Sprintf("[orchestrator] Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
-			returnsChildJobs, stepChildCount, stepMonitor == nil))
+		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
+			returnsChildJobs, stepChildCount, stepMonitor == nil), "", "orchestrator")
 
 		if returnsChildJobs && stepChildCount > 0 {
 			stepStatus = "spawned"
@@ -391,7 +391,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 				Depth:     1,
 			}
 			stepMonitor.StartMonitoring(ctx, stepQueueJob)
-			o.jobManager.AddJobLog(ctx, stepID, "info", "[orchestrator] Step monitor started for spawned children")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Step monitor started for spawned children", "", "orchestrator")
 		}
 
 		// Update manager metadata with step progress
@@ -437,7 +437,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 
 	// Handle completion
 	if hasChildJobs && jobMonitor != nil {
-		o.jobManager.AddJobLog(ctx, managerID, "info", "[orchestrator] Steps have child jobs - starting manager job monitoring")
+		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", "Steps have child jobs - starting manager job monitoring", "", "orchestrator")
 
 		stepIDsMetadata := map[string]interface{}{
 			"step_job_ids": stepJobIDs,
