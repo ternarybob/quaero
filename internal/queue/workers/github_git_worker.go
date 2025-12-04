@@ -420,20 +420,8 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	matchedFiles, _ := initResult.Metadata["matched_files"].(int)
 	excludedByLimit, _ := initResult.Metadata["excluded_by_limit"].(int)
 
-	// Define fileInfo type for extracting files from metadata
-	type fileInfo struct {
-		Path   string
-		Folder string
-	}
-
-	// Extract files from metadata
-	var files []fileInfo
-	if filesInterface, ok := initResult.Metadata["files"]; ok {
-		if filesSlice, ok := filesInterface.([]fileInfo); ok {
-			files = filesSlice
-		}
-	}
-
+	// Use WorkItems directly - they contain path and folder in Config
+	workItems := initResult.WorkItems
 	filesToProcess := initResult.TotalCount
 
 	w.logger.Info().
@@ -442,6 +430,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("files_to_process", filesToProcess).
+		Int("work_items", len(workItems)).
 		Msg("[worker] Starting file processing from init result")
 
 	// Add step logs for UI visibility (git-style output)
@@ -457,24 +446,36 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		baseTags = []string{}
 	}
 
-	// Process files inline - no child jobs needed
+	// Process files inline using WorkItems
 	processedCount := 0
 	failedCount := 0
 	startProcessing := time.Now()
 
-	for i, file := range files {
+	for i, workItem := range workItems {
 		if processedCount >= filesToProcess {
 			break
+		}
+
+		// Extract path and folder from WorkItem config
+		filePath, _ := workItem.Config["path"].(string)
+		folder, _ := workItem.Config["folder"].(string)
+
+		if filePath == "" {
+			w.logger.Warn().
+				Str("work_item_id", workItem.ID).
+				Msg("[worker] WorkItem missing path, skipping")
+			failedCount++
+			continue
 		}
 
 		fileStartTime := time.Now()
 
 		// Read file content from cloned repo
-		filePath := filepath.Join(cloneDir, file.Path)
-		content, err := os.ReadFile(filePath)
+		fullPath := filepath.Join(cloneDir, filePath)
+		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			w.logger.Warn().Err(err).
-				Str("file", file.Path).
+				Str("file", filePath).
 				Msg("[worker] Failed to read file, skipping")
 			failedCount++
 			continue
@@ -484,18 +485,18 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		doc := &models.Document{
 			ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
 			SourceType:      models.SourceTypeGitHubGit,
-			SourceID:        fmt.Sprintf("%s/%s/%s/%s", owner, repo, branch, file.Path),
-			Title:           filepath.Base(file.Path),
+			SourceID:        fmt.Sprintf("%s/%s/%s/%s", owner, repo, branch, filePath),
+			Title:           filepath.Base(filePath),
 			ContentMarkdown: string(content),
-			URL:             fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, file.Path),
+			URL:             fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, filePath),
 			Tags:            mergeTags(baseTags, []string{"github", repo, branch}),
 			Metadata: map[string]interface{}{
 				"owner":       owner,
 				"repo":        repo,
 				"branch":      branch,
-				"folder":      file.Folder,
-				"path":        file.Path,
-				"file_type":   filepath.Ext(file.Path),
+				"folder":      folder,
+				"path":        filePath,
+				"file_type":   filepath.Ext(filePath),
 				"clone_based": true,
 			},
 			CreatedAt: time.Now(),
@@ -505,7 +506,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		// Save document
 		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Warn().Err(err).
-				Str("file", file.Path).
+				Str("file", filePath).
 				Msg("[worker] Failed to save document, skipping")
 			failedCount++
 			continue
@@ -516,13 +517,13 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 
 		// Log every file processed
 		w.logger.Debug().
-			Str("file", file.Path).
+			Str("file", filePath).
 			Str("doc_id", doc.ID[:12]).
 			Dur("duration", fileElapsed).
 			Msg("[worker] File processed")
 
 		// Add job log for UI visibility (every 10 files or last file)
-		if processedCount%10 == 0 || i == len(files)-1 || processedCount == filesToProcess {
+		if processedCount%10 == 0 || i == len(workItems)-1 || processedCount == filesToProcess {
 			w.jobManager.AddJobLog(ctx, stepID, "info",
 				fmt.Sprintf("[worker] Progress: %d/%d files (%.1f%%)",
 					processedCount, filesToProcess, float64(processedCount)/float64(filesToProcess)*100))
