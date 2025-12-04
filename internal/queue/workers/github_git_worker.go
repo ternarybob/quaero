@@ -86,6 +86,7 @@ func (w *GitHubGitWorker) Validate(job *models.QueueJob) error {
 
 // Execute processes a GitHub git file job (reads from cloned repo)
 func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) error {
+	startTime := time.Now()
 	w.logger.Debug().Str("job_id", job.ID).Msg("Processing GitHub git file job")
 
 	// Update job status to running
@@ -151,10 +152,16 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 		w.logger.Warn().Err(err).Msg("Failed to update job progress")
 	}
 
-	w.logger.Debug().
+	elapsed := time.Since(startTime)
+	w.logger.Info().
 		Str("job_id", job.ID).
-		Str("path", path).
-		Msg("GitHub git file job completed successfully")
+		Str("file", path).
+		Str("repo", fmt.Sprintf("%s/%s", owner, repo)).
+		Dur("duration", elapsed).
+		Msg("Worker completed - file downloaded")
+
+	// Also add job log for UI visibility
+	w.jobManager.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Worker completed - downloaded file: %s (time: %s)", path, elapsed.Round(time.Millisecond)))
 
 	return nil
 }
@@ -394,6 +401,25 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("failed to walk repository: %w", err)
 	}
 
+	// Log total files found in repository
+	totalFilesInRepo := len(files)
+	filesToSchedule := totalFilesInRepo
+	if filesToSchedule > maxFiles {
+		filesToSchedule = maxFiles
+	}
+
+	w.logger.Info().
+		Str("owner", owner).
+		Str("repo", repo).
+		Str("branch", branch).
+		Int("total_files_found", totalFilesInRepo).
+		Int("files_to_schedule", filesToSchedule).
+		Int("max_files_limit", maxFiles).
+		Msg("Repository scanned - scheduling worker jobs")
+
+	// Add step log for UI visibility
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Repository %s/%s scanned: %d files found, scheduling %d workers", owner, repo, totalFilesInRepo, filesToSchedule))
+
 	// Create parent job
 	parentJob := models.NewQueueJob(
 		"github_git_parent",
@@ -519,8 +545,12 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("files_enqueued", totalFilesEnqueued).
+		Int("total_files_in_repo", totalFilesInRepo).
 		Str("clone_dir", cloneDir).
 		Msg("GitHub git clone completed, child jobs enqueued")
+
+	// Add step log for UI visibility
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawned %d worker jobs for %s/%s@%s (total files in repo: %d)", totalFilesEnqueued, owner, repo, branch, totalFilesInRepo))
 
 	// Update parent job with total count
 	if err := w.jobManager.UpdateJobProgress(ctx, parentJob.ID, 0, totalFilesEnqueued); err != nil {
