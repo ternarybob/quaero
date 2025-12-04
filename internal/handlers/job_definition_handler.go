@@ -28,20 +28,20 @@ var ErrJobDefinitionNotFound = errors.New("job definition not found")
 
 // JobDefinitionHandler handles HTTP requests for job definition management
 type JobDefinitionHandler struct {
-	jobDefStorage      interfaces.JobDefinitionStorage
-	jobStorage         interfaces.QueueStorage
-	jobMgr             *queue.Manager
-	orchestrator       *queue.Orchestrator
-	jobMonitor         interfaces.JobMonitor
-	stepMonitor        interfaces.StepMonitor
-	authStorage        interfaces.AuthStorage
-	kvStorage          interfaces.KeyValueStorage // For {key-name} replacement in job definitions
-	storageManager     interfaces.StorageManager  // For reloading job definitions from disk
-	definitionsDir     string                     // Path to job definitions directory
-	validationService  *validation.TOMLValidationService
-	jobService         *jobs.Service              // Business logic for job definitions
-	documentService    interfaces.DocumentService // For direct document capture
-	logger             arbor.ILogger
+	jobDefStorage     interfaces.JobDefinitionStorage
+	jobStorage        interfaces.QueueStorage
+	jobMgr            *queue.Manager
+	orchestrator      *queue.Orchestrator
+	jobMonitor        interfaces.JobMonitor
+	stepMonitor       interfaces.StepMonitor
+	authStorage       interfaces.AuthStorage
+	kvStorage         interfaces.KeyValueStorage // For {key-name} replacement in job definitions
+	storageManager    interfaces.StorageManager  // For reloading job definitions from disk
+	definitionsDir    string                     // Path to job definitions directory
+	validationService *validation.TOMLValidationService
+	jobService        *jobs.Service              // Business logic for job definitions
+	documentService   interfaces.DocumentService // For direct document capture
+	logger            arbor.ILogger
 }
 
 // NewJobDefinitionHandler creates a new job definition handler
@@ -85,20 +85,20 @@ func NewJobDefinitionHandler(
 	logger.Debug().Msg("Job definition handler initialized with JobManager and JobMonitor")
 
 	return &JobDefinitionHandler{
-		jobDefStorage:      jobDefStorage,
-		jobStorage:         jobStorage,
-		jobMgr:             jobMgr,
-		orchestrator:       orchestrator,
-		jobMonitor:         jobMonitor,
-		stepMonitor:        stepMonitor,
-		authStorage:        authStorage,
-		kvStorage:          kvStorage,
-		storageManager:     storageManager,
-		definitionsDir:     definitionsDir,
-		validationService:  validation.NewTOMLValidationService(logger),
-		jobService:         jobs.NewService(kvStorage, agentService, logger),
-		documentService:    documentService,
-		logger:             logger,
+		jobDefStorage:     jobDefStorage,
+		jobStorage:        jobStorage,
+		jobMgr:            jobMgr,
+		orchestrator:      orchestrator,
+		jobMonitor:        jobMonitor,
+		stepMonitor:       stepMonitor,
+		authStorage:       authStorage,
+		kvStorage:         kvStorage,
+		storageManager:    storageManager,
+		definitionsDir:    definitionsDir,
+		validationService: validation.NewTOMLValidationService(logger),
+		jobService:        jobs.NewService(kvStorage, agentService, logger),
+		documentService:   documentService,
+		logger:            logger,
 	}
 }
 
@@ -1279,7 +1279,7 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 						OnError:     models.ErrorStrategyContinue,
 						Config: map[string]interface{}{
 							"start_urls":       linksToUse,
-							"max_depth":        0,     // Don't follow links from these pages
+							"max_depth":        0, // Don't follow links from these pages
 							"max_pages":        len(linksToUse),
 							"concurrency":      3,
 							"follow_links":     false, // Only crawl the provided links
@@ -2071,4 +2071,3 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 
 	WriteJSON(w, http.StatusAccepted, response)
 }
-

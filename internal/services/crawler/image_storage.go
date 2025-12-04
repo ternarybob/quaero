@@ -55,8 +55,8 @@ func DefaultImageStorageConfig() ImageStorageConfig {
 // StoredImage represents a downloaded and stored image
 type StoredImage struct {
 	OriginalURL string `json:"original_url"`
-	LocalPath   string `json:"local_path"`   // Relative path from BaseDir
-	FullPath    string `json:"full_path"`    // Absolute path
+	LocalPath   string `json:"local_path"` // Relative path from BaseDir
+	FullPath    string `json:"full_path"`  // Absolute path
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
 	Hash        string `json:"hash"` // SHA256 hash for deduplication

@@ -173,13 +173,13 @@ func (h *HybridScraperHandler) CrawlHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	WriteJSON(w, http.StatusAccepted, map[string]interface{}{
-		"session_id":   session.ID,
-		"status":       session.Status,
-		"start_url":    session.StartURL,
-		"links_count":  len(session.LinksToCrawl),
-		"started_at":   session.StartedAt.Format(time.RFC3339),
-		"message":      "Crawl session started. Extension will process links and POST results.",
-		"results_url":  "/api/hybrid-scraper/session/" + session.ID,
+		"session_id":  session.ID,
+		"status":      session.Status,
+		"start_url":   session.StartURL,
+		"links_count": len(session.LinksToCrawl),
+		"started_at":  session.StartedAt.Format(time.RFC3339),
+		"message":     "Crawl session started. Extension will process links and POST results.",
+		"results_url": "/api/hybrid-scraper/session/" + session.ID,
 	})
 }
 
