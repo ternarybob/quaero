@@ -258,12 +258,13 @@ func (w *GitHubRepoWorker) Init(ctx context.Context, step models.JobStep, jobDef
 	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
-		Msg("[step] GitHub repo worker initialized")
+		Msg("GitHub repo worker initialized")
 
 	// Create work items for each branch
 	workItems := make([]interfaces.WorkItem, len(branches))
@@ -325,12 +326,14 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	maxFiles, _ := initResult.Metadata["max_files"].(int)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
-		Msg("[worker] Creating GitHub repo jobs from init result")
+		Msg("Creating GitHub repo jobs from init result")
 
 	// Preserve the original validation variables for use below
 	_ = extensions

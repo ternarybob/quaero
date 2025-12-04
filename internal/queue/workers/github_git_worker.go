@@ -256,11 +256,12 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			stepConfig["branch"] = extractedBranch
 		}
 		w.logger.Debug().
+			Str("phase", "init").
 			Str("trigger_url", triggerURL).
 			Str("extracted_owner", extractedOwner).
 			Str("extracted_repo", extractedRepo).
 			Str("extracted_branch", extractedBranch).
-			Msg("[init] Extracted owner/repo from trigger URL")
+			Msg("Extracted owner/repo from trigger URL")
 	}
 
 	// Validate required config
@@ -288,12 +289,13 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	gitPath := getStringConfig(stepConfig, "git_path", defaultGitPath)
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("max_files", maxFiles).
-		Msg("[init] Initializing GitHub git worker - assessing repository")
+		Msg("Initializing GitHub git worker - assessing repository")
 
 	// Get connector for authentication
 	var connector *models.Connector
@@ -329,11 +331,12 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	repoURL := fmt.Sprintf("https://oauth2:%s@github.com/%s/%s.git", token, owner, repo)
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
 		Str("clone_dir", cloneDir).
-		Msg("[init] Cloning repository to assess content")
+		Msg("Cloning repository to assess content")
 
 	// Run git clone with depth 1 (shallow clone) for speed
 	cmd := exec.CommandContext(ctx, gitPath, "clone",
@@ -361,12 +364,13 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			}
 		}
 		w.logger.Error().
+			Str("phase", "init").
 			Str("git_path", gitPath).
 			Str("owner", owner).
 			Str("repo", repo).
 			Str("branch", branch).
 			Str("error_output", errOutput).
-			Msg("[init] Git clone failed")
+			Msg("Git clone failed")
 		return nil, fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
 	}
 
@@ -467,6 +471,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	matchedFiles := len(files)
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
@@ -475,7 +480,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Int("excluded_by_extension", excludedByExtension).
 		Int("excluded_by_binary", excludedByBinary).
 		Int("matched_files", matchedFiles).
-		Msg("[init] Repository assessed - file analysis complete")
+		Msg("Repository assessed - file analysis complete")
 
 	// Create work items from ALL files (batching happens in CreateJobs)
 	workItems := make([]interfaces.WorkItem, matchedFiles)

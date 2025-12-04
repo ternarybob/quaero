@@ -134,9 +134,10 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			}
 			apiKey = resolvedAPIKey
 			w.logger.Info().
+				Str("phase", "init").
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
-				Msg("[step] Resolved API key placeholder from storage")
+				Msg("Resolved API key placeholder from storage")
 		} else {
 			apiKey = apiKeyValue
 		}
@@ -147,11 +148,12 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	}
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
-		Msg("[step] Web search worker initialized")
+		Msg("Web search worker initialized")
 
 	// Create a single work item representing the search
 	workItems := []interfaces.WorkItem{
@@ -204,12 +206,14 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
 		Str("step_id", stepID).
-		Msg("[worker] Starting web search from init result")
+		Msg("Starting web search from init result")
 
 	// Log step start for UI
 	w.logJobEvent(ctx, stepID, step.Name, "info",

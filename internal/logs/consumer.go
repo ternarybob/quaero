@@ -190,6 +190,7 @@ func (c *Consumer) shouldPublishEvent(level log.Level) bool {
 }
 
 // publishLogEvent publishes a log entry as an event for UI consumption
+// Includes structured context fields (phase, originator, step_name) for UI rendering
 func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.JobLogEntry) {
 	// Circuit breaker: Check if we're already publishing an event for this correlation ID + message
 	// This prevents recursive event publishing (defense in depth)
@@ -202,15 +203,32 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 
 	// Publish to EventService (WebSocket will subscribe to this event type)
 	go func() {
+		// Build payload with structured context fields for UI rendering
+		payload := map[string]interface{}{
+			"job_id":    event.CorrelationID,
+			"level":     logEntry.Level,
+			"message":   logEntry.Message,
+			"timestamp": logEntry.Timestamp,
+		}
+
+		// Include structured context fields if present (UI uses these for rendering)
+		if logEntry.Phase != "" {
+			payload["phase"] = logEntry.Phase
+		}
+		if logEntry.Originator != "" {
+			payload["originator"] = logEntry.Originator
+		}
+		if logEntry.StepName != "" {
+			payload["step_name"] = logEntry.StepName
+		}
+		if logEntry.SourceType != "" {
+			payload["source_type"] = logEntry.SourceType
+		}
+
 		// Non-blocking publish in goroutine
 		err := c.eventService.Publish(c.ctx, interfaces.Event{
-			Type: "log_event", // Event type for log streaming
-			Payload: map[string]interface{}{
-				"job_id":    event.CorrelationID,
-				"level":     logEntry.Level,
-				"message":   logEntry.Message,
-				"timestamp": logEntry.Timestamp,
-			},
+			Type:    "log_event", // Event type for log streaming
+			Payload: payload,
 		})
 		if err != nil {
 			// Use logger without correlation ID to avoid recursive channel processing
@@ -223,6 +241,7 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 }
 
 // transformEvent converts arbor LogEvent to JobLogEntry format
+// Extracts structured fields (phase, originator, step_name) for UI rendering
 func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 	// Format timestamp as "15:04:05" for display
 	formattedTime := event.Timestamp.Format("15:04:05")
@@ -233,12 +252,32 @@ func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 	// Convert level to 3-letter format for consistent display
 	levelStr := convertTo3Letter(event.Level.String())
 
-	// Build message with fields if present
+	// Extract structured context fields for UI rendering
+	// These fields are set by workers via log.Str("phase", "step").Msg(...)
+	var phase, originator, stepName, sourceType string
+
+	// Build message, excluding context fields that are stored separately
 	message := event.Message
 	if len(event.Fields) > 0 {
-		// Append fields to message for database persistence
+		var extraFields []string
 		for key, value := range event.Fields {
-			message += fmt.Sprintf(" %s=%v", key, value)
+			switch key {
+			case "phase":
+				phase = fmt.Sprintf("%v", value)
+			case "originator":
+				originator = fmt.Sprintf("%v", value)
+			case "step_name":
+				stepName = fmt.Sprintf("%v", value)
+			case "source_type":
+				sourceType = fmt.Sprintf("%v", value)
+			default:
+				// Append non-context fields to message for persistence
+				extraFields = append(extraFields, fmt.Sprintf("%s=%v", key, value))
+			}
+		}
+		// Append extra fields to message if any
+		for _, field := range extraFields {
+			message += " " + field
 		}
 	}
 
@@ -248,5 +287,9 @@ func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 		Level:           levelStr,
 		Message:         message,
 		AssociatedJobID: event.CorrelationID,
+		Phase:           phase,
+		Originator:      originator,
+		StepName:        stepName,
+		SourceType:      sourceType,
 	}
 }

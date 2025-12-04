@@ -263,9 +263,10 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 			return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 		}
 		w.logger.Debug().
+			Str("phase", "init").
 			Str("step_name", step.Name).
 			Str("api_key_name", cleanAPIKeyName).
-			Msg("[step] Resolved API key from storage")
+			Msg("Resolved API key from storage")
 	}
 
 	// Extract document filter from step config
@@ -278,9 +279,10 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 	}
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
-		Msg("[step] Initializing agent worker - querying documents")
+		Msg("Initializing agent worker - querying documents")
 
 	// Query documents to process
 	documents, err := w.queryDocuments(ctx, &jobDef, documentFilter)
@@ -303,10 +305,11 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 	}
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(documents)).
-		Msg("[step] Agent worker initialized - found documents")
+		Msg("Agent worker initialized - found documents")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems:            workItems,
@@ -360,17 +363,20 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	// Check if there are any work items
 	if len(initResult.WorkItems) == 0 {
 		w.logger.Warn().
+			Str("phase", "run").
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
-			Msg("[step] No documents found for agent processing")
+			Msg("No documents found for agent processing")
 		return stepID, nil
 	}
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(initResult.WorkItems)).
-		Msg("[worker] Creating agent jobs from init result")
+		Msg("Creating agent jobs from init result")
 
 	// Create and enqueue agent jobs for each document
 	jobIDs := make([]string, 0, len(initResult.WorkItems))
@@ -379,10 +385,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		jobID, err := w.createAgentJob(ctx, agentType, docID, stepConfig, stepID, step.Name, managerID)
 		if err != nil {
 			w.logger.Warn().
+				Str("phase", "run").
+				Str("originator", "worker").
 				Err(err).
 				Str("document_id", docID).
 				Str("agent_type", agentType).
-				Msg("[worker] Failed to create agent job for document")
+				Msg("Failed to create agent job for document")
 			continue
 		}
 		jobIDs = append(jobIDs, jobID)
@@ -395,10 +403,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_created", len(jobIDs)).
-		Msg("[worker] Agent jobs created and enqueued")
+		Msg("Agent jobs created and enqueued")
 
 	// Poll for job completion (wait for all agent jobs to complete)
 	if err := w.pollJobCompletion(ctx, jobIDs); err != nil {
@@ -406,10 +416,11 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	w.logger.Info().
+		Str("phase", "run").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
-		Msg("[step] Agent job orchestration completed")
+		Msg("Agent job orchestration completed")
 
 	return stepID, nil
 }

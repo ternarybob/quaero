@@ -361,11 +361,12 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		// Determine step status
 		stepStatus := "completed"
 		o.logger.Debug().
+			Str("phase", "orchestrator").
 			Str("step_id", stepID).
 			Bool("returns_child_jobs", returnsChildJobs).
 			Int("step_child_count", stepChildCount).
 			Bool("step_monitor_nil", stepMonitor == nil).
-			Msg("[orchestrator] Determining step status for step monitor")
+			Msg("Determining step status for step monitor")
 
 		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
 			returnsChildJobs, stepChildCount, stepMonitor == nil), "", "orchestrator")

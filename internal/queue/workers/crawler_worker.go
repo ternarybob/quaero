@@ -47,6 +47,10 @@ type CrawlerWorker struct {
 var _ interfaces.DefinitionWorker = (*CrawlerWorker)(nil)
 var _ interfaces.JobWorker = (*CrawlerWorker)(nil)
 
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
 // NewCrawlerWorker creates a new crawler worker that implements both DefinitionWorker and JobWorker interfaces
 func NewCrawlerWorker(
 	crawlerService *crawler.Service,
@@ -72,15 +76,31 @@ func NewCrawlerWorker(
 }
 
 // ============================================================================
-// INTERFACE METHODS
+// PUBLIC INTERFACE METHODS - TYPE IDENTIFICATION
 // ============================================================================
 
-// GetWorkerType returns "crawler_url" - the job type this worker handles
+// GetType returns WorkerTypeCrawler for the DefinitionWorker interface
+func (w *CrawlerWorker) GetType() models.WorkerType {
+	return models.WorkerTypeCrawler
+}
+
+// GetWorkerType returns "crawler_url" - the job type this worker handles (JobWorker interface)
 func (w *CrawlerWorker) GetWorkerType() string {
 	return "crawler_url"
 }
 
-// Validate validates that the queue job is compatible with this worker
+// ============================================================================
+// PUBLIC INTERFACE METHODS - VALIDATION
+// ============================================================================
+
+// ValidateConfig validates step configuration for crawler type (DefinitionWorker interface)
+func (w *CrawlerWorker) ValidateConfig(step models.JobStep) error {
+	// Crawler is agnostic - any configuration is valid
+	// Validation happens during execution by the crawler service
+	return nil
+}
+
+// Validate validates that the queue job is compatible with this worker (JobWorker interface)
 func (w *CrawlerWorker) Validate(job *models.QueueJob) error {
 	if job.Type != "crawler_url" {
 		return fmt.Errorf("invalid job type: expected %s, got %s", "crawler_url", job.Type)
@@ -106,6 +126,201 @@ func (w *CrawlerWorker) Validate(job *models.QueueJob) error {
 
 	return nil
 }
+
+// ============================================================================
+// PUBLIC INTERFACE METHODS - INITIALIZATION
+// ============================================================================
+
+// Init performs the initialization/setup phase for a crawler step.
+// This is where we:
+//   - Determine the base URL and seed URLs to crawl
+//   - Build the crawl configuration
+//   - Estimate the number of pages based on max_depth and max_pages
+//
+// The Init phase does NOT start the crawl - it only gathers information.
+func (w *CrawlerWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+	stepConfig := step.Config
+	if stepConfig == nil {
+		stepConfig = make(map[string]interface{})
+	}
+
+	// Extract entity type from config (default to "issues" for jira, "pages" for confluence)
+	entityType := "all"
+	if et, ok := stepConfig["entity_type"].(string); ok {
+		entityType = et
+	} else {
+		// Infer from source type
+		switch jobDef.SourceType {
+		case "jira":
+			entityType = "issues"
+		case "confluence":
+			entityType = "pages"
+		}
+	}
+
+	// Build CrawlConfig struct from map with proper defaults
+	crawlConfig := w.buildCrawlConfig(stepConfig)
+
+	// Build seed URLs - prioritize start_urls from step config, fallback to source type
+	var seedURLs []string
+	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {
+		for _, url := range startURLs {
+			if urlStr, ok := url.(string); ok {
+				seedURLs = append(seedURLs, urlStr)
+			}
+		}
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Init: Using start_urls from job definition config")
+	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
+		seedURLs = startURLsStr
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Strs("start_urls", seedURLs).
+			Msg("Init: Using start_urls from job definition config")
+	} else {
+		seedURLs = w.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Str("source_type", jobDef.SourceType).
+			Str("base_url", jobDef.BaseURL).
+			Strs("generated_urls", seedURLs).
+			Msg("Init: Generated seed URLs based on source type")
+	}
+
+	// Default source_type to "web" for generic crawler jobs
+	sourceType := jobDef.SourceType
+	if sourceType == "" {
+		sourceType = "web"
+	}
+
+	// Create work items from seed URLs
+	workItems := make([]interfaces.WorkItem, len(seedURLs))
+	for i, url := range seedURLs {
+		workItems[i] = interfaces.WorkItem{
+			ID:   url,
+			Name: fmt.Sprintf("Seed URL: %s", url),
+			Type: "url",
+			Config: map[string]interface{}{
+				"url":         url,
+				"depth":       0,
+				"source_type": sourceType,
+				"entity_type": entityType,
+			},
+		}
+	}
+
+	// Estimate total pages based on seed URLs and max_pages
+	// Each seed URL could potentially expand to max_pages
+	estimatedTotal := len(seedURLs) * crawlConfig.MaxPages
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Int("seed_urls", len(seedURLs)).
+		Int("max_depth", crawlConfig.MaxDepth).
+		Int("max_pages", crawlConfig.MaxPages).
+		Int("concurrency", crawlConfig.Concurrency).
+		Int("estimated_total", estimatedTotal).
+		Msg("Crawler worker initialized")
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(seedURLs), // Seed URLs are the initial work items
+		Strategy:             interfaces.ProcessingStrategyParallel,
+		SuggestedConcurrency: crawlConfig.Concurrency,
+		Metadata: map[string]interface{}{
+			"base_url":        jobDef.BaseURL,
+			"source_type":     sourceType,
+			"entity_type":     entityType,
+			"max_depth":       crawlConfig.MaxDepth,
+			"max_pages":       crawlConfig.MaxPages,
+			"estimated_total": estimatedTotal,
+			"seed_urls":       seedURLs,
+			"crawl_config":    crawlConfig,
+		},
+	}, nil
+}
+
+// ============================================================================
+// PUBLIC INTERFACE METHODS - JOB CREATION
+// ============================================================================
+
+// CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
+// The crawler service will create child jobs for each URL discovered.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+// If initResult is provided, it will be used; otherwise Init is called internally.
+func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize crawler: %w", err)
+		}
+	}
+
+	// Extract data from initResult metadata
+	sourceType, _ := initResult.Metadata["source_type"].(string)
+	entityType, _ := initResult.Metadata["entity_type"].(string)
+	seedURLs, _ := initResult.Metadata["seed_urls"].([]string)
+	crawlConfig, _ := initResult.Metadata["crawl_config"].(crawler.CrawlConfig)
+
+	// Get manager_id from step job's parent_id for event aggregation
+	// Step jobs have parent_id = manager_id in the 3-level hierarchy
+	managerID := ""
+	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
+		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+			managerID = *stepJob.ParentID
+		}
+	}
+
+	// Apply tags from job definition to all documents created by this crawl
+	crawlConfig.Tags = jobDef.Tags
+
+	// Set step context for job_log event aggregation in UI
+	crawlConfig.StepName = step.Name
+	crawlConfig.ManagerID = managerID
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("source_type", sourceType).
+		Str("base_url", jobDef.BaseURL).
+		Str("entity_type", entityType).
+		Int("seed_url_count", len(seedURLs)).
+		Int("max_depth", crawlConfig.MaxDepth).
+		Int("max_pages", crawlConfig.MaxPages).
+		Msg("Creating parent crawler job from init result")
+
+	// Start crawl job with properly typed config
+	jobID, err := w.crawlerService.StartCrawl(
+		sourceType,
+		entityType,
+		seedURLs,
+		crawlConfig,   // Pass CrawlConfig struct
+		jobDef.AuthID, // sourceID - use auth_id as source identifier
+		false,         // refreshSource
+		nil,           // sourceConfigSnapshot
+		nil,           // authSnapshot
+		stepID,        // jobDefinitionID - link to step
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
+	}
+
+	w.logger.Debug().
+		Str("step_name", step.Name).
+		Str("job_id", jobID).
+		Str("step_id", stepID).
+		Msg("Parent crawler job created")
+
+	return jobID, nil
+}
+
+// ============================================================================
+// PUBLIC INTERFACE METHODS - EXECUTION
+// ============================================================================
 
 // Execute executes a crawler job with full workflow:
 // 1. ChromeDP page rendering and JavaScript execution
@@ -409,7 +624,16 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 }
 
 // ============================================================================
-// CONFIGURATION AND RENDERING HELPERS
+// PUBLIC INTERFACE METHODS - METADATA
+// ============================================================================
+
+// ReturnsChildJobs returns true since crawler creates child jobs for each URL
+func (w *CrawlerWorker) ReturnsChildJobs() bool {
+	return true
+}
+
+// ============================================================================
+// PRIVATE HELPERS - CONFIGURATION
 // ============================================================================
 
 // extractCrawlConfig extracts CrawlConfig from Job.Config map
@@ -519,6 +743,147 @@ func (w *CrawlerWorker) extractCrawlConfig(config map[string]interface{}) (*mode
 
 	return crawlConfig, nil
 }
+
+// buildCrawlConfig constructs a CrawlConfig struct from a config map
+func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
+	config := crawler.CrawlConfig{
+		MaxDepth:       2,
+		MaxPages:       100,
+		Concurrency:    5,
+		RateLimit:      time.Second,
+		RetryAttempts:  3,
+		RetryBackoff:   time.Second,
+		FollowLinks:    true,
+		DetailLevel:    "full",
+		DownloadImages: true, // Default to downloading images
+	}
+
+	// Override with values from config map
+	// TOML parser uses int64, JSON uses float64, Go uses int
+	if v, ok := configMap["max_depth"].(float64); ok {
+		config.MaxDepth = int(v)
+	} else if v, ok := configMap["max_depth"].(int); ok {
+		config.MaxDepth = v
+	} else if v, ok := configMap["max_depth"].(int64); ok {
+		config.MaxDepth = int(v)
+	}
+
+	if v, ok := configMap["max_pages"].(float64); ok {
+		config.MaxPages = int(v)
+	} else if v, ok := configMap["max_pages"].(int); ok {
+		config.MaxPages = v
+	} else if v, ok := configMap["max_pages"].(int64); ok {
+		config.MaxPages = int(v)
+	}
+
+	if v, ok := configMap["concurrency"].(float64); ok {
+		config.Concurrency = int(v)
+	} else if v, ok := configMap["concurrency"].(int); ok {
+		config.Concurrency = v
+	} else if v, ok := configMap["concurrency"].(int64); ok {
+		config.Concurrency = int(v)
+	}
+
+	if v, ok := configMap["rate_limit"].(float64); ok {
+		config.RateLimit = time.Duration(v) * time.Millisecond
+	} else if v, ok := configMap["rate_limit"].(int); ok {
+		config.RateLimit = time.Duration(v) * time.Millisecond
+	}
+
+	if v, ok := configMap["retry_attempts"].(float64); ok {
+		config.RetryAttempts = int(v)
+	} else if v, ok := configMap["retry_attempts"].(int); ok {
+		config.RetryAttempts = v
+	}
+
+	if v, ok := configMap["retry_backoff"].(float64); ok {
+		config.RetryBackoff = time.Duration(v) * time.Millisecond
+	} else if v, ok := configMap["retry_backoff"].(int); ok {
+		config.RetryBackoff = time.Duration(v) * time.Millisecond
+	}
+
+	if v, ok := configMap["follow_links"].(bool); ok {
+		config.FollowLinks = v
+	}
+
+	if v, ok := configMap["detail_level"].(string); ok {
+		config.DetailLevel = v
+	}
+
+	if v, ok := configMap["include_patterns"].([]string); ok {
+		config.IncludePatterns = v
+	} else if v, ok := configMap["include_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(v))
+		for _, pattern := range v {
+			if s, ok := pattern.(string); ok {
+				patterns = append(patterns, s)
+			}
+		}
+		config.IncludePatterns = patterns
+	}
+
+	if v, ok := configMap["exclude_patterns"].([]string); ok {
+		config.ExcludePatterns = v
+	} else if v, ok := configMap["exclude_patterns"].([]interface{}); ok {
+		patterns := make([]string, 0, len(v))
+		for _, pattern := range v {
+			if s, ok := pattern.(string); ok {
+				patterns = append(patterns, s)
+			}
+		}
+		config.ExcludePatterns = patterns
+	}
+
+	// Extract tags to apply to documents
+	if v, ok := configMap["tags"].([]string); ok {
+		config.Tags = v
+	} else if v, ok := configMap["tags"].([]interface{}); ok {
+		tags := make([]string, 0, len(v))
+		for _, tag := range v {
+			if s, ok := tag.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		config.Tags = tags
+	}
+
+	// Extract download_images setting
+	if v, ok := configMap["download_images"].(bool); ok {
+		config.DownloadImages = v
+	}
+
+	return config
+}
+
+// buildSeedURLs constructs seed URLs based on source type and entity type
+func (w *CrawlerWorker) buildSeedURLs(baseURL, sourceType, entityType string) []string {
+	switch sourceType {
+	case "jira":
+		switch entityType {
+		case "projects":
+			return []string{baseURL + "/rest/api/2/project"}
+		case "issues":
+			return []string{baseURL + "/rest/api/2/search"}
+		default:
+			return []string{baseURL + "/rest/api/2/project"}
+		}
+	case "confluence":
+		switch entityType {
+		case "spaces":
+			return []string{baseURL + "/rest/api/space"}
+		case "pages":
+			return []string{baseURL + "/rest/api/content"}
+		default:
+			return []string{baseURL + "/rest/api/space"}
+		}
+	default:
+		return []string{baseURL}
+	}
+}
+
+// ============================================================================
+// PRIVATE HELPERS - PAGE RENDERING
+// ============================================================================
 
 // renderPageWithChromeDp renders a page using ChromeDP and returns HTML content and status code
 func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx context.Context, url string, logger arbor.ILogger) (string, int, error) {
@@ -822,7 +1187,7 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 }
 
 // ============================================================================
-// AUTHENTICATION HELPERS
+// PRIVATE HELPERS - AUTHENTICATION
 // ============================================================================
 
 // injectAuthCookies loads authentication credentials from storage and injects cookies into ChromeDP browser
@@ -1297,7 +1662,7 @@ func (w *CrawlerWorker) injectAuthCookies(ctx context.Context, browserCtx contex
 }
 
 // ============================================================================
-// CHILD JOB MANAGEMENT
+// PRIVATE HELPERS - CHILD JOB MANAGEMENT
 // ============================================================================
 
 // spawnChildJob creates and enqueues a child job for a discovered link
@@ -1401,7 +1766,7 @@ func (w *CrawlerWorker) spawnChildJob(ctx context.Context, parentJob *models.Que
 }
 
 // ============================================================================
-// STEP CONTEXT HELPERS
+// PRIVATE HELPERS - STEP CONTEXT
 // ============================================================================
 
 // stepContext holds step-related information for event publishing
@@ -1463,6 +1828,10 @@ func (w *CrawlerWorker) extractStepContext(ctx context.Context, job *models.Queu
 	return sc
 }
 
+// ============================================================================
+// PRIVATE HELPERS - PROGRESS UPDATES
+// ============================================================================
+
 // publishCrawlerProgressUpdate logs a crawler job progress update.
 // Uses debug level to reduce UI noise while tracking activity.
 func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *models.QueueJob, status, activity, currentURL string) {
@@ -1471,345 +1840,4 @@ func (w *CrawlerWorker) publishCrawlerProgressUpdate(ctx context.Context, job *m
 		message = fmt.Sprintf("[%s] %s: %s", status, activity, currentURL)
 	}
 	w.jobMgr.AddJobLog(ctx, job.ID, "debug", message)
-}
-
-// ============================================================================
-// DEFINITIONWORKER INTERFACE METHODS (for job definition step handling)
-// ============================================================================
-
-// GetType returns WorkerTypeCrawler for the DefinitionWorker interface
-func (w *CrawlerWorker) GetType() models.WorkerType {
-	return models.WorkerTypeCrawler
-}
-
-// Init performs the initialization/setup phase for a crawler step.
-// This is where we:
-//   - Determine the base URL and seed URLs to crawl
-//   - Build the crawl configuration
-//   - Estimate the number of pages based on max_depth and max_pages
-//
-// The Init phase does NOT start the crawl - it only gathers information.
-func (w *CrawlerWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
-	stepConfig := step.Config
-	if stepConfig == nil {
-		stepConfig = make(map[string]interface{})
-	}
-
-	// Extract entity type from config (default to "issues" for jira, "pages" for confluence)
-	entityType := "all"
-	if et, ok := stepConfig["entity_type"].(string); ok {
-		entityType = et
-	} else {
-		// Infer from source type
-		switch jobDef.SourceType {
-		case "jira":
-			entityType = "issues"
-		case "confluence":
-			entityType = "pages"
-		}
-	}
-
-	// Build CrawlConfig struct from map with proper defaults
-	crawlConfig := w.buildCrawlConfig(stepConfig)
-
-	// Build seed URLs - prioritize start_urls from step config, fallback to source type
-	var seedURLs []string
-	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {
-		for _, url := range startURLs {
-			if urlStr, ok := url.(string); ok {
-				seedURLs = append(seedURLs, urlStr)
-			}
-		}
-		w.logger.Debug().
-			Str("step_name", step.Name).
-			Strs("start_urls", seedURLs).
-			Msg("Init: Using start_urls from job definition config")
-	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
-		seedURLs = startURLsStr
-		w.logger.Debug().
-			Str("step_name", step.Name).
-			Strs("start_urls", seedURLs).
-			Msg("Init: Using start_urls from job definition config")
-	} else {
-		seedURLs = w.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
-		w.logger.Debug().
-			Str("step_name", step.Name).
-			Str("source_type", jobDef.SourceType).
-			Str("base_url", jobDef.BaseURL).
-			Strs("generated_urls", seedURLs).
-			Msg("Init: Generated seed URLs based on source type")
-	}
-
-	// Default source_type to "web" for generic crawler jobs
-	sourceType := jobDef.SourceType
-	if sourceType == "" {
-		sourceType = "web"
-	}
-
-	// Create work items from seed URLs
-	workItems := make([]interfaces.WorkItem, len(seedURLs))
-	for i, url := range seedURLs {
-		workItems[i] = interfaces.WorkItem{
-			ID:   url,
-			Name: fmt.Sprintf("Seed URL: %s", url),
-			Type: "url",
-			Config: map[string]interface{}{
-				"url":         url,
-				"depth":       0,
-				"source_type": sourceType,
-				"entity_type": entityType,
-			},
-		}
-	}
-
-	// Estimate total pages based on seed URLs and max_pages
-	// Each seed URL could potentially expand to max_pages
-	estimatedTotal := len(seedURLs) * crawlConfig.MaxPages
-
-	w.logger.Info().
-		Str("step_name", step.Name).
-		Int("seed_urls", len(seedURLs)).
-		Int("max_depth", crawlConfig.MaxDepth).
-		Int("max_pages", crawlConfig.MaxPages).
-		Int("concurrency", crawlConfig.Concurrency).
-		Int("estimated_total", estimatedTotal).
-		Msg("Crawler worker initialized")
-
-	return &interfaces.WorkerInitResult{
-		WorkItems:            workItems,
-		TotalCount:           len(seedURLs), // Seed URLs are the initial work items
-		Strategy:             interfaces.ProcessingStrategyParallel,
-		SuggestedConcurrency: crawlConfig.Concurrency,
-		Metadata: map[string]interface{}{
-			"base_url":        jobDef.BaseURL,
-			"source_type":     sourceType,
-			"entity_type":     entityType,
-			"max_depth":       crawlConfig.MaxDepth,
-			"max_pages":       crawlConfig.MaxPages,
-			"estimated_total": estimatedTotal,
-			"seed_urls":       seedURLs,
-			"crawl_config":    crawlConfig,
-		},
-	}, nil
-}
-
-// CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
-// The crawler service will create child jobs for each URL discovered.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-// If initResult is provided, it will be used; otherwise Init is called internally.
-func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
-	// Call Init if not provided
-	if initResult == nil {
-		var err error
-		initResult, err = w.Init(ctx, step, jobDef)
-		if err != nil {
-			return "", fmt.Errorf("failed to initialize crawler: %w", err)
-		}
-	}
-
-	// Extract data from initResult metadata
-	sourceType, _ := initResult.Metadata["source_type"].(string)
-	entityType, _ := initResult.Metadata["entity_type"].(string)
-	seedURLs, _ := initResult.Metadata["seed_urls"].([]string)
-	crawlConfig, _ := initResult.Metadata["crawl_config"].(crawler.CrawlConfig)
-
-	// Get manager_id from step job's parent_id for event aggregation
-	// Step jobs have parent_id = manager_id in the 3-level hierarchy
-	managerID := ""
-	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
-		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
-			managerID = *stepJob.ParentID
-		}
-	}
-
-	// Apply tags from job definition to all documents created by this crawl
-	crawlConfig.Tags = jobDef.Tags
-
-	// Set step context for job_log event aggregation in UI
-	crawlConfig.StepName = step.Name
-	crawlConfig.ManagerID = managerID
-
-	w.logger.Debug().
-		Str("step_name", step.Name).
-		Str("source_type", sourceType).
-		Str("base_url", jobDef.BaseURL).
-		Str("entity_type", entityType).
-		Int("seed_url_count", len(seedURLs)).
-		Int("max_depth", crawlConfig.MaxDepth).
-		Int("max_pages", crawlConfig.MaxPages).
-		Msg("Creating parent crawler job from init result")
-
-	// Start crawl job with properly typed config
-	jobID, err := w.crawlerService.StartCrawl(
-		sourceType,
-		entityType,
-		seedURLs,
-		crawlConfig,   // Pass CrawlConfig struct
-		jobDef.AuthID, // sourceID - use auth_id as source identifier
-		false,         // refreshSource
-		nil,           // sourceConfigSnapshot
-		nil,           // authSnapshot
-		stepID,        // jobDefinitionID - link to step
-	)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to start crawl (source_type=%s, step=%s): %w", sourceType, step.Name, err)
-	}
-
-	w.logger.Debug().
-		Str("step_name", step.Name).
-		Str("job_id", jobID).
-		Str("step_id", stepID).
-		Msg("Parent crawler job created")
-
-	return jobID, nil
-}
-
-// ReturnsChildJobs returns true since crawler creates child jobs for each URL
-func (w *CrawlerWorker) ReturnsChildJobs() bool {
-	return true
-}
-
-// ValidateConfig validates step configuration for crawler type (DefinitionWorker interface)
-func (w *CrawlerWorker) ValidateConfig(step models.JobStep) error {
-	// Crawler is agnostic - any configuration is valid
-	// Validation happens during execution by the crawler service
-	return nil
-}
-
-// buildCrawlConfig constructs a CrawlConfig struct from a config map
-func (w *CrawlerWorker) buildCrawlConfig(configMap map[string]interface{}) crawler.CrawlConfig {
-	config := crawler.CrawlConfig{
-		MaxDepth:       2,
-		MaxPages:       100,
-		Concurrency:    5,
-		RateLimit:      time.Second,
-		RetryAttempts:  3,
-		RetryBackoff:   time.Second,
-		FollowLinks:    true,
-		DetailLevel:    "full",
-		DownloadImages: true, // Default to downloading images
-	}
-
-	// Override with values from config map
-	// TOML parser uses int64, JSON uses float64, Go uses int
-	if v, ok := configMap["max_depth"].(float64); ok {
-		config.MaxDepth = int(v)
-	} else if v, ok := configMap["max_depth"].(int); ok {
-		config.MaxDepth = v
-	} else if v, ok := configMap["max_depth"].(int64); ok {
-		config.MaxDepth = int(v)
-	}
-
-	if v, ok := configMap["max_pages"].(float64); ok {
-		config.MaxPages = int(v)
-	} else if v, ok := configMap["max_pages"].(int); ok {
-		config.MaxPages = v
-	} else if v, ok := configMap["max_pages"].(int64); ok {
-		config.MaxPages = int(v)
-	}
-
-	if v, ok := configMap["concurrency"].(float64); ok {
-		config.Concurrency = int(v)
-	} else if v, ok := configMap["concurrency"].(int); ok {
-		config.Concurrency = v
-	} else if v, ok := configMap["concurrency"].(int64); ok {
-		config.Concurrency = int(v)
-	}
-
-	if v, ok := configMap["rate_limit"].(float64); ok {
-		config.RateLimit = time.Duration(v) * time.Millisecond
-	} else if v, ok := configMap["rate_limit"].(int); ok {
-		config.RateLimit = time.Duration(v) * time.Millisecond
-	}
-
-	if v, ok := configMap["retry_attempts"].(float64); ok {
-		config.RetryAttempts = int(v)
-	} else if v, ok := configMap["retry_attempts"].(int); ok {
-		config.RetryAttempts = v
-	}
-
-	if v, ok := configMap["retry_backoff"].(float64); ok {
-		config.RetryBackoff = time.Duration(v) * time.Millisecond
-	} else if v, ok := configMap["retry_backoff"].(int); ok {
-		config.RetryBackoff = time.Duration(v) * time.Millisecond
-	}
-
-	if v, ok := configMap["follow_links"].(bool); ok {
-		config.FollowLinks = v
-	}
-
-	if v, ok := configMap["detail_level"].(string); ok {
-		config.DetailLevel = v
-	}
-
-	if v, ok := configMap["include_patterns"].([]string); ok {
-		config.IncludePatterns = v
-	} else if v, ok := configMap["include_patterns"].([]interface{}); ok {
-		patterns := make([]string, 0, len(v))
-		for _, pattern := range v {
-			if s, ok := pattern.(string); ok {
-				patterns = append(patterns, s)
-			}
-		}
-		config.IncludePatterns = patterns
-	}
-
-	if v, ok := configMap["exclude_patterns"].([]string); ok {
-		config.ExcludePatterns = v
-	} else if v, ok := configMap["exclude_patterns"].([]interface{}); ok {
-		patterns := make([]string, 0, len(v))
-		for _, pattern := range v {
-			if s, ok := pattern.(string); ok {
-				patterns = append(patterns, s)
-			}
-		}
-		config.ExcludePatterns = patterns
-	}
-
-	// Extract tags to apply to documents
-	if v, ok := configMap["tags"].([]string); ok {
-		config.Tags = v
-	} else if v, ok := configMap["tags"].([]interface{}); ok {
-		tags := make([]string, 0, len(v))
-		for _, tag := range v {
-			if s, ok := tag.(string); ok {
-				tags = append(tags, s)
-			}
-		}
-		config.Tags = tags
-	}
-
-	// Extract download_images setting
-	if v, ok := configMap["download_images"].(bool); ok {
-		config.DownloadImages = v
-	}
-
-	return config
-}
-
-// buildSeedURLs constructs seed URLs based on source type and entity type
-func (w *CrawlerWorker) buildSeedURLs(baseURL, sourceType, entityType string) []string {
-	switch sourceType {
-	case "jira":
-		switch entityType {
-		case "projects":
-			return []string{baseURL + "/rest/api/2/project"}
-		case "issues":
-			return []string{baseURL + "/rest/api/2/search"}
-		default:
-			return []string{baseURL + "/rest/api/2/project"}
-		}
-	case "confluence":
-		switch entityType {
-		case "spaces":
-			return []string{baseURL + "/rest/api/space"}
-		case "pages":
-			return []string{baseURL + "/rest/api/content"}
-		default:
-			return []string{baseURL + "/rest/api/space"}
-		}
-	default:
-		return []string{baseURL}
-	}
 }

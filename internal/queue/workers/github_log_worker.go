@@ -297,12 +297,13 @@ func (w *GitHubLogWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	maxRuns := getLogIntConfig(stepConfig, "max_runs", 100)
 
 	w.logger.Info().
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("status", status).
 		Int("max_runs", maxRuns).
-		Msg("[step] GitHub Actions log worker initialized")
+		Msg("GitHub Actions log worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
@@ -355,12 +356,14 @@ func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	maxRuns, _ := initResult.Metadata["max_runs"].(int)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("status", status).
 		Int("max_runs", maxRuns).
-		Msg("[worker] Creating GitHub Actions jobs from init result")
+		Msg("Creating GitHub Actions jobs from init result")
 
 	_ = workflowFiles // TODO: filter by workflow files not yet implemented
 
