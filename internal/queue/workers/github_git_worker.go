@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -218,6 +219,13 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	excludePaths := getStringSliceConfig(stepConfig, "exclude_paths", []string{"vendor/", "node_modules/", ".git/", "dist/", "build/"})
 	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
 
+	// Get git executable path with OS-appropriate default
+	defaultGitPath := "git" // Linux/macOS default (assumes git is in PATH)
+	if runtime.GOOS == "windows" {
+		defaultGitPath = "C:\\Program Files\\Git\\bin\\git.exe"
+	}
+	gitPath := getStringConfig(stepConfig, "git_path", defaultGitPath)
+
 	w.logger.Debug().
 		Str("step_name", step.Name).
 		Str("connector_id", connectorID).
@@ -225,6 +233,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
+		Str("git_path", gitPath).
 		Int("max_files", maxFiles).
 		Msg("Creating GitHub git clone parent job")
 
@@ -269,7 +278,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Msg("Cloning repository via git command")
 
 	// Run git clone with depth 1 (shallow clone) for speed
-	cmd := exec.CommandContext(ctx, "git", "clone",
+	cmd := exec.CommandContext(ctx, gitPath, "clone",
 		"--depth", "1",
 		"--branch", branch,
 		"--single-branch",
