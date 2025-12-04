@@ -220,6 +220,7 @@
                                                                     <span class="terminal-time" x-text="formatLogTime(log.timestamp)"></span>
                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)"></span>
                                                                     <span x-show="log.originator" x-text="'[' + log.originator + ']'" style="color: #61AFEF;"></span>
+                                                                    <span x-show="log.phase" x-text="'[' + log.phase + ']'" style="color: #98C379;"></span>
                                                                     <span x-text="log.message"></span>
                                                                 </div>
                                                             </template>
@@ -1268,6 +1269,7 @@
                                 step_name: logData.step_name,
                                 source_type: logData.source_type,
                                 originator: logData.originator,
+                                phase: logData.phase,
                                 metadata: logData.metadata,
                                 timestamp: logData.timestamp
                             }
@@ -1997,7 +1999,8 @@
                         timestamp: logData.timestamp || new Date().toISOString(),
                         step_name: stepName,
                         source_type: logData.source_type || '',
-                        originator: logData.originator || ''
+                        originator: logData.originator || '',
+                        phase: logData.phase || ''
                     };
 
                     // Dedup: Check if this exact log already exists (by timestamp + message + step_name)
@@ -2162,7 +2165,8 @@
                                 timestamp: log.full_timestamp || log.timestamp,
                                 step_name: log.step_name || '',
                                 source_type: log.source_type || '',
-                                originator: log.originator || ''
+                                originator: log.originator || '',
+                                phase: log.phase || ''
                             }));
 
                         if (newLogs.length > 0) {
