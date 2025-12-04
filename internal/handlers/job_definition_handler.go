@@ -1986,6 +1986,52 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Check if matched job definition uses a non-crawler worker type
+	// If so, execute the matched job definition directly instead of creating an ephemeral crawler
+	if len(jobDef.Steps) > 0 {
+		firstStepType := jobDef.Steps[0].Type
+		if firstStepType != models.WorkerTypeCrawler {
+			h.logger.Info().
+				Str("job_def_id", jobDef.ID).
+				Str("job_def_name", jobDef.Name).
+				Str("worker_type", string(firstStepType)).
+				Str("url", req.StartURL).
+				Msg("Using non-crawler job definition for extension trigger")
+
+			// Create a copy of the job definition with trigger URL injected
+			execJobDef := h.prepareNonCrawlerJobDefForExecution(jobDef, req.StartURL)
+
+			// Execute the prepared job definition
+			go func() {
+				bgCtx := context.Background()
+				parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
+				if err != nil {
+					h.logger.Error().
+						Err(err).
+						Str("job_def_id", jobDef.ID).
+						Msg("Non-crawler job execution failed")
+					return
+				}
+				h.logger.Info().
+					Str("job_def_id", jobDef.ID).
+					Str("parent_job_id", parentJobID).
+					Str("worker_type", string(firstStepType)).
+					Msg("Non-crawler job execution started successfully")
+			}()
+
+			// Return response for non-crawler job
+			WriteJSON(w, http.StatusAccepted, map[string]interface{}{
+				"job_id":      jobDef.ID,
+				"job_name":    jobDef.Name,
+				"status":      "running",
+				"message":     fmt.Sprintf("Started job '%s' (%s worker)", jobDef.Name, firstStepType),
+				"url":         req.StartURL,
+				"worker_type": string(firstStepType),
+			})
+			return
+		}
+	}
+
 	// Store cookies as authentication if provided
 	var authID string
 	if len(req.Cookies) > 0 {
