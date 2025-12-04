@@ -64,106 +64,25 @@ func NewGitHubGitWorker(
 	}
 }
 
-// GetWorkerType returns the job type this worker handles
+// GetWorkerType returns the job type this worker handles (not used for inline processing)
 func (w *GitHubGitWorker) GetWorkerType() string {
 	return models.JobTypeGitHubGitFile
 }
 
 // Validate validates that the queue job is compatible with this worker
 func (w *GitHubGitWorker) Validate(job *models.QueueJob) error {
+	// This worker now processes files inline, so this is rarely called
 	if job.Type != models.JobTypeGitHubGitFile {
 		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeGitHubGitFile, job.Type)
-	}
-
-	requiredFields := []string{"owner", "repo", "branch", "path"}
-	for _, field := range requiredFields {
-		if _, ok := job.GetConfigString(field); !ok {
-			return fmt.Errorf("missing required config field: %s", field)
-		}
 	}
 	return nil
 }
 
-// Execute processes a GitHub git file job (reads from cloned repo)
+// Execute is kept for compatibility but the main work is done inline in CreateJobs
 func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) error {
-	startTime := time.Now()
-	w.logger.Debug().Str("job_id", job.ID).Msg("Processing GitHub git file job")
-
-	// Update job status to running
-	if err := w.jobManager.UpdateJobStatus(ctx, job.ID, string(models.JobStatusRunning)); err != nil {
-		return fmt.Errorf("failed to update job status: %w", err)
-	}
-
-	// Extract configuration from job
-	owner, _ := job.GetConfigString("owner")
-	repo, _ := job.GetConfigString("repo")
-	branch, _ := job.GetConfigString("branch")
-	path, _ := job.GetConfigString("path")
-	folder, _ := job.GetConfigString("folder")
-	cloneDir, _ := job.GetConfigString("clone_dir")
-
-	// Get tags from metadata
-	baseTags := getTagsFromMetadata(job.Metadata)
-
-	// Read file content from cloned repo
-	filePath := filepath.Join(cloneDir, path)
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read file %s: %w", path, err)
-	}
-
-	// Create document
-	doc := &models.Document{
-		ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
-		SourceType:      models.SourceTypeGitHubGit,
-		SourceID:        fmt.Sprintf("%s/%s/%s/%s", owner, repo, branch, path),
-		Title:           filepath.Base(path),
-		ContentMarkdown: string(content),
-		URL:             fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, path),
-		Tags:            mergeTags(baseTags, []string{"github", repo, branch}),
-		Metadata: map[string]interface{}{
-			"owner":       owner,
-			"repo":        repo,
-			"branch":      branch,
-			"folder":      folder,
-			"path":        path,
-			"file_type":   filepath.Ext(path),
-			"clone_based": true,
-		},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	// Save document
-	if err := w.documentStorage.SaveDocument(doc); err != nil {
-		return fmt.Errorf("failed to save document: %w", err)
-	}
-
-	// Log document saved
-	w.logDocumentSaved(ctx, job, doc.ID, doc.Title, path)
-
-	// Update job status to completed
-	if err := w.jobManager.UpdateJobStatus(ctx, job.ID, string(models.JobStatusCompleted)); err != nil {
-		return fmt.Errorf("failed to update job status: %w", err)
-	}
-
-	// Update progress (completed=1, failed=0)
-	if err := w.jobManager.UpdateJobProgress(ctx, job.ID, 1, 0); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to update job progress")
-	}
-
-	elapsed := time.Since(startTime)
-	w.logger.Info().
-		Str("job_id", job.ID).
-		Str("file", path).
-		Str("repo", fmt.Sprintf("%s/%s", owner, repo)).
-		Dur("duration", elapsed).
-		Msg("Worker completed - file downloaded")
-
-	// Also add job log for UI visibility
-	w.jobManager.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Worker completed - downloaded file: %s (time: %s)", path, elapsed.Round(time.Millisecond)))
-
-	return nil
+	// This method is no longer the primary path - files are processed inline in CreateJobs
+	// Kept for interface compatibility
+	return fmt.Errorf("github_git worker processes files inline - this method should not be called")
 }
 
 // ============================================================================
@@ -446,156 +365,125 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	if excludedByLimit > 0 {
 		w.jobManager.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Limit reached: %d files excluded by max_files limit", excludedByLimit))
 	}
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Scheduling %d worker jobs for download", filesToSchedule))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Processing %d files inline (no child jobs)", filesToSchedule))
 
-	// Create parent job
-	parentJob := models.NewQueueJob(
-		"github_git_parent",
-		fmt.Sprintf("GitHub Git: %s/%s", owner, repo),
-		map[string]interface{}{
-			"owner":     owner,
-			"repo":      repo,
-			"branch":    branch,
-			"clone_dir": cloneDir,
-		},
-		map[string]interface{}{
-			"connector_id":      connectorID,
-			"job_definition_id": jobDef.ID,
-			"tags":              jobDef.Tags,
-		},
-	)
-	parentJob.ParentID = &stepID
-
-	// Serialize parent job to JSON
-	parentPayloadBytes, err := parentJob.ToJSON()
-	if err != nil {
-		os.RemoveAll(cloneDir)
-		return "", fmt.Errorf("failed to serialize parent job: %w", err)
+	// Get tags for documents
+	baseTags := jobDef.Tags
+	if baseTags == nil {
+		baseTags = []string{}
 	}
 
-	// Create parent job record in database
-	if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
-		ID:              parentJob.ID,
-		ParentID:        parentJob.ParentID,
-		Type:            parentJob.Type,
-		Name:            parentJob.Name,
-		Phase:           "execution",
-		Status:          "pending",
-		CreatedAt:       parentJob.CreatedAt,
-		ProgressCurrent: 0,
-		ProgressTotal:   0,
-		Payload:         string(parentPayloadBytes),
-	}); err != nil {
-		os.RemoveAll(cloneDir)
-		return "", fmt.Errorf("failed to create parent job record: %w", err)
-	}
+	// Process files inline - no child jobs needed
+	// This is much more efficient than creating 1000+ separate jobs
+	processedCount := 0
+	failedCount := 0
+	startProcessing := time.Now()
 
-	// Enqueue child jobs for files
-	totalFilesEnqueued := 0
-
-	for _, file := range files {
-		if totalFilesEnqueued >= maxFiles {
+	for i, file := range files {
+		if processedCount >= maxFiles {
 			w.logger.Warn().
 				Int("max_files", maxFiles).
-				Msg("Reached max_files limit, stopping file enumeration")
+				Msg("Reached max_files limit, stopping file processing")
 			break
 		}
 
-		// Create child job for each file
-		childJob := models.NewQueueJobChild(
-			parentJob.ID,
-			models.JobTypeGitHubGitFile,
-			fmt.Sprintf("Git: %s@%s:%s", repo, branch, file.Path),
-			map[string]interface{}{
-				"owner":     owner,
-				"repo":      repo,
-				"branch":    branch,
-				"path":      file.Path,
-				"folder":    file.Folder,
-				"clone_dir": cloneDir,
-			},
-			map[string]interface{}{
-				"connector_id":   connectorID,
-				"tags":           jobDef.Tags,
-				"root_parent_id": stepID,
-			},
-			parentJob.Depth+1,
-		)
+		fileStartTime := time.Now()
 
-		// Serialize child job to JSON
-		childPayloadBytes, err := childJob.ToJSON()
+		// Read file content from cloned repo
+		filePath := filepath.Join(cloneDir, file.Path)
+		content, err := os.ReadFile(filePath)
 		if err != nil {
 			w.logger.Warn().Err(err).
 				Str("file", file.Path).
-				Msg("Failed to serialize child job, skipping")
+				Msg("Failed to read file, skipping")
+			failedCount++
 			continue
 		}
 
-		// Create child job record in database
-		if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
-			ID:              childJob.ID,
-			ParentID:        childJob.ParentID,
-			Type:            childJob.Type,
-			Name:            childJob.Name,
-			Phase:           "execution",
-			Status:          "pending",
-			CreatedAt:       childJob.CreatedAt,
-			ProgressCurrent: 0,
-			ProgressTotal:   1,
-			Payload:         string(childPayloadBytes),
-		}); err != nil {
+		// Create document
+		doc := &models.Document{
+			ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
+			SourceType:      models.SourceTypeGitHubGit,
+			SourceID:        fmt.Sprintf("%s/%s/%s/%s", owner, repo, branch, file.Path),
+			Title:           filepath.Base(file.Path),
+			ContentMarkdown: string(content),
+			URL:             fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, file.Path),
+			Tags:            mergeTags(baseTags, []string{"github", repo, branch}),
+			Metadata: map[string]interface{}{
+				"owner":       owner,
+				"repo":        repo,
+				"branch":      branch,
+				"folder":      file.Folder,
+				"path":        file.Path,
+				"file_type":   filepath.Ext(file.Path),
+				"clone_based": true,
+			},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		// Save document
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Warn().Err(err).
 				Str("file", file.Path).
-				Msg("Failed to create child job record, skipping")
+				Msg("Failed to save document, skipping")
+			failedCount++
 			continue
 		}
 
-		// Create queue message and enqueue
-		queueMsg := models.QueueMessage{
-			JobID:   childJob.ID,
-			Type:    childJob.Type,
-			Payload: childPayloadBytes,
-		}
+		processedCount++
+		fileElapsed := time.Since(fileStartTime)
 
-		if err := w.queueMgr.Enqueue(ctx, queueMsg); err != nil {
-			w.logger.Warn().Err(err).
-				Str("file", file.Path).
-				Msg("Failed to enqueue file job, skipping")
-			continue
-		}
+		// Log every file processed
+		w.logger.Debug().
+			Str("file", file.Path).
+			Str("doc_id", doc.ID[:12]).
+			Dur("duration", fileElapsed).
+			Msg("File processed")
 
-		totalFilesEnqueued++
+		// Add job log for UI visibility (every 10 files or last file)
+		if processedCount%10 == 0 || i == len(files)-1 || processedCount == filesToSchedule {
+			w.jobManager.AddJobLog(ctx, stepID, "info",
+				fmt.Sprintf("Progress: %d/%d files processed (%.1f%%)",
+					processedCount, filesToSchedule, float64(processedCount)/float64(filesToSchedule)*100))
+		}
 	}
 
+	totalElapsed := time.Since(startProcessing)
+
+	// Clean up clone directory immediately since we're done with it
+	if err := os.RemoveAll(cloneDir); err != nil {
+		w.logger.Warn().Err(err).Str("clone_dir", cloneDir).Msg("Failed to clean up clone directory")
+	} else {
+		w.logger.Debug().Str("clone_dir", cloneDir).Msg("Clone directory cleaned up")
+	}
+
+	// Log completion
 	w.logger.Info().
-		Str("parent_job_id", parentJob.ID).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
-		Int("files_enqueued", totalFilesEnqueued).
+		Int("files_processed", processedCount).
+		Int("files_failed", failedCount).
 		Int("total_files_scanned", totalFilesScanned).
 		Int("files_matched", matchedFiles).
-		Str("clone_dir", cloneDir).
-		Msg("GitHub git clone completed, child jobs enqueued")
+		Dur("processing_time", totalElapsed).
+		Msg("GitHub git clone completed - all files processed inline")
 
-	// Add step log for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files enqueued (scanned: %d, matched: %d, rejected: %d)",
-		totalFilesEnqueued, totalFilesScanned, matchedFiles, excludedByPath+excludedByExtension+excludedByBinary))
+	// Add final step logs for UI visibility
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files imported, %d failed (time: %s)",
+		processedCount, failedCount, totalElapsed.Round(time.Millisecond)))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Summary: scanned %d, matched %d, rejected %d",
+		totalFilesScanned, matchedFiles, excludedByPath+excludedByExtension+excludedByBinary))
 
-	// Update parent job with total count
-	if err := w.jobManager.UpdateJobProgress(ctx, parentJob.ID, 0, totalFilesEnqueued); err != nil {
-		w.logger.Warn().Err(err).Msg("Failed to update parent job progress")
-	}
-
-	// Note: Clone directory cleanup should happen after all child jobs complete
-	// This requires a cleanup mechanism (e.g., post-job hook or scheduled cleanup)
-
-	return parentJob.ID, nil
+	// Return empty string since we don't create child jobs anymore
+	// The step will be marked complete by the caller
+	return "", nil
 }
 
-// ReturnsChildJobs returns true since GitHub git creates child jobs for each file
+// ReturnsChildJobs returns false - files are now processed inline for efficiency
 func (w *GitHubGitWorker) ReturnsChildJobs() bool {
-	return true
+	return false
 }
 
 // ValidateConfig validates step configuration for GitHub git type
