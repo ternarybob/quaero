@@ -1193,6 +1193,53 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 		// Get crawl settings from matching job definition - required for link crawling
 		matchedJobDef, _ := h.findMatchingJobDefinition(ctx, req.URL)
 
+		// Check if matched job definition uses a non-crawler worker type
+		// If so, execute the matched job definition directly instead of creating an ephemeral crawler
+		if matchedJobDef != nil && len(matchedJobDef.Steps) > 0 {
+			firstStepType := matchedJobDef.Steps[0].Type
+			// Non-crawler worker types should be executed directly using their own worker
+			if firstStepType != models.WorkerTypeCrawler {
+				h.logger.Info().
+					Str("job_def_id", matchedJobDef.ID).
+					Str("job_def_name", matchedJobDef.Name).
+					Str("worker_type", string(firstStepType)).
+					Str("url", req.URL).
+					Msg("Using non-crawler job definition for extension trigger")
+
+				// Execute the matched job definition directly
+				go func() {
+					bgCtx := context.Background()
+					parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, matchedJobDef, h.jobMonitor, h.stepMonitor)
+					if err != nil {
+						h.logger.Error().
+							Err(err).
+							Str("job_def_id", matchedJobDef.ID).
+							Msg("Non-crawler job execution failed")
+						return
+					}
+					h.logger.Info().
+						Str("job_def_id", matchedJobDef.ID).
+						Str("parent_job_id", parentJobID).
+						Str("worker_type", string(firstStepType)).
+						Msg("Non-crawler job execution started successfully")
+				}()
+
+				// Return response for non-crawler job
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"job_id":      matchedJobDef.ID,
+					"job_name":    matchedJobDef.Name,
+					"status":      "running",
+					"message":     fmt.Sprintf("Started job '%s' (%s worker)", matchedJobDef.Name, firstStepType),
+					"url":         req.URL,
+					"document_id": doc.ID,
+					"worker_type": string(firstStepType),
+				})
+				return
+			}
+		}
+
 		// Only start background crawl if we have a matching job definition
 		maxPages := 10
 		includePatterns := []string{}
