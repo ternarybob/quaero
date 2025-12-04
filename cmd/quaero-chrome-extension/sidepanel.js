@@ -175,6 +175,13 @@ async function toggleRecording() {
   const toggle = document.getElementById('recording-toggle');
   const isRecording = toggle.checked;
 
+  // Block starting recording if no config match
+  if (isRecording && !hasConfigMatch) {
+    toggle.checked = false;
+    showError('Cannot record: no matching job definition config for this URL');
+    return;
+  }
+
   try {
     const action = isRecording ? 'startRecording' : 'stopRecording';
     const response = await chrome.runtime.sendMessage({ action });
@@ -433,6 +440,7 @@ setInterval(async () => {
 let currentCrawlConfig = null;
 let currentLinks = [];
 let isCrawling = false;
+let hasConfigMatch = false; // Track if current URL has a matching config
 
 // Initialize crawl section when panel opens
 document.addEventListener('DOMContentLoaded', async () => {
@@ -450,16 +458,20 @@ async function refreshLinksAndConfig() {
   const configName = document.getElementById('config-name');
   const startBtn = document.getElementById('start-crawl-btn');
   const linksPreview = document.getElementById('crawl-links-preview');
+  const recordingToggle = document.getElementById('recording-toggle');
+  const recordingLabel = document.getElementById('recording-status-label');
 
   configIndicator.className = 'config-indicator';
   configName.textContent = 'Checking...';
   startBtn.disabled = true;
+  hasConfigMatch = false;
 
   try {
     // Get current tab URL
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.url) {
       configName.textContent = 'No active tab';
+      updateConfigMatchUI(false);
       return;
     }
 
@@ -478,24 +490,56 @@ async function refreshLinksAndConfig() {
 
     // Update UI based on match
     if (currentCrawlConfig.matched) {
+      hasConfigMatch = true;
       configIndicator.className = 'config-indicator matched';
       configName.textContent = currentCrawlConfig.job_definition.name;
+
+      // Extract links from current page
+      await extractLinksFromPage(tab.id);
+
+      // Enable start button if we have links
+      startBtn.disabled = currentLinks.length === 0;
+      linksPreview.style.display = 'block';
     } else {
+      hasConfigMatch = false;
       configIndicator.className = 'config-indicator no-match';
-      configName.textContent = 'Default config (no match)';
+      configName.textContent = 'No matching config - recording disabled';
+      linksPreview.style.display = 'none';
+      startBtn.disabled = true;
     }
 
-    // Extract links from current page
-    await extractLinksFromPage(tab.id);
-
-    // Enable start button if we have links
-    startBtn.disabled = currentLinks.length === 0;
-    linksPreview.style.display = 'block';
+    // Update recording toggle based on config match
+    updateConfigMatchUI(hasConfigMatch);
 
   } catch (error) {
     console.error('Error refreshing config:', error);
     configIndicator.className = 'config-indicator';
     configName.textContent = 'Error loading config';
+    hasConfigMatch = false;
+    updateConfigMatchUI(false);
+  }
+}
+
+// Update UI elements based on whether config matches
+function updateConfigMatchUI(matched) {
+  const recordingToggle = document.getElementById('recording-toggle');
+  const recordingLabel = document.getElementById('recording-status-label');
+  const startBtn = document.getElementById('start-crawl-btn');
+
+  if (matched) {
+    // Enable recording toggle (unless already recording)
+    recordingToggle.disabled = false;
+    if (!recordingToggle.checked) {
+      recordingLabel.textContent = 'Recording Off';
+    }
+  } else {
+    // Disable recording toggle if not currently recording
+    if (!recordingToggle.checked) {
+      recordingToggle.disabled = true;
+      recordingLabel.textContent = 'No config match';
+    }
+    // Always disable crawl button when no match
+    startBtn.disabled = true;
   }
 }
 
