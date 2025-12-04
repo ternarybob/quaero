@@ -434,10 +434,10 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Msg("[worker] Starting file processing from init result")
 
 	// Add step logs for UI visibility (git-style output)
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Cloned '%s/%s@%s'", owner, repo, branch))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Scanned %d files: %d excluded by path, %d by extension, %d by binary",
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Cloned '%s/%s@%s'", owner, repo, branch))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Scanned %d files: %d excluded by path, %d by extension, %d by binary",
 		totalFilesScanned, excludedByPath, excludedByExtension, excludedByBinary))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Matched %d files, processing %d (limit exclusions: %d)",
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Matched %d files, processing %d (limit exclusions: %d)",
 		matchedFiles, filesToProcess, excludedByLimit))
 
 	// Get tags for documents
@@ -525,7 +525,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		// Add job log for UI visibility (every 10 files or last file)
 		if processedCount%10 == 0 || i == len(workItems)-1 || processedCount == filesToProcess {
 			w.jobManager.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("[worker] Progress: %d/%d files (%.1f%%)",
+				fmt.Sprintf("Progress: %d/%d files (%.1f%%)",
 					processedCount, filesToProcess, float64(processedCount)/float64(filesToProcess)*100))
 		}
 	}
@@ -552,7 +552,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Msg("[worker] GitHub git processing completed")
 
 	// Add final step logs for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Completed: %d files imported, %d failed (time: %s)",
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files imported, %d failed (time: %s)",
 		processedCount, failedCount, totalElapsed.Round(time.Millisecond)))
 
 	// Return empty string since we don't create child jobs anymore
