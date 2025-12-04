@@ -40,6 +40,8 @@ const (
 	JobDefinitionTypeAgent      JobDefinitionType = "agent"      // Agent-powered document processing jobs
 	JobDefinitionTypeFetch      JobDefinitionType = "fetch"      // API-based data collection with authentication (GitHub, etc.)
 	JobDefinitionTypeWebSearch  JobDefinitionType = "web_search" // Gemini-powered web search with grounding
+	JobDefinitionTypeLocalDir   JobDefinitionType = "local_dir"  // Local filesystem directory indexing
+	JobDefinitionTypeCodeMap    JobDefinitionType = "code_map"   // Hierarchical code structure analysis
 )
 
 // JobOwnerType represents whether a job is system-managed or user-created
@@ -54,7 +56,9 @@ const (
 // IsValidJobDefinitionType checks if a given JobDefinitionType is one of the valid constants
 func IsValidJobDefinitionType(jobType JobDefinitionType) bool {
 	switch jobType {
-	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces, JobDefinitionTypeAgent, JobDefinitionTypeFetch, JobDefinitionTypeWebSearch:
+	case JobDefinitionTypeCrawler, JobDefinitionTypeSummarizer, JobDefinitionTypeCustom, JobDefinitionTypePlaces,
+		JobDefinitionTypeAgent, JobDefinitionTypeFetch, JobDefinitionTypeWebSearch,
+		JobDefinitionTypeLocalDir, JobDefinitionTypeCodeMap:
 		return true
 	default:
 		return false
