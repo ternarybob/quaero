@@ -66,6 +66,11 @@ const (
 	// Local directory types (local filesystem indexing)
 	SourceTypeLocalDir   = "local_dir"
 	JobTypeLocalDirBatch = "local_dir_batch" // Batch job containing multiple local files
+
+	// Code map types (hierarchical code structure analysis)
+	SourceTypeCodeMap       = "code_map"
+	JobTypeCodeMapStructure = "code_map_structure" // Directory structure extraction job
+	JobTypeCodeMapSummary   = "code_map_summary"   // AI summarization job for directories/files
 )
 
 // NewQueueJob creates a new root queued job

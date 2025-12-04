@@ -628,6 +628,19 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(localDirWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", localDirWorker.GetType().String()).Str("job_type", localDirWorker.GetWorkerType()).Msg("Local Directory worker registered")
 
+	// Register Code Map worker (hierarchical code structure analysis - optimized for large codebases)
+	codeMapWorker := workers.NewCodeMapWorker(
+		jobMgr,
+		queueMgr,
+		a.StorageManager.DocumentStorage(),
+		a.AgentService, // May be nil if AI not configured
+		a.EventService,
+		a.Logger,
+	)
+	a.StepManager.RegisterWorker(codeMapWorker)  // Register with StepManager for step routing
+	jobProcessor.RegisterExecutor(codeMapWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", codeMapWorker.GetType().String()).Str("job_type", codeMapWorker.GetWorkerType()).Msg("Code Map worker registered")
+
 	// Register agent worker if AgentService is available (implements both StepWorker and JobWorker)
 	if a.AgentService != nil {
 		agentWorker := workers.NewAgentWorker(

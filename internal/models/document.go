@@ -145,6 +145,67 @@ func (l *LocalDirMetadata) ToMap() (map[string]interface{}, error) {
 	return m, nil
 }
 
+// CodeMapMetadata represents hierarchical code structure metadata
+// Used by CodeMapWorker for efficient large codebase analysis
+type CodeMapMetadata struct {
+	// Identity
+	BasePath    string `json:"base_path"`    // Root directory being mapped
+	NodeType    string `json:"node_type"`    // "project", "directory", "file"
+	RelPath     string `json:"rel_path"`     // Relative path from base
+	ParentPath  string `json:"parent_path"`  // Parent node's relative path (empty for root)
+	ProjectName string `json:"project_name"` // Human-readable project name
+
+	// Structure (for directories)
+	ChildCount     int      `json:"child_count"`     // Number of direct children
+	FileCount      int      `json:"file_count"`      // Total files in subtree
+	DirCount       int      `json:"dir_count"`       // Total directories in subtree
+	TotalSize      int64    `json:"total_size"`      // Total bytes in subtree
+	TotalLOC       int      `json:"total_loc"`       // Total lines of code in subtree
+	Languages      []string `json:"languages"`       // Detected languages in subtree
+	MainLanguage   string   `json:"main_language"`   // Primary language by LOC
+	ChildPaths     []string `json:"child_paths"`     // Direct child relative paths
+	IgnoredCount   int      `json:"ignored_count"`   // Files ignored by filters
+	IgnoredReasons []string `json:"ignored_reasons"` // Why files were ignored
+
+	// Structure (for files)
+	Extension  string   `json:"extension"`   // File extension
+	FileSize   int64    `json:"file_size"`   // File size in bytes
+	LOC        int      `json:"loc"`         // Lines of code
+	Language   string   `json:"language"`    // Detected programming language
+	FileType   string   `json:"file_type"`   // code, config, doc, test, etc.
+	Exports    []string `json:"exports"`     // Exported functions/classes/types
+	Imports    []string `json:"imports"`     // Import statements
+	HasTests   bool     `json:"has_tests"`   // Contains test code
+	Complexity string   `json:"complexity"`  // low, medium, high (heuristic)
+	ModTime    string   `json:"mod_time"`    // Last modification time (RFC3339)
+	ContentMD5 string   `json:"content_md5"` // MD5 hash for change detection
+
+	// AI-Generated (populated by summarization step)
+	Summary     string   `json:"summary"`      // AI-generated summary
+	Purpose     string   `json:"purpose"`      // Inferred purpose/responsibility
+	KeyConcepts []string `json:"key_concepts"` // Main concepts/patterns found
+	Complexity_ string   `json:"complexity_"`  // AI-assessed complexity
+
+	// Processing State
+	Indexed       bool   `json:"indexed"`        // Structure has been indexed
+	Summarized    bool   `json:"summarized"`     // AI summary has been generated
+	LastIndexed   string `json:"last_indexed"`   // When structure was indexed (RFC3339)
+	LastSummarized string `json:"last_summarized"` // When summary was generated (RFC3339)
+}
+
+// ToMap converts code map metadata to map for storage
+func (c *CodeMapMetadata) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // CrossSourceMetadata contains cross-reference information extracted from content.
 //
 // NOTE: Currently unpopulated by transformers. Future enhancement to extract cross-references
