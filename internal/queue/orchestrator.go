@@ -365,7 +365,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			Bool("returns_child_jobs", returnsChildJobs).
 			Int("step_child_count", stepChildCount).
 			Bool("step_monitor_nil", stepMonitor == nil).
-			Msg("Determining step status for step monitor")
+			Msg("[orchestrator] Determining step status for step monitor")
 
 		o.jobManager.AddJobLog(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
 			returnsChildJobs, stepChildCount, stepMonitor == nil))

@@ -65,7 +65,7 @@ func (m *StepManager) Init(ctx context.Context, step models.JobStep, jobDef mode
 	m.logger.Debug().
 		Str("step_type", string(workerType)).
 		Str("step_name", step.Name).
-		Msg("Initializing step worker")
+		Msg("[init] Initializing step worker")
 
 	// Call worker's Init method to assess work
 	initResult, err := worker.Init(ctx, step, jobDef)
@@ -79,7 +79,7 @@ func (m *StepManager) Init(ctx context.Context, step models.JobStep, jobDef mode
 		Int("work_items", len(initResult.WorkItems)).
 		Int("total_count", initResult.TotalCount).
 		Str("strategy", string(initResult.Strategy)).
-		Msg("Step worker initialized")
+		Msg("[init] Step worker initialized")
 
 	return initResult, nil
 }
@@ -106,7 +106,7 @@ func (m *StepManager) Execute(ctx context.Context, step models.JobStep, jobDef m
 		Str("step_type", string(workerType)).
 		Str("step_name", step.Name).
 		Bool("has_init_result", initResult != nil).
-		Msg("Executing step worker CreateJobs")
+		Msg("[run] Executing step worker CreateJobs")
 
 	return worker.CreateJobs(ctx, step, jobDef, parentJobID, initResult)
 }

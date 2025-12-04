@@ -104,7 +104,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 	if len(filesRaw) == 0 {
 		w.logger.Warn().
 			Str("job_id", job.ID).
-			Msg("Batch job has no files to process")
+			Msg("[run] Batch job has no files to process")
 		return nil
 	}
 
@@ -114,7 +114,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 		Str("repo", repo).
 		Int("batch_idx", int(batchIdx)).
 		Int("files_in_batch", len(filesRaw)).
-		Msg("Processing batch job")
+		Msg("[run] Processing batch job")
 
 	// Process each file in the batch
 	var savedCount, errorCount int
@@ -140,7 +140,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 			w.logger.Debug().
 				Err(err).
 				Str("path", filePath).
-				Msg("Failed to read file")
+				Msg("[run] Failed to read file")
 			errorCount++
 			continue
 		}
@@ -182,7 +182,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 			w.logger.Debug().
 				Err(err).
 				Str("path", filePath).
-				Msg("Failed to save document")
+				Msg("[run] Failed to save document")
 			errorCount++
 			continue
 		}
@@ -195,7 +195,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 				Int("saved", savedCount).
 				Int("errors", errorCount).
 				Int("total", len(filesRaw)).
-				Msg("Batch progress")
+				Msg("[run] Batch progress")
 		}
 	}
 
@@ -207,7 +207,7 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 		Int("batch_idx", int(batchIdx)).
 		Int("saved", savedCount).
 		Int("errors", errorCount).
-		Msg("Batch job completed")
+		Msg("[run] Batch job completed")
 
 	return nil
 }
@@ -260,7 +260,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			Str("extracted_owner", extractedOwner).
 			Str("extracted_repo", extractedRepo).
 			Str("extracted_branch", extractedBranch).
-			Msg("Extracted owner/repo from trigger URL")
+			Msg("[init] Extracted owner/repo from trigger URL")
 	}
 
 	// Validate required config
@@ -293,7 +293,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("max_files", maxFiles).
-		Msg("Initializing GitHub git worker - assessing repository")
+		Msg("[init] Initializing GitHub git worker - assessing repository")
 
 	// Get connector for authentication
 	var connector *models.Connector
@@ -333,7 +333,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("repo", repo).
 		Str("branch", branch).
 		Str("clone_dir", cloneDir).
-		Msg("Cloning repository to assess content")
+		Msg("[init] Cloning repository to assess content")
 
 	// Run git clone with depth 1 (shallow clone) for speed
 	cmd := exec.CommandContext(ctx, gitPath, "clone",
@@ -366,7 +366,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			Str("repo", repo).
 			Str("branch", branch).
 			Str("error_output", errOutput).
-			Msg("Git clone failed")
+			Msg("[init] Git clone failed")
 		return nil, fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
 	}
 
@@ -475,7 +475,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Int("excluded_by_extension", excludedByExtension).
 		Int("excluded_by_binary", excludedByBinary).
 		Int("matched_files", matchedFiles).
-		Msg("Repository assessed - file analysis complete")
+		Msg("[init] Repository assessed - file analysis complete")
 
 	// Create work items from ALL files (batching happens in CreateJobs)
 	workItems := make([]interfaces.WorkItem, matchedFiles)
@@ -558,7 +558,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Int("total_files", totalFiles).
 		Int("batch_size", batchSize).
 		Int("batch_count", batchCount).
-		Msg("Creating batched queue jobs")
+		Msg("[run] Creating batched queue jobs")
 
 	// Add step logs for UI visibility
 	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Cloned '%s/%s@%s'", owner, repo, branch))
@@ -620,7 +620,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		if err != nil {
 			w.logger.Error().Err(err).
 				Int("batch_idx", batchIdx).
-				Msg("Failed to serialize batch job")
+				Msg("[run] Failed to serialize batch job")
 			continue
 		}
 
@@ -639,7 +639,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		}); err != nil {
 			w.logger.Error().Err(err).
 				Int("batch_idx", batchIdx).
-				Msg("Failed to create batch job record")
+				Msg("[run] Failed to create batch job record")
 			continue
 		}
 
@@ -652,7 +652,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		if err := w.queueMgr.Enqueue(ctx, msg); err != nil {
 			w.logger.Error().Err(err).
 				Int("batch_idx", batchIdx).
-				Msg("Failed to enqueue batch job")
+				Msg("[run] Failed to enqueue batch job")
 			continue
 		}
 
@@ -662,7 +662,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			Str("job_id", batchJob.ID).
 			Int("batch_idx", batchIdx).
 			Int("files_in_batch", len(batchWorkItems)).
-			Msg("Batch job created and enqueued")
+			Msg("[run] Batch job created and enqueued")
 	}
 
 	if len(jobIDs) == 0 {
@@ -675,7 +675,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("step_name", step.Name).
 		Int("batches_created", len(jobIDs)).
 		Int("total_files", totalFiles).
-		Msg("Batch jobs created and enqueued")
+		Msg("[run] Batch jobs created and enqueued")
 
 	// Return the step ID - orchestrator will monitor child job completion
 	return stepID, nil
