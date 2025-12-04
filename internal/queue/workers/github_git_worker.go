@@ -64,25 +64,150 @@ func NewGitHubGitWorker(
 	}
 }
 
-// GetWorkerType returns the job type this worker handles (not used for inline processing)
+// GetWorkerType returns the job type this worker handles (batch jobs)
 func (w *GitHubGitWorker) GetWorkerType() string {
-	return models.JobTypeGitHubGitFile
+	return models.JobTypeGitHubGitBatch
 }
 
 // Validate validates that the queue job is compatible with this worker
 func (w *GitHubGitWorker) Validate(job *models.QueueJob) error {
-	// This worker now processes files inline, so this is rarely called
-	if job.Type != models.JobTypeGitHubGitFile {
-		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeGitHubGitFile, job.Type)
+	if job.Type != models.JobTypeGitHubGitBatch {
+		return fmt.Errorf("invalid job type: expected %s, got %s", models.JobTypeGitHubGitBatch, job.Type)
 	}
 	return nil
 }
 
-// Execute is kept for compatibility but the main work is done inline in CreateJobs
+// Execute processes a batch of files from a github_git_batch queue job.
+// Each batch contains up to 1000 files to read from the cloned repository.
 func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) error {
-	// This method is no longer the primary path - files are processed inline in CreateJobs
-	// Kept for interface compatibility
-	return fmt.Errorf("github_git worker processes files inline - this method should not be called")
+	// Extract config from batch job
+	owner, _ := job.Config["owner"].(string)
+	repo, _ := job.Config["repo"].(string)
+	branch, _ := job.Config["branch"].(string)
+	cloneDir, _ := job.Config["clone_dir"].(string)
+	batchIdx, _ := job.Config["batch_idx"].(float64) // JSON numbers are float64
+	filesRaw, _ := job.Config["files"].([]interface{})
+	tagsRaw, _ := job.Config["tags"].([]interface{})
+
+	// Convert tags to string slice
+	var tags []string
+	for _, t := range tagsRaw {
+		if s, ok := t.(string); ok {
+			tags = append(tags, s)
+		}
+	}
+
+	// Validate required fields
+	if cloneDir == "" {
+		return fmt.Errorf("clone_dir is required in batch job config")
+	}
+	if len(filesRaw) == 0 {
+		w.logger.Warn().
+			Str("job_id", job.ID).
+			Msg("Batch job has no files to process")
+		return nil
+	}
+
+	w.logger.Info().
+		Str("job_id", job.ID).
+		Str("owner", owner).
+		Str("repo", repo).
+		Int("batch_idx", int(batchIdx)).
+		Int("files_in_batch", len(filesRaw)).
+		Msg("Processing batch job")
+
+	// Process each file in the batch
+	var savedCount, errorCount int
+
+	for _, fileRaw := range filesRaw {
+		fileMap, ok := fileRaw.(map[string]interface{})
+		if !ok {
+			errorCount++
+			continue
+		}
+
+		filePath, _ := fileMap["path"].(string)
+		folder, _ := fileMap["folder"].(string)
+		if filePath == "" {
+			errorCount++
+			continue
+		}
+
+		// Read file content from cloned repository
+		fullPath := filepath.Join(cloneDir, filePath)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			w.logger.Debug().
+				Err(err).
+				Str("path", filePath).
+				Msg("Failed to read file")
+			errorCount++
+			continue
+		}
+
+		// Generate document ID
+		docID := uuid.New().String()
+
+		// Build document title from path
+		title := filepath.Base(filePath)
+
+		// Build source URL for GitHub
+		sourceURL := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, filePath)
+
+		// Create document metadata
+		metadata := map[string]interface{}{
+			"owner":      owner,
+			"repo":       repo,
+			"branch":     branch,
+			"path":       filePath,
+			"folder":     folder,
+			"source_url": sourceURL,
+			"type":       "github_file",
+		}
+
+		// Create document
+		doc := &models.Document{
+			ID:       docID,
+			Title:    title,
+			Content:  string(content),
+			URL:      sourceURL,
+			Tags:     tags,
+			Metadata: metadata,
+		}
+
+		// Save document
+		if err := w.documentStorage.SaveDocument(ctx, doc); err != nil {
+			w.logger.Debug().
+				Err(err).
+				Str("path", filePath).
+				Msg("Failed to save document")
+			errorCount++
+			continue
+		}
+
+		savedCount++
+
+		// Log progress periodically (every 100 files)
+		if savedCount%100 == 0 {
+			w.logger.Debug().
+				Int("saved", savedCount).
+				Int("errors", errorCount).
+				Int("total", len(filesRaw)).
+				Msg("Batch progress")
+		}
+	}
+
+	// Log final batch results
+	w.jobManager.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("Batch complete: %d saved, %d errors", savedCount, errorCount))
+
+	w.logger.Info().
+		Str("job_id", job.ID).
+		Int("batch_idx", int(batchIdx)).
+		Int("saved", savedCount).
+		Int("errors", errorCount).
+		Msg("Batch job completed")
+
+	return nil
 }
 
 // ============================================================================
@@ -133,7 +258,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			Str("extracted_owner", extractedOwner).
 			Str("extracted_repo", extractedRepo).
 			Str("extracted_branch", extractedBranch).
-			Msg("[step] Extracted owner/repo from trigger URL")
+			Msg("Extracted owner/repo from trigger URL")
 	}
 
 	// Validate required config
@@ -166,7 +291,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("max_files", maxFiles).
-		Msg("[step] Initializing GitHub git worker - assessing repository")
+		Msg("Initializing GitHub git worker - assessing repository")
 
 	// Get connector for authentication
 	var connector *models.Connector
@@ -206,7 +331,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Str("repo", repo).
 		Str("branch", branch).
 		Str("clone_dir", cloneDir).
-		Msg("[step] Cloning repository to assess content")
+		Msg("Cloning repository to assess content")
 
 	// Run git clone with depth 1 (shallow clone) for speed
 	cmd := exec.CommandContext(ctx, gitPath, "clone",
@@ -239,7 +364,7 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			Str("repo", repo).
 			Str("branch", branch).
 			Str("error_output", errOutput).
-			Msg("[step] Git clone failed")
+			Msg("Git clone failed")
 		return nil, fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
 	}
 
@@ -336,14 +461,8 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		return nil, fmt.Errorf("failed to walk repository: %w", err)
 	}
 
-	// Calculate files to process
+	// All matched files will be processed (no limit in Init - batching happens in CreateJobs)
 	matchedFiles := len(files)
-	filesToProcess := matchedFiles
-	excludedByLimit := 0
-	if filesToProcess > maxFiles {
-		excludedByLimit = filesToProcess - maxFiles
-		filesToProcess = maxFiles
-	}
 
 	w.logger.Info().
 		Str("owner", owner).
@@ -354,14 +473,11 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		Int("excluded_by_extension", excludedByExtension).
 		Int("excluded_by_binary", excludedByBinary).
 		Int("matched_files", matchedFiles).
-		Int("excluded_by_limit", excludedByLimit).
-		Int("files_to_process", filesToProcess).
-		Msg("[step] Repository assessed - file analysis complete")
+		Msg("Repository assessed - file analysis complete")
 
-	// Create work items from files
-	workItems := make([]interfaces.WorkItem, filesToProcess)
-	for i := 0; i < filesToProcess; i++ {
-		file := files[i]
+	// Create work items from ALL files (batching happens in CreateJobs)
+	workItems := make([]interfaces.WorkItem, matchedFiles)
+	for i, file := range files {
 		workItems[i] = interfaces.WorkItem{
 			ID:   file.Path,
 			Name: filepath.Base(file.Path),
@@ -373,11 +489,15 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 		}
 	}
 
+	// Calculate batch count for logging
+	batchSize := 1000
+	batchCount := (matchedFiles + batchSize - 1) / batchSize
+
 	return &interfaces.WorkerInitResult{
 		WorkItems:            workItems,
-		TotalCount:           filesToProcess,
-		Strategy:             interfaces.ProcessingStrategyInline,
-		SuggestedConcurrency: 1, // Inline processing doesn't use concurrency
+		TotalCount:           matchedFiles,
+		Strategy:             interfaces.ProcessingStrategyParallel, // Batched queue jobs
+		SuggestedConcurrency: batchCount,                            // One job per batch
 		Metadata: map[string]interface{}{
 			"owner":                 owner,
 			"repo":                  repo,
@@ -389,15 +509,14 @@ func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			"excluded_by_extension": excludedByExtension,
 			"excluded_by_binary":    excludedByBinary,
 			"matched_files":         matchedFiles,
-			"excluded_by_limit":     excludedByLimit,
-			"files":                 files[:filesToProcess], // Only include files to process
+			"batch_size":            batchSize,
+			"batch_count":           batchCount,
 		},
 	}, nil
 }
 
-// CreateJobs processes files from the cloned repository based on init result.
-// If initResult is provided, it uses the clone directory from init.
-// Otherwise, it calls Init internally.
+// CreateJobs creates batched queue jobs for processing files from the repository.
+// Each batch contains up to 1000 files and is processed as a separate queue job.
 func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
@@ -418,27 +537,33 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	excludedByExtension, _ := initResult.Metadata["excluded_by_extension"].(int)
 	excludedByBinary, _ := initResult.Metadata["excluded_by_binary"].(int)
 	matchedFiles, _ := initResult.Metadata["matched_files"].(int)
-	excludedByLimit, _ := initResult.Metadata["excluded_by_limit"].(int)
+	batchSize, _ := initResult.Metadata["batch_size"].(int)
+	if batchSize == 0 {
+		batchSize = 1000
+	}
 
-	// Use WorkItems directly - they contain path and folder in Config
 	workItems := initResult.WorkItems
-	filesToProcess := initResult.TotalCount
+	totalFiles := len(workItems)
+
+	// Calculate batch count
+	batchCount := (totalFiles + batchSize - 1) / batchSize
 
 	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
-		Int("files_to_process", filesToProcess).
-		Int("work_items", len(workItems)).
-		Msg("[worker] Starting file processing from init result")
+		Int("total_files", totalFiles).
+		Int("batch_size", batchSize).
+		Int("batch_count", batchCount).
+		Msg("Creating batched queue jobs")
 
-	// Add step logs for UI visibility (git-style output)
+	// Add step logs for UI visibility
 	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Cloned '%s/%s@%s'", owner, repo, branch))
 	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Scanned %d files: %d excluded by path, %d by extension, %d by binary",
 		totalFilesScanned, excludedByPath, excludedByExtension, excludedByBinary))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Matched %d files, processing %d (limit exclusions: %d)",
-		matchedFiles, filesToProcess, excludedByLimit))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Matched %d files, creating %d batch jobs (%d files per batch)",
+		matchedFiles, batchCount, batchSize))
 
 	// Get tags for documents
 	baseTags := jobDef.Tags
@@ -446,122 +571,114 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		baseTags = []string{}
 	}
 
-	// Process files inline using WorkItems
-	processedCount := 0
-	failedCount := 0
-	startProcessing := time.Now()
+	// Create batched queue jobs
+	jobIDs := make([]string, 0, batchCount)
 
-	for i, workItem := range workItems {
-		if processedCount >= filesToProcess {
-			break
+	for batchIdx := 0; batchIdx < batchCount; batchIdx++ {
+		startIdx := batchIdx * batchSize
+		endIdx := startIdx + batchSize
+		if endIdx > totalFiles {
+			endIdx = totalFiles
 		}
 
-		// Extract path and folder from WorkItem config
-		filePath, _ := workItem.Config["path"].(string)
-		folder, _ := workItem.Config["folder"].(string)
+		batchWorkItems := workItems[startIdx:endIdx]
 
-		if filePath == "" {
-			w.logger.Warn().
-				Str("work_item_id", workItem.ID).
-				Msg("[worker] WorkItem missing path, skipping")
-			failedCount++
-			continue
+		// Convert WorkItems to file paths for the batch config
+		filePaths := make([]map[string]interface{}, len(batchWorkItems))
+		for i, item := range batchWorkItems {
+			filePaths[i] = map[string]interface{}{
+				"path":   item.Config["path"],
+				"folder": item.Config["folder"],
+			}
 		}
 
-		fileStartTime := time.Now()
-
-		// Read file content from cloned repo
-		fullPath := filepath.Join(cloneDir, filePath)
-		content, err := os.ReadFile(fullPath)
-		if err != nil {
-			w.logger.Warn().Err(err).
-				Str("file", filePath).
-				Msg("[worker] Failed to read file, skipping")
-			failedCount++
-			continue
-		}
-
-		// Create document
-		doc := &models.Document{
-			ID:              fmt.Sprintf("doc_%s", uuid.New().String()),
-			SourceType:      models.SourceTypeGitHubGit,
-			SourceID:        fmt.Sprintf("%s/%s/%s/%s", owner, repo, branch, filePath),
-			Title:           filepath.Base(filePath),
-			ContentMarkdown: string(content),
-			URL:             fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, branch, filePath),
-			Tags:            mergeTags(baseTags, []string{"github", repo, branch}),
-			Metadata: map[string]interface{}{
-				"owner":       owner,
-				"repo":        repo,
-				"branch":      branch,
-				"folder":      folder,
-				"path":        filePath,
-				"file_type":   filepath.Ext(filePath),
-				"clone_based": true,
+		// Create batch job
+		batchJob := models.NewQueueJob(
+			models.JobTypeGitHubGitBatch,
+			fmt.Sprintf("Batch %d/%d: %s/%s", batchIdx+1, batchCount, owner, repo),
+			map[string]interface{}{
+				"owner":      owner,
+				"repo":       repo,
+				"branch":     branch,
+				"clone_dir":  cloneDir,
+				"batch_idx":  batchIdx,
+				"batch_size": len(batchWorkItems),
+				"files":      filePaths,
+				"tags":       baseTags,
 			},
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
+			map[string]interface{}{
+				"job_definition_id": jobDef.ID,
+				"step_name":         step.Name,
+			},
+		)
+		batchJob.ParentID = &stepID
 
-		// Save document
-		if err := w.documentStorage.SaveDocument(doc); err != nil {
-			w.logger.Warn().Err(err).
-				Str("file", filePath).
-				Msg("[worker] Failed to save document, skipping")
-			failedCount++
+		// Serialize and enqueue
+		payloadBytes, err := batchJob.ToJSON()
+		if err != nil {
+			w.logger.Error().Err(err).
+				Int("batch_idx", batchIdx).
+				Msg("Failed to serialize batch job")
 			continue
 		}
 
-		processedCount++
-		fileElapsed := time.Since(fileStartTime)
+		// Create job record
+		if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
+			ID:       batchJob.ID,
+			ParentID: batchJob.ParentID,
+			Type:     batchJob.Type,
+			Name:     batchJob.Name,
+			Status:   "pending",
+			Config:   batchJob.Config,
+			Metadata: batchJob.Metadata,
+		}); err != nil {
+			w.logger.Error().Err(err).
+				Int("batch_idx", batchIdx).
+				Msg("Failed to create batch job record")
+			continue
+		}
 
-		// Log every file processed
+		// Enqueue to queue manager
+		msg := models.QueueMessage{
+			JobID:   batchJob.ID,
+			Type:    batchJob.Type,
+			Payload: payloadBytes,
+		}
+		if err := w.queueMgr.Enqueue(ctx, msg); err != nil {
+			w.logger.Error().Err(err).
+				Int("batch_idx", batchIdx).
+				Msg("Failed to enqueue batch job")
+			continue
+		}
+
+		jobIDs = append(jobIDs, batchJob.ID)
+
 		w.logger.Debug().
-			Str("file", filePath).
-			Str("doc_id", doc.ID[:12]).
-			Dur("duration", fileElapsed).
-			Msg("[worker] File processed")
-
-		// Add job log for UI visibility (every 10 files or last file)
-		if processedCount%10 == 0 || i == len(workItems)-1 || processedCount == filesToProcess {
-			w.jobManager.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("Progress: %d/%d files (%.1f%%)",
-					processedCount, filesToProcess, float64(processedCount)/float64(filesToProcess)*100))
-		}
+			Str("job_id", batchJob.ID).
+			Int("batch_idx", batchIdx).
+			Int("files_in_batch", len(batchWorkItems)).
+			Msg("Batch job created and enqueued")
 	}
 
-	totalElapsed := time.Since(startProcessing)
-
-	// Clean up clone directory immediately since we're done with it
-	if cloneDir != "" {
-		if err := os.RemoveAll(cloneDir); err != nil {
-			w.logger.Warn().Err(err).Str("clone_dir", cloneDir).Msg("[worker] Failed to clean up clone directory")
-		} else {
-			w.logger.Debug().Str("clone_dir", cloneDir).Msg("[worker] Clone directory cleaned up")
-		}
+	if len(jobIDs) == 0 {
+		return "", fmt.Errorf("failed to create any batch jobs")
 	}
 
-	// Log completion
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Created %d batch jobs for %d files", len(jobIDs), totalFiles))
+
 	w.logger.Info().
-		Str("owner", owner).
-		Str("repo", repo).
-		Str("branch", branch).
-		Int("files_processed", processedCount).
-		Int("files_failed", failedCount).
-		Dur("processing_time", totalElapsed).
-		Msg("[worker] GitHub git processing completed")
+		Str("step_name", step.Name).
+		Int("batches_created", len(jobIDs)).
+		Int("total_files", totalFiles).
+		Msg("Batch jobs created and enqueued")
 
-	// Add final step logs for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files imported, %d failed (time: %s)",
-		processedCount, failedCount, totalElapsed.Round(time.Millisecond)))
-
-	// Return empty string since we don't create child jobs anymore
-	return "", nil
+	// Return the step ID - orchestrator will monitor child job completion
+	return stepID, nil
 }
 
-// ReturnsChildJobs returns false - files are now processed inline for efficiency
+// ReturnsChildJobs returns true - we create batched child jobs for queue processing
 func (w *GitHubGitWorker) ReturnsChildJobs() bool {
-	return false
+	return true
 }
 
 // ValidateConfig validates step configuration for GitHub git type

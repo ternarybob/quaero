@@ -59,8 +59,9 @@ const (
 	JobTypeGitHubRepoFile = "github_repo_file"
 
 	// GitHub Git types (git clone-based, faster for full repo downloads)
-	SourceTypeGitHubGit  = "github_git"
-	JobTypeGitHubGitFile = "github_git_file"
+	SourceTypeGitHubGit   = "github_git"
+	JobTypeGitHubGitFile  = "github_git_file"
+	JobTypeGitHubGitBatch = "github_git_batch" // Batch job containing multiple files
 )
 
 // NewQueueJob creates a new root queued job
