@@ -326,12 +326,14 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	maxFiles, _ := initResult.Metadata["max_files"].(int)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
-		Msg("[worker] Creating GitHub repo jobs from init result")
+		Msg("Creating GitHub repo jobs from init result")
 
 	// Preserve the original validation variables for use below
 	_ = extensions

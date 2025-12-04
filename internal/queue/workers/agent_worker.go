@@ -385,10 +385,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		jobID, err := w.createAgentJob(ctx, agentType, docID, stepConfig, stepID, step.Name, managerID)
 		if err != nil {
 			w.logger.Warn().
+				Str("phase", "run").
+				Str("originator", "worker").
 				Err(err).
 				Str("document_id", docID).
 				Str("agent_type", agentType).
-				Msg("[worker] Failed to create agent job for document")
+				Msg("Failed to create agent job for document")
 			continue
 		}
 		jobIDs = append(jobIDs, jobID)
@@ -401,10 +403,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_created", len(jobIDs)).
-		Msg("[worker] Agent jobs created and enqueued")
+		Msg("Agent jobs created and enqueued")
 
 	// Poll for job completion (wait for all agent jobs to complete)
 	if err := w.pollJobCompletion(ctx, jobIDs); err != nil {

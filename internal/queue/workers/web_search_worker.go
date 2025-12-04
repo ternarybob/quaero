@@ -206,12 +206,14 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	apiKey, _ := initResult.Metadata["api_key"].(string)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
 		Str("step_id", stepID).
-		Msg("[worker] Starting web search from init result")
+		Msg("Starting web search from init result")
 
 	// Log step start for UI
 	w.logJobEvent(ctx, stepID, step.Name, "info",

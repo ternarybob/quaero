@@ -166,10 +166,12 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 	searchType, _ := initResult.Metadata["search_type"].(string)
 
 	w.logger.Info().
+		Str("phase", "run").
+		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("search_query", searchQuery).
 		Str("search_type", searchType).
-		Msg("[worker] Starting places search from init result")
+		Msg("Starting places search from init result")
 
 	// Build search request
 	req := &models.PlacesSearchRequest{
