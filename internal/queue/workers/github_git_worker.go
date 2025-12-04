@@ -7,6 +7,7 @@ package workers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -220,11 +221,15 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		connectorID = connector.ID
 	}
 
-	// Extract token from connector config
-	token, ok := connector.Config["token"].(string)
-	if !ok || token == "" {
+	// Extract token from connector config (Config is json.RawMessage)
+	var gitHubConfig models.GitHubConnectorConfig
+	if err := json.Unmarshal(connector.Config, &gitHubConfig); err != nil {
+		return "", fmt.Errorf("failed to parse GitHub connector config: %w", err)
+	}
+	if gitHubConfig.Token == "" {
 		return "", fmt.Errorf("GitHub token not found in connector config")
 	}
+	token := gitHubConfig.Token
 
 	// Create unique clone directory
 	cloneDir := filepath.Join(w.tempDir, fmt.Sprintf("%s-%s-%d", owner, repo, time.Now().UnixNano()))
