@@ -267,9 +267,9 @@ func (w *GitHubLogWorker) GetType() models.WorkerType {
 	return models.WorkerTypeGitHubActions
 }
 
-// CreateJobs creates a parent job and spawns child jobs for each workflow run.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
+// Init performs the initialization/setup phase for a GitHub Actions log step.
+// This is where we validate configuration and prepare parameters.
+func (w *GitHubLogWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -282,31 +282,87 @@ func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	repo := getLogStringConfig(stepConfig, "repo", "")
 
 	if connectorID == "" && connectorName == "" {
-		return "", fmt.Errorf("connector_id or connector_name is required")
+		return nil, fmt.Errorf("connector_id or connector_name is required")
 	}
 	if owner == "" {
-		return "", fmt.Errorf("owner is required")
+		return nil, fmt.Errorf("owner is required")
 	}
 	if repo == "" {
-		return "", fmt.Errorf("repo is required")
+		return nil, fmt.Errorf("repo is required")
 	}
 
 	// Extract optional config with defaults
 	workflowFiles := getLogStringSliceConfig(stepConfig, "workflow_files", []string{})
-	_ = workflowFiles // TODO: filter by workflow files not yet implemented
 	status := getLogStringConfig(stepConfig, "status", "failure")
 	maxRuns := getLogIntConfig(stepConfig, "max_runs", 100)
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
-		Str("connector_id", connectorID).
-		Str("connector_name", connectorName).
 		Str("owner", owner).
 		Str("repo", repo).
-		Strs("workflow_files", workflowFiles).
 		Str("status", status).
 		Int("max_runs", maxRuns).
-		Msg("Creating GitHub Actions parent job")
+		Msg("[step] GitHub Actions log worker initialized")
+
+	return &interfaces.WorkerInitResult{
+		WorkItems: []interfaces.WorkItem{
+			{
+				ID:   fmt.Sprintf("%s/%s/actions", owner, repo),
+				Name: fmt.Sprintf("Actions: %s/%s", owner, repo),
+				Type: "github_actions",
+			},
+		},
+		TotalCount:           1,
+		Strategy:             interfaces.ProcessingStrategyParallel,
+		SuggestedConcurrency: 5,
+		Metadata: map[string]interface{}{
+			"owner":          owner,
+			"repo":           repo,
+			"workflow_files": workflowFiles,
+			"status":         status,
+			"max_runs":       maxRuns,
+			"connector_id":   connectorID,
+			"connector_name": connectorName,
+			"step_config":    stepConfig,
+		},
+	}, nil
+}
+
+// CreateJobs creates a parent job and spawns child jobs for each workflow run.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *GitHubLogWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize github_actions worker: %w", err)
+		}
+	}
+
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
+	if stepConfig == nil {
+		stepConfig = step.Config
+	}
+
+	// Extract metadata from init result
+	connectorID, _ := initResult.Metadata["connector_id"].(string)
+	connectorName, _ := initResult.Metadata["connector_name"].(string)
+	owner, _ := initResult.Metadata["owner"].(string)
+	repo, _ := initResult.Metadata["repo"].(string)
+	workflowFiles, _ := initResult.Metadata["workflow_files"].([]string)
+	status, _ := initResult.Metadata["status"].(string)
+	maxRuns, _ := initResult.Metadata["max_runs"].(int)
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("owner", owner).
+		Str("repo", repo).
+		Str("status", status).
+		Int("max_runs", maxRuns).
+		Msg("[worker] Creating GitHub Actions jobs from init result")
+
+	_ = workflowFiles // TODO: filter by workflow files not yet implemented
 
 	// Get GitHub connector - by ID or by name
 	var connector *models.Connector

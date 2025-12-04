@@ -74,20 +74,23 @@ func (w *WebSearchWorker) GetType() models.WorkerType {
 	return models.WorkerTypeWebSearch
 }
 
-// CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
-// Creates a document with the search results and source URLs.
-// Returns the step job ID since web search executes synchronously.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
+// Init performs the initialization/setup phase for a web search step.
+// This is where we:
+//   - Extract and validate configuration (query, depth, breadth)
+//   - Resolve API key from storage
+//   - Return the search parameters as a single work item
+//
+// The Init phase does NOT perform the search - it only validates and prepares.
+func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
-		return "", fmt.Errorf("step config is required for web_search")
+		return nil, fmt.Errorf("step config is required for web_search")
 	}
 
 	// Extract query (required)
 	query, ok := stepConfig["query"].(string)
 	if !ok || query == "" {
-		return "", fmt.Errorf("query is required in step config")
+		return nil, fmt.Errorf("query is required in step config")
 	}
 
 	// Extract depth (optional, default 1, max 10)
@@ -127,24 +130,20 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
 			resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
 			if err != nil {
-				return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+				return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 			}
 			apiKey = resolvedAPIKey
 			w.logger.Info().
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
-				Msg("Resolved API key placeholder from storage")
+				Msg("[step] Resolved API key placeholder from storage")
 		} else {
-			// Use the already-resolved API key value directly
 			apiKey = apiKeyValue
-			w.logger.Debug().
-				Str("step_name", step.Name).
-				Msg("Using pre-resolved API key from orchestrator")
 		}
 	}
 
 	if apiKey == "" {
-		return "", fmt.Errorf("api_key is required for web_search")
+		return nil, fmt.Errorf("api_key is required for web_search")
 	}
 
 	w.logger.Info().
@@ -152,8 +151,65 @@ func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("query", query).
 		Int("depth", depth).
 		Int("breadth", breadth).
+		Msg("[step] Web search worker initialized")
+
+	// Create a single work item representing the search
+	workItems := []interfaces.WorkItem{
+		{
+			ID:   query,
+			Name: fmt.Sprintf("Search: %s", query),
+			Type: "search",
+			Config: map[string]interface{}{
+				"query":   query,
+				"depth":   depth,
+				"breadth": breadth,
+			},
+		},
+	}
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           1, // Single search operation
+		Strategy:             interfaces.ProcessingStrategyInline,
+		SuggestedConcurrency: 1,
+		Metadata: map[string]interface{}{
+			"query":       query,
+			"depth":       depth,
+			"breadth":     breadth,
+			"api_key":     apiKey,
+			"step_config": stepConfig,
+		},
+	}, nil
+}
+
+// CreateJobs executes a web search using Gemini SDK with GoogleSearch grounding.
+// Creates a document with the search results and source URLs.
+// Returns the step job ID since web search executes synchronously.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+// If initResult is provided, it uses the parameters from init.
+func (w *WebSearchWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize web_search worker: %w", err)
+		}
+	}
+
+	// Extract metadata from init result
+	query, _ := initResult.Metadata["query"].(string)
+	depth, _ := initResult.Metadata["depth"].(int)
+	breadth, _ := initResult.Metadata["breadth"].(int)
+	apiKey, _ := initResult.Metadata["api_key"].(string)
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("query", query).
+		Int("depth", depth).
+		Int("breadth", breadth).
 		Str("step_id", stepID).
-		Msg("Starting web search")
+		Msg("[worker] Starting web search from init result")
 
 	// Log step start for UI
 	w.logJobEvent(ctx, stepID, step.Name, "info",

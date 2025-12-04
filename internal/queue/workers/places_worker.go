@@ -56,14 +56,98 @@ func (w *PlacesWorker) GetType() models.WorkerType {
 	return models.WorkerTypePlacesSearch
 }
 
+// Init performs the initialization/setup phase for a places search step.
+// This is where we validate configuration and prepare search parameters.
+func (w *PlacesWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+	stepConfig := step.Config
+	if stepConfig == nil {
+		return nil, fmt.Errorf("step config is required for places_search")
+	}
+
+	// Extract search_query (required)
+	searchQuery, ok := stepConfig["search_query"].(string)
+	if !ok || searchQuery == "" {
+		return nil, fmt.Errorf("search_query is required in step config")
+	}
+
+	// Extract search_type (required, default to "text_search")
+	searchType, _ := stepConfig["search_type"].(string)
+	if searchType == "" {
+		searchType = "text_search"
+	}
+
+	// Validate search_type
+	if searchType != "text_search" && searchType != "nearby_search" {
+		return nil, fmt.Errorf("search_type must be one of: text_search, nearby_search")
+	}
+
+	// Resolve API key if present
+	resolvedAPIKey := ""
+	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
+		if strings.HasPrefix(apiKeyValue, "{") && strings.HasSuffix(apiKeyValue, "}") {
+			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
+			var err error
+			resolvedAPIKey, err = common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+			}
+			w.logger.Info().
+				Str("step_name", step.Name).
+				Str("api_key_name", cleanAPIKeyName).
+				Msg("[step] Resolved API key from storage")
+		} else {
+			resolvedAPIKey = apiKeyValue
+		}
+	}
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("search_query", searchQuery).
+		Str("search_type", searchType).
+		Msg("[step] Places search worker initialized")
+
+	return &interfaces.WorkerInitResult{
+		WorkItems: []interfaces.WorkItem{
+			{
+				ID:   searchQuery,
+				Name: fmt.Sprintf("Places: %s", searchQuery),
+				Type: "places_search",
+			},
+		},
+		TotalCount:           1,
+		Strategy:             interfaces.ProcessingStrategyInline,
+		SuggestedConcurrency: 1,
+		Metadata: map[string]interface{}{
+			"search_query":     searchQuery,
+			"search_type":      searchType,
+			"resolved_api_key": resolvedAPIKey,
+			"step_config":      stepConfig,
+		},
+	}, nil
+}
+
 // CreateJobs executes a places search operation using the Google Places API.
 // Searches for places matching the query and creates documents for each result.
 // Returns the step job ID since places search executes synchronously.
 // stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
-	stepConfig := step.Config
+func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize places_search worker: %w", err)
+		}
+	}
+
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
 	if stepConfig == nil {
-		return "", fmt.Errorf("step config is required for places_search")
+		stepConfig = step.Config
+	}
+
+	// Apply resolved API key
+	if resolvedAPIKey, ok := initResult.Metadata["resolved_api_key"].(string); ok && resolvedAPIKey != "" {
+		stepConfig["resolved_api_key"] = resolvedAPIKey
 	}
 
 	// Get manager_id from step job's parent_id for event aggregation
@@ -73,47 +157,17 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 			managerID = *stepJob.ParentID
 		}
 	}
+	_ = managerID // Used for logging context
 
-	// Extract search_query (required)
-	searchQuery, ok := stepConfig["search_query"].(string)
-	if !ok || searchQuery == "" {
-		return "", fmt.Errorf("search_query is required in step config")
-	}
+	// Extract search parameters from init result
+	searchQuery, _ := initResult.Metadata["search_query"].(string)
+	searchType, _ := initResult.Metadata["search_type"].(string)
 
-	// Extract search_type (required, default to "text_search")
-	searchType, ok := stepConfig["search_type"].(string)
-	if !ok || searchType == "" {
-		searchType = "text_search"
-	}
-
-	// Validate search_type
-	if searchType != "text_search" && searchType != "nearby_search" {
-		return "", fmt.Errorf("search_type must be one of: text_search, nearby_search")
-	}
-
-	// Check for API key in step config
-	if apiKeyValue, ok := stepConfig["api_key"].(string); ok && apiKeyValue != "" {
-		// Check if this is a variable reference (wrapped in {}) or an actual API key
-		if strings.HasPrefix(apiKeyValue, "{") && strings.HasSuffix(apiKeyValue, "}") {
-			// Variable reference - resolve from KV store
-			cleanAPIKeyName := strings.Trim(apiKeyValue, "{}")
-			resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
-			if err != nil {
-				return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
-			}
-			w.logger.Info().
-				Str("step_name", step.Name).
-				Str("api_key_name", cleanAPIKeyName).
-				Msg("Resolved API key from storage for places search execution")
-			stepConfig["resolved_api_key"] = resolvedAPIKey
-		} else {
-			// Actual API key value (already substituted) - use directly
-			w.logger.Info().
-				Str("step_name", step.Name).
-				Msg("Using pre-substituted API key for places search execution")
-			stepConfig["resolved_api_key"] = apiKeyValue
-		}
-	}
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("search_query", searchQuery).
+		Str("search_type", searchType).
+		Msg("[worker] Starting places search from init result")
 
 	// Build search request
 	req := &models.PlacesSearchRequest{

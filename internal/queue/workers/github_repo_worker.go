@@ -227,9 +227,9 @@ func (w *GitHubRepoWorker) GetType() models.WorkerType {
 	return models.WorkerTypeGitHubRepo
 }
 
-// CreateJobs creates a parent job and spawns child jobs for each file in the repository.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
+// Init performs the initialization/setup phase for a GitHub repo step.
+// This is where we validate configuration and prepare repo parameters.
+func (w *GitHubRepoWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -242,13 +242,13 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	repo := getStringConfig(stepConfig, "repo", "")
 
 	if connectorID == "" && connectorName == "" {
-		return "", fmt.Errorf("connector_id or connector_name is required")
+		return nil, fmt.Errorf("connector_id or connector_name is required")
 	}
 	if owner == "" {
-		return "", fmt.Errorf("owner is required")
+		return nil, fmt.Errorf("owner is required")
 	}
 	if repo == "" {
-		return "", fmt.Errorf("repo is required")
+		return nil, fmt.Errorf("repo is required")
 	}
 
 	// Extract optional config with defaults
@@ -257,15 +257,84 @@ func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, 
 	excludePaths := getStringSliceConfig(stepConfig, "exclude_paths", []string{"vendor/", "node_modules/", ".git/", "dist/", "build/"})
 	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
-		Str("connector_id", connectorID).
-		Str("connector_name", connectorName).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
-		Msg("Creating GitHub repo parent job")
+		Msg("[step] GitHub repo worker initialized")
+
+	// Create work items for each branch
+	workItems := make([]interfaces.WorkItem, len(branches))
+	for i, branch := range branches {
+		workItems[i] = interfaces.WorkItem{
+			ID:   fmt.Sprintf("%s/%s@%s", owner, repo, branch),
+			Name: fmt.Sprintf("Branch: %s", branch),
+			Type: "branch",
+			Config: map[string]interface{}{
+				"branch": branch,
+			},
+		}
+	}
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(branches),
+		Strategy:             interfaces.ProcessingStrategyParallel,
+		SuggestedConcurrency: 5,
+		Metadata: map[string]interface{}{
+			"owner":          owner,
+			"repo":           repo,
+			"branches":       branches,
+			"extensions":     extensions,
+			"exclude_paths":  excludePaths,
+			"max_files":      maxFiles,
+			"connector_id":   connectorID,
+			"connector_name": connectorName,
+			"step_config":    stepConfig,
+		},
+	}, nil
+}
+
+// CreateJobs creates a parent job and spawns child jobs for each file in the repository.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+func (w *GitHubRepoWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize github_repo worker: %w", err)
+		}
+	}
+
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
+	if stepConfig == nil {
+		stepConfig = step.Config
+	}
+
+	// Extract metadata from init result
+	connectorID, _ := initResult.Metadata["connector_id"].(string)
+	connectorName, _ := initResult.Metadata["connector_name"].(string)
+	owner, _ := initResult.Metadata["owner"].(string)
+	repo, _ := initResult.Metadata["repo"].(string)
+	branches, _ := initResult.Metadata["branches"].([]string)
+	extensions, _ := initResult.Metadata["extensions"].([]string)
+	excludePaths, _ := initResult.Metadata["exclude_paths"].([]string)
+	maxFiles, _ := initResult.Metadata["max_files"].(int)
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("owner", owner).
+		Str("repo", repo).
+		Strs("branches", branches).
+		Int("max_files", maxFiles).
+		Msg("[worker] Creating GitHub repo jobs from init result")
+
+	// Preserve the original validation variables for use below
+	_ = extensions
+	_ = excludePaths
 
 	// Get GitHub connector - by ID or by name
 	var connector *models.Connector

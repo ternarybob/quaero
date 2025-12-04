@@ -234,19 +234,122 @@ func (w *AgentWorker) GetType() models.WorkerType {
 	return models.WorkerTypeAgent
 }
 
-// CreateJobs creates agent jobs for documents matching the filter criteria.
-// Queries documents based on job definition, creates child jobs for each document,
-// and enqueues them for processing.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
-	// Parse step config
+// Init performs the initialization/setup phase for an agent step.
+// This is where we:
+//   - Extract and validate configuration
+//   - Query documents matching the filter criteria
+//   - Return document list as work items
+//
+// The Init phase does NOT create any jobs - it only gathers information.
+func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
 	}
 
+	// Extract agent type from step config
+	agentType, ok := stepConfig["agent_type"].(string)
+	if !ok || agentType == "" {
+		return nil, fmt.Errorf("missing required config field: agent_type")
+	}
+
+	// Check for API key in step config and resolve it from KV store
+	resolvedAPIKey := ""
+	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
+		cleanAPIKeyName := strings.Trim(apiKeyName, "{}")
+		var err error
+		resolvedAPIKey, err = common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
+		}
+		w.logger.Debug().
+			Str("step_name", step.Name).
+			Str("api_key_name", cleanAPIKeyName).
+			Msg("[step] Resolved API key from storage")
+	}
+
+	// Extract document filter from step config
+	documentFilter := make(map[string]interface{})
+	for k, v := range stepConfig {
+		if len(k) > 7 && k[:7] == "filter_" {
+			filterKey := k[7:]
+			documentFilter[filterKey] = v
+		}
+	}
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Msg("[step] Initializing agent worker - querying documents")
+
+	// Query documents to process
+	documents, err := w.queryDocuments(ctx, &jobDef, documentFilter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query documents for agent processing: %w", err)
+	}
+
+	// Create work items from documents
+	workItems := make([]interfaces.WorkItem, len(documents))
+	for i, doc := range documents {
+		workItems[i] = interfaces.WorkItem{
+			ID:   doc.ID,
+			Name: doc.Title,
+			Type: "document",
+			Config: map[string]interface{}{
+				"document_id": doc.ID,
+				"title":       doc.Title,
+			},
+		}
+	}
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("document_count", len(documents)).
+		Msg("[step] Agent worker initialized - found documents")
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(documents),
+		Strategy:             interfaces.ProcessingStrategyParallel,
+		SuggestedConcurrency: 5, // Reasonable default for API calls
+		Metadata: map[string]interface{}{
+			"agent_type":       agentType,
+			"resolved_api_key": resolvedAPIKey,
+			"document_filter":  documentFilter,
+			"step_config":      stepConfig,
+		},
+	}, nil
+}
+
+// CreateJobs creates agent jobs for documents matching the filter criteria.
+// Queries documents based on job definition, creates child jobs for each document,
+// and enqueues them for processing.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+// If initResult is provided, it uses the document list from init.
+func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize agent worker: %w", err)
+		}
+	}
+
+	// Extract metadata from init result
+	agentType, _ := initResult.Metadata["agent_type"].(string)
+	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
+
+	// Apply resolved API key if available
+	if resolvedAPIKey, ok := initResult.Metadata["resolved_api_key"].(string); ok && resolvedAPIKey != "" {
+		if stepConfig == nil {
+			stepConfig = make(map[string]interface{})
+		}
+		stepConfig["resolved_api_key"] = resolvedAPIKey
+	}
+
 	// Get manager_id from step job's parent_id for event aggregation
-	// Step jobs have parent_id = manager_id in the 3-level hierarchy
 	managerID := ""
 	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
 		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
@@ -254,74 +357,32 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		}
 	}
 
-	// Extract agent type from step config
-	agentType, ok := stepConfig["agent_type"].(string)
-	if !ok || agentType == "" {
-		return "", fmt.Errorf("missing required config field: agent_type")
-	}
-
-	// Check for API key in step config and resolve it from KV store
-	if apiKeyName, ok := stepConfig["api_key"].(string); ok && apiKeyName != "" {
-		// Strip curly braces if present (e.g., "{google_gemini_api_key}" -> "google_gemini_api_key")
-		cleanAPIKeyName := strings.Trim(apiKeyName, "{}")
-
-		resolvedAPIKey, err := common.ResolveAPIKey(ctx, w.kvStorage, cleanAPIKeyName, "")
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
-		}
-		w.logger.Debug().
-			Str("step_name", step.Name).
-			Str("api_key_name", cleanAPIKeyName).
-			Msg("Resolved API key from storage for agent execution")
-		stepConfig["resolved_api_key"] = resolvedAPIKey
-	}
-
-	// Extract document filter from step config (optional)
-	// New format uses flat filter_* fields instead of nested document_filter
-	documentFilter := make(map[string]interface{})
-	for k, v := range stepConfig {
-		if len(k) > 7 && k[:7] == "filter_" {
-			filterKey := k[7:] // e.g., "filter_limit" -> "limit"
-			documentFilter[filterKey] = v
-		}
-	}
-
-	w.logger.Debug().
-		Str("step_name", step.Name).
-		Str("agent_type", agentType).
-		Str("step_id", stepID).
-		Msg("Creating agent jobs for documents")
-
-	// Query documents to process
-	documents, err := w.queryDocuments(ctx, &jobDef, documentFilter)
-	if err != nil {
-		return "", fmt.Errorf("failed to query documents for agent processing: %w", err)
-	}
-
-	if len(documents) == 0 {
+	// Check if there are any work items
+	if len(initResult.WorkItems) == 0 {
 		w.logger.Warn().
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
-			Msg("No documents found for agent processing - check if documents exist with matching filters")
-		return stepID, nil // No documents to process, but not an error
+			Msg("[step] No documents found for agent processing")
+		return stepID, nil
 	}
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
-		Int("document_count", len(documents)).
-		Msg("Found documents for agent processing")
+		Int("document_count", len(initResult.WorkItems)).
+		Msg("[worker] Creating agent jobs from init result")
 
 	// Create and enqueue agent jobs for each document
-	jobIDs := make([]string, 0, len(documents))
-	for _, doc := range documents {
-		jobID, err := w.createAgentJob(ctx, agentType, doc.ID, stepConfig, stepID, step.Name, managerID)
+	jobIDs := make([]string, 0, len(initResult.WorkItems))
+	for _, workItem := range initResult.WorkItems {
+		docID := workItem.ID
+		jobID, err := w.createAgentJob(ctx, agentType, docID, stepConfig, stepID, step.Name, managerID)
 		if err != nil {
 			w.logger.Warn().
 				Err(err).
-				Str("document_id", doc.ID).
+				Str("document_id", docID).
 				Str("agent_type", agentType).
-				Msg("Failed to create agent job for document")
+				Msg("[worker] Failed to create agent job for document")
 			continue
 		}
 		jobIDs = append(jobIDs, jobID)
@@ -333,22 +394,22 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		return "", fmt.Errorf("failed to create any agent jobs for step %s", step.Name)
 	}
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_created", len(jobIDs)).
-		Msg("Agent jobs created and enqueued")
+		Msg("[worker] Agent jobs created and enqueued")
 
 	// Poll for job completion (wait for all agent jobs to complete)
 	if err := w.pollJobCompletion(ctx, jobIDs); err != nil {
 		return "", fmt.Errorf("agent jobs did not complete successfully: %w", err)
 	}
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
-		Msg("Agent job orchestration completed successfully")
+		Msg("[step] Agent job orchestration completed")
 
 	return stepID, nil
 }

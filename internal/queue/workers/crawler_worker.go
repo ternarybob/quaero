@@ -1482,23 +1482,17 @@ func (w *CrawlerWorker) GetType() models.WorkerType {
 	return models.WorkerTypeCrawler
 }
 
-// CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
-// The crawler service will create child jobs for each URL discovered.
-// stepID is the ID of the step job - all jobs should have parent_id = stepID
-func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
-	// Parse step config map into CrawlConfig struct
+// Init performs the initialization/setup phase for a crawler step.
+// This is where we:
+//   - Determine the base URL and seed URLs to crawl
+//   - Build the crawl configuration
+//   - Estimate the number of pages based on max_depth and max_pages
+//
+// The Init phase does NOT start the crawl - it only gathers information.
+func (w *CrawlerWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
-	}
-
-	// Get manager_id from step job's parent_id for event aggregation
-	// Step jobs have parent_id = manager_id in the 3-level hierarchy
-	managerID := ""
-	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
-		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
-			managerID = *stepJob.ParentID
-		}
 	}
 
 	// Extract entity type from config (default to "issues" for jira, "pages" for confluence)
@@ -1518,13 +1512,6 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 	// Build CrawlConfig struct from map with proper defaults
 	crawlConfig := w.buildCrawlConfig(stepConfig)
 
-	// Apply tags from job definition to all documents created by this crawl
-	crawlConfig.Tags = jobDef.Tags
-
-	// Set step context for job_log event aggregation in UI
-	crawlConfig.StepName = step.Name
-	crawlConfig.ManagerID = managerID
-
 	// Build seed URLs - prioritize start_urls from step config, fallback to source type
 	var seedURLs []string
 	if startURLs, ok := stepConfig["start_urls"].([]interface{}); ok && len(startURLs) > 0 {
@@ -1536,13 +1523,13 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		w.logger.Debug().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
-			Msg("Using start_urls from job definition config")
+			Msg("Init: Using start_urls from job definition config")
 	} else if startURLsStr, ok := stepConfig["start_urls"].([]string); ok && len(startURLsStr) > 0 {
 		seedURLs = startURLsStr
 		w.logger.Debug().
 			Str("step_name", step.Name).
 			Strs("start_urls", seedURLs).
-			Msg("Using start_urls from job definition config")
+			Msg("Init: Using start_urls from job definition config")
 	} else {
 		seedURLs = w.buildSeedURLs(jobDef.BaseURL, jobDef.SourceType, entityType)
 		w.logger.Debug().
@@ -1550,17 +1537,97 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 			Str("source_type", jobDef.SourceType).
 			Str("base_url", jobDef.BaseURL).
 			Strs("generated_urls", seedURLs).
-			Msg("Using generated URLs based on source type (no start_urls in config)")
+			Msg("Init: Generated seed URLs based on source type")
 	}
 
 	// Default source_type to "web" for generic crawler jobs
 	sourceType := jobDef.SourceType
 	if sourceType == "" {
 		sourceType = "web"
-		w.logger.Debug().
-			Str("step_name", step.Name).
-			Msg("No source_type specified, defaulting to 'web' for generic web crawling")
 	}
+
+	// Create work items from seed URLs
+	workItems := make([]interfaces.WorkItem, len(seedURLs))
+	for i, url := range seedURLs {
+		workItems[i] = interfaces.WorkItem{
+			ID:   url,
+			Name: fmt.Sprintf("Seed URL: %s", url),
+			Type: "url",
+			Config: map[string]interface{}{
+				"url":         url,
+				"depth":       0,
+				"source_type": sourceType,
+				"entity_type": entityType,
+			},
+		}
+	}
+
+	// Estimate total pages based on seed URLs and max_pages
+	// Each seed URL could potentially expand to max_pages
+	estimatedTotal := len(seedURLs) * crawlConfig.MaxPages
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Int("seed_urls", len(seedURLs)).
+		Int("max_depth", crawlConfig.MaxDepth).
+		Int("max_pages", crawlConfig.MaxPages).
+		Int("concurrency", crawlConfig.Concurrency).
+		Int("estimated_total", estimatedTotal).
+		Msg("Crawler worker initialized")
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           len(seedURLs), // Seed URLs are the initial work items
+		Strategy:             interfaces.ProcessingStrategyParallel,
+		SuggestedConcurrency: crawlConfig.Concurrency,
+		Metadata: map[string]interface{}{
+			"base_url":        jobDef.BaseURL,
+			"source_type":     sourceType,
+			"entity_type":     entityType,
+			"max_depth":       crawlConfig.MaxDepth,
+			"max_pages":       crawlConfig.MaxPages,
+			"estimated_total": estimatedTotal,
+			"seed_urls":       seedURLs,
+			"crawl_config":    crawlConfig,
+		},
+	}, nil
+}
+
+// CreateJobs creates a parent crawler job and triggers the crawler service to start crawling.
+// The crawler service will create child jobs for each URL discovered.
+// stepID is the ID of the step job - all jobs should have parent_id = stepID
+// If initResult is provided, it will be used; otherwise Init is called internally.
+func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize crawler: %w", err)
+		}
+	}
+
+	// Extract data from initResult metadata
+	sourceType, _ := initResult.Metadata["source_type"].(string)
+	entityType, _ := initResult.Metadata["entity_type"].(string)
+	seedURLs, _ := initResult.Metadata["seed_urls"].([]string)
+	crawlConfig, _ := initResult.Metadata["crawl_config"].(crawler.CrawlConfig)
+
+	// Get manager_id from step job's parent_id for event aggregation
+	// Step jobs have parent_id = manager_id in the 3-level hierarchy
+	managerID := ""
+	if stepJobInterface, err := w.jobMgr.GetJob(ctx, stepID); err == nil && stepJobInterface != nil {
+		if stepJob, ok := stepJobInterface.(*models.QueueJobState); ok && stepJob != nil && stepJob.ParentID != nil {
+			managerID = *stepJob.ParentID
+		}
+	}
+
+	// Apply tags from job definition to all documents created by this crawl
+	crawlConfig.Tags = jobDef.Tags
+
+	// Set step context for job_log event aggregation in UI
+	crawlConfig.StepName = step.Name
+	crawlConfig.ManagerID = managerID
 
 	w.logger.Debug().
 		Str("step_name", step.Name).
@@ -1570,7 +1637,7 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 		Int("seed_url_count", len(seedURLs)).
 		Int("max_depth", crawlConfig.MaxDepth).
 		Int("max_pages", crawlConfig.MaxPages).
-		Msg("Creating parent crawler job")
+		Msg("Creating parent crawler job from init result")
 
 	// Start crawl job with properly typed config
 	jobID, err := w.crawlerService.StartCrawl(

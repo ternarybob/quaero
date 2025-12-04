@@ -46,14 +46,48 @@ func (m *StepManager) GetWorker(workerType models.WorkerType) interfaces.Definit
 	return m.workers[workerType]
 }
 
-// Execute routes a step to the appropriate worker.
-func (m *StepManager) Execute(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
-	// Determine worker type from step type
-	// Note: models.JobStep uses StepType, but DefinitionWorker uses WorkerType.
-	// They should be compatible or convertible.
-	// Assuming direct cast for now as per existing code patterns, or we need a mapping.
-	// Looking at manager_worker_architecture.md, StepType and WorkerType seem aligned.
+// Init initializes a step by calling the worker's Init method.
+// This is the assessment phase where workers determine what work needs to be done.
+// Returns the WorkerInitResult for inspection before job creation.
+func (m *StepManager) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+	workerType := models.WorkerType(step.Type)
 
+	worker, exists := m.workers[workerType]
+	if !exists {
+		return nil, fmt.Errorf("no worker registered for step type: %s", step.Type)
+	}
+
+	// Validate config first
+	if err := worker.ValidateConfig(step); err != nil {
+		return nil, fmt.Errorf("invalid step configuration: %w", err)
+	}
+
+	m.logger.Debug().
+		Str("step_type", string(workerType)).
+		Str("step_name", step.Name).
+		Msg("Initializing step worker")
+
+	// Call worker's Init method to assess work
+	initResult, err := worker.Init(ctx, step, jobDef)
+	if err != nil {
+		return nil, fmt.Errorf("worker init failed: %w", err)
+	}
+
+	m.logger.Debug().
+		Str("step_type", string(workerType)).
+		Str("step_name", step.Name).
+		Int("work_items", len(initResult.WorkItems)).
+		Int("total_count", initResult.TotalCount).
+		Str("strategy", string(initResult.Strategy)).
+		Msg("Step worker initialized")
+
+	return initResult, nil
+}
+
+// Execute routes a step to the appropriate worker for job creation.
+// If initResult is provided, it will be passed to CreateJobs.
+// If nil, the worker will call Init internally.
+func (m *StepManager) Execute(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	workerType := models.WorkerType(step.Type)
 
 	worker, exists := m.workers[workerType]
@@ -61,10 +95,18 @@ func (m *StepManager) Execute(ctx context.Context, step models.JobStep, jobDef m
 		return "", fmt.Errorf("no worker registered for step type: %s", step.Type)
 	}
 
-	// Validate config first
-	if err := worker.ValidateConfig(step); err != nil {
-		return "", fmt.Errorf("invalid step configuration: %w", err)
+	// If initResult is nil, validate config (Init wasn't called separately)
+	if initResult == nil {
+		if err := worker.ValidateConfig(step); err != nil {
+			return "", fmt.Errorf("invalid step configuration: %w", err)
+		}
 	}
 
-	return worker.CreateJobs(ctx, step, jobDef, parentJobID)
+	m.logger.Debug().
+		Str("step_type", string(workerType)).
+		Str("step_name", step.Name).
+		Bool("has_init_result", initResult != nil).
+		Msg("Executing step worker CreateJobs")
+
+	return worker.CreateJobs(ctx, step, jobDef, parentJobID, initResult)
 }

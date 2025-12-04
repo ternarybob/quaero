@@ -252,10 +252,30 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		stepStartLog := fmt.Sprintf("Starting Step %d/%d: %s", i+1, len(jobDef.Steps), step.Name)
 		o.jobManager.AddJobLog(ctx, stepID, "info", stepStartLog)
 
-		// Execute step via StepManager
-		// Replaces m.GetWorker(step.Type) logic
-		// Pass stepID so worker creates jobs under the step
-		childJobID, err := o.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID)
+		// Phase 1: Initialize step worker to assess work
+		o.jobManager.AddJobLog(ctx, stepID, "info", "Initializing worker...")
+		initResult, err := o.stepManager.Init(ctx, resolvedStep, *jobDef)
+		if err != nil {
+			o.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Step %s init failed: %v", step.Name, err))
+			o.jobManager.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Init failed: %v", err))
+			o.jobManager.SetJobError(ctx, managerID, err.Error())
+			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
+
+			if step.OnError == models.ErrorStrategyFail {
+				return managerID, fmt.Errorf("step %s init failed: %w", step.Name, err)
+			}
+			lastValidationError = fmt.Sprintf("Step %s init failed: %v", step.Name, err)
+			continue
+		}
+
+		// Log init result for visibility
+		initLogMsg := fmt.Sprintf("Worker initialized: %d work items, strategy=%s",
+			initResult.TotalCount, initResult.Strategy)
+		o.jobManager.AddJobLog(ctx, stepID, "info", initLogMsg)
+
+		// Phase 2: Create jobs based on init result
+		// Execute step via StepManager, passing the init result
+		childJobID, err := o.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID, initResult)
 		if err != nil {
 			o.jobManager.AddJobLog(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err))
 			o.jobManager.AddJobLog(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err))

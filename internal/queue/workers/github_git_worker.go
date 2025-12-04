@@ -94,8 +94,15 @@ func (w *GitHubGitWorker) GetType() models.WorkerType {
 	return models.WorkerTypeGitHubGit
 }
 
-// CreateJobs clones the repository using git command and creates child jobs for each file
-func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string) (string, error) {
+// Init performs the initialization/setup phase for a GitHub git step.
+// This is where we:
+//   - Validate configuration and extract repo details
+//   - Clone the repository (shallow clone for speed)
+//   - Walk the directory and identify files to process
+//
+// The Init phase creates a temporary clone and returns file list.
+// The cloneDir is stored in metadata for CreateJobs to use.
+func (w *GitHubGitWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
 	stepConfig := step.Config
 	if stepConfig == nil {
 		stepConfig = make(map[string]interface{})
@@ -126,17 +133,18 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			Str("extracted_owner", extractedOwner).
 			Str("extracted_repo", extractedRepo).
 			Str("extracted_branch", extractedBranch).
-			Msg("Extracted owner/repo from trigger URL")
+			Msg("[step] Extracted owner/repo from trigger URL")
 	}
 
+	// Validate required config
 	if connectorID == "" && connectorName == "" {
-		return "", fmt.Errorf("connector_id or connector_name is required")
+		return nil, fmt.Errorf("connector_id or connector_name is required")
 	}
 	if owner == "" {
-		return "", fmt.Errorf("owner is required (provide in config or via trigger_url)")
+		return nil, fmt.Errorf("owner is required (provide in config or via trigger_url)")
 	}
 	if repo == "" {
-		return "", fmt.Errorf("repo is required (provide in config or via trigger_url)")
+		return nil, fmt.Errorf("repo is required (provide in config or via trigger_url)")
 	}
 
 	// Extract optional config with defaults
@@ -152,16 +160,13 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 	gitPath := getStringConfig(stepConfig, "git_path", defaultGitPath)
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("step_name", step.Name).
-		Str("connector_id", connectorID).
-		Str("connector_name", connectorName).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
-		Str("git_path", gitPath).
 		Int("max_files", maxFiles).
-		Msg("Creating GitHub git clone parent job")
+		Msg("[step] Initializing GitHub git worker - assessing repository")
 
 	// Get connector for authentication
 	var connector *models.Connector
@@ -169,12 +174,12 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	if connectorID != "" {
 		connector, err = w.connectorService.GetConnector(ctx, connectorID)
 		if err != nil {
-			return "", fmt.Errorf("failed to get connector by ID: %w", err)
+			return nil, fmt.Errorf("failed to get connector by ID: %w", err)
 		}
 	} else {
 		connector, err = w.connectorService.GetConnectorByName(ctx, connectorName)
 		if err != nil {
-			return "", fmt.Errorf("failed to get connector by name '%s': %w", connectorName, err)
+			return nil, fmt.Errorf("failed to get connector by name '%s': %w", connectorName, err)
 		}
 		connectorID = connector.ID
 	}
@@ -182,10 +187,10 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	// Extract token from connector config (Config is json.RawMessage)
 	var gitHubConfig models.GitHubConnectorConfig
 	if err := json.Unmarshal(connector.Config, &gitHubConfig); err != nil {
-		return "", fmt.Errorf("failed to parse GitHub connector config: %w", err)
+		return nil, fmt.Errorf("failed to parse GitHub connector config: %w", err)
 	}
 	if gitHubConfig.Token == "" {
-		return "", fmt.Errorf("GitHub token not found in connector config")
+		return nil, fmt.Errorf("GitHub token not found in connector config")
 	}
 	token := gitHubConfig.Token
 
@@ -201,7 +206,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("repo", repo).
 		Str("branch", branch).
 		Str("clone_dir", cloneDir).
-		Msg("Cloning repository via git command")
+		Msg("[step] Cloning repository to assess content")
 
 	// Run git clone with depth 1 (shallow clone) for speed
 	cmd := exec.CommandContext(ctx, gitPath, "clone",
@@ -234,8 +239,8 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			Str("repo", repo).
 			Str("branch", branch).
 			Str("error_output", errOutput).
-			Msg("Git clone failed")
-		return "", fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
+			Msg("[step] Git clone failed")
+		return nil, fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
 	}
 
 	// Build extension map for quick lookup
@@ -245,10 +250,11 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	// Walk the directory and collect files with detailed counting
-	var files []struct {
+	type fileInfo struct {
 		Path   string
 		Folder string
 	}
+	var files []fileInfo
 
 	// Counters for detailed logging
 	var totalFilesScanned int
@@ -317,10 +323,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			return nil
 		}
 
-		files = append(files, struct {
-			Path   string
-			Folder string
-		}{
+		files = append(files, fileInfo{
 			Path:   relPath,
 			Folder: filepath.Dir(relPath),
 		})
@@ -330,19 +333,18 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 
 	if err != nil {
 		os.RemoveAll(cloneDir)
-		return "", fmt.Errorf("failed to walk repository: %w", err)
+		return nil, fmt.Errorf("failed to walk repository: %w", err)
 	}
 
-	// Calculate files to schedule
+	// Calculate files to process
 	matchedFiles := len(files)
-	filesToSchedule := matchedFiles
+	filesToProcess := matchedFiles
 	excludedByLimit := 0
-	if filesToSchedule > maxFiles {
-		excludedByLimit = filesToSchedule - maxFiles
-		filesToSchedule = maxFiles
+	if filesToProcess > maxFiles {
+		excludedByLimit = filesToProcess - maxFiles
+		filesToProcess = maxFiles
 	}
 
-	// Log detailed file counts (similar to git output style)
 	w.logger.Info().
 		Str("owner", owner).
 		Str("repo", repo).
@@ -353,19 +355,101 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Int("excluded_by_binary", excludedByBinary).
 		Int("matched_files", matchedFiles).
 		Int("excluded_by_limit", excludedByLimit).
-		Int("files_to_download", filesToSchedule).
-		Msg("Repository scanned - file analysis complete")
+		Int("files_to_process", filesToProcess).
+		Msg("[step] Repository assessed - file analysis complete")
 
-	// Add detailed step logs for UI visibility (git-style output)
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Cloning into '%s/%s@%s'...", owner, repo, branch))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Enumerating files: %d total files in repository", totalFilesScanned))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Filtering files: %d excluded by path, %d excluded by extension, %d excluded by binary type",
-		excludedByPath, excludedByExtension, excludedByBinary))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Matched files: %d (limit: %d)", matchedFiles, maxFiles))
-	if excludedByLimit > 0 {
-		w.jobManager.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Limit reached: %d files excluded by max_files limit", excludedByLimit))
+	// Create work items from files
+	workItems := make([]interfaces.WorkItem, filesToProcess)
+	for i := 0; i < filesToProcess; i++ {
+		file := files[i]
+		workItems[i] = interfaces.WorkItem{
+			ID:   file.Path,
+			Name: filepath.Base(file.Path),
+			Type: "file",
+			Config: map[string]interface{}{
+				"path":   file.Path,
+				"folder": file.Folder,
+			},
+		}
 	}
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Processing %d files inline (no child jobs)", filesToSchedule))
+
+	return &interfaces.WorkerInitResult{
+		WorkItems:            workItems,
+		TotalCount:           filesToProcess,
+		Strategy:             interfaces.ProcessingStrategyInline,
+		SuggestedConcurrency: 1, // Inline processing doesn't use concurrency
+		Metadata: map[string]interface{}{
+			"owner":                 owner,
+			"repo":                  repo,
+			"branch":                branch,
+			"connector_id":          connectorID,
+			"clone_dir":             cloneDir,
+			"total_files_scanned":   totalFilesScanned,
+			"excluded_by_path":      excludedByPath,
+			"excluded_by_extension": excludedByExtension,
+			"excluded_by_binary":    excludedByBinary,
+			"matched_files":         matchedFiles,
+			"excluded_by_limit":     excludedByLimit,
+			"files":                 files[:filesToProcess], // Only include files to process
+		},
+	}, nil
+}
+
+// CreateJobs processes files from the cloned repository based on init result.
+// If initResult is provided, it uses the clone directory from init.
+// Otherwise, it calls Init internally.
+func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
+	// Call Init if not provided
+	if initResult == nil {
+		var err error
+		initResult, err = w.Init(ctx, step, jobDef)
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize github_git worker: %w", err)
+		}
+	}
+
+	// Extract metadata from init result
+	owner, _ := initResult.Metadata["owner"].(string)
+	repo, _ := initResult.Metadata["repo"].(string)
+	branch, _ := initResult.Metadata["branch"].(string)
+	cloneDir, _ := initResult.Metadata["clone_dir"].(string)
+	totalFilesScanned, _ := initResult.Metadata["total_files_scanned"].(int)
+	excludedByPath, _ := initResult.Metadata["excluded_by_path"].(int)
+	excludedByExtension, _ := initResult.Metadata["excluded_by_extension"].(int)
+	excludedByBinary, _ := initResult.Metadata["excluded_by_binary"].(int)
+	matchedFiles, _ := initResult.Metadata["matched_files"].(int)
+	excludedByLimit, _ := initResult.Metadata["excluded_by_limit"].(int)
+
+	// Define fileInfo type for extracting files from metadata
+	type fileInfo struct {
+		Path   string
+		Folder string
+	}
+
+	// Extract files from metadata
+	var files []fileInfo
+	if filesInterface, ok := initResult.Metadata["files"]; ok {
+		if filesSlice, ok := filesInterface.([]fileInfo); ok {
+			files = filesSlice
+		}
+	}
+
+	filesToProcess := initResult.TotalCount
+
+	w.logger.Info().
+		Str("step_name", step.Name).
+		Str("owner", owner).
+		Str("repo", repo).
+		Str("branch", branch).
+		Int("files_to_process", filesToProcess).
+		Msg("[worker] Starting file processing from init result")
+
+	// Add step logs for UI visibility (git-style output)
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Cloned '%s/%s@%s'", owner, repo, branch))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Scanned %d files: %d excluded by path, %d by extension, %d by binary",
+		totalFilesScanned, excludedByPath, excludedByExtension, excludedByBinary))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Matched %d files, processing %d (limit exclusions: %d)",
+		matchedFiles, filesToProcess, excludedByLimit))
 
 	// Get tags for documents
 	baseTags := jobDef.Tags
@@ -374,16 +458,12 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 	}
 
 	// Process files inline - no child jobs needed
-	// This is much more efficient than creating 1000+ separate jobs
 	processedCount := 0
 	failedCount := 0
 	startProcessing := time.Now()
 
 	for i, file := range files {
-		if processedCount >= maxFiles {
-			w.logger.Warn().
-				Int("max_files", maxFiles).
-				Msg("Reached max_files limit, stopping file processing")
+		if processedCount >= filesToProcess {
 			break
 		}
 
@@ -395,7 +475,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		if err != nil {
 			w.logger.Warn().Err(err).
 				Str("file", file.Path).
-				Msg("Failed to read file, skipping")
+				Msg("[worker] Failed to read file, skipping")
 			failedCount++
 			continue
 		}
@@ -426,7 +506,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Warn().Err(err).
 				Str("file", file.Path).
-				Msg("Failed to save document, skipping")
+				Msg("[worker] Failed to save document, skipping")
 			failedCount++
 			continue
 		}
@@ -439,23 +519,25 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			Str("file", file.Path).
 			Str("doc_id", doc.ID[:12]).
 			Dur("duration", fileElapsed).
-			Msg("File processed")
+			Msg("[worker] File processed")
 
 		// Add job log for UI visibility (every 10 files or last file)
-		if processedCount%10 == 0 || i == len(files)-1 || processedCount == filesToSchedule {
+		if processedCount%10 == 0 || i == len(files)-1 || processedCount == filesToProcess {
 			w.jobManager.AddJobLog(ctx, stepID, "info",
-				fmt.Sprintf("Progress: %d/%d files processed (%.1f%%)",
-					processedCount, filesToSchedule, float64(processedCount)/float64(filesToSchedule)*100))
+				fmt.Sprintf("[worker] Progress: %d/%d files (%.1f%%)",
+					processedCount, filesToProcess, float64(processedCount)/float64(filesToProcess)*100))
 		}
 	}
 
 	totalElapsed := time.Since(startProcessing)
 
 	// Clean up clone directory immediately since we're done with it
-	if err := os.RemoveAll(cloneDir); err != nil {
-		w.logger.Warn().Err(err).Str("clone_dir", cloneDir).Msg("Failed to clean up clone directory")
-	} else {
-		w.logger.Debug().Str("clone_dir", cloneDir).Msg("Clone directory cleaned up")
+	if cloneDir != "" {
+		if err := os.RemoveAll(cloneDir); err != nil {
+			w.logger.Warn().Err(err).Str("clone_dir", cloneDir).Msg("[worker] Failed to clean up clone directory")
+		} else {
+			w.logger.Debug().Str("clone_dir", cloneDir).Msg("[worker] Clone directory cleaned up")
+		}
 	}
 
 	// Log completion
@@ -465,19 +547,14 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("branch", branch).
 		Int("files_processed", processedCount).
 		Int("files_failed", failedCount).
-		Int("total_files_scanned", totalFilesScanned).
-		Int("files_matched", matchedFiles).
 		Dur("processing_time", totalElapsed).
-		Msg("GitHub git clone completed - all files processed inline")
+		Msg("[worker] GitHub git processing completed")
 
 	// Add final step logs for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files imported, %d failed (time: %s)",
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[step] Completed: %d files imported, %d failed (time: %s)",
 		processedCount, failedCount, totalElapsed.Round(time.Millisecond)))
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Summary: scanned %d, matched %d, rejected %d",
-		totalFilesScanned, matchedFiles, excludedByPath+excludedByExtension+excludedByBinary))
 
 	// Return empty string since we don't create child jobs anymore
-	// The step will be marked complete by the caller
 	return "", nil
 }
 
