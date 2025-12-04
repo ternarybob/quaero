@@ -1022,6 +1022,63 @@ func (h *JobDefinitionHandler) prepareJobDefForExecution(template *models.JobDef
 	return jobDef
 }
 
+// prepareNonCrawlerJobDefForExecution creates an in-memory copy of a job definition
+// with the trigger URL injected into all step configs. This allows workers to extract
+// context from the URL (e.g., github_git can extract owner/repo from GitHub URLs).
+func (h *JobDefinitionHandler) prepareNonCrawlerJobDefForExecution(template *models.JobDefinition, triggerURL string) *models.JobDefinition {
+	// Create an in-memory copy - keep original ID so it references the existing job definition
+	jobDef := &models.JobDefinition{
+		ID:          template.ID,
+		Name:        template.Name,
+		Type:        template.Type,
+		JobType:     template.JobType,
+		Schedule:    template.Schedule,
+		Timeout:     template.Timeout,
+		Enabled:     template.Enabled,
+		AutoStart:   template.AutoStart,
+		AuthID:      template.AuthID,
+		Tags:        template.Tags,
+		UrlPatterns: template.UrlPatterns,
+		Config:      make(map[string]interface{}),
+		Description: template.Description,
+	}
+
+	// Copy the original config
+	for k, v := range template.Config {
+		jobDef.Config[k] = v
+	}
+
+	// Use default timeout if not set
+	if jobDef.Timeout == "" {
+		jobDef.Timeout = "30m"
+	}
+
+	// Copy steps and inject trigger_url into each step's config
+	for _, step := range template.Steps {
+		newStep := models.JobStep{
+			Name:        step.Name,
+			Type:        step.Type,
+			Description: step.Description,
+			OnError:     step.OnError,
+			Depends:     step.Depends,
+			Condition:   step.Condition,
+		}
+
+		// Copy config and inject trigger_url
+		newConfig := make(map[string]interface{})
+		for k, v := range step.Config {
+			newConfig[k] = v
+		}
+		// Inject the trigger URL so workers can extract context (e.g., owner/repo for GitHub)
+		newConfig["trigger_url"] = triggerURL
+
+		newStep.Config = newConfig
+		jobDef.Steps = append(jobDef.Steps, newStep)
+	}
+
+	return jobDef
+}
+
 // createAdHocJobDef creates a new ad-hoc job definition with default crawler settings
 // Used when no matching job definition is found for the URL
 func (h *JobDefinitionHandler) createAdHocJobDef(targetURL, name string, maxDepthPtr, maxPagesPtr *int, includePatterns, excludePatterns []string, authID string) *models.JobDefinition {
@@ -1206,10 +1263,14 @@ func (h *JobDefinitionHandler) CreateAndExecuteQuickCrawlHandler(w http.Response
 					Str("url", req.URL).
 					Msg("Using non-crawler job definition for extension trigger")
 
-				// Execute the matched job definition directly
+				// Create a copy of the job definition with trigger URL injected into step configs
+				// This allows workers like github_git to extract owner/repo from the visited URL
+				execJobDef := h.prepareNonCrawlerJobDefForExecution(matchedJobDef, req.URL)
+
+				// Execute the prepared job definition
 				go func() {
 					bgCtx := context.Background()
-					parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, matchedJobDef, h.jobMonitor, h.stepMonitor)
+					parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, execJobDef, h.jobMonitor, h.stepMonitor)
 					if err != nil {
 						h.logger.Error().
 							Err(err).

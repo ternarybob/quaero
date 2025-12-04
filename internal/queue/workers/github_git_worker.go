@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -173,20 +174,42 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		stepConfig = make(map[string]interface{})
 	}
 
-	// Extract required config
+	// Extract config
 	connectorID := getStringConfig(stepConfig, "connector_id", "")
 	connectorName := getStringConfig(stepConfig, "connector_name", "")
 	owner := getStringConfig(stepConfig, "owner", "")
 	repo := getStringConfig(stepConfig, "repo", "")
+	triggerURL := getStringConfig(stepConfig, "trigger_url", "")
+
+	// If owner/repo not provided, extract from trigger_url (e.g., from Chrome extension)
+	if (owner == "" || repo == "") && triggerURL != "" {
+		extractedOwner, extractedRepo, extractedBranch := w.parseGitHubURL(triggerURL)
+		if owner == "" {
+			owner = extractedOwner
+		}
+		if repo == "" {
+			repo = extractedRepo
+		}
+		// Also use extracted branch if not explicitly configured
+		if extractedBranch != "" && getStringConfig(stepConfig, "branch", "") == "" {
+			stepConfig["branch"] = extractedBranch
+		}
+		w.logger.Debug().
+			Str("trigger_url", triggerURL).
+			Str("extracted_owner", extractedOwner).
+			Str("extracted_repo", extractedRepo).
+			Str("extracted_branch", extractedBranch).
+			Msg("Extracted owner/repo from trigger URL")
+	}
 
 	if connectorID == "" && connectorName == "" {
 		return "", fmt.Errorf("connector_id or connector_name is required")
 	}
 	if owner == "" {
-		return "", fmt.Errorf("owner is required")
+		return "", fmt.Errorf("owner is required (provide in config or via trigger_url)")
 	}
 	if repo == "" {
-		return "", fmt.Errorf("repo is required")
+		return "", fmt.Errorf("repo is required (provide in config or via trigger_url)")
 	}
 
 	// Extract optional config with defaults
@@ -502,17 +525,8 @@ func (w *GitHubGitWorker) ValidateConfig(step models.JobStep) error {
 		return fmt.Errorf("github_git step requires either 'connector_id' or 'connector_name' in config")
 	}
 
-	// Validate required owner field
-	owner, ok := step.Config["owner"].(string)
-	if !ok || owner == "" {
-		return fmt.Errorf("github_git step requires 'owner' in config")
-	}
-
-	// Validate required repo field
-	repo, ok := step.Config["repo"].(string)
-	if !ok || repo == "" {
-		return fmt.Errorf("github_git step requires 'repo' in config")
-	}
+	// Note: owner and repo are optional - they can be extracted from trigger_url at runtime
+	// when the job is triggered from the Chrome extension visiting a GitHub page
 
 	return nil
 }
@@ -540,4 +554,42 @@ func (w *GitHubGitWorker) logDocumentSaved(ctx context.Context, job *models.Queu
 		message = fmt.Sprintf("Document saved: %s - %s (ID: %s)", path, title, docID[:8])
 	}
 	w.jobManager.AddJobLog(ctx, job.ID, "info", message)
+}
+
+// parseGitHubURL extracts owner, repo, and optionally branch from a GitHub URL
+// Supports various GitHub URL formats:
+// - https://github.com/owner/repo
+// - https://github.com/owner/repo/tree/branch
+// - https://github.com/owner/repo/blob/branch/path
+// - https://github.com/owner/repo/commit/sha
+func (w *GitHubGitWorker) parseGitHubURL(githubURL string) (owner, repo, branch string) {
+	parsed, err := url.Parse(githubURL)
+	if err != nil {
+		return "", "", ""
+	}
+
+	// Remove leading slash and split path
+	path := strings.TrimPrefix(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) < 2 {
+		return "", "", ""
+	}
+
+	owner = parts[0]
+	repo = parts[1]
+
+	// Extract branch if present in URL
+	// Formats: /owner/repo/tree/branch, /owner/repo/blob/branch/file
+	if len(parts) >= 4 {
+		switch parts[2] {
+		case "tree", "blob":
+			branch = parts[3]
+		case "commit":
+			// For commit URLs, we could use the SHA but typically want default branch
+			// Leave branch empty to use configured default
+		}
+	}
+
+	return owner, repo, branch
 }
