@@ -134,7 +134,7 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 			}
 			apiKey = resolvedAPIKey
 			w.logger.Info().
-				Str("phase", "step").
+				Str("phase", "init").
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
 				Msg("Resolved API key placeholder from storage")
@@ -148,7 +148,7 @@ func (w *WebSearchWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	}
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("query", query).
 		Int("depth", depth).

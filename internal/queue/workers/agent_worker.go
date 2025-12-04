@@ -263,7 +263,7 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 			return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 		}
 		w.logger.Debug().
-			Str("phase", "step").
+			Str("phase", "init").
 			Str("step_name", step.Name).
 			Str("api_key_name", cleanAPIKeyName).
 			Msg("Resolved API key from storage")
@@ -279,7 +279,7 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 	}
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Msg("Initializing agent worker - querying documents")
@@ -305,7 +305,7 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 	}
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(documents)).
@@ -363,7 +363,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	// Check if there are any work items
 	if len(initResult.WorkItems) == 0 {
 		w.logger.Warn().
-			Str("phase", "step").
+			Str("phase", "run").
 			Str("step_name", step.Name).
 			Str("source_type", jobDef.SourceType).
 			Msg("No documents found for agent processing")
@@ -371,7 +371,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "run").
 		Str("originator", "worker").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
@@ -416,7 +416,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	}
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "run").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).

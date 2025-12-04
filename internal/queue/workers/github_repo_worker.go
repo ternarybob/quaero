@@ -258,7 +258,7 @@ func (w *GitHubRepoWorker) Init(ctx context.Context, step models.JobStep, jobDef
 	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).

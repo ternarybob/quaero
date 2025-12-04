@@ -297,7 +297,7 @@ func (w *GitHubLogWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	maxRuns := getLogIntConfig(stepConfig, "max_runs", 100)
 
 	w.logger.Info().
-		Str("phase", "step").
+		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
