@@ -325,11 +325,17 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		extMap[strings.ToLower(ext)] = true
 	}
 
-	// Walk the directory and collect files
+	// Walk the directory and collect files with detailed counting
 	var files []struct {
 		Path   string
 		Folder string
 	}
+
+	// Counters for detailed logging
+	var totalFilesScanned int
+	var excludedByPath int
+	var excludedByExtension int
+	var excludedByBinary int
 
 	err = filepath.Walk(cloneDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -351,6 +357,9 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			return nil
 		}
 
+		// Count all files
+		totalFilesScanned++
+
 		// Get relative path
 		relPath, err := filepath.Rel(cloneDir, path)
 		if err != nil {
@@ -359,6 +368,7 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 
 		// Skip .git directory
 		if strings.HasPrefix(relPath, ".git") {
+			excludedByPath++
 			return nil
 		}
 
@@ -371,17 +381,20 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 			}
 		}
 		if shouldExclude {
+			excludedByPath++
 			return nil
 		}
 
 		// Check extension filter
 		ext := strings.ToLower(filepath.Ext(relPath))
 		if len(extensions) > 0 && !extMap[ext] {
+			excludedByExtension++
 			return nil
 		}
 
 		// Skip binary files by extension
 		if isBinaryExtensionGit(relPath) {
+			excludedByBinary++
 			return nil
 		}
 
@@ -401,24 +414,39 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		return "", fmt.Errorf("failed to walk repository: %w", err)
 	}
 
-	// Log total files found in repository
-	totalFilesInRepo := len(files)
-	filesToSchedule := totalFilesInRepo
+	// Calculate files to schedule
+	matchedFiles := len(files)
+	filesToSchedule := matchedFiles
+	excludedByLimit := 0
 	if filesToSchedule > maxFiles {
+		excludedByLimit = filesToSchedule - maxFiles
 		filesToSchedule = maxFiles
 	}
 
+	// Log detailed file counts (similar to git output style)
 	w.logger.Info().
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("branch", branch).
-		Int("total_files_found", totalFilesInRepo).
-		Int("files_to_schedule", filesToSchedule).
-		Int("max_files_limit", maxFiles).
-		Msg("Repository scanned - scheduling worker jobs")
+		Int("total_files_in_repo", totalFilesScanned).
+		Int("excluded_by_path", excludedByPath).
+		Int("excluded_by_extension", excludedByExtension).
+		Int("excluded_by_binary", excludedByBinary).
+		Int("matched_files", matchedFiles).
+		Int("excluded_by_limit", excludedByLimit).
+		Int("files_to_download", filesToSchedule).
+		Msg("Repository scanned - file analysis complete")
 
-	// Add step log for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Repository %s/%s scanned: %d files found, scheduling %d workers", owner, repo, totalFilesInRepo, filesToSchedule))
+	// Add detailed step logs for UI visibility (git-style output)
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Cloning into '%s/%s@%s'...", owner, repo, branch))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Enumerating files: %d total files in repository", totalFilesScanned))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Filtering files: %d excluded by path, %d excluded by extension, %d excluded by binary type",
+		excludedByPath, excludedByExtension, excludedByBinary))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Matched files: %d (limit: %d)", matchedFiles, maxFiles))
+	if excludedByLimit > 0 {
+		w.jobManager.AddJobLog(ctx, stepID, "warn", fmt.Sprintf("Limit reached: %d files excluded by max_files limit", excludedByLimit))
+	}
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Scheduling %d worker jobs for download", filesToSchedule))
 
 	// Create parent job
 	parentJob := models.NewQueueJob(
@@ -545,12 +573,14 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		Str("repo", repo).
 		Str("branch", branch).
 		Int("files_enqueued", totalFilesEnqueued).
-		Int("total_files_in_repo", totalFilesInRepo).
+		Int("total_files_scanned", totalFilesScanned).
+		Int("files_matched", matchedFiles).
 		Str("clone_dir", cloneDir).
 		Msg("GitHub git clone completed, child jobs enqueued")
 
 	// Add step log for UI visibility
-	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Spawned %d worker jobs for %s/%s@%s (total files in repo: %d)", totalFilesEnqueued, owner, repo, branch, totalFilesInRepo))
+	w.jobManager.AddJobLog(ctx, stepID, "info", fmt.Sprintf("Completed: %d files enqueued (scanned: %d, matched: %d, rejected: %d)",
+		totalFilesEnqueued, totalFilesScanned, matchedFiles, excludedByPath+excludedByExtension+excludedByBinary))
 
 	// Update parent job with total count
 	if err := w.jobManager.UpdateJobProgress(ctx, parentJob.ID, 0, totalFilesEnqueued); err != nil {
