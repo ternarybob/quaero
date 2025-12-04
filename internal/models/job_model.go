@@ -62,6 +62,10 @@ const (
 	SourceTypeGitHubGit   = "github_git"
 	JobTypeGitHubGitFile  = "github_git_file"
 	JobTypeGitHubGitBatch = "github_git_batch" // Batch job containing multiple files
+
+	// Local directory types (local filesystem indexing)
+	SourceTypeLocalDir   = "local_dir"
+	JobTypeLocalDirBatch = "local_dir_batch" // Batch job containing multiple local files
 )
 
 // NewQueueJob creates a new root queued job

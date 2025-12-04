@@ -21,6 +21,7 @@ const (
 	WorkerTypeTransform           WorkerType = "transform"
 	WorkerTypeReindex             WorkerType = "reindex"
 	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
+	WorkerTypeLocalDir            WorkerType = "local_dir" // Local directory indexing
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -28,7 +29,7 @@ func (w WorkerType) IsValid() bool {
 	switch w {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
-		WorkerTypeReindex, WorkerTypeDatabaseMaintenance:
+		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir:
 		return true
 	}
 	return false
@@ -52,5 +53,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeTransform,
 		WorkerTypeReindex,
 		WorkerTypeDatabaseMaintenance,
+		WorkerTypeLocalDir,
 	}
 }

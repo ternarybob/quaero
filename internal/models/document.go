@@ -120,6 +120,31 @@ type GitHubMetadata struct {
 	PullRequest  string     `json:"pull_request"`  // Associated PR number (if any)
 }
 
+// LocalDirMetadata represents local directory file metadata
+type LocalDirMetadata struct {
+	BasePath     string     `json:"base_path"`     // Base directory path that was indexed
+	FilePath     string     `json:"file_path"`     // Relative file path within base directory
+	AbsolutePath string     `json:"absolute_path"` // Full absolute path to the file
+	Folder       string     `json:"folder"`        // Parent folder within base directory
+	Extension    string     `json:"extension"`     // File extension (e.g., ".go", ".ts")
+	FileSize     int64      `json:"file_size"`     // File size in bytes
+	ModTime      *time.Time `json:"mod_time"`      // File modification time
+	FileType     string     `json:"file_type"`     // Detected file type (code, markdown, config, etc.)
+}
+
+// ToMap converts local directory metadata to map for storage
+func (l *LocalDirMetadata) ToMap() (map[string]interface{}, error) {
+	data, err := json.Marshal(l)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // CrossSourceMetadata contains cross-reference information extracted from content.
 //
 // NOTE: Currently unpopulated by transformers. Future enhancement to extract cross-references
