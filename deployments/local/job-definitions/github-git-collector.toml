@@ -24,7 +24,7 @@ url_patterns = ["github.com/*/*", "*.github.com/*/*"]
 type = "github_git"
 description = "Clone repository via git and import files as searchable documents. Owner/repo extracted from visited URL."
 on_error = "continue"
-connector_name = "{github-magentus}"
+connector_name = "github-magentus"
 # owner and repo are extracted from trigger_url when triggered from extension
 # branch defaults to "main" if not extracted from URL
 extensions = [".go", ".ts", ".tsx", ".js", ".jsx", ".md", ".yaml", ".yml", ".toml", ".json"]
