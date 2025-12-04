@@ -184,13 +184,13 @@ func (h *JobDefinitionHandler) CreateJobDefinitionHandler(w http.ResponseWriter,
 		WriteError(w, http.StatusBadRequest, "Job definition name is required")
 		return
 	}
-	if jobDef.Type == "" {
-		WriteError(w, http.StatusBadRequest, "Job definition type is required")
-		return
-	}
 	if len(jobDef.Steps) == 0 {
 		WriteError(w, http.StatusBadRequest, "Job definition must have at least one step")
 		return
+	}
+	// Type can be derived from steps if not provided
+	if jobDef.Type == "" && len(jobDef.Steps) > 0 {
+		jobDef.Type = deriveJobDefType(jobDef.Steps[0].Type)
 	}
 
 	// Validate job definition
@@ -807,15 +807,15 @@ func (h *JobDefinitionHandler) SaveInvalidJobDefinitionHandler(w http.ResponseWr
 	WriteJSON(w, http.StatusCreated, jobDef)
 }
 
-// findMatchingJobDefinition searches crawler job definitions for URL pattern matches
+// findMatchingJobDefinition searches job definitions with extension=true for URL pattern matches
 // Returns the MOST SPECIFIC job definition whose url_patterns match the target URL
 // When multiple patterns match, the one with highest specificity wins (more literal characters)
 // Patterns support wildcards: * matches any sequence of characters
 // Example: "*.atlassian.net/wiki/*" is more specific than "*.*" and will be preferred
+// Only job definitions with extension=true are considered for matching
 func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, targetURL string) (*models.JobDefinition, error) {
-	// List all crawler-type job definitions
+	// List all job definitions (we'll filter by extension=true below)
 	opts := &interfaces.JobDefinitionListOptions{
-		Type:  string(models.JobDefinitionTypeCrawler),
 		Limit: 100, // Reasonable limit for job definitions
 	}
 
@@ -841,6 +841,11 @@ func (h *JobDefinitionHandler) findMatchingJobDefinition(ctx context.Context, ta
 	var matches []matchResult
 
 	for _, jobDef := range jobDefs {
+		// Only consider job definitions with extension=true
+		if !jobDef.Extension {
+			continue
+		}
+
 		if len(jobDef.UrlPatterns) == 0 {
 			continue
 		}
@@ -2070,4 +2075,23 @@ func (h *JobDefinitionHandler) CrawlWithLinksHandler(w http.ResponseWriter, r *h
 	}
 
 	WriteJSON(w, http.StatusAccepted, response)
+}
+
+// deriveJobDefType maps a WorkerType to the corresponding JobDefinitionType
+// Used when job type is not explicitly provided but can be inferred from step worker type
+func deriveJobDefType(workerType models.WorkerType) models.JobDefinitionType {
+	switch workerType {
+	case models.WorkerTypeCrawler:
+		return models.JobDefinitionTypeCrawler
+	case models.WorkerTypeAgent:
+		return models.JobDefinitionTypeAgent
+	case models.WorkerTypeGitHubRepo, models.WorkerTypeGitHubActions, models.WorkerTypeGitHubGit:
+		return models.JobDefinitionTypeFetch
+	case models.WorkerTypeWebSearch:
+		return models.JobDefinitionTypeWebSearch
+	case models.WorkerTypePlacesSearch:
+		return models.JobDefinitionTypePlaces
+	default:
+		return models.JobDefinitionTypeCustom
+	}
 }

@@ -1,16 +1,19 @@
-# GitHub Repository Content Collector
+# GitHub Repository Content Collector (API-based)
 # Imports repository files as documents with folder path tracking
 # Documents include metadata: owner, repo, branch, folder, path, sha, file_type
+# Uses GitHub API - slower than git clone for large repos but works without git installed
 
 id = "github-repo-collector"
-name = "GitHub Repository Collector"
-type = "fetch"
-description = "Fetches repository content from specified branches and imports as searchable documents"
+name = "GitHub Repository Collector (API)"
+description = "Fetches repository content via API and imports as searchable documents"
 tags = ["github", "source-code", "repository"]
 schedule = ""
 timeout = "30m"
 enabled = true
 auto_start = false
+
+# Extension matching disabled - use github-git-collector for extension-triggered downloads
+extension = false
 
 [step.fetch_repo_content]
 type = "github_repo"

@@ -38,8 +38,8 @@ func NewService(
 type JobDefinitionFile struct {
 	ID          string   `toml:"id"`
 	Name        string   `toml:"name"`
-	Type        string   `toml:"type"`
-	JobType     string   `toml:"job_type"`
+	Type        string   `toml:"type"`     // Optional: derived from first step's worker type if not specified
+	JobType     string   `toml:"job_type"` // Owner type: "system" or "user"
 	Description string   `toml:"description"`
 	Schedule    string   `toml:"schedule"`
 	Timeout     string   `toml:"timeout"`
@@ -48,8 +48,12 @@ type JobDefinitionFile struct {
 	AuthID      string   `toml:"authentication"`
 	Tags        []string `toml:"tags"`
 
+	// Extension matching: when true, this job definition can be matched by the Chrome extension
+	// based on url_patterns. Default is false.
+	Extension bool `toml:"extension"`
+
 	// URL patterns for automatic job matching (wildcards: *.domain.com/*)
-	// Used by quick crawl to find matching job definitions
+	// Used by Chrome extension to find matching job definitions when extension=true
 	UrlPatterns []string `toml:"url_patterns"`
 
 	// Crawler shorthand fields (creates default crawl step if no [step.*] defined)
@@ -95,7 +99,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 			}
 
 			if !stepType.IsValid() {
-				return nil, fmt.Errorf("step '%s': invalid type '%s' - must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance", name, stepType)
+				return nil, fmt.Errorf("step '%s': invalid type '%s' - must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, database_maintenance", name, stepType)
 			}
 
 			// Build config from all remaining fields (excluding known step metadata)
@@ -159,17 +163,29 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		steps = append(steps, step)
 	}
 
-	// Determine job type
-	jobType := models.JobOwnerTypeUser
+	// Determine job owner type (system vs user)
+	jobOwnerType := models.JobOwnerTypeUser
 	if f.JobType == "system" {
-		jobType = models.JobOwnerTypeSystem
+		jobOwnerType = models.JobOwnerTypeSystem
+	}
+
+	// Determine job definition type: use explicit type if provided, otherwise derive from first step
+	var jobDefType models.JobDefinitionType
+	if f.Type != "" {
+		jobDefType = models.JobDefinitionType(f.Type)
+	} else if len(steps) > 0 {
+		// Derive from first step's worker type
+		jobDefType = deriveJobDefinitionType(steps[0].Type)
+	} else {
+		// Default to crawler for backwards compatibility
+		jobDefType = models.JobDefinitionTypeCrawler
 	}
 
 	return &models.JobDefinition{
 		ID:          f.ID,
 		Name:        f.Name,
-		Type:        models.JobDefinitionType(f.Type),
-		JobType:     jobType,
+		Type:        jobDefType,
+		JobType:     jobOwnerType,
 		Description: f.Description,
 		Schedule:    f.Schedule,
 		Timeout:     f.Timeout,
@@ -177,11 +193,30 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		AutoStart:   f.AutoStart,
 		AuthID:      f.AuthID,
 		Tags:        f.Tags,
+		Extension:   f.Extension,
 		UrlPatterns: f.UrlPatterns,
 		Steps:       steps,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}, nil
+}
+
+// deriveJobDefinitionType maps a WorkerType to the corresponding JobDefinitionType
+func deriveJobDefinitionType(workerType models.WorkerType) models.JobDefinitionType {
+	switch workerType {
+	case models.WorkerTypeCrawler:
+		return models.JobDefinitionTypeCrawler
+	case models.WorkerTypeAgent:
+		return models.JobDefinitionTypeAgent
+	case models.WorkerTypeGitHubRepo, models.WorkerTypeGitHubActions, models.WorkerTypeGitHubGit:
+		return models.JobDefinitionTypeFetch
+	case models.WorkerTypeWebSearch:
+		return models.JobDefinitionTypeWebSearch
+	case models.WorkerTypePlacesSearch:
+		return models.JobDefinitionTypePlaces
+	default:
+		return models.JobDefinitionTypeCustom
+	}
 }
 
 // ConvertToTOML converts a JobDefinition to simplified TOML format for export

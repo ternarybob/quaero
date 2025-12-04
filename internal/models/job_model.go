@@ -54,9 +54,13 @@ const (
 	SourceTypeGitHubActionLog = "github_action_log"
 	JobTypeGitHubActionLog    = "github_action_log"
 
-	// GitHub Repository types
+	// GitHub Repository types (API-based)
 	SourceTypeGitHubRepo  = "github_repo"
 	JobTypeGitHubRepoFile = "github_repo_file"
+
+	// GitHub Git types (git clone-based, faster for full repo downloads)
+	SourceTypeGitHubGit  = "github_git"
+	JobTypeGitHubGitFile = "github_git_file"
 )
 
 // NewQueueJob creates a new root queued job

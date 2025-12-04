@@ -4,13 +4,15 @@
 
 id = "confluence-crawler"
 name = "Confluence Crawler"
-type = "crawler"
 description = "Default crawler configuration for Atlassian Confluence sites"
 schedule = ""
 timeout = "30m"
 enabled = true
 auto_start = false
 tags = ["confluence", "atlassian", "wiki"]
+
+# Extension matching: when true, this job can be matched by Chrome extension
+extension = true
 
 # URL patterns for automatic job matching (wildcards supported)
 # Quick crawl will use this job definition when the URL matches any pattern

@@ -17,6 +17,7 @@ const (
 	WorkerTypeWebSearch           WorkerType = "web_search"
 	WorkerTypeGitHubRepo          WorkerType = "github_repo"
 	WorkerTypeGitHubActions       WorkerType = "github_actions"
+	WorkerTypeGitHubGit           WorkerType = "github_git" // Clone repository via git instead of API
 	WorkerTypeTransform           WorkerType = "transform"
 	WorkerTypeReindex             WorkerType = "reindex"
 	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
@@ -26,7 +27,7 @@ const (
 func (w WorkerType) IsValid() bool {
 	switch w {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
-		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeTransform,
+		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeDatabaseMaintenance:
 		return true
 	}
@@ -47,6 +48,7 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo,
 		WorkerTypeGitHubActions,
+		WorkerTypeGitHubGit,
 		WorkerTypeTransform,
 		WorkerTypeReindex,
 		WorkerTypeDatabaseMaintenance,

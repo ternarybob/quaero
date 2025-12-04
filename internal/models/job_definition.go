@@ -134,7 +134,7 @@ type ErrorTolerance struct {
 type JobDefinition struct {
 	ID               string                 `json:"id"`                // Unique identifier for the job definition
 	Name             string                 `json:"name"`              // Human-readable job name
-	Type             JobDefinitionType      `json:"type"`              // Type of job definition (crawler, summarizer, custom)
+	Type             JobDefinitionType      `json:"type"`              // Type of job definition (crawler, summarizer, custom) - derived from steps if not specified
 	JobType          JobOwnerType           `json:"job_type"`          // Job owner type (system or user)
 	Description      string                 `json:"description"`       // Job description
 	TOML             string                 `json:"toml" db:"toml"`    // Raw TOML content from which this job definition was loaded (optional)
@@ -146,6 +146,7 @@ type JobDefinition struct {
 	Timeout          string                 `json:"timeout"`           // Optional: duration string like "10m", "1h", "30s". Empty means no timeout.
 	Enabled          bool                   `json:"enabled"`           // Whether the job is enabled
 	AutoStart        bool                   `json:"auto_start"`        // Whether to auto-start on scheduler initialization
+	Extension        bool                   `json:"extension"`         // When true, this job can be matched by Chrome extension via url_patterns
 	Config           map[string]interface{} `json:"config"`            // Job-specific configuration
 	PreJobs          []string               `json:"pre_jobs"`          // Array of job definition IDs to execute before main steps (validation, pre-checks)
 	PostJobs         []string               `json:"post_jobs"`         // Array of job IDs to execute after this job completes
@@ -169,6 +170,7 @@ func isPlaceholder(value string) bool {
 
 // Validate validates the job definition
 // Note: Schedule is optional. When empty, the job can only be triggered manually.
+// Note: Type is optional. When empty, it can be derived from the first step's worker type.
 func (j *JobDefinition) Validate() error {
 	// Validate required fields
 	if j.ID == "" {
@@ -177,13 +179,10 @@ func (j *JobDefinition) Validate() error {
 	if j.Name == "" {
 		return errors.New("job definition name is required")
 	}
-	if j.Type == "" {
-		return errors.New("job definition type is required")
-	}
 
-	// Validate JobDefinitionType is one of the allowed constants
-	if !IsValidJobDefinitionType(j.Type) {
-		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch)", j.Type)
+	// Type can be derived from steps, so only validate if explicitly set
+	if j.Type != "" && !IsValidJobDefinitionType(j.Type) {
+		return fmt.Errorf("invalid job definition type: %s (must be one of: crawler, summarizer, custom, places, agent, fetch, web_search)", j.Type)
 	}
 
 	// Validate JobOwnerType (default to 'user' if empty)
@@ -282,7 +281,7 @@ func (j *JobDefinition) ValidateStep(step *JobStep) error {
 
 	// Validate that Type is a known WorkerType
 	if !step.Type.IsValid() {
-		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, transform, reindex, database_maintenance)", step.Type)
+		return fmt.Errorf("invalid worker type: %s (must be one of: agent, crawler, places_search, web_search, github_repo, github_actions, github_git, transform, reindex, database_maintenance)", step.Type)
 	}
 
 	// Validate error strategy if provided

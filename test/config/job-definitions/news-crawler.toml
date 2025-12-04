@@ -4,7 +4,6 @@
 
 id = "news-crawler"
 name = "News Crawler"
-type = "crawler"
 description = "Crawler job that crawls a news website and filters for specific content"
 
 schedule = ""
@@ -17,6 +16,9 @@ enabled = true
 
 # Whether to start automatically on service startup
 auto_start = false
+
+# Extension matching: when true, this job can be matched by Chrome extension
+extension = true
 
 # URL patterns for automatic job matching (wildcards supported)
 # Quick crawl will use this job definition when the URL matches any pattern
