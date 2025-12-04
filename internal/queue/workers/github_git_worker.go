@@ -286,12 +286,30 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 		cloneDir,
 	)
 
-	// Suppress output to avoid leaking token
+	// Capture stderr for error reporting (sanitize to avoid leaking token)
+	var stderr strings.Builder
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to clone repository: %w (ensure git is installed and token has access)", err)
+		// Sanitize error output to remove token
+		errOutput := stderr.String()
+		errOutput = strings.ReplaceAll(errOutput, token, "[REDACTED]")
+		// Also redact any oauth2:token patterns
+		if idx := strings.Index(errOutput, "oauth2:"); idx != -1 {
+			endIdx := strings.Index(errOutput[idx:], "@")
+			if endIdx != -1 {
+				errOutput = errOutput[:idx] + "oauth2:[REDACTED]" + errOutput[idx+endIdx:]
+			}
+		}
+		w.logger.Error().
+			Str("git_path", gitPath).
+			Str("owner", owner).
+			Str("repo", repo).
+			Str("branch", branch).
+			Str("error_output", errOutput).
+			Msg("Git clone failed")
+		return "", fmt.Errorf("failed to clone repository: %w - git output: %s", err, errOutput)
 	}
 
 	// Build extension map for quick lookup
