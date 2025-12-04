@@ -3,7 +3,6 @@
 
 id = "agent-document-generator"
 name = "Agent Document Generator"
-type = "agent"
 description = "Generates summary documents from existing documents using Google Gemini ADK"
 tags = ["agent", "generated", "summary"]
 schedule = ""

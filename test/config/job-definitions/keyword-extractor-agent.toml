@@ -21,7 +21,6 @@
 # Job metadata
 id = "keyword-extractor-agent"
 name = "Keyword Extraction"
-type = "agent"
 description = "Extracts keywords from crawled documents using Google Gemini"
 enabled = true
 auto_start = true
