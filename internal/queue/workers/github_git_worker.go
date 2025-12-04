@@ -167,16 +167,18 @@ func (w *GitHubGitWorker) Execute(ctx context.Context, job *models.QueueJob) err
 
 		// Create document
 		doc := &models.Document{
-			ID:       docID,
-			Title:    title,
-			Content:  string(content),
-			URL:      sourceURL,
-			Tags:     tags,
-			Metadata: metadata,
+			ID:              docID,
+			SourceType:      "github_git",
+			SourceID:        filePath,
+			Title:           title,
+			ContentMarkdown: string(content),
+			URL:             sourceURL,
+			Tags:            tags,
+			Metadata:        metadata,
 		}
 
 		// Save document
-		if err := w.documentStorage.SaveDocument(ctx, doc); err != nil {
+		if err := w.documentStorage.SaveDocument(doc); err != nil {
 			w.logger.Debug().
 				Err(err).
 				Str("path", filePath).
@@ -624,13 +626,16 @@ func (w *GitHubGitWorker) CreateJobs(ctx context.Context, step models.JobStep, j
 
 		// Create job record
 		if err := w.jobManager.CreateJobRecord(ctx, &queue.Job{
-			ID:       batchJob.ID,
-			ParentID: batchJob.ParentID,
-			Type:     batchJob.Type,
-			Name:     batchJob.Name,
-			Status:   "pending",
-			Config:   batchJob.Config,
-			Metadata: batchJob.Metadata,
+			ID:              batchJob.ID,
+			ParentID:        batchJob.ParentID,
+			Type:            batchJob.Type,
+			Name:            batchJob.Name,
+			Phase:           "execution",
+			Status:          "pending",
+			CreatedAt:       batchJob.CreatedAt,
+			ProgressCurrent: 0,
+			ProgressTotal:   len(batchWorkItems),
+			Payload:         string(payloadBytes),
 		}); err != nil {
 			w.logger.Error().Err(err).
 				Int("batch_idx", batchIdx).
