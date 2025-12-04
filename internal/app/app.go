@@ -603,6 +603,19 @@ func (a *App) initServices() error {
 	jobProcessor.RegisterExecutor(githubLogWorker) // Register with JobProcessor for job execution
 	a.Logger.Debug().Str("step_type", githubLogWorker.GetType().String()).Str("job_type", githubLogWorker.GetWorkerType()).Msg("GitHub Actions worker registered")
 
+	// Register GitHub Git worker (git clone-based, faster for bulk file downloads)
+	githubGitWorker := workers.NewGitHubGitWorker(
+		a.ConnectorService,
+		jobMgr,
+		queueMgr,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.Logger,
+	)
+	a.StepManager.RegisterWorker(githubGitWorker)  // Register with StepManager for step routing
+	jobProcessor.RegisterExecutor(githubGitWorker) // Register with JobProcessor for job execution
+	a.Logger.Debug().Str("step_type", githubGitWorker.GetType().String()).Str("job_type", githubGitWorker.GetWorkerType()).Msg("GitHub Git worker registered")
+
 	// Register agent worker if AgentService is available (implements both StepWorker and JobWorker)
 	if a.AgentService != nil {
 		agentWorker := workers.NewAgentWorker(
