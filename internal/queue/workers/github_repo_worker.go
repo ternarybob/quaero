@@ -258,12 +258,13 @@ func (w *GitHubRepoWorker) Init(ctx context.Context, step models.JobStep, jobDef
 	maxFiles := getIntConfig(stepConfig, "max_files", 1000)
 
 	w.logger.Info().
+		Str("phase", "step").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Strs("branches", branches).
 		Int("max_files", maxFiles).
-		Msg("[step] GitHub repo worker initialized")
+		Msg("GitHub repo worker initialized")
 
 	// Create work items for each branch
 	workItems := make([]interfaces.WorkItem, len(branches))

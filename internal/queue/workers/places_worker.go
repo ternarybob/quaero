@@ -92,19 +92,21 @@ func (w *PlacesWorker) Init(ctx context.Context, step models.JobStep, jobDef mod
 				return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 			}
 			w.logger.Info().
+				Str("phase", "step").
 				Str("step_name", step.Name).
 				Str("api_key_name", cleanAPIKeyName).
-				Msg("[step] Resolved API key from storage")
+				Msg("Resolved API key from storage")
 		} else {
 			resolvedAPIKey = apiKeyValue
 		}
 	}
 
 	w.logger.Info().
+		Str("phase", "step").
 		Str("step_name", step.Name).
 		Str("search_query", searchQuery).
 		Str("search_type", searchType).
-		Msg("[step] Places search worker initialized")
+		Msg("Places search worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{

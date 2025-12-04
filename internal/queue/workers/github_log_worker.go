@@ -297,12 +297,13 @@ func (w *GitHubLogWorker) Init(ctx context.Context, step models.JobStep, jobDef 
 	maxRuns := getLogIntConfig(stepConfig, "max_runs", 100)
 
 	w.logger.Info().
+		Str("phase", "step").
 		Str("step_name", step.Name).
 		Str("owner", owner).
 		Str("repo", repo).
 		Str("status", status).
 		Int("max_runs", maxRuns).
-		Msg("[step] GitHub Actions log worker initialized")
+		Msg("GitHub Actions log worker initialized")
 
 	return &interfaces.WorkerInitResult{
 		WorkItems: []interfaces.WorkItem{
