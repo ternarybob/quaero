@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -36,19 +35,94 @@ func (ltc *localDirTestContext) screenshot(name string) {
 }
 
 // saveJobToml saves the job definition as TOML to the results directory
+// Uses the correct format: [step.{stepname}] with config fields directly in section
 func (ltc *localDirTestContext) saveJobToml(filename string, jobDef map[string]interface{}) {
-	tomlData, err := toml.Marshal(jobDef)
-	if err != nil {
-		ltc.env.LogTest(ltc.t, "Warning: failed to marshal job definition to TOML: %v", err)
-		return
+	var buf strings.Builder
+
+	// Write top-level fields
+	writeTomlField(&buf, "id", jobDef["id"])
+	writeTomlField(&buf, "name", jobDef["name"])
+	writeTomlField(&buf, "type", jobDef["type"])
+	writeTomlField(&buf, "description", jobDef["description"])
+	writeTomlField(&buf, "enabled", jobDef["enabled"])
+	if tags, ok := jobDef["tags"].([]string); ok && len(tags) > 0 {
+		writeTomlField(&buf, "tags", tags)
+	}
+	buf.WriteString("\n")
+
+	// Write steps in [step.{name}] format
+	if steps, ok := jobDef["steps"].([]map[string]interface{}); ok {
+		for _, step := range steps {
+			stepName, _ := step["name"].(string)
+			buf.WriteString(fmt.Sprintf("[step.%s]\n", stepName))
+
+			// Write step fields (excluding name and config)
+			writeTomlField(&buf, "type", step["type"])
+			if desc, ok := step["description"].(string); ok && desc != "" {
+				writeTomlField(&buf, "description", desc)
+			}
+			if depends, ok := step["depends"].(string); ok && depends != "" {
+				writeTomlField(&buf, "depends", depends)
+			}
+			if onError, ok := step["on_error"].(string); ok && onError != "" {
+				writeTomlField(&buf, "on_error", onError)
+			}
+
+			// Write config fields directly in step section
+			if config, ok := step["config"].(map[string]interface{}); ok {
+				for k, v := range config {
+					writeTomlField(&buf, k, v)
+				}
+			}
+			buf.WriteString("\n")
+		}
 	}
 
 	tomlPath := filepath.Join(ltc.env.GetResultsDir(), filename)
-	if err := os.WriteFile(tomlPath, tomlData, 0644); err != nil {
+	if err := os.WriteFile(tomlPath, []byte(buf.String()), 0644); err != nil {
 		ltc.env.LogTest(ltc.t, "Warning: failed to save job TOML to %s: %v", tomlPath, err)
 		return
 	}
 	ltc.env.LogTest(ltc.t, "Saved job definition TOML to: %s", tomlPath)
+}
+
+// writeTomlField writes a TOML field to the buffer
+func writeTomlField(buf *strings.Builder, key string, value interface{}) {
+	if value == nil {
+		return
+	}
+	switch v := value.(type) {
+	case string:
+		buf.WriteString(fmt.Sprintf("%s = %q\n", key, v))
+	case bool:
+		buf.WriteString(fmt.Sprintf("%s = %t\n", key, v))
+	case int:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, v))
+	case int64:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, v))
+	case float64:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, int(v)))
+	case []string:
+		buf.WriteString(fmt.Sprintf("%s = [", key))
+		for i, s := range v {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteString(fmt.Sprintf("%q", s))
+		}
+		buf.WriteString("]\n")
+	case []interface{}:
+		buf.WriteString(fmt.Sprintf("%s = [", key))
+		for i, item := range v {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			if s, ok := item.(string); ok {
+				buf.WriteString(fmt.Sprintf("%q", s))
+			}
+		}
+		buf.WriteString("]\n")
+	}
 }
 
 // newLocalDirTestContext creates a new test context with browser and environment
