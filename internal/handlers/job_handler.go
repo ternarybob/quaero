@@ -792,13 +792,17 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract job ID from path: /api/jobs/{id}/cancel
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 3 {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job ID is required"})
 		return
 	}
 	jobID := pathParts[2]
 
 	if jobID == "" {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job ID is required"})
 		return
 	}
 
@@ -821,7 +825,9 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobInterface, storageErr := h.jobStorage.GetJob(ctx, jobID)
 	if storageErr != nil {
 		h.logger.Error().Err(storageErr).Str("job_id", jobID).Msg("Job not found in storage")
-		http.Error(w, "Job not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job not found"})
 		return
 	}
 
@@ -829,21 +835,27 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobState, ok := jobInterface.(*models.QueueJobState)
 	if !ok {
 		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type - expected QueueJobState")
-		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid job type"})
 		return
 	}
 
 	// Check if job is in a cancellable state
 	if jobState.Status != models.JobStatusRunning && jobState.Status != models.JobStatusPending {
 		h.logger.Warn().Str("job_id", jobID).Str("status", string(jobState.Status)).Msg("Job is not in a cancellable state")
-		http.Error(w, fmt.Sprintf("Job is not running (status: %s)", jobState.Status), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Job is not running (status: %s)", jobState.Status)})
 		return
 	}
 
 	// Cancel the job via storage
 	if err := h.jobStorage.UpdateJobStatus(ctx, jobID, string(models.JobStatusCancelled), "Cancelled by user"); err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel job in storage")
-		http.Error(w, "Failed to cancel job", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to update job status"})
 		return
 	}
 

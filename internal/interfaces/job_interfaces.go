@@ -36,6 +36,9 @@ type StepMonitor interface {
 // JobStatusManager provides methods for managing job status and lifecycle.
 // Used by monitors to update job state without creating circular dependencies.
 type JobStatusManager interface {
+	// GetJob retrieves a job by ID to check its current status
+	// Returns interface{} which is actually *models.QueueJobState
+	GetJob(ctx context.Context, jobID string) (interface{}, error)
 	// UpdateJobStatus updates the status of a job
 	UpdateJobStatus(ctx context.Context, jobID string, status string) error
 	// SetJobFinished marks a job as finished
