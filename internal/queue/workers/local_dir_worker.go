@@ -103,6 +103,18 @@ func (w *LocalDirWorker) Execute(ctx context.Context, job *models.QueueJob) erro
 	var savedCount, errorCount int
 
 	for _, fileRaw := range filesRaw {
+		// Check for cancellation before processing each file
+		select {
+		case <-ctx.Done():
+			w.logger.Info().
+				Str("job_id", job.ID).
+				Int("saved", savedCount).
+				Int("remaining", len(filesRaw)-savedCount-errorCount).
+				Msg("[run] Job cancelled during file processing")
+			return ctx.Err()
+		default:
+		}
+
 		fileMap, ok := fileRaw.(map[string]interface{})
 		if !ok {
 			errorCount++

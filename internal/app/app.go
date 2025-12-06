@@ -416,6 +416,7 @@ func (a *App) initServices() error {
 
 	// 5.9. Initialize job processor (replaces worker pool)
 	jobProcessor := workers.NewJobProcessor(queueMgr, jobMgr, a.Logger, a.Config.Queue.Concurrency)
+	jobProcessor.SetEventService(a.EventService) // Enable event-based job cancellation
 	a.JobProcessor = jobProcessor
 	a.Logger.Debug().Msg("Job processor initialized")
 

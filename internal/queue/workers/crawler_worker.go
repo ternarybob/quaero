@@ -380,6 +380,15 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 	jobLogger.Trace().Msg("Published progress update for browser creation")
 
+	// Check for cancellation before starting expensive browser operations
+	select {
+	case <-ctx.Done():
+		jobLogger.Info().Msg("Job cancelled before browser creation")
+		w.jobMgr.AddJobLog(ctx, job.ID, "info", "Job cancelled")
+		return ctx.Err()
+	default:
+	}
+
 	// Headless mode with stealth settings for background crawling
 	allocatorOpts := []chromedp.ExecAllocatorOption{
 		chromedp.NoFirstRun,
@@ -398,8 +407,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	}
 
+	// Use the passed context so cancellation propagates to ChromeDP operations
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
-		context.Background(),
+		ctx,
 		allocatorOpts...,
 	)
 	defer allocatorCancel()
