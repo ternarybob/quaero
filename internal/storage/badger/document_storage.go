@@ -3,6 +3,7 @@ package badger
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/ternarybob/arbor"
@@ -138,21 +139,56 @@ func (s *DocumentStorage) SearchByIdentifier(identifier string, excludeSources [
 func (s *DocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {
 	query := badgerhold.Where("ID").Ne("") // Select all
 
+	hasTags := opts != nil && len(opts.Tags) > 0
+
 	if opts != nil {
 		if opts.SourceType != "" {
 			query = query.And("SourceType").Eq(opts.SourceType)
 		}
-		if opts.Limit > 0 {
-			query = query.Limit(opts.Limit)
-		}
-		if opts.Offset > 0 {
-			query = query.Skip(opts.Offset)
+		// Don't apply Limit/Offset yet if we need to filter by tags in Go
+		// BadgerHold doesn't support array contains, so we filter post-query
+		if !hasTags {
+			if opts.Limit > 0 {
+				query = query.Limit(opts.Limit)
+			}
+			if opts.Offset > 0 {
+				query = query.Skip(opts.Offset)
+			}
 		}
 	}
 
 	var docs []models.Document
 	if err := s.db.Store().Find(&docs, query); err != nil {
 		return nil, fmt.Errorf("failed to list documents: %w", err)
+	}
+
+	// If tags filter is specified, filter documents that have at least one matching tag
+	if hasTags {
+		tagSet := make(map[string]struct{})
+		for _, tag := range opts.Tags {
+			tagSet[tag] = struct{}{}
+		}
+
+		filtered := make([]models.Document, 0)
+		for _, doc := range docs {
+			for _, docTag := range doc.Tags {
+				if _, exists := tagSet[docTag]; exists {
+					filtered = append(filtered, doc)
+					break // Document matches at least one tag
+				}
+			}
+		}
+		docs = filtered
+
+		// Apply offset and limit after tag filtering
+		if opts.Offset > 0 && opts.Offset < len(docs) {
+			docs = docs[opts.Offset:]
+		} else if opts.Offset >= len(docs) {
+			docs = []models.Document{}
+		}
+		if opts.Limit > 0 && opts.Limit < len(docs) {
+			docs = docs[:opts.Limit]
+		}
 	}
 
 	result := make([]*models.Document, len(docs))
@@ -212,9 +248,28 @@ func (s *DocumentStorage) GetStats() (*models.DocumentStats, error) {
 }
 
 func (s *DocumentStorage) GetAllTags() ([]string, error) {
-	// Requires iterating all documents or maintaining a separate tags index
-	// Omitted for initial implementation
-	return []string{}, nil
+	// Iterate all documents and collect unique tags
+	var docs []models.Document
+	if err := s.db.Store().Find(&docs, nil); err != nil {
+		return nil, fmt.Errorf("failed to fetch documents for tags: %w", err)
+	}
+
+	// Use a map to track unique tags
+	tagSet := make(map[string]struct{})
+	for _, doc := range docs {
+		for _, tag := range doc.Tags {
+			tagSet[tag] = struct{}{}
+		}
+	}
+
+	// Convert map keys to sorted slice for consistent ordering
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+
+	return tags, nil
 }
 
 func (s *DocumentStorage) SetForceSyncPending(id string, pending bool) error {
