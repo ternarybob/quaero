@@ -425,11 +425,11 @@ func (w *SummaryWorker) createDocument(summaryContent, prompt string, documents 
 
 	// Build metadata
 	metadata := map[string]interface{}{
-		"prompt":               prompt,
-		"source_document_ids":  sourceDocIDs,
+		"prompt":                prompt,
+		"source_document_ids":   sourceDocIDs,
 		"source_document_count": len(documents),
-		"parent_job_id":        parentJobID,
-		"generated_at":         time.Now().Format(time.RFC3339),
+		"parent_job_id":         parentJobID,
+		"generated_at":          time.Now().Format(time.RFC3339),
 	}
 	if jobDef != nil {
 		metadata["job_name"] = jobDef.Name

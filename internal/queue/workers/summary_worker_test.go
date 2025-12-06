@@ -241,12 +241,12 @@ func TestSummaryWorker_Init(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		step           models.JobStep
-		jobDef         models.JobDefinition
-		setupMocks     func()
-		wantErr        bool
-		wantDocCount   int
+		name         string
+		step         models.JobStep
+		jobDef       models.JobDefinition
+		setupMocks   func()
+		wantErr      bool
+		wantDocCount int
 	}{
 		{
 			name: "successful init with documents",

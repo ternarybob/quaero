@@ -36,15 +36,66 @@ func (ltc *localDirTestContext) screenshot(name string) {
 }
 
 // saveJobToml saves the job definition as TOML to the results directory
+// Converts the API steps array format to the correct [step.{name}] TOML format
 func (ltc *localDirTestContext) saveJobToml(filename string, jobDef map[string]interface{}) {
-	tomlData, err := toml.Marshal(jobDef)
+	// Convert the steps array to the correct [step.{name}] format for TOML
+	tomlDef := make(map[string]interface{})
+	for k, v := range jobDef {
+		if k == "steps" {
+			// Convert steps array to step map: [step.{name}] format
+			if stepsArray, ok := v.([]map[string]interface{}); ok {
+				stepMap := make(map[string]map[string]interface{})
+				for _, step := range stepsArray {
+					if name, ok := step["name"].(string); ok {
+						// Copy step data but exclude "name" (it becomes the key)
+						stepData := make(map[string]interface{})
+						for sk, sv := range step {
+							if sk != "name" {
+								// Flatten config into step data for TOML format
+								if sk == "config" {
+									if configMap, ok := sv.(map[string]interface{}); ok {
+										for ck, cv := range configMap {
+											stepData[ck] = cv
+										}
+									}
+								} else if sk == "depends" {
+									// Convert depends string to array for TOML format
+									if depStr, ok := sv.(string); ok && depStr != "" {
+										// Split comma-separated deps into array
+										deps := strings.Split(depStr, ",")
+										for i := range deps {
+											deps[i] = strings.TrimSpace(deps[i])
+										}
+										stepData["depends"] = deps
+									}
+								} else {
+									stepData[sk] = sv
+								}
+							}
+						}
+						stepMap[name] = stepData
+					}
+				}
+				tomlDef["step"] = stepMap
+			}
+		} else {
+			tomlDef[k] = v
+		}
+	}
+
+	tomlData, err := toml.Marshal(tomlDef)
 	if err != nil {
 		ltc.env.LogTest(ltc.t, "Warning: failed to marshal job definition to TOML: %v", err)
 		return
 	}
 
+	// Remove the redundant [step] line that go-toml generates for nested maps
+	// We only want [step.{name}] sections, not a standalone [step] header
+	tomlStr := string(tomlData)
+	tomlStr = strings.Replace(tomlStr, "[step]\n", "", 1)
+
 	tomlPath := filepath.Join(ltc.env.GetResultsDir(), filename)
-	if err := os.WriteFile(tomlPath, tomlData, 0644); err != nil {
+	if err := os.WriteFile(tomlPath, []byte(tomlStr), 0644); err != nil {
 		ltc.env.LogTest(ltc.t, "Warning: failed to save job TOML to %s: %v", tomlPath, err)
 		return
 	}
@@ -557,12 +608,58 @@ func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
 	ltc.env.LogTest(t, "Test completed - final status: %s", finalStatus)
 }
 
+// verifyTomlStepFormat reads the saved TOML file and verifies:
+// 1. No standalone [step] line exists (only [step.{name}] sections)
+// 2. The depends field is present in the generate-summary step
+func (ltc *localDirTestContext) verifyTomlStepFormat(filename string) error {
+	tomlPath := filepath.Join(ltc.env.GetResultsDir(), filename)
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return fmt.Errorf("failed to read TOML file: %w", err)
+	}
+
+	content := string(data)
+
+	// Check 1: No standalone [step] line (only [step.{name}] sections allowed)
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "[step]" {
+			return fmt.Errorf("found standalone [step] line - should only have [step.{name}] sections")
+		}
+	}
+
+	// Check 2: Verify [step.generate-summary] section exists
+	if !strings.Contains(content, "[step.generate-summary]") {
+		return fmt.Errorf("missing [step.generate-summary] section")
+	}
+
+	// Check 3: Verify [step.index-files] section exists
+	if !strings.Contains(content, "[step.index-files]") {
+		return fmt.Errorf("missing [step.index-files] section")
+	}
+
+	// Check 4: Verify depends field is present as array in generate-summary step
+	if !strings.Contains(content, "depends = ['index-files']") {
+		return fmt.Errorf("missing depends = ['index-files'] (array format) in generate-summary step")
+	}
+
+	ltc.env.LogTest(ltc.t, "TOML format verification passed: no [step], has [step.{name}] sections, depends field present")
+	return nil
+}
+
 // TestSummaryAgentWithDependency tests summary agent with step dependency via UI
 func TestSummaryAgentWithDependency(t *testing.T) {
 	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent With Dependency ---")
+
+	// Navigate to Jobs page first before taking initial screenshot
+	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobsURL)); err != nil {
+		t.Fatalf("Failed to navigate to jobs page: %v", err)
+	}
+	chromedp.Run(ltc.ctx, chromedp.Sleep(2*time.Second))
 	ltc.screenshot("test_start")
 
 	// Create test directory
@@ -580,6 +677,12 @@ func TestSummaryAgentWithDependency(t *testing.T) {
 		t.Fatalf("Failed to create combined job definition: %v", err)
 	}
 	defer ltc.deleteJobDefinitionViaAPI(defID)
+
+	// Verify TOML format is correct (no [step], has depends field)
+	ltc.env.LogTest(t, "Step 1b: Verifying TOML step format")
+	if err := ltc.verifyTomlStepFormat("combined-job-definition.toml"); err != nil {
+		t.Errorf("TOML format verification failed: %v", err)
+	}
 
 	// Trigger job via UI
 	ltc.env.LogTest(t, "Step 2: Triggering combined job via UI")
@@ -609,6 +712,12 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent Plain Request ---")
+
+	// Navigate to Jobs page first before taking initial screenshot
+	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobsURL)); err != nil {
+		t.Fatalf("Failed to navigate to jobs page: %v", err)
+	}
+	chromedp.Run(ltc.ctx, chromedp.Sleep(2*time.Second))
 	ltc.screenshot("test_start")
 
 	// Create test directory

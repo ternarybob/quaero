@@ -308,10 +308,10 @@ func TestSummaryAgentValidation(t *testing.T) {
 			defID := fmt.Sprintf("validation-test-%d", time.Now().UnixNano())
 
 			body := map[string]interface{}{
-				"id":          defID,
-				"name":        "Validation Test: " + tt.name,
-				"type":        "summarizer",
-				"enabled":     true,
+				"id":      defID,
+				"name":    "Validation Test: " + tt.name,
+				"type":    "summarizer",
+				"enabled": true,
 				"steps": []map[string]interface{}{
 					{
 						"name":   "summarize",
