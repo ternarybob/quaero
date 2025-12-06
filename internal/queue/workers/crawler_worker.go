@@ -380,6 +380,15 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 
 	jobLogger.Trace().Msg("Published progress update for browser creation")
 
+	// Check for cancellation before starting expensive browser operations
+	select {
+	case <-ctx.Done():
+		jobLogger.Info().Msg("Job cancelled before browser creation")
+		w.jobMgr.AddJobLog(ctx, job.ID, "info", "Job cancelled")
+		return ctx.Err()
+	default:
+	}
+
 	// Headless mode with stealth settings for background crawling
 	allocatorOpts := []chromedp.ExecAllocatorOption{
 		chromedp.NoFirstRun,
@@ -398,8 +407,9 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 	}
 
+	// Use the passed context so cancellation propagates to ChromeDP operations
 	allocatorCtx, allocatorCancel := chromedp.NewExecAllocator(
-		context.Background(),
+		ctx,
 		allocatorOpts...,
 	)
 	defer allocatorCancel()
@@ -420,6 +430,13 @@ func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error
 	renderStartTime := time.Now()
 	htmlContent, statusCode, err := w.renderPageWithChromeDp(ctx, browserCtx, seedURL, jobLogger)
 	if err != nil {
+		// Check if this was a cancellation (user action - not an error)
+		if ctx.Err() != nil {
+			jobLogger.Info().Str("url", seedURL).Msg("Job cancelled during page rendering")
+			w.jobMgr.AddJobLog(ctx, job.ID, "info", "Job cancelled")
+			return ctx.Err()
+		}
+		// Actual error
 		jobDuration := time.Since(jobStartTime)
 		jobLogger.Error().Err(err).Str("url", seedURL).Msg("Failed to render page with ChromeDP")
 		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("Failed: %s - render error (%v)", seedURL, jobDuration.Round(time.Millisecond)))
@@ -890,9 +907,9 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	var htmlContent string
 	var statusCode int64 = 200 // Default status code
 
-	// Check if browser context is already cancelled
+	// Check if browser context is already cancelled (user cancellation - not an error)
 	if err := browserCtx.Err(); err != nil {
-		logger.Error().Err(err).Str("url", url).Msg("Browser context already cancelled before navigation")
+		logger.Info().Str("url", url).Msg("Browser context cancelled before navigation")
 		return "", 0, fmt.Errorf("browser context cancelled: %w", err)
 	}
 
@@ -1115,10 +1132,12 @@ func (w *CrawlerWorker) renderPageWithChromeDp(ctx context.Context, browserCtx c
 	)
 
 	if err != nil {
-		// Check if context was cancelled during operation
+		// Check if context was cancelled during operation (user cancellation - not an error)
 		if browserCtx.Err() != nil {
-			logger.Error().Err(browserCtx.Err()).Str("url", url).Msg("Browser context cancelled during navigation")
+			logger.Info().Str("url", url).Msg("Browser context cancelled during navigation")
+			return "", 0, fmt.Errorf("chromedp navigation failed: %w", err)
 		}
+		// Actual error - log at error level
 		logger.Error().Err(err).Str("url", url).Msg("ChromeDP navigation failed")
 		return "", 0, fmt.Errorf("chromedp navigation failed: %w", err)
 	}

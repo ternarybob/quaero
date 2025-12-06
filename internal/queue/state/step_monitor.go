@@ -122,6 +122,21 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 			return fmt.Errorf("step timed out")
 
 		case <-ticker.C:
+			// Check if step job has been cancelled via API (database status check)
+			// This allows cancellation even without context cancellation
+			currentJobInterface, jobErr := m.jobMgr.GetJob(ctx, stepJob.ID)
+			if jobErr == nil {
+				if currentJob, ok := currentJobInterface.(*models.QueueJobState); ok {
+					if currentJob.Status == models.JobStatusCancelled {
+						stepLogger.Debug().Msg("Step job was cancelled via API, stopping monitor")
+						// Job already marked as cancelled, set finished timestamp and exit
+						m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+						m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "cancelled", nil)
+						return nil
+					}
+				}
+			}
+
 			// Check child job progress for THIS step
 			completed, childCount, stats, err := m.checkStepChildProgress(ctx, stepJob.ID, stepLogger)
 			if err != nil {

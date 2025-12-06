@@ -310,6 +310,148 @@ func (m *BadgerManager) Extend(ctx context.Context, messageID string, duration t
 	})
 }
 
+// DeleteByJobID deletes all queue messages for a specific job ID.
+// This is used to remove pending jobs from the queue when they are cancelled.
+// Returns the number of messages deleted.
+func (m *BadgerManager) DeleteByJobID(ctx context.Context, jobID string) (int, error) {
+	deleted := 0
+
+	err := m.db.Update(func(txn *badger.Txn) error {
+		// Iterate over all messages to find those matching the job ID
+		opts := badger.DefaultIteratorOptions
+		prefix := []byte(fmt.Sprintf("queue:%s:msg:", m.queueName))
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		var toDelete []struct {
+			msgKey   []byte
+			indexKey []byte
+		}
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			key := item.Key()
+
+			var qMsg QueueMessage
+			if err := item.Value(func(val []byte) error {
+				return json.Unmarshal(val, &qMsg)
+			}); err != nil {
+				continue // Skip invalid messages
+			}
+
+			// Check if this message belongs to the target job
+			if qMsg.Body.JobID == jobID {
+				// Make a copy of the key since it becomes invalid after iteration
+				keyCopy := make([]byte, len(key))
+				copy(keyCopy, key)
+
+				toDelete = append(toDelete, struct {
+					msgKey   []byte
+					indexKey []byte
+				}{
+					msgKey:   keyCopy,
+					indexKey: m.indexKey(qMsg.VisibleAt, qMsg.ID),
+				})
+			}
+		}
+
+		// Delete all matching messages
+		for _, d := range toDelete {
+			if err := txn.Delete(d.msgKey); err != nil {
+				if err != badger.ErrKeyNotFound {
+					return err
+				}
+			}
+			if err := txn.Delete(d.indexKey); err != nil {
+				if err != badger.ErrKeyNotFound {
+					return err
+				}
+			}
+			deleted++
+		}
+
+		return nil
+	})
+
+	return deleted, err
+}
+
+// DeleteByJobIDs deletes all queue messages for multiple job IDs.
+// This is used to remove pending child jobs from the queue when a parent job is cancelled.
+// Returns the total number of messages deleted.
+func (m *BadgerManager) DeleteByJobIDs(ctx context.Context, jobIDs []string) (int, error) {
+	if len(jobIDs) == 0 {
+		return 0, nil
+	}
+
+	// Create a set for fast lookup
+	jobIDSet := make(map[string]bool, len(jobIDs))
+	for _, id := range jobIDs {
+		jobIDSet[id] = true
+	}
+
+	deleted := 0
+
+	err := m.db.Update(func(txn *badger.Txn) error {
+		// Iterate over all messages to find those matching any job ID
+		opts := badger.DefaultIteratorOptions
+		prefix := []byte(fmt.Sprintf("queue:%s:msg:", m.queueName))
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		var toDelete []struct {
+			msgKey   []byte
+			indexKey []byte
+		}
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			key := item.Key()
+
+			var qMsg QueueMessage
+			if err := item.Value(func(val []byte) error {
+				return json.Unmarshal(val, &qMsg)
+			}); err != nil {
+				continue // Skip invalid messages
+			}
+
+			// Check if this message belongs to any target job
+			if jobIDSet[qMsg.Body.JobID] {
+				// Make a copy of the key since it becomes invalid after iteration
+				keyCopy := make([]byte, len(key))
+				copy(keyCopy, key)
+
+				toDelete = append(toDelete, struct {
+					msgKey   []byte
+					indexKey []byte
+				}{
+					msgKey:   keyCopy,
+					indexKey: m.indexKey(qMsg.VisibleAt, qMsg.ID),
+				})
+			}
+		}
+
+		// Delete all matching messages
+		for _, d := range toDelete {
+			if err := txn.Delete(d.msgKey); err != nil {
+				if err != badger.ErrKeyNotFound {
+					return err
+				}
+			}
+			if err := txn.Delete(d.indexKey); err != nil {
+				if err != badger.ErrKeyNotFound {
+					return err
+				}
+			}
+			deleted++
+		}
+
+		return nil
+	})
+
+	return deleted, err
+}
+
 // Close closes the queue manager (no-op for BadgerManager as DB is managed externally)
 func (m *BadgerManager) Close() error {
 	return nil

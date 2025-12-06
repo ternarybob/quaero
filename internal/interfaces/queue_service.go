@@ -14,6 +14,14 @@ type QueueManager interface {
 	Enqueue(ctx context.Context, msg models.QueueMessage) error
 	Receive(ctx context.Context) (*models.QueueMessage, func() error, error)
 	Extend(ctx context.Context, messageID string, duration time.Duration) error
+	// DeleteByJobID removes all queue messages for a specific job ID.
+	// Used to remove pending jobs from the queue when they are cancelled.
+	// Returns the number of messages deleted.
+	DeleteByJobID(ctx context.Context, jobID string) (int, error)
+	// DeleteByJobIDs removes all queue messages for multiple job IDs.
+	// Used to remove pending child jobs from the queue when a parent job is cancelled.
+	// Returns the total number of messages deleted.
+	DeleteByJobIDs(ctx context.Context, jobIDs []string) (int, error)
 	Close() error
 }
 

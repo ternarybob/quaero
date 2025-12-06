@@ -20,17 +20,23 @@ import (
 // JobProcessor is a job-agnostic processor that uses Badger queue for queue management.
 // It routes jobs to registered workers based on job type.
 // Supports concurrent job processing via multiple worker goroutines.
+// Supports event-based cancellation of running jobs via EventJobCancelled events.
 type JobProcessor struct {
-	queueMgr    interfaces.QueueManager
-	jobMgr      *queue.Manager
-	executors   map[string]interfaces.JobWorker // Job workers keyed by job type
-	logger      arbor.ILogger
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	running     bool
-	mu          sync.Mutex
-	concurrency int // Number of concurrent worker goroutines
+	queueMgr     interfaces.QueueManager
+	jobMgr       *queue.Manager
+	eventService interfaces.EventService
+	executors    map[string]interfaces.JobWorker // Job workers keyed by job type
+	logger       arbor.ILogger
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	running      bool
+	mu           sync.Mutex
+	concurrency  int // Number of concurrent worker goroutines
+
+	// Active job tracking for cancellation
+	activeJobs   map[string]context.CancelFunc // Maps job ID to its cancel function
+	activeJobsMu sync.RWMutex
 }
 
 // NewJobProcessor creates a new job processor that routes jobs to registered workers.
@@ -52,7 +58,14 @@ func NewJobProcessor(queueMgr interfaces.QueueManager, jobMgr *queue.Manager, lo
 		cancel:      cancel,
 		running:     false,
 		concurrency: concurrency,
+		activeJobs:  make(map[string]context.CancelFunc),
 	}
+}
+
+// SetEventService sets the event service for job cancellation events.
+// Must be called before Start() to enable event-based cancellation.
+func (jp *JobProcessor) SetEventService(eventService interfaces.EventService) {
+	jp.eventService = eventService
 }
 
 // RegisterExecutor registers a job worker for a job type.
@@ -81,11 +94,54 @@ func (jp *JobProcessor) Start() {
 		Int("concurrency", jp.concurrency).
 		Msg("Starting job processor")
 
+	// Subscribe to job cancellation events for real-time cancellation of running jobs
+	if jp.eventService != nil {
+		if err := jp.eventService.Subscribe(interfaces.EventJobCancelled, jp.handleJobCancelled); err != nil {
+			jp.logger.Warn().Err(err).Msg("Failed to subscribe to job cancellation events")
+		} else {
+			jp.logger.Debug().Msg("Subscribed to job cancellation events")
+		}
+	}
+
 	// Start multiple goroutines to process jobs concurrently
 	for i := 0; i < jp.concurrency; i++ {
 		jp.wg.Add(1)
 		go jp.processJobs(i)
 	}
+}
+
+// handleJobCancelled handles EventJobCancelled events to cancel running jobs.
+func (jp *JobProcessor) handleJobCancelled(ctx context.Context, event interfaces.Event) error {
+	// Extract job ID from event payload
+	payload, ok := event.Payload.(map[string]interface{})
+	if !ok {
+		jp.logger.Warn().Msg("Invalid job cancelled event payload")
+		return nil
+	}
+
+	jobID, ok := payload["job_id"].(string)
+	if !ok || jobID == "" {
+		jp.logger.Warn().Msg("Job cancelled event missing job_id")
+		return nil
+	}
+
+	// Look up the active job and cancel it
+	jp.activeJobsMu.RLock()
+	cancelFn, exists := jp.activeJobs[jobID]
+	jp.activeJobsMu.RUnlock()
+
+	if exists {
+		jp.logger.Info().
+			Str("job_id", jobID).
+			Msg("Cancelling running job via event")
+		cancelFn()
+	} else {
+		jp.logger.Debug().
+			Str("job_id", jobID).
+			Msg("Job not found in active jobs (may have already completed)")
+	}
+
+	return nil
 }
 
 // Stop stops the job processor gracefully.
@@ -264,6 +320,27 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 		return jobProcessed
 	}
 
+	// Check if job has been cancelled before executing
+	// This prevents processing of jobs that were cancelled while pending in the queue
+	jobInterface, err := jp.jobMgr.GetJob(jp.ctx, msg.JobID)
+	if err == nil {
+		if jobState, ok := jobInterface.(*models.QueueJobState); ok {
+			if jobState.Status == models.JobStatusCancelled {
+				jp.logger.Info().
+					Str("job_id", msg.JobID).
+					Str("job_type", msg.Type).
+					Int("worker_id", workerID).
+					Msg("Job was cancelled, skipping execution")
+
+				// Delete message from queue without executing
+				if err := deleteFn(); err != nil {
+					jp.logger.Error().Err(err).Msg("Failed to delete cancelled job message")
+				}
+				return jobProcessed
+			}
+		}
+	}
+
 	// Get worker for job type
 	worker, ok := jp.executors[msg.Type]
 	if !ok {
@@ -303,17 +380,51 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 		return jobProcessed
 	}
 
-	// Execute the job using the worker
+	// Create a per-job cancellable context for event-based cancellation
+	// This allows the job to be cancelled via EventJobCancelled events
+	jobCtx, jobCancel := context.WithCancel(jp.ctx)
+
+	// Register the job in activeJobs map for cancellation support
+	jp.activeJobsMu.Lock()
+	jp.activeJobs[msg.JobID] = jobCancel
+	jp.activeJobsMu.Unlock()
+
+	// Ensure we clean up the active job entry when done
+	defer func() {
+		jp.activeJobsMu.Lock()
+		delete(jp.activeJobs, msg.JobID)
+		jp.activeJobsMu.Unlock()
+		jobCancel() // Clean up context resources
+	}()
+
+	// Execute the job using the worker with the per-job context
 	jp.logger.Info().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
 		Msg("TRACE: About to call worker.Execute")
-	err = worker.Execute(jp.ctx, queueJob)
+	err = worker.Execute(jobCtx, queueJob)
 	jp.logger.Info().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
 		Bool("has_error", err != nil).
 		Msg("TRACE: worker.Execute returned")
+
+	// Check if job was cancelled via context
+	if jobCtx.Err() == context.Canceled {
+		jp.logger.Info().
+			Str("job_id", msg.JobID).
+			Str("job_type", msg.Type).
+			Int("worker_id", workerID).
+			Dur("duration", time.Since(jobStartTime)).
+			Msg("Job cancelled")
+
+		// Job was cancelled - update status (already done by cancel handler)
+		// Just delete the message and return
+		if err := deleteFn(); err != nil {
+			jp.logger.Error().Err(err).Msg("Failed to delete cancelled job message")
+		}
+		return jobProcessed
+	}
 
 	if err != nil {
 		// Job failed - log at Error level with duration

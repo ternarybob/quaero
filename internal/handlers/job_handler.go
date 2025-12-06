@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,13 +37,14 @@ type JobHandler struct {
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
 	jobManager       interfaces.JobManager
+	queueManager     interfaces.QueueManager
 	eventService     interfaces.EventService
 	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, eventService interfaces.EventService, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, queueManager interfaces.QueueManager, eventService interfaces.EventService, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
@@ -50,6 +52,7 @@ func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueS
 		schedulerService: schedulerService,
 		logService:       logService,
 		jobManager:       jobManager,
+		queueManager:     queueManager,
 		eventService:     eventService,
 		config:           config,
 		logger:           logger,
@@ -792,13 +795,17 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract job ID from path: /api/jobs/{id}/cancel
 	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(pathParts) < 3 {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job ID is required"})
 		return
 	}
 	jobID := pathParts[2]
 
 	if jobID == "" {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job ID is required"})
 		return
 	}
 
@@ -821,7 +828,9 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobInterface, storageErr := h.jobStorage.GetJob(ctx, jobID)
 	if storageErr != nil {
 		h.logger.Error().Err(storageErr).Str("job_id", jobID).Msg("Job not found in storage")
-		http.Error(w, "Job not found", http.StatusNotFound)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Job not found"})
 		return
 	}
 
@@ -829,31 +838,62 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 	jobState, ok := jobInterface.(*models.QueueJobState)
 	if !ok {
 		h.logger.Error().Str("job_id", jobID).Msg("Invalid job type - expected QueueJobState")
-		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid job type"})
 		return
 	}
 
 	// Check if job is in a cancellable state
 	if jobState.Status != models.JobStatusRunning && jobState.Status != models.JobStatusPending {
 		h.logger.Warn().Str("job_id", jobID).Str("status", string(jobState.Status)).Msg("Job is not in a cancellable state")
-		http.Error(w, fmt.Sprintf("Job is not running (status: %s)", jobState.Status), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Job is not running (status: %s)", jobState.Status)})
 		return
 	}
 
 	// Cancel the job via storage
 	if err := h.jobStorage.UpdateJobStatus(ctx, jobID, string(models.JobStatusCancelled), "Cancelled by user"); err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to cancel job in storage")
-		http.Error(w, "Failed to cancel job", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to update job status"})
 		return
 	}
 
+	// Remove the job from the queue (if it's still pending)
+	if h.queueManager != nil {
+		deleted, err := h.queueManager.DeleteByJobID(ctx, jobID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to remove job from queue")
+		} else if deleted > 0 {
+			h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Msg("Removed job from queue")
+		}
+	}
+
 	// Cancel all child jobs if this is a parent job
-	if jobState.Type == "parent" {
+	if jobState.Type == "parent" || jobState.Type == "manager" || jobState.Type == "step" {
+		// Update child job statuses (recursive - handles Manager → Step → Job hierarchy)
+		// Also publishes EventJobCancelled for each running job so JobProcessor cancels them
 		childrenCancelled, childErr := h.jobManager.StopAllChildJobs(ctx, jobID)
 		if childErr != nil {
 			h.logger.Warn().Err(childErr).Str("job_id", jobID).Msg("Failed to cancel child jobs")
 		} else if childrenCancelled > 0 {
 			h.logger.Debug().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
+		}
+
+		// Remove child jobs from the queue (recursive - handles nested children)
+		if h.queueManager != nil {
+			allChildIDs := h.collectAllChildJobIDs(ctx, jobID)
+			if len(allChildIDs) > 0 {
+				deleted, err := h.queueManager.DeleteByJobIDs(ctx, allChildIDs)
+				if err != nil {
+					h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to remove child jobs from queue")
+				} else if deleted > 0 {
+					h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Int("total_children", len(allChildIDs)).Msg("Removed child jobs from queue")
+				}
+			}
 		}
 	}
 
@@ -880,6 +920,29 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		"job_id":  jobID,
 		"message": "Job cancelled successfully",
 	})
+}
+
+// collectAllChildJobIDs recursively collects all child job IDs for a parent job.
+// Handles the Manager → Step → Job hierarchy by recursively traversing step jobs.
+func (h *JobHandler) collectAllChildJobIDs(ctx context.Context, parentID string) []string {
+	var allIDs []string
+
+	childJobs, err := h.jobStorage.GetChildJobs(ctx, parentID)
+	if err != nil || len(childJobs) == 0 {
+		return allIDs
+	}
+
+	for _, child := range childJobs {
+		allIDs = append(allIDs, child.ID)
+
+		// Recursively collect children of step/manager/parent jobs
+		if child.Type == "step" || child.Type == "manager" || child.Type == "parent" {
+			nestedIDs := h.collectAllChildJobIDs(ctx, child.ID)
+			allIDs = append(allIDs, nestedIDs...)
+		}
+	}
+
+	return allIDs
 }
 
 // DeleteJobErrorResponse represents a structured error response for job deletion

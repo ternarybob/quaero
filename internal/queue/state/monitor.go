@@ -187,6 +187,23 @@ func (m *jobMonitor) monitorChildJobs(ctx context.Context, job *models.QueueJob)
 			return fmt.Errorf("parent job timed out")
 
 		case <-ticker.C:
+			// Check if job has been cancelled via API (database status check)
+			// This allows cancellation even without context cancellation
+			currentJobInterface, jobErr := m.jobMgr.GetJob(ctx, job.ID)
+			if jobErr == nil {
+				if currentJob, ok := currentJobInterface.(*models.QueueJobState); ok {
+					if currentJob.Status == models.JobStatusCancelled {
+						jobLogger.Debug().Msg("Parent job was cancelled via API, stopping monitor")
+						// Job already marked as cancelled, set finished timestamp and exit
+						if err := m.jobMgr.SetJobFinished(ctx, job.ID); err != nil {
+							jobLogger.Warn().Err(err).Msg("Failed to set finished_at timestamp")
+						}
+						m.publishParentJobProgress(ctx, job, "cancelled", "Job cancelled by user")
+						return nil
+					}
+				}
+			}
+
 			// Check child job progress
 			completed, childCount, err := m.checkChildJobProgressWithCount(ctx, job.ID, jobLogger)
 			if err != nil {

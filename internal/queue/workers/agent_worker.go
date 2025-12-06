@@ -157,6 +157,15 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		agentInput["gemini_rate_limit"] = rateLimit
 	}
 
+	// Check for cancellation before expensive AI operation
+	select {
+	case <-ctx.Done():
+		jobLogger.Info().Msg("Job cancelled before agent execution")
+		w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s - cancelled", agentType))
+		return ctx.Err()
+	default:
+	}
+
 	// Step 3: Execute agent
 	jobLogger.Trace().Str("agent_type", agentType).Msg("Executing agent")
 
