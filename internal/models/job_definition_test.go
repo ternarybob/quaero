@@ -224,9 +224,13 @@ func TestWorkerType_IsValid(t *testing.T) {
 		{"web_search is valid", WorkerTypeWebSearch, true},
 		{"github_repo is valid", WorkerTypeGitHubRepo, true},
 		{"github_actions is valid", WorkerTypeGitHubActions, true},
+		{"github_git is valid", WorkerTypeGitHubGit, true},
 		{"transform is valid", WorkerTypeTransform, true},
 		{"reindex is valid", WorkerTypeReindex, true},
 		{"database_maintenance is valid", WorkerTypeDatabaseMaintenance, true},
+		{"local_dir is valid", WorkerTypeLocalDir, true},
+		{"code_map is valid", WorkerTypeCodeMap, true},
+		{"summary is valid", WorkerTypeSummary, true},
 		{"empty string is invalid", WorkerType(""), false},
 		{"unknown type is invalid", WorkerType("unknown"), false},
 		{"typo is invalid", WorkerType("crawl"), false},
@@ -371,7 +375,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 func TestAllWorkerTypes(t *testing.T) {
 	allTypes := AllWorkerTypes()
 
-	expectedCount := 9
+	expectedCount := 13
 	if len(allTypes) != expectedCount {
 		t.Errorf("AllWorkerTypes() returned %d types, expected %d", len(allTypes), expectedCount)
 	}
@@ -391,9 +395,13 @@ func TestAllWorkerTypes(t *testing.T) {
 		WorkerTypeWebSearch:           true,
 		WorkerTypeGitHubRepo:          true,
 		WorkerTypeGitHubActions:       true,
+		WorkerTypeGitHubGit:           true,
 		WorkerTypeTransform:           true,
 		WorkerTypeReindex:             true,
 		WorkerTypeDatabaseMaintenance: true,
+		WorkerTypeLocalDir:            true,
+		WorkerTypeCodeMap:             true,
+		WorkerTypeSummary:             true,
 	}
 
 	for _, st := range allTypes {
