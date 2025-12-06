@@ -61,6 +61,14 @@ func (m *mockQueueManager) Extend(ctx context.Context, messageID string, duratio
 	return nil
 }
 
+func (m *mockQueueManager) DeleteByJobID(ctx context.Context, jobID string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockQueueManager) DeleteByJobIDs(ctx context.Context, jobIDs []string) (int, error) {
+	return 0, nil
+}
+
 func (m *mockQueueManager) Close() error {
 	return nil
 }
@@ -284,6 +292,14 @@ func (m *blockingQueueManager) Receive(ctx context.Context) (*models.QueueMessag
 
 func (m *blockingQueueManager) Extend(ctx context.Context, messageID string, duration time.Duration) error {
 	return nil
+}
+
+func (m *blockingQueueManager) DeleteByJobID(ctx context.Context, jobID string) (int, error) {
+	return 0, nil
+}
+
+func (m *blockingQueueManager) DeleteByJobIDs(ctx context.Context, jobIDs []string) (int, error) {
+	return 0, nil
 }
 
 func (m *blockingQueueManager) Close() error {

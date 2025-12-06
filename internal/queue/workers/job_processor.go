@@ -264,6 +264,27 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 		return jobProcessed
 	}
 
+	// Check if job has been cancelled before executing
+	// This prevents processing of jobs that were cancelled while pending in the queue
+	jobInterface, err := jp.jobMgr.GetJob(jp.ctx, msg.JobID)
+	if err == nil {
+		if jobState, ok := jobInterface.(*models.QueueJobState); ok {
+			if jobState.Status == models.JobStatusCancelled {
+				jp.logger.Info().
+					Str("job_id", msg.JobID).
+					Str("job_type", msg.Type).
+					Int("worker_id", workerID).
+					Msg("Job was cancelled, skipping execution")
+
+				// Delete message from queue without executing
+				if err := deleteFn(); err != nil {
+					jp.logger.Error().Err(err).Msg("Failed to delete cancelled job message")
+				}
+				return jobProcessed
+			}
+		}
+	}
+
 	// Get worker for job type
 	worker, ok := jp.executors[msg.Type]
 	if !ok {

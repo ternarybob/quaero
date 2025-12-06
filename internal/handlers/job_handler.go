@@ -36,13 +36,14 @@ type JobHandler struct {
 	schedulerService interfaces.SchedulerService
 	logService       interfaces.LogService
 	jobManager       interfaces.JobManager
+	queueManager     interfaces.QueueManager
 	eventService     interfaces.EventService
 	config           *common.Config
 	logger           arbor.ILogger
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, eventService interfaces.EventService, config *common.Config, logger arbor.ILogger) *JobHandler {
+func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueStorage, authStorage interfaces.AuthStorage, schedulerService interfaces.SchedulerService, logService interfaces.LogService, jobManager interfaces.JobManager, queueManager interfaces.QueueManager, eventService interfaces.EventService, config *common.Config, logger arbor.ILogger) *JobHandler {
 	return &JobHandler{
 		crawlerService:   crawlerService,
 		jobStorage:       jobStorage,
@@ -50,6 +51,7 @@ func NewJobHandler(crawlerService *crawler.Service, jobStorage interfaces.QueueS
 		schedulerService: schedulerService,
 		logService:       logService,
 		jobManager:       jobManager,
+		queueManager:     queueManager,
 		eventService:     eventService,
 		config:           config,
 		logger:           logger,
@@ -859,13 +861,43 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remove the job from the queue (if it's still pending)
+	if h.queueManager != nil {
+		deleted, err := h.queueManager.DeleteByJobID(ctx, jobID)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to remove job from queue")
+		} else if deleted > 0 {
+			h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Msg("Removed job from queue")
+		}
+	}
+
 	// Cancel all child jobs if this is a parent job
-	if jobState.Type == "parent" {
+	if jobState.Type == "parent" || jobState.Type == "manager" || jobState.Type == "step" {
+		// Update child job statuses
 		childrenCancelled, childErr := h.jobManager.StopAllChildJobs(ctx, jobID)
 		if childErr != nil {
 			h.logger.Warn().Err(childErr).Str("job_id", jobID).Msg("Failed to cancel child jobs")
 		} else if childrenCancelled > 0 {
 			h.logger.Debug().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
+		}
+
+		// Remove child jobs from the queue
+		if h.queueManager != nil {
+			childJobs, err := h.jobStorage.GetChildJobs(ctx, jobID)
+			if err == nil && len(childJobs) > 0 {
+				// Collect all child job IDs
+				childIDs := make([]string, len(childJobs))
+				for i, child := range childJobs {
+					childIDs[i] = child.ID
+				}
+				// Remove all child jobs from queue in one operation
+				deleted, err := h.queueManager.DeleteByJobIDs(ctx, childIDs)
+				if err != nil {
+					h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to remove child jobs from queue")
+				} else if deleted > 0 {
+					h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Msg("Removed child jobs from queue")
+				}
+			}
 		}
 	}
 

@@ -790,8 +790,8 @@ func (a *App) initHandlers() error {
 	)
 	a.MCPHandler = handlers.NewMCPHandler(mcpService, a.Logger)
 
-	// Initialize job handler with JobManager and EventService
-	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.QueueStorage(), a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.EventService, a.Config, a.Logger)
+	// Initialize job handler with JobManager, QueueManager and EventService
+	a.JobHandler = handlers.NewJobHandler(a.CrawlerService, a.StorageManager.QueueStorage(), a.StorageManager.AuthStorage(), a.SchedulerService, a.LogService, a.JobManager, a.QueueManager, a.EventService, a.Config, a.Logger)
 
 	// Initialize status handler
 	a.StatusHandler = handlers.NewStatusHandler(a.StatusService, a.Logger)

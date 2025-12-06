@@ -755,3 +755,11 @@ func (m *mockQueueManager) Receive(ctx context.Context) (*models.QueueMessage, f
 func (m *mockQueueManager) Extend(ctx context.Context, messageID string, duration time.Duration) error {
 	return nil
 }
+
+func (m *mockQueueManager) DeleteByJobID(ctx context.Context, jobID string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockQueueManager) DeleteByJobIDs(ctx context.Context, jobIDs []string) (int, error) {
+	return 0, nil
+}
