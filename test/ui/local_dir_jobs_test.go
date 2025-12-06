@@ -17,13 +17,28 @@ import (
 
 // localDirTestContext holds shared state for local_dir tests
 type localDirTestContext struct {
-	t          *testing.T
-	env        *common.TestEnvironment
-	ctx        context.Context
-	helper     *common.HTTPTestHelper
-	jobsURL    string
-	queueURL   string
-	jobAddURL  string
+	t               *testing.T
+	env             *common.TestEnvironment
+	ctx             context.Context
+	helper          *common.HTTPTestHelper
+	jobsURL         string
+	queueURL        string
+	jobAddURL       string
+	screenshotCount int
+}
+
+// screenshot takes a screenshot with an incremented prefix (01, 02, 03, etc.)
+func (ltc *localDirTestContext) screenshot(name string) {
+	ltc.screenshotCount++
+	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
+	ltc.env.TakeScreenshot(ltc.ctx, prefixedName)
+}
+
+// fullScreenshot takes a full screenshot with an incremented prefix
+func (ltc *localDirTestContext) fullScreenshot(name string) {
+	ltc.screenshotCount++
+	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
+	ltc.env.TakeFullScreenshot(ltc.ctx, prefixedName)
 }
 
 // newLocalDirTestContext creates a new test context with browser and environment
@@ -216,7 +231,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 	ltc.env.LogTest(ltc.t, "Triggering job via UI: %s", jobName)
 
 	// Take screenshot before navigation
-	ltc.env.TakeScreenshot(ltc.ctx, "trigger_job_before")
+	ltc.screenshot("trigger_job_before")
 
 	// Navigate to Jobs page
 	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobsURL)); err != nil {
@@ -231,7 +246,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		return fmt.Errorf("jobs page did not load: %w", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "jobs_page_loaded")
+	ltc.screenshot("jobs_page_loaded")
 
 	// Convert job name to button ID format
 	buttonID := strings.ToLower(jobName)
@@ -247,7 +262,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.WaitVisible(runBtnSelector, chromedp.ByQuery),
 		chromedp.Click(runBtnSelector, chromedp.ByQuery),
 	); err != nil {
-		ltc.env.TakeFullScreenshot(ltc.ctx, "run_button_not_found")
+		ltc.fullScreenshot("run_button_not_found")
 		return fmt.Errorf("failed to click run button: %w", err)
 	}
 
@@ -257,11 +272,11 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 	); err != nil {
-		ltc.env.TakeFullScreenshot(ltc.ctx, "modal_not_found")
+		ltc.fullScreenshot("modal_not_found")
 		return fmt.Errorf("confirmation modal did not appear: %w", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "confirmation_modal")
+	ltc.screenshot("confirmation_modal")
 
 	// Click Confirm button
 	ltc.env.LogTest(ltc.t, "Clicking confirm button")
@@ -269,11 +284,11 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	); err != nil {
-		ltc.env.TakeFullScreenshot(ltc.ctx, "confirm_failed")
+		ltc.fullScreenshot("confirm_failed")
 		return fmt.Errorf("failed to click confirm: %w", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "trigger_job_after")
+	ltc.screenshot("trigger_job_after")
 	ltc.env.LogTest(ltc.t, "Job triggered successfully via UI")
 	return nil
 }
@@ -283,7 +298,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 	ltc.env.LogTest(ltc.t, "Monitoring job via UI: %s (timeout: %v)", jobName, timeout)
 
 	// Take screenshot before navigation
-	ltc.env.TakeScreenshot(ltc.ctx, "monitor_before")
+	ltc.screenshot("monitor_before")
 
 	// Navigate to Queue page
 	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.queueURL)); err != nil {
@@ -298,7 +313,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		return "", fmt.Errorf("queue page did not load: %w", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "queue_page_loaded")
+	ltc.screenshot("queue_page_loaded")
 	ltc.env.LogTest(ltc.t, "Queue page loaded, looking for job...")
 
 	// Poll for job to appear
@@ -321,12 +336,12 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		),
 	)
 	if pollErr != nil || jobID == "" {
-		ltc.env.TakeFullScreenshot(ltc.ctx, "job_not_found_in_queue")
+		ltc.fullScreenshot("job_not_found_in_queue")
 		return "", fmt.Errorf("job not found in queue: %w", pollErr)
 	}
 
 	ltc.env.LogTest(ltc.t, "Job found in queue: %s", jobID)
-	ltc.env.TakeScreenshot(ltc.ctx, "job_found")
+	ltc.screenshot("job_found")
 
 	// Monitor status until terminal state
 	startTime := time.Now()
@@ -340,7 +355,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		}
 
 		if time.Since(pollStart) > timeout {
-			ltc.env.TakeFullScreenshot(ltc.ctx, "job_timeout")
+			ltc.fullScreenshot("job_timeout")
 			return lastStatus, fmt.Errorf("job did not complete within %v (last status: %s)", timeout, lastStatus)
 		}
 
@@ -376,7 +391,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 			elapsed := time.Since(startTime)
 			ltc.env.LogTest(ltc.t, "Status change: %s -> %s (at %v)", lastStatus, currentStatus, elapsed.Round(time.Millisecond))
 			lastStatus = currentStatus
-			ltc.env.TakeScreenshot(ltc.ctx, fmt.Sprintf("status_%s", currentStatus))
+			ltc.screenshot(fmt.Sprintf("status_%s", currentStatus))
 		}
 
 		// Check for terminal states
@@ -388,14 +403,14 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "monitor_after")
+	ltc.fullScreenshot("monitor_after")
 	return currentStatus, nil
 }
 
 // verifyJobAddPage verifies the job add page loads and has required elements
 func (ltc *localDirTestContext) verifyJobAddPage() error {
 	ltc.env.LogTest(ltc.t, "Navigating to job add page")
-	ltc.env.TakeScreenshot(ltc.ctx, "job_add_before")
+	ltc.screenshot("job_add_before")
 
 	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobAddURL)); err != nil {
 		return fmt.Errorf("failed to navigate to job add page: %w", err)
@@ -409,7 +424,7 @@ func (ltc *localDirTestContext) verifyJobAddPage() error {
 		return fmt.Errorf("job add page did not load: %w", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "job_add_loaded")
+	ltc.screenshot("job_add_loaded")
 
 	// Verify TOML editor exists
 	var editorExists bool
@@ -420,12 +435,12 @@ func (ltc *localDirTestContext) verifyJobAddPage() error {
 	}
 
 	if !editorExists {
-		ltc.env.TakeFullScreenshot(ltc.ctx, "editor_missing")
+		ltc.fullScreenshot("editor_missing")
 		return fmt.Errorf("TOML editor not found on page")
 	}
 
 	ltc.env.LogTest(ltc.t, "TOML editor found on job add page")
-	ltc.env.TakeScreenshot(ltc.ctx, "job_add_after")
+	ltc.screenshot("job_add_after")
 	return nil
 }
 
@@ -441,7 +456,7 @@ func TestLocalDirJobAddPage(t *testing.T) {
 		t.Fatalf("Job add page verification failed: %v", err)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.fullScreenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed successfully")
 }
 
@@ -482,7 +497,7 @@ func TestLocalDirJobExecution(t *testing.T) {
 		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.fullScreenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
 }
 
@@ -522,7 +537,7 @@ func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
 		ltc.env.LogTest(t, "Job monitoring ended: %v (status: %s)", err, finalStatus)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.fullScreenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - final status: %s", finalStatus)
 }
 
@@ -532,7 +547,7 @@ func TestSummaryAgentWithDependency(t *testing.T) {
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent With Dependency ---")
-	ltc.env.TakeScreenshot(ltc.ctx, "test_start")
+	ltc.screenshot("test_start")
 
 	// Create test directory
 	testDir, cleanupDir := createTestDirectory(t)
@@ -568,7 +583,7 @@ func TestSummaryAgentWithDependency(t *testing.T) {
 		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.fullScreenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
 }
 
@@ -578,7 +593,7 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent Plain Request ---")
-	ltc.env.TakeScreenshot(ltc.ctx, "test_start")
+	ltc.screenshot("test_start")
 
 	// Create test directory
 	testDir, cleanupDir := createTestDirectory(t)
@@ -657,6 +672,6 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 		t.Errorf("Expected summary job status 'completed', got '%s'", summaryStatus)
 	}
 
-	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.fullScreenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - summary job status: %s", summaryStatus)
 }
