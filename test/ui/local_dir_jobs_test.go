@@ -888,3 +888,63 @@ func (ltc *localDirTestContext) createSummaryJobDefinition(name string, filterTa
 	ltc.env.LogTest(ltc.t, "Created summary job definition: %s (ID: %s)", name, defID)
 	return defID, nil
 }
+
+// createCombinedIndexSummaryJob creates a job with both index and summary steps, where summary depends on index
+func (ltc *localDirTestContext) createCombinedIndexSummaryJob(name, dirPath string, tags []string, prompt string) (string, error) {
+	ltc.env.LogTest(ltc.t, "Creating combined index+summary job: %s", name)
+
+	helper := ltc.env.NewHTTPTestHelper(ltc.t)
+
+	// Generate unique ID
+	defID := fmt.Sprintf("combined-test-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        name,
+		"description": "Combined job: index files then generate summary",
+		"type":        "summarizer",
+		"enabled":     true,
+		"tags":        tags,
+		"steps": []map[string]interface{}{
+			{
+				"name": "index-files",
+				"type": "local_dir",
+				"config": map[string]interface{}{
+					"dir_path":           dirPath,
+					"include_extensions": []string{".go", ".md", ".txt"},
+					"exclude_paths":      []string{".git", "node_modules"},
+					"max_file_size":      1048576,
+					"max_files":          50,
+				},
+			},
+			{
+				"name":    "generate-summary",
+				"type":    "summary",
+				"depends": "index-files", // Summary step depends on index step completing first
+				"config": map[string]interface{}{
+					"prompt":      prompt,
+					"filter_tags": tags,
+					"api_key":     "{google_gemini_api_key}",
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create job definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		return "", fmt.Errorf("job definition creation failed with status: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	ltc.env.LogTest(ltc.t, "Created combined job definition: %s (ID: %s)", name, defID)
+	return defID, nil
+}
