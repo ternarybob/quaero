@@ -1,22 +1,85 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test/common"
 )
 
-// createLocalDirTestDirectory creates a temporary directory with test files
-func createLocalDirTestDirectory(t *testing.T) string {
+// localDirTestContext holds shared state for local_dir tests
+type localDirTestContext struct {
+	t          *testing.T
+	env        *common.TestEnvironment
+	ctx        context.Context
+	helper     *common.HTTPTestHelper
+	jobsURL    string
+	queueURL   string
+	jobAddURL  string
+}
+
+// newLocalDirTestContext creates a new test context with browser and environment
+func newLocalDirTestContext(t *testing.T, timeout time.Duration) (*localDirTestContext, func()) {
+	// Setup Test Environment
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+
+	// Create a timeout context for the entire test
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), timeout)
+
+	// Create allocator context
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.WindowSize(1920, 1080),
+	)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+
+	// Create browser context
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+
+	baseURL := env.GetBaseURL()
+
+	ltc := &localDirTestContext{
+		t:         t,
+		env:       env,
+		ctx:       browserCtx,
+		helper:    env.NewHTTPTestHelper(t),
+		jobsURL:   baseURL + "/jobs",
+		queueURL:  baseURL + "/queue",
+		jobAddURL: baseURL + "/jobs/add",
+	}
+
+	// Return cleanup function
+	cleanup := func() {
+		if err := chromedp.Cancel(browserCtx); err != nil {
+			t.Logf("Warning: browser cancel returned: %v", err)
+		}
+		cancelBrowser()
+		cancelAlloc()
+		cancelTimeout()
+		env.Cleanup()
+	}
+
+	return ltc, cleanup
+}
+
+// createTestDirectory creates a temporary directory with test files
+func createTestDirectory(t *testing.T) (string, func()) {
 	tempDir, err := os.MkdirTemp("", "quaero-ui-local-dir-test-*")
-	require.NoError(t, err, "Failed to create temp directory")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
 
 	testFiles := map[string]string{
 		"README.md":          "# Test Project\n\nThis is a test project for local_dir worker UI testing.\n\n## Features\n- File indexing\n- Content extraction\n",
@@ -31,38 +94,33 @@ func createLocalDirTestDirectory(t *testing.T) string {
 	for path, content := range testFiles {
 		fullPath := filepath.Join(tempDir, path)
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			t.Logf("Warning: failed to create directory for %s: %v", path, err)
-			continue
+			t.Fatalf("Failed to create directory for %s: %v", path, err)
 		}
 		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-			t.Logf("Warning: failed to create test file %s: %v", path, err)
+			t.Fatalf("Failed to create test file %s: %v", path, err)
 		}
 	}
 
 	t.Logf("Created test directory with %d files at: %s", len(testFiles), tempDir)
-	return tempDir
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return tempDir, cleanup
 }
 
-// cleanupLocalDirTestDirectory removes the test directory
-func cleanupLocalDirTestDirectory(t *testing.T, dir string) {
-	if dir == "" {
-		return
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		t.Logf("Warning: failed to cleanup test directory %s: %v", dir, err)
-	} else {
-		t.Logf("Cleaned up test directory: %s", dir)
-	}
-}
+// createJobDefinitionViaAPI creates a job definition via API (used to set up test data)
+func (ltc *localDirTestContext) createJobDefinitionViaAPI(name, dirPath string, tags []string) (string, error) {
+	defID := fmt.Sprintf("local-dir-test-%d", time.Now().UnixNano())
 
-// createLocalDirJobDef creates a local_dir job definition via API
-func createLocalDirJobDef(t *testing.T, helper *common.HTTPTestHelper, id, name, dirPath string, tags []string) string {
 	body := map[string]interface{}{
-		"id":      id,
-		"name":    name,
-		"type":    "local_dir",
-		"enabled": true,
-		"tags":    tags,
+		"id":          defID,
+		"name":        name,
+		"description": "Test local directory indexing job",
+		"type":        "local_dir",
+		"enabled":     true,
+		"tags":        tags,
 		"steps": []map[string]interface{}{
 			{
 				"name": "index-files",
@@ -78,23 +136,26 @@ func createLocalDirJobDef(t *testing.T, helper *common.HTTPTestHelper, id, name,
 		},
 	}
 
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create local_dir job definition")
+	resp, err := ltc.helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create job definition: %w", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		t.Logf("Failed to create job definition: status %d", resp.StatusCode)
-		return ""
+		return "", fmt.Errorf("job definition creation failed with status: %d", resp.StatusCode)
 	}
 
-	t.Logf("Created local_dir job definition: id=%s", id)
-	return id
+	ltc.env.LogTest(ltc.t, "Created job definition via API: %s", defID)
+	return defID, nil
 }
 
-// createCombinedJobDef creates a job with index + summary steps using depends
-func createCombinedJobDef(t *testing.T, helper *common.HTTPTestHelper, id, name, dirPath string, tags []string, prompt string) string {
+// createCombinedJobDefinitionViaAPI creates a job with index + summary steps
+func (ltc *localDirTestContext) createCombinedJobDefinitionViaAPI(name, dirPath string, tags []string, prompt string) (string, error) {
+	defID := fmt.Sprintf("combined-test-%d", time.Now().UnixNano())
+
 	body := map[string]interface{}{
-		"id":          id,
+		"id":          defID,
 		"name":        name,
 		"description": "Combined job: index files then generate summary",
 		"type":        "summarizer",
@@ -125,376 +186,437 @@ func createCombinedJobDef(t *testing.T, helper *common.HTTPTestHelper, id, name,
 		},
 	}
 
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err, "Failed to create combined job definition")
+	resp, err := ltc.helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create combined job definition: %w", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		t.Logf("Failed to create combined job definition: status %d", resp.StatusCode)
-		return ""
+		return "", fmt.Errorf("combined job definition creation failed with status: %d", resp.StatusCode)
 	}
 
-	t.Logf("Created combined job definition: id=%s", id)
-	return id
+	ltc.env.LogTest(ltc.t, "Created combined job definition via API: %s", defID)
+	return defID, nil
 }
 
-// deleteLocalDirJobDef deletes a job definition via API
-func deleteLocalDirJobDef(t *testing.T, helper *common.HTTPTestHelper, defID string) {
-	resp, err := helper.DELETE("/api/job-definitions/" + defID)
+// deleteJobDefinitionViaAPI deletes a job definition via API
+func (ltc *localDirTestContext) deleteJobDefinitionViaAPI(defID string) {
+	resp, err := ltc.helper.DELETE("/api/job-definitions/" + defID)
 	if err != nil {
-		t.Logf("Warning: failed to delete job definition %s: %v", defID, err)
+		ltc.env.LogTest(ltc.t, "Warning: failed to delete job definition %s: %v", defID, err)
 		return
 	}
 	resp.Body.Close()
-	t.Logf("Deleted job definition: %s", defID)
+	ltc.env.LogTest(ltc.t, "Deleted job definition: %s", defID)
 }
 
-// executeJobDef executes a job definition and returns the job ID
-func executeJobDef(t *testing.T, helper *common.HTTPTestHelper, defID string) string {
-	resp, err := helper.POST(fmt.Sprintf("/api/job-definitions/%s/execute", defID), nil)
-	require.NoError(t, err, "Failed to execute job definition")
-	defer resp.Body.Close()
+// triggerJobViaUI triggers a job by clicking the run button on the Jobs page
+func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
+	ltc.env.LogTest(ltc.t, "Triggering job via UI: %s", jobName)
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Logf("Job execution returned status %d", resp.StatusCode)
-		return ""
+	// Take screenshot before navigation
+	ltc.env.TakeScreenshot(ltc.ctx, "trigger_job_before")
+
+	// Navigate to Jobs page
+	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobsURL)); err != nil {
+		return fmt.Errorf("failed to navigate to jobs page: %w", err)
 	}
 
-	var result map[string]interface{}
-	err = helper.ParseJSONResponse(resp, &result)
-	require.NoError(t, err, "Failed to parse execute response")
-
-	jobID, ok := result["job_id"].(string)
-	if !ok {
-		t.Log("Job ID not found in response")
-		return ""
+	// Wait for page to load
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		return fmt.Errorf("jobs page did not load: %w", err)
 	}
 
-	t.Logf("Job started: %s", jobID)
-	return jobID
+	ltc.env.TakeScreenshot(ltc.ctx, "jobs_page_loaded")
+
+	// Convert job name to button ID format
+	buttonID := strings.ToLower(jobName)
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	buttonID = re.ReplaceAllString(buttonID, "-")
+	buttonID = buttonID + "-run"
+
+	ltc.env.LogTest(ltc.t, "Looking for run button: #%s", buttonID)
+
+	// Click the run button
+	runBtnSelector := fmt.Sprintf(`#%s`, buttonID)
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.WaitVisible(runBtnSelector, chromedp.ByQuery),
+		chromedp.Click(runBtnSelector, chromedp.ByQuery),
+	); err != nil {
+		ltc.env.TakeFullScreenshot(ltc.ctx, "run_button_not_found")
+		return fmt.Errorf("failed to click run button: %w", err)
+	}
+
+	// Wait for confirmation modal
+	ltc.env.LogTest(ltc.t, "Waiting for confirmation modal")
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+	); err != nil {
+		ltc.env.TakeFullScreenshot(ltc.ctx, "modal_not_found")
+		return fmt.Errorf("confirmation modal did not appear: %w", err)
+	}
+
+	ltc.env.TakeScreenshot(ltc.ctx, "confirmation_modal")
+
+	// Click Confirm button
+	ltc.env.LogTest(ltc.t, "Clicking confirm button")
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	); err != nil {
+		ltc.env.TakeFullScreenshot(ltc.ctx, "confirm_failed")
+		return fmt.Errorf("failed to click confirm: %w", err)
+	}
+
+	ltc.env.TakeScreenshot(ltc.ctx, "trigger_job_after")
+	ltc.env.LogTest(ltc.t, "Job triggered successfully via UI")
+	return nil
 }
 
-// waitForLocalDirJobCompletion waits for a job to reach terminal state
-func waitForLocalDirJobCompletion(t *testing.T, helper *common.HTTPTestHelper, jobID string, timeout time.Duration) string {
-	deadline := time.Now().Add(timeout)
+// monitorJobViaUI monitors job progress on the Queue page
+func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Duration) (string, error) {
+	ltc.env.LogTest(ltc.t, "Monitoring job via UI: %s (timeout: %v)", jobName, timeout)
+
+	// Take screenshot before navigation
+	ltc.env.TakeScreenshot(ltc.ctx, "monitor_before")
+
+	// Navigate to Queue page
+	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.queueURL)); err != nil {
+		return "", fmt.Errorf("failed to navigate to queue page: %w", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		return "", fmt.Errorf("queue page did not load: %w", err)
+	}
+
+	ltc.env.TakeScreenshot(ltc.ctx, "queue_page_loaded")
+	ltc.env.LogTest(ltc.t, "Queue page loaded, looking for job...")
+
+	// Poll for job to appear
+	var jobID string
+	pollErr := chromedp.Run(ltc.ctx,
+		chromedp.Poll(
+			fmt.Sprintf(`
+				(() => {
+					const element = document.querySelector('[x-data="jobList"]');
+					if (!element) return null;
+					const component = Alpine.$data(element);
+					if (!component || !component.allJobs) return null;
+					const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+					return job ? job.id : null;
+				})()
+			`, jobName),
+			&jobID,
+			chromedp.WithPollingTimeout(30*time.Second),
+			chromedp.WithPollingInterval(1*time.Second),
+		),
+	)
+	if pollErr != nil || jobID == "" {
+		ltc.env.TakeFullScreenshot(ltc.ctx, "job_not_found_in_queue")
+		return "", fmt.Errorf("job not found in queue: %w", pollErr)
+	}
+
+	ltc.env.LogTest(ltc.t, "Job found in queue: %s", jobID)
+	ltc.env.TakeScreenshot(ltc.ctx, "job_found")
+
+	// Monitor status until terminal state
+	startTime := time.Now()
 	lastStatus := ""
+	var currentStatus string
+	pollStart := time.Now()
 
-	for time.Now().Before(deadline) {
-		resp, err := helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
+	for {
+		if err := ltc.ctx.Err(); err != nil {
+			return lastStatus, fmt.Errorf("context cancelled: %w", err)
+		}
+
+		if time.Since(pollStart) > timeout {
+			ltc.env.TakeFullScreenshot(ltc.ctx, "job_timeout")
+			return lastStatus, fmt.Errorf("job did not complete within %v (last status: %s)", timeout, lastStatus)
+		}
+
+		// Refresh the page data
+		chromedp.Run(ltc.ctx, chromedp.Evaluate(`typeof loadJobs === 'function' && loadJobs()`, nil))
+		time.Sleep(200 * time.Millisecond)
+
+		// Get current status from UI
+		err := chromedp.Run(ltc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const cards = document.querySelectorAll('.card');
+					for (const card of cards) {
+						const titleEl = card.querySelector('.card-title');
+						if (titleEl && titleEl.textContent.includes('%s')) {
+							const statusBadge = card.querySelector('span.label[data-status]');
+							if (statusBadge) {
+								return statusBadge.getAttribute('data-status');
+							}
+						}
+					}
+					return null;
+				})()
+			`, jobName), &currentStatus),
+		)
+
 		if err != nil {
-			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			time.Sleep(500 * time.Millisecond)
-			continue
+		// Log status changes
+		if currentStatus != lastStatus && currentStatus != "" {
+			elapsed := time.Since(startTime)
+			ltc.env.LogTest(ltc.t, "Status change: %s -> %s (at %v)", lastStatus, currentStatus, elapsed.Round(time.Millisecond))
+			lastStatus = currentStatus
+			ltc.env.TakeScreenshot(ltc.ctx, fmt.Sprintf("status_%s", currentStatus))
 		}
 
-		var job map[string]interface{}
-		err = helper.ParseJSONResponse(resp, &job)
-		if err != nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		status, _ := job["status"].(string)
-		if status != lastStatus {
-			t.Logf("Job status: %s -> %s", lastStatus, status)
-			lastStatus = status
-		}
-
-		// Check terminal states
-		if status == "completed" || status == "failed" || status == "cancelled" {
-			return status
+		// Check for terminal states
+		if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "cancelled" {
+			ltc.env.LogTest(ltc.t, "Job reached terminal state: %s", currentStatus)
+			break
 		}
 
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	return "timeout"
+	ltc.env.TakeFullScreenshot(ltc.ctx, "monitor_after")
+	return currentStatus, nil
 }
 
-// deleteLocalDirJob deletes a job via API
-func deleteLocalDirJob(t *testing.T, helper *common.HTTPTestHelper, jobID string) {
-	resp, err := helper.DELETE("/api/jobs/" + jobID)
-	if err != nil {
-		t.Logf("Warning: failed to delete job %s: %v", jobID, err)
-		return
+// verifyJobAddPage verifies the job add page loads and has required elements
+func (ltc *localDirTestContext) verifyJobAddPage() error {
+	ltc.env.LogTest(ltc.t, "Navigating to job add page")
+	ltc.env.TakeScreenshot(ltc.ctx, "job_add_before")
+
+	if err := chromedp.Run(ltc.ctx, chromedp.Navigate(ltc.jobAddURL)); err != nil {
+		return fmt.Errorf("failed to navigate to job add page: %w", err)
 	}
-	resp.Body.Close()
+
+	// Wait for page to load
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		return fmt.Errorf("job add page did not load: %w", err)
+	}
+
+	ltc.env.TakeScreenshot(ltc.ctx, "job_add_loaded")
+
+	// Verify TOML editor exists
+	var editorExists bool
+	if err := chromedp.Run(ltc.ctx,
+		chromedp.Evaluate(`document.getElementById('toml-editor') !== null`, &editorExists),
+	); err != nil {
+		return fmt.Errorf("failed to check for TOML editor: %w", err)
+	}
+
+	if !editorExists {
+		ltc.env.TakeFullScreenshot(ltc.ctx, "editor_missing")
+		return fmt.Errorf("TOML editor not found on page")
+	}
+
+	ltc.env.LogTest(ltc.t, "TOML editor found on job add page")
+	ltc.env.TakeScreenshot(ltc.ctx, "job_add_after")
+	return nil
 }
 
-// TestLocalDirJobAddPage tests creating a local_dir job definition via API
+// TestLocalDirJobAddPage tests the job add page UI
 func TestLocalDirJobAddPage(t *testing.T) {
-	// 1. Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	require.NoError(t, err, "Failed to setup test environment")
-	defer env.Cleanup()
+	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
+	defer cleanup()
 
-	helper := env.NewHTTPTestHelper(t)
-	env.LogTest(t, "--- Starting Test: Local Dir Job Add Page ---")
+	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job Add Page ---")
 
-	// Create test directory
-	testDir := createLocalDirTestDirectory(t)
-	defer cleanupLocalDirTestDirectory(t, testDir)
-
-	// Step 1: Create a valid local_dir job definition
-	env.LogTest(t, "Step 1: Creating local_dir job definition")
-	defID := fmt.Sprintf("local-dir-add-test-%d", time.Now().UnixNano())
-	body := map[string]interface{}{
-		"id":          defID,
-		"name":        "Local Dir Add Test",
-		"description": "Test local_dir job definition creation",
-		"type":        "local_dir",
-		"enabled":     true,
-		"steps": []map[string]interface{}{
-			{
-				"name": "index-files",
-				"type": "local_dir",
-				"config": map[string]interface{}{
-					"dir_path":           testDir,
-					"include_extensions": []string{".go", ".md", ".txt"},
-					"exclude_paths":      []string{".git"},
-					"max_file_size":      1048576,
-					"max_files":          50,
-				},
-			},
-		},
+	// Verify job add page
+	if err := ltc.verifyJobAddPage(); err != nil {
+		t.Fatalf("Job add page verification failed: %v", err)
 	}
 
-	resp, err := helper.POST("/api/job-definitions", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	helper.AssertStatusCode(resp, http.StatusCreated)
-
-	var result map[string]interface{}
-	err = helper.ParseJSONResponse(resp, &result)
-	require.NoError(t, err)
-
-	// Verify response
-	assert.Equal(t, defID, result["id"], "Job definition ID should match")
-	assert.Contains(t, result, "name", "Response should contain name")
-	assert.Contains(t, result, "steps", "Response should contain steps")
-
-	env.LogTest(t, "Created job definition: %s", defID)
-	defer deleteLocalDirJobDef(t, helper, defID)
-
-	// Step 2: Verify job definition was created by fetching it
-	env.LogTest(t, "Step 2: Verifying job definition exists")
-	resp, err = helper.GET(fmt.Sprintf("/api/job-definitions/%s", defID))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	helper.AssertStatusCode(resp, http.StatusOK)
-
-	var jobDef map[string]interface{}
-	err = helper.ParseJSONResponse(resp, &jobDef)
-	require.NoError(t, err)
-	assert.Equal(t, "Local Dir Add Test", jobDef["name"], "Job definition name should match")
-
-	env.LogTest(t, "Test completed successfully")
+	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.env.LogTest(t, "Test completed successfully")
 }
 
-// TestLocalDirJobExecution tests executing a local_dir job via API
+// TestLocalDirJobExecution tests triggering and monitoring a local_dir job via UI
 func TestLocalDirJobExecution(t *testing.T) {
-	// 1. Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	require.NoError(t, err, "Failed to setup test environment")
-	defer env.Cleanup()
+	ltc, cleanup := newLocalDirTestContext(t, 5*time.Minute)
+	defer cleanup()
 
-	helper := env.NewHTTPTestHelper(t)
-	env.LogTest(t, "--- Starting Test: Local Dir Job Execution ---")
+	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job Execution ---")
 
 	// Create test directory
-	testDir := createLocalDirTestDirectory(t)
-	defer cleanupLocalDirTestDirectory(t, testDir)
+	testDir, cleanupDir := createTestDirectory(t)
+	defer cleanupDir()
 
-	// Step 1: Create job definition
-	env.LogTest(t, "Step 1: Creating job definition")
-	defID := fmt.Sprintf("local-dir-exec-test-%d", time.Now().UnixNano())
-	createLocalDirJobDef(t, helper, defID, "Local Dir Exec Test", testDir, []string{"test", "local_dir"})
-	defer deleteLocalDirJobDef(t, helper, defID)
-
-	// Step 2: Execute job definition
-	env.LogTest(t, "Step 2: Executing job definition")
-	jobID := executeJobDef(t, helper, defID)
-	if jobID == "" {
-		t.Skip("Skipping - job execution not available")
-		return
+	// Create job definition via API
+	jobName := "Local Dir UI Test"
+	defID, err := ltc.createJobDefinitionViaAPI(jobName, testDir, []string{"test", "local_dir"})
+	if err != nil {
+		t.Fatalf("Failed to create job definition: %v", err)
 	}
-	defer deleteLocalDirJob(t, helper, jobID)
+	defer ltc.deleteJobDefinitionViaAPI(defID)
 
-	// Step 3: Monitor job execution
-	env.LogTest(t, "Step 3: Monitoring job execution")
-	finalStatus := waitForLocalDirJobCompletion(t, helper, jobID, 2*time.Minute)
-	env.LogTest(t, "Job reached terminal state: %s", finalStatus)
-
-	// Verify completion
-	assert.Equal(t, "completed", finalStatus, "Job should complete successfully")
-
-	env.LogTest(t, "Test completed - job status: %s", finalStatus)
-}
-
-// TestLocalDirJobWithEmptyDirectory tests local_dir job with empty directory
-func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
-	// 1. Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	require.NoError(t, err, "Failed to setup test environment")
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-	env.LogTest(t, "--- Starting Test: Local Dir Job With Empty Directory ---")
-
-	// Create empty test directory
-	tempDir, err := os.MkdirTemp("", "quaero-ui-empty-dir-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-	env.LogTest(t, "Created empty test directory: %s", tempDir)
-
-	// Step 1: Create job definition
-	env.LogTest(t, "Step 1: Creating job definition for empty directory")
-	defID := fmt.Sprintf("local-dir-empty-test-%d", time.Now().UnixNano())
-	createLocalDirJobDef(t, helper, defID, "Local Dir Empty Test", tempDir, []string{"test", "empty"})
-	defer deleteLocalDirJobDef(t, helper, defID)
-
-	// Step 2: Execute job
-	env.LogTest(t, "Step 2: Executing job")
-	jobID := executeJobDef(t, helper, defID)
-	if jobID == "" {
-		t.Skip("Skipping - job execution not available")
-		return
-	}
-	defer deleteLocalDirJob(t, helper, jobID)
-
-	// Step 3: Monitor job
-	env.LogTest(t, "Step 3: Monitoring job")
-	finalStatus := waitForLocalDirJobCompletion(t, helper, jobID, 1*time.Minute)
-
-	// Job should complete (possibly with 0 documents)
-	env.LogTest(t, "Test completed - final status: %s", finalStatus)
-}
-
-// TestSummaryAgentWithDependency tests the summary agent with step dependency on index step
-func TestSummaryAgentWithDependency(t *testing.T) {
-	// 1. Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	require.NoError(t, err, "Failed to setup test environment")
-	defer env.Cleanup()
-
-	helper := env.NewHTTPTestHelper(t)
-	env.LogTest(t, "--- Starting Test: Summary Agent With Dependency ---")
-
-	// Create test directory
-	testDir := createLocalDirTestDirectory(t)
-	defer cleanupLocalDirTestDirectory(t, testDir)
-
-	// Step 1: Create combined job definition with index + summary steps
-	env.LogTest(t, "Step 1: Creating combined job definition with dependency")
-	defID := fmt.Sprintf("combined-test-%d", time.Now().UnixNano())
-	tags := []string{"codebase", "test-project"}
-	prompt := "Review the code base and provide an architectural summary in markdown."
-
-	createCombinedJobDef(t, helper, defID, "Combined Index Summary Test", testDir, tags, prompt)
-	defer deleteLocalDirJobDef(t, helper, defID)
-	env.LogTest(t, "Created combined job definition: %s", defID)
-
-	// Step 2: Verify job definition structure
-	env.LogTest(t, "Step 2: Verifying job definition structure")
-	resp, err := helper.GET(fmt.Sprintf("/api/job-definitions/%s", defID))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		var jobDef map[string]interface{}
-		err = helper.ParseJSONResponse(resp, &jobDef)
-		require.NoError(t, err)
-
-		steps, ok := jobDef["steps"].([]interface{})
-		if ok && len(steps) == 2 {
-			env.LogTest(t, "Job definition has 2 steps as expected")
-
-			// Check second step has depends field
-			step2, ok := steps[1].(map[string]interface{})
-			if ok {
-				depends, _ := step2["depends"].(string)
-				assert.Equal(t, "index-files", depends, "Summary step should depend on index-files")
-				env.LogTest(t, "Summary step depends on: %s", depends)
-			}
-		}
+	// Trigger job via UI
+	ltc.env.LogTest(t, "Step 1: Triggering job via UI")
+	if err := ltc.triggerJobViaUI(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
 	}
 
-	// Step 3: Execute job
-	env.LogTest(t, "Step 3: Executing combined job")
-	jobID := executeJobDef(t, helper, defID)
-	if jobID == "" {
-		t.Skip("Skipping - job execution not available")
-		return
+	// Monitor job via UI
+	ltc.env.LogTest(t, "Step 2: Monitoring job via UI")
+	finalStatus, err := ltc.monitorJobViaUI(jobName, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("Job monitoring failed: %v", err)
 	}
-	defer deleteLocalDirJob(t, helper, jobID)
-
-	// Step 4: Monitor job execution (longer timeout for LLM call)
-	env.LogTest(t, "Step 4: Monitoring job execution (index + summary)")
-	finalStatus := waitForLocalDirJobCompletion(t, helper, jobID, 5*time.Minute)
-	env.LogTest(t, "Job reached terminal state: %s", finalStatus)
 
 	// Verify completion
 	if finalStatus != "completed" {
-		t.Logf("Job did not complete successfully: %s (may require API key)", finalStatus)
+		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
 	}
 
-	// Step 5: Check if summary document was created
-	env.LogTest(t, "Step 5: Checking for summary document")
-	resp, err = helper.GET("/api/documents?tags=summary")
-	if err == nil && resp.StatusCode == http.StatusOK {
-		env.LogTest(t, "Summary document query successful")
-		resp.Body.Close()
-	}
-
-	env.LogTest(t, "Test completed - job status: %s", finalStatus)
+	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
 }
 
-// TestSummaryAgentPlainRequest tests the summary agent with a plain text prompt
-func TestSummaryAgentPlainRequest(t *testing.T) {
-	// 1. Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	require.NoError(t, err, "Failed to setup test environment")
-	defer env.Cleanup()
+// TestLocalDirJobWithEmptyDirectory tests job behavior with empty directory via UI
+func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
+	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
+	defer cleanup()
 
-	helper := env.NewHTTPTestHelper(t)
-	env.LogTest(t, "--- Starting Test: Summary Agent Plain Request ---")
+	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job With Empty Directory ---")
+
+	// Create empty test directory
+	tempDir, err := os.MkdirTemp("", "quaero-ui-empty-dir-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+	ltc.env.LogTest(t, "Created empty test directory: %s", tempDir)
+
+	// Create job definition via API
+	jobName := "Local Dir Empty Test"
+	defID, err := ltc.createJobDefinitionViaAPI(jobName, tempDir, []string{"test", "empty"})
+	if err != nil {
+		t.Fatalf("Failed to create job definition: %v", err)
+	}
+	defer ltc.deleteJobDefinitionViaAPI(defID)
+
+	// Trigger job via UI
+	ltc.env.LogTest(t, "Step 1: Triggering job via UI")
+	if err := ltc.triggerJobViaUI(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
+	}
+
+	// Monitor job via UI
+	ltc.env.LogTest(t, "Step 2: Monitoring job via UI")
+	finalStatus, err := ltc.monitorJobViaUI(jobName, 1*time.Minute)
+	if err != nil {
+		ltc.env.LogTest(t, "Job monitoring ended: %v (status: %s)", err, finalStatus)
+	}
+
+	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.env.LogTest(t, "Test completed - final status: %s", finalStatus)
+}
+
+// TestSummaryAgentWithDependency tests summary agent with step dependency via UI
+func TestSummaryAgentWithDependency(t *testing.T) {
+	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	ltc.env.LogTest(t, "--- Starting Test: Summary Agent With Dependency ---")
+	ltc.env.TakeScreenshot(ltc.ctx, "test_start")
 
 	// Create test directory
-	testDir := createLocalDirTestDirectory(t)
-	defer cleanupLocalDirTestDirectory(t, testDir)
+	testDir, cleanupDir := createTestDirectory(t)
+	defer cleanupDir()
 
-	// Step 1: First index the files
-	env.LogTest(t, "Step 1: Creating and running index job")
-	indexDefID := fmt.Sprintf("plain-index-%d", time.Now().UnixNano())
-	createLocalDirJobDef(t, helper, indexDefID, "Plain Request Index", testDir, []string{"plain-test"})
-	defer deleteLocalDirJobDef(t, helper, indexDefID)
+	// Create combined job definition with index + summary steps
+	jobName := "Combined Index Summary Test"
+	tags := []string{"codebase", "test-project"}
+	prompt := "Review the code base and provide an architectural summary in markdown."
 
-	indexJobID := executeJobDef(t, helper, indexDefID)
-	if indexJobID == "" {
-		t.Skip("Skipping - job execution not available")
-		return
+	ltc.env.LogTest(t, "Step 1: Creating combined job definition with dependency")
+	defID, err := ltc.createCombinedJobDefinitionViaAPI(jobName, testDir, tags, prompt)
+	if err != nil {
+		t.Fatalf("Failed to create combined job definition: %v", err)
 	}
-	defer deleteLocalDirJob(t, helper, indexJobID)
+	defer ltc.deleteJobDefinitionViaAPI(defID)
 
-	indexStatus := waitForLocalDirJobCompletion(t, helper, indexJobID, 2*time.Minute)
+	// Trigger job via UI
+	ltc.env.LogTest(t, "Step 2: Triggering combined job via UI")
+	if err := ltc.triggerJobViaUI(jobName); err != nil {
+		t.Fatalf("Failed to trigger job: %v", err)
+	}
+
+	// Monitor job via UI (longer timeout for LLM call)
+	ltc.env.LogTest(t, "Step 3: Monitoring job execution (index + summary)")
+	finalStatus, err := ltc.monitorJobViaUI(jobName, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Job monitoring failed: %v", err)
+	}
+
+	// Verify completion
+	if finalStatus != "completed" {
+		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
+	}
+
+	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
+}
+
+// TestSummaryAgentPlainRequest tests summary agent with plain text prompt via UI
+func TestSummaryAgentPlainRequest(t *testing.T) {
+	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	ltc.env.LogTest(t, "--- Starting Test: Summary Agent Plain Request ---")
+	ltc.env.TakeScreenshot(ltc.ctx, "test_start")
+
+	// Create test directory
+	testDir, cleanupDir := createTestDirectory(t)
+	defer cleanupDir()
+
+	// Step 1: First run an index job
+	indexJobName := "Plain Request Index"
+	ltc.env.LogTest(t, "Step 1: Creating and running index job")
+
+	indexDefID, err := ltc.createJobDefinitionViaAPI(indexJobName, testDir, []string{"plain-test"})
+	if err != nil {
+		t.Fatalf("Failed to create index job: %v", err)
+	}
+	defer ltc.deleteJobDefinitionViaAPI(indexDefID)
+
+	if err := ltc.triggerJobViaUI(indexJobName); err != nil {
+		t.Fatalf("Failed to trigger index job: %v", err)
+	}
+
+	indexStatus, err := ltc.monitorJobViaUI(indexJobName, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("Index job failed: %v", err)
+	}
 	if indexStatus != "completed" {
 		t.Fatalf("Index job did not complete: %s", indexStatus)
 	}
-	env.LogTest(t, "Index job completed")
+	ltc.env.LogTest(t, "Index job completed")
 
-	// Step 2: Create summary job with plain prompt
-	env.LogTest(t, "Step 2: Creating summary job with plain prompt")
-	summaryDefID := fmt.Sprintf("summary-plain-%d", time.Now().UnixNano())
+	// Step 2: Create and run summary job with plain prompt
+	summaryJobName := "Plain Summary Request"
 	plainPrompt := "List all the files and describe what each one does in a simple bullet point format."
 
+	ltc.env.LogTest(t, "Step 2: Creating summary job with plain prompt")
+
+	summaryDefID := fmt.Sprintf("summary-plain-%d", time.Now().UnixNano())
 	summaryBody := map[string]interface{}{
 		"id":          summaryDefID,
-		"name":        "Plain Summary Request",
+		"name":        summaryJobName,
 		"description": "Plain text summary request test",
 		"type":        "summarizer",
 		"enabled":     true,
@@ -511,32 +633,30 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 		},
 	}
 
-	resp, err := helper.POST("/api/job-definitions", summaryBody)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		t.Logf("Summary job definition creation returned status %d", resp.StatusCode)
+	resp, err := ltc.helper.POST("/api/job-definitions", summaryBody)
+	if err != nil {
+		t.Fatalf("Failed to create summary job: %v", err)
 	}
-	defer deleteLocalDirJobDef(t, helper, summaryDefID)
+	resp.Body.Close()
+	defer ltc.deleteJobDefinitionViaAPI(summaryDefID)
 
-	// Step 3: Execute summary job
-	env.LogTest(t, "Step 3: Executing summary job")
-	summaryJobID := executeJobDef(t, helper, summaryDefID)
-	if summaryJobID == "" {
-		t.Skip("Skipping - summary job execution not available")
-		return
+	// Trigger summary job via UI
+	ltc.env.LogTest(t, "Step 3: Triggering summary job via UI")
+	if err := ltc.triggerJobViaUI(summaryJobName); err != nil {
+		t.Fatalf("Failed to trigger summary job: %v", err)
 	}
-	defer deleteLocalDirJob(t, helper, summaryJobID)
 
-	// Step 4: Monitor summary job
-	env.LogTest(t, "Step 4: Monitoring summary job")
-	summaryStatus := waitForLocalDirJobCompletion(t, helper, summaryJobID, 3*time.Minute)
-	env.LogTest(t, "Summary job reached terminal state: %s", summaryStatus)
+	// Monitor summary job via UI
+	ltc.env.LogTest(t, "Step 4: Monitoring summary job via UI")
+	summaryStatus, err := ltc.monitorJobViaUI(summaryJobName, 3*time.Minute)
+	if err != nil {
+		t.Fatalf("Summary job failed: %v", err)
+	}
 
 	if summaryStatus != "completed" {
-		t.Logf("Summary job did not complete: %s (may require API key)", summaryStatus)
+		t.Errorf("Expected summary job status 'completed', got '%s'", summaryStatus)
 	}
 
-	env.LogTest(t, "Test completed - summary job status: %s", summaryStatus)
+	ltc.env.TakeFullScreenshot(ltc.ctx, "test_complete")
+	ltc.env.LogTest(t, "Test completed - summary job status: %s", summaryStatus)
 }
