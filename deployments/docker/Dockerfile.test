@@ -1,0 +1,55 @@
+# Test Docker image for running Quaero integration and UI tests
+# Includes Go build environment and Chrome for headless browser testing
+
+FROM golang:1.23-alpine
+
+# Install build dependencies and Chrome for UI tests
+RUN apk add --no-cache \
+    git \
+    ca-certificates \
+    chromium \
+    chromium-chromedriver \
+    # Required for chromedp
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
+    # Build tools
+    make \
+    bash \
+    curl
+
+# Set Chrome environment variables for chromedp
+ENV CHROME_BIN=/usr/bin/chromium-browser
+ENV CHROME_PATH=/usr/bin/chromium-browser
+ENV CHROMEDP_NO_SANDBOX=true
+
+# Create non-root user for running tests
+RUN addgroup -g 1000 tester && \
+    adduser -D -u 1000 -G tester tester
+
+WORKDIR /app
+
+# Copy go mod files first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the entire project
+COPY . .
+
+# Ensure proper ownership
+RUN chown -R tester:tester /app
+
+# Create directories for test results and data
+RUN mkdir -p /app/test/results /app/test/bin /app/bin/data && \
+    chown -R tester:tester /app/test/results /app/test/bin /app/bin
+
+# Switch to non-root user
+USER tester
+
+# Build the application for tests
+RUN CGO_ENABLED=0 go build -o /app/bin/quaero ./cmd/quaero
+
+# Default command runs all tests
+# Override with specific test commands as needed
+CMD ["go", "test", "-v", "./test/..."]

@@ -30,6 +30,23 @@ services:
     networks:
       - quaero-network
 
+  # Test runner service - builds and runs tests in container
+  quaero-test:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.test
+    container_name: quaero-test
+    volumes:
+      - ../../test/results:/app/test/results
+    environment:
+      - TEST_MODE=integration
+      - TEST_TIMEOUT_SECONDS=180
+      - CHROMEDP_NO_SANDBOX=true
+    # Run API tests by default, override with docker compose run
+    command: ["sh", "-c", "cd /app/test/api && go test -v -timeout 10m ./..."]
+    profiles:
+      - test
+
 volumes:
   quaero-data:
     driver: local

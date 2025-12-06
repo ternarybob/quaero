@@ -4,7 +4,8 @@ This directory contains Docker configuration for deploying Quaero in containers.
 
 ## Files
 
-- `Dockerfile` - Multi-stage build configuration
+- `Dockerfile` - Multi-stage build configuration for production
+- `Dockerfile.test` - Test environment with Chrome for UI tests
 - `docker-compose.yml` - Docker Compose orchestration
 
 ## Quick Start
@@ -129,6 +130,41 @@ Ensure volumes are writable by UID 1000:
 docker-compose down -v
 docker-compose up -d
 ```
+
+## Testing
+
+The `Dockerfile.test` provides a complete test environment with Go and Chrome for running both API and UI tests.
+
+### Run Tests with Docker Compose
+
+```bash
+# Run API tests (default)
+docker compose --profile test run --rm quaero-test
+
+# Run UI tests
+docker compose --profile test run --rm quaero-test sh -c "cd /app/test/ui && go test -v -timeout 15m ./..."
+
+# Run all tests
+docker compose --profile test run --rm quaero-test sh -c "cd /app/test/api && go test -v ./... && cd /app/test/ui && go test -v ./..."
+```
+
+### Build Test Image Directly
+
+```bash
+docker build -f deployments/docker/Dockerfile.test -t quaero-test:latest .
+
+# Run API tests
+docker run --rm quaero-test:latest sh -c "cd /app/test/api && go test -v -timeout 10m ./..."
+
+# Run UI tests
+docker run --rm quaero-test:latest sh -c "cd /app/test/ui && go test -v -timeout 15m ./..."
+```
+
+### Test Results
+
+Test results are saved to `test/results/` directory:
+- `test/results/api/` - API test results
+- `test/results/ui/` - UI test results (includes screenshots)
 
 ## See Also
 
