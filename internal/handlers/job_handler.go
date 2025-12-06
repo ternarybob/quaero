@@ -873,7 +873,8 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Cancel all child jobs if this is a parent job
 	if jobState.Type == "parent" || jobState.Type == "manager" || jobState.Type == "step" {
-		// Update child job statuses
+		// Update child job statuses (recursive - handles Manager → Step → Job hierarchy)
+		// Also publishes EventJobCancelled for each running job so JobProcessor cancels them
 		childrenCancelled, childErr := h.jobManager.StopAllChildJobs(ctx, jobID)
 		if childErr != nil {
 			h.logger.Warn().Err(childErr).Str("job_id", jobID).Msg("Failed to cancel child jobs")
@@ -881,21 +882,15 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 			h.logger.Debug().Str("job_id", jobID).Int("children_cancelled", childrenCancelled).Msg("Cancelled child jobs")
 		}
 
-		// Remove child jobs from the queue
+		// Remove child jobs from the queue (recursive - handles nested children)
 		if h.queueManager != nil {
-			childJobs, err := h.jobStorage.GetChildJobs(ctx, jobID)
-			if err == nil && len(childJobs) > 0 {
-				// Collect all child job IDs
-				childIDs := make([]string, len(childJobs))
-				for i, child := range childJobs {
-					childIDs[i] = child.ID
-				}
-				// Remove all child jobs from queue in one operation
-				deleted, err := h.queueManager.DeleteByJobIDs(ctx, childIDs)
+			allChildIDs := h.collectAllChildJobIDs(ctx, jobID)
+			if len(allChildIDs) > 0 {
+				deleted, err := h.queueManager.DeleteByJobIDs(ctx, allChildIDs)
 				if err != nil {
 					h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to remove child jobs from queue")
 				} else if deleted > 0 {
-					h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Msg("Removed child jobs from queue")
+					h.logger.Debug().Str("job_id", jobID).Int("deleted", deleted).Int("total_children", len(allChildIDs)).Msg("Removed child jobs from queue")
 				}
 			}
 		}
@@ -924,6 +919,29 @@ func (h *JobHandler) CancelJobHandler(w http.ResponseWriter, r *http.Request) {
 		"job_id":  jobID,
 		"message": "Job cancelled successfully",
 	})
+}
+
+// collectAllChildJobIDs recursively collects all child job IDs for a parent job.
+// Handles the Manager → Step → Job hierarchy by recursively traversing step jobs.
+func (h *JobHandler) collectAllChildJobIDs(ctx context.Context, parentID string) []string {
+	var allIDs []string
+
+	childJobs, err := h.jobStorage.GetChildJobs(ctx, parentID)
+	if err != nil || len(childJobs) == 0 {
+		return allIDs
+	}
+
+	for _, child := range childJobs {
+		allIDs = append(allIDs, child.ID)
+
+		// Recursively collect children of step/manager/parent jobs
+		if child.Type == "step" || child.Type == "manager" || child.Type == "parent" {
+			nestedIDs := h.collectAllChildJobIDs(ctx, child.ID)
+			allIDs = append(allIDs, nestedIDs...)
+		}
+	}
+
+	return allIDs
 }
 
 // DeleteJobErrorResponse represents a structured error response for job deletion

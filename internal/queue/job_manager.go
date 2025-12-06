@@ -936,7 +936,10 @@ func (m *Manager) GetDocumentCount(ctx context.Context, jobID string) (int, erro
 	return 0, nil
 }
 
-// StopAllChildJobs cancels all running child jobs of the specified parent job
+// StopAllChildJobs cancels all running child jobs of the specified parent job.
+// This method recursively cancels children (handles Manager → Step → Job hierarchy)
+// and publishes EventJobCancelled for each running job so the JobProcessor can
+// cancel them immediately via context cancellation.
 func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, error) {
 	// Get all child jobs
 	opts := &interfaces.JobListOptions{
@@ -950,9 +953,30 @@ func (m *Manager) StopAllChildJobs(ctx context.Context, parentID string) (int, e
 
 	count := 0
 	for _, child := range children {
+		// Recursively cancel children of step jobs (handles Manager → Step → Job hierarchy)
+		if child.Type == "step" || child.Type == "manager" || child.Type == "parent" {
+			nestedCount, _ := m.StopAllChildJobs(ctx, child.ID)
+			count += nestedCount
+		}
+
 		if child.Status == models.JobStatusRunning || child.Status == models.JobStatusPending {
 			if err := m.jobStorage.UpdateJobStatus(ctx, child.ID, string(models.JobStatusCancelled), ""); err == nil {
 				count++
+
+				// Publish EventJobCancelled for running jobs so JobProcessor can cancel them
+				if child.Status == models.JobStatusRunning && m.eventService != nil {
+					cancelEvent := interfaces.Event{
+						Type: interfaces.EventJobCancelled,
+						Payload: map[string]interface{}{
+							"job_id":    child.ID,
+							"status":    "cancelled",
+							"parent_id": parentID,
+						},
+					}
+					if err := m.eventService.Publish(ctx, cancelEvent); err != nil {
+						m.logger.Warn().Err(err).Str("job_id", child.ID).Msg("Failed to publish cancel event for child job")
+					}
+				}
 			}
 		}
 	}
