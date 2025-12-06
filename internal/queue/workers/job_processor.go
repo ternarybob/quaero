@@ -111,18 +111,18 @@ func (jp *JobProcessor) Start() {
 }
 
 // handleJobCancelled handles EventJobCancelled events to cancel running jobs.
-func (jp *JobProcessor) handleJobCancelled(event interfaces.Event) {
+func (jp *JobProcessor) handleJobCancelled(ctx context.Context, event interfaces.Event) error {
 	// Extract job ID from event payload
 	payload, ok := event.Payload.(map[string]interface{})
 	if !ok {
 		jp.logger.Warn().Msg("Invalid job cancelled event payload")
-		return
+		return nil
 	}
 
 	jobID, ok := payload["job_id"].(string)
 	if !ok || jobID == "" {
 		jp.logger.Warn().Msg("Job cancelled event missing job_id")
-		return
+		return nil
 	}
 
 	// Look up the active job and cancel it
@@ -140,6 +140,8 @@ func (jp *JobProcessor) handleJobCancelled(event interfaces.Event) {
 			Str("job_id", jobID).
 			Msg("Job not found in active jobs (may have already completed)")
 	}
+
+	return nil
 }
 
 // Stop stops the job processor gracefully.
