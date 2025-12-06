@@ -324,6 +324,71 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			hasChildJobs = true
 			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawned child jobs", step.Name), "", "run")
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Spawned child jobs (job: %s)", childJobID), "", "run")
+
+			// Wait for child jobs to complete before proceeding to the next step
+			// This is critical for steps that depend on data produced by child jobs (e.g., summary depending on index)
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Waiting for child jobs to complete...", "", "run")
+
+			waitTimeout := 30 * time.Minute // Default timeout for waiting
+			if jobDef.Timeout != "" {
+				if parsedTimeout, err := time.ParseDuration(jobDef.Timeout); err == nil {
+					waitTimeout = parsedTimeout
+				}
+			}
+
+			waitStart := time.Now()
+			pollInterval := 500 * time.Millisecond
+			lastLoggedStats := ""
+
+			for {
+				// Check context cancellation
+				select {
+				case <-ctx.Done():
+					o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", "Context cancelled while waiting for child jobs", "", "run")
+					return managerID, ctx.Err()
+				default:
+				}
+
+				// Check timeout
+				if time.Since(waitStart) > waitTimeout {
+					o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Timeout waiting for child jobs after %v", waitTimeout), "", "run")
+					return managerID, fmt.Errorf("timeout waiting for child jobs of step %s", step.Name)
+				}
+
+				// Get current child stats
+				stats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
+				if err != nil {
+					o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get child stats while waiting")
+					time.Sleep(pollInterval)
+					continue
+				}
+
+				childStats := stats[stepID]
+				if childStats == nil {
+					time.Sleep(pollInterval)
+					continue
+				}
+
+				// Log progress periodically (only when stats change)
+				currentStats := fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
+					childStats.PendingChildren, childStats.RunningChildren,
+					childStats.CompletedChildren, childStats.FailedChildren)
+				if currentStats != lastLoggedStats {
+					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+						fmt.Sprintf("Child jobs: %s", currentStats), "", "run")
+					lastLoggedStats = currentStats
+				}
+
+				// Check if all children are in terminal state
+				if childStats.PendingChildren == 0 && childStats.RunningChildren == 0 {
+					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+						fmt.Sprintf("All child jobs completed (%d completed, %d failed) in %v",
+							childStats.CompletedChildren, childStats.FailedChildren, time.Since(waitStart)), "", "run")
+					break
+				}
+
+				time.Sleep(pollInterval)
+			}
 		} else {
 			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name), "", "run")
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID), "", "run")
