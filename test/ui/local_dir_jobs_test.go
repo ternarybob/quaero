@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,6 +14,26 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test/common"
 )
+
+// checkChromeAvailable checks if Chrome is available for testing
+// Returns true if Chrome is found, false otherwise
+func checkChromeAvailable() bool {
+	// Check common Chrome executable names
+	chromeNames := []string{"google-chrome", "chromium", "chromium-browser", "chrome"}
+	for _, name := range chromeNames {
+		if _, err := exec.LookPath(name); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// skipIfNoChrome skips the test if Chrome is not available
+func skipIfNoChrome(t *testing.T) {
+	if !checkChromeAvailable() {
+		t.Skip("Skipping test - Chrome/Chromium not found in PATH")
+	}
+}
 
 // localDirTestContext holds shared state for local_dir job tests
 type localDirTestContext struct {
@@ -415,6 +436,7 @@ func (ltc *localDirTestContext) monitorJob(jobName string, timeout time.Duration
 
 // TestLocalDirJobAddPage tests the job add page basic functionality
 func TestLocalDirJobAddPage(t *testing.T) {
+	skipIfNoChrome(t)
 	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
 	defer cleanup()
 
@@ -484,6 +506,7 @@ func TestLocalDirJobAddPage(t *testing.T) {
 
 // TestLocalDirJobExecution tests executing a local_dir job via UI
 func TestLocalDirJobExecution(t *testing.T) {
+	skipIfNoChrome(t)
 	ltc, cleanup := newLocalDirTestContext(t, 5*time.Minute)
 	defer cleanup()
 
@@ -529,6 +552,7 @@ func TestLocalDirJobExecution(t *testing.T) {
 
 // TestLocalDirJobWithEmptyDirectory tests local_dir job behavior with empty directory
 func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
+	skipIfNoChrome(t)
 	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
 	defer cleanup()
 
@@ -568,6 +592,7 @@ func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
 
 // TestLocalDirJobQueueDisplay tests that local_dir jobs display correctly in queue
 func TestLocalDirJobQueueDisplay(t *testing.T) {
+	skipIfNoChrome(t)
 	ltc, cleanup := newLocalDirTestContext(t, 4*time.Minute)
 	defer cleanup()
 
@@ -636,4 +661,230 @@ func TestLocalDirJobQueueDisplay(t *testing.T) {
 	}
 
 	ltc.env.LogTest(t, "Test completed - final status: %s", finalStatus)
+}
+
+// TestSummaryAgentWorkflow tests the complete summary agent workflow:
+// 1. Index a code directory with local_dir job
+// 2. Run a summary job that aggregates tagged documents
+// 3. Verify summary document is created with proper tags
+func TestSummaryAgentWorkflow(t *testing.T) {
+	skipIfNoChrome(t)
+	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	ltc.env.LogTest(t, "--- Starting Test: Summary Agent Workflow ---")
+
+	// Step 1: Create test directory with code files
+	if err := ltc.createTestDirectory(); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+
+	// Step 2: Create local_dir job to index files with specific tags
+	indexJobName := "Code Index Test"
+	indexDefID, err := ltc.createLocalDirJobDefinitionWithTags(indexJobName, ltc.testDir, []string{"codebase", "test-project"})
+	if err != nil {
+		t.Fatalf("Failed to create index job definition: %v", err)
+	}
+	defer ltc.deleteJobDefinition(indexDefID)
+
+	// Step 3: Trigger the indexing job
+	if err := ltc.triggerJob(indexJobName); err != nil {
+		t.Fatalf("Failed to trigger index job: %v", err)
+	}
+
+	// Step 4: Monitor indexing job completion
+	indexStatus, err := ltc.monitorJob(indexJobName, 3*time.Minute)
+	if err != nil {
+		t.Fatalf("Index job monitoring failed: %v", err)
+	}
+	if indexStatus != "completed" {
+		t.Fatalf("Index job did not complete successfully: status=%s", indexStatus)
+	}
+	ltc.env.LogTest(t, "Index job completed successfully")
+
+	// Step 5: Create summary job that aggregates the indexed documents
+	summaryJobName := "Code Summary Test"
+	summaryPrompt := "Review the code base and provide an architectural summary of the code in markdown. Include: main components, file structure patterns, key functions/types, and how the code is organized."
+	summaryDefID, err := ltc.createSummaryJobDefinition(summaryJobName, []string{"codebase", "test-project"}, summaryPrompt)
+	if err != nil {
+		t.Fatalf("Failed to create summary job definition: %v", err)
+	}
+	defer ltc.deleteJobDefinition(summaryDefID)
+
+	// Step 6: Trigger the summary job
+	if err := ltc.triggerJob(summaryJobName); err != nil {
+		t.Fatalf("Failed to trigger summary job: %v", err)
+	}
+
+	// Step 7: Monitor summary job completion
+	summaryStatus, err := ltc.monitorJob(summaryJobName, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Summary job monitoring failed: %v", err)
+	}
+	if summaryStatus != "completed" {
+		t.Fatalf("Summary job did not complete successfully: status=%s", summaryStatus)
+	}
+	ltc.env.LogTest(t, "Summary job completed successfully")
+
+	// Step 8: Verify summary document was created with proper tags
+	helper := ltc.env.NewHTTPTestHelper(t)
+	ltc.env.LogTest(t, "Verifying summary document...")
+
+	// Query documents with summary tag
+	resp, err := helper.GET("/api/documents?tags=summary")
+	if err != nil {
+		t.Fatalf("Failed to query documents: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("Document query failed with status: %d", resp.StatusCode)
+	}
+
+	var docResult struct {
+		Documents []struct {
+			ID       string                 `json:"id"`
+			Title    string                 `json:"title"`
+			Tags     []string               `json:"tags"`
+			Metadata map[string]interface{} `json:"metadata"`
+		} `json:"documents"`
+		Total int `json:"total"`
+	}
+	if err := helper.ParseJSONResponse(resp, &docResult); err != nil {
+		t.Fatalf("Failed to parse document response: %v", err)
+	}
+
+	ltc.env.LogTest(t, "Found %d summary documents", docResult.Total)
+
+	// Verify at least one summary document exists
+	if docResult.Total == 0 {
+		t.Fatal("No summary documents found")
+	}
+
+	// Find our summary document (should have job name tag)
+	var foundSummary bool
+	summaryNameTag := strings.ToLower(strings.ReplaceAll(summaryJobName, " ", "-"))
+	for _, doc := range docResult.Documents {
+		ltc.env.LogTest(t, "Document: %s (tags: %v)", doc.Title, doc.Tags)
+		for _, tag := range doc.Tags {
+			if tag == summaryNameTag || tag == "summary" {
+				foundSummary = true
+				ltc.env.LogTest(t, "Found summary document: %s", doc.Title)
+
+				// Verify it has source document count in metadata
+				if sourceCount, ok := doc.Metadata["source_document_count"]; ok {
+					ltc.env.LogTest(t, "Summary generated from %v source documents", sourceCount)
+				}
+				break
+			}
+		}
+		if foundSummary {
+			break
+		}
+	}
+
+	if !foundSummary {
+		t.Error("Summary document with expected tags not found")
+	}
+
+	ltc.env.TakeFullScreenshot(ltc.ctx, "summary_workflow_complete")
+	ltc.env.LogTest(t, "Test completed - summary workflow passed")
+}
+
+// createLocalDirJobDefinitionWithTags creates a local_dir job definition with specific tags
+func (ltc *localDirTestContext) createLocalDirJobDefinitionWithTags(name, dirPath string, tags []string) (string, error) {
+	ltc.env.LogTest(ltc.t, "Creating local_dir job definition with tags: %s", name)
+
+	helper := ltc.env.NewHTTPTestHelper(ltc.t)
+
+	// Generate unique ID
+	defID := fmt.Sprintf("local-dir-tagged-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        name,
+		"description": "Test local directory indexing job with tags",
+		"type":        "local_dir",
+		"enabled":     true,
+		"tags":        tags,
+		"steps": []map[string]interface{}{
+			{
+				"name": "index-files",
+				"type": "local_dir",
+				"config": map[string]interface{}{
+					"dir_path":           dirPath,
+					"include_extensions": []string{".go", ".md", ".txt"},
+					"exclude_paths":      []string{".git", "node_modules"},
+					"max_file_size":      1048576,
+					"max_files":          50,
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create job definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		return "", fmt.Errorf("job definition creation failed with status: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	ltc.env.LogTest(ltc.t, "Created local_dir job definition with tags: %s (ID: %s)", name, defID)
+	return defID, nil
+}
+
+// createSummaryJobDefinition creates a summary job definition
+func (ltc *localDirTestContext) createSummaryJobDefinition(name string, filterTags []string, prompt string) (string, error) {
+	ltc.env.LogTest(ltc.t, "Creating summary job definition: %s", name)
+
+	helper := ltc.env.NewHTTPTestHelper(ltc.t)
+
+	// Generate unique ID
+	defID := fmt.Sprintf("summary-test-%d", time.Now().UnixNano())
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        name,
+		"description": "Test summary job that aggregates tagged documents",
+		"type":        "summarizer",
+		"enabled":     true,
+		"tags":        []string{"summary-output"},
+		"steps": []map[string]interface{}{
+			{
+				"name": "generate-summary",
+				"type": "summary",
+				"config": map[string]interface{}{
+					"prompt":      prompt,
+					"filter_tags": filterTags,
+					"api_key":     "{google_gemini_api_key}",
+				},
+			},
+		},
+	}
+
+	resp, err := helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create job definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		return "", fmt.Errorf("job definition creation failed with status: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	ltc.env.LogTest(ltc.t, "Created summary job definition: %s (ID: %s)", name, defID)
+	return defID, nil
 }

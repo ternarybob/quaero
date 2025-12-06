@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -13,9 +14,12 @@ import (
 type mockDefinitionWorker struct {
 	workerType       models.WorkerType
 	validateErr      error
+	initResult       *interfaces.WorkerInitResult
+	initErr          error
 	createJobsResult string
 	createJobsErr    error
 	validateCalled   bool
+	initCalled       bool
 	createJobsCalled bool
 }
 
@@ -28,7 +32,12 @@ func (m *mockDefinitionWorker) ValidateConfig(step models.JobStep) error {
 	return m.validateErr
 }
 
-func (m *mockDefinitionWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, parentJobID string) (string, error) {
+func (m *mockDefinitionWorker) Init(ctx context.Context, step models.JobStep, jobDef models.JobDefinition) (*interfaces.WorkerInitResult, error) {
+	m.initCalled = true
+	return m.initResult, m.initErr
+}
+
+func (m *mockDefinitionWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	m.createJobsCalled = true
 	return m.createJobsResult, m.createJobsErr
 }
@@ -145,7 +154,7 @@ func TestStepManager_Execute_Success(t *testing.T) {
 	}
 	parentID := "parent-123"
 
-	jobID, err := sm.Execute(ctx, step, jobDef, parentID)
+	jobID, err := sm.Execute(ctx, step, jobDef, parentID, nil)
 
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -180,7 +189,7 @@ func TestStepManager_Execute_NoWorker(t *testing.T) {
 	}
 	parentID := "parent-123"
 
-	_, err := sm.Execute(ctx, step, jobDef, parentID)
+	_, err := sm.Execute(ctx, step, jobDef, parentID, nil)
 
 	if err == nil {
 		t.Fatal("Execute should have failed for unregistered worker")
@@ -214,7 +223,7 @@ func TestStepManager_Execute_ValidationError(t *testing.T) {
 	}
 	parentID := "parent-123"
 
-	_, err := sm.Execute(ctx, step, jobDef, parentID)
+	_, err := sm.Execute(ctx, step, jobDef, parentID, nil)
 
 	if err == nil {
 		t.Fatal("Execute should have failed with validation error")
@@ -252,7 +261,7 @@ func TestStepManager_Execute_CreateJobsError(t *testing.T) {
 	}
 	parentID := "parent-123"
 
-	_, err := sm.Execute(ctx, step, jobDef, parentID)
+	_, err := sm.Execute(ctx, step, jobDef, parentID, nil)
 
 	if err == nil {
 		t.Fatal("Execute should have failed with CreateJobs error")

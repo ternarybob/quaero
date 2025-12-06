@@ -681,6 +681,18 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(webSearchWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", webSearchWorker.GetType().String()).Msg("Web search worker registered")
 
+	// Register Summary worker (synchronous execution, aggregates tagged documents)
+	summaryWorker := workers.NewSummaryWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize Orchestrator

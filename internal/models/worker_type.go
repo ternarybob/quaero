@@ -23,6 +23,7 @@ const (
 	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
 	WorkerTypeLocalDir            WorkerType = "local_dir" // Local directory indexing (full content)
 	WorkerTypeCodeMap             WorkerType = "code_map"  // Hierarchical code structure analysis
+	WorkerTypeSummary             WorkerType = "summary"   // Corpus summary generation from tagged documents
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -30,7 +31,8 @@ func (w WorkerType) IsValid() bool {
 	switch w {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
-		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap:
+		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
+		WorkerTypeSummary:
 		return true
 	}
 	return false
@@ -56,5 +58,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeDatabaseMaintenance,
 		WorkerTypeLocalDir,
 		WorkerTypeCodeMap,
+		WorkerTypeSummary,
 	}
 }
