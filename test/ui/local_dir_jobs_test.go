@@ -27,15 +27,8 @@ type localDirTestContext struct {
 	screenshotCount int
 }
 
-// screenshot takes a screenshot with an incremented prefix (01, 02, 03, etc.)
+// screenshot takes a full-page screenshot with an incremented prefix (01, 02, 03, etc.)
 func (ltc *localDirTestContext) screenshot(name string) {
-	ltc.screenshotCount++
-	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
-	ltc.env.TakeScreenshot(ltc.ctx, prefixedName)
-}
-
-// fullScreenshot takes a full screenshot with an incremented prefix
-func (ltc *localDirTestContext) fullScreenshot(name string) {
 	ltc.screenshotCount++
 	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
 	ltc.env.TakeFullScreenshot(ltc.ctx, prefixedName)
@@ -262,7 +255,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.WaitVisible(runBtnSelector, chromedp.ByQuery),
 		chromedp.Click(runBtnSelector, chromedp.ByQuery),
 	); err != nil {
-		ltc.fullScreenshot("run_button_not_found")
+		ltc.screenshot("run_button_not_found")
 		return fmt.Errorf("failed to click run button: %w", err)
 	}
 
@@ -272,7 +265,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 	); err != nil {
-		ltc.fullScreenshot("modal_not_found")
+		ltc.screenshot("modal_not_found")
 		return fmt.Errorf("confirmation modal did not appear: %w", err)
 	}
 
@@ -284,7 +277,7 @@ func (ltc *localDirTestContext) triggerJobViaUI(jobName string) error {
 		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	); err != nil {
-		ltc.fullScreenshot("confirm_failed")
+		ltc.screenshot("confirm_failed")
 		return fmt.Errorf("failed to click confirm: %w", err)
 	}
 
@@ -336,7 +329,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		),
 	)
 	if pollErr != nil || jobID == "" {
-		ltc.fullScreenshot("job_not_found_in_queue")
+		ltc.screenshot("job_not_found_in_queue")
 		return "", fmt.Errorf("job not found in queue: %w", pollErr)
 	}
 
@@ -355,7 +348,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		}
 
 		if time.Since(pollStart) > timeout {
-			ltc.fullScreenshot("job_timeout")
+			ltc.screenshot("job_timeout")
 			return lastStatus, fmt.Errorf("job did not complete within %v (last status: %s)", timeout, lastStatus)
 		}
 
@@ -403,7 +396,7 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	ltc.fullScreenshot("monitor_after")
+	ltc.screenshot("monitor_after")
 	return currentStatus, nil
 }
 
@@ -435,7 +428,7 @@ func (ltc *localDirTestContext) verifyJobAddPage() error {
 	}
 
 	if !editorExists {
-		ltc.fullScreenshot("editor_missing")
+		ltc.screenshot("editor_missing")
 		return fmt.Errorf("TOML editor not found on page")
 	}
 
@@ -456,7 +449,7 @@ func TestLocalDirJobAddPage(t *testing.T) {
 		t.Fatalf("Job add page verification failed: %v", err)
 	}
 
-	ltc.fullScreenshot("test_complete")
+	ltc.screenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed successfully")
 }
 
@@ -497,7 +490,7 @@ func TestLocalDirJobExecution(t *testing.T) {
 		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
 	}
 
-	ltc.fullScreenshot("test_complete")
+	ltc.screenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
 }
 
@@ -537,7 +530,7 @@ func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
 		ltc.env.LogTest(t, "Job monitoring ended: %v (status: %s)", err, finalStatus)
 	}
 
-	ltc.fullScreenshot("test_complete")
+	ltc.screenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - final status: %s", finalStatus)
 }
 
@@ -583,7 +576,7 @@ func TestSummaryAgentWithDependency(t *testing.T) {
 		t.Errorf("Expected job status 'completed', got '%s'", finalStatus)
 	}
 
-	ltc.fullScreenshot("test_complete")
+	ltc.screenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - job status: %s", finalStatus)
 }
 
@@ -672,6 +665,6 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 		t.Errorf("Expected summary job status 'completed', got '%s'", summaryStatus)
 	}
 
-	ltc.fullScreenshot("test_complete")
+	ltc.screenshot("test_complete")
 	ltc.env.LogTest(t, "Test completed - summary job status: %s", summaryStatus)
 }
