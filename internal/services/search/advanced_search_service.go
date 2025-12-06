@@ -242,6 +242,11 @@ func (s *AdvancedSearchService) applyFilters(
 		results = filterByMetadata(results, opts.MetadataFilters)
 	}
 
+	// Apply tags filter if specified (documents must have ALL tags)
+	if len(opts.Tags) > 0 {
+		results = filterByTags(results, opts.Tags)
+	}
+
 	// Apply limit after filters
 	if opts.Limit > 0 && len(results) > opts.Limit {
 		results = results[:opts.Limit]

@@ -80,6 +80,37 @@ func filterByMetadata(docs []*models.Document, filters map[string]string) []*mod
 	return filtered
 }
 
+// filterByTags filters documents that have ALL specified tags (AND operation)
+// Used by both FTS5SearchService and AdvancedSearchService
+func filterByTags(docs []*models.Document, tags []string) []*models.Document {
+	if len(tags) == 0 {
+		return docs
+	}
+
+	filtered := make([]*models.Document, 0, len(docs))
+	for _, doc := range docs {
+		if hasAllTags(doc.Tags, tags) {
+			filtered = append(filtered, doc)
+		}
+	}
+	return filtered
+}
+
+// hasAllTags checks if docTags contains all required tags
+func hasAllTags(docTags, requiredTags []string) bool {
+	tagSet := make(map[string]bool, len(docTags))
+	for _, tag := range docTags {
+		tagSet[tag] = true
+	}
+
+	for _, required := range requiredTags {
+		if !tagSet[required] {
+			return false
+		}
+	}
+	return true
+}
+
 // matchesMetadata checks if document metadata matches all filter criteria
 // Used by filterByMetadata helper
 func matchesMetadata(metadata map[string]interface{}, filters map[string]string) bool {
