@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -32,6 +33,22 @@ func (ltc *localDirTestContext) screenshot(name string) {
 	ltc.screenshotCount++
 	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
 	ltc.env.TakeFullScreenshot(ltc.ctx, prefixedName)
+}
+
+// saveJobToml saves the job definition as TOML to the results directory
+func (ltc *localDirTestContext) saveJobToml(filename string, jobDef map[string]interface{}) {
+	tomlData, err := toml.Marshal(jobDef)
+	if err != nil {
+		ltc.env.LogTest(ltc.t, "Warning: failed to marshal job definition to TOML: %v", err)
+		return
+	}
+
+	tomlPath := filepath.Join(ltc.env.GetResultsDir(), filename)
+	if err := os.WriteFile(tomlPath, tomlData, 0644); err != nil {
+		ltc.env.LogTest(ltc.t, "Warning: failed to save job TOML to %s: %v", tomlPath, err)
+		return
+	}
+	ltc.env.LogTest(ltc.t, "Saved job definition TOML to: %s", tomlPath)
 }
 
 // newLocalDirTestContext creates a new test context with browser and environment
@@ -144,6 +161,9 @@ func (ltc *localDirTestContext) createJobDefinitionViaAPI(name, dirPath string, 
 		},
 	}
 
+	// Save job definition as TOML to results directory
+	ltc.saveJobToml("local-dir-job-definition.toml", body)
+
 	resp, err := ltc.helper.POST("/api/job-definitions", body)
 	if err != nil {
 		return "", fmt.Errorf("failed to create job definition: %w", err)
@@ -193,6 +213,9 @@ func (ltc *localDirTestContext) createCombinedJobDefinitionViaAPI(name, dirPath 
 			},
 		},
 	}
+
+	// Save job definition as TOML to results directory
+	ltc.saveJobToml("combined-job-definition.toml", body)
 
 	resp, err := ltc.helper.POST("/api/job-definitions", body)
 	if err != nil {
@@ -640,6 +663,9 @@ func TestSummaryAgentPlainRequest(t *testing.T) {
 			},
 		},
 	}
+
+	// Save job definition as TOML to results directory
+	ltc.saveJobToml("summary-plain-job-definition.toml", summaryBody)
 
 	resp, err := ltc.helper.POST("/api/job-definitions", summaryBody)
 	if err != nil {
