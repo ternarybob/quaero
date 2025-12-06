@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/pelletier/go-toml/v2"
 	"github.com/ternarybob/quaero/test/common"
 )
 
@@ -36,70 +35,99 @@ func (ltc *localDirTestContext) screenshot(name string) {
 }
 
 // saveJobToml saves the job definition as TOML to the results directory
-// Converts the API steps array format to the correct [step.{name}] TOML format
+// Uses the correct format: [step.{stepname}] with config fields directly in section
 func (ltc *localDirTestContext) saveJobToml(filename string, jobDef map[string]interface{}) {
-	// Convert the steps array to the correct [step.{name}] format for TOML
-	tomlDef := make(map[string]interface{})
-	for k, v := range jobDef {
-		if k == "steps" {
-			// Convert steps array to step map: [step.{name}] format
-			if stepsArray, ok := v.([]map[string]interface{}); ok {
-				stepMap := make(map[string]map[string]interface{})
-				for _, step := range stepsArray {
-					if name, ok := step["name"].(string); ok {
-						// Copy step data but exclude "name" (it becomes the key)
-						stepData := make(map[string]interface{})
-						for sk, sv := range step {
-							if sk != "name" {
-								// Flatten config into step data for TOML format
-								if sk == "config" {
-									if configMap, ok := sv.(map[string]interface{}); ok {
-										for ck, cv := range configMap {
-											stepData[ck] = cv
-										}
-									}
-								} else if sk == "depends" {
-									// Convert depends string to array for TOML format
-									if depStr, ok := sv.(string); ok && depStr != "" {
-										// Split comma-separated deps into array
-										deps := strings.Split(depStr, ",")
-										for i := range deps {
-											deps[i] = strings.TrimSpace(deps[i])
-										}
-										stepData["depends"] = deps
-									}
-								} else {
-									stepData[sk] = sv
-								}
-							}
-						}
-						stepMap[name] = stepData
-					}
-				}
-				tomlDef["step"] = stepMap
+	var buf strings.Builder
+
+	// Write top-level fields
+	writeTomlField(&buf, "id", jobDef["id"])
+	writeTomlField(&buf, "name", jobDef["name"])
+	writeTomlField(&buf, "type", jobDef["type"])
+	writeTomlField(&buf, "description", jobDef["description"])
+	writeTomlField(&buf, "enabled", jobDef["enabled"])
+	if tags, ok := jobDef["tags"].([]string); ok && len(tags) > 0 {
+		writeTomlField(&buf, "tags", tags)
+	}
+	buf.WriteString("\n")
+
+	// Write steps in [step.{name}] format
+	if steps, ok := jobDef["steps"].([]map[string]interface{}); ok {
+		for _, step := range steps {
+			stepName, _ := step["name"].(string)
+			buf.WriteString(fmt.Sprintf("[step.%s]\n", stepName))
+
+			// Write step fields (excluding name and config)
+			writeTomlField(&buf, "type", step["type"])
+			if desc, ok := step["description"].(string); ok && desc != "" {
+				writeTomlField(&buf, "description", desc)
 			}
-		} else {
-			tomlDef[k] = v
+			if depends, ok := step["depends"].(string); ok && depends != "" {
+				// Convert depends string to array format for TOML
+				deps := strings.Split(depends, ",")
+				for i := range deps {
+					deps[i] = strings.TrimSpace(deps[i])
+				}
+				writeTomlField(&buf, "depends", deps)
+			}
+			if onError, ok := step["on_error"].(string); ok && onError != "" {
+				writeTomlField(&buf, "on_error", onError)
+			}
+
+			// Write config fields directly in step section
+			if config, ok := step["config"].(map[string]interface{}); ok {
+				for k, v := range config {
+					writeTomlField(&buf, k, v)
+				}
+			}
+			buf.WriteString("\n")
 		}
 	}
 
-	tomlData, err := toml.Marshal(tomlDef)
-	if err != nil {
-		ltc.env.LogTest(ltc.t, "Warning: failed to marshal job definition to TOML: %v", err)
-		return
-	}
-
-	// Remove the redundant [step] line that go-toml generates for nested maps
-	// We only want [step.{name}] sections, not a standalone [step] header
-	tomlStr := string(tomlData)
-	tomlStr = strings.Replace(tomlStr, "[step]\n", "", 1)
-
 	tomlPath := filepath.Join(ltc.env.GetResultsDir(), filename)
-	if err := os.WriteFile(tomlPath, []byte(tomlStr), 0644); err != nil {
+	if err := os.WriteFile(tomlPath, []byte(buf.String()), 0644); err != nil {
 		ltc.env.LogTest(ltc.t, "Warning: failed to save job TOML to %s: %v", tomlPath, err)
 		return
 	}
 	ltc.env.LogTest(ltc.t, "Saved job definition TOML to: %s", tomlPath)
+}
+
+// writeTomlField writes a TOML field to the buffer
+func writeTomlField(buf *strings.Builder, key string, value interface{}) {
+	if value == nil {
+		return
+	}
+	switch v := value.(type) {
+	case string:
+		buf.WriteString(fmt.Sprintf("%s = %q\n", key, v))
+	case bool:
+		buf.WriteString(fmt.Sprintf("%s = %t\n", key, v))
+	case int:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, v))
+	case int64:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, v))
+	case float64:
+		buf.WriteString(fmt.Sprintf("%s = %d\n", key, int(v)))
+	case []string:
+		buf.WriteString(fmt.Sprintf("%s = [", key))
+		for i, s := range v {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteString(fmt.Sprintf("%q", s))
+		}
+		buf.WriteString("]\n")
+	case []interface{}:
+		buf.WriteString(fmt.Sprintf("%s = [", key))
+		for i, item := range v {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			if s, ok := item.(string); ok {
+				buf.WriteString(fmt.Sprintf("%q", s))
+			}
+		}
+		buf.WriteString("]\n")
+	}
 }
 
 // newLocalDirTestContext creates a new test context with browser and environment
@@ -640,8 +668,8 @@ func (ltc *localDirTestContext) verifyTomlStepFormat(filename string) error {
 	}
 
 	// Check 4: Verify depends field is present as array in generate-summary step
-	if !strings.Contains(content, "depends = ['index-files']") {
-		return fmt.Errorf("missing depends = ['index-files'] (array format) in generate-summary step")
+	if !strings.Contains(content, "depends = [\"index-files\"]") {
+		return fmt.Errorf("missing depends = [\"index-files\"] (array format) in generate-summary step")
 	}
 
 	ltc.env.LogTest(ltc.t, "TOML format verification passed: no [step], has [step.{name}] sections, depends field present")
