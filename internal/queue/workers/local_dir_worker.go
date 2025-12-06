@@ -679,3 +679,6 @@ func detectFileType(ext string) string {
 
 	return "text"
 }
+
+// Note: Helper functions getStringConfig, getIntConfig, getStringSliceConfig
+// are defined in github_repo_worker.go and shared across all workers in this package

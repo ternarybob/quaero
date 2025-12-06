@@ -187,9 +187,9 @@ type CodeMapMetadata struct {
 	Complexity_ string   `json:"complexity_"`  // AI-assessed complexity
 
 	// Processing State
-	Indexed       bool   `json:"indexed"`        // Structure has been indexed
-	Summarized    bool   `json:"summarized"`     // AI summary has been generated
-	LastIndexed   string `json:"last_indexed"`   // When structure was indexed (RFC3339)
+	Indexed        bool   `json:"indexed"`         // Structure has been indexed
+	Summarized     bool   `json:"summarized"`      // AI summary has been generated
+	LastIndexed    string `json:"last_indexed"`    // When structure was indexed (RFC3339)
 	LastSummarized string `json:"last_summarized"` // When summary was generated (RFC3339)
 }
 

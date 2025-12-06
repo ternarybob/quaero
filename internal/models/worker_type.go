@@ -21,8 +21,8 @@ const (
 	WorkerTypeTransform           WorkerType = "transform"
 	WorkerTypeReindex             WorkerType = "reindex"
 	WorkerTypeDatabaseMaintenance WorkerType = "database_maintenance"
-	WorkerTypeLocalDir            WorkerType = "local_dir"  // Local directory indexing (full content)
-	WorkerTypeCodeMap             WorkerType = "code_map"   // Hierarchical code structure analysis
+	WorkerTypeLocalDir            WorkerType = "local_dir" // Local directory indexing (full content)
+	WorkerTypeCodeMap             WorkerType = "code_map"  // Hierarchical code structure analysis
 )
 
 // IsValid checks if the WorkerType is a known, valid type

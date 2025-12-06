@@ -43,7 +43,7 @@ type JobDefinitionFile struct {
 	Description string   `toml:"description"`
 	Schedule    string   `toml:"schedule"`
 	Timeout     string   `toml:"timeout"`
-	Enabled     bool     `toml:"enabled"`
+	Enabled     *bool    `toml:"enabled"` // Pointer to detect if explicitly set; defaults to true
 	AutoStart   bool     `toml:"auto_start"`
 	AuthID      string   `toml:"authentication"`
 	Tags        []string `toml:"tags"`
@@ -181,6 +181,12 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		jobDefType = models.JobDefinitionTypeCrawler
 	}
 
+	// Default enabled to true if not explicitly set
+	enabled := true
+	if f.Enabled != nil {
+		enabled = *f.Enabled
+	}
+
 	return &models.JobDefinition{
 		ID:          f.ID,
 		Name:        f.Name,
@@ -189,7 +195,7 @@ func (f *JobDefinitionFile) ToJobDefinition() (*models.JobDefinition, error) {
 		Description: f.Description,
 		Schedule:    f.Schedule,
 		Timeout:     f.Timeout,
-		Enabled:     f.Enabled,
+		Enabled:     enabled,
 		AutoStart:   f.AutoStart,
 		AuthID:      f.AuthID,
 		Tags:        f.Tags,

@@ -151,26 +151,9 @@
                     <h3>TOML Format Reference</h3>
                 </div>
                 <div class="card-body">
-                    <pre style="background-color: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code># Required Fields
-id = "my-crawler"              # Unique identifier
-name = "My Crawler"            # Human-readable name
-description = "Description"    # Job description
-source_type = "web"            # Source type (required for crawler jobs)
-
-# Crawler Configuration
-start_urls = ["https://example.com"]
-include_patterns = ["^/articles/"]  # Regex patterns to include
-exclude_patterns = ["login", "admin"]  # Patterns to exclude
-max_depth = 3                  # Maximum crawl depth
-max_pages = 100                # Maximum pages to crawl
-concurrency = 5                # Concurrent workers
-follow_links = true            # Follow discovered links
-
-# Optional Fields
-schedule = "0 */6 * * *"       # Cron expression (empty = manual only)
-timeout = "30m"                # Duration: 10m, 1h, 30s
-enabled = true                 # Enable/disable job
-auto_start = false             # Auto-start on application startup</code></pre>
+                    <p>
+                        See the <a href="https://github.com/ternarybob/quaero/blob/main/deployments/local/job-definitions/README.md" target="_blank">job definitions documentation</a> for detailed examples and configuration options.
+                    </p>
                 </div>
             </div>
         </section>
@@ -374,28 +357,20 @@ auto_start = false             # Auto-start on application startup</code></pre>
 id = "example-crawler"
 name = "Example Web Crawler"
 description = "Example crawler job that demonstrates the TOML format"
-source_type = "web"
-
-# Initial URLs to start crawling from
-start_urls = [
-    "https://example.com/articles"
-]
-
-# URL filtering patterns (regex)
-include_patterns = ["^/articles/", "^/blog/"]
-exclude_patterns = ["login", "logout", "admin"]
-
-# Crawler settings
-max_depth = 2
-max_pages = 50
-concurrency = 3
-follow_links = true
-
-# Optional scheduling and execution settings
-schedule = ""        # Empty = manual execution only
-timeout = "15m"      # 15 minutes
+tags = ["news", "web-content"]
+schedule = ""
+timeout = "30m"
 enabled = true
-auto_start = false`;
+
+[step.crawl]
+type = "crawler"
+start_urls = ["https://example.com/news"]
+include_patterns = ["^/news/", "^/articles/"]
+exclude_patterns = ["login", "logout", "admin"]
+max_depth = 2
+max_pages = 100
+concurrency = 5
+follow_links = true`;
 
                     this.validationMessage = '';
                 },
