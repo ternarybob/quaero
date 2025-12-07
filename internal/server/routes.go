@@ -110,6 +110,13 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/hybrid-scraper/inject-stealth", s.app.HybridScraperHandler.InjectStealthHandler)
 	mux.HandleFunc("/api/hybrid-scraper/session/", s.app.HybridScraperHandler.SessionHandler)
 
+	// API routes - DevOps Enrichment Pipeline
+	mux.HandleFunc("/api/devops/summary", s.app.DevOpsHandler.SummaryHandler)
+	mux.HandleFunc("/api/devops/components", s.app.DevOpsHandler.ComponentsHandler)
+	mux.HandleFunc("/api/devops/graph", s.app.DevOpsHandler.GraphHandler)
+	mux.HandleFunc("/api/devops/platforms", s.app.DevOpsHandler.PlatformsHandler)
+	mux.HandleFunc("/api/devops/enrich", s.app.DevOpsHandler.EnrichHandler)
+
 	// 404 handler for unmatched API routes
 	mux.HandleFunc("/api/", s.app.APIHandler.NotFoundHandler)
 

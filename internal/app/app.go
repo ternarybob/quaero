@@ -127,6 +127,7 @@ type App struct {
 	ConnectorHandler     *handlers.ConnectorHandler
 	GitHubJobsHandler    *handlers.GitHubJobsHandler
 	HybridScraperHandler *handlers.HybridScraperHandler
+	DevOpsHandler        *handlers.DevOpsHandler
 }
 
 // New initializes the application with all dependencies
@@ -694,6 +695,19 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
+	// Register DevOps worker (enrichment pipeline for C/C++ code analysis)
+	devopsWorker := workers.NewDevOpsWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.EventService,
+		a.StorageManager.KeyValueStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(devopsWorker) // Register with StepManager for step routing
+	a.Logger.Debug().Str("step_type", devopsWorker.GetType().String()).Msg("DevOps worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize Orchestrator
@@ -853,6 +867,16 @@ func (a *App) initHandlers() error {
 	// Initialize hybrid scraper handler (lazy initialization - browser launched on-demand)
 	a.HybridScraperHandler = handlers.NewHybridScraperHandler(a.Logger)
 	a.Logger.Debug().Msg("Hybrid scraper handler initialized")
+
+	// Initialize DevOps handler for enrichment pipeline endpoints
+	a.DevOpsHandler = handlers.NewDevOpsHandler(
+		a.StorageManager.KeyValueStorage(),
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.JobManager,
+		a.Logger,
+	)
+	a.Logger.Debug().Msg("DevOps handler initialized")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)
