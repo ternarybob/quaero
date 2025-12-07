@@ -1,5 +1,10 @@
 # Test Docker image for running Quaero integration and UI tests
 # Includes Go build environment and Chrome for headless browser testing
+#
+# Usage:
+#   docker build -f deployments/docker/Dockerfile.test -t quaero-test:latest .
+#   docker run --rm quaero-test:latest sh -c "cd /app/test/api && go test -v ./..."
+#   docker run --rm quaero-test:latest sh -c "cd /app/test/ui && go test -v ./..."
 
 FROM golang:1.23-alpine
 
@@ -37,19 +42,29 @@ RUN go mod download
 # Copy the entire project
 COPY . .
 
-# Ensure proper ownership
-RUN chown -R tester:tester /app
+# Create directories for test environment
+RUN mkdir -p /app/test/bin /app/test/results /app/bin/data && \
+    mkdir -p /app/test/bin/pages /app/test/bin/job-definitions && \
+    mkdir -p /app/test/bin/variables /app/test/bin/bin/connectors && \
+    mkdir -p /app/test/bin/quaero-chrome-extension
 
-# Create directories for test results and data
-RUN mkdir -p /app/test/results /app/test/bin /app/bin/data && \
-    chown -R tester:tester /app/test/results /app/test/bin /app/bin
+# Build the application
+RUN CGO_ENABLED=0 go build -o /app/test/bin/quaero ./cmd/quaero && \
+    cp /app/test/bin/quaero /app/bin/quaero
+
+# Setup test environment - copy required files to test/bin
+RUN cp -r /app/pages /app/test/bin/ && \
+    cp -r /app/cmd/quaero-chrome-extension/* /app/test/bin/quaero-chrome-extension/ 2>/dev/null || true && \
+    cp /app/test/config/test-quaero.toml /app/test/bin/quaero.toml && \
+    cp -r /app/test/config/job-definitions/* /app/test/bin/job-definitions/ 2>/dev/null || true && \
+    cp -r /app/test/config/variables/* /app/test/bin/variables/ 2>/dev/null || true && \
+    cp -r /app/test/config/connectors/* /app/test/bin/bin/connectors/ 2>/dev/null || true
+
+# Ensure proper ownership for tester user
+RUN chown -R tester:tester /app
 
 # Switch to non-root user
 USER tester
 
-# Build the application for tests
-RUN CGO_ENABLED=0 go build -o /app/bin/quaero ./cmd/quaero
-
-# Default command runs all tests
-# Override with specific test commands as needed
-CMD ["go", "test", "-v", "./test/..."]
+# Default command shows help
+CMD ["echo", "Run tests with: sh -c 'cd /app/test/api && go test -v ./...'"]
