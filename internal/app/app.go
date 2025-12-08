@@ -695,18 +695,56 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
-	// Register DevOps worker (enrichment pipeline for C/C++ code analysis)
-	devopsWorker := workers.NewDevOpsWorker(
+	// Register enrichment pipeline workers (each handles a specific enrichment step)
+	extractStructureWorker := workers.NewExtractStructureWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
-		a.EventService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(extractStructureWorker)
+	a.Logger.Debug().Str("step_type", extractStructureWorker.GetType().String()).Msg("Extract structure worker registered")
+
+	analyzeBuildWorker := workers.NewAnalyzeBuildWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(analyzeBuildWorker)
+	a.Logger.Debug().Str("step_type", analyzeBuildWorker.GetType().String()).Msg("Analyze build worker registered")
+
+	classifyWorker := workers.NewClassifyWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(classifyWorker)
+	a.Logger.Debug().Str("step_type", classifyWorker.GetType().String()).Msg("Classify worker registered")
+
+	dependencyGraphWorker := workers.NewDependencyGraphWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(dependencyGraphWorker)
+	a.Logger.Debug().Str("step_type", dependencyGraphWorker.GetType().String()).Msg("Dependency graph worker registered")
+
+	aggregateSummaryWorker := workers.NewAggregateSummaryWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
 		a.StorageManager.KeyValueStorage(),
 		a.LLMService,
 		a.Logger,
 		jobMgr,
 	)
-	a.StepManager.RegisterWorker(devopsWorker) // Register with StepManager for step routing
-	a.Logger.Debug().Str("step_type", devopsWorker.GetType().String()).Msg("DevOps worker registered")
+	a.StepManager.RegisterWorker(aggregateSummaryWorker)
+	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
 
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
@@ -873,7 +911,10 @@ func (a *App) initHandlers() error {
 		a.StorageManager.KeyValueStorage(),
 		a.StorageManager.DocumentStorage(),
 		a.SearchService,
-		a.JobManager,
+		a.StorageManager.JobDefinitionStorage(),
+		a.Orchestrator,
+		a.JobMonitor,
+		a.StepMonitor,
 		a.Logger,
 	)
 	a.Logger.Debug().Msg("DevOps handler initialized")

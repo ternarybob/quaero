@@ -42,11 +42,14 @@ func NewAnalyzeBuildSystemAction(
 
 // Build file detection patterns
 var buildFilePatterns = []struct {
-	pattern   string
-	extension string
-	prefix    string
+	pattern         string
+	extension       string
+	prefix          string
+	caseInsensitive bool
 }{
 	{pattern: "Makefile", prefix: "Makefile"},
+	{pattern: "makefile", caseInsensitive: true}, // lowercase makefile
+	{pattern: "GNUmakefile"},                     // GNU-style makefile
 	{extension: ".mk"},
 	{pattern: "CMakeLists.txt"},
 	{extension: ".cmake"},
@@ -72,7 +75,8 @@ var (
 	linkedLibPattern = regexp.MustCompile(`-l(\w+)`)
 
 	// CMake link libraries: target_link_libraries(target lib1 lib2)
-	cmakeLinkPattern = regexp.MustCompile(`target_link_libraries\s*\([^)]*\b(\w+)\b`)
+	// Matches individual library names, will find multiple with FindAllStringSubmatch
+	cmakeLinkPattern = regexp.MustCompile(`target_link_libraries\s*\(\s*(\w+)(?:\s+(?:PUBLIC|PRIVATE|INTERFACE))?([^)]+)\)`)
 
 	// LDFLAGS and similar variables
 	ldflagsPattern = regexp.MustCompile(`(?i)LDFLAGS\s*[+:=]\s*([^\n]+)`)
@@ -85,11 +89,18 @@ var (
 func (a *AnalyzeBuildSystemAction) IsBuildFile(path string) bool {
 	base := filepath.Base(path)
 	ext := filepath.Ext(path)
+	baseLower := strings.ToLower(base)
 
 	for _, pattern := range buildFilePatterns {
-		// Check exact pattern match
-		if pattern.pattern != "" && base == pattern.pattern {
-			return true
+		// Check exact pattern match (case-insensitive if specified)
+		if pattern.pattern != "" {
+			if pattern.caseInsensitive {
+				if baseLower == strings.ToLower(pattern.pattern) {
+					return true
+				}
+			} else if base == pattern.pattern {
+				return true
+			}
 		}
 		// Check extension
 		if pattern.extension != "" && ext == pattern.extension {
@@ -106,10 +117,11 @@ func (a *AnalyzeBuildSystemAction) IsBuildFile(path string) bool {
 
 // Execute performs build system analysis on a document
 func (a *AnalyzeBuildSystemAction) Execute(ctx context.Context, doc *models.Document, force bool) error {
-	// Check if this is a build file
-	if !a.IsBuildFile(doc.FilePath) {
+	// Check if this is a build file (use URL as file path)
+	filePath := doc.URL
+	if !a.IsBuildFile(filePath) {
 		a.logger.Debug().
-			Str("file_path", doc.FilePath).
+			Str("file_path", filePath).
 			Msg("Skipping non-build file")
 		return nil
 	}
@@ -118,14 +130,14 @@ func (a *AnalyzeBuildSystemAction) Execute(ctx context.Context, doc *models.Docu
 	if !force && a.hasEnrichmentPass(doc, "analyze_build_system") {
 		a.logger.Debug().
 			Str("document_id", doc.ID).
-			Str("file_path", doc.FilePath).
+			Str("file_path", filePath).
 			Msg("Document already has analyze_build_system pass, skipping")
 		return nil
 	}
 
 	a.logger.Info().
 		Str("document_id", doc.ID).
-		Str("file_path", doc.FilePath).
+		Str("file_path", filePath).
 		Msg("Analyzing build system file")
 
 	// Initialize DevOps metadata if not present
@@ -136,16 +148,16 @@ func (a *AnalyzeBuildSystemAction) Execute(ctx context.Context, doc *models.Docu
 	devopsData := a.getDevOpsMetadata(doc)
 
 	// Extract build information based on file type
-	content := doc.Content
-	base := filepath.Base(doc.FilePath)
+	content := doc.ContentMarkdown
+	base := filepath.Base(filePath)
 
-	if strings.HasPrefix(base, "Makefile") || filepath.Ext(doc.FilePath) == ".mk" {
+	if strings.HasPrefix(base, "Makefile") || filepath.Ext(filePath) == ".mk" {
 		a.analyzeMakefile(content, devopsData)
-	} else if base == "CMakeLists.txt" || filepath.Ext(doc.FilePath) == ".cmake" {
+	} else if base == "CMakeLists.txt" || filepath.Ext(filePath) == ".cmake" {
 		a.analyzeCMake(content, devopsData)
-	} else if strings.HasSuffix(doc.FilePath, ".vcxproj") {
+	} else if strings.HasSuffix(filePath, ".vcxproj") {
 		a.analyzeVCXProj(content, devopsData)
-	} else if strings.HasPrefix(base, "configure") || filepath.Ext(doc.FilePath) == ".sln" {
+	} else if strings.HasPrefix(base, "configure") || filepath.Ext(filePath) == ".sln" {
 		a.analyzeConfigureOrSln(content, devopsData)
 	}
 
@@ -162,11 +174,11 @@ func (a *AnalyzeBuildSystemAction) Execute(ctx context.Context, doc *models.Docu
 
 	// Use LLM for complex analysis if available and content is substantial
 	if a.llmService != nil && len(content) > 100 && len(devopsData.BuildTargets) > 0 {
-		llmData, err := a.AnalyzeWithLLM(ctx, content, doc.FilePath)
+		llmData, err := a.AnalyzeWithLLM(ctx, content, filePath)
 		if err != nil {
 			a.logger.Warn().
 				Err(err).
-				Str("file_path", doc.FilePath).
+				Str("file_path", filePath).
 				Msg("LLM analysis failed, using regex results only")
 		} else {
 			// Merge LLM results with regex results
@@ -188,7 +200,7 @@ func (a *AnalyzeBuildSystemAction) Execute(ctx context.Context, doc *models.Docu
 
 	a.logger.Info().
 		Str("document_id", doc.ID).
-		Str("file_path", doc.FilePath).
+		Str("file_path", filePath).
 		Int("build_targets", len(devopsData.BuildTargets)).
 		Int("compiler_flags", len(devopsData.CompilerFlags)).
 		Int("linked_libraries", len(devopsData.LinkedLibraries)).
@@ -312,11 +324,15 @@ func (a *AnalyzeBuildSystemAction) ExtractLinkedLibraries(content string) []stri
 	// Extract from CMake target_link_libraries
 	cmakeMatches := cmakeLinkPattern.FindAllStringSubmatch(content, -1)
 	for _, match := range cmakeMatches {
-		if len(match) > 1 {
-			// Skip CMake keywords
-			lib := match[1]
-			if lib != "PUBLIC" && lib != "PRIVATE" && lib != "INTERFACE" {
-				libraries = append(libraries, lib)
+		// match[1] is the target name (skip it), match[2] is the rest of the arguments
+		if len(match) > 2 {
+			// Split the library arguments by whitespace
+			libArgs := strings.Fields(match[2])
+			for _, lib := range libArgs {
+				// Skip CMake keywords
+				if lib != "PUBLIC" && lib != "PRIVATE" && lib != "INTERFACE" && lib != "" {
+					libraries = append(libraries, lib)
+				}
 			}
 		}
 	}

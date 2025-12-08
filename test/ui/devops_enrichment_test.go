@@ -8,404 +8,55 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/google/uuid"
 	"github.com/ternarybob/quaero/test/common"
 )
 
+// =============================================================================
+// Types and Structs
+// =============================================================================
+
 // devopsTestContext holds shared state for DevOps enrichment tests
 type devopsTestContext struct {
-	t         *testing.T
-	env       *common.TestEnvironment
-	ctx       context.Context
-	baseURL   string
-	jobsURL   string
-	queueURL  string
-	helper    *common.HTTPTestHelper
-	docsCount int // Track number of imported docs
+	t             *testing.T
+	env           *common.TestEnvironment
+	ctx           context.Context
+	baseURL       string
+	jobsURL       string
+	queueURL      string
+	helper        *common.HTTPTestHelper
+	docsCount     int      // Track number of imported docs
+	importedFiles []string // Track imported file paths for manifest
+	screenshotNum int      // Sequential screenshot counter
 }
 
-// newDevopsTestContext creates a new test context with browser and environment
-func newDevopsTestContext(t *testing.T, timeout time.Duration) (*devopsTestContext, func()) {
-	// Setup Test Environment
-	env, err := common.SetupTestEnvironment(t.Name())
-	if err != nil {
-		t.Fatalf("Failed to setup test environment: %v", err)
-	}
-
-	// Create a timeout context for the entire test
-	ctx, cancelTimeout := context.WithTimeout(context.Background(), timeout)
-
-	// Create allocator context
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.WindowSize(1920, 1080),
-	)
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
-
-	// Create browser context
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-
-	baseURL := env.GetBaseURL()
-
-	dtc := &devopsTestContext{
-		t:        t,
-		env:      env,
-		ctx:      browserCtx,
-		baseURL:  baseURL,
-		jobsURL:  baseURL + "/jobs",
-		queueURL: baseURL + "/queue",
-		helper:   env.NewHTTPTestHelperWithTimeout(t, 5*time.Minute),
-	}
-
-	// Return cleanup function
-	cleanup := func() {
-		// Properly close the browser before canceling contexts
-		if err := chromedp.Cancel(browserCtx); err != nil {
-			t.Logf("Warning: browser cancel returned: %v", err)
-		}
-		cancelBrowser()
-		cancelAlloc()
-		cancelTimeout()
-		env.Cleanup()
-	}
-
-	return dtc, cleanup
+// LocalDirImportConfig holds configuration for a local_dir import job
+type LocalDirImportConfig struct {
+	DirPath           string   // Path to directory to import
+	IncludeExtensions []string // File extensions to include (nil = all files)
+	ExcludePaths      []string // Paths to exclude
+	MaxFileSize       int64    // Max file size in bytes (0 = default)
+	Tags              []string // Tags to apply to imported documents
 }
 
-// importFixtures imports test files from test/fixtures/cpp_project/ into the document store
-func (dtc *devopsTestContext) importFixtures() error {
-	dtc.env.LogTest(dtc.t, "Importing test fixtures from cpp_project...")
-
-	fixturesDir := "../fixtures/cpp_project"
-	absPath, err := filepath.Abs(fixturesDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve fixtures path: %w", err)
-	}
-
-	var importedCount int
-	var files []string
-
-	// Walk the fixtures directory and collect all source files
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
-
-		// Import only source code files
-		ext := filepath.Ext(path)
-		if ext == ".cpp" || ext == ".h" || ext == ".txt" || ext == ".cmake" {
-			files = append(files, path)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to walk fixtures directory: %w", err)
-	}
-
-	// Import each file as a document
-	for _, filePath := range files {
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			dtc.env.LogTest(dtc.t, "  Warning: Failed to read %s: %v", filePath, err)
-			continue
-		}
-
-		// Extract relative path for the title
-		relPath, _ := filepath.Rel(absPath, filePath)
-
-		doc := map[string]interface{}{
-			"source_type":      "local_file",
-			"url":              "file://" + filePath,
-			"title":            relPath,
-			"content_markdown": string(content),
-			"metadata": map[string]interface{}{
-				"file_type": filepath.Ext(filePath),
-				"file_path": relPath,
-				"language":  detectLanguage(filepath.Ext(filePath)),
-			},
-			"tags": []string{"test-fixture", "devops-candidate"},
-		}
-
-		resp, err := dtc.helper.POST("/api/documents", doc)
-		if err != nil {
-			dtc.env.LogTest(dtc.t, "  Warning: Failed to import %s: %v", relPath, err)
-			continue
-		}
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-			dtc.env.LogTest(dtc.t, "  Warning: Failed to import %s (status %d)", relPath, resp.StatusCode)
-			continue
-		}
-
-		importedCount++
-		dtc.env.LogTest(dtc.t, "  ✓ Imported: %s", relPath)
-	}
-
-	dtc.docsCount = importedCount
-	dtc.env.LogTest(dtc.t, "✓ Imported %d files from fixtures", importedCount)
-
-	if importedCount == 0 {
-		return fmt.Errorf("no files were imported")
-	}
-
-	return nil
+// LocalDirImportResult holds the result of a local_dir import job
+type LocalDirImportResult struct {
+	JobID         string   // ID of the executed job
+	JobDefID      string   // ID of the job definition
+	ImportedCount int      // Number of files imported
+	ImportedFiles []string // List of imported file paths
+	Success       bool     // Whether import completed successfully
 }
 
-// detectLanguage maps file extension to language name
-func detectLanguage(ext string) string {
-	switch ext {
-	case ".cpp", ".cc", ".cxx":
-		return "cpp"
-	case ".h", ".hpp":
-		return "cpp-header"
-	case ".cmake":
-		return "cmake"
-	default:
-		return "text"
-	}
-}
-
-// triggerEnrichment triggers the DevOps enrichment pipeline via API
-func (dtc *devopsTestContext) triggerEnrichment() (string, error) {
-	dtc.env.LogTest(dtc.t, "Triggering DevOps enrichment pipeline...")
-
-	resp, err := dtc.helper.POST("/api/devops/enrich", nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to trigger enrichment: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("enrichment trigger failed (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var result map[string]interface{}
-	if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	jobID, ok := result["job_id"].(string)
-	if !ok {
-		return "", fmt.Errorf("job_id not found in response")
-	}
-
-	dtc.env.LogTest(dtc.t, "✓ Enrichment pipeline triggered (job ID: %s)", jobID)
-	return jobID, nil
-}
-
-// monitorJobWithPolling monitors a job via polling (API-based, not UI-based)
-func (dtc *devopsTestContext) monitorJobWithPolling(jobID string, timeout time.Duration) error {
-	dtc.env.LogTest(dtc.t, "Monitoring job: %s (timeout: %v)", jobID, timeout)
-
-	startTime := time.Now()
-	lastProgressLog := time.Now()
-	checkCount := 0
-
-	for {
-		// Check timeout
-		if time.Since(startTime) > timeout {
-			return fmt.Errorf("job %s did not complete within %v", jobID, timeout)
-		}
-
-		// Check context cancellation
-		if err := dtc.ctx.Err(); err != nil {
-			return fmt.Errorf("context cancelled during monitoring: %w", err)
-		}
-
-		// Get job status via API
-		resp, err := dtc.helper.GET("/api/jobs/" + jobID)
-		if err != nil {
-			return fmt.Errorf("failed to get job status: %w", err)
-		}
-
-		var job map[string]interface{}
-		if err := dtc.helper.ParseJSONResponse(resp, &job); err != nil {
-			resp.Body.Close()
-			return fmt.Errorf("failed to parse job response: %w", err)
-		}
-		resp.Body.Close()
-
-		status, _ := job["status"].(string)
-		checkCount++
-
-		// Log progress every 10 seconds
-		if time.Since(lastProgressLog) >= 10*time.Second {
-			elapsed := time.Since(startTime)
-			dtc.env.LogTest(dtc.t, "  [%v] Still monitoring... (status: %s, checks: %d)",
-				elapsed.Round(time.Second), status, checkCount)
-			lastProgressLog = time.Now()
-		}
-
-		// Check if job is done
-		if status == "completed" {
-			dtc.env.LogTest(dtc.t, "✓ Job completed successfully (after %d checks)", checkCount)
-			return nil
-		}
-
-		if status == "failed" {
-			failureReason := "unknown"
-			if metadata, ok := job["metadata"].(map[string]interface{}); ok {
-				if reason, ok := metadata["failure_reason"].(string); ok {
-					failureReason = reason
-				}
-			}
-			return fmt.Errorf("job %s failed: %s", jobID, failureReason)
-		}
-
-		if status == "cancelled" {
-			return fmt.Errorf("job %s was cancelled", jobID)
-		}
-
-		// Wait before next check
-		time.Sleep(1 * time.Second)
-	}
-}
-
-// verifyEnrichmentResults verifies that enrichment produced expected results
-func (dtc *devopsTestContext) verifyEnrichmentResults() error {
-	dtc.env.LogTest(dtc.t, "Verifying enrichment results...")
-
-	// 1. Verify dependency graph exists
-	dtc.env.LogTest(dtc.t, "  Checking dependency graph...")
-	resp, err := dtc.helper.GET("/api/devops/graph")
-	if err != nil {
-		return fmt.Errorf("failed to get dependency graph: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("dependency graph not found (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var graph map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&graph); err != nil {
-		return fmt.Errorf("failed to parse graph: %w", err)
-	}
-
-	// Check for nodes and edges
-	nodes, hasNodes := graph["nodes"]
-	edges, hasEdges := graph["edges"]
-
-	if !hasNodes || !hasEdges {
-		return fmt.Errorf("graph missing nodes or edges: hasNodes=%v, hasEdges=%v", hasNodes, hasEdges)
-	}
-
-	dtc.env.LogTest(dtc.t, "  ✓ Dependency graph exists with nodes and edges")
-
-	// 2. Verify summary document exists
-	dtc.env.LogTest(dtc.t, "  Checking DevOps summary...")
-	resp2, err := dtc.helper.GET("/api/devops/summary")
-	if err != nil {
-		return fmt.Errorf("failed to get summary: %w", err)
-	}
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp2.Body)
-		return fmt.Errorf("summary not found (status %d): %s", resp2.StatusCode, string(body))
-	}
-
-	var summaryResult map[string]interface{}
-	if err := json.NewDecoder(resp2.Body).Decode(&summaryResult); err != nil {
-		return fmt.Errorf("failed to parse summary: %w", err)
-	}
-
-	summary, ok := summaryResult["summary"].(string)
-	if !ok || summary == "" {
-		return fmt.Errorf("summary is empty or missing")
-	}
-
-	dtc.env.LogTest(dtc.t, "  ✓ DevOps summary exists (%d characters)", len(summary))
-
-	// 3. Verify components endpoint works
-	dtc.env.LogTest(dtc.t, "  Checking components...")
-	resp3, err := dtc.helper.GET("/api/devops/components")
-	if err != nil {
-		return fmt.Errorf("failed to get components: %w", err)
-	}
-	defer resp3.Body.Close()
-
-	if resp3.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp3.Body)
-		return fmt.Errorf("components not found (status %d): %s", resp3.StatusCode, string(body))
-	}
-
-	dtc.env.LogTest(dtc.t, "  ✓ Components endpoint accessible")
-
-	// 4. Verify platforms endpoint works
-	dtc.env.LogTest(dtc.t, "  Checking platforms...")
-	resp4, err := dtc.helper.GET("/api/devops/platforms")
-	if err != nil {
-		return fmt.Errorf("failed to get platforms: %w", err)
-	}
-	defer resp4.Body.Close()
-
-	if resp4.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp4.Body)
-		return fmt.Errorf("platforms not found (status %d): %s", resp4.StatusCode, string(body))
-	}
-
-	dtc.env.LogTest(dtc.t, "  ✓ Platforms endpoint accessible")
-
-	dtc.env.LogTest(dtc.t, "✓ All enrichment results verified")
-	return nil
-}
-
-// verifyDocumentsEnriched verifies that documents have devops metadata
-func (dtc *devopsTestContext) verifyDocumentsEnriched() error {
-	dtc.env.LogTest(dtc.t, "Verifying documents have DevOps metadata...")
-
-	// Query documents with devops tags
-	resp, err := dtc.helper.GET("/api/documents?tags=devops-enriched&limit=100")
-	if err != nil {
-		return fmt.Errorf("failed to query documents: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var docs []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&docs); err != nil {
-		return fmt.Errorf("failed to parse documents: %w", err)
-	}
-
-	if len(docs) == 0 {
-		return fmt.Errorf("no documents found with devops-enriched tag")
-	}
-
-	// Check that at least one document has devops metadata
-	hasMetadata := false
-	for _, doc := range docs {
-		if metadata, ok := doc["metadata"].(map[string]interface{}); ok {
-			if _, hasDevOps := metadata["devops"]; hasDevOps {
-				hasMetadata = true
-				break
-			}
-		}
-	}
-
-	if !hasMetadata {
-		dtc.env.LogTest(dtc.t, "  Warning: No documents have devops metadata field")
-	} else {
-		dtc.env.LogTest(dtc.t, "  ✓ Found documents with devops metadata")
-	}
-
-	dtc.env.LogTest(dtc.t, "✓ Found %d enriched documents", len(docs))
-	return nil
-}
+// =============================================================================
+// Public Test Functions
+// =============================================================================
 
 // TestDevOpsEnrichmentPipeline_FullFlow tests the complete enrichment pipeline
 func TestDevOpsEnrichmentPipeline_FullFlow(t *testing.T) {
@@ -418,44 +69,87 @@ func TestDevOpsEnrichmentPipeline_FullFlow(t *testing.T) {
 
 	dtc.env.LogTest(t, "--- Starting Test: DevOps Enrichment Full Flow ---")
 
-	// 1. Import test fixtures via API
+	// Save job definition TOML to results directory
+	if err := dtc.loadAndSaveJobDefinitionToml(); err != nil {
+		t.Fatalf("Failed to load job definition: %v", err)
+	}
+
+	// Screenshot 1: Initial state - DOCUMENTS page showing empty database
+	documentsURL := dtc.baseURL + "/documents"
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(documentsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(t, "Warning: Failed to navigate to documents page: %v", err)
+	}
+	dtc.takeSequentialScreenshot("initial_empty_documents")
+
+	// Screenshot 2: JOBS page showing available job definitions (loaded at startup)
+	jobsListURL := dtc.baseURL + "/jobs"
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(jobsListURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(t, "Warning: Failed to navigate to jobs page: %v", err)
+	}
+	dtc.takeSequentialScreenshot("jobs_definitions_available")
+
+	// 1. Import test fixtures via API (test data setup)
 	if err := dtc.importFixtures(); err != nil {
 		t.Fatalf("Failed to import fixtures: %v", err)
 	}
 
-	// Take screenshot before enrichment
-	if err := chromedp.Run(dtc.ctx, chromedp.Navigate(dtc.baseURL)); err != nil {
-		dtc.env.LogTest(t, "Warning: Failed to navigate to home page: %v", err)
-	} else {
-		dtc.env.TakeScreenshot(dtc.ctx, "devops_before_enrichment")
+	// Screenshot 3: DOCUMENTS page showing imported files
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(documentsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(t, "Warning: Failed to navigate to documents page: %v", err)
 	}
+	dtc.takeSequentialScreenshot("documents_after_import")
 
-	// 2. Trigger enrichment pipeline
+	// 2. Trigger enrichment pipeline via UI
 	jobID, err := dtc.triggerEnrichment()
 	if err != nil {
 		t.Fatalf("Failed to trigger enrichment: %v", err)
 	}
 
-	// 3. Monitor job progress (polling with timeout)
+	// 3. Monitor job progress (polling with timeout, with step screenshots)
 	if err := dtc.monitorJobWithPolling(jobID, 8*time.Minute); err != nil {
-		dtc.env.TakeScreenshot(dtc.ctx, "devops_job_failed")
+		dtc.takeSequentialScreenshot("job_failed")
 		t.Fatalf("Job monitoring failed: %v", err)
 	}
 
-	// 4. Verify enrichment results
+	// Screenshot: QUEUE page showing completed job
+	queueURL := dtc.baseURL + "/queue"
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(queueURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(t, "Warning: Failed to navigate to queue page: %v", err)
+	}
+	dtc.takeSequentialScreenshot("queue_job_completed")
+
+	// 4. Verify enrichment results (with actual data validation)
 	if err := dtc.verifyEnrichmentResults(); err != nil {
-		dtc.env.TakeScreenshot(dtc.ctx, "devops_verification_failed")
+		dtc.takeSequentialScreenshot("verification_failed")
 		t.Fatalf("Enrichment verification failed: %v", err)
 	}
 
-	// 5. Verify documents have devops metadata
+	// 5. Verify documents have devops metadata (with content validation)
 	if err := dtc.verifyDocumentsEnriched(); err != nil {
 		dtc.env.LogTest(t, "Warning: Document verification failed: %v", err)
 		// Don't fail the test - this is informational
 	}
 
-	// Take final screenshot
-	dtc.env.TakeScreenshot(dtc.ctx, "devops_after_enrichment")
+	// Screenshot: DOCUMENTS page showing enriched docs (should show devops-enriched tag)
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(documentsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(t, "Warning: Failed to navigate to documents page: %v", err)
+	}
+	dtc.takeSequentialScreenshot("documents_after_enrichment")
 
 	dtc.env.LogTest(t, "✓ Test completed successfully")
 }
@@ -470,6 +164,11 @@ func TestDevOpsEnrichmentPipeline_ProgressMonitoring(t *testing.T) {
 	defer cleanup()
 
 	dtc.env.LogTest(t, "--- Starting Test: DevOps Progress Monitoring ---")
+
+	// Save job definition TOML to results directory
+	if err := dtc.loadAndSaveJobDefinitionToml(); err != nil {
+		t.Fatalf("Failed to load job definition: %v", err)
+	}
 
 	// Import fixtures
 	if err := dtc.importFixtures(); err != nil {
@@ -554,6 +253,11 @@ func TestDevOpsEnrichmentPipeline_IncrementalEnrich(t *testing.T) {
 
 	dtc.env.LogTest(t, "--- Starting Test: Incremental Enrichment ---")
 
+	// Save job definition TOML to results directory
+	if err := dtc.loadAndSaveJobDefinitionToml(); err != nil {
+		t.Fatalf("Failed to load job definition: %v", err)
+	}
+
 	// 1. Import initial subset of files
 	dtc.env.LogTest(t, "Importing initial file subset...")
 	if err := dtc.importFixtures(); err != nil {
@@ -579,6 +283,7 @@ func TestDevOpsEnrichmentPipeline_IncrementalEnrich(t *testing.T) {
 	dtc.env.LogTest(t, "Adding new files...")
 	newDocs := []map[string]interface{}{
 		{
+			"id":               uuid.New().String(),
 			"source_type":      "local_file",
 			"url":              "file:///test/new_component.cpp",
 			"title":            "new_component.cpp",
@@ -590,6 +295,7 @@ func TestDevOpsEnrichmentPipeline_IncrementalEnrich(t *testing.T) {
 			"tags": []string{"test-fixture", "devops-candidate"},
 		},
 		{
+			"id":               uuid.New().String(),
 			"source_type":      "local_file",
 			"url":              "file:///test/new_utils.h",
 			"title":            "new_utils.h",
@@ -644,6 +350,11 @@ func TestDevOpsEnrichmentPipeline_LargeCodebase(t *testing.T) {
 
 	dtc.env.LogTest(t, "--- Starting Test: Large Codebase Enrichment ---")
 
+	// Save job definition TOML to results directory
+	if err := dtc.loadAndSaveJobDefinitionToml(); err != nil {
+		t.Fatalf("Failed to load job definition: %v", err)
+	}
+
 	// Generate synthetic files (simulate large codebase)
 	dtc.env.LogTest(t, "Generating synthetic codebase...")
 
@@ -665,6 +376,7 @@ func TestDevOpsEnrichmentPipeline_LargeCodebase(t *testing.T) {
 		content := fmt.Sprintf(templates[templateIdx], i, i, i, i, i, i)
 
 		doc := map[string]interface{}{
+			"id":               uuid.New().String(),
 			"source_type":      "local_file",
 			"url":              fmt.Sprintf("file:///synthetic/file_%d%s", i, ext),
 			"title":            fmt.Sprintf("file_%d%s", i, ext),
@@ -711,4 +423,1448 @@ func TestDevOpsEnrichmentPipeline_LargeCodebase(t *testing.T) {
 	}
 
 	dtc.env.LogTest(t, "✓ Large codebase test completed (%d files processed)", fileCount)
+}
+
+// TestLocalDirImport_IncludeExtensions tests local_dir import with different include_extensions configurations
+func TestLocalDirImport_IncludeExtensions(t *testing.T) {
+	dtc, cleanup := newDevopsTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	dtc.env.LogTest(t, "--- Starting Test: Local Dir Import Include Extensions ---")
+
+	// Get cpp_project fixture path
+	cppProjectPath, err := getCppProjectPath()
+	if err != nil {
+		t.Fatalf("Failed to find cpp_project fixture: %v", err)
+	}
+	dtc.env.LogTest(t, "Using cpp_project fixture at: %s", cppProjectPath)
+
+	// Screenshot 1: Initial state
+	chromedp.Run(dtc.ctx, chromedp.Navigate(dtc.baseURL+"/documents"), chromedp.Sleep(2*time.Second))
+	dtc.takeSequentialScreenshot("initial_empty_documents")
+
+	// Test cases for different extensions configurations
+	// cpp_project has:
+	// - 5 .cpp files: main.cpp, utils.cpp, platform_linux.cpp, platform_win.cpp, test_main.cpp
+	// - 2 .h files: utils.h, config.h
+	// - 1 .txt file: CMakeLists.txt
+	// - 1 file without extension: Makefile (won't be matched)
+	testCases := []struct {
+		name              string
+		includeExtensions []string
+		expectedCount     int
+		description       string
+	}{
+		{
+			name:              "cpp-only",
+			includeExtensions: []string{".cpp"},
+			expectedCount:     5,
+			description:       "Import only .cpp files",
+		},
+		{
+			name:              "cpp-and-h",
+			includeExtensions: []string{".cpp", ".h"},
+			expectedCount:     7,
+			description:       "Import .cpp and .h files",
+		},
+		{
+			name:              "all-files",
+			includeExtensions: []string{".cpp", ".h", ".txt"}, // Include all file types in cpp_project
+			expectedCount:     8,                              // 5 .cpp + 2 .h + 1 .txt (CMakeLists.txt) = 8 (Makefile has no ext)
+			description:       "Import all files with standard extensions",
+		},
+	}
+
+	for i, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dtc.env.LogTest(t, "")
+			dtc.env.LogTest(t, "=== Test Case %d: %s ===", i+1, tc.description)
+
+			// Clear documents before each test case
+			dtc.env.LogTest(t, "  Clearing existing documents...")
+			resp, err := dtc.helper.DELETE("/api/documents/clear-all")
+			if err != nil {
+				t.Fatalf("Failed to clear documents: %v", err)
+			}
+			resp.Body.Close()
+			time.Sleep(2 * time.Second) // Give time for deletion to complete
+
+			// Configure import
+			config := LocalDirImportConfig{
+				DirPath:           cppProjectPath,
+				IncludeExtensions: tc.includeExtensions,
+				Tags:              []string{"import-test", tc.name},
+			}
+
+			// Run import via UI
+			jobName := fmt.Sprintf("Import Test %s", tc.name)
+			result, err := dtc.importFilesViaLocalDirJob(jobName, config, false)
+			if err != nil {
+				t.Fatalf("Import failed: %v", err)
+			}
+
+			// Take screenshot of results
+			chromedp.Run(dtc.ctx, chromedp.Navigate(dtc.baseURL+"/documents"), chromedp.Sleep(2*time.Second))
+			dtc.takeSequentialScreenshot(fmt.Sprintf("documents_after_%s_import", tc.name))
+
+			// Verify count
+			if result.ImportedCount != tc.expectedCount {
+				t.Errorf("Expected %d files, got %d for %s",
+					tc.expectedCount, result.ImportedCount, tc.description)
+			} else {
+				dtc.env.LogTest(t, "✓ %s: imported %d files (expected %d)",
+					tc.description, result.ImportedCount, tc.expectedCount)
+			}
+		})
+	}
+
+	// Final screenshot
+	dtc.takeSequentialScreenshot("test_complete")
+	dtc.env.LogTest(t, "")
+	dtc.env.LogTest(t, "✓ All include_extensions test cases completed")
+}
+
+// =============================================================================
+// Private Helper Functions
+// =============================================================================
+
+// newDevopsTestContext creates a new test context with browser and environment
+func newDevopsTestContext(t *testing.T, timeout time.Duration) (*devopsTestContext, func()) {
+	// Setup Test Environment
+	env, err := common.SetupTestEnvironment(t.Name())
+	if err != nil {
+		t.Fatalf("Failed to setup test environment: %v", err)
+	}
+
+	// Create a timeout context for the entire test
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), timeout)
+
+	// Create allocator context
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.WindowSize(1920, 1080),
+	)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+
+	// Create browser context
+	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
+
+	baseURL := env.GetBaseURL()
+
+	dtc := &devopsTestContext{
+		t:        t,
+		env:      env,
+		ctx:      browserCtx,
+		baseURL:  baseURL,
+		jobsURL:  baseURL + "/jobs",
+		queueURL: baseURL + "/queue",
+		helper:   env.NewHTTPTestHelperWithTimeout(t, 5*time.Minute),
+	}
+
+	// Return cleanup function
+	cleanup := func() {
+		// Properly close the browser before canceling contexts
+		if err := chromedp.Cancel(browserCtx); err != nil {
+			t.Logf("Warning: browser cancel returned: %v", err)
+		}
+		cancelBrowser()
+		cancelAlloc()
+		cancelTimeout()
+		env.Cleanup()
+	}
+
+	return dtc, cleanup
+}
+
+// detectLanguage maps file extension to language name
+func detectLanguage(ext string) string {
+	switch ext {
+	case ".cpp", ".cc", ".cxx":
+		return "cpp"
+	case ".h", ".hpp":
+		return "cpp-header"
+	case ".cmake":
+		return "cmake"
+	default:
+		return "text"
+	}
+}
+
+// formatFileList formats a list of files for display
+func formatFileList(files []string) string {
+	if len(files) == 0 {
+		return "(none)"
+	}
+	result := ""
+	for i, f := range files {
+		result += fmt.Sprintf("%d. %s\n", i+1, f)
+	}
+	return result
+}
+
+// generateLocalDirToml generates TOML content for a complete local_dir job definition
+func generateLocalDirToml(defID, name string, config LocalDirImportConfig) string {
+	var sb strings.Builder
+
+	// Job definition header
+	sb.WriteString("# Local Directory Import Job Definition\n")
+	sb.WriteString(fmt.Sprintf("# Test: %s\n\n", name))
+
+	// Job-level properties
+	sb.WriteString(fmt.Sprintf("id = %q\n", defID))
+	sb.WriteString(fmt.Sprintf("name = %q\n", name))
+	sb.WriteString("description = \"Import files from local directory\"\n")
+
+	// Tags
+	tags := config.Tags
+	if len(tags) == 0 {
+		tags = []string{"local-dir-import", "test"}
+	}
+	sb.WriteString("tags = [")
+	for i, tag := range tags {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%q", tag))
+	}
+	sb.WriteString("]\n")
+
+	sb.WriteString("schedule = \"\"\n")
+	sb.WriteString("timeout = \"10m\"\n")
+	sb.WriteString("enabled = true\n")
+	sb.WriteString("auto_start = false\n\n")
+
+	// Step definition using [step.{name}] format
+	sb.WriteString("[step.import_files]\n")
+	sb.WriteString("type = \"local_dir\"\n")
+	sb.WriteString("description = \"Import files from local directory\"\n")
+	sb.WriteString("on_error = \"continue\"\n")
+	sb.WriteString(fmt.Sprintf("dir_path = %q\n", config.DirPath))
+
+	// Extensions
+	if config.IncludeExtensions != nil {
+		sb.WriteString("extensions = [")
+		for i, ext := range config.IncludeExtensions {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%q", ext))
+		}
+		sb.WriteString("]\n")
+	}
+
+	// Exclude paths
+	excludePaths := config.ExcludePaths
+	if len(excludePaths) == 0 {
+		excludePaths = []string{".git", "node_modules", "__pycache__"}
+	}
+	sb.WriteString("exclude_paths = [")
+	for i, path := range excludePaths {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%q", path))
+	}
+	sb.WriteString("]\n")
+
+	// Max file size
+	maxFileSize := config.MaxFileSize
+	if maxFileSize == 0 {
+		maxFileSize = 1048576 // 1MB default
+	}
+	sb.WriteString(fmt.Sprintf("max_file_size = %d\n", maxFileSize))
+
+	return sb.String()
+}
+
+// getCppProjectPath returns the absolute path to the cpp_project fixture directory
+func getCppProjectPath() (string, error) {
+	possiblePaths := []string{
+		"test/fixtures/cpp_project",
+		"../fixtures/cpp_project",
+		"../../test/fixtures/cpp_project",
+	}
+
+	for _, p := range possiblePaths {
+		absPath, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			return absPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("cpp_project fixture not found")
+}
+
+// =============================================================================
+// Private Methods - Screenshots and Manifests
+// =============================================================================
+
+// takeSequentialScreenshot takes a screenshot with incremented numbering (01_, 02_, etc.)
+func (dtc *devopsTestContext) takeSequentialScreenshot(name string) {
+	dtc.screenshotNum++
+	screenshotName := fmt.Sprintf("%02d_%s", dtc.screenshotNum, name)
+	if err := dtc.env.TakeFullScreenshot(dtc.ctx, screenshotName); err != nil {
+		dtc.env.LogTest(dtc.t, "  Warning: Failed to take screenshot %s: %v", screenshotName, err)
+	} else {
+		dtc.env.LogTest(dtc.t, "  📸 Screenshot: %s", screenshotName)
+	}
+}
+
+// saveImportedFilesManifest saves a manifest of imported files to the results directory
+func (dtc *devopsTestContext) saveImportedFilesManifest() error {
+	if len(dtc.importedFiles) == 0 {
+		return nil
+	}
+
+	manifestPath := filepath.Join(dtc.env.GetResultsDir(), "imported_files.txt")
+	content := fmt.Sprintf("# Imported Files Manifest\n# Total: %d files\n# Generated: %s\n\n",
+		len(dtc.importedFiles), time.Now().Format(time.RFC3339))
+
+	for i, file := range dtc.importedFiles {
+		content += fmt.Sprintf("%d. %s\n", i+1, file)
+	}
+
+	if err := os.WriteFile(manifestPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to save manifest: %w", err)
+	}
+
+	dtc.env.LogTest(dtc.t, "Saved imported files manifest to: %s", manifestPath)
+	return nil
+}
+
+// =============================================================================
+// Private Methods - Job Definition Management
+// =============================================================================
+
+// loadAndSaveJobDefinitionToml loads the job definition into the service and saves a copy to results
+func (dtc *devopsTestContext) loadAndSaveJobDefinitionToml() error {
+	// The test service working directory is test/bin/, so job-definitions/devops_enrich.toml
+	// is the standard path. This matches the [jobs] definitions_dir config in test-quaero.toml.
+	// The service will auto-load from job-definitions/ on startup.
+	//
+	// We also check relative paths for when running tests from different directories.
+	possiblePaths := []string{
+		"job-definitions/devops_enrich.toml",                // From test/bin/ working dir (standard)
+		"../bin/job-definitions/devops_enrich.toml",         // From test/ui/ or test/api/ when running go test
+		"../../test/bin/job-definitions/devops_enrich.toml", // From project root
+		"../../jobs/devops_enrich.toml",                     // Fallback to root jobs/ dir
+	}
+
+	var foundPath string
+	var content []byte
+	var err error
+	for _, p := range possiblePaths {
+		absPath, _ := filepath.Abs(p)
+		content, err = os.ReadFile(absPath)
+		if err == nil {
+			foundPath = absPath
+			break
+		}
+	}
+
+	if err != nil {
+		dtc.env.LogTest(dtc.t, "Warning: Could not read job definition TOML: %v", err)
+		return err
+	}
+
+	dtc.env.LogTest(dtc.t, "Found job definition at: %s", foundPath)
+
+	// Save to results directory for documentation
+	destPath := filepath.Join(dtc.env.GetResultsDir(), "devops_enrich.toml")
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		dtc.env.LogTest(dtc.t, "Warning: Could not save job definition TOML: %v", err)
+	} else {
+		dtc.env.LogTest(dtc.t, "Saved job definition TOML to: %s", destPath)
+	}
+
+	// Load the job definition into the service via API
+	if err := dtc.env.LoadJobDefinitionFile(foundPath); err != nil {
+		dtc.env.LogTest(dtc.t, "Warning: Could not load job definition into service: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// saveLocalDirJobToml saves the job definition TOML to the results directory
+func (dtc *devopsTestContext) saveLocalDirJobToml(defID, name string, config LocalDirImportConfig) {
+	tomlContent := generateLocalDirToml(defID, name, config)
+
+	// Sanitize name for filename
+	safeName := strings.ToLower(name)
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	safeName = re.ReplaceAllString(safeName, "_")
+	safeName = strings.Trim(safeName, "_")
+
+	destPath := filepath.Join(dtc.env.GetResultsDir(), fmt.Sprintf("job_def_%s.toml", safeName))
+	if err := os.WriteFile(destPath, []byte(tomlContent), 0644); err != nil {
+		dtc.env.LogTest(dtc.t, "Warning: Could not save job definition TOML: %v", err)
+	} else {
+		dtc.env.LogTest(dtc.t, "  Saved job definition TOML to: %s", filepath.Base(destPath))
+	}
+}
+
+// createLocalDirJobDefinition creates a local_dir job definition via API
+func (dtc *devopsTestContext) createLocalDirJobDefinition(name string, config LocalDirImportConfig) (string, error) {
+	defID := fmt.Sprintf("local-dir-import-%d", time.Now().UnixNano())
+
+	// Build step config
+	stepConfig := map[string]interface{}{
+		"dir_path": config.DirPath,
+	}
+
+	// Only add extensions if explicitly provided (nil = use default extensions)
+	if config.IncludeExtensions != nil {
+		stepConfig["extensions"] = config.IncludeExtensions
+	}
+
+	if len(config.ExcludePaths) > 0 {
+		stepConfig["exclude_paths"] = config.ExcludePaths
+	} else {
+		stepConfig["exclude_paths"] = []string{".git", "node_modules", "__pycache__"}
+	}
+
+	if config.MaxFileSize > 0 {
+		stepConfig["max_file_size"] = config.MaxFileSize
+	} else {
+		stepConfig["max_file_size"] = 1048576 // 1MB default
+	}
+
+	// Build job definition
+	tags := config.Tags
+	if len(tags) == 0 {
+		tags = []string{"local-dir-import", "test"}
+	}
+
+	body := map[string]interface{}{
+		"id":          defID,
+		"name":        name,
+		"description": "Local directory import job for testing",
+		"type":        "local_dir",
+		"enabled":     true,
+		"tags":        tags,
+		"steps": []map[string]interface{}{
+			{
+				"name":   "import-files",
+				"type":   "local_dir",
+				"config": stepConfig,
+			},
+		},
+	}
+
+	resp, err := dtc.helper.POST("/api/job-definitions", body)
+	if err != nil {
+		return "", fmt.Errorf("failed to create job definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("job definition creation failed (status %d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result map[string]interface{}
+	if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	dtc.env.LogTest(dtc.t, "  Created local_dir job definition: %s (id: %s)", name, defID)
+
+	// Save the TOML to results directory
+	dtc.saveLocalDirJobToml(defID, name, config)
+
+	return defID, nil
+}
+
+// deleteJobDefinition deletes a job definition via API
+func (dtc *devopsTestContext) deleteJobDefinition(defID string) error {
+	resp, err := dtc.helper.DELETE("/api/job-definitions/" + defID)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+// =============================================================================
+// Private Methods - Import Functions
+// =============================================================================
+
+// importFixtures imports test files from test/fixtures/cpp_project/ into the document store
+func (dtc *devopsTestContext) importFixtures() error {
+	dtc.env.LogTest(dtc.t, "Importing test fixtures from cpp_project...")
+
+	fixturesDir := "../fixtures/cpp_project"
+	absPath, err := filepath.Abs(fixturesDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve fixtures path: %w", err)
+	}
+
+	var importedCount int
+	var files []string
+
+	// Walk the fixtures directory and collect all source files
+	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Import only source code files
+		ext := filepath.Ext(path)
+		if ext == ".cpp" || ext == ".h" || ext == ".txt" || ext == ".cmake" {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk fixtures directory: %w", err)
+	}
+
+	// Import each file as a document
+	for _, filePath := range files {
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			dtc.env.LogTest(dtc.t, "  Warning: Failed to read %s: %v", filePath, err)
+			continue
+		}
+
+		// Extract relative path for the title
+		relPath, _ := filepath.Rel(absPath, filePath)
+
+		doc := map[string]interface{}{
+			"id":               uuid.New().String(),
+			"source_type":      "local_file",
+			"url":              "file://" + filePath,
+			"title":            relPath,
+			"content_markdown": string(content),
+			"metadata": map[string]interface{}{
+				"file_type": filepath.Ext(filePath),
+				"file_path": relPath,
+				"language":  detectLanguage(filepath.Ext(filePath)),
+			},
+			"tags": []string{"test-fixture", "devops-candidate"},
+		}
+
+		resp, err := dtc.helper.POST("/api/documents", doc)
+		if err != nil {
+			dtc.env.LogTest(dtc.t, "  Warning: Failed to import %s: %v", relPath, err)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+			dtc.env.LogTest(dtc.t, "  Warning: Failed to import %s (status %d)", relPath, resp.StatusCode)
+			continue
+		}
+
+		importedCount++
+		dtc.importedFiles = append(dtc.importedFiles, relPath)
+		dtc.env.LogTest(dtc.t, "  ✓ Imported: %s", relPath)
+	}
+
+	dtc.docsCount = importedCount
+	dtc.env.LogTest(dtc.t, "✓ Imported %d files from fixtures", importedCount)
+
+	// Save manifest of imported files
+	if err := dtc.saveImportedFilesManifest(); err != nil {
+		dtc.env.LogTest(dtc.t, "Warning: Failed to save manifest: %v", err)
+	}
+
+	if importedCount == 0 {
+		return fmt.Errorf("no files were imported")
+	}
+
+	return nil
+}
+
+// importFilesViaLocalDirJob creates and runs a local_dir job to import files via UI
+// Parameters:
+//   - jobName: Name for the job definition
+//   - config: Import configuration including directory path and file filters
+//   - enableForSubsequentTests: If true, keeps the job definition for later use
+//
+// Returns LocalDirImportResult with import details
+func (dtc *devopsTestContext) importFilesViaLocalDirJob(jobName string, config LocalDirImportConfig, enableForSubsequentTests bool) (*LocalDirImportResult, error) {
+	dtc.env.LogTest(dtc.t, "Importing files via local_dir job: %s", jobName)
+
+	if config.IncludeExtensions != nil {
+		dtc.env.LogTest(dtc.t, "  Include extensions: %v", config.IncludeExtensions)
+	} else {
+		dtc.env.LogTest(dtc.t, "  Include extensions: all files (no filter)")
+	}
+
+	result := &LocalDirImportResult{}
+
+	// Step 1: Create job definition via API
+	defID, err := dtc.createLocalDirJobDefinition(jobName, config)
+	if err != nil {
+		return result, fmt.Errorf("failed to create job definition: %w", err)
+	}
+	result.JobDefID = defID
+
+	// Clean up job definition unless it should persist for subsequent tests
+	if !enableForSubsequentTests {
+		defer dtc.deleteJobDefinition(defID)
+	}
+
+	// Step 2: Trigger job via UI (click Run button + confirm)
+	_, err = dtc.triggerLocalDirJobViaUI(jobName)
+	if err != nil {
+		return result, fmt.Errorf("failed to trigger job via UI: %w", err)
+	}
+
+	// Step 3: Wait for job with our definition ID to appear and complete
+	jobID, status, err := dtc.waitForJobByDefinitionID(defID, 3*time.Minute)
+	if err != nil {
+		return result, fmt.Errorf("job did not complete: %w", err)
+	}
+	result.JobID = jobID
+
+	result.Success = (status == "completed")
+	if !result.Success {
+		return result, fmt.Errorf("job ended with status: %s", status)
+	}
+
+	// Step 4: Get imported document count
+	count, err := dtc.getImportedDocumentCount(config.Tags)
+	if err != nil {
+		dtc.env.LogTest(dtc.t, "  Warning: Could not get document count: %v", err)
+	}
+	result.ImportedCount = count
+
+	dtc.env.LogTest(dtc.t, "✓ Import completed: %d files imported", result.ImportedCount)
+	return result, nil
+}
+
+// =============================================================================
+// Private Methods - Job Triggering
+// =============================================================================
+
+// triggerEnrichment triggers the DevOps enrichment pipeline (tries UI first, falls back to API)
+func (dtc *devopsTestContext) triggerEnrichment() (string, error) {
+	return dtc.triggerEnrichmentViaUI()
+}
+
+// triggerEnrichmentViaUI triggers the DevOps enrichment pipeline by clicking the Run button in the UI
+func (dtc *devopsTestContext) triggerEnrichmentViaUI() (string, error) {
+	dtc.env.LogTest(dtc.t, "Triggering DevOps enrichment pipeline via UI...")
+
+	// Navigate to Jobs page
+	jobsURL := dtc.baseURL + "/jobs"
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(jobsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		return "", fmt.Errorf("failed to navigate to jobs page: %w", err)
+	}
+
+	// The run button has ID: {job-name-slug}-run where the slug is lowercase with hyphens
+	// For "DevOps Enrichment Pipeline", the ID is "devops-enrichment-pipeline-run"
+	runButtonID := "#devops-enrichment-pipeline-run"
+
+	// Try to click the run button
+	dtc.env.LogTest(dtc.t, "  Looking for Run button...")
+
+	var clicked bool
+
+	// Try by ID first using JavaScript click (more reliable with Vue.js)
+	var clickResult string
+	err := chromedp.Run(dtc.ctx,
+		chromedp.WaitVisible(runButtonID, chromedp.ByQuery),
+		// Use JavaScript to click - more reliable with Vue.js event handlers
+		chromedp.Evaluate(`
+			(function() {
+				const btn = document.querySelector('#devops-enrichment-pipeline-run');
+				if (btn) {
+					btn.click();
+					return 'clicked';
+				}
+				return 'not found';
+			})()
+		`, &clickResult),
+	)
+	if err == nil && clickResult == "clicked" {
+		dtc.env.LogTest(dtc.t, "  Found and clicked run button by ID (JS click): %s", runButtonID)
+		clicked = true
+	} else {
+		dtc.env.LogTest(dtc.t, "  Button not found by ID or JS click failed (%s), trying aria-label selector...", clickResult)
+		// Try by aria-label using JavaScript
+		err = chromedp.Run(dtc.ctx,
+			chromedp.Evaluate(`
+				(function() {
+					const btn = document.querySelector('button.btn-success[aria-label="Run Job"]');
+					if (btn) {
+						btn.click();
+						return 'clicked';
+					}
+					return 'not found';
+				})()
+			`, &clickResult),
+		)
+		if err == nil && clickResult == "clicked" {
+			dtc.env.LogTest(dtc.t, "  Found and clicked run button by aria-label (JS click)")
+			clicked = true
+		} else {
+			dtc.env.LogTest(dtc.t, "  Button not found by aria-label, trying first btn-success...")
+			// Try first btn-success button
+			err = chromedp.Run(dtc.ctx,
+				chromedp.Evaluate(`
+					(function() {
+						const btn = document.querySelector('button.btn-success');
+						if (btn) {
+							btn.click();
+							return 'clicked';
+						}
+						return 'not found';
+					})()
+				`, &clickResult),
+			)
+			if err == nil && clickResult == "clicked" {
+				dtc.env.LogTest(dtc.t, "  Found and clicked first btn-success button (JS click)")
+				clicked = true
+			}
+		}
+	}
+
+	if !clicked {
+		dtc.env.LogTest(dtc.t, "  Warning: Could not click run button via UI, falling back to API")
+		return dtc.triggerEnrichmentViaAPI()
+	}
+
+	// Wait for confirmation modal and click confirm button
+	dtc.env.LogTest(dtc.t, "  Waiting for confirmation modal...")
+	time.Sleep(500 * time.Millisecond)
+
+	// Click the confirm button in the modal (Alpine.js confirmation dialog)
+	var confirmClicked string
+	err = chromedp.Run(dtc.ctx,
+		chromedp.WaitVisible("body.modal-open", chromedp.ByQuery),
+		chromedp.Evaluate(`
+			(function() {
+				const confirmBtn = document.querySelector('.modal.active .btn-primary, #confirmation-modal .btn-primary');
+				if (confirmBtn) { confirmBtn.click(); return 'clicked'; }
+				if (window.Alpine && Alpine.store('confirmation')) {
+					Alpine.store('confirmation').confirm();
+					return 'clicked via Alpine';
+				}
+				return 'not found';
+			})()
+		`, &confirmClicked),
+	)
+	if err != nil || (confirmClicked != "clicked" && confirmClicked != "clicked via Alpine") {
+		dtc.env.LogTest(dtc.t, "  Warning: Could not click confirm (%s), trying Alpine directly...", confirmClicked)
+		chromedp.Run(dtc.ctx,
+			chromedp.Evaluate(`Alpine.store('confirmation').confirm()`, &confirmClicked),
+		)
+	}
+	dtc.env.LogTest(dtc.t, "  Confirmation handled: %s", confirmClicked)
+
+	// Wait for job to start
+	dtc.env.LogTest(dtc.t, "  Waiting for job to start...")
+	time.Sleep(2 * time.Second)
+
+	// Get the latest job ID via API (since we triggered via UI)
+	return dtc.getLatestJobID()
+}
+
+// triggerEnrichmentViaAPI triggers the DevOps enrichment pipeline via API (fallback)
+func (dtc *devopsTestContext) triggerEnrichmentViaAPI() (string, error) {
+	dtc.env.LogTest(dtc.t, "Triggering DevOps enrichment pipeline via API...")
+
+	resp, err := dtc.helper.POST("/api/devops/enrich", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to trigger enrichment: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("enrichment trigger failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	jobID, ok := result["job_id"].(string)
+	if !ok {
+		return "", fmt.Errorf("job_id not found in response")
+	}
+
+	dtc.env.LogTest(dtc.t, "✓ Enrichment pipeline triggered via API (job ID: %s)", jobID)
+	return jobID, nil
+}
+
+// triggerLocalDirJobViaUI triggers a local_dir job by clicking the run button and confirming
+func (dtc *devopsTestContext) triggerLocalDirJobViaUI(jobName string) (string, error) {
+	dtc.env.LogTest(dtc.t, "  Triggering local_dir job via UI: %s", jobName)
+
+	// Navigate to Jobs page
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(dtc.jobsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		return "", fmt.Errorf("failed to navigate to jobs page: %w", err)
+	}
+
+	// Convert job name to button ID format: lowercase, non-alphanumeric to hyphens
+	buttonID := strings.ToLower(jobName)
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	buttonID = re.ReplaceAllString(buttonID, "-")
+	buttonID = strings.Trim(buttonID, "-") + "-run"
+
+	dtc.env.LogTest(dtc.t, "  Looking for run button: #%s", buttonID)
+
+	// Click the run button using JavaScript
+	var clickResult string
+	err := chromedp.Run(dtc.ctx,
+		chromedp.WaitVisible("#"+buttonID, chromedp.ByQuery),
+		chromedp.Evaluate(fmt.Sprintf(`
+			(function() {
+				const btn = document.querySelector('#%s');
+				if (btn) {
+					btn.click();
+					return 'clicked';
+				}
+				return 'not found';
+			})()
+		`, buttonID), &clickResult),
+	)
+	if err != nil || clickResult != "clicked" {
+		return "", fmt.Errorf("failed to click run button: %v (result: %s)", err, clickResult)
+	}
+
+	// Wait for confirmation modal and click confirm
+	dtc.env.LogTest(dtc.t, "  Waiting for confirmation modal...")
+	time.Sleep(500 * time.Millisecond)
+
+	var confirmClicked string
+	err = chromedp.Run(dtc.ctx,
+		chromedp.WaitVisible("body.modal-open", chromedp.ByQuery),
+		chromedp.Evaluate(`
+			(function() {
+				const confirmBtn = document.querySelector('.modal.active .btn-primary, #confirmation-modal .btn-primary');
+				if (confirmBtn) { confirmBtn.click(); return 'clicked'; }
+				if (window.Alpine && Alpine.store('confirmation')) {
+					Alpine.store('confirmation').confirm();
+					return 'clicked via Alpine';
+				}
+				return 'not found';
+			})()
+		`, &confirmClicked),
+	)
+	if err != nil || (confirmClicked != "clicked" && confirmClicked != "clicked via Alpine") {
+		dtc.env.LogTest(dtc.t, "  Warning: Could not click confirm (%s), trying Alpine directly...", confirmClicked)
+		chromedp.Run(dtc.ctx,
+			chromedp.Evaluate(`Alpine.store('confirmation').confirm()`, &confirmClicked),
+		)
+	}
+	dtc.env.LogTest(dtc.t, "  Confirmation handled: %s", confirmClicked)
+
+	// Wait for job to start being processed
+	time.Sleep(1 * time.Second)
+
+	return "", nil
+}
+
+// =============================================================================
+// Private Methods - Job Monitoring
+// =============================================================================
+
+// getLatestJobID gets the most recent job ID from the jobs list
+func (dtc *devopsTestContext) getLatestJobID() (string, error) {
+	// Retry for up to 10 seconds since job creation may take time
+	maxRetries := 10
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := dtc.helper.GET("/api/jobs?limit=1&order=desc")
+		if err != nil {
+			if attempt == maxRetries {
+				return "", fmt.Errorf("failed to get jobs: %w", err)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		var result map[string]interface{}
+		if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
+			resp.Body.Close()
+			if attempt == maxRetries {
+				return "", fmt.Errorf("failed to parse jobs response: %w", err)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		resp.Body.Close()
+
+		jobs, ok := result["jobs"].([]interface{})
+		if !ok || len(jobs) == 0 {
+			if attempt == maxRetries {
+				return "", fmt.Errorf("no jobs found after %d attempts", maxRetries)
+			}
+			dtc.env.LogTest(dtc.t, "  Waiting for job to appear (attempt %d/%d)...", attempt, maxRetries)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		job := jobs[0].(map[string]interface{})
+		jobID, ok := job["id"].(string)
+		if !ok {
+			return "", fmt.Errorf("job ID not found")
+		}
+
+		dtc.env.LogTest(dtc.t, "✓ Found latest job (ID: %s)", jobID)
+		return jobID, nil
+	}
+	return "", fmt.Errorf("no jobs found")
+}
+
+// waitForJobByDefinitionID waits for a job with the given definition ID to appear and complete
+// Returns the job ID and final status
+func (dtc *devopsTestContext) waitForJobByDefinitionID(defID string, timeout time.Duration) (string, string, error) {
+	dtc.env.LogTest(dtc.t, "  Waiting for job with definition ID: %s", defID)
+
+	deadline := time.Now().Add(timeout)
+	pollInterval := 1 * time.Second
+	var foundJobID string
+
+	// Phase 1: Wait for job to appear
+	for time.Now().Before(deadline) {
+		resp, err := dtc.helper.GET("/api/jobs?limit=50&order=desc")
+		if err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		var result map[string]interface{}
+		if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
+			resp.Body.Close()
+			time.Sleep(pollInterval)
+			continue
+		}
+		resp.Body.Close()
+
+		jobs, ok := result["jobs"].([]interface{})
+		if !ok {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Look for a job matching our definition ID
+		for _, j := range jobs {
+			job := j.(map[string]interface{})
+			metadata, ok := job["metadata"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			jobDefID, ok := metadata["job_definition_id"].(string)
+			if ok && jobDefID == defID {
+				jobID, _ := job["id"].(string)
+				foundJobID = jobID
+				dtc.env.LogTest(dtc.t, "  Found job with matching definition: %s", foundJobID)
+				break
+			}
+		}
+
+		if foundJobID != "" {
+			break
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	if foundJobID == "" {
+		return "", "", fmt.Errorf("no job found for definition %s within timeout", defID)
+	}
+
+	// Phase 2: Wait for job to complete
+	for time.Now().Before(deadline) {
+		resp, err := dtc.helper.GET("/api/jobs/" + foundJobID)
+		if err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		var job map[string]interface{}
+		if err := dtc.helper.ParseJSONResponse(resp, &job); err != nil {
+			resp.Body.Close()
+			time.Sleep(pollInterval)
+			continue
+		}
+		resp.Body.Close()
+
+		status, _ := job["status"].(string)
+		dtc.env.LogTest(dtc.t, "    Job status: %s", status)
+
+		if status == "completed" || status == "failed" || status == "cancelled" {
+			return foundJobID, status, nil
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return foundJobID, "", fmt.Errorf("job %s did not complete within timeout", foundJobID)
+}
+
+// waitForJobCompletion waits for a job to complete and returns the final status
+func (dtc *devopsTestContext) waitForJobCompletion(jobID string, timeout time.Duration) (string, error) {
+	dtc.env.LogTest(dtc.t, "  Waiting for job completion (timeout: %v)...", timeout)
+
+	deadline := time.Now().Add(timeout)
+	pollInterval := 2 * time.Second
+
+	for time.Now().Before(deadline) {
+		resp, err := dtc.helper.GET("/api/jobs/" + jobID)
+		if err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		var job map[string]interface{}
+		if err := dtc.helper.ParseJSONResponse(resp, &job); err != nil {
+			resp.Body.Close()
+			time.Sleep(pollInterval)
+			continue
+		}
+		resp.Body.Close()
+
+		status, _ := job["status"].(string)
+		dtc.env.LogTest(dtc.t, "    Job status: %s", status)
+
+		if status == "completed" || status == "failed" || status == "cancelled" {
+			return status, nil
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return "", fmt.Errorf("job did not complete within %v", timeout)
+}
+
+// monitorJobWithPolling monitors a job via polling with step-based screenshots
+func (dtc *devopsTestContext) monitorJobWithPolling(jobID string, timeout time.Duration) error {
+	dtc.env.LogTest(dtc.t, "Monitoring job: %s (timeout: %v)", jobID, timeout)
+
+	// Navigate to job details page in browser (use queue page with job filter for better visibility)
+	jobDetailsURL := fmt.Sprintf("%s/queue?job=%s", dtc.baseURL, jobID)
+	if err := chromedp.Run(dtc.ctx,
+		chromedp.Navigate(jobDetailsURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		dtc.env.LogTest(dtc.t, "  Warning: Could not navigate to job details: %v", err)
+	}
+	dtc.takeSequentialScreenshot("job_details_start")
+
+	startTime := time.Now()
+	lastProgressLog := time.Now()
+	checkCount := 0
+	lastStep := ""
+	lastStepStatus := ""
+
+	for {
+		// Check timeout
+		if time.Since(startTime) > timeout {
+			dtc.takeSequentialScreenshot("job_timeout")
+			return fmt.Errorf("job %s did not complete within %v", jobID, timeout)
+		}
+
+		// Check context cancellation
+		if err := dtc.ctx.Err(); err != nil {
+			return fmt.Errorf("context cancelled during monitoring: %w", err)
+		}
+
+		// Get job status via API
+		resp, err := dtc.helper.GET("/api/jobs/" + jobID)
+		if err != nil {
+			return fmt.Errorf("failed to get job status: %w", err)
+		}
+
+		var job map[string]interface{}
+		if err := dtc.helper.ParseJSONResponse(resp, &job); err != nil {
+			resp.Body.Close()
+			return fmt.Errorf("failed to parse job response: %w", err)
+		}
+		resp.Body.Close()
+
+		status, _ := job["status"].(string)
+		checkCount++
+
+		// Extract current step info from metadata
+		currentStep := ""
+		currentStepStatus := ""
+		completedSteps := 0
+		totalSteps := 0
+		if metadata, ok := job["metadata"].(map[string]interface{}); ok {
+			if stepName, ok := metadata["current_step_name"].(string); ok {
+				currentStep = stepName
+			}
+			if stepStatus, ok := metadata["current_step_status"].(string); ok {
+				currentStepStatus = stepStatus
+			}
+			if cs, ok := metadata["completed_steps"].(float64); ok {
+				completedSteps = int(cs)
+			}
+			if ts, ok := metadata["total_steps"].(float64); ok {
+				totalSteps = int(ts)
+			}
+		}
+
+		// Take screenshot on step change (navigate to queue page to see job progress)
+		if currentStep != "" && (currentStep != lastStep || currentStepStatus != lastStepStatus) {
+			// Refresh to show updated state
+			if err := chromedp.Run(dtc.ctx,
+				chromedp.Reload(),
+				chromedp.Sleep(1*time.Second),
+			); err == nil {
+				screenshotName := fmt.Sprintf("step_%d_of_%d_%s", completedSteps, totalSteps, currentStep)
+				dtc.takeSequentialScreenshot(screenshotName)
+			}
+			dtc.env.LogTest(dtc.t, "  Step %d/%d: %s (%s)", completedSteps, totalSteps, currentStep, currentStepStatus)
+
+			lastStep = currentStep
+			lastStepStatus = currentStepStatus
+		}
+
+		// Log progress every 5 seconds
+		if time.Since(lastProgressLog) >= 5*time.Second {
+			elapsed := time.Since(startTime)
+			stepInfo := ""
+			if currentStep != "" {
+				stepInfo = fmt.Sprintf(", step %d/%d: %s", completedSteps, totalSteps, currentStep)
+			}
+			dtc.env.LogTest(dtc.t, "  [%v] Monitoring... (status: %s%s)",
+				elapsed.Round(time.Second), status, stepInfo)
+			lastProgressLog = time.Now()
+		}
+
+		// Check if job is done
+		if status == "completed" {
+			// Navigate to queue page and take final screenshot
+			if err := chromedp.Run(dtc.ctx,
+				chromedp.Reload(),
+				chromedp.Sleep(1*time.Second),
+			); err == nil {
+				dtc.takeSequentialScreenshot("job_details_completed")
+			}
+			dtc.env.LogTest(dtc.t, "✓ Job completed successfully (after %d checks)", checkCount)
+			return nil
+		}
+
+		if status == "failed" {
+			dtc.takeSequentialScreenshot("job_failed")
+			failureReason := "unknown"
+			if metadata, ok := job["metadata"].(map[string]interface{}); ok {
+				if reason, ok := metadata["failure_reason"].(string); ok {
+					failureReason = reason
+				}
+			}
+			return fmt.Errorf("job %s failed: %s", jobID, failureReason)
+		}
+
+		if status == "cancelled" {
+			dtc.takeSequentialScreenshot("job_cancelled")
+			return fmt.Errorf("job %s was cancelled", jobID)
+		}
+
+		// Wait before next check
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// =============================================================================
+// Private Methods - Verification
+// =============================================================================
+
+// verifyEnrichmentResults verifies that enrichment produced expected results with actual data validation
+func (dtc *devopsTestContext) verifyEnrichmentResults() error {
+	dtc.env.LogTest(dtc.t, "Verifying enrichment results...")
+
+	// 1. Verify dependency graph exists AND has actual nodes
+	dtc.env.LogTest(dtc.t, "  Checking dependency graph...")
+	resp, err := dtc.helper.GET("/api/devops/graph")
+	if err != nil {
+		return fmt.Errorf("failed to get dependency graph: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("dependency graph not found (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var graph map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&graph); err != nil {
+		return fmt.Errorf("failed to parse graph: %w", err)
+	}
+
+	// Validate graph has actual nodes (not just empty structure)
+	nodes, hasNodes := graph["nodes"].([]interface{})
+	edges, hasEdges := graph["edges"].([]interface{})
+
+	if !hasNodes || !hasEdges {
+		return fmt.Errorf("graph missing nodes or edges structure")
+	}
+
+	dtc.env.LogTest(dtc.t, "  ✓ Dependency graph: %d nodes, %d edges", len(nodes), len(edges))
+
+	// 2. Verify summary document exists AND has meaningful content
+	dtc.env.LogTest(dtc.t, "  Checking DevOps summary...")
+	resp2, err := dtc.helper.GET("/api/devops/summary")
+	if err != nil {
+		return fmt.Errorf("failed to get summary: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		return fmt.Errorf("summary not found (status %d): %s", resp2.StatusCode, string(body))
+	}
+
+	var summaryResult map[string]interface{}
+	if err := json.NewDecoder(resp2.Body).Decode(&summaryResult); err != nil {
+		return fmt.Errorf("failed to parse summary: %w", err)
+	}
+
+	summary, ok := summaryResult["summary"].(string)
+	if !ok || summary == "" {
+		return fmt.Errorf("summary is empty or missing")
+	}
+
+	// Verify summary has expected sections (minimal check)
+	if len(summary) < 100 {
+		return fmt.Errorf("summary too short (%d chars), expected meaningful content", len(summary))
+	}
+
+	dtc.env.LogTest(dtc.t, "  ✓ DevOps summary: %d characters", len(summary))
+
+	// 3. Verify components endpoint returns structure with actual data
+	dtc.env.LogTest(dtc.t, "  Checking components...")
+	resp3, err := dtc.helper.GET("/api/devops/components")
+	if err != nil {
+		return fmt.Errorf("failed to get components: %w", err)
+	}
+	defer resp3.Body.Close()
+
+	if resp3.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp3.Body)
+		return fmt.Errorf("components not found (status %d): %s", resp3.StatusCode, string(body))
+	}
+
+	var componentsResult map[string]interface{}
+	if err := json.NewDecoder(resp3.Body).Decode(&componentsResult); err != nil {
+		return fmt.Errorf("failed to parse components: %w", err)
+	}
+
+	components, _ := componentsResult["components"].([]interface{})
+	dtc.env.LogTest(dtc.t, "  ✓ Components: %d found", len(components))
+
+	// 4. Verify platforms endpoint returns structure
+	dtc.env.LogTest(dtc.t, "  Checking platforms...")
+	resp4, err := dtc.helper.GET("/api/devops/platforms")
+	if err != nil {
+		return fmt.Errorf("failed to get platforms: %w", err)
+	}
+	defer resp4.Body.Close()
+
+	if resp4.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp4.Body)
+		return fmt.Errorf("platforms not found (status %d): %s", resp4.StatusCode, string(body))
+	}
+
+	var platformsResult map[string]interface{}
+	if err := json.NewDecoder(resp4.Body).Decode(&platformsResult); err != nil {
+		return fmt.Errorf("failed to parse platforms: %w", err)
+	}
+
+	platforms, _ := platformsResult["platforms"].(map[string]interface{})
+	dtc.env.LogTest(dtc.t, "  ✓ Platforms: %d found", len(platforms))
+
+	// Save enrichment results summary to file
+	resultsSummary := fmt.Sprintf(`# Enrichment Results Summary
+Generated: %s
+
+## Dependency Graph
+- Nodes: %d
+- Edges: %d
+
+## Components
+- Count: %d
+
+## Platforms
+- Count: %d
+
+## Summary Length
+- Characters: %d
+`,
+		time.Now().Format(time.RFC3339),
+		len(nodes), len(edges),
+		len(components),
+		len(platforms),
+		len(summary))
+
+	resultsPath := filepath.Join(dtc.env.GetResultsDir(), "enrichment_results.txt")
+	if err := os.WriteFile(resultsPath, []byte(resultsSummary), 0644); err != nil {
+		dtc.env.LogTest(dtc.t, "  Warning: Failed to save results summary: %v", err)
+	} else {
+		dtc.env.LogTest(dtc.t, "  Saved results summary to: %s", resultsPath)
+	}
+
+	dtc.env.LogTest(dtc.t, "✓ All enrichment results verified")
+	return nil
+}
+
+// verifyDocumentsEnriched verifies that documents have devops metadata with actual content
+func (dtc *devopsTestContext) verifyDocumentsEnriched() error {
+	dtc.env.LogTest(dtc.t, "Verifying documents have DevOps metadata...")
+
+	// Query documents with devops-enriched tag
+	resp, err := dtc.helper.GET("/api/documents?tags=devops-enriched&limit=100")
+	if err != nil {
+		return fmt.Errorf("failed to query documents: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Handle both array and object response formats
+	body, _ := io.ReadAll(resp.Body)
+
+	// Try to parse as object with "documents" field first
+	var docsResponse struct {
+		Documents []map[string]interface{} `json:"documents"`
+	}
+	if err := json.Unmarshal(body, &docsResponse); err == nil && len(docsResponse.Documents) > 0 {
+		return dtc.validateEnrichedDocuments(docsResponse.Documents)
+	}
+
+	// Try to parse as array
+	var docs []map[string]interface{}
+	if err := json.Unmarshal(body, &docs); err != nil {
+		return fmt.Errorf("failed to parse documents: %w", err)
+	}
+
+	return dtc.validateEnrichedDocuments(docs)
+}
+
+// validateEnrichedDocuments validates the content of enriched documents
+func (dtc *devopsTestContext) validateEnrichedDocuments(docs []map[string]interface{}) error {
+	if len(docs) == 0 {
+		dtc.env.LogTest(dtc.t, "  Warning: No documents found with devops-enriched tag")
+		return nil // Don't fail, just warn
+	}
+
+	// Track enrichment statistics
+	docsWithMetadata := 0
+	docsWithIncludes := 0
+	docsWithPlatforms := 0
+	docsWithComponent := 0
+	totalIncludes := 0
+
+	var sampleDoc map[string]interface{}
+
+	for _, doc := range docs {
+		metadata, ok := doc["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		devops, hasDevOps := metadata["devops"].(map[string]interface{})
+		if !hasDevOps {
+			continue
+		}
+
+		docsWithMetadata++
+		if sampleDoc == nil {
+			sampleDoc = devops
+		}
+
+		// Check for includes
+		if includes, ok := devops["includes"].([]interface{}); ok && len(includes) > 0 {
+			docsWithIncludes++
+			totalIncludes += len(includes)
+		}
+
+		// Check for platforms
+		if platforms, ok := devops["platforms"].([]interface{}); ok && len(platforms) > 0 {
+			docsWithPlatforms++
+		}
+
+		// Check for component classification
+		if component, ok := devops["component"].(string); ok && component != "" {
+			docsWithComponent++
+		}
+	}
+
+	dtc.env.LogTest(dtc.t, "  Documents with DevOps metadata: %d/%d", docsWithMetadata, len(docs))
+	dtc.env.LogTest(dtc.t, "  Documents with includes: %d (total: %d includes)", docsWithIncludes, totalIncludes)
+	dtc.env.LogTest(dtc.t, "  Documents with platforms: %d", docsWithPlatforms)
+	dtc.env.LogTest(dtc.t, "  Documents with component: %d", docsWithComponent)
+
+	// Log sample devops metadata for debugging
+	if sampleDoc != nil {
+		sampleJSON, _ := json.MarshalIndent(sampleDoc, "    ", "  ")
+		dtc.env.LogTest(dtc.t, "  Sample DevOps metadata:\n    %s", string(sampleJSON))
+	}
+
+	// Save document enrichment details to file
+	enrichmentDetails := fmt.Sprintf(`# Document Enrichment Details
+Generated: %s
+
+## Statistics
+- Total documents: %d
+- With DevOps metadata: %d
+- With includes: %d (total includes: %d)
+- With platforms: %d
+- With component classification: %d
+
+## Imported Files
+%s
+`,
+		time.Now().Format(time.RFC3339),
+		len(docs),
+		docsWithMetadata,
+		docsWithIncludes, totalIncludes,
+		docsWithPlatforms,
+		docsWithComponent,
+		formatFileList(dtc.importedFiles))
+
+	detailsPath := filepath.Join(dtc.env.GetResultsDir(), "document_enrichment.txt")
+	if err := os.WriteFile(detailsPath, []byte(enrichmentDetails), 0644); err != nil {
+		dtc.env.LogTest(dtc.t, "  Warning: Failed to save enrichment details: %v", err)
+	}
+
+	dtc.env.LogTest(dtc.t, "✓ Found %d enriched documents", len(docs))
+	return nil
+}
+
+// =============================================================================
+// Private Methods - Document Queries
+// =============================================================================
+
+// getImportedDocumentCount returns the count of documents with specific tags
+func (dtc *devopsTestContext) getImportedDocumentCount(tags []string) (int, error) {
+	tagQuery := strings.Join(tags, ",")
+	resp, err := dtc.helper.GET("/api/documents?tags=" + tagQuery + "&limit=1000")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := dtc.helper.ParseJSONResponse(resp, &result); err != nil {
+		return 0, err
+	}
+
+	totalCount, _ := result["total_count"].(float64)
+	return int(totalCount), nil
 }

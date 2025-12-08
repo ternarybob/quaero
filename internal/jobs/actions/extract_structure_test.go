@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 )
 
@@ -60,8 +61,57 @@ func (m *MockDocumentStorage) FullTextSearch(query string, limit int) ([]*models
 	return nil, nil
 }
 
+func (m *MockDocumentStorage) SearchByIdentifier(identifier string, excludeSources []string, limit int) ([]*models.Document, error) {
+	return nil, nil
+}
+
+func (m *MockDocumentStorage) ListDocuments(opts *interfaces.ListOptions) ([]*models.Document, error) {
+	var docs []*models.Document
+	for _, doc := range m.documents {
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
+func (m *MockDocumentStorage) GetDocumentsBySource(sourceType string) ([]*models.Document, error) {
+	return nil, nil
+}
+
+func (m *MockDocumentStorage) CountDocuments() (int, error) {
+	return len(m.documents), nil
+}
+
+func (m *MockDocumentStorage) CountDocumentsBySource(sourceType string) (int, error) {
+	return 0, nil
+}
+
+func (m *MockDocumentStorage) GetStats() (*models.DocumentStats, error) {
+	return &models.DocumentStats{TotalDocuments: len(m.documents)}, nil
+}
+
+func (m *MockDocumentStorage) GetAllTags() ([]string, error) {
+	return nil, nil
+}
+
+func (m *MockDocumentStorage) ClearAll() error {
+	m.documents = make(map[string]*models.Document)
+	return nil
+}
+
+func (m *MockDocumentStorage) GetDocumentsForceSync() ([]*models.Document, error) {
+	return nil, nil
+}
+
+func (m *MockDocumentStorage) SetForceSyncPending(id string, pending bool) error {
+	return nil
+}
+
+func (m *MockDocumentStorage) RebuildFTS5Index() error {
+	return nil
+}
+
 func TestExtractStructureAction_IsCppFile(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	tests := []struct {
@@ -97,7 +147,7 @@ func TestExtractStructureAction_IsCppFile(t *testing.T) {
 }
 
 func TestExtractStructureAction_ExtractIncludes(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	t.Run("Extract local and system includes", func(t *testing.T) {
@@ -165,7 +215,7 @@ int main() {
 }
 
 func TestExtractStructureAction_ExtractDefines(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	t.Run("Extract defines", func(t *testing.T) {
@@ -207,7 +257,7 @@ func TestExtractStructureAction_ExtractDefines(t *testing.T) {
 }
 
 func TestExtractStructureAction_ExtractConditionals(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	t.Run("Extract ifdef and ifndef", func(t *testing.T) {
@@ -249,7 +299,7 @@ func TestExtractStructureAction_ExtractConditionals(t *testing.T) {
 }
 
 func TestExtractStructureAction_DetectPlatforms(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	t.Run("Detect Windows platform", func(t *testing.T) {
@@ -341,7 +391,7 @@ int main() {
 }
 
 func TestExtractStructureAction_Execute(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	storage := NewMockDocumentStorage()
 	action := NewExtractStructureAction(storage, logger)
 
@@ -469,7 +519,7 @@ int main() {
 }
 
 func TestExtractStructureAction_EdgeCases(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewExtractStructureAction(nil, logger)
 
 	t.Run("Malformed includes", func(t *testing.T) {
@@ -493,7 +543,7 @@ func TestExtractStructureAction_EdgeCases(t *testing.T) {
 /* #include "config.h" */
 #include <vector>
 `
-		local, system := action.ExtractIncludes(content)
+		_, system := action.ExtractIncludes(content)
 
 		// Should extract commented includes too (regex doesn't parse comments)
 		// This is acceptable behavior

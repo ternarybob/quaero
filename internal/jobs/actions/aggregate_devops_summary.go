@@ -463,6 +463,12 @@ func (a *AggregateDevOpsSummaryAction) FormatForPrompt(data *AggregatedData) str
 
 // generateSummaryWithLLM calls the LLM service to generate the summary
 func (a *AggregateDevOpsSummaryAction) generateSummaryWithLLM(ctx context.Context, prompt string) (string, error) {
+	// Check if LLM service is configured
+	if a.llmService == nil {
+		a.logger.Warn().Msg("LLM service not configured, using minimal summary")
+		return a.generateMinimalSummary(), nil
+	}
+
 	messages := []interfaces.Message{
 		{
 			Role:    "system",

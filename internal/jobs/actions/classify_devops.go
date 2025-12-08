@@ -95,6 +95,14 @@ func (a *ClassifyDevOpsAction) Execute(ctx context.Context, doc *models.Document
 		Bool("force", force).
 		Msg("Starting classify_devops action")
 
+	// Check if LLM service is configured
+	if a.llmService == nil {
+		a.logger.Warn().
+			Str("doc_id", doc.ID).
+			Msg("LLM service not configured, skipping classification")
+		return nil
+	}
+
 	// 1. Check if already classified (unless force)
 	if !force && a.isAlreadyClassified(doc) {
 		a.logger.Debug().
@@ -139,11 +147,11 @@ func (a *ClassifyDevOpsAction) Execute(ctx context.Context, doc *models.Document
 		return fmt.Errorf("failed to parse classification: %w", err)
 	}
 
-	// 7. Update doc.Metadata with classification fields (merge with existing)
-	a.updateDocumentMetadata(doc, devopsMetadata, classification)
-
-	// 8. Add "classify_devops" to enrichment_passes
+	// 7. Add "classify_devops" to enrichment_passes
 	a.addEnrichmentPass(devopsMetadata, "classify_devops")
+
+	// 8. Update doc.Metadata with classification fields (merge with existing)
+	a.updateDocumentMetadata(doc, devopsMetadata, classification)
 
 	// Update document in storage
 	if err := a.documentStorage.UpdateDocument(doc); err != nil {

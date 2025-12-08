@@ -43,9 +43,10 @@ func (m *MockKeyValueStorage) Set(ctx context.Context, key, value, description s
 	return nil
 }
 
-func (m *MockKeyValueStorage) Upsert(ctx context.Context, key, value, description string) error {
+func (m *MockKeyValueStorage) Upsert(ctx context.Context, key, value, description string) (bool, error) {
+	_, exists := m.data[key]
 	m.data[key] = value
-	return nil
+	return !exists, nil
 }
 
 func (m *MockKeyValueStorage) Delete(ctx context.Context, key string) error {
@@ -61,8 +62,16 @@ func (m *MockKeyValueStorage) List(ctx context.Context) ([]interfaces.KeyValuePa
 	return pairs, nil
 }
 
+func (m *MockKeyValueStorage) GetAll(ctx context.Context) (map[string]string, error) {
+	result := make(map[string]string)
+	for k, v := range m.data {
+		result[k] = v
+	}
+	return result, nil
+}
+
 func TestBuildDependencyGraphAction_NormalizePath(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	tests := []struct {
@@ -113,7 +122,7 @@ func TestBuildDependencyGraphAction_NormalizePath(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_ResolvePath(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	tests := []struct {
@@ -161,7 +170,7 @@ func TestBuildDependencyGraphAction_ResolvePath(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_BuildGraph(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	t.Run("Build graph from documents", func(t *testing.T) {
@@ -269,7 +278,7 @@ func TestBuildDependencyGraphAction_BuildGraph(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_ComputeComponentSummaries(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	t.Run("Compute summaries from nodes", func(t *testing.T) {
@@ -387,7 +396,7 @@ func TestBuildDependencyGraphAction_ComputeComponentSummaries(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_Execute(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	kvStorage := NewMockKeyValueStorage()
 
 	t.Run("Execute and store graph", func(t *testing.T) {
@@ -444,7 +453,7 @@ func TestBuildDependencyGraphAction_Execute(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_EdgeCases(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	t.Run("Circular includes", func(t *testing.T) {
@@ -603,7 +612,7 @@ func TestBuildDependencyGraphAction_EdgeCases(t *testing.T) {
 }
 
 func TestBuildDependencyGraphAction_GetDevOpsMetadata(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewBuildDependencyGraphAction(nil, nil, nil, logger)
 
 	t.Run("Extract valid metadata", func(t *testing.T) {

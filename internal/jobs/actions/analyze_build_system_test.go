@@ -2,7 +2,6 @@ package actions
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/ternarybob/arbor"
@@ -45,7 +44,7 @@ func (m *MockLLMService) Close() error {
 }
 
 func TestAnalyzeBuildSystemAction_IsBuildFile(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	tests := []struct {
@@ -82,7 +81,7 @@ func TestAnalyzeBuildSystemAction_IsBuildFile(t *testing.T) {
 }
 
 func TestAnalyzeBuildSystemAction_ExtractMakefileTargets(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Extract simple targets", func(t *testing.T) {
@@ -149,7 +148,7 @@ $(TARGET): main.o
 }
 
 func TestAnalyzeBuildSystemAction_ExtractCMakeTargets(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Extract executables and libraries", func(t *testing.T) {
@@ -193,7 +192,7 @@ add_library(mydll SHARED dll.cpp)
 }
 
 func TestAnalyzeBuildSystemAction_ExtractCompilerFlags(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Extract various compiler flags", func(t *testing.T) {
@@ -251,7 +250,7 @@ gcc -DVERSION=1.0 -I./headers -o app main.c
 }
 
 func TestAnalyzeBuildSystemAction_ExtractLinkedLibraries(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Extract libraries from -l flags", func(t *testing.T) {
@@ -315,7 +314,7 @@ target_link_libraries(myapp PUBLIC pthread PRIVATE ssl INTERFACE crypto)
 }
 
 func TestAnalyzeBuildSystemAction_ExtractObjectFiles(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Extract .o and .obj files", func(t *testing.T) {
@@ -359,7 +358,7 @@ app: main.o utils.o helper.obj
 }
 
 func TestAnalyzeBuildSystemAction_AnalyzeWithLLM(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 
 	t.Run("Successful LLM analysis", func(t *testing.T) {
 		jsonResponse := `{
@@ -456,16 +455,16 @@ func TestAnalyzeBuildSystemAction_AnalyzeWithLLM(t *testing.T) {
 }
 
 func TestAnalyzeBuildSystemAction_Execute(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	storage := NewMockDocumentStorage()
 
 	t.Run("Analyze Makefile", func(t *testing.T) {
 		action := NewAnalyzeBuildSystemAction(storage, nil, logger)
 
 		doc := &models.Document{
-			ID:       "test-makefile",
-			FilePath: "/path/to/Makefile",
-			Content: `
+			ID:  "test-makefile",
+			URL: "/path/to/Makefile",
+			ContentMarkdown: `
 all: app
 app: main.o utils.o
 	gcc -o app main.o utils.o -lpthread -lm
@@ -494,10 +493,10 @@ main.o: main.c
 		action := NewAnalyzeBuildSystemAction(storage, nil, logger)
 
 		doc := &models.Document{
-			ID:       "test-cpp",
-			FilePath: "/path/to/main.cpp",
-			Content:  "int main() { return 0; }",
-			Metadata: make(map[string]interface{}),
+			ID:              "test-cpp",
+			URL:             "/path/to/main.cpp",
+			ContentMarkdown: "int main() { return 0; }",
+			Metadata:        make(map[string]interface{}),
 		}
 
 		err := action.Execute(context.Background(), doc, false)
@@ -512,9 +511,9 @@ main.o: main.c
 		action := NewAnalyzeBuildSystemAction(storage, nil, logger)
 
 		doc := &models.Document{
-			ID:       "test-cmake",
-			FilePath: "/path/to/CMakeLists.txt",
-			Content: `
+			ID:  "test-cmake",
+			URL: "/path/to/CMakeLists.txt",
+			ContentMarkdown: `
 cmake_minimum_required(VERSION 3.10)
 project(MyApp)
 add_executable(myapp main.cpp)
@@ -543,11 +542,26 @@ target_link_libraries(myapp pthread ssl)
 		mockLLM := NewMockLLMService(jsonResponse, nil)
 		action := NewAnalyzeBuildSystemAction(storage, mockLLM, logger)
 
+		// Content must be > 100 chars for LLM to be called
+		longContent := `# Makefile for testing LLM integration
+all: app
+app: main.o utils.o helper.o
+	gcc -o app main.o utils.o helper.o -lpthread -lm
+
+main.o: main.c config.h
+	gcc -c main.c -DDEBUG -I./include
+
+utils.o: utils.c utils.h
+	gcc -c utils.c
+
+clean:
+	rm -f *.o app
+`
 		doc := &models.Document{
-			ID:       "test-with-llm",
-			FilePath: "/path/to/Makefile",
-			Content:  "all: app\napp: main.o\n\tgcc -o app main.o",
-			Metadata: make(map[string]interface{}),
+			ID:              "test-with-llm",
+			URL:             "/path/to/Makefile",
+			ContentMarkdown: longContent,
+			Metadata:        make(map[string]interface{}),
 		}
 
 		err := action.Execute(context.Background(), doc, false)
@@ -562,7 +576,7 @@ target_link_libraries(myapp pthread ssl)
 }
 
 func TestAnalyzeBuildSystemAction_EdgeCases(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Complex multi-target Makefile", func(t *testing.T) {
@@ -622,10 +636,10 @@ add_library(utils STATIC utils.cpp)
 		action := NewAnalyzeBuildSystemAction(storage, nil, logger)
 
 		doc := &models.Document{
-			ID:       "test-vcxproj",
-			FilePath: "/path/to/project.vcxproj",
-			Content:  content,
-			Metadata: make(map[string]interface{}),
+			ID:              "test-vcxproj",
+			URL:             "/path/to/project.vcxproj",
+			ContentMarkdown: content,
+			Metadata:        make(map[string]interface{}),
 		}
 
 		err := action.Execute(context.Background(), doc, false)
@@ -658,7 +672,7 @@ add_library(utils STATIC utils.cpp)
 }
 
 func TestAnalyzeBuildSystemAction_MergeLLMResults(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAnalyzeBuildSystemAction(nil, nil, logger)
 
 	t.Run("Merge LLM results with existing metadata", func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
+	"github.com/ternarybob/quaero/internal/queue"
 )
 
 // DevOpsHandler handles DevOps enrichment API endpoints
@@ -20,7 +21,10 @@ type DevOpsHandler struct {
 	kvStorage       interfaces.KeyValueStorage
 	documentStorage interfaces.DocumentStorage
 	searchService   interfaces.SearchService
-	jobManager      interfaces.JobManager
+	jobDefStorage   interfaces.JobDefinitionStorage
+	orchestrator    *queue.Orchestrator
+	jobMonitor      interfaces.JobMonitor
+	stepMonitor     interfaces.StepMonitor
 	logger          arbor.ILogger
 }
 
@@ -29,14 +33,20 @@ func NewDevOpsHandler(
 	kvStorage interfaces.KeyValueStorage,
 	documentStorage interfaces.DocumentStorage,
 	searchService interfaces.SearchService,
-	jobManager interfaces.JobManager,
+	jobDefStorage interfaces.JobDefinitionStorage,
+	orchestrator *queue.Orchestrator,
+	jobMonitor interfaces.JobMonitor,
+	stepMonitor interfaces.StepMonitor,
 	logger arbor.ILogger,
 ) *DevOpsHandler {
 	return &DevOpsHandler{
 		kvStorage:       kvStorage,
 		documentStorage: documentStorage,
 		searchService:   searchService,
-		jobManager:      jobManager,
+		jobDefStorage:   jobDefStorage,
+		orchestrator:    orchestrator,
+		jobMonitor:      jobMonitor,
+		stepMonitor:     stepMonitor,
 		logger:          logger,
 	}
 }
@@ -170,16 +180,25 @@ func (h *DevOpsHandler) EnrichHandler(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Create a job from the devops_enrich job definition
-	// The job definition should exist and be registered in the system
-	jobID, err := h.jobManager.CreateJob(ctx, "devops_enrich", nil)
+	// Load the devops_enrich job definition
+	jobDef, err := h.jobDefStorage.GetJobDefinition(ctx, "devops_enrich")
 	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to create DevOps enrichment job")
+		h.logger.Error().Err(err).Msg("Failed to load devops_enrich job definition")
+		http.Error(w, "DevOps enrichment pipeline not configured: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Execute the job definition through the orchestrator
+	// Use a background context so the job continues after HTTP response
+	bgCtx := context.Background()
+	jobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to execute DevOps enrichment job")
 		http.Error(w, "Failed to trigger enrichment pipeline: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Info().Str("job_id", jobID).Msg("DevOps enrichment pipeline job created")
+	h.logger.Info().Str("job_id", jobID).Msg("DevOps enrichment pipeline started")
 
 	WriteJSON(w, http.StatusCreated, map[string]interface{}{
 		"job_id":  jobID,

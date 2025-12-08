@@ -16,52 +16,46 @@ auto_start = false
 # Step 1: Extract Structure - Process all C/C++ files (parallel processing)
 # Extracts #includes, #defines, platform conditionals using regex patterns
 [step.extract_structure]
-type = "devops"
+type = "extract_structure"
 description = "Extract includes, defines, and platform info from C/C++ files"
 on_error = "continue"
-action = "extract_structure"
-# Note: filter_tags can be added if needed to target specific documents
-# Example: filter_tags = ["source-code", "c-cpp"]
+filter_tags = ["devops-candidate"]
 
 # Step 2: Analyze Build System - Process build files only
 # Parses Makefiles, CMake, and other build files for targets and dependencies
 [step.analyze_build_system]
-type = "devops"
+type = "analyze_build"
 description = "Analyze Makefiles, CMake, and other build files"
 depends = "extract_structure"
 on_error = "continue"
-action = "analyze_build_system"
-# Note: filter_tags can be added to target build files specifically
-# Example: filter_tags = ["build-file"]
+filter_tags = ["devops-candidate"]
 
 # Step 3: Classify DevOps - LLM classification (batched)
 # Uses LLM to classify files by role, component, and test type
 [step.classify_devops]
-type = "devops"
+type = "classify"
 description = "LLM-based classification of file roles and components"
 depends = "extract_structure"
 on_error = "continue"
-action = "classify_devops"
-# Note: Can use filter_tags to process only files with extracted metadata
-# Example: filter_tags = ["devops-extracted"]
+filter_tags = ["devops-candidate"]
 
 # Step 4: Build Dependency Graph - Single aggregation job
 # Builds dependency graph from all extracted metadata across documents
 [step.build_dependency_graph]
-type = "devops"
+type = "dependency_graph"
 description = "Build dependency graph from extracted metadata"
 depends = "extract_structure, classify_devops"
 on_error = "fail"
-action = "build_dependency_graph"
+filter_tags = ["devops-candidate"]
 
 # Step 5: Aggregate DevOps Summary - Single synthesis job
 # Generates final DevOps summary and CI/CD guide using LLM
 [step.aggregate_devops_summary]
-type = "devops"
+type = "aggregate_summary"
 description = "Generate actionable DevOps summary and CI/CD guide"
 depends = "build_dependency_graph"
 on_error = "fail"
-action = "aggregate_devops_summary"
+filter_tags = ["devops-candidate"]
 
 # Error tolerance for child job failures
 # Allow some files to fail without stopping the entire pipeline

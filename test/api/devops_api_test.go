@@ -2,13 +2,169 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/ternarybob/quaero/test/common"
 )
+
+// loadAndSaveJobDefinitionToml loads the job definition into the service and saves a copy to results
+func loadAndSaveJobDefinitionToml(t *testing.T, env *common.TestEnvironment) error {
+	// Find the jobs directory relative to the test
+	possiblePaths := []string{
+		"../../jobs/devops_enrich.toml",
+		"../../../jobs/devops_enrich.toml",
+		"jobs/devops_enrich.toml",
+	}
+
+	var foundPath string
+	var content []byte
+	var err error
+	for _, p := range possiblePaths {
+		absPath, _ := filepath.Abs(p)
+		content, err = os.ReadFile(absPath)
+		if err == nil {
+			foundPath = absPath
+			break
+		}
+	}
+
+	if err != nil {
+		t.Logf("Warning: Could not read job definition TOML: %v", err)
+		return err
+	}
+
+	// Save to results directory for documentation
+	destPath := filepath.Join(env.GetResultsDir(), "devops_enrich.toml")
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		t.Logf("Warning: Could not save job definition TOML: %v", err)
+	} else {
+		t.Logf("Saved job definition TOML to: %s", destPath)
+	}
+
+	// Load the job definition into the service via API
+	if err := env.LoadJobDefinitionFile(foundPath); err != nil {
+		t.Logf("Warning: Could not load job definition into service: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// importFixtures imports test files from test/fixtures/cpp_project/ into the document store
+func importFixtures(t *testing.T, helper *common.HTTPTestHelper) int {
+	t.Log("Importing test fixtures from cpp_project...")
+
+	// Find fixtures directory relative to test file
+	possiblePaths := []string{
+		"../fixtures/cpp_project",
+		"../../test/fixtures/cpp_project",
+		"test/fixtures/cpp_project",
+	}
+
+	var fixturesDir string
+	for _, p := range possiblePaths {
+		absPath, _ := filepath.Abs(p)
+		if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+			fixturesDir = absPath
+			break
+		}
+	}
+
+	if fixturesDir == "" {
+		t.Log("Warning: Could not find fixtures directory")
+		return 0
+	}
+
+	var importedCount int
+	var files []string
+
+	// Walk the fixtures directory and collect all source files
+	err := filepath.Walk(fixturesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Import only source code files
+		ext := filepath.Ext(path)
+		if ext == ".cpp" || ext == ".h" || ext == ".txt" || ext == ".cmake" {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		t.Logf("Warning: Failed to walk fixtures directory: %v", err)
+		return 0
+	}
+
+	// Import each file as a document
+	for _, filePath := range files {
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			t.Logf("  Warning: Failed to read %s: %v", filePath, err)
+			continue
+		}
+
+		// Extract relative path for the title
+		relPath, _ := filepath.Rel(fixturesDir, filePath)
+
+		// Detect language from extension
+		ext := filepath.Ext(filePath)
+		language := "text"
+		switch ext {
+		case ".cpp", ".cc", ".cxx":
+			language = "cpp"
+		case ".h", ".hpp":
+			language = "cpp-header"
+		case ".cmake":
+			language = "cmake"
+		}
+
+		doc := map[string]interface{}{
+			"id":               uuid.New().String(),
+			"source_type":      "local_file",
+			"url":              "file://" + filePath,
+			"title":            relPath,
+			"content_markdown": string(content),
+			"metadata": map[string]interface{}{
+				"file_type": ext,
+				"file_path": relPath,
+				"language":  language,
+			},
+			"tags": []string{"test-fixture", "devops-candidate"},
+		}
+
+		resp, err := helper.POST("/api/documents", doc)
+		if err != nil {
+			t.Logf("  Warning: Failed to import %s: %v", relPath, err)
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+			t.Logf("  Warning: Failed to import %s (status %d)", relPath, resp.StatusCode)
+			continue
+		}
+
+		importedCount++
+		t.Logf("  ✓ Imported: %s", relPath)
+	}
+
+	t.Logf("✓ Imported %d files from fixtures", importedCount)
+	return importedCount
+}
 
 // TestDevOpsAPI_Summary_NotGenerated tests GET /api/devops/summary before enrichment
 func TestDevOpsAPI_Summary_NotGenerated(t *testing.T) {
@@ -35,6 +191,9 @@ func TestDevOpsAPI_TriggerEnrichment(t *testing.T) {
 	env, err := common.SetupTestEnvironment(t.Name())
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
+
+	// Save job definition TOML to results directory
+	loadAndSaveJobDefinitionToml(t, env)
 
 	helper := env.NewHTTPTestHelper(t)
 
@@ -168,6 +327,9 @@ func TestDevOpsAPI_FullFlow(t *testing.T) {
 	require.NoError(t, err, "Failed to setup test environment")
 	defer env.Cleanup()
 
+	// Save job definition TOML to results directory
+	loadAndSaveJobDefinitionToml(t, env)
+
 	helper := env.NewHTTPTestHelper(t)
 
 	// Step 1: Verify initial state (no summary)
@@ -184,11 +346,14 @@ func TestDevOpsAPI_FullFlow(t *testing.T) {
 	defer resp.Body.Close()
 	helper.AssertStatusCode(resp, http.StatusNotFound)
 
-	// Step 3: Import test fixtures (if available)
-	// Note: This would require test documents/fixtures to be loaded
-	// For now, we'll just trigger enrichment on existing data
-	t.Log("Step 3: Checking for existing documents to enrich")
-	// This step would normally load test data, but we'll skip it for this basic test
+	// Step 3: Import test fixtures
+	t.Log("Step 3: Importing test fixtures for enrichment")
+	importedCount := importFixtures(t, helper)
+	if importedCount == 0 {
+		t.Log("⚠️  No fixtures imported - enrichment will process 0 documents")
+	} else {
+		t.Logf("✓ Imported %d fixture documents with 'devops-candidate' tag", importedCount)
+	}
 
 	// Step 4: Trigger enrichment
 	t.Log("Step 4: Triggering DevOps enrichment pipeline")

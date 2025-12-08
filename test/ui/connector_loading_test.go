@@ -82,7 +82,11 @@ func TestConnectorUI_NoConnectorsMessage(t *testing.T) {
 		t.Logf("Failed to write page dump: %v", err)
 	}
 
-	env.LogTest(t, "No connectors message test completed")
+	// Take final screenshot
+	if err := env.TakeFullScreenshot(ctx, "connectors_test_complete"); err != nil {
+		t.Logf("Failed to take final screenshot: %v", err)
+	}
+	env.LogTest(t, "✓ No connectors message test completed")
 }
 
 // TestConnectorUI_ConnectorDetails tests viewing connector details
@@ -199,5 +203,9 @@ func TestConnectorUI_ConnectorDetails(t *testing.T) {
 		chromedp.Sleep(1*time.Second),
 	)
 
-	env.LogTest(t, "Connector details test completed")
+	// Take final screenshot
+	if err := env.TakeFullScreenshot(ctx, "connector_details_test_complete"); err != nil {
+		t.Logf("Failed to take final screenshot: %v", err)
+	}
+	env.LogTest(t, "✓ Connector details test completed")
 }

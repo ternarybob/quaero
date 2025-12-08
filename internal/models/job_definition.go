@@ -26,6 +26,7 @@ func init() {
 	gob.Register([]string{})                 // Used by agents for keyword lists
 	gob.Register(time.Time{})                // Used in document timestamps and job metadata
 	gob.Register(CrawlConfig{})              // Used in crawler job configs
+	gob.Register(DevOpsMetadata{})           // Used for C/C++ DevOps enrichment
 }
 
 // JobDefinitionType represents the type of job definition

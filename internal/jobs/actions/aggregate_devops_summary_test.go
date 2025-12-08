@@ -30,8 +30,21 @@ func (m *MockSearchService) Search(ctx context.Context, query string, opts inter
 	return m.documents, nil
 }
 
+func (m *MockSearchService) GetByID(ctx context.Context, id string) (*models.Document, error) {
+	for _, doc := range m.documents {
+		if doc.ID == id {
+			return doc, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockSearchService) SearchByReference(ctx context.Context, reference string, opts interfaces.SearchOptions) ([]*models.Document, error) {
+	return m.documents, nil
+}
+
 func TestAggregateDevOpsSummaryAction_AggregateFromDocuments(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAggregateDevOpsSummaryAction(nil, nil, nil, nil, logger)
 
 	t.Run("Aggregate from multiple documents", func(t *testing.T) {
@@ -268,7 +281,7 @@ func TestAggregateDevOpsSummaryAction_AggregateFromDocuments(t *testing.T) {
 }
 
 func TestAggregateDevOpsSummaryAction_FormatForPrompt(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAggregateDevOpsSummaryAction(nil, nil, nil, nil, logger)
 
 	t.Run("Format complete data", func(t *testing.T) {
@@ -327,7 +340,7 @@ func TestAggregateDevOpsSummaryAction_FormatForPrompt(t *testing.T) {
 }
 
 func TestAggregateDevOpsSummaryAction_Execute(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	storage := NewMockDocumentStorage()
 	kvStorage := NewMockKeyValueStorage()
 
@@ -474,7 +487,7 @@ Unit tests using gtest.`
 }
 
 func TestAggregateDevOpsSummaryAction_CreateSummaryDocument(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	storage := NewMockDocumentStorage()
 	action := NewAggregateDevOpsSummaryAction(storage, nil, nil, nil, logger)
 
@@ -536,7 +549,7 @@ func TestAggregateDevOpsSummaryAction_CreateSummaryDocument(t *testing.T) {
 }
 
 func TestAggregateDevOpsSummaryAction_GetDevOpsMetadata(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAggregateDevOpsSummaryAction(nil, nil, nil, nil, logger)
 
 	t.Run("Get valid metadata", func(t *testing.T) {
@@ -583,7 +596,7 @@ func TestAggregateDevOpsSummaryAction_GetDevOpsMetadata(t *testing.T) {
 }
 
 func TestAggregateDevOpsSummaryAction_EdgeCases(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	storage := NewMockDocumentStorage()
 	kvStorage := NewMockKeyValueStorage()
 
@@ -677,7 +690,7 @@ func TestAggregateDevOpsSummaryAction_EdgeCases(t *testing.T) {
 }
 
 func TestAggregateDevOpsSummaryAction_GenerateMinimalSummary(t *testing.T) {
-	logger := arbor.NewNoOpLogger()
+	logger := arbor.NewLogger()
 	action := NewAggregateDevOpsSummaryAction(nil, nil, nil, nil, logger)
 
 	summary := action.generateMinimalSummary()
