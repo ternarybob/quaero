@@ -18,12 +18,14 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
-    
+        go-version: '1.23'
+
     - name: Download dependencies
       run: go mod download
-    
+
     - name: Run tests
+      env:
+        GOTOOLCHAIN: local
       run: go test -v -race -coverprofile=coverage.out ./...
     
     - name: Upload coverage
@@ -34,18 +36,20 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
-    
+        go-version: '1.23'
+
     - name: Build
-      run: make build
+      env:
+        GOTOOLCHAIN: local
+      run: CGO_ENABLED=0 go build -o bin/quaero ./cmd/quaero
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -56,17 +60,20 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
-    
+        go-version: '1.23'
+
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
         version: latest
+      env:
+        GOTOOLCHAIN: local
+        GOFLAGS: ""

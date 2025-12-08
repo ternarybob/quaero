@@ -560,6 +560,21 @@ func (s *InMemoryJobStorage) MarkRunningJobsAsPending(ctx context.Context, reaso
 	return count, nil
 }
 
+func (s *InMemoryJobStorage) GetStepStats(ctx context.Context, managerID string) (*interfaces.StepStats, error) {
+	// Simple mock - return empty stats
+	return &interfaces.StepStats{}, nil
+}
+
+func (s *InMemoryJobStorage) ListStepJobs(ctx context.Context, managerID string) ([]*models.QueueJob, error) {
+	// Simple mock - return empty slice
+	return []*models.QueueJob{}, nil
+}
+
+func (s *InMemoryJobStorage) IncrementDocumentCountAtomic(ctx context.Context, jobID string) (int, error) {
+	// Simple mock - return 1
+	return 1, nil
+}
+
 // Helper method to verify log contains expected content
 func (s *InMemoryJobStorage) VerifyLogContains(t *testing.T, jobID, expectedSubstring string) bool {
 	entries, exists := s.logs[jobID]
