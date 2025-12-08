@@ -233,8 +233,8 @@ func (h *JobDefinitionHandler) ListJobDefinitionsHandler(w http.ResponseWriter, 
 	opts := interfaces.JobDefinitionListOptions{
 		Limit:    50,
 		Offset:   0,
-		OrderBy:  "CreatedAt",
-		OrderDir: "DESC",
+		OrderBy:  "Name",
+		OrderDir: "ASC",
 	}
 
 	// Parse type filter
