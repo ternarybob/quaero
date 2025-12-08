@@ -112,6 +112,10 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 			stepLogger.Debug().Msg("Step monitoring cancelled")
 			m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, "cancelled")
 			m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+			// Update step_stats in manager metadata for UI display
+			if err := m.jobMgr.UpdateStepStatInManager(ctx, stepJob.ID, managerID, "cancelled"); err != nil {
+				m.logger.Warn().Err(err).Str("step_id", stepJob.ID).Msg("Failed to update step_stats on cancellation")
+			}
 			return ctx.Err()
 
 		case <-timeout:
@@ -119,6 +123,10 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 			m.jobMgr.SetJobError(ctx, stepJob.ID, "Timed out waiting for child jobs")
 			m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, "failed")
 			m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+			// Update step_stats in manager metadata for UI display
+			if err := m.jobMgr.UpdateStepStatInManager(ctx, stepJob.ID, managerID, "failed"); err != nil {
+				m.logger.Warn().Err(err).Str("step_id", stepJob.ID).Msg("Failed to update step_stats on timeout")
+			}
 			return fmt.Errorf("step timed out")
 
 		case <-ticker.C:
@@ -131,6 +139,10 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 						stepLogger.Debug().Msg("Step job was cancelled via API, stopping monitor")
 						// Job already marked as cancelled, set finished timestamp and exit
 						m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+						// Update step_stats in manager metadata for UI display
+						if err := m.jobMgr.UpdateStepStatInManager(ctx, stepJob.ID, managerID, "cancelled"); err != nil {
+							m.logger.Warn().Err(err).Str("step_id", stepJob.ID).Msg("Failed to update step_stats on API cancellation")
+						}
 						m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "cancelled", nil)
 						return nil
 					}
@@ -167,6 +179,13 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 				m.publishStepLog(ctx, managerID, stepJob.Name, "info", fmt.Sprintf("Step completed (no jobs) in %s", formatDuration(duration)))
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, "completed")
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+				// Update step_stats in manager metadata for UI display
+				if err := m.jobMgr.UpdateStepStatInManager(ctx, stepJob.ID, managerID, "completed"); err != nil {
+					m.logger.Warn().Err(err).
+						Str("step_id", stepJob.ID).
+						Str("manager_id", managerID).
+						Msg("Failed to update step_stats in manager metadata")
+				}
 				m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, "completed", stats)
 				return nil
 			}
@@ -205,6 +224,14 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 				m.publishStepLog(ctx, managerID, stepJob.Name, logLevel, stepLogMsg)
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, finalStatus)
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
+				// Update step_stats in manager metadata for UI display
+				if err := m.jobMgr.UpdateStepStatInManager(ctx, stepJob.ID, managerID, finalStatus); err != nil {
+					m.logger.Warn().Err(err).
+						Str("step_id", stepJob.ID).
+						Str("manager_id", managerID).
+						Str("status", finalStatus).
+						Msg("Failed to update step_stats in manager metadata")
+				}
 				m.publishStepProgress(ctx, stepJob.ID, managerID, stepJob.Name, finalStatus, stats)
 
 				stepLogger.Debug().
