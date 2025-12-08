@@ -26,7 +26,6 @@ const (
 	WorkerTypeSummary             WorkerType = "summary"   // Corpus summary generation from tagged documents
 
 	// Enrichment pipeline workers - each handles a specific enrichment step
-	WorkerTypeExtractStructure WorkerType = "extract_structure" // Extract C/C++ code structure (includes, defines, conditionals)
 	WorkerTypeAnalyzeBuild     WorkerType = "analyze_build"     // Parse build files (CMake, Makefile) for targets and dependencies
 	WorkerTypeClassify         WorkerType = "classify"          // LLM-based classification of file roles and components
 	WorkerTypeDependencyGraph  WorkerType = "dependency_graph"  // Build dependency graph from extracted metadata
@@ -39,7 +38,7 @@ func (w WorkerType) IsValid() bool {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
-		WorkerTypeSummary, WorkerTypeExtractStructure, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
+		WorkerTypeSummary, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
 		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary:
 		return true
 	}
@@ -67,7 +66,6 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeLocalDir,
 		WorkerTypeCodeMap,
 		WorkerTypeSummary,
-		WorkerTypeExtractStructure,
 		WorkerTypeAnalyzeBuild,
 		WorkerTypeClassify,
 		WorkerTypeDependencyGraph,

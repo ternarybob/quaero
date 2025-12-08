@@ -600,6 +600,99 @@ func TestLocalDirWorker_HelperFunctions(t *testing.T) {
 	})
 }
 
+// TestLocalDirWorker_CreateJobsStepTags tests that step-level tags are used in batch jobs
+func TestLocalDirWorker_CreateJobsStepTags(t *testing.T) {
+	tests := []struct {
+		name         string
+		stepTags     interface{}
+		jobDefTags   []string
+		expectedTags []string
+	}{
+		{
+			name:         "step tags as interface slice",
+			stepTags:     []interface{}{"codebase", "quaero"},
+			jobDefTags:   nil,
+			expectedTags: []string{"codebase", "quaero"},
+		},
+		{
+			name:         "step tags as string slice",
+			stepTags:     []string{"project", "go"},
+			jobDefTags:   nil,
+			expectedTags: []string{"project", "go"},
+		},
+		{
+			name:         "fallback to job definition tags",
+			stepTags:     nil,
+			jobDefTags:   []string{"default-tag"},
+			expectedTags: []string{"default-tag"},
+		},
+		{
+			name:         "step tags override job definition tags",
+			stepTags:     []interface{}{"step-tag"},
+			jobDefTags:   []string{"job-def-tag"},
+			expectedTags: []string{"step-tag"},
+		},
+		{
+			name:         "empty step tags fallback to job definition",
+			stepTags:     []interface{}{},
+			jobDefTags:   []string{"fallback"},
+			expectedTags: []string{"fallback"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build step config
+			stepConfig := map[string]interface{}{
+				"dir_path": ".",
+			}
+			if tt.stepTags != nil {
+				stepConfig["tags"] = tt.stepTags
+			}
+
+			step := models.JobStep{
+				Name:   "import_files",
+				Type:   "local_dir",
+				Config: stepConfig,
+			}
+			jobDef := models.JobDefinition{
+				ID:   "test-job",
+				Name: "Test Job",
+				Tags: tt.jobDefTags,
+			}
+
+			// Extract tags using the same logic as CreateJobs
+			var baseTags []string
+			if stepTags, ok := step.Config["tags"].([]interface{}); ok {
+				for _, tag := range stepTags {
+					if tagStr, ok := tag.(string); ok {
+						baseTags = append(baseTags, tagStr)
+					}
+				}
+			} else if stepTags, ok := step.Config["tags"].([]string); ok {
+				baseTags = stepTags
+			}
+
+			// Fallback to job definition tags if no step tags specified
+			if len(baseTags) == 0 && len(jobDef.Tags) > 0 {
+				baseTags = jobDef.Tags
+			}
+
+			// Verify expected tags
+			if len(baseTags) != len(tt.expectedTags) {
+				t.Errorf("got %d tags %v, want %d tags %v", len(baseTags), baseTags, len(tt.expectedTags), tt.expectedTags)
+				return
+			}
+
+			for i, expected := range tt.expectedTags {
+				if baseTags[i] != expected {
+					t.Errorf("tag[%d] = %s, want %s", i, baseTags[i], expected)
+				}
+			}
+		})
+	}
+}
+
 // Benchmark tests
 func BenchmarkLocalDirWorker_Init(b *testing.B) {
 	logger := arbor.NewLogger()

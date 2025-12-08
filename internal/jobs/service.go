@@ -394,8 +394,16 @@ func (s *Service) ValidateAPIKeys(jobDef *models.JobDefinition) {
 	for _, step := range jobDef.Steps {
 		if step.Config != nil {
 			if apiKeyName, ok := step.Config["api_key"].(string); ok && apiKeyName != "" {
+				// Handle {key-name} variable reference pattern
+				// If api_key is wrapped in braces like "{google_gemini_api_key}",
+				// extract the actual key name for lookup
+				lookupName := apiKeyName
+				if len(apiKeyName) > 2 && apiKeyName[0] == '{' && apiKeyName[len(apiKeyName)-1] == '}' {
+					lookupName = apiKeyName[1 : len(apiKeyName)-1]
+				}
+
 				// Try to resolve the API key from KV store
-				_, err := common.ResolveAPIKey(ctx, s.kvStorage, apiKeyName, "")
+				_, err := common.ResolveAPIKey(ctx, s.kvStorage, lookupName, "")
 				if err != nil {
 					// API key not found or invalid
 					jobDef.RuntimeStatus = "error"

@@ -26,7 +26,7 @@ filter_tags = ["devops-candidate"]
 [step.analyze_build_system]
 type = "analyze_build"
 description = "Analyze Makefiles, CMake, and other build files"
-depends = "extract_structure"
+depends = "import_files"
 on_error = "continue"
 filter_tags = ["devops-candidate"]
 
@@ -35,7 +35,7 @@ filter_tags = ["devops-candidate"]
 [step.classify_devops]
 type = "classify"
 description = "LLM-based classification of file roles and components"
-depends = "extract_structure"
+depends = "import_files"
 on_error = "continue"
 filter_tags = ["devops-candidate"]
 
@@ -44,7 +44,7 @@ filter_tags = ["devops-candidate"]
 [step.build_dependency_graph]
 type = "dependency_graph"
 description = "Build dependency graph from extracted metadata"
-depends = "extract_structure, classify_devops"
+depends = "import_files, classify_devops"
 on_error = "fail"
 filter_tags = ["devops-candidate"]
 

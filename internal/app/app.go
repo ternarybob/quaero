@@ -696,15 +696,6 @@ func (a *App) initServices() error {
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
 	// Register enrichment pipeline workers (each handles a specific enrichment step)
-	extractStructureWorker := workers.NewExtractStructureWorker(
-		a.SearchService,
-		a.StorageManager.DocumentStorage(),
-		a.Logger,
-		jobMgr,
-	)
-	a.StepManager.RegisterWorker(extractStructureWorker)
-	a.Logger.Debug().Str("step_type", extractStructureWorker.GetType().String()).Msg("Extract structure worker registered")
-
 	analyzeBuildWorker := workers.NewAnalyzeBuildWorker(
 		a.SearchService,
 		a.StorageManager.DocumentStorage(),
