@@ -441,6 +441,8 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 	// Monitor status until terminal state
 	startTime := time.Now()
 	lastStatus := ""
+	lastScreenshotTime := time.Now()
+	lastProgressLog := time.Now()
 	var currentStatus string
 	pollStart := time.Now()
 
@@ -452,6 +454,22 @@ func (ltc *localDirTestContext) monitorJobViaUI(jobName string, timeout time.Dur
 		if time.Since(pollStart) > timeout {
 			ltc.screenshot("job_timeout")
 			return lastStatus, fmt.Errorf("job did not complete within %v (last status: %s)", timeout, lastStatus)
+		}
+
+		// Log progress every 10 seconds
+		if time.Since(lastProgressLog) >= 10*time.Second {
+			elapsed := time.Since(startTime)
+			ltc.env.LogTest(ltc.t, "  [%v] Still monitoring... (status: %s)", elapsed.Round(time.Second), lastStatus)
+			lastProgressLog = time.Now()
+		}
+
+		// Take periodic screenshot every 30 seconds
+		if time.Since(lastScreenshotTime) >= 30*time.Second {
+			elapsed := time.Since(startTime)
+			screenshotName := fmt.Sprintf("monitor_%ds", int(elapsed.Seconds()))
+			ltc.screenshot(screenshotName)
+			ltc.env.LogTest(ltc.t, "  Captured periodic screenshot: %s", screenshotName)
+			lastScreenshotTime = time.Now()
 		}
 
 		// Refresh the page data

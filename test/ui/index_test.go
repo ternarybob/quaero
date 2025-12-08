@@ -166,4 +166,10 @@ func TestIndex(t *testing.T) {
 	} else {
 		env.LogTest(t, "✓ Footer contains version info: %s", footerText)
 	}
+
+	// Take final screenshot to capture test completion state
+	if err := env.TakeFullScreenshot(ctx, "index_test_complete"); err != nil {
+		t.Logf("Failed to take final screenshot: %v", err)
+	}
+	env.LogTest(t, "✓ Test completed successfully")
 }

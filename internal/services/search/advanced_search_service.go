@@ -151,6 +151,7 @@ func (s *AdvancedSearchService) executeListDocuments(
 		Offset:   opts.Offset,
 		OrderBy:  "updated_at",
 		OrderDir: "desc",
+		Tags:     opts.Tags, // Push tags filter to DB level for efficiency
 	}
 
 	// Push document_type filter to DB level for efficiency

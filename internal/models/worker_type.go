@@ -24,6 +24,12 @@ const (
 	WorkerTypeLocalDir            WorkerType = "local_dir" // Local directory indexing (full content)
 	WorkerTypeCodeMap             WorkerType = "code_map"  // Hierarchical code structure analysis
 	WorkerTypeSummary             WorkerType = "summary"   // Corpus summary generation from tagged documents
+
+	// Enrichment pipeline workers - each handles a specific enrichment step
+	WorkerTypeAnalyzeBuild     WorkerType = "analyze_build"     // Parse build files (CMake, Makefile) for targets and dependencies
+	WorkerTypeClassify         WorkerType = "classify"          // LLM-based classification of file roles and components
+	WorkerTypeDependencyGraph  WorkerType = "dependency_graph"  // Build dependency graph from extracted metadata
+	WorkerTypeAggregateSummary WorkerType = "aggregate_summary" // Generate summary of all enrichment metadata
 )
 
 // IsValid checks if the WorkerType is a known, valid type
@@ -32,7 +38,8 @@ func (w WorkerType) IsValid() bool {
 	case WorkerTypeAgent, WorkerTypeCrawler, WorkerTypePlacesSearch, WorkerTypeWebSearch,
 		WorkerTypeGitHubRepo, WorkerTypeGitHubActions, WorkerTypeGitHubGit, WorkerTypeTransform,
 		WorkerTypeReindex, WorkerTypeDatabaseMaintenance, WorkerTypeLocalDir, WorkerTypeCodeMap,
-		WorkerTypeSummary:
+		WorkerTypeSummary, WorkerTypeAnalyzeBuild, WorkerTypeClassify,
+		WorkerTypeDependencyGraph, WorkerTypeAggregateSummary:
 		return true
 	}
 	return false
@@ -59,5 +66,9 @@ func AllWorkerTypes() []WorkerType {
 		WorkerTypeLocalDir,
 		WorkerTypeCodeMap,
 		WorkerTypeSummary,
+		WorkerTypeAnalyzeBuild,
+		WorkerTypeClassify,
+		WorkerTypeDependencyGraph,
+		WorkerTypeAggregateSummary,
 	}
 }

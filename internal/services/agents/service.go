@@ -135,6 +135,15 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	keywordExtractor := &KeywordExtractor{}
 	service.RegisterAgent(keywordExtractor)
 
+	metadataEnricher := &MetadataEnricher{}
+	service.RegisterAgent(metadataEnricher)
+
+	categoryClassifier := &CategoryClassifier{}
+	service.RegisterAgent(categoryClassifier)
+
+	entityRecognizer := &EntityRecognizer{}
+	service.RegisterAgent(entityRecognizer)
+
 	logger.Debug().
 		Str("model", config.AgentModel).
 		Int("max_turns", config.MaxTurns).

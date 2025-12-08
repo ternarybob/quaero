@@ -491,10 +491,21 @@ func (w *LocalDirWorker) CreateJobs(ctx context.Context, step models.JobStep, jo
 	w.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Matched %d files, creating %d batch jobs (%d files per batch)",
 		matchedFiles, batchCount, batchSize), "", "run")
 
-	// Get tags for documents
-	baseTags := jobDef.Tags
-	if baseTags == nil {
-		baseTags = []string{}
+	// Get tags for documents - prefer step config tags, fallback to job definition tags
+	var baseTags []string
+	if stepTags, ok := step.Config["tags"].([]interface{}); ok {
+		for _, tag := range stepTags {
+			if tagStr, ok := tag.(string); ok {
+				baseTags = append(baseTags, tagStr)
+			}
+		}
+	} else if stepTags, ok := step.Config["tags"].([]string); ok {
+		baseTags = stepTags
+	}
+
+	// Fallback to job definition tags if no step tags specified
+	if len(baseTags) == 0 && len(jobDef.Tags) > 0 {
+		baseTags = jobDef.Tags
 	}
 
 	// Create batched queue jobs

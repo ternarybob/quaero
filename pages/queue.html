@@ -2528,15 +2528,16 @@
                                         } else if (stepNum <= completedSteps) {
                                             status = 'completed';
                                         }
-
-                                        // Override based on parent status if job is done (no active children)
-                                        if (!hasActiveChildren && parentStatus === 'completed' && stepNum <= stepDefs.length) {
-                                            status = 'completed';
-                                        }
                                     }
 
                                     // Get step-specific statistics (child count and document count created by this step)
                                     const stepStat = stepStats.find(s => s && s.step_index === index) || {};
+
+                                    // Use step_stats.status from backend as authoritative source for terminal status
+                                    // This ensures failed steps show "failed" even when parent job continues
+                                    if (stepStat.status && (stepStat.status === 'failed' || stepStat.status === 'completed' || stepStat.status === 'spawned')) {
+                                        status = stepStat.status;
+                                    }
 
                                     // For child count: prefer stepStats, but for running/failed steps count from allChildJobs
                                     // Children have step_name in their metadata to associate them with a step

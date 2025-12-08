@@ -261,6 +261,27 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
+			// Store step statistics with failed status for UI display
+			stepStats[i] = map[string]interface{}{
+				"step_index":     i,
+				"step_id":        stepID,
+				"step_name":      step.Name,
+				"step_type":      step.Type.String(),
+				"child_count":    0,
+				"document_count": 0,
+				"status":         "failed",
+			}
+			// Update manager metadata with failed step progress
+			failedStepMetadata := map[string]interface{}{
+				"current_step":        i + 1,
+				"current_step_name":   step.Name,
+				"current_step_type":   step.Type.String(),
+				"current_step_status": "failed",
+				"current_step_id":     stepID,
+				"step_stats":          stepStats[:i+1],
+			}
+			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
+
 			if step.OnError == models.ErrorStrategyFail {
 				return managerID, fmt.Errorf("step %s init failed: %w", step.Name, err)
 			}
@@ -281,6 +302,27 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
+
+			// Store step statistics with failed status for UI display
+			stepStats[i] = map[string]interface{}{
+				"step_index":     i,
+				"step_id":        stepID,
+				"step_name":      step.Name,
+				"step_type":      step.Type.String(),
+				"child_count":    0,
+				"document_count": 0,
+				"status":         "failed",
+			}
+			// Update manager metadata with failed step progress
+			failedStepMetadata := map[string]interface{}{
+				"current_step":        i + 1,
+				"current_step_name":   step.Name,
+				"current_step_type":   step.Type.String(),
+				"current_step_status": "failed",
+				"current_step_id":     stepID,
+				"step_stats":          stepStats[:i+1],
+			}
+			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
 			if step.OnError == models.ErrorStrategyFail {
 				return managerID, fmt.Errorf("step %s failed: %w", step.Name, err)
@@ -413,16 +455,6 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		// Calculate documents created by this step
 		stepDocCount := docCountAfter - docCountBefore
 
-		// Store step statistics for UI
-		stepStats[i] = map[string]interface{}{
-			"step_index":     i,
-			"step_id":        stepID,
-			"step_name":      step.Name,
-			"step_type":      step.Type.String(),
-			"child_count":    stepChildCount,
-			"document_count": stepDocCount,
-		}
-
 		// Determine step status
 		stepStatus := "completed"
 		o.logger.Debug().
@@ -438,6 +470,17 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 
 		if returnsChildJobs && stepChildCount > 0 {
 			stepStatus = "spawned"
+		}
+
+		// Store step statistics for UI with determined status
+		stepStats[i] = map[string]interface{}{
+			"step_index":     i,
+			"step_id":        stepID,
+			"step_name":      step.Name,
+			"step_type":      step.Type.String(),
+			"child_count":    stepChildCount,
+			"document_count": stepDocCount,
+			"status":         stepStatus,
 		}
 
 		// Update step job status

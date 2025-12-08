@@ -231,6 +231,11 @@ func TestWorkerType_IsValid(t *testing.T) {
 		{"local_dir is valid", WorkerTypeLocalDir, true},
 		{"code_map is valid", WorkerTypeCodeMap, true},
 		{"summary is valid", WorkerTypeSummary, true},
+		{"extract_structure is valid", WorkerTypeExtractStructure, true},
+		{"analyze_build is valid", WorkerTypeAnalyzeBuild, true},
+		{"classify is valid", WorkerTypeClassify, true},
+		{"dependency_graph is valid", WorkerTypeDependencyGraph, true},
+		{"aggregate_summary is valid", WorkerTypeAggregateSummary, true},
 		{"empty string is invalid", WorkerType(""), false},
 		{"unknown type is invalid", WorkerType("unknown"), false},
 		{"typo is invalid", WorkerType("crawl"), false},
@@ -375,7 +380,7 @@ func TestJobStep_TypeValidation(t *testing.T) {
 func TestAllWorkerTypes(t *testing.T) {
 	allTypes := AllWorkerTypes()
 
-	expectedCount := 13
+	expectedCount := 18
 	if len(allTypes) != expectedCount {
 		t.Errorf("AllWorkerTypes() returned %d types, expected %d", len(allTypes), expectedCount)
 	}
@@ -402,6 +407,11 @@ func TestAllWorkerTypes(t *testing.T) {
 		WorkerTypeLocalDir:            true,
 		WorkerTypeCodeMap:             true,
 		WorkerTypeSummary:             true,
+		WorkerTypeExtractStructure:    true,
+		WorkerTypeAnalyzeBuild:        true,
+		WorkerTypeClassify:            true,
+		WorkerTypeDependencyGraph:     true,
+		WorkerTypeAggregateSummary:    true,
 	}
 
 	for _, st := range allTypes {

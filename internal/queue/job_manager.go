@@ -649,6 +649,62 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 	return m.jobStorage.UpdateJob(ctx, jobState)
 }
 
+// UpdateStepStatInManager updates a step's status in the manager's step_stats metadata.
+// This is called by StepMonitor when a step completes to update the UI display.
+func (m *Manager) UpdateStepStatInManager(ctx context.Context, stepID, managerID, status string) error {
+	// Get manager job
+	jobEntityInterface, err := m.jobStorage.GetJob(ctx, managerID)
+	if err != nil {
+		return fmt.Errorf("get manager job %s: %w", managerID, err)
+	}
+	managerJob := jobEntityInterface.(*models.QueueJobState)
+
+	if managerJob.Metadata == nil {
+		return fmt.Errorf("manager job %s has no metadata", managerID)
+	}
+
+	// Get step_stats array from metadata
+	stepStatsInterface, ok := managerJob.Metadata["step_stats"]
+	if !ok {
+		return fmt.Errorf("manager job %s has no step_stats in metadata", managerID)
+	}
+
+	// step_stats is stored as []interface{} in JSON
+	stepStats, ok := stepStatsInterface.([]interface{})
+	if !ok {
+		return fmt.Errorf("step_stats is not an array: %T", stepStatsInterface)
+	}
+
+	// Find and update the step by step_id
+	found := false
+	for i, statInterface := range stepStats {
+		stat, ok := statInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if stat["step_id"] == stepID {
+			stat["status"] = status
+			stepStats[i] = stat
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("step %s not found in step_stats", stepID)
+	}
+
+	// Update metadata with modified step_stats
+	managerJob.Metadata["step_stats"] = stepStats
+
+	// Also update current_step_status if this is the current step
+	if currentStepID, ok := managerJob.Metadata["current_step_id"].(string); ok && currentStepID == stepID {
+		managerJob.Metadata["current_step_status"] = status
+	}
+
+	return m.jobStorage.UpdateJob(ctx, managerJob)
+}
+
 // AddJobLog adds a log entry for a job to the database and publishes to WebSocket.
 // Automatically resolves step context from job metadata/parent chain for UI display.
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {

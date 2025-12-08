@@ -127,6 +127,7 @@ type App struct {
 	ConnectorHandler     *handlers.ConnectorHandler
 	GitHubJobsHandler    *handlers.GitHubJobsHandler
 	HybridScraperHandler *handlers.HybridScraperHandler
+	DevOpsHandler        *handlers.DevOpsHandler
 }
 
 // New initializes the application with all dependencies
@@ -694,6 +695,48 @@ func (a *App) initServices() error {
 	a.StepManager.RegisterWorker(summaryWorker) // Register with StepManager for step routing
 	a.Logger.Debug().Str("step_type", summaryWorker.GetType().String()).Msg("Summary worker registered")
 
+	// Register enrichment pipeline workers (each handles a specific enrichment step)
+	analyzeBuildWorker := workers.NewAnalyzeBuildWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(analyzeBuildWorker)
+	a.Logger.Debug().Str("step_type", analyzeBuildWorker.GetType().String()).Msg("Analyze build worker registered")
+
+	classifyWorker := workers.NewClassifyWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(classifyWorker)
+	a.Logger.Debug().Str("step_type", classifyWorker.GetType().String()).Msg("Classify worker registered")
+
+	dependencyGraphWorker := workers.NewDependencyGraphWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(dependencyGraphWorker)
+	a.Logger.Debug().Str("step_type", dependencyGraphWorker.GetType().String()).Msg("Dependency graph worker registered")
+
+	aggregateSummaryWorker := workers.NewAggregateSummaryWorker(
+		a.SearchService,
+		a.StorageManager.DocumentStorage(),
+		a.StorageManager.KeyValueStorage(),
+		a.LLMService,
+		a.Logger,
+		jobMgr,
+	)
+	a.StepManager.RegisterWorker(aggregateSummaryWorker)
+	a.Logger.Debug().Str("step_type", aggregateSummaryWorker.GetType().String()).Msg("Aggregate summary worker registered")
+
 	a.Logger.Debug().Msg("All workers registered with StepManager")
 
 	// Initialize Orchestrator
@@ -853,6 +896,19 @@ func (a *App) initHandlers() error {
 	// Initialize hybrid scraper handler (lazy initialization - browser launched on-demand)
 	a.HybridScraperHandler = handlers.NewHybridScraperHandler(a.Logger)
 	a.Logger.Debug().Msg("Hybrid scraper handler initialized")
+
+	// Initialize DevOps handler for enrichment pipeline endpoints
+	a.DevOpsHandler = handlers.NewDevOpsHandler(
+		a.StorageManager.KeyValueStorage(),
+		a.StorageManager.DocumentStorage(),
+		a.SearchService,
+		a.StorageManager.JobDefinitionStorage(),
+		a.Orchestrator,
+		a.JobMonitor,
+		a.StepMonitor,
+		a.Logger,
+	)
+	a.Logger.Debug().Msg("DevOps handler initialized")
 
 	// Set auth loader for WebSocket handler
 	a.WSHandler.SetAuthLoader(a.AuthService)

@@ -61,6 +61,22 @@ func (s *FTS5SearchService) Search(
 				Msg("Failed to list documents")
 			return nil, fmt.Errorf("search failed: %w", err)
 		}
+
+		// Debug: Log document count and tag info before filtering
+		s.logger.Debug().
+			Int("docs_before_filter", len(results)).
+			Strs("filter_tags", opts.Tags).
+			Msg("Listed documents before tag filtering")
+
+		// Debug: Sample document tags
+		for i, doc := range results {
+			if i < 3 { // Log first 3 docs
+				s.logger.Debug().
+					Str("doc_id", doc.ID).
+					Strs("doc_tags", doc.Tags).
+					Msg("Sample document tags")
+			}
+		}
 	} else {
 		// Use FullTextSearch from storage layer
 		limit := opts.Limit
@@ -90,7 +106,13 @@ func (s *FTS5SearchService) Search(
 
 	// Apply tags filter if specified (documents must have ALL tags)
 	if len(opts.Tags) > 0 {
+		beforeTagFilter := len(results)
 		results = filterByTags(results, opts.Tags)
+		s.logger.Debug().
+			Int("before_tag_filter", beforeTagFilter).
+			Int("after_tag_filter", len(results)).
+			Strs("tags", opts.Tags).
+			Msg("Tag filtering results")
 	}
 
 	// Apply limit after filters

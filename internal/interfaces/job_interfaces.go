@@ -57,6 +57,11 @@ type JobStatusManager interface {
 	AddJobLogWithContext(ctx context.Context, jobID string, level string, message string, stepName string, originator string) error
 	// GetJobChildStats returns child job statistics for given job IDs
 	GetJobChildStats(ctx context.Context, jobIDs []string) (map[string]*jobtypes.JobChildStats, error)
+	// UpdateStepStatInManager updates a step's status in the manager's step_stats metadata.
+	// This is called by StepMonitor when a step completes to update the UI display.
+	UpdateStepStatInManager(ctx context.Context, stepID, managerID, status string) error
+	// UpdateJobMetadata updates job metadata (for StepMonitor to update step_stats directly if needed)
+	UpdateJobMetadata(ctx context.Context, jobID string, metadata map[string]interface{}) error
 }
 
 // JobWorker defines the interface that all job workers must implement.

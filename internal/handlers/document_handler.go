@@ -323,6 +323,16 @@ func (h *DocumentHandler) CreateDocumentHandler(w http.ResponseWriter, r *http.R
 	// Extract optional metadata
 	metadata, _ := docReq["metadata"].(map[string]interface{})
 
+	// Extract optional tags
+	var tags []string
+	if tagsRaw, ok := docReq["tags"].([]interface{}); ok {
+		for _, t := range tagsRaw {
+			if tagStr, ok := t.(string); ok {
+				tags = append(tags, tagStr)
+			}
+		}
+	}
+
 	// Create document model
 	doc := &models.Document{
 		ID:              id,
@@ -332,6 +342,7 @@ func (h *DocumentHandler) CreateDocumentHandler(w http.ResponseWriter, r *http.R
 		ContentMarkdown: contentMarkdown,
 		URL:             url,
 		Metadata:        metadata,
+		Tags:            tags,
 	}
 
 	// Save document

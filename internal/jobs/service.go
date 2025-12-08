@@ -71,6 +71,17 @@ type JobDefinitionFile struct {
 
 // ParseTOML parses TOML content into a JobDefinitionFile
 func ParseTOML(content []byte) (*JobDefinitionFile, error) {
+	// First, parse into a generic map to detect invalid keys like [[steps]]
+	var rawConfig map[string]interface{}
+	if err := toml.Unmarshal(content, &rawConfig); err != nil {
+		return nil, fmt.Errorf("invalid TOML syntax: %w", err)
+	}
+
+	// Reject [[steps]] format - use [step.{name}] instead
+	if _, hasSteps := rawConfig["steps"]; hasSteps {
+		return nil, fmt.Errorf("invalid format: '[[steps]]' is not supported - use '[step.{name}]' format for step definitions")
+	}
+
 	var jobFile JobDefinitionFile
 	if err := toml.Unmarshal(content, &jobFile); err != nil {
 		return nil, fmt.Errorf("invalid TOML syntax: %w", err)
@@ -383,8 +394,16 @@ func (s *Service) ValidateAPIKeys(jobDef *models.JobDefinition) {
 	for _, step := range jobDef.Steps {
 		if step.Config != nil {
 			if apiKeyName, ok := step.Config["api_key"].(string); ok && apiKeyName != "" {
+				// Handle {key-name} variable reference pattern
+				// If api_key is wrapped in braces like "{google_gemini_api_key}",
+				// extract the actual key name for lookup
+				lookupName := apiKeyName
+				if len(apiKeyName) > 2 && apiKeyName[0] == '{' && apiKeyName[len(apiKeyName)-1] == '}' {
+					lookupName = apiKeyName[1 : len(apiKeyName)-1]
+				}
+
 				// Try to resolve the API key from KV store
-				_, err := common.ResolveAPIKey(ctx, s.kvStorage, apiKeyName, "")
+				_, err := common.ResolveAPIKey(ctx, s.kvStorage, lookupName, "")
 				if err != nil {
 					// API key not found or invalid
 					jobDef.RuntimeStatus = "error"
