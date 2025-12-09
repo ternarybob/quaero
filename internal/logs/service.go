@@ -90,20 +90,11 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 	// Collect all job IDs for iterators
 	jobIDs := []string{parentJobID}
 
-	// Step 1: Fetch child jobs if requested
-	var childJobs []*models.QueueJob
+	// Step 1: Fetch all descendant jobs recursively if requested
+	// This ensures logs from grandchildren (worker jobs under step jobs) are included
 	if includeChildren {
-		childJobs, err = s.jobStorage.GetChildJobs(ctx, parentJobID)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("parent_id", parentJobID).Msg("Failed to fetch child jobs, continuing with parent only")
-		} else {
-			// Build metadata map from childJobs slice (avoid N DB calls - Comment 7)
-			for _, childJob := range childJobs {
-				jobMeta := s.extractJobMetadata(childJob)
-				metadata[childJob.ID] = jobMeta
-				jobIDs = append(jobIDs, childJob.ID)
-			}
-		}
+		allDescendants := s.collectAllDescendants(ctx, parentJobID, metadata)
+		jobIDs = append(jobIDs, allDescendants...)
 	}
 
 	// Step 2: Create iterators for each job
@@ -234,4 +225,50 @@ func (s *Service) extractJobMetadata(job *models.QueueJob) *interfaces.Aggregate
 	}
 
 	return meta
+}
+
+// collectAllDescendants recursively collects all descendant job IDs from a parent job.
+// This includes children, grandchildren, etc. - all jobs in the hierarchy.
+// It also populates the metadata map for each discovered job.
+// Limited to maxDescendants jobs to prevent excessive memory/query usage.
+func (s *Service) collectAllDescendants(ctx context.Context, parentJobID string, metadata map[string]*interfaces.AggregatedJobMeta) []string {
+	const maxDescendants = 1000 // Safety limit for very large job trees
+
+	var result []string
+
+	// Use a queue for breadth-first traversal to avoid deep recursion
+	queue := []string{parentJobID}
+
+	for len(queue) > 0 && len(result) < maxDescendants {
+		// Pop from front
+		currentID := queue[0]
+		queue = queue[1:]
+
+		// Get direct children of current job
+		childJobs, err := s.jobStorage.GetChildJobs(ctx, currentID)
+		if err != nil {
+			s.logger.Debug().Err(err).Str("parent_id", currentID).Msg("Failed to fetch child jobs")
+			continue
+		}
+
+		// Process each child
+		for _, childJob := range childJobs {
+			if len(result) >= maxDescendants {
+				s.logger.Info().Int("limit", maxDescendants).Str("parent_id", parentJobID).Msg("Reached max descendants limit for log aggregation")
+				break
+			}
+
+			// Add to result
+			result = append(result, childJob.ID)
+
+			// Extract and store metadata
+			jobMeta := s.extractJobMetadata(childJob)
+			metadata[childJob.ID] = jobMeta
+
+			// Add to queue for further traversal (to get grandchildren)
+			queue = append(queue, childJob.ID)
+		}
+	}
+
+	return result
 }
