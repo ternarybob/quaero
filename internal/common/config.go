@@ -172,7 +172,7 @@ func NewDefaultConfig() *Config {
 		},
 		Queue: QueueConfig{
 			PollInterval:      "1s",
-			Concurrency:       10, // Global job processor concurrency - how many jobs run in parallel
+			Concurrency:       100, // Global job processor concurrency - supports high throughput for rule-based agents
 			VisibilityTimeout: "5m",
 			MaxReceive:        3,
 			QueueName:         "quaero_jobs",

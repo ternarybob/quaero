@@ -112,44 +112,94 @@ func hasAllTags(docTags, requiredTags []string) bool {
 }
 
 // matchesMetadata checks if document metadata matches all filter criteria
+// Supports:
+//   - Flat keys: "category" matches metadata["category"]
+//   - Nested keys: "rule_classifier.category" matches metadata["rule_classifier"]["category"]
+//   - Multi-value: "build,config,docs" matches if value equals any of these
+//
 // Used by filterByMetadata helper
 func matchesMetadata(metadata map[string]interface{}, filters map[string]string) bool {
-	for key, value := range filters {
-		metaValue, exists := metadata[key]
-		if !exists {
+	for key, filterValue := range filters {
+		// Get the metadata value (supports nested keys via dot notation)
+		metaValue := getNestedValue(metadata, key)
+		if metaValue == nil {
 			return false
 		}
 
-		// Convert metadata value to string for comparison
-		var metaStr string
-		switch v := metaValue.(type) {
-		case string:
-			metaStr = v
-		case []string:
-			// Check if value is in array
-			for _, item := range v {
-				if item == value {
-					goto nextFilter
-				}
-			}
-			return false
-		case []interface{}:
-			// Check if value is in array
-			for _, item := range v {
-				if fmt.Sprintf("%v", item) == value {
-					goto nextFilter
-				}
-			}
-			return false
-		default:
-			metaStr = fmt.Sprintf("%v", v)
+		// Parse filter value - support comma-separated multi-value filters
+		allowedValues := strings.Split(filterValue, ",")
+		for i := range allowedValues {
+			allowedValues[i] = strings.TrimSpace(allowedValues[i])
 		}
 
-		if metaStr != value {
+		// Check if metadata value matches any allowed value
+		if !matchesAnyValue(metaValue, allowedValues) {
 			return false
 		}
-
-	nextFilter:
 	}
 	return true
+}
+
+// getNestedValue retrieves a value from nested map using dot notation
+// e.g., "rule_classifier.category" retrieves metadata["rule_classifier"]["category"]
+func getNestedValue(data map[string]interface{}, key string) interface{} {
+	parts := strings.Split(key, ".")
+
+	var current interface{} = data
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			val, exists := v[part]
+			if !exists {
+				return nil
+			}
+			current = val
+		default:
+			return nil
+		}
+	}
+	return current
+}
+
+// matchesAnyValue checks if metaValue matches any of the allowed values
+func matchesAnyValue(metaValue interface{}, allowedValues []string) bool {
+	// Convert metadata value to string(s) for comparison
+	switch v := metaValue.(type) {
+	case string:
+		for _, allowed := range allowedValues {
+			if v == allowed {
+				return true
+			}
+		}
+		return false
+	case []string:
+		// Check if any item in array matches any allowed value
+		for _, item := range v {
+			for _, allowed := range allowedValues {
+				if item == allowed {
+					return true
+				}
+			}
+		}
+		return false
+	case []interface{}:
+		// Check if any item in array matches any allowed value
+		for _, item := range v {
+			itemStr := fmt.Sprintf("%v", item)
+			for _, allowed := range allowedValues {
+				if itemStr == allowed {
+					return true
+				}
+			}
+		}
+		return false
+	default:
+		metaStr := fmt.Sprintf("%v", v)
+		for _, allowed := range allowedValues {
+			if metaStr == allowed {
+				return true
+			}
+		}
+		return false
+	}
 }

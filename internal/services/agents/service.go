@@ -22,6 +22,13 @@ type AgentExecutor interface {
 	GetType() string
 }
 
+// RateLimitSkipper is an optional interface that agents can implement to skip rate limiting.
+// Agents that don't make external API calls (e.g., rule-based classifiers) should implement this.
+type RateLimitSkipper interface {
+	// SkipRateLimit returns true if this agent should bypass rate limiting
+	SkipRateLimit() bool
+}
+
 // Service manages agent lifecycle and execution using direct genai API.
 // It maintains a registry of agent types and routes execution requests to the appropriate agent.
 type Service struct {
@@ -141,6 +148,9 @@ func NewService(config *common.GeminiConfig, storageManager interfaces.StorageMa
 	categoryClassifier := &CategoryClassifier{}
 	service.RegisterAgent(categoryClassifier)
 
+	ruleClassifier := &RuleClassifier{}
+	service.RegisterAgent(ruleClassifier)
+
 	entityRecognizer := &EntityRecognizer{}
 	service.RegisterAgent(entityRecognizer)
 
@@ -251,18 +261,26 @@ func (s *Service) Execute(ctx context.Context, agentType string, input map[strin
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Enforce rate limit
-	s.mu.Lock()
-	timeSinceLast := time.Since(s.lastRequest)
-	if timeSinceLast < rateLimit {
-		sleepDuration := rateLimit - timeSinceLast
-		s.logger.Debug().
-			Dur("sleep_duration", sleepDuration).
-			Msg("Rate limit enforcing delay")
-		time.Sleep(sleepDuration)
+	// Check if agent should skip rate limiting (e.g., rule-based agents that don't call APIs)
+	skipRateLimit := false
+	if skipper, ok := agent.(RateLimitSkipper); ok {
+		skipRateLimit = skipper.SkipRateLimit()
 	}
-	s.lastRequest = time.Now()
-	s.mu.Unlock()
+
+	// Enforce rate limit (unless agent opts out)
+	if !skipRateLimit {
+		s.mu.Lock()
+		timeSinceLast := time.Since(s.lastRequest)
+		if timeSinceLast < rateLimit {
+			sleepDuration := rateLimit - timeSinceLast
+			s.logger.Debug().
+				Dur("sleep_duration", sleepDuration).
+				Msg("Rate limit enforcing delay")
+			time.Sleep(sleepDuration)
+		}
+		s.lastRequest = time.Now()
+		s.mu.Unlock()
+	}
 
 	// Execute agent
 	startTime := time.Now()
@@ -373,4 +391,26 @@ func (s *Service) Close() error {
 	s.agents = nil
 
 	return nil
+}
+
+// IsRuleBased returns true if the specified agent type is rule-based (does not use LLM).
+// Rule-based agents implement the RateLimitSkipper interface with SkipRateLimit() returning true.
+//
+// Parameters:
+//   - agentType: Agent identifier to check
+//
+// Returns:
+//   - true if the agent is rule-based (no LLM calls)
+//   - false if the agent uses LLM or if agent type is unknown
+func (s *Service) IsRuleBased(agentType string) bool {
+	agent, ok := s.agents[agentType]
+	if !ok {
+		return false
+	}
+
+	if skipper, ok := agent.(RateLimitSkipper); ok {
+		return skipper.SkipRateLimit()
+	}
+
+	return false
 }

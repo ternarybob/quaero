@@ -1,6 +1,6 @@
 # Changes Log
 
-## WP1 & WP2: Update step_stats in Manager Metadata on Step Completion
+## Fix 1: Update step_stats in Manager Metadata on Step Completion
 
 ### Files Modified
 
@@ -24,10 +24,32 @@
   4. Grace period completion (no children) - status "completed"
   5. All children completed - final status determined by child outcomes
 
+---
+
+## Fix 2: Step Status Reverts to "Spawned" on API Refresh
+
+### Root Cause
+The orchestrator waits synchronously for child jobs to complete (polling loop), but after the wait finishes, it still sets `stepStatus = "spawned"` because the condition only checked `returnsChildJobs && stepChildCount > 0`.
+
+This caused the step_stats to be written with status="spawned" even though all children had completed, which then overwrote the UI state on page refresh.
+
+### Files Modified
+
+#### `internal/queue/orchestrator.go`
+- Added `childrenWaitedSynchronously` flag to track whether the orchestrator waited inline for children
+- Set this flag to `true` when the synchronous wait loop completes successfully
+- Updated step status determination logic to only set "spawned" when NOT waiting synchronously:
+  ```go
+  if returnsChildJobs && stepChildCount > 0 && !childrenWaitedSynchronously {
+      stepStatus = "spawned"
+  }
+  ```
+- Updated logging to include `children_waited_synchronously` flag for debugging
+
 ### Skill Compliance
 - [x] Error wrapping with context (`fmt.Errorf("...: %w", err)`)
-- [x] Structured logging with arbor (`logger.Warn().Err(err).Str(...).Msg(...)`)
+- [x] Structured logging with arbor
 - [x] Context passed to all storage calls
-- [x] Interface-based dependency (uses `JobStatusManager` interface)
+- [x] Interface-based dependency
 
 ### Ready for Validation

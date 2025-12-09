@@ -71,4 +71,15 @@ type AgentService interface {
 	//   - nil on successful cleanup
 	//   - error if cleanup fails (resources may not be fully released)
 	Close() error
+
+	// IsRuleBased returns true if the specified agent type is rule-based (does not use LLM).
+	// Rule-based agents perform deterministic operations like pattern matching without API calls.
+	//
+	// Parameters:
+	//   - agentType: Agent identifier to check
+	//
+	// Returns:
+	//   - true if the agent is rule-based (no LLM calls)
+	//   - false if the agent uses LLM or if agent type is unknown
+	IsRuleBased(agentType string) bool
 }

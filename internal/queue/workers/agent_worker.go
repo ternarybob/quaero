@@ -100,14 +100,22 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	documentID, _ := job.GetConfigString("document_id")
 	agentType, _ := job.GetConfigString("agent_type")
 
+	// Determine if this is a rule-based agent (no LLM) or AI agent
+	isRuleBased := w.agentService.IsRuleBased(agentType)
+	logPrefix := "AI"
+	if isRuleBased {
+		logPrefix = "Rule"
+	}
+
 	jobLogger.Debug().
 		Str("job_id", job.ID).
 		Str("document_id", documentID).
 		Str("agent_type", agentType).
+		Bool("rule_based", isRuleBased).
 		Msg("Starting agent job execution")
 
 	// Log job start
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s (document: %s) - starting", agentType, documentID))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("%s: %s (document: %s) - starting", logPrefix, agentType, documentID))
 
 	// Update job status to running
 	if err := w.jobMgr.UpdateJobStatus(ctx, job.ID, "running"); err != nil {
@@ -120,7 +128,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	doc, err := w.documentStorage.GetDocument(documentID)
 	if err != nil {
 		jobLogger.Error().Err(err).Str("document_id", documentID).Msg("Failed to load document")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed to load document: %v", agentType, documentID, err))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("%s: %s (document: %s) - failed to load document: %v", logPrefix, agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Document load failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to load document: %w", err)
@@ -157,11 +165,11 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		agentInput["gemini_rate_limit"] = rateLimit
 	}
 
-	// Check for cancellation before expensive AI operation
+	// Check for cancellation before agent execution
 	select {
 	case <-ctx.Done():
 		jobLogger.Info().Msg("Job cancelled before agent execution")
-		w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s - cancelled", agentType))
+		w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("%s: %s - cancelled", logPrefix, agentType))
 		return ctx.Err()
 	default:
 	}
@@ -175,7 +183,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 
 	if err != nil {
 		jobLogger.Error().Err(err).Str("agent_type", agentType).Msg("Agent execution failed")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed: %v", agentType, documentID, err))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("%s: %s (document: %s) - failed: %v", logPrefix, agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Agent execution failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("agent execution failed: %w", err)
@@ -200,7 +208,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 	// Update document in storage
 	if err := w.documentStorage.UpdateDocument(doc); err != nil {
 		jobLogger.Error().Err(err).Str("document_id", documentID).Msg("Failed to update document metadata")
-		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("AI: %s (document: %s) - failed to save: %v", agentType, documentID, err))
+		w.jobMgr.AddJobLog(ctx, job.ID, "error", fmt.Sprintf("%s: %s (document: %s) - failed to save: %v", logPrefix, agentType, documentID, err))
 		w.jobMgr.SetJobError(ctx, job.ID, fmt.Sprintf("Metadata update failed: %v", err))
 		w.jobMgr.UpdateJobStatus(ctx, job.ID, "failed")
 		return fmt.Errorf("failed to update document metadata: %w", err)
@@ -229,7 +237,7 @@ func (w *AgentWorker) Execute(ctx context.Context, job *models.QueueJob) error {
 		Msg("Agent job execution completed successfully")
 
 	// Log completion with timing (context auto-resolved)
-	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("AI: %s (document: %s) - completed in %v", agentType, documentID, totalTime))
+	w.jobMgr.AddJobLog(ctx, job.ID, "info", fmt.Sprintf("%s: %s (document: %s) - completed in %v", logPrefix, agentType, documentID, totalTime))
 
 	return nil
 }
@@ -462,6 +470,7 @@ func (w *AgentWorker) ValidateConfig(step models.JobStep) error {
 		"sentiment_analyzer":  true,
 		"entity_recognizer":   true,
 		"category_classifier": true,
+		"rule_classifier":     true,
 		"relation_extractor":  true,
 		"question_answerer":   true,
 	}
@@ -511,6 +520,19 @@ func (w *AgentWorker) queryDocuments(ctx context.Context, jobDef *models.JobDefi
 			opts.Tags = tags
 		}
 
+		// Support category filter - filter by rule_classifier.category metadata
+		// Accepts array of categories: filter_category = ["source", "build"]
+		// Converts to MetadataFilters with nested key: rule_classifier.category=source,build
+		if categories := extractCategoryFilter(filter); len(categories) > 0 {
+			if opts.MetadataFilters == nil {
+				opts.MetadataFilters = make(map[string]string)
+			}
+			opts.MetadataFilters["rule_classifier.category"] = strings.Join(categories, ",")
+			w.logger.Debug().
+				Strs("categories", categories).
+				Msg("Filtering documents by rule_classifier.category")
+		}
+
 		// Support limit override
 		if limit, ok := filter["limit"].(int); ok && limit > 0 {
 			opts.Limit = limit
@@ -538,8 +560,45 @@ func (w *AgentWorker) queryDocuments(ctx context.Context, jobDef *models.JobDefi
 	return results, nil
 }
 
+// extractCategoryFilter extracts category values from filter config
+// Supports both []interface{} (from TOML) and []string formats
+func extractCategoryFilter(filter map[string]interface{}) []string {
+	if filter == nil {
+		return nil
+	}
+
+	// Try []interface{} (common from TOML parsing)
+	if categories, ok := filter["category"].([]interface{}); ok && len(categories) > 0 {
+		result := make([]string, 0, len(categories))
+		for _, cat := range categories {
+			if catStr, ok := cat.(string); ok {
+				result = append(result, catStr)
+			}
+		}
+		return result
+	}
+
+	// Try []string
+	if categories, ok := filter["category"].([]string); ok && len(categories) > 0 {
+		return categories
+	}
+
+	// Try single string value
+	if category, ok := filter["category"].(string); ok && category != "" {
+		return []string{category}
+	}
+
+	return nil
+}
+
 // createAgentJob creates and enqueues an agent job for a document
 func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID string, stepConfig map[string]interface{}, parentJobID string, stepName string, managerID string) (string, error) {
+	// Determine if this is a rule-based agent (no LLM) or AI agent for job naming
+	jobNamePrefix := "AI"
+	if w.agentService.IsRuleBased(agentType) {
+		jobNamePrefix = "Rule"
+	}
+
 	// Build job config
 	jobConfig := map[string]interface{}{
 		"agent_type":  agentType,
@@ -576,11 +635,11 @@ func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID 
 	}
 	queueJob := models.NewQueueJobChild(
 		parentJobID,
-		"agent", // Agent job type for AI-powered document processing
-		fmt.Sprintf("AI: %s (document: %s)", agentType, documentID),
+		"agent", // Agent job type for document processing (AI or rule-based)
+		fmt.Sprintf("%s: %s (document: %s)", jobNamePrefix, agentType, documentID),
 		jobConfig,
 		metadata,
-		0, // depth (not used for AI jobs)
+		0, // depth (not used for agent jobs)
 	)
 
 	// Validate queue job

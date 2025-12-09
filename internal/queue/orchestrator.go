@@ -362,6 +362,9 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			returnsChildJobs = worker.ReturnsChildJobs()
 		}
 
+		// Track whether we waited for children synchronously (vs async StepMonitor)
+		childrenWaitedSynchronously := false
+
 		if returnsChildJobs {
 			hasChildJobs = true
 			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawned child jobs", step.Name), "", "run")
@@ -426,6 +429,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
 						fmt.Sprintf("All child jobs completed (%d completed, %d failed) in %v",
 							childStats.CompletedChildren, childStats.FailedChildren, time.Since(waitStart)), "", "run")
+					childrenWaitedSynchronously = true
 					break
 				}
 
@@ -456,6 +460,8 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		stepDocCount := docCountAfter - docCountBefore
 
 		// Determine step status
+		// If we waited synchronously for children, the step is completed.
+		// Only use "spawned" status if we're using async StepMonitor (not waiting inline).
 		stepStatus := "completed"
 		o.logger.Debug().
 			Str("phase", "orchestrator").
@@ -463,12 +469,15 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			Bool("returns_child_jobs", returnsChildJobs).
 			Int("step_child_count", stepChildCount).
 			Bool("step_monitor_nil", stepMonitor == nil).
+			Bool("children_waited_synchronously", childrenWaitedSynchronously).
 			Msg("Determining step status for step monitor")
 
-		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, step_monitor_nil=%v",
-			returnsChildJobs, stepChildCount, stepMonitor == nil), "", "orchestrator")
+		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step status check: returns_child_jobs=%v, step_child_count=%d, children_waited=%v",
+			returnsChildJobs, stepChildCount, childrenWaitedSynchronously), "", "orchestrator")
 
-		if returnsChildJobs && stepChildCount > 0 {
+		// Only set status to "spawned" if we're NOT waiting synchronously
+		// When childrenWaitedSynchronously is true, children already completed so status should be "completed"
+		if returnsChildJobs && stepChildCount > 0 && !childrenWaitedSynchronously {
 			stepStatus = "spawned"
 		}
 

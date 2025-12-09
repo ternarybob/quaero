@@ -1,305 +1,395 @@
 ---
 name: 3agents-skills
-description: Three-agent workflow with skills. Opus plans, Sonnet implements with skill context, Sonnet validates.
+description: Opus plans/reviews, Sonnet implements with skills, Sonnet validates against user intent.
 ---
 
-Execute task: $ARGUMENTS
+Execute: $ARGUMENTS
 
----
-
-## SKILLS CONFIGURATION
-
-Skills provide domain-specific context to each agent phase. Load skills before execution.
-
+## CONFIG
 ```yaml
-skills:
-  go:
-    path: .claude/skills/go/SKILL.md
-    applies_to: [implementation, refactoring, handlers, services, tests]
-  
-  frontend:
-    path: .claude/skills/frontend/SKILL.md  
-    applies_to: [templates, alpine, css, ui]
-  
-  architecture:
-    path: .claude/skills/architecture/SKILL.md
-    applies_to: [design, structure, patterns]
-
-# Skill selection rules
-skill_routing:
-  - pattern: "*.go"
-    skills: [go]
-  - pattern: "*.html"
-    skills: [frontend, go]  # Templates need both
-  - pattern: "*_test.go"
-    skills: [go]
-  - pattern: "internal/handlers/*"
-    skills: [go, frontend]
-  - pattern: "internal/services/*"
-    skills: [go]
-  - pattern: "internal/queue/*"
-    skills: [go]
+models: 
+  planner: claude-opus-4-5-20251101   # PHASE 1: breaks down request, selects skills
+  worker: sonnet                       # PHASE 2: implements tasks with skill patterns
+  validator: sonnet                    # PHASE 3: checks work matches user request
+  reviewer: opus                       # PHASE 4: security/architecture review
+opus_override: [security, authentication, crypto, state-machine, architectural-change]
+critical_triggers: [security, authentication, authorization, payments, data-migration, crypto, api-breaking, database-schema]
+paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents-skills/", skills: ".claude/skills/" }
 ```
 
----
-
-## AGENT MODELS
-
-```yaml
-agents:
-  planner:
-    model: claude-opus-4-5-20251101
-    role: Architect - deep analysis, skill selection, parallelization
-    
-  implementer:
-    model: claude-sonnet-4-20250514
-    role: Builder - executes with skill context, writes code
-    instances: 1-3  # Parallel for independent tasks
-    
-  validator:
-    model: claude-sonnet-4-20250514
-    role: Reviewer - verifies against skills, runs tests
-```
+## RULES
+- Tests: `/test/api`, `/test/ui` only
+- Binaries: `go build -o /tmp/` - never in root
+- Make technical decisions - only stop for architecture choices
+- **EVERY run creates NEW workdir** - even continuations of previous work
+- **NO phase proceeds without its document written first**
+- **Skills are optional** - if no matching skill exists, proceed without
 
 ---
 
-## EXECUTION RULES
+## PHASE 0: CLASSIFY + SKILL DISCOVERY (MANDATORY)
 
-- **Skill Loading:** Each agent loads relevant skills before work
-- **Tests:** Only in `/test/api` and `/test/ui` directories
-- **Binaries:** Never in root - use `go build -o /tmp/` or `go run`
-- **Complete:** Run all phases to completion - only pause for design decisions
-- **Parallel:** Independent implementation steps can run simultaneously
+**GATE: Cannot proceed to Phase 1 until manifest.md exists**
 
----
-
-## PHASE 1: PLANNER (Opus)
-
-**Purpose:** Deep analysis, skill selection, work decomposition
-
-### Step 1.1: Skill Discovery
+### Step 0.1: Classify Request
+1. **Type**: `feature` | `fix`
+2. **Slug**: kebab-case from request
+3. **Date**: `YYYYMMDD` (today)
+4. **Workdir**: `./docs/{type}/{date}-{slug}/`
 ```bash
-# List available skills
-ls -la .claude/skills/
+mkdir -p ./docs/{type}/{date}-{slug}/
 ```
 
-Load and analyze relevant skills based on $ARGUMENTS:
-- If task involves Go code → load `go/SKILL.md`
-- If task involves templates/UI → load `frontend/SKILL.md`
-- If task involves architecture → load `architecture/SKILL.md`
+### Step 0.2: Discover Available Skills
+```bash
+# Check what skills exist in project
+ls -la .claude/skills/ 2>/dev/null || echo "No skills directory"
+```
 
-### Step 1.2: Analysis (Extended Thinking)
+For each skill found, read its SKILL.md to understand:
+- What patterns it provides
+- What file types it applies to
+- Key rules and anti-patterns
 
-Before creating the plan, think deeply:
+### Step 0.3: Assess Skill Relevance
+Based on $ARGUMENTS, determine which skills (if any) apply:
+- Go code changes → check for `go/SKILL.md`
+- Frontend/templates → check for `frontend/SKILL.md`
+- Architecture changes → check for `architecture/SKILL.md`
+- No matching skill → proceed without (still valid)
 
-1. **Scope Analysis**
-   - What files/packages are affected?
-   - What are the dependencies between changes?
-   - Which skills apply to each component?
-
-2. **Risk Assessment**
-   - What could break?
-   - What tests need updating?
-   - Are there migration concerns?
-
-3. **Parallelization Opportunities**
-   - Which tasks are independent?
-   - What's the critical path?
-   - How many implementer instances needed?
-
-### Step 1.3: Generate Implementation Plan
-
-Create `{workdir}/01-plan.md`:
-
+**WRITE `{workdir}/manifest.md`:**
 ```markdown
-# Implementation Plan: {task_summary}
+# {Type}: {Title}
+- Slug: {slug} | Type: {type} | Date: {YYYY-MM-DD}
+- Request: "{original input}"
+- Prior: {link to previous workdir if continuation, else "none"}
 
-## Skills Required
-- [ ] go - for {specific reasons}
-- [ ] frontend - for {specific reasons}
+## User Intent
+{Restate what user wants in clear terms - this is the validation target}
 
-## Work Packages
+## Success Criteria
+- [ ] {measurable criterion from user request}
+- [ ] {another criterion}
 
-### WP1: {name} [PARALLEL-SAFE]
-**Skills:** go
-**Files:** internal/services/foo.go
-**Description:** {what to do}
-**Acceptance:** {how to verify}
+## Skills Assessment
+| Skill | Path | Exists | Relevant | Reason |
+|-------|------|--------|----------|--------|
+| go | .claude/skills/go/SKILL.md | ✅/❌ | ✅/❌ | {why or why not} |
+| frontend | .claude/skills/frontend/SKILL.md | ✅/❌ | ✅/❌ | {why or why not} |
 
-### WP2: {name} [DEPENDS: WP1]
-**Skills:** go, frontend
-**Files:** internal/handlers/foo.go, web/templates/foo.html
-**Description:** {what to do}
-**Acceptance:** {how to verify}
-
-### WP3: {name} [PARALLEL-SAFE]
-**Skills:** go
-**Files:** internal/services/foo_test.go
-**Description:** {what to do}
-**Acceptance:** {how to verify}
-
-## Execution Order
-1. WP1, WP3 (parallel)
-2. WP2 (after WP1)
-
-## Validation Checklist
-- [ ] All tests pass: `go test ./...`
-- [ ] Lint clean: `golangci-lint run`
-- [ ] Follows skill patterns
+**Active Skills:** {list or "none - proceeding without skills"}
 ```
 
 ---
 
-## PHASE 2: IMPLEMENTER (Sonnet)
+## PHASE 1: PLAN (opus)
 
-**Purpose:** Execute work packages with skill context
+**GATE: Cannot proceed to Phase 2 until plan.md + all task-N.md exist**
 
-### For Each Work Package:
-
-#### Step 2.1: Load Required Skills
+### Step 1.1: Load Active Skills
+If skills were marked relevant in manifest:
 ```bash
-# Example for WP with go skill
-cat .claude/skills/go/SKILL.md
+cat .claude/skills/{skill}/SKILL.md
 ```
 
-#### Step 2.2: Implement
-Apply skill patterns while implementing:
-- Follow code patterns from skill
-- Use recommended error handling
-- Match project structure
+### Step 1.2: Create Plan
 
-#### Step 2.3: Self-Check Against Skill
-Before completing, verify:
-- [ ] Matches skill's recommended patterns
-- [ ] Avoids skill's listed anti-patterns
-- [ ] Uses correct package structure
-- [ ] Error handling follows guidelines
-
-#### Step 2.4: Document Changes
-Append to `{workdir}/02-changes.md`:
+**WRITE `{workdir}/plan.md`:**
 ```markdown
-## WP{n}: {name}
+# Plan: {task}
+Type: {feature|fix} | Workdir: {workdir}
 
-### Files Modified
-- `path/to/file.go` - {summary}
+## User Intent (from manifest)
+{copy from manifest - validator will check against this}
 
-### Skill Compliance
-- [x] Error wrapping with context
-- [x] Structured logging
-- [x] Table-driven tests
-- [ ] N/A - no handlers in this WP
+## Active Skills
+{list from manifest, or "none"}
 
-### Ready for Validation
+## Tasks
+| # | Desc | Depends | Critical | Model | Skill |
+|---|------|---------|----------|-------|-------|
+| 1 | ... | - | no | sonnet | go |
+| 2 | ... | 1 | no | sonnet | go |
+| 3 | ... | - | no | sonnet | - |
+
+## Order
+[1,3] → [2]
 ```
 
----
-
-## PHASE 3: VALIDATOR (Sonnet)
-
-**Purpose:** Verify implementation against skills and requirements
-
-### Step 3.1: Load All Applicable Skills
-```bash
-cat .claude/skills/go/SKILL.md
-cat .claude/skills/frontend/SKILL.md  # if applicable
-```
-
-### Step 3.2: Run Automated Checks
-```bash
-# Build
-go build -o /tmp/quaero ./cmd/quaero
-
-# Test
-go test -v ./...
-
-# Lint
-golangci-lint run
-
-# Check for common issues
-grep -r "panic(" internal/  # Should be empty
-grep -r "log\." internal/   # Should use slog instead
-```
-
-### Step 3.3: Skill Compliance Review
-
-For each modified file, verify against loaded skills:
-
-**Go Skill Checklist:**
-- [ ] Context passed to DB/network calls
-- [ ] Errors wrapped with `%w`
-- [ ] Structured logging with slog
-- [ ] No global state
-- [ ] Handlers are thin (logic in services)
-- [ ] Tests are table-driven
-
-**Frontend Skill Checklist (if applicable):**
-- [ ] Alpine.js data binding correct
-- [ ] JSON helper used for template data
-- [ ] No inline scripts
-
-### Step 3.4: Generate Report
-
-Create `{workdir}/03-validation.md`:
+**WRITE `{workdir}/task-{N}.md`** for each task:
 ```markdown
-# Validation Report
+# Task {N}: {desc}
+Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus} | Skill: {skill or "none"}
 
-## Automated Checks
-- Build: ✅ PASS
-- Tests: ✅ PASS (coverage: X%)
-- Lint: ✅ PASS
+## Addresses User Intent
+{which part of user request this task fulfills}
 
-## Skill Compliance
+## Skill Patterns to Apply
+{if skill assigned, list key patterns from SKILL.md to follow}
+{or "N/A - no skill for this task"}
 
-### go/SKILL.md
-| Pattern | Status | Notes |
-|---------|--------|-------|
-| Error wrapping | ✅ | All errors use %w |
-| Structured logging | ✅ | slog throughout |
-| Table-driven tests | ✅ | New tests follow pattern |
+## Do
+- {action}
 
-### Issues Found
-{none or list}
-
-### Recommendations
-{optional improvements}
-
-## Result: ✅ APPROVED / ⚠️ NEEDS REVISION
+## Accept
+- [ ] {criterion}
 ```
 
 ---
 
-## PHASE 4: COMPLETION
+## PHASE 2: IMPLEMENT (sonnet - worker)
 
-If validation passes:
-1. Summarize changes to user
-2. List files modified
-3. Note any follow-up tasks
+**GATE: Each task writes step-N.md IMMEDIATELY after completion**
 
-If validation fails:
-1. Return to Phase 2 with specific fixes
-2. Re-validate after fixes
-3. Max 2 revision cycles before escalating to user
+For each task in dependency order:
 
----
-
-## WORKDIR STRUCTURE
-
-```
-docs/work/{timestamp}-{slug}/
-├── 01-plan.md           # Planner output
-├── 02-changes.md        # Implementer log
-├── 03-validation.md     # Validator report
-└── 04-summary.md        # Final summary (if complete)
-```
-
----
-
-## EXAMPLE INVOCATION
-
+### Step 2.1: Load Task's Skill (if assigned)
 ```bash
-# From project root
-claude "/3agents-skills add rate limiting to crawl jobs"
+cat .claude/skills/{task_skill}/SKILL.md
+```
 
-# With a plan file
-claude "/3agents-skills docs/features/rate-limiting-spec.md"
+### Step 2.2: Execute
+1. Read task-{N}.md
+2. Work in `/tmp/3agents-skills/task-{N}/`
+3. Apply skill patterns (if skill assigned)
+4. Execute + verify compiles
+5. Copy results to source
+6. **WRITE step-N.md BEFORE next task**
+
+**WRITE `{workdir}/step-{N}.md`:**
+```markdown
+# Step {N}: {desc}
+Model: {used} | Skill: {used or "none"} | Status: ✅|⚠️|❌
+
+## Done
+- {action}: {outcome}
+
+## Files Changed
+- `{path}` - {what}
+
+## Skill Compliance (if skill used)
+- [x] {pattern followed}
+- [x] {anti-pattern avoided}
+- [ ] N/A - {reason}
+{or "No skill applied"}
+
+## Build Check
+Build: ✅|❌ | Tests: ✅|❌|⏭️
+```
+
+**UPDATE `{workdir}/progress.md`** after each step:
+```markdown
+# Progress
+| Task | Skill | Status | Validated | Note |
+|------|-------|--------|-----------|------|
+| 1 | go | ✅ | ⏳ | done, awaiting validation |
+| 2 | go | 🔄 | - | wip |
+| 3 | - | ⏳ | - | pending |
+```
+
+---
+
+## PHASE 3: VALIDATE (sonnet - validator)
+
+**Purpose: Verify implementation matches user's original request AND skill patterns**
+
+After all tasks complete:
+
+### Step 3.1: Load Context
+1. **Re-read manifest.md** - get User Intent + Success Criteria + Active Skills
+2. **Read all step-N.md** - what was actually done
+3. **Load active skills** - for pattern verification
+
+### Step 3.2: Validate
+
+**WRITE `{workdir}/validation.md`:**
+```markdown
+# Validation
+Validator: sonnet | Date: {timestamp}
+
+## User Request
+"{original request from manifest}"
+
+## User Intent
+{from manifest}
+
+## Success Criteria Check
+- [ ] {criterion 1}: ✅ MET | ⚠️ PARTIAL | ❌ NOT MET - {evidence}
+- [ ] {criterion 2}: ✅ MET | ⚠️ PARTIAL | ❌ NOT MET - {evidence}
+
+## Implementation Review
+| Task | Intent | Implemented | Match |
+|------|--------|-------------|-------|
+| 1 | {what it should do} | {what it did} | ✅|⚠️|❌ |
+| 2 | ... | ... | ... |
+
+## Skill Compliance (if skills used)
+### {skill}/SKILL.md
+| Pattern | Applied | Evidence |
+|---------|---------|----------|
+| {pattern} | ✅|❌ | {where/how} |
+
+{or "No skills were used for this request"}
+
+## Gaps
+- {missing functionality}
+- {deviation from request}
+- {skill pattern violations}
+
+## Technical Check
+Build: ✅|❌ | Tests: ✅|❌ ({N} passed, {N} failed)
+
+## Verdict: ✅ MATCHES | ⚠️ PARTIAL | ❌ MISMATCH
+{summary of how well implementation matches user intent}
+
+## Required Fixes (if not ✅)
+1. {fix needed}
+```
+
+**Update progress.md** - mark tasks as validated.
+
+**If MISMATCH:** Create fix tasks, return to PHASE 2.
+
+---
+
+## PHASE 4: REVIEW (opus) — if any critical tasks
+
+**WRITE `{workdir}/review.md`:**
+```markdown
+# Review
+Triggers: {list}
+
+## Security/Architecture Issues
+- {issue or "None"}
+
+## Skill Concerns
+- {any skill-related architectural issues}
+
+## Verdict: ✅ APPROVED | ⚠️ NOTES | ❌ CHANGES_REQUIRED
+- {action item}
+```
+
+---
+
+## PHASE 5: SUMMARY
+
+**GATE: Cannot complete until summary.md exists**
+
+**WRITE `{workdir}/summary.md`:**
+```markdown
+# Complete: {task}
+Type: {feature|fix} | Tasks: {N} | Files: {N}
+
+## User Request
+"{original}"
+
+## Result
+{1-2 sentences - what was delivered}
+
+## Skills Used
+{list or "none"}
+
+## Validation: {verdict}
+{from validation.md}
+
+## Review: {verdict or "N/A"}
+
+## Verify
+Build: ✅ | Tests: ✅ ({N} passed)
+```
+
+Cleanup: `rm -rf /tmp/3agents-skills/`
+
+---
+
+## AGENT ROLES
+```
+┌─────────────────────────────────────────────────────┐
+│ USER REQUEST                                        │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 0: CLASSIFY + SKILL DISCOVERY                 │
+│ Extract intent + assess available skills            │
+│ → manifest.md (with skills assessment)              │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 1: PLAN (opus)                                │
+│ Load relevant skills, break into tasks              │
+│ Assign skills to tasks                              │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 2: IMPLEMENT (sonnet - worker)                │
+│ Execute tasks with skill patterns                   │
+│ step-N.md for each with skill compliance            │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 3: VALIDATE (sonnet - validator)              │
+│ Compare implementation to user intent               │
+│ Verify skill pattern compliance                     │
+│ ❌ MISMATCH → loop back to PHASE 2 with fixes      │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 4: REVIEW (opus) - if critical                │
+│ Security/architecture + skill concerns              │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│ PHASE 5: SUMMARY                                    │
+│ Final report with validation + skills used          │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## ENFORCEMENT
+```
+PHASE 0 → manifest.md (with intent + skills assessment) EXISTS? → PHASE 1
+PHASE 1 → plan.md + task-*.md EXIST? → PHASE 2  
+PHASE 2 → step-N.md after EACH task → progress.md updated
+PHASE 3 → validation.md written → MATCHES? continue : fix loop
+PHASE 4 → review.md if critical
+PHASE 5 → summary.md EXISTS? → DONE
+```
+
+**HARD STOPS:**
+- User decision needed
+- `CHANGES_REQUIRED` verdict
+- Ambiguous requirements
+- `MISMATCH` after 2 fix attempts
+
+**NOT STOPS (fix and continue):**
+- Compile errors
+- Test failures
+- `APPROVED_WITH_NOTES`
+- `PARTIAL` match (with notes)
+- No matching skills (proceed without)
+
+---
+
+## CHECKLIST (verify before declaring done)
+- [ ] manifest.md with intent + success criteria + skills assessment
+- [ ] plan.md with tasks linked to intent and skills
+- [ ] task-{N}.md for each task (with skill assignment)
+- [ ] step-{N}.md for each completed task (with skill compliance)
+- [ ] progress.md current
+- [ ] **validation.md with intent comparison + skill compliance**
+- [ ] review.md (if critical)
+- [ ] summary.md created
+- [ ] /tmp/3agents-skills/ cleaned
+
+**Run stops when summary.md is written. Not before.**
+
+---
+
+## INVOKE
+```
+/3agents-skills Add rate limiting to crawl jobs    → ./docs/feature/20251209-rate-limiting/
+/3agents-skills Fix the queue timeout issue        → ./docs/fix/20251209-queue-timeout/
+/3agents-skills Continue rate limiting work        → ./docs/feature/20251209-rate-limiting-continued/
 ```

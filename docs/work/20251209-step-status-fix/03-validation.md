@@ -2,8 +2,7 @@
 
 ## Automated Checks
 - Build: PASS (`go build -o /tmp/quaero ./cmd/quaero`)
-- Tests: PASS (`go test ./internal/queue/... ./internal/queue/state/...`)
-- Lint: N/A (not run yet)
+- Tests: PASS (`go test ./internal/queue/...`)
 
 ## Skill Compliance
 
@@ -16,25 +15,24 @@
 | Interface-based DI | PASS | Uses JobStatusManager interface |
 | No panics | PASS | All errors handled gracefully |
 
+## Issue Summary
+
+### Problem 1: StepMonitor not updating step_stats
+- **Symptom**: Steps showed "Spawned" even after StepMonitor marked them completed
+- **Cause**: StepMonitor only updated step job status, not the step_stats in manager metadata
+- **Fix**: Added `UpdateStepStatInManager()` method and called it from StepMonitor
+
+### Problem 2: Orchestrator overwrites step_stats with "spawned"
+- **Symptom**: Steps reverted to "Spawned" on page refresh/API call
+- **Cause**: Orchestrator waited synchronously for children, but then still set status to "spawned"
+- **Fix**: Added `childrenWaitedSynchronously` flag, only set "spawned" when NOT waiting inline
+
 ## Manual Testing Required
 
-To verify the fix works in production:
-
-1. Start the application and run the `codebase_assess` job
-2. Observe steps in the UI
-3. Verify that steps transition from "Spawned" to "Completed" when all child jobs finish
-4. Check logs for any warnings about failed step_stats updates
-
-## Root Cause Summary
-
-The issue was that `StepMonitor` updated the step job's status directly (`UpdateJobStatus`), but didn't update the `step_stats` array in the manager job's metadata. The UI reads step status from `step_stats` for display, so the status remained "spawned" even after children completed.
-
-## Fix Summary
-
-Added `UpdateStepStatInManager()` method to update the step's status in the manager's `step_stats` metadata when:
-- Step completes successfully
-- Step fails (all children failed)
-- Step is cancelled
-- Step times out
+1. Start application: `.\scripts\build.ps1 -Run`
+2. Run `codebase_assess` job
+3. Verify steps show "Completed" (not "Spawned") after finishing
+4. Refresh page - verify status persists as "Completed"
+5. Check events panel shows events (not "No events yet")
 
 ## Result: PASS (Pending Manual Verification)

@@ -1852,12 +1852,24 @@ func (dtc *devopsTestContext) validateEnrichedDocuments(docs []map[string]interf
 	docsWithComponent := 0
 	totalIncludes := 0
 
+	// Track rule_classifier statistics (from category-filter feature)
+	docsWithRuleClassifier := 0
+	categoryBreakdown := make(map[string]int)
+
 	var sampleDoc map[string]interface{}
 
 	for _, doc := range docs {
 		metadata, ok := doc["metadata"].(map[string]interface{})
 		if !ok {
 			continue
+		}
+
+		// Check for rule_classifier metadata (from rule_classify_files step)
+		if ruleClassifier, hasRC := metadata["rule_classifier"].(map[string]interface{}); hasRC {
+			docsWithRuleClassifier++
+			if category, ok := ruleClassifier["category"].(string); ok {
+				categoryBreakdown[category]++
+			}
 		}
 
 		devops, hasDevOps := metadata["devops"].(map[string]interface{})
@@ -1887,6 +1899,10 @@ func (dtc *devopsTestContext) validateEnrichedDocuments(docs []map[string]interf
 		}
 	}
 
+	dtc.env.LogTest(dtc.t, "  Documents with rule_classifier metadata: %d/%d", docsWithRuleClassifier, len(docs))
+	if len(categoryBreakdown) > 0 {
+		dtc.env.LogTest(dtc.t, "  Category breakdown: %v", categoryBreakdown)
+	}
 	dtc.env.LogTest(dtc.t, "  Documents with DevOps metadata: %d/%d", docsWithMetadata, len(docs))
 	dtc.env.LogTest(dtc.t, "  Documents with includes: %d (total: %d includes)", docsWithIncludes, totalIncludes)
 	dtc.env.LogTest(dtc.t, "  Documents with platforms: %d", docsWithPlatforms)
@@ -1899,25 +1915,38 @@ func (dtc *devopsTestContext) validateEnrichedDocuments(docs []map[string]interf
 	}
 
 	// Save document enrichment details to file
+	categoryBreakdownStr := ""
+	for cat, count := range categoryBreakdown {
+		categoryBreakdownStr += fmt.Sprintf("  - %s: %d\n", cat, count)
+	}
+	if categoryBreakdownStr == "" {
+		categoryBreakdownStr = "  (none)\n"
+	}
+
 	enrichmentDetails := fmt.Sprintf(`# Document Enrichment Details
 Generated: %s
 
 ## Statistics
 - Total documents: %d
+- With rule_classifier metadata: %d
 - With DevOps metadata: %d
 - With includes: %d (total includes: %d)
 - With platforms: %d
 - With component classification: %d
 
+## Category Breakdown (from rule_classifier)
+%s
 ## Imported Files
 %s
 `,
 		time.Now().Format(time.RFC3339),
 		len(docs),
+		docsWithRuleClassifier,
 		docsWithMetadata,
 		docsWithIncludes, totalIncludes,
 		docsWithPlatforms,
 		docsWithComponent,
+		categoryBreakdownStr,
 		formatFileList(dtc.importedFiles))
 
 	detailsPath := filepath.Join(dtc.env.GetResultsDir(), "document_enrichment.txt")
@@ -1935,16 +1964,18 @@ Generated: %s
 
 // PerFileAssessment holds the assessment result for a single document
 type PerFileAssessment struct {
-	DocumentID   string   `json:"document_id"`
-	Title        string   `json:"title"`
-	HasDevOps    bool     `json:"has_devops"`
-	HasIncludes  bool     `json:"has_includes"`
-	HasDefines   bool     `json:"has_defines"`
-	HasPlatforms bool     `json:"has_platforms"`
-	HasComponent bool     `json:"has_component"`
-	HasFileRole  bool     `json:"has_file_role"`
-	PassCount    int      `json:"pass_count"`
-	Issues       []string `json:"issues,omitempty"`
+	DocumentID        string   `json:"document_id"`
+	Title             string   `json:"title"`
+	HasRuleClassifier bool     `json:"has_rule_classifier"`
+	RuleCategory      string   `json:"rule_category,omitempty"`
+	HasDevOps         bool     `json:"has_devops"`
+	HasIncludes       bool     `json:"has_includes"`
+	HasDefines        bool     `json:"has_defines"`
+	HasPlatforms      bool     `json:"has_platforms"`
+	HasComponent      bool     `json:"has_component"`
+	HasFileRole       bool     `json:"has_file_role"`
+	PassCount         int      `json:"pass_count"`
+	Issues            []string `json:"issues,omitempty"`
 }
 
 // PerFileAssessmentReport holds the complete per-file assessment report
@@ -2019,47 +2050,62 @@ func (dtc *devopsTestContext) assessPerFileEnrichment() (*PerFileAssessmentRepor
 			continue
 		}
 
+		// Check for rule_classifier metadata (from category-filter feature)
+		if ruleClassifier, hasRC := metadata["rule_classifier"].(map[string]interface{}); hasRC {
+			assessment.HasRuleClassifier = true
+			assessment.PassCount++
+			if category, ok := ruleClassifier["category"].(string); ok {
+				assessment.RuleCategory = category
+			}
+		}
+
 		devops, hasDevOps := metadata["devops"].(map[string]interface{})
 		if !hasDevOps {
-			assessment.Issues = append(assessment.Issues, "No devops metadata")
-			report.Assessments = append(report.Assessments, assessment)
-			report.FailedDocuments++
-			continue
+			// Don't fail if we have rule_classifier but no devops
+			if !assessment.HasRuleClassifier {
+				assessment.Issues = append(assessment.Issues, "No devops or rule_classifier metadata")
+				report.Assessments = append(report.Assessments, assessment)
+				report.FailedDocuments++
+				continue
+			}
 		}
 
-		assessment.HasDevOps = true
+		assessment.HasDevOps = hasDevOps
 
-		// Check for includes
-		if includes, ok := devops["includes"].([]interface{}); ok && len(includes) > 0 {
-			assessment.HasIncludes = true
-			assessment.PassCount++
+		// Only check devops fields if devops metadata exists
+		if hasDevOps && devops != nil {
+			// Check for includes
+			if includes, ok := devops["includes"].([]interface{}); ok && len(includes) > 0 {
+				assessment.HasIncludes = true
+				assessment.PassCount++
+			}
+
+			// Check for defines
+			if defines, ok := devops["defines"].([]interface{}); ok && len(defines) > 0 {
+				assessment.HasDefines = true
+				assessment.PassCount++
+			}
+
+			// Check for platforms
+			if platforms, ok := devops["platforms"].([]interface{}); ok && len(platforms) > 0 {
+				assessment.HasPlatforms = true
+				assessment.PassCount++
+			}
+
+			// Check for component classification
+			if component, ok := devops["component"].(string); ok && component != "" {
+				assessment.HasComponent = true
+				assessment.PassCount++
+			}
+
+			// Check for file_role
+			if fileRole, ok := devops["file_role"].(string); ok && fileRole != "" {
+				assessment.HasFileRole = true
+				assessment.PassCount++
+			}
 		}
 
-		// Check for defines
-		if defines, ok := devops["defines"].([]interface{}); ok && len(defines) > 0 {
-			assessment.HasDefines = true
-			assessment.PassCount++
-		}
-
-		// Check for platforms
-		if platforms, ok := devops["platforms"].([]interface{}); ok && len(platforms) > 0 {
-			assessment.HasPlatforms = true
-			assessment.PassCount++
-		}
-
-		// Check for component classification
-		if component, ok := devops["component"].(string); ok && component != "" {
-			assessment.HasComponent = true
-			assessment.PassCount++
-		}
-
-		// Check for file_role
-		if fileRole, ok := devops["file_role"].(string); ok && fileRole != "" {
-			assessment.HasFileRole = true
-			assessment.PassCount++
-		}
-
-		// Determine if document passes (at least has devops metadata and some enrichment)
+		// Determine if document passes (at least has rule_classifier or devops metadata with some enrichment)
 		if assessment.PassCount >= 1 {
 			report.PassedDocuments++
 		} else {

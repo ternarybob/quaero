@@ -745,13 +745,20 @@ func (ctc *codebaseTestContext) verifyAssessmentResults() error {
 
 	// Count how many have enrichment metadata
 	enrichedCount := 0
+	ruleClassifiedCount := 0
 	for _, docRaw := range documents {
 		doc, ok := docRaw.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		if metadata, ok := doc["metadata"].(map[string]interface{}); ok {
-			// Check for any enrichment indicators
+			// Check for rule_classifier metadata (from rule_classify_files step)
+			if ruleClassifier, hasRC := metadata["rule_classifier"].(map[string]interface{}); hasRC {
+				if _, hasCategory := ruleClassifier["category"]; hasCategory {
+					ruleClassifiedCount++
+				}
+			}
+			// Check for any other enrichment indicators
 			if _, hasCategory := metadata["category"]; hasCategory {
 				enrichedCount++
 			} else if _, hasEntities := metadata["entities"]; hasEntities {
@@ -762,11 +769,12 @@ func (ctc *codebaseTestContext) verifyAssessmentResults() error {
 		}
 	}
 
-	ctc.env.LogTest(ctc.t, "  Documents with enrichment metadata: %d", enrichedCount)
+	ctc.env.LogTest(ctc.t, "  Documents with rule_classifier metadata: %d", ruleClassifiedCount)
+	ctc.env.LogTest(ctc.t, "  Documents with other enrichment metadata: %d", enrichedCount)
 
 	// Save verification summary to results
 	resultsDir := ctc.env.GetResultsDir()
-	summary := fmt.Sprintf("Assessment Results:\n- Total documents: %d\n- Enriched documents: %d\n", docCount, enrichedCount)
+	summary := fmt.Sprintf("Assessment Results:\n- Total documents: %d\n- Rule-classified documents: %d\n- Other enriched documents: %d\n", docCount, ruleClassifiedCount, enrichedCount)
 	if err := os.WriteFile(filepath.Join(resultsDir, "verification_summary.txt"), []byte(summary), 0644); err != nil {
 		ctc.env.LogTest(ctc.t, "  Warning: Failed to save verification summary: %v", err)
 	}
