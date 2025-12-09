@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -68,11 +69,20 @@ func (m *jobMonitor) StartMonitoring(ctx context.Context, job *models.QueueJob) 
 			if r := recover(); r != nil {
 				buf := make([]byte, 4096)
 				n := runtime.Stack(buf, false)
-				m.logger.Fatal().
+				stackTrace := string(buf[:n])
+
+				// Log to structured logger first
+				m.logger.Error().
 					Str("panic", fmt.Sprintf("%v", r)).
-					Str("stack", string(buf[:n])).
+					Str("stack", stackTrace).
 					Str("job_id", job.ID).
-					Msg("FATAL: Job monitor goroutine panicked")
+					Msg("FATAL: Job monitor goroutine panicked - writing crash file")
+
+				// Write crash file for reliable persistence
+				common.WriteCrashFile(r, stackTrace)
+
+				// Note: Don't os.Exit here - this is a monitor goroutine, not main processor
+				// The parent job will be left in running state and can be manually recovered
 			}
 		}()
 

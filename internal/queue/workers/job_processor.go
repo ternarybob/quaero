@@ -7,11 +7,13 @@ package workers
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/ternarybob/arbor"
+	"github.com/ternarybob/quaero/internal/common"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/models"
 	"github.com/ternarybob/quaero/internal/queue"
@@ -175,11 +177,20 @@ func (jp *JobProcessor) processJobs(workerID int) {
 	// will crash the entire application without logging
 	defer func() {
 		if r := recover(); r != nil {
-			jp.logger.Fatal().
+			stackTrace := getStackTrace()
+
+			// Log to structured logger first
+			jp.logger.Error().
 				Str("panic", fmt.Sprintf("%v", r)).
-				Str("stack", getStackTrace()).
+				Str("stack", stackTrace).
 				Int("worker_id", workerID).
-				Msg("FATAL: Job processor goroutine panicked - application will terminate")
+				Msg("FATAL: Job processor goroutine panicked - writing crash file")
+
+			// Write crash file for reliable persistence
+			common.WriteCrashFile(r, stackTrace)
+
+			// Exit the process - this goroutine panicking is fatal
+			os.Exit(1)
 		}
 	}()
 
@@ -398,16 +409,16 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 	}()
 
 	// Execute the job using the worker with the per-job context
-	jp.logger.Info().
+	jp.logger.Debug().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
-		Msg("TRACE: About to call worker.Execute")
+		Msg("Calling worker.Execute")
 	err = worker.Execute(jobCtx, queueJob)
-	jp.logger.Info().
+	jp.logger.Debug().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
 		Bool("has_error", err != nil).
-		Msg("TRACE: worker.Execute returned")
+		Msg("Worker.Execute returned")
 
 	// Check if job was cancelled via context
 	if jobCtx.Err() == context.Canceled {

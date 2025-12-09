@@ -329,10 +329,10 @@ func (w *CrawlerWorker) CreateJobs(ctx context.Context, step models.JobStep, job
 // 4. Link discovery and filtering
 // 5. Child job spawning for discovered links (respecting depth limits)
 func (w *CrawlerWorker) Execute(ctx context.Context, job *models.QueueJob) error {
-	w.logger.Info().
+	w.logger.Debug().
 		Str("job_id", job.ID).
 		Str("job_type", job.Type).
-		Msg("TRACE: CrawlerWorker.Execute called")
+		Msg("CrawlerWorker.Execute called")
 
 	// Create job-specific logger using parent context for log aggregation
 	// All children log under the root parent ID for unified log viewing
