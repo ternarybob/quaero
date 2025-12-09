@@ -187,15 +187,7 @@
                                                             <i class="fas fa-file-alt"></i> <span x-text="item.step.documentCount"></span> docs
                                                         </span>
                                                     </template>
-                                                    <!-- Children button removed - events panel shows job progress -->
-                                                    <template x-if="item.step.progress">
-                                                        <span class="step-progress-text">
-                                                            <span x-text="item.step.progress.pending"></span> pending,
-                                                            <span x-text="item.step.progress.running"></span> running,
-                                                            <span x-text="item.step.progress.completed"></span> completed,
-                                                            <span x-text="item.step.progress.failed"></span> failed
-                                                        </span>
-                                                    </template>
+                                                    <!-- Step queue stats removed - was showing inaccurate global counts instead of step-specific counts -->
                                                 </div>
                                                 <template x-if="item.step.description">
                                                     <div class="step-description" x-text="item.step.description"></div>
@@ -217,7 +209,7 @@
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
                                                                 <div class="terminal-line" :data-log-index="logIndex">
-                                                                    <span class="terminal-time" x-text="formatLogTime(log.timestamp)"></span>
+                                                                    <span class="terminal-time" x-text="formatLogTime(log.full_timestamp || log.timestamp)"></span>
                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)"></span>
                                                                     <span x-show="log.originator" x-text="'[' + log.originator + ']'" style="color: #61AFEF;"></span>
                                                                     <span x-show="log.phase" x-text="'[' + log.phase + ']'" style="color: #98C379;"></span>
@@ -310,7 +302,7 @@
                                             'job-card-parent': item.type === 'parent',
                                             'job-card-child': item.type === 'child',
                                             'job-card-flat': item.type === 'flat'
-                                        }" style="margin-bottom: 0.8rem; cursor: pointer;" :data-job-id="item.job.id" @click="navigateToJobDetails(item.job.id)">
+                                        }" style="margin-bottom: 0.8rem; cursor: pointer;" :data-job-id="item.job.id" @click="toggleJobStepsCollapse(item.job.id)">
                                         <div class="card-body">
                                             <div class="columns" style="gap: 0.5rem;">
                                                 <!-- Left side: Checkbox and Content -->
@@ -372,8 +364,14 @@
                                                         </div>
                                                     </template>
 
-                                                    <!-- Metadata -->
+                                                    <!-- Metadata row - clicking anywhere on job card toggles step collapse -->
                                                     <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem;">
+                                                        <!-- Collapse/Expand indicator for multi-step jobs -->
+                                                        <template x-if="item.job.metadata?.step_definitions?.length > 0">
+                                                            <div style="display: flex; align-items: center; margin-right: 0.25rem;" :title="isJobStepsCollapsed(item.job.id) ? 'Click to expand steps' : 'Click to collapse steps'">
+                                                                <i class="fas" :class="isJobStepsCollapsed(item.job.id) ? 'fa-chevron-right' : 'fa-chevron-down'" style="color: #666;"></i>
+                                                            </div>
+                                                        </template>
                                                         <!-- Status Badge -->
                                                         <div>
                                                             <span class="label" :class="getStatusBadgeClass(item.type, item.job.status, item.job)" :data-job-id="item.job.id" :data-status="item.job.status">
@@ -476,21 +474,6 @@
                                                                 </div>
                                                             </template>
 
-                                                            <!-- Standard Progress Display for Non-Crawler Jobs -->
-                                                            <template x-if="!isCrawlerJob(item.job)">
-                                                                <div style="margin-top: 0.8rem; padding: 0.5rem; background-color: #f5f5f5; border-radius: 4px; font-size: 0.875rem;">
-                                                                    <strong>Progress:</strong>
-                                                                    <template x-if="item.job.status_report?.progress_text">
-                                                                        <span x-text="item.job.status_report.progress_text"></span>
-                                                                    </template>
-                                                                    <template x-if="!item.job.status_report?.progress_text && item.job.child_count > 0">
-                                                                        <span x-text="getChildJobsSummary(item.job.id)"></span>
-                                                                    </template>
-                                                                    <template x-if="!item.job.status_report?.progress_text && (!item.job.child_count || item.job.child_count === 0)">
-                                                                        <span>No progress data</span>
-                                                                    </template>
-                                                                </div>
-                                                            </template>
 
                                                             <!-- Errors from backend -->
                                                             <template x-if="item.job.status_report?.errors && item.job.status_report.errors.length > 0">
@@ -1217,6 +1200,17 @@
                         }));
                     }
 
+                    // Handle refresh_step_events trigger (from event aggregator)
+                    // This triggers UI to fetch events from API instead of receiving full payloads
+                    // finished=true means step has completed and this is the final event refresh
+                    if (message.type === 'refresh_step_events' && message.payload) {
+                        const { step_ids, timestamp, finished } = message.payload;
+                        console.log('[Queue] Received refresh_step_events trigger for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
+                        window.dispatchEvent(new CustomEvent('jobList:refreshStepEvents', {
+                            detail: { step_ids, timestamp, finished }
+                        }));
+                    }
+
                     // Handle manager progress events (from ManagerMonitor - monitors steps under a manager)
                     if (message.type === 'manager_progress' && message.payload) {
                         const managerProgress = message.payload;
@@ -1817,8 +1811,10 @@
                 expandedSteps: {}, // Track which step rows have children expanded (key: "parentId:stepName")
                 expandedJobLogs: {}, // Track which parent jobs have logs panel expanded (legacy, kept for compatibility)
                 expandedStepLogs: {}, // Track which step logs panels are expanded (key: "parentId:stepName")
+                collapsedJobs: {}, // Track which parent jobs have their steps collapsed
                 jobLogs: {}, // Store logs per parent job { parentId: [{level, message, timestamp, step_name, source_type}] }
                 maxLogsPerJob: 100, // Maximum number of logs to keep per job
+                // Note: _stepEventsFetchedOnStart removed - we now only fetch on COMPLETE, not START
 
                 // Loading state management
                 isLoading: false, // Tracks whether a fetch is in progress
@@ -1836,6 +1832,10 @@
                 _renderPending: false,
                 _renderTimeout: null,
                 _renderThrottleMs: 100, // Throttle renders to max 10/second during rapid updates
+
+                // Debounced stats recalculation (prevents API flooding during rapid job updates)
+                _statsTimeout: null,
+                _statsDebounceMs: 2000, // Debounce stats fetch to max once per 2 seconds
 
                 init() {
                     // Add event listeners for external commands
@@ -1864,6 +1864,8 @@
                     // Step hierarchy progress updates
                     window.addEventListener('jobList:updateStepProgress', (e) => this.updateStepProgress(e.detail));
                     window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
+                    // Trigger-based event refresh (from event aggregator)
+                    window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
 
                     // Set initial load flag
                     this.isInitialLoad = true;
@@ -1959,6 +1961,18 @@
                 isStepExpanded(parentId, stepName) {
                     const key = `${parentId}:${stepName}`;
                     return !!this.expandedSteps[key];
+                },
+
+                // Job steps collapse methods (hide/show step rows under parent job)
+                toggleJobStepsCollapse(jobId) {
+                    const newState = !this.collapsedJobs[jobId];
+                    this.collapsedJobs = { ...this.collapsedJobs, [jobId]: newState };
+                    console.log('[Queue] Toggled steps collapse for job', jobId.substring(0, 8), '- collapsed:', newState);
+                    this.renderJobs();
+                },
+
+                isJobStepsCollapsed(jobId) {
+                    return !!this.collapsedJobs[jobId];
                 },
 
                 // Job logs panel methods
@@ -2071,14 +2085,77 @@
                     const newState = !this.expandedStepLogs[key];
                     this.expandedStepLogs = { ...this.expandedStepLogs, [key]: newState };
                     console.log('[Queue] Toggled step logs for', stepName, '- now:', newState);
-                    // Scroll to bottom of logs when expanding
+
+                    // When expanding, fetch step events from API
                     if (newState) {
+                        this.fetchStepEvents(jobId, stepName);
+
+                        // Scroll to bottom of logs when expanding
                         this.$nextTick(() => {
                             const logsContainer = document.querySelector(`[data-step-logs-container="${key}"]`);
                             if (logsContainer) {
                                 logsContainer.scrollTop = logsContainer.scrollHeight;
                             }
                         });
+                    }
+                },
+
+                // Fetch step events from API and cache them
+                async fetchStepEvents(managerId, stepName) {
+                    const manager = this.allJobs.find(j => j.id === managerId);
+                    if (!manager) {
+                        console.warn('[Queue] Manager not found:', managerId.substring(0, 8));
+                        return;
+                    }
+
+                    // Find step job ID from manager's metadata.step_job_ids
+                    const stepJobIds = manager.metadata?.step_job_ids || {};
+                    const stepJobId = stepJobIds[stepName];
+
+                    if (!stepJobId) {
+                        console.warn('[Queue] Step job ID not found for step:', stepName);
+                        return;
+                    }
+
+                    // Check if we already fetched recently (throttle)
+                    const cacheKey = `${managerId}:${stepName}`;
+                    const now = Date.now();
+                    if (!this._stepEventsFetchTime) {
+                        this._stepEventsFetchTime = {};
+                    }
+                    if (this._stepEventsFetchTime[cacheKey] && now - this._stepEventsFetchTime[cacheKey] < 2000) {
+                        console.log('[Queue] Skipping fetch for', stepName, '- recently fetched');
+                        return;
+                    }
+                    this._stepEventsFetchTime[cacheKey] = now;
+
+                    try {
+                        console.log('[Queue] Fetching events for step', stepName, 'job:', stepJobId.substring(0, 8));
+                        const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                        if (!response.ok) {
+                            console.warn('[Queue] Failed to fetch step events:', response.status);
+                            return;
+                        }
+
+                        const data = await response.json();
+                        const logs = data.logs || [];
+
+                        // Store in jobLogs keyed by manager:stepName for getStepLogs to find
+                        if (!this.jobLogs[managerId]) {
+                            this.jobLogs[managerId] = [];
+                        }
+                        // Remove old logs for this step and add new ones
+                        this.jobLogs[managerId] = this.jobLogs[managerId].filter(l => l.step_name !== stepName);
+                        // Add fetched logs with step_name for filtering
+                        const logsWithStepName = logs.map(log => ({ ...log, step_name: stepName }));
+                        this.jobLogs[managerId].push(...logsWithStepName);
+
+                        console.log('[Queue] Loaded', logs.length, 'events for step', stepName);
+
+                        // Trigger re-render
+                        this.throttledRenderJobs();
+                    } catch (err) {
+                        console.error('[Queue] Error fetching step events:', err);
                     }
                 },
 
@@ -2131,9 +2208,79 @@
                     if (!timestamp) return '';
                     try {
                         const date = new Date(timestamp);
-                        return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        // Include milliseconds for ordering visibility in fast jobs
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const mins = String(date.getMinutes()).padStart(2, '0');
+                        const secs = String(date.getSeconds()).padStart(2, '0');
+                        const ms = String(date.getMilliseconds()).padStart(3, '0');
+                        return `${hours}:${mins}:${secs}.${ms}`;
                     } catch {
                         return '';
+                    }
+                },
+
+                // Load events for completed steps on page load
+                // This ensures steps that completed before WebSocket triggers fired still show their events
+                async loadCompletedStepEvents() {
+                    // Find all manager jobs (parents with step_job_ids) that are completed/failed/cancelled
+                    const completedStatuses = ['completed', 'failed', 'cancelled'];
+                    const managerJobs = this.allJobs.filter(job =>
+                        !job.parent_id &&
+                        job.metadata?.step_job_ids &&
+                        completedStatuses.includes(job.status)
+                    );
+
+                    console.log('[Queue] loadCompletedStepEvents: Found', managerJobs.length, 'completed manager jobs with steps');
+
+                    const promises = [];
+
+                    for (const manager of managerJobs) {
+                        const stepJobIds = manager.metadata.step_job_ids || {};
+
+                        for (const [stepName, stepJobId] of Object.entries(stepJobIds)) {
+                            // Check if we already have events for this step
+                            const existingLogs = this.jobLogs[manager.id] || [];
+                            const stepLogs = existingLogs.filter(l => l.step_name === stepName);
+
+                            if (stepLogs.length === 0) {
+                                // No events cached - fetch from API
+                                console.log('[Queue] Will fetch events for step', stepName, 'in manager', manager.id.substring(0, 8));
+                                promises.push(this.fetchStepEventsById(manager.id, stepName, stepJobId));
+                            }
+                        }
+                    }
+
+                    if (promises.length > 0) {
+                        console.log('[Queue] Loading events for', promises.length, 'completed steps');
+                        await Promise.all(promises);
+                    }
+                },
+
+                // Fetch step events by step job ID (for completed steps on page load)
+                async fetchStepEventsById(managerId, stepName, stepJobId) {
+                    try {
+                        console.log('[Queue] Fetching events for completed step', stepName, 'job:', stepJobId.substring(0, 8));
+                        const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                        if (!response.ok) {
+                            console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
+                            return;
+                        }
+
+                        const data = await response.json();
+                        const logs = data.logs || [];
+
+                        // Store in jobLogs for getStepLogs to find
+                        if (!this.jobLogs[managerId]) {
+                            this.jobLogs[managerId] = [];
+                        }
+                        // Remove old logs for this step and add new ones
+                        this.jobLogs[managerId] = this.jobLogs[managerId].filter(l => l.step_name !== stepName);
+                        const logsWithStepName = logs.map(log => ({ ...log, step_name: stepName }));
+                        this.jobLogs[managerId].push(...logsWithStepName);
+
+                        console.log('[Queue] Loaded', logs.length, 'events for completed step', stepName);
+                    } catch (err) {
+                        console.warn('[Queue] Error fetching events for step', stepName, ':', err);
                     }
                 },
 
@@ -2317,6 +2464,12 @@
                         this.fetchAllHistoricalLogs(parentJobs).then(() => {
                             // Re-render after logs are fetched to update event counts
                             this.renderJobs();
+
+                            // Load events for completed steps that may not have step_name in aggregated logs
+                            // This ensures fast-completing steps show their events on page reload
+                            this.loadCompletedStepEvents().then(() => {
+                                this.renderJobs();
+                            });
                         });
 
                     } catch (error) {
@@ -2446,9 +2599,14 @@
                             // Add parent job row
                             itemsToRender.push({ type: 'parent', job: parentJob });
 
-                            // Add step rows for multi-step job definitions
+                            // Add step rows for multi-step job definitions (unless collapsed)
                             const stepDefs = parentJob.metadata?.step_definitions;
                             if (stepDefs && Array.isArray(stepDefs) && stepDefs.length > 0) {
+                                // Skip step rows if parent job's steps are collapsed
+                                if (this.isJobStepsCollapsed(parentJob.id)) {
+                                    return; // Skip to next parent job
+                                }
+
                                 // Get step status from metadata (persisted) or status_report (WebSocket)
                                 const currentStep = parentJob.metadata?.current_step || parentJob.status_report?.current_step || 0;
                                 const completedSteps = parentJob.metadata?.completed_steps || 0;
@@ -2565,30 +2723,6 @@
 
                                     const documentCount = stepStat.document_count || 0;
 
-                                    // For active or terminal steps, show step-specific child stats as progress
-                                    // First try to get from _stepProgress map (real-time WebSocket updates)
-                                    // Fall back to parent's aggregate child stats if not available
-                                    let stepProgress = null;
-                                    if (status === 'running' || status === 'spawned' || status === 'failed' || status === 'completed') {
-                                        // Check for real-time step progress from WebSocket events
-                                        if (parentJob._stepProgress && parentJob._stepProgress[stepDef.name]) {
-                                            const rtProgress = parentJob._stepProgress[stepDef.name];
-                                            stepProgress = {
-                                                pending: rtProgress.pending || 0,
-                                                running: rtProgress.running || 0,
-                                                completed: rtProgress.completed || 0,
-                                                failed: rtProgress.failed || 0
-                                            };
-                                        } else if (parentJob.child_count > 0) {
-                                            // Fallback: use parent's aggregate child stats
-                                            stepProgress = {
-                                                pending: parentJob.pending_children || 0,
-                                                running: parentJob.running_children || 0,
-                                                completed: parentJob.completed_children || 0,
-                                                failed: parentJob.failed_children || 0
-                                            };
-                                        }
-                                    }
 
                                     itemsToRender.push({
                                         type: 'step',
@@ -2602,8 +2736,7 @@
                                             current: stepNum === currentStep,
                                             totalSteps: stepDefs.length,
                                             childCount: childCount,
-                                            documentCount: documentCount,
-                                            progress: stepProgress
+                                            documentCount: documentCount
                                         }
                                     });
 
@@ -2611,6 +2744,8 @@
                                     const stepLogsKey = `${parentJob.id}:${stepDef.name}`;
                                     if ((status === 'running' || status === 'spawned' || status === 'failed') && !this.expandedStepLogs[stepLogsKey]) {
                                         this.expandedStepLogs = { ...this.expandedStepLogs, [stepLogsKey]: true };
+                                        // Fetch events when auto-expanding
+                                        this.fetchStepEvents(parentJob.id, stepDef.name);
                                     }
 
                                     // Add child rows immediately after this step row if step is expanded
@@ -2791,7 +2926,12 @@
                     if (!timestamp) return '';
                     try {
                         const date = new Date(timestamp);
-                        return date.toLocaleTimeString();
+                        // Include milliseconds for ordering visibility in fast jobs
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const mins = String(date.getMinutes()).padStart(2, '0');
+                        const secs = String(date.getSeconds()).padStart(2, '0');
+                        const ms = String(date.getMilliseconds()).padStart(3, '0');
+                        return `${hours}:${mins}:${secs}.${ms}`;
                     } catch (error) {
                         return '';
                     }
@@ -3362,6 +3502,23 @@
                         this.debouncedRefreshParent(job.parent_id);
                     }
 
+                    // If a manager job (no parent_id, has step_job_ids) just completed, load step events
+                    // This handles the case where steps completed during job run but events weren't loaded
+                    const completedStatuses = ['completed', 'failed', 'cancelled'];
+                    if (!job.parent_id && job.metadata?.step_job_ids && completedStatuses.includes(update.status)) {
+                        console.log('[Queue] Manager job completed, loading step events for:', job.id.substring(0, 8));
+                        // Load events for all steps in this manager
+                        const stepJobIds = job.metadata.step_job_ids;
+                        for (const [stepName, stepJobId] of Object.entries(stepJobIds)) {
+                            // Check if we already have events for this step
+                            const existingLogs = this.jobLogs[job.id] || [];
+                            const stepLogs = existingLogs.filter(l => l.step_name === stepName);
+                            if (stepLogs.length === 0) {
+                                this.fetchStepEventsById(job.id, stepName, stepJobId);
+                            }
+                        }
+                    }
+
                     // Trim to pageSize if on first page to maintain pagination consistency
                     if (this.currentPage === 1 && this.filteredJobs.length > this.pageSize) {
                         this.filteredJobs.length = this.pageSize;
@@ -3371,10 +3528,25 @@
                     this.throttledRenderJobs();
                 },
 
-                // Reload job statistics from backend API (triggered by WebSocket updates)
-                // Backend counts ALL jobs (both parent and child jobs) from database
-                async recalculateStats() {
+                // Debounced stats recalculation - prevents API flooding during rapid job updates
+                // Only fetches stats at most once per _statsDebounceMs (default 2 seconds)
+                recalculateStats() {
+                    // Clear any existing timeout
+                    if (this._statsTimeout) {
+                        clearTimeout(this._statsTimeout);
+                    }
+
+                    // Set new timeout to fetch stats after debounce period
+                    this._statsTimeout = setTimeout(() => {
+                        this._statsTimeout = null;
+                        this._doFetchStats();
+                    }, this._statsDebounceMs);
+                },
+
+                // Internal: Actually fetch stats from API (called by debounced recalculateStats)
+                async _doFetchStats() {
                     try {
+                        console.log('[Queue] Fetching job stats (debounced)');
                         const response = await fetch('/api/jobs/stats');
                         if (response.ok) {
                             const stats = await response.json();
@@ -3593,6 +3765,105 @@
                     }
 
                     // Re-render to show updated progress (throttled)
+                    this.throttledRenderJobs();
+                },
+
+                // Refresh step events from API (triggered by refresh_step_events WebSocket message)
+                // This is the new trigger-based approach that replaces individual event pushes
+                // ONLY fetches on COMPLETE (finished=true) - we skip START fetches since steps run fast
+                async refreshStepEvents(detail) {
+                    const { step_ids, timestamp, finished } = detail;
+                    if (!step_ids || step_ids.length === 0) return;
+
+                    // ONLY fetch on COMPLETE - skip START and middle-of-execution triggers
+                    // For fast-completing steps, START fetch is wasted since COMPLETE comes immediately
+                    if (!finished) {
+                        console.log('[Queue] Skipping refresh for', step_ids.length, 'steps - not COMPLETE (finished=' + finished + ')');
+                        return;
+                    }
+
+                    for (const stepJobId of step_ids) {
+                        try {
+                            // Find manager and step name by searching managers for this step job ID
+                            // Step jobs may not be in allJobs directly, but manager.metadata.step_job_ids has the mapping
+                            let managerId = null;
+                            let stepName = null;
+
+                            for (const job of this.allJobs) {
+                                const stepJobIds = job.metadata?.step_job_ids;
+                                if (stepJobIds) {
+                                    for (const [name, id] of Object.entries(stepJobIds)) {
+                                        if (id === stepJobId) {
+                                            managerId = job.id;
+                                            stepName = name;
+                                            break;
+                                        }
+                                    }
+                                    if (managerId) break;
+                                }
+                            }
+
+                            // If not found in cached jobs, fetch the step job to get parent_id
+                            // This handles the case where manager's metadata wasn't populated when UI loaded
+                            if (!managerId || !stepName) {
+                                console.log('[Queue] Step job ID not in cached managers, fetching from API:', stepJobId.substring(0, 8));
+                                try {
+                                    const stepResponse = await fetch(`/api/jobs/${stepJobId}`);
+                                    if (stepResponse.ok) {
+                                        const stepJob = await stepResponse.json();
+                                        if (stepJob.parent_id) {
+                                            managerId = stepJob.parent_id;
+                                            stepName = stepJob.metadata?.step_name || stepJob.name;
+                                            console.log('[Queue] Found step via API: manager=', managerId.substring(0, 8), 'step=', stepName);
+
+                                            // Also refresh the manager job in allJobs to get updated metadata
+                                            const managerResponse = await fetch(`/api/jobs/${managerId}`);
+                                            if (managerResponse.ok) {
+                                                const managerJob = await managerResponse.json();
+                                                const managerIndex = this.allJobs.findIndex(j => j.id === managerId);
+                                                if (managerIndex >= 0) {
+                                                    this.allJobs[managerIndex] = managerJob;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (fetchErr) {
+                                    console.warn('[Queue] Failed to fetch step job:', fetchErr);
+                                }
+                            }
+
+                            if (!managerId || !stepName) {
+                                console.warn('[Queue] Could not find manager/stepName for step job', stepJobId.substring(0, 8));
+                                continue;
+                            }
+
+                            // Fetch latest logs for this step job
+                            console.log('[Queue] Fetching COMPLETE events for step', stepName, 'job:', stepJobId.substring(0, 8));
+                            const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                            if (!response.ok) {
+                                console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
+                                continue;
+                            }
+
+                            const data = await response.json();
+                            const logs = data.logs || [];
+
+                            // Store in jobLogs for getStepLogs to find
+                            if (!this.jobLogs[managerId]) {
+                                this.jobLogs[managerId] = [];
+                            }
+                            // Remove old logs for this step and add new ones
+                            this.jobLogs[managerId] = this.jobLogs[managerId].filter(l => l.step_name !== stepName);
+                            const logsWithStepName = logs.map(log => ({ ...log, step_name: stepName }));
+                            this.jobLogs[managerId].push(...logsWithStepName);
+
+                            console.log('[Queue] Loaded', logs.length, 'events for step', stepName, '[COMPLETE]');
+                        } catch (err) {
+                            console.error('[Queue] Error fetching step events:', stepJobId.substring(0, 8), err);
+                        }
+                    }
+
+                    // Re-render to show updated events
                     this.throttledRenderJobs();
                 },
 

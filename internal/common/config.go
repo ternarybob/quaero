@@ -139,6 +139,10 @@ type WebSocketConfig struct {
 	// Throttle intervals for high-frequency events. Map of event type to duration string.
 	// Example: {"crawl_progress": "1s", "job_spawn": "500ms"}
 	ThrottleIntervals map[string]string `toml:"throttle_intervals"`
+	// Event aggregator settings for trigger-based UI updates (step events)
+	// Instead of pushing each step event, accumulate and trigger UI refresh
+	EventCountThreshold int    `toml:"event_count_threshold"` // Trigger refresh after N events (default: 100)
+	TimeThreshold       string `toml:"time_threshold"`        // Trigger refresh after duration (default: "1s")
 }
 
 // PlacesAPIConfig contains Google Places API configuration
@@ -253,6 +257,9 @@ func NewDefaultConfig() *Config {
 				"crawl_progress": "1s",    // Max 1 crawl progress update per second per job
 				"job_spawn":      "500ms", // Max 2 job spawn events per second
 			},
+			// Event aggregator for trigger-based UI updates (step events)
+			EventCountThreshold: 100,  // Trigger UI refresh after 100 step events
+			TimeThreshold:       "1s", // Or after 1 second, whichever comes first
 		},
 		PlacesAPI: PlacesAPIConfig{
 			APIKey:              "",              // User must provide API key in config file
@@ -536,6 +543,17 @@ func applyEnvOverrides(config *Config) {
 				config.WebSocket.ThrottleIntervals = make(map[string]string)
 			}
 			config.WebSocket.ThrottleIntervals["job_spawn"] = jobSpawnThrottle
+		}
+	}
+	// Event aggregator settings for trigger-based UI updates
+	if eventCountThreshold := os.Getenv("QUAERO_WEBSOCKET_EVENT_COUNT_THRESHOLD"); eventCountThreshold != "" {
+		if ect, err := strconv.Atoi(eventCountThreshold); err == nil && ect > 0 {
+			config.WebSocket.EventCountThreshold = ect
+		}
+	}
+	if timeThreshold := os.Getenv("QUAERO_WEBSOCKET_TIME_THRESHOLD"); timeThreshold != "" {
+		if _, err := time.ParseDuration(timeThreshold); err == nil {
+			config.WebSocket.TimeThreshold = timeThreshold
 		}
 	}
 

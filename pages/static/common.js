@@ -121,12 +121,19 @@ document.addEventListener('alpine:init', () => {
         maxLogs: 200,
         autoScroll: true,
         logIdCounter: 0,
+        _lastRefreshTime: 0, // Throttle refresh_logs triggers
 
         // Architecture Note: Log Filtering
         // - Server filters logs before broadcasting (WebSocketWriter with min_level and exclude_patterns)
         // - Client displays all received logs without filtering
         // - This maintains clean separation: server controls filtering, client is display layer
         // - See: internal/handlers/websocket_writer.go for server-side filtering logic
+        //
+        // Architecture Note: Trigger-Based Batching (2025-12-10)
+        // - Server uses LogEventAggregator to batch log events
+        // - Instead of individual 'log' messages, server sends 'refresh_logs' triggers
+        // - UI fetches from API when triggered, reducing WebSocket load during high volume
+        // - Individual 'log' subscription kept for backward compatibility
 
         init() {
             window.debugLog('ServiceLogs', 'Initializing component');
@@ -171,13 +178,36 @@ document.addEventListener('alpine:init', () => {
 
         subscribeToWebSocket() {
             if (typeof WebSocketManager !== 'undefined') {
+                // Subscribe to individual log messages (backward compatibility)
                 WebSocketManager.subscribe('log', (data) => {
                     this.addLog(data);
                 });
-                window.debugLog('ServiceLogs', 'WebSocket subscription established');
+
+                // Subscribe to refresh_logs trigger (batched approach - preferred)
+                // Server sends this trigger periodically when logs are pending
+                // UI fetches from API on trigger instead of receiving each log individually
+                WebSocketManager.subscribe('refresh_logs', (data) => {
+                    this.handleRefreshTrigger(data);
+                });
+
+                window.debugLog('ServiceLogs', 'WebSocket subscriptions established (log + refresh_logs)');
             } else {
                 window.debugError('ServiceLogs', 'WebSocketManager not loaded', new Error('WebSocketManager undefined'));
             }
+        },
+
+        // Handle refresh_logs trigger from server (batched log delivery)
+        handleRefreshTrigger(data) {
+            const now = Date.now();
+            // Throttle: don't fetch more than once per 500ms
+            if (now - this._lastRefreshTime < 500) {
+                window.debugLog('ServiceLogs', 'Skipping refresh_logs trigger - throttled');
+                return;
+            }
+            this._lastRefreshTime = now;
+
+            window.debugLog('ServiceLogs', 'refresh_logs trigger received, fetching from API');
+            this.loadRecentLogs();
         },
 
         addLog(logData) {

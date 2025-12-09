@@ -430,7 +430,7 @@ func (h *JobHandler) GetJobResultsHandler(w http.ResponseWriter, r *http.Request
 }
 
 // GetJobLogsHandler returns the logs of a job
-// GET /api/jobs/{id}/logs?order=desc (desc=newest-first, asc=oldest-first)
+// GET /api/jobs/{id}/logs?order=desc&limit=100 (desc=newest-first, asc=oldest-first)
 func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -451,6 +451,17 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	order := r.URL.Query().Get("order")
 	if order == "" {
 		order = "desc" // Default to newest-first
+	}
+
+	// Parse limit query parameter (default: 1000, max: 5000)
+	limit := 1000
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+			if limit > 5000 {
+				limit = 5000 // Cap at 5000 to prevent memory issues
+			}
+		}
 	}
 
 	// Parse level query parameter for server-side filtering
@@ -489,7 +500,7 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if level == "all" {
 		// Fetch ALL logs including debug (explicit request)
-		logs, err = h.logService.GetLogs(ctx, jobID, 1000)
+		logs, err = h.logService.GetLogs(ctx, jobID, limit)
 		if err != nil {
 			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
 			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
@@ -503,12 +514,12 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 			filterLevel = "info" // Default: INFO and above (excludes debug)
 		}
 
-		h.logger.Debug().Str("job_id", jobID).Str("level", filterLevel).Msg("Fetching logs with level filter")
-		logs, err = h.logService.GetLogsByLevel(ctx, jobID, filterLevel, 1000)
+		h.logger.Debug().Str("job_id", jobID).Str("level", filterLevel).Int("limit", limit).Msg("Fetching logs with level filter")
+		logs, err = h.logService.GetLogsByLevel(ctx, jobID, filterLevel, limit)
 		if err != nil {
 			// Fall back to all logs if level filtering fails
 			h.logger.Warn().Err(err).Str("job_id", jobID).Str("level", filterLevel).Msg("Failed to get logs by level, falling back to all logs")
-			logs, err = h.logService.GetLogs(ctx, jobID, 1000)
+			logs, err = h.logService.GetLogs(ctx, jobID, limit)
 			if err != nil {
 				h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
 				http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
@@ -545,6 +556,7 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 		"job_id": jobID,
 		"logs":   logs,
 		"count":  len(logs),
+		"limit":  limit, // Include limit in response
 		"order":  order, // Include order in response for client awareness
 		"level":  level, // Include level filter applied (or "all" if no filter)
 	})

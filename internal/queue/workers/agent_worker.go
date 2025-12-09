@@ -279,7 +279,7 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve API key '%s' from storage: %w", cleanAPIKeyName, err)
 		}
-		w.logger.Debug().
+		w.logger.Info().
 			Str("phase", "init").
 			Str("step_name", step.Name).
 			Str("api_key_name", cleanAPIKeyName).
@@ -528,9 +528,9 @@ func (w *AgentWorker) queryDocuments(ctx context.Context, jobDef *models.JobDefi
 				opts.MetadataFilters = make(map[string]string)
 			}
 			opts.MetadataFilters["rule_classifier.category"] = strings.Join(categories, ",")
-			w.logger.Debug().
-				Strs("categories", categories).
-				Msg("Filtering documents by rule_classifier.category")
+			w.logger.Info().
+				Strs("categories", categories).Str("filter_key", "rule_classifier.category").
+				Msg("Category filter configured")
 		}
 
 		// Support limit override
@@ -680,7 +680,7 @@ func (w *AgentWorker) createAgentJob(ctx context.Context, agentType, documentID 
 		return "", fmt.Errorf("failed to enqueue job: %w", err)
 	}
 
-	w.logger.Debug().
+	w.logger.Info().
 		Str("job_id", queueJob.ID).
 		Str("parent_job_id", parentJobID).
 		Str("agent_type", agentType).
@@ -696,7 +696,7 @@ func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) er
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	w.logger.Debug().
+	w.logger.Info().
 		Int("job_count", len(jobIDs)).
 		Msg("Polling for agent job completion")
 
@@ -740,7 +740,7 @@ func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) er
 			}
 
 			if allCompleted {
-				w.logger.Debug().
+				w.logger.Info().
 					Int("job_count", len(jobIDs)).
 					Msg("All agent jobs completed successfully")
 				return nil

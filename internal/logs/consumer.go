@@ -243,11 +243,12 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 // transformEvent converts arbor LogEvent to JobLogEntry format
 // Extracts structured fields (phase, originator, step_name) for UI rendering
 func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
-	// Format timestamp as "15:04:05" for display
-	formattedTime := event.Timestamp.Format("15:04:05")
+	// Format timestamp as "15:04:05.000" for display (with milliseconds for fast jobs)
+	formattedTime := event.Timestamp.Format("15:04:05.000")
 
-	// Also store RFC3339 format for accurate sorting
-	fullTimestamp := event.Timestamp.Format(time.RFC3339)
+	// Store RFC3339Nano format for accurate sorting with millisecond/nanosecond precision
+	// This is critical for fast jobs that complete in under 1 second
+	fullTimestamp := event.Timestamp.Format(time.RFC3339Nano)
 
 	// Convert level to 3-letter format for consistent display
 	levelStr := convertTo3Letter(event.Level.String())

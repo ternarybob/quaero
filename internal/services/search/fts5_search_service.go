@@ -101,7 +101,13 @@ func (s *FTS5SearchService) Search(
 
 	// Apply metadata filters if specified
 	if len(opts.MetadataFilters) > 0 {
+		beforeMetadataFilter := len(results)
 		results = filterByMetadata(results, opts.MetadataFilters)
+		s.logger.Info().
+			Int("before_metadata_filter", beforeMetadataFilter).
+			Int("after_metadata_filter", len(results)).
+			Str("metadata_filters", fmt.Sprintf("%v", opts.MetadataFilters)).
+			Msg("Metadata filtering results")
 	}
 
 	// Apply tags filter if specified (documents must have ALL tags)

@@ -1149,14 +1149,14 @@ func (m *Manager) ExecuteJobDefinition(ctx context.Context, jobDef *models.JobDe
 	// Store cumulative child counts at step completion to calculate per-step deltas
 	stepStats := make([]map[string]interface{}, len(jobDef.Steps))
 
-	// Track step job IDs for monitoring
-	stepJobIDs := make([]string, len(jobDef.Steps))
+	// Track step job IDs for monitoring (map step name -> step job ID)
+	stepJobIDs := make(map[string]string, len(jobDef.Steps))
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
 		// Create step job (child of manager, parent of spawned jobs)
 		stepID := uuid.New().String()
-		stepJobIDs[i] = stepID
+		stepJobIDs[step.Name] = stepID
 
 		stepConfig := make(map[string]interface{})
 		for k, v := range step.Config {

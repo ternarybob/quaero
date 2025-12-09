@@ -14,9 +14,10 @@ package models
 //   - Truncation is transparent and automatic (no manual cleanup required)
 //
 // Timestamp Format:
-//   - Uses "15:04:05" format (HH:MM:SS, 24-hour clock) for display
-//   - Includes FullTimestamp (RFC3339) for accurate chronological sorting across days
-//   - Example: "14:23:45" for display, "2025-11-01T14:23:45Z" for sorting
+//   - Uses "15:04:05.000" format (HH:MM:SS.mmm, 24-hour clock) for display with milliseconds
+//   - Includes FullTimestamp (RFC3339Nano) for accurate chronological sorting with nanosecond precision
+//   - Milliseconds are critical for fast jobs that complete in under 1 second
+//   - Example: "14:23:45.123" for display, "2025-11-01T14:23:45.123456789Z" for sorting
 //
 // Log Levels:
 //   - "info":  Normal operational events (job started, progress milestones, completion)
@@ -27,8 +28,8 @@ package models
 // Usage Example:
 //
 //	logEntry := models.JobLogEntry{
-//	    Timestamp:      time.Now().Format("15:04:05"),
-//	    FullTimestamp:  time.Now().Format(time.RFC3339),
+//	    Timestamp:      time.Now().Format("15:04:05.000"),
+//	    FullTimestamp:  time.Now().Format(time.RFC3339Nano),
 //	    Level:     "info",
 //	    Message:   "Job started: source=jira/issues, seeds=5, max_depth=3",
 //	}
@@ -36,8 +37,8 @@ package models
 //	    logger.Warn().Err(err).Msg("Failed to append log")
 //	}
 type JobLogEntry struct {
-	Timestamp       string `json:"timestamp"`             // HH:MM:SS format (24-hour clock), e.g., "14:23:45"
-	FullTimestamp   string `json:"full_timestamp"`        // RFC3339 format for accurate sorting, e.g., "2025-11-01T14:23:45Z"
+	Timestamp       string `json:"timestamp"`             // HH:MM:SS.mmm format (24-hour clock), e.g., "14:23:45.123"
+	FullTimestamp   string `json:"full_timestamp"`        // RFC3339Nano format for accurate sorting, e.g., "2025-11-01T14:23:45.123456789Z"
 	Level           string `json:"level"`                 // Log level: "info", "warn", "error", "debug"
 	Message         string `json:"message"`               // Human-readable log message with structured data
 	AssociatedJobID string `json:"job_id"`                // ID of the job that generated this log (populated during aggregation)

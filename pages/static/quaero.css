@@ -2059,3 +2059,13 @@ body.modal-open {
 .log-level-debug {
     color: #0969da;
 }
+
+/* Job Steps Toggle - clickable metadata row */
+.job-steps-toggle {
+    cursor: pointer;
+}
+
+.job-steps-toggle:hover {
+    background-color: rgba(0, 0, 0, 0.02);
+    border-radius: 4px;
+}

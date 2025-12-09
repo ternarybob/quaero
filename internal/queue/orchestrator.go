@@ -145,14 +145,14 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 	// Track per-step statistics for UI display
 	stepStats := make([]map[string]interface{}, len(jobDef.Steps))
 
-	// Track step job IDs for monitoring
-	stepJobIDs := make([]string, len(jobDef.Steps))
+	// Track step job IDs for monitoring (map step name -> step job ID)
+	stepJobIDs := make(map[string]string, len(jobDef.Steps))
 
 	// Execute steps sequentially
 	for i, step := range jobDef.Steps {
 		// Create step job (child of manager, parent of spawned jobs)
 		stepID := uuid.New().String()
-		stepJobIDs[i] = stepID
+		stepJobIDs[step.Name] = stepID
 
 		stepConfig := make(map[string]interface{})
 		for k, v := range step.Config {
@@ -553,16 +553,18 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		}
 	}
 
+	// Always save step_job_ids metadata so UI can fetch step events on page refresh
+	// This must be saved regardless of whether steps have child jobs
+	stepIDsMetadata := map[string]interface{}{
+		"step_job_ids": stepJobIDs,
+	}
+	if err := o.jobManager.UpdateJobMetadata(ctx, managerID, stepIDsMetadata); err != nil {
+		// Log but continue
+	}
+
 	// Handle completion
 	if hasChildJobs && jobMonitor != nil {
 		o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", "Steps have child jobs - starting manager job monitoring", "", "orchestrator")
-
-		stepIDsMetadata := map[string]interface{}{
-			"step_job_ids": stepJobIDs,
-		}
-		if err := o.jobManager.UpdateJobMetadata(ctx, managerID, stepIDsMetadata); err != nil {
-			// Log but continue
-		}
 
 		managerQueueJob := &models.QueueJob{
 			ID:        managerID,
