@@ -171,7 +171,7 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 				// Publish "Starting N workers..." when we first see children
 				if !hasPublishedStarting {
 					hasPublishedStarting = true
-					m.publishStepLog(ctx, managerID, stepJob.Name, "info", fmt.Sprintf("Starting %d workers...", childCount))
+					m.publishStepLog(ctx, stepJob.ID, stepJob.Name, "info", fmt.Sprintf("Starting %d workers...", childCount))
 				}
 			}
 
@@ -184,9 +184,9 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 
 				// Publish starting message if not yet published
 				if !hasPublishedStarting {
-					m.publishStepLog(ctx, managerID, stepJob.Name, "info", "Starting workers...")
+					m.publishStepLog(ctx, stepJob.ID, stepJob.Name, "info", "Starting workers...")
 				}
-				m.publishStepLog(ctx, managerID, stepJob.Name, "info", fmt.Sprintf("Step completed (no jobs) in %s", formatDuration(duration)))
+				m.publishStepLog(ctx, stepJob.ID, stepJob.Name, "info", fmt.Sprintf("Step completed (no jobs) in %s", formatDuration(duration)))
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, "completed")
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
 				// Update step_stats in manager metadata for UI display
@@ -230,8 +230,8 @@ func (m *StepMonitor) monitorStepChildren(ctx context.Context, stepJob *models.Q
 					}
 				}
 
-				// Publish step log to manager for UI step panel (AddJobLog also publishes, so only use one)
-				m.publishStepLog(ctx, managerID, stepJob.Name, logLevel, stepLogMsg)
+				// Publish step log to step job for UI step panel (AddJobLog also publishes, so only use one)
+				m.publishStepLog(ctx, stepJob.ID, stepJob.Name, logLevel, stepLogMsg)
 				m.jobMgr.UpdateJobStatus(ctx, stepJob.ID, finalStatus)
 				m.jobMgr.SetJobFinished(ctx, stepJob.ID)
 				// Update step_stats in manager metadata for UI display
@@ -348,15 +348,16 @@ func (m *StepMonitor) publishStepProgress(
 	}()
 }
 
-// publishStepLog stores and publishes a job_log event for a step to the manager's log stream.
+// publishStepLog stores and publishes a job_log event for a step to the step job's log stream.
 // This ensures step events appear in the UI's step events panel and persist after page refresh.
-func (m *StepMonitor) publishStepLog(ctx context.Context, managerID, stepName, level, message string) {
-	// Store to database with explicit step_name and "step" originator for persistence
+// Logs are stored under stepID so the UI can fetch them via /api/jobs/{stepID}/logs.
+func (m *StepMonitor) publishStepLog(ctx context.Context, stepID, stepName, level, message string) {
+	// Store to database under the step job ID (not manager) for UI to fetch correctly
 	// This uses AddJobLogWithContext to set the correct step context
 	if m.jobMgr != nil {
-		if err := m.jobMgr.AddJobLogWithContext(ctx, managerID, level, message, stepName, "step"); err != nil {
+		if err := m.jobMgr.AddJobLogWithContext(ctx, stepID, level, message, stepName, "step"); err != nil {
 			m.logger.Debug().Err(err).
-				Str("manager_id", managerID).
+				Str("step_id", stepID).
 				Str("step_name", stepName).
 				Msg("Failed to store step log")
 		}

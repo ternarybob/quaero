@@ -1200,12 +1200,24 @@
                         }));
                     }
 
-                    // Handle refresh_step_events trigger (from event aggregator)
-                    // This triggers UI to fetch events from API instead of receiving full payloads
-                    // finished=true means step has completed and this is the final event refresh
+                    // Handle unified refresh_logs trigger (from UnifiedLogAggregator)
+                    // This replaces the old refresh_step_events for job-scoped triggers
+                    // scope=job triggers step events refresh, scope=service is ignored here
+                    if (message.type === 'refresh_logs' && message.payload) {
+                        const { scope, step_ids, timestamp, finished } = message.payload;
+                        // Only handle job-scoped triggers (service scope handled by common.js)
+                        if (scope === 'job' && step_ids && step_ids.length > 0) {
+                            console.log('[Queue] Received refresh_logs trigger (scope=job) for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
+                            window.dispatchEvent(new CustomEvent('jobList:refreshStepEvents', {
+                                detail: { step_ids, timestamp, finished }
+                            }));
+                        }
+                    }
+
+                    // Legacy: Handle old refresh_step_events trigger for backward compatibility
                     if (message.type === 'refresh_step_events' && message.payload) {
                         const { step_ids, timestamp, finished } = message.payload;
-                        console.log('[Queue] Received refresh_step_events trigger for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
+                        console.log('[Queue] Received legacy refresh_step_events trigger for', step_ids.length, 'steps', finished ? '(FINISHED)' : '');
                         window.dispatchEvent(new CustomEvent('jobList:refreshStepEvents', {
                             detail: { step_ids, timestamp, finished }
                         }));

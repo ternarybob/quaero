@@ -43,11 +43,10 @@ type WebSocketHandler struct {
 	mu                     sync.RWMutex
 	authLoader             AuthLoader
 	eventService           interfaces.EventService
-	crawlProgressThrottler *rate.Limiter               // Rate limiter for crawl_progress events
-	jobSpawnThrottler      *rate.Limiter               // Rate limiter for job_spawn events
-	allowedEvents          map[string]bool             // Whitelist of events to broadcast (empty = allow all)
-	stepEventAggregator    *events.StepEventAggregator // Aggregator for trigger-based step event updates
-	logEventAggregator     *events.LogEventAggregator  // Aggregator for trigger-based log event updates
+	crawlProgressThrottler *rate.Limiter                // Rate limiter for crawl_progress events
+	jobSpawnThrottler      *rate.Limiter                // Rate limiter for job_spawn events
+	allowedEvents          map[string]bool              // Whitelist of events to broadcast (empty = allow all)
+	unifiedLogAggregator   *events.UnifiedLogAggregator // Unified aggregator for service and step logs
 }
 
 func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILogger, config *common.WebSocketConfig) *WebSocketHandler {
@@ -106,8 +105,9 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 		}
 	}
 
-	// Initialize step event aggregator for trigger-based UI updates
-	// Triggers every timeThreshold (default 2s) for steps with pending events
+	// Initialize unified log aggregator for trigger-based UI updates
+	// Handles both service logs and step logs with a single aggregator
+	// Triggers every timeThreshold (default 2s) for pending events
 	// Also triggers immediately when a step finishes
 	if config != nil {
 		timeThreshold := 2 * time.Second // Default 2 seconds to reduce request frequency
@@ -117,35 +117,20 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 			}
 		}
 
-		// Create aggregator with callback to broadcast refresh trigger
+		// Create unified aggregator with callback to broadcast refresh trigger
 		arborLogger := arbor.NewLogger()
-		h.stepEventAggregator = events.NewStepEventAggregator(
+		h.unifiedLogAggregator = events.NewUnifiedLogAggregator(
 			timeThreshold,
-			h.broadcastStepRefreshTrigger,
+			h.broadcastUnifiedRefreshTrigger,
 			arborLogger,
 		)
 
 		logger.Info().
 			Dur("time_threshold", timeThreshold).
-			Msg("Step event aggregator initialized (time-based triggers + immediate on finish)")
+			Msg("Unified log aggregator initialized (service + step logs)")
 
 		// Start periodic flush in background
-		h.stepEventAggregator.StartPeriodicFlush(context.Background())
-
-		// Create log event aggregator with callback to broadcast refresh trigger
-		// Uses same time threshold as step aggregator
-		h.logEventAggregator = events.NewLogEventAggregator(
-			timeThreshold,
-			h.broadcastLogsRefreshTrigger,
-			arborLogger,
-		)
-
-		logger.Info().
-			Dur("time_threshold", timeThreshold).
-			Msg("Log event aggregator initialized (time-based triggers)")
-
-		// Start periodic flush in background
-		h.logEventAggregator.StartPeriodicFlush(context.Background())
+		h.unifiedLogAggregator.StartPeriodicFlush(context.Background())
 	}
 
 	// Subscribe to crawler events if eventService is provided
@@ -161,57 +146,24 @@ func (h *WebSocketHandler) SetAuthLoader(loader AuthLoader) {
 	h.authLoader = loader
 }
 
-// broadcastStepRefreshTrigger sends a WebSocket message to trigger UI refresh for specific steps
-// This is called by the step event aggregator when thresholds are reached
-// finished=true indicates the step has completed and this is the final event refresh
-func (h *WebSocketHandler) broadcastStepRefreshTrigger(ctx context.Context, stepIDs []string, finished bool) {
+// broadcastUnifiedRefreshTrigger sends a unified WebSocket message to trigger UI refresh
+// This is called by the unified log aggregator when thresholds are reached
+// The message includes scope (service/job) and step_ids for job-scoped triggers
+func (h *WebSocketHandler) broadcastUnifiedRefreshTrigger(ctx context.Context, trigger events.LogRefreshTrigger) {
+	payload := map[string]interface{}{
+		"scope":     trigger.Scope,
+		"timestamp": trigger.Timestamp.Format(time.RFC3339),
+	}
+
+	// Include step_ids and finished flag for job scope
+	if trigger.Scope == "job" {
+		payload["step_ids"] = trigger.StepIDs
+		payload["finished"] = trigger.Finished
+	}
+
 	msg := WSMessage{
-		Type: "refresh_step_events",
-		Payload: map[string]interface{}{
-			"step_ids":  stepIDs,
-			"timestamp": time.Now().Format(time.RFC3339),
-			"finished":  finished,
-		},
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error().Err(err).Msg("Failed to marshal refresh_step_events message")
-		return
-	}
-
-	h.mu.RLock()
-	clients := make([]*websocket.Conn, 0, len(h.clients))
-	mutexes := make([]*sync.Mutex, 0, len(h.clients))
-	for conn := range h.clients {
-		clients = append(clients, conn)
-		mutexes = append(mutexes, h.clientMutex[conn])
-	}
-	h.mu.RUnlock()
-
-	for i, conn := range clients {
-		mutex := mutexes[i]
-		mutex.Lock()
-		err := conn.WriteMessage(websocket.TextMessage, data)
-		mutex.Unlock()
-
-		if err != nil {
-			h.logger.Warn().Err(err).Msg("Failed to send refresh_step_events to client")
-		}
-	}
-
-	// NOTE: Don't log here - logging would trigger another log_event
-	// which could affect the refresh cycle
-}
-
-// broadcastLogsRefreshTrigger sends a WebSocket message to trigger UI refresh for logs
-// This is called by the log event aggregator when thresholds are reached
-func (h *WebSocketHandler) broadcastLogsRefreshTrigger(ctx context.Context) {
-	msg := WSMessage{
-		Type: "refresh_logs",
-		Payload: map[string]interface{}{
-			"timestamp": time.Now().Format(time.RFC3339),
-		},
+		Type:    "refresh_logs",
+		Payload: payload,
 	}
 
 	data, err := json.Marshal(msg)
@@ -906,22 +858,22 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	}
 
 	// Subscribe to log events from LogService (replaces direct BroadcastLog calls)
-	// Uses aggregator for trigger-based UI updates instead of direct broadcast
+	// Uses unified aggregator for trigger-based UI updates instead of direct broadcast
 	h.eventService.Subscribe("log_event", func(ctx context.Context, event interfaces.Event) error {
+		// Use unified aggregator for trigger-based updates if available
+		if h.unifiedLogAggregator != nil {
+			// Record that a service log event occurred (will be included in next periodic trigger)
+			h.unifiedLogAggregator.RecordServiceLog(ctx)
+			return nil
+		}
+
+		// Fallback: Direct broadcast (legacy behavior if aggregator not initialized)
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
 			h.logger.Warn().Msg("Invalid log_event payload type")
 			return nil
 		}
 
-		// Use aggregator for trigger-based updates if available
-		if h.logEventAggregator != nil {
-			// Record that a log event occurred (will be included in next periodic trigger)
-			h.logEventAggregator.RecordEvent(ctx)
-			return nil
-		}
-
-		// Fallback: Direct broadcast (legacy behavior if aggregator not initialized)
 		// Build log payload with job_id for client-side filtering
 		logPayload := map[string]interface{}{
 			"timestamp": getString(payload, "timestamp"),
@@ -1278,7 +1230,7 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	})
 
 	// Subscribe to step progress events from StepMonitor (for step-level progress updates)
-	// Uses aggregator for trigger-based UI updates instead of direct broadcast
+	// Uses unified aggregator for trigger-based UI updates instead of direct broadcast
 	h.eventService.Subscribe(interfaces.EventStepProgress, func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
@@ -1298,16 +1250,16 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			return nil
 		}
 
-		// Use aggregator for trigger-based updates if available
-		if h.stepEventAggregator != nil {
+		// Use unified aggregator for trigger-based updates if available
+		if h.unifiedLogAggregator != nil {
 			// Check if step finished - trigger immediately for final state
 			status := getString(payload, "status")
 			if status == "completed" || status == "failed" || status == "cancelled" {
 				// Step finished - trigger immediate refresh so UI shows final events
-				h.stepEventAggregator.TriggerImmediately(ctx, stepID)
+				h.unifiedLogAggregator.TriggerStepImmediately(ctx, stepID)
 			} else {
 				// Step still running - record event for periodic trigger
-				h.stepEventAggregator.RecordEvent(ctx, stepID)
+				h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
 			}
 			return nil
 		}

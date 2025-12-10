@@ -261,6 +261,26 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
 
+			// Publish step_progress event so UI gets refresh trigger with finished=true
+			if o.eventService != nil {
+				stepProgressPayload := map[string]interface{}{
+					"step_id":    stepID,
+					"manager_id": managerID,
+					"step_name":  step.Name,
+					"status":     "failed",
+					"timestamp":  time.Now().Format(time.RFC3339),
+				}
+				stepProgressEvent := interfaces.Event{
+					Type:    interfaces.EventStepProgress,
+					Payload: stepProgressPayload,
+				}
+				go func() {
+					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+						// Log but don't fail
+					}
+				}()
+			}
+
 			// Store step statistics with failed status for UI display
 			stepStats[i] = map[string]interface{}{
 				"step_index":     i,
@@ -302,6 +322,26 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
 			o.jobManager.SetJobError(ctx, managerID, err.Error())
 			o.jobManager.UpdateJobStatus(ctx, stepID, "failed")
+
+			// Publish step_progress event so UI gets refresh trigger with finished=true
+			if o.eventService != nil {
+				stepProgressPayload := map[string]interface{}{
+					"step_id":    stepID,
+					"manager_id": managerID,
+					"step_name":  step.Name,
+					"status":     "failed",
+					"timestamp":  time.Now().Format(time.RFC3339),
+				}
+				stepProgressEvent := interfaces.Event{
+					Type:    interfaces.EventStepProgress,
+					Payload: stepProgressPayload,
+				}
+				go func() {
+					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+						// Log but don't fail
+					}
+				}()
+			}
 
 			// Store step statistics with failed status for UI display
 			stepStats[i] = map[string]interface{}{
@@ -496,6 +536,27 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		if stepStatus == "completed" {
 			o.jobManager.UpdateJobStatus(ctx, stepID, "completed")
 			o.jobManager.SetJobFinished(ctx, stepID)
+
+			// Publish step_progress event so UI gets refresh trigger with finished=true
+			// This is critical for steps that complete synchronously (no StepMonitor)
+			if o.eventService != nil {
+				stepProgressPayload := map[string]interface{}{
+					"step_id":    stepID,
+					"manager_id": managerID,
+					"step_name":  step.Name,
+					"status":     "completed",
+					"timestamp":  time.Now().Format(time.RFC3339),
+				}
+				stepProgressEvent := interfaces.Event{
+					Type:    interfaces.EventStepProgress,
+					Payload: stepProgressPayload,
+				}
+				go func() {
+					if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+						// Log but don't fail
+					}
+				}()
+			}
 		} else if stepStatus == "spawned" && stepMonitor != nil {
 			stepQueueJob := &models.QueueJob{
 				ID:        stepID,

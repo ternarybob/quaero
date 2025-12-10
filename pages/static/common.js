@@ -129,10 +129,10 @@ document.addEventListener('alpine:init', () => {
         // - This maintains clean separation: server controls filtering, client is display layer
         // - See: internal/handlers/websocket_writer.go for server-side filtering logic
         //
-        // Architecture Note: Trigger-Based Batching (2025-12-10)
-        // - Server uses LogEventAggregator to batch log events
-        // - Instead of individual 'log' messages, server sends 'refresh_logs' triggers
-        // - UI fetches from API when triggered, reducing WebSocket load during high volume
+        // Architecture Note: Unified Logging API (2025-12-10)
+        // - Server uses UnifiedLogAggregator to batch both service and step log events
+        // - Single 'refresh_logs' WebSocket trigger with scope indicator (service/job)
+        // - UI fetches from unified /api/logs?scope=service endpoint
         // - Individual 'log' subscription kept for backward compatibility
 
         init() {
@@ -142,9 +142,10 @@ document.addEventListener('alpine:init', () => {
         },
 
         async loadRecentLogs() {
-            window.debugLog('ServiceLogs', 'Loading recent logs...');
+            window.debugLog('ServiceLogs', 'Loading recent logs from unified API...');
             try {
-                const response = await fetch('/api/logs/recent');
+                // Use unified /api/logs endpoint with scope=service
+                const response = await fetch('/api/logs?scope=service');
                 window.debugLog('ServiceLogs', 'API response status:', response.status);
                 if (!response.ok) {
                     window.debugLog('ServiceLogs', 'API returned non-OK status:', response.status);
@@ -200,8 +201,16 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        // Handle refresh_logs trigger from server (batched log delivery)
+        // Handle unified refresh_logs trigger from server
+        // The trigger includes scope: "service" or "job" - only reload for service scope
         handleRefreshTrigger(data) {
+            // Check scope - only reload for service logs (default scope if not specified)
+            const scope = data.scope || 'service';
+            if (scope !== 'service') {
+                window.debugLog('ServiceLogs', 'Ignoring refresh_logs trigger - scope:', scope);
+                return;
+            }
+
             const now = Date.now();
             // Throttle: don't fetch more than once per 2 seconds to reduce request frequency
             if (now - this._lastRefreshTime < 2000) {
@@ -210,7 +219,7 @@ document.addEventListener('alpine:init', () => {
             }
             this._lastRefreshTime = now;
 
-            window.debugLog('ServiceLogs', 'refresh_logs trigger received, fetching from API');
+            window.debugLog('ServiceLogs', 'refresh_logs trigger received (scope=service), fetching from API');
             this.loadRecentLogs();
         },
 

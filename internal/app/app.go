@@ -128,6 +128,7 @@ type App struct {
 	GitHubJobsHandler    *handlers.GitHubJobsHandler
 	HybridScraperHandler *handlers.HybridScraperHandler
 	DevOpsHandler        *handlers.DevOpsHandler
+	UnifiedLogsHandler   *handlers.UnifiedLogsHandler
 }
 
 // New initializes the application with all dependencies
@@ -854,6 +855,10 @@ func (a *App) initHandlers() error {
 
 	// Initialize system logs handler
 	a.SystemLogsHandler = handlers.NewSystemLogsHandler(a.SystemLogsService, a.Logger)
+
+	// Initialize unified logs handler (single endpoint for service and job logs)
+	a.UnifiedLogsHandler = handlers.NewUnifiedLogsHandler(a.LogService, a.Logger)
+	a.Logger.Debug().Msg("Unified logs handler initialized")
 
 	// Initialize config handler with ConfigService for dynamic key injection
 	a.ConfigHandler = handlers.NewConfigHandler(a.Logger, a.Config, a.ConfigService)

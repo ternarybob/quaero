@@ -1,64 +1,90 @@
 # Global Development Standards
 
-## SESSION START - WORKFLOW DETECTION (MANDATORY)
+## SESSION START (ONCE)
 
-**On first response only, run:**
+**On FIRST response of session, detect workflow capability:**
 ```powershell
 dir .claude\commands\3agents-skills.md
 dir .claude\skills\
 ```
 
-**Then announce based on ACTUAL results:**
-
-### If BOTH exist:
+**Announce result:**
 ```
 ┌─────────────────────────────────────────────────┐
 │ 🔧 3-AGENT WORKFLOW ACTIVE                      │
 │ Skills: [list found]                            │
-│ Direct coding disabled.                         │
 └─────────────────────────────────────────────────┘
 ```
-
-### If missing:
+or
 ```
 ┌─────────────────────────────────────────────────┐
-│ ⚡ STANDARD MODE - Direct coding enabled        │
+│ ⚡ STANDARD MODE                                │
 └─────────────────────────────────────────────────┘
 ```
 
 ---
 
-## CONTEXT CONTINUITY
+## EVERY PROMPT - REQUEST ASSESSMENT
 
-### Follow-up Detection
-If the next prompt relates to the previous request:
-- **Continue in same workdir** - don't create new
-- **Don't re-announce** workflow status
-- **Don't re-read** skills/docs already in context
+**On EVERY prompt, assess:**
 
-### Related Prompt Indicators:
+### 1. Is workflow active? (from session start check)
+### 2. Is this a code change request?
+
+Code change keywords:
+- add, implement, create, build
+- fix, resolve, correct, debug  
+- refactor, clean, reorganize, improve
+- update (when code implied)
+- Any source file modification
+
+### 3. Is this a follow-up to previous work?
+
+Follow-up indicators:
 - "also", "and", "what about", "can you also"
 - "actually", "instead", "change that to"
 - "the same", "that file", "this feature"
 - "last update", "last refactor", "last fix", "last change"
 - "the previous", "what we just", "continue with"
-- Refers to files/tasks just discussed
-- Continuation of same feature/fix
 
-### New Request Indicators:
-- Completely different topic
-- "new feature", "different thing"
-- Explicit: "start fresh", "new task"
+---
+
+## DECISION MATRIX
+
+| Workflow Active? | Code Change? | Follow-up? | Action |
+|------------------|--------------|------------|--------|
+| ✅ | ✅ | ❌ | New workdir, run /3agents-skills |
+| ✅ | ✅ | ✅ | Continue in SAME workdir |
+| ✅ | ❌ | - | Direct response |
+| ❌ | - | - | Direct response (standard mode) |
+
+---
+
+## WORKFLOW EXECUTION
+
+**New code change (not follow-up):**
+```
+📋 3-agent workflow: .\docs\{type}\{date}-{slug}\
+```
+Then execute phases from `.claude\commands\3agents-skills.md`
+
+**Follow-up to previous:**
+```
+📋 Continuing in: .\docs\{type}\{date}-{slug}\
+```
+Continue in existing workdir, don't re-read skills already in context.
+
+**Direct response OK:**
+- Questions, explanations
+- Read-only operations
+- Git commands
 
 ---
 
 ## TOKEN EFFICIENCY
 
 ### Don't Re-read If Already In Context:
-- Skills (go/SKILL.md, frontend/SKILL.md)
-- Task files (task-N.md, step-N.md)
-- Plan documents
-- Source files already viewed
+- Skills, task files, plan documents, source files already viewed
 
 ### Do Re-read If:
 - File was modified since last read
@@ -66,33 +92,5 @@ If the next prompt relates to the previous request:
 - New session started
 
 ### Compact Responses:
-- Skip repeating file contents back
-- Reference by name: "Updated `handler.go` per go/SKILL.md patterns"
-- Summarize changes, don't echo full diffs
-
----
-
-## WORKFLOW MODE
-
-### Use /3agents-skills for:
-- add, implement, create, build
-- fix, resolve, correct, debug
-- refactor, clean, reorganize, improve
-- Any source file modification
-
-### Before code change:
-```
-📋 3-agent workflow: .\docs\{type}\{date}-{slug}\
-```
-
-### Direct Response OK:
-- Questions, explanations
-- Read-only operations
-- Git commands
-
----
-
-## STANDARD MODE
-
-- Direct coding permitted
-- Normal behavior
+- Reference by name: "Updated per go/SKILL.md"
+- Summarize changes, don't echo full content
