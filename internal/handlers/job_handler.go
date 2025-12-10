@@ -479,7 +479,7 @@ func (h *JobHandler) GetJobLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch logs with level filtering
-	var logs []models.JobLogEntry
+	var logs []models.LogEntry
 	var err error
 
 	// Validate level is one of: error, warn, info, debug, all (and accept aliases)
@@ -647,23 +647,23 @@ func (h *JobHandler) GetAggregatedJobLogsHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Enrich logs with job context from metadata using AssociatedJobID (Comment 1)
+	// Enrich logs with job context from metadata using JobID (Comment 1)
 	enrichedLogs := make([]map[string]interface{}, 0, len(logEntries))
 	for _, log := range logEntries {
-		// Use AssociatedJobID to find the correct metadata for this log
+		// Use JobID to find the correct metadata for this log
 		enrichedLog := map[string]interface{}{
 			"timestamp":      log.Timestamp,
 			"full_timestamp": log.FullTimestamp,
 			"level":          log.Level,
 			"message":        log.Message,
-			"job_id":         log.AssociatedJobID,
-			"step_name":      log.StepName,   // Include step_name for UI filtering
-			"source_type":    log.SourceType, // Include source_type for worker context
-			"originator":     log.Originator, // Include originator for display context
+			"job_id":         log.JobID(),
+			"step_name":      log.StepName(),   // Include step_name for UI filtering
+			"source_type":    log.SourceType(), // Include source_type for worker context
+			"originator":     log.Originator(), // Include originator for display context
 		}
 
 		// Find metadata for the job that produced this log
-		if meta, exists := metadata[log.AssociatedJobID]; exists {
+		if meta, exists := metadata[log.JobID()]; exists {
 			enrichedLog["job_name"] = meta.JobName
 			enrichedLog["job_url"] = meta.JobURL
 			enrichedLog["job_depth"] = meta.JobDepth
@@ -671,7 +671,7 @@ func (h *JobHandler) GetAggregatedJobLogsHandler(w http.ResponseWriter, r *http.
 			enrichedLog["parent_id"] = meta.ParentID
 		} else {
 			// Use default values if no metadata found
-			enrichedLog["job_name"] = fmt.Sprintf("Job %s", log.AssociatedJobID)
+			enrichedLog["job_name"] = fmt.Sprintf("Job %s", log.JobID())
 			enrichedLog["job_type"] = "unknown"
 			enrichedLog["parent_id"] = ""
 		}

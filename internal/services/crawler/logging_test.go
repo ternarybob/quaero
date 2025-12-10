@@ -366,13 +366,13 @@ func (m *MockEventService) Close() error {
 // InMemoryJobStorage implements interfaces.JobStorage for testing
 type InMemoryJobStorage struct {
 	jobs map[string]interface{}
-	logs map[string][]models.JobLogEntry
+	logs map[string][]models.LogEntry
 }
 
 func NewInMemoryJobStorage() *InMemoryJobStorage {
 	return &InMemoryJobStorage{
 		jobs: make(map[string]interface{}),
-		logs: make(map[string][]models.JobLogEntry),
+		logs: make(map[string][]models.LogEntry),
 	}
 }
 
@@ -531,16 +531,16 @@ func (s *InMemoryJobStorage) UpdateProgressCountersAtomic(ctx context.Context, j
 	return nil
 }
 
-func (s *InMemoryJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+func (s *InMemoryJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.LogEntry) error {
 	s.logs[jobID] = append(s.logs[jobID], logEntry)
 	return nil
 }
 
-func (s *InMemoryJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+func (s *InMemoryJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.LogEntry, error) {
 	if logs, exists := s.logs[jobID]; exists {
 		return logs, nil
 	}
-	return []models.JobLogEntry{}, nil
+	return []models.LogEntry{}, nil
 }
 
 func (s *InMemoryJobStorage) MarkURLSeen(ctx context.Context, jobID string, url string) (bool, error) {

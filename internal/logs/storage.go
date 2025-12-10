@@ -4,6 +4,6 @@ import (
 	"github.com/ternarybob/quaero/internal/interfaces"
 )
 
-// JobLogStorage is an alias to interfaces.JobLogStorage for backward compatibility
-// Deprecated: Use interfaces.JobLogStorage directly
-type JobLogStorage = interfaces.JobLogStorage
+// LogStorage is an alias to interfaces.LogStorage for backward compatibility
+// Deprecated: Use interfaces.LogStorage directly
+type LogStorage = interfaces.LogStorage

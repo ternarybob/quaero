@@ -49,10 +49,10 @@ type WebSocketHandler interface {
 
 // LogService manages log storage operations only
 type LogService interface {
-	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error
-	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error
-	GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error)
-	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
+	AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error
+	AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error
+	GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error)
+	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
 	// GetAggregatedLogs fetches logs for parent job and optionally all child jobs
@@ -74,7 +74,7 @@ type LogService interface {
 	// Returns next_cursor for chaining pagination requests (empty string when no more results)
 	// The cursor is opaque and should be treated as an implementation detail - clients should
 	// simply pass the returned cursor in subsequent requests to continue pagination
-	GetAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string, limit int, cursor string, order string) ([]models.JobLogEntry, map[string]*AggregatedJobMeta, string, error)
+	GetAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string, limit int, cursor string, order string) ([]models.LogEntry, map[string]*AggregatedJobMeta, string, error)
 }
 
 // JobManager manages job CRUD operations and queue integration

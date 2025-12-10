@@ -113,12 +113,12 @@ type QueueStorage interface {
 	// Deprecated: Use LogService.AppendLog() instead. This method writes to the crawl_jobs.logs
 	// JSON column (limited to 100 entries). The new LogService writes to the dedicated job_logs
 	// table with unlimited history and better performance.
-	AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error
+	AppendJobLog(ctx context.Context, jobID string, logEntry models.LogEntry) error
 
 	// Deprecated: Use LogService.GetLogs() instead. This method reads from the crawl_jobs.logs
 	// JSON column (limited to 100 entries). The new LogService reads from the dedicated job_logs
 	// table with full history and indexed queries.
-	GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error)
+	GetJobLogs(ctx context.Context, jobID string) ([]models.LogEntry, error)
 
 	// VERIFICATION COMMENT 1: Concurrency-safe URL deduplication
 	// MarkURLSeen atomically records a URL as seen for a job and returns whether it was newly added.
@@ -153,21 +153,26 @@ type JobDefinitionStorage interface {
 	CountJobDefinitions(ctx context.Context) (int, error)
 }
 
-// JobLogStorage - interface for job log persistence
+// LogStorage - interface for log persistence
 // ORDERING: GetLogs() and GetLogsByLevel() return logs in newest-first order (DESC).
 // This matches typical web UI expectations where recent activity appears first.
-type JobLogStorage interface {
-	AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error
-	AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error
-	GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error)
-	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error)
+type LogStorage interface {
+	AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error
+	AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error
+	GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error)
+	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
 
 	// GetLogsWithOffset fetches logs starting from an offset (for pagination)
 	// offset is the number of most recent logs to skip
-	GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.JobLogEntry, error)
-	GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.JobLogEntry, error)
+	GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error)
+	GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.LogEntry, error)
+
+	// GetLogsByManagerID retrieves logs for all jobs under a manager (uses ManagerID index)
+	GetLogsByManagerID(ctx context.Context, managerID string, limit int) ([]models.LogEntry, error)
+	// GetLogsByStepID retrieves logs for all jobs under a step (uses StepID index)
+	GetLogsByStepID(ctx context.Context, stepID string, limit int) ([]models.LogEntry, error)
 }
 
 // ConnectorStorage - interface for connector persistence
@@ -184,7 +189,7 @@ type StorageManager interface {
 	AuthStorage() AuthStorage
 	DocumentStorage() DocumentStorage
 	QueueStorage() QueueStorage
-	JobLogStorage() JobLogStorage
+	LogStorage() LogStorage
 	JobDefinitionStorage() JobDefinitionStorage
 	KeyValueStorage() KeyValueStorage
 	ConnectorStorage() ConnectorStorage

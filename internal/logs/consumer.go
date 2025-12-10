@@ -17,7 +17,7 @@ import (
 
 // Consumer consumes log batches from arbor's context channel and dispatches to storage and events
 type Consumer struct {
-	storage       interfaces.JobLogStorage
+	storage       interfaces.LogStorage
 	eventService  interfaces.EventService
 	logger        arbor.ILogger
 	channel       chan []arbormodels.LogEvent
@@ -29,7 +29,7 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new log consumer
-func NewConsumer(storage interfaces.JobLogStorage, eventService interfaces.EventService, logger arbor.ILogger, minEventLevel string) *Consumer {
+func NewConsumer(storage interfaces.LogStorage, eventService interfaces.EventService, logger arbor.ILogger, minEventLevel string) *Consumer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Consumer{
 		storage:       storage,
@@ -124,7 +124,7 @@ func (c *Consumer) consumer() {
 			}
 
 			// Group entries by jobID for batch writes
-			entriesByJob := make(map[string][]models.JobLogEntry)
+			entriesByJob := make(map[string][]models.LogEntry)
 
 			// Process each event in the batch
 			for _, event := range batch {
@@ -140,7 +140,7 @@ func (c *Consumer) consumer() {
 					continue
 				}
 
-				// Transform arbor log event to JobLogEntry
+				// Transform arbor log event to LogEntry
 				logEntry := transformEvent(event)
 
 				// Group by jobID for batch database writes ONLY if jobID is present
@@ -160,7 +160,7 @@ func (c *Consumer) consumer() {
 			var wg sync.WaitGroup
 			for jobID, entries := range entriesByJob {
 				wg.Add(1)
-				go func(jid string, logs []models.JobLogEntry) {
+				go func(jid string, logs []models.LogEntry) {
 					defer wg.Done()
 
 					// Dispatch to database with proper context (cancellable during shutdown)
@@ -194,7 +194,7 @@ func (c *Consumer) shouldPublishEvent(level log.Level) bool {
 
 // publishLogEvent publishes a log entry as an event for UI consumption
 // Includes structured context fields (phase, originator, step_name) for UI rendering
-func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.JobLogEntry) {
+func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.LogEntry) {
 	// Circuit breaker: Check if we're already publishing an event for this correlation ID + message
 	// This prevents recursive event publishing (defense in depth)
 	key := fmt.Sprintf("%s:%s", event.CorrelationID, logEntry.Message)
@@ -208,24 +208,17 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 	go func() {
 		// Build payload with structured context fields for UI rendering
 		payload := map[string]interface{}{
-			"job_id":    event.CorrelationID,
+			"job_id":    logEntry.JobID(),
 			"level":     logEntry.Level,
 			"message":   logEntry.Message,
 			"timestamp": logEntry.Timestamp,
 		}
 
-		// Include structured context fields if present (UI uses these for rendering)
-		if logEntry.Phase != "" {
-			payload["phase"] = logEntry.Phase
-		}
-		if logEntry.Originator != "" {
-			payload["originator"] = logEntry.Originator
-		}
-		if logEntry.StepName != "" {
-			payload["step_name"] = logEntry.StepName
-		}
-		if logEntry.SourceType != "" {
-			payload["source_type"] = logEntry.SourceType
+		// Include all context fields in payload (UI uses these for rendering)
+		for key, value := range logEntry.Context {
+			if key != models.LogCtxJobID { // job_id already added
+				payload[key] = value
+			}
 		}
 
 		// Non-blocking publish in goroutine
@@ -243,9 +236,9 @@ func (c *Consumer) publishLogEvent(event arbormodels.LogEvent, logEntry models.J
 	}()
 }
 
-// transformEvent converts arbor LogEvent to JobLogEntry format
-// Extracts structured fields (phase, originator, step_name) for UI rendering
-func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
+// transformEvent converts arbor LogEvent to LogEntry format
+// Extracts structured fields into Context map for consistent storage
+func transformEvent(event arbormodels.LogEvent) models.LogEntry {
 	// Format timestamp as "15:04:05.000" for display (with milliseconds for fast jobs)
 	formattedTime := event.Timestamp.Format("15:04:05.000")
 
@@ -256,24 +249,33 @@ func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 	// Convert level to 3-letter format for consistent display
 	levelStr := convertTo3Letter(event.Level.String())
 
-	// Extract structured context fields for UI rendering
-	// These fields are set by workers via log.Str("phase", "step").Msg(...)
-	var phase, originator, stepName, sourceType string
+	// Initialize context map with job_id from correlation ID
+	context := make(map[string]string)
+	if event.CorrelationID != "" {
+		context[models.LogCtxJobID] = event.CorrelationID
+	}
 
-	// Build message, excluding context fields that are stored separately
+	// Build message, extracting known context fields into Context map
 	message := event.Message
 	if len(event.Fields) > 0 {
 		var extraFields []string
 		for key, value := range event.Fields {
+			valueStr := fmt.Sprintf("%v", value)
 			switch key {
 			case "phase":
-				phase = fmt.Sprintf("%v", value)
+				context[models.LogCtxPhase] = valueStr
 			case "originator":
-				originator = fmt.Sprintf("%v", value)
+				context[models.LogCtxOriginator] = valueStr
 			case "step_name":
-				stepName = fmt.Sprintf("%v", value)
+				context[models.LogCtxStepName] = valueStr
 			case "source_type":
-				sourceType = fmt.Sprintf("%v", value)
+				context[models.LogCtxSourceType] = valueStr
+			case "manager_id":
+				context[models.LogCtxManagerID] = valueStr
+			case "step_id":
+				context[models.LogCtxStepID] = valueStr
+			case "parent_id":
+				context[models.LogCtxParentID] = valueStr
 			default:
 				// Append non-context fields to message for persistence
 				extraFields = append(extraFields, fmt.Sprintf("%s=%v", key, value))
@@ -285,15 +287,11 @@ func transformEvent(event arbormodels.LogEvent) models.JobLogEntry {
 		}
 	}
 
-	return models.JobLogEntry{
-		Timestamp:       formattedTime,
-		FullTimestamp:   fullTimestamp,
-		Level:           levelStr,
-		Message:         message,
-		AssociatedJobID: event.CorrelationID,
-		Phase:           phase,
-		Originator:      originator,
-		StepName:        stepName,
-		SourceType:      sourceType,
+	return models.LogEntry{
+		Timestamp:     formattedTime,
+		FullTimestamp: fullTimestamp,
+		Level:         levelStr,
+		Message:       message,
+		Context:       context,
 	}
 }

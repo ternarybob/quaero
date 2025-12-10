@@ -17,23 +17,23 @@ import (
 // Manager handles job metadata, lifecycle, and worker routing.
 // This is the single manager for the queue system - it routes job definition steps to workers.
 type Manager struct {
-	jobStorage    interfaces.QueueStorage
-	jobLogStorage interfaces.JobLogStorage
-	queue         interfaces.QueueManager
-	eventService  interfaces.EventService // Optional: may be nil for testing
-	logger        arbor.ILogger
+	jobStorage   interfaces.QueueStorage
+	logStorage   interfaces.LogStorage
+	queue        interfaces.QueueManager
+	eventService interfaces.EventService // Optional: may be nil for testing
+	logger       arbor.ILogger
 
 	// Worker registry moved to StepManager
 	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
 }
 
-func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, queue interfaces.QueueManager, eventService interfaces.EventService, logger arbor.ILogger) *Manager {
+func NewManager(jobStorage interfaces.QueueStorage, logStorage interfaces.LogStorage, queue interfaces.QueueManager, eventService interfaces.EventService, logger arbor.ILogger) *Manager {
 	return &Manager{
-		jobStorage:    jobStorage,
-		jobLogStorage: jobLogStorage,
-		queue:         queue,
-		eventService:  eventService,
-		logger:        logger,
+		jobStorage:   jobStorage,
+		logStorage:   logStorage,
+		queue:        queue,
+		eventService: eventService,
+		logger:       logger,
 	}
 }
 
@@ -348,7 +348,7 @@ func (m *Manager) ListChildJobs(ctx context.Context, parentID string) ([]Job, er
 
 // GetJobLogs retrieves logs for a job
 func (m *Manager) GetJobLogs(ctx context.Context, jobID string, limit int) ([]JobLog, error) {
-	entries, err := m.jobLogStorage.GetLogs(ctx, jobID, limit)
+	entries, err := m.logStorage.GetLogs(ctx, jobID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func (m *Manager) GetJobLogs(ctx context.Context, jobID string, limit int) ([]Jo
 	for _, entry := range entries {
 		ts, _ := time.Parse(time.RFC3339, entry.FullTimestamp)
 		logs = append(logs, JobLog{
-			JobID:     entry.AssociatedJobID,
+			JobID:     entry.JobID(),
 			Timestamp: ts,
 			Level:     entry.Level,
 			Message:   entry.Message,
@@ -748,12 +748,17 @@ func (m *Manager) AddJobLogWithContext(ctx context.Context, jobID, level, messag
 func (m *Manager) AddJobLogFull(ctx context.Context, jobID, level, message, stepName, originator, phase string) error {
 	now := time.Now()
 
-	// Resolve manager_id from job metadata (we still need this for WebSocket routing)
-	_, managerID, resolvedOriginator := m.resolveJobContext(ctx, jobID)
+	// Resolve full job hierarchy context for indexed queries
+	resolvedStepName, managerID, stepID, parentID, resolvedOriginator := m.resolveJobHierarchy(ctx, jobID)
 
 	// Use explicit originator if provided, otherwise use resolved originator
 	if originator != "" {
 		resolvedOriginator = originator
+	}
+
+	// Use explicit stepName if provided
+	if stepName != "" {
+		resolvedStepName = stepName
 	}
 
 	// For manager jobs, manager_id should be the job ID itself (for WebSocket routing)
@@ -761,18 +766,38 @@ func (m *Manager) AddJobLogFull(ctx context.Context, jobID, level, message, step
 		managerID = jobID
 	}
 
-	entry := models.JobLogEntry{
-		AssociatedJobID: jobID,
-		Timestamp:       now.Format("15:04:05"),
-		FullTimestamp:   now.Format(time.RFC3339),
-		Level:           level,
-		Message:         message,
-		StepName:        stepName,           // Store step_name in DB for post-refresh filtering
-		Originator:      resolvedOriginator, // Store originator for UI display
-		Phase:           phase,              // Store execution phase for UI display
+	// Build context map with all metadata
+	context := map[string]string{
+		models.LogCtxJobID: jobID,
+	}
+	if resolvedStepName != "" {
+		context[models.LogCtxStepName] = resolvedStepName
+	}
+	if resolvedOriginator != "" {
+		context[models.LogCtxOriginator] = resolvedOriginator
+	}
+	if phase != "" {
+		context[models.LogCtxPhase] = phase
+	}
+	if managerID != "" {
+		context[models.LogCtxManagerID] = managerID
+	}
+	if stepID != "" {
+		context[models.LogCtxStepID] = stepID
+	}
+	if parentID != "" {
+		context[models.LogCtxParentID] = parentID
 	}
 
-	if err := m.jobLogStorage.AppendLog(ctx, jobID, entry); err != nil {
+	entry := models.LogEntry{
+		Timestamp:     now.Format("15:04:05"),
+		FullTimestamp: now.Format(time.RFC3339),
+		Level:         level,
+		Message:       message,
+		Context:       context,
+	}
+
+	if err := m.logStorage.AppendLog(ctx, jobID, entry); err != nil {
 		return fmt.Errorf("failed to append log: %w", err)
 	}
 
@@ -846,6 +871,68 @@ func (m *Manager) resolveJobContext(ctx context.Context, jobID string) (stepName
 	}
 
 	return stepName, managerID, originator
+}
+
+// resolveJobHierarchy resolves the full job hierarchy context for log indexing.
+// Returns: stepName, managerID, stepID, parentID, originator
+// This enables efficient queries across the job hierarchy: Manager -> Step -> Worker
+func (m *Manager) resolveJobHierarchy(ctx context.Context, jobID string) (stepName, managerID, stepID, parentID, originator string) {
+	jobInterface, err := m.jobStorage.GetJob(ctx, jobID)
+	if err != nil {
+		return "", "", "", "", ""
+	}
+
+	jobState, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		return "", "", "", "", ""
+	}
+
+	// Determine originator based on job type
+	switch jobState.Type {
+	case string(models.JobTypeManager):
+		originator = "manager"
+		managerID = jobID // Manager is itself
+	case string(models.JobTypeStep):
+		originator = "step"
+		stepID = jobID // Step is itself
+	default:
+		originator = "worker"
+	}
+
+	// Get direct parent ID
+	if jobState.ParentID != nil && *jobState.ParentID != "" {
+		parentID = *jobState.ParentID
+	}
+
+	// Extract hierarchy IDs from metadata
+	if jobState.Metadata != nil {
+		// Step name for display
+		if sn, ok := jobState.Metadata["step_name"].(string); ok {
+			stepName = sn
+		}
+		// Manager ID (root of hierarchy)
+		if mid, ok := jobState.Metadata["manager_id"].(string); ok {
+			managerID = mid
+		}
+		// Step ID (for workers - their parent step)
+		if sid, ok := jobState.Metadata["step_id"].(string); ok && stepID == "" {
+			stepID = sid
+		}
+	}
+
+	// For workers, try to resolve step_id from parent if not in metadata
+	if originator == "worker" && stepID == "" && parentID != "" {
+		// Check if parent is a step job
+		if parentJob, err := m.jobStorage.GetJob(ctx, parentID); err == nil {
+			if parentState, ok := parentJob.(*models.QueueJobState); ok {
+				if parentState.Type == string(models.JobTypeStep) {
+					stepID = parentID
+				}
+			}
+		}
+	}
+
+	return stepName, managerID, stepID, parentID, originator
 }
 
 // UpdateJobProgress updates job progress

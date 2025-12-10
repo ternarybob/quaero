@@ -194,17 +194,48 @@
                                                 </template>
                                                 <!-- Step Events Panel -->
                                                 <div class="step-events-panel" :data-step-events-panel="item.job.id + ':' + item.step.name">
-                                                    <button class="btn btn-sm step-events-btn" :data-events-count="getStepLogs(item.job.id, item.step.name).length" @click.stop="toggleStepLogsExpand(item.job.id, item.step.name)">
-                                                        <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-                                                        <i class="fas fa-stream"></i>
-                                                        <span class="events-count-text" x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + ')'"></span>
-                                                    </button>
+                                                    <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                                        <button class="btn btn-sm step-events-btn" :data-events-count="getStepLogs(item.job.id, item.step.name).length" @click.stop="toggleStepLogsExpand(item.job.id, item.step.name)">
+                                                            <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                                                            <i class="fas fa-stream"></i>
+                                                            <span class="events-count-text" x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + (getStepEventFilter(item.job.id, item.step.name) !== 'all' ? '/' + getStepLogsTotal(item.job.id, item.step.name) : '') + ')'"></span>
+                                                        </button>
+                                                        <!-- Filter dropdown (only show when expanded) -->
+                                                        <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
+                                                            <div class="dropdown dropdown-right" @click.stop>
+                                                                <a href="#" class="btn btn-sm" :class="getStepEventFilter(item.job.id, item.step.name) !== 'all' ? 'btn-primary' : ''" tabindex="0" style="padding: 0.1rem 0.4rem;">
+                                                                    <i class="fas fa-filter" style="font-size: 0.7rem;"></i>
+                                                                </a>
+                                                                <ul class="menu" style="min-width: 120px;">
+                                                                    <li class="menu-item">
+                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'all')"
+                                                                           :class="getStepEventFilter(item.job.id, item.step.name) === 'all' ? 'active' : ''">
+                                                                            <i class="fas fa-list"></i> All
+                                                                        </a>
+                                                                    </li>
+                                                                    <li class="menu-item">
+                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'warn')"
+                                                                           :class="getStepEventFilter(item.job.id, item.step.name) === 'warn' ? 'active' : ''">
+                                                                            <i class="fas fa-exclamation-triangle" style="color: #f0ad4e;"></i> Warn+
+                                                                        </a>
+                                                                    </li>
+                                                                    <li class="menu-item">
+                                                                        <a href="#" @click.prevent="setStepEventFilter(item.job.id, item.step.name, 'error')"
+                                                                           :class="getStepEventFilter(item.job.id, item.step.name) === 'error' ? 'active' : ''">
+                                                                            <i class="fas fa-times-circle" style="color: #d9534f;"></i> Error
+                                                                        </a>
+                                                                    </li>
+                                                                </ul>
+                                                            </div>
+                                                        </template>
+                                                    </div>
                                                     <!-- Expanded step logs list -->
                                                     <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
                                                         <div class="terminal step-logs-container" :data-step-logs-container="item.job.id + ':' + item.step.name" style="min-height: auto; max-height: 300px;">
                                                             <template x-if="getStepLogs(item.job.id, item.step.name).length === 0">
                                                                 <div class="step-logs-empty" style="color: var(--code-color);">
-                                                                    <i class="fas fa-info-circle"></i> No events yet for this step.
+                                                                    <i class="fas fa-info-circle"></i>
+                                                                    <span x-text="getStepEventFilter(item.job.id, item.step.name) !== 'all' ? 'No ' + getStepEventFilter(item.job.id, item.step.name) + ' events for this step.' : 'No events yet for this step.'"></span>
                                                                 </div>
                                                             </template>
                                                             <template x-for="(log, logIndex) in getStepLogs(item.job.id, item.step.name)" :key="logIndex">
@@ -1825,6 +1856,7 @@
                 expandedStepLogs: {}, // Track which step logs panels are expanded (key: "parentId:stepName")
                 collapsedJobs: {}, // Track which parent jobs have their steps collapsed
                 jobLogs: {}, // Store logs per parent job { parentId: [{level, message, timestamp, step_name, source_type}] }
+                stepEventFilters: {}, // Track level filter per step (key: "parentId:stepName", value: "all"|"warn"|"error")
                 maxLogsPerJob: 100, // Maximum number of logs to keep per job
                 // Note: _stepEventsFetchedOnStart removed - we now only fetch on COMPLETE, not START
 
@@ -2106,7 +2138,41 @@
                 getStepLogs(jobId, stepName) {
                     const allLogs = this.jobLogs[jobId] || [];
                     // Filter by step_name - events include step context via uniform job_log events
-                    return allLogs.filter(log => log.step_name === stepName);
+                    let logs = allLogs.filter(log => log.step_name === stepName);
+
+                    // Apply level filter if set
+                    const filterKey = `${jobId}:${stepName}`;
+                    const levelFilter = this.stepEventFilters[filterKey] || 'all';
+                    if (levelFilter === 'warn') {
+                        logs = logs.filter(log => {
+                            const level = (log.level || '').toLowerCase();
+                            return level === 'warn' || level === 'warning' || level === 'error' || level === 'err';
+                        });
+                    } else if (levelFilter === 'error') {
+                        logs = logs.filter(log => {
+                            const level = (log.level || '').toLowerCase();
+                            return level === 'error' || level === 'err';
+                        });
+                    }
+                    return logs;
+                },
+
+                // Get total step logs count (unfiltered) for badge display
+                getStepLogsTotal(jobId, stepName) {
+                    const allLogs = this.jobLogs[jobId] || [];
+                    return allLogs.filter(log => log.step_name === stepName).length;
+                },
+
+                // Get current step event filter level
+                getStepEventFilter(jobId, stepName) {
+                    const key = `${jobId}:${stepName}`;
+                    return this.stepEventFilters[key] || 'all';
+                },
+
+                // Set step event filter level
+                setStepEventFilter(jobId, stepName, level) {
+                    const key = `${jobId}:${stepName}`;
+                    this.stepEventFilters = { ...this.stepEventFilters, [key]: level };
                 },
 
                 toggleStepLogsExpand(jobId, stepName) {
@@ -2159,8 +2225,9 @@
                     this._stepEventsFetchTime[cacheKey] = now;
 
                     try {
+                        // Use unified /api/logs endpoint with include_children=false for direct step logs
                         console.log('[Queue] Fetching events for step', stepName, 'job:', stepJobId.substring(0, 8));
-                        const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=info`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch step events:', response.status);
                             return;
@@ -2300,8 +2367,9 @@
                     this._stepEventFetchInFlight.add(stepJobId);
 
                     try {
+                        // Use unified /api/logs endpoint with include_children=false for direct step logs
                         console.log('[Queue] Fetching events for completed step', stepName, 'job:', stepJobId.substring(0, 8));
-                        const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=info`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
                             return;
@@ -2329,12 +2397,12 @@
                 },
 
                 // Fetch historical logs for a parent job from the API
-                // Uses aggregated endpoint to get logs from all child jobs (steps and workers)
+                // Uses unified /api/logs endpoint to get logs from all child jobs (steps and workers)
                 async fetchHistoricalLogs(jobId) {
                     try {
-                        // Use aggregated endpoint to get logs from manager and all children
+                        // Use unified /api/logs endpoint with include_children=true to get logs from manager and all children
                         // This ensures step logs are available after page refresh
-                        const response = await fetch(`/api/jobs/${jobId}/logs/aggregated?order=asc&include_children=true`);
+                        const response = await fetch(`/api/logs?scope=job&job_id=${jobId}&include_children=true&order=asc`);
                         if (!response.ok) {
                             console.warn('[Queue] Failed to fetch logs for job', jobId.substring(0, 8));
                             return;
@@ -3812,19 +3880,15 @@
                     this.throttledRenderJobs();
                 },
 
-                // Refresh step events from API (triggered by refresh_step_events WebSocket message)
+                // Refresh step events from API (triggered by refresh_logs WebSocket message)
                 // This is the new trigger-based approach that replaces individual event pushes
-                // ONLY fetches on COMPLETE (finished=true) - we skip START fetches since steps run fast
+                // Fetches for both running and completed steps to show real-time updates
                 async refreshStepEvents(detail) {
                     const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
 
-                    // ONLY fetch on COMPLETE - skip START and middle-of-execution triggers
-                    // For fast-completing steps, START fetch is wasted since COMPLETE comes immediately
-                    if (!finished) {
-                        console.log('[Queue] Skipping refresh for', step_ids.length, 'steps - not COMPLETE (finished=' + finished + ')');
-                        return;
-                    }
+                    // Log trigger type for debugging
+                    console.log('[Queue] Refresh trigger for', step_ids.length, 'steps', finished ? '(FINISHED)' : '(RUNNING)');
 
                     // Initialize in-flight tracking for step event fetches
                     if (!this._stepEventFetchInFlight) {
@@ -3893,9 +3957,9 @@
                                 continue;
                             }
 
-                            // Fetch latest logs for this step job
+                            // Fetch latest logs for this step job using unified /api/logs endpoint
                             console.log('[Queue] Fetching COMPLETE events for step', stepName, 'job:', stepJobId.substring(0, 8));
-                            const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
+                            const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=asc&level=info`);
                             if (!response.ok) {
                                 console.warn('[Queue] Failed to fetch events for step', stepJobId.substring(0, 8), response.status);
                                 continue;

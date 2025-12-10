@@ -25,10 +25,10 @@ type logIterator struct {
 	level     string
 	order     string
 	cursor    *CursorKey
-	logs      []models.JobLogEntry
+	logs      []models.LogEntry
 	nextIdx   int
 	ctx       context.Context
-	storage   interfaces.JobLogStorage
+	storage   interfaces.LogStorage
 	batchSize int
 	offset    int // Number of logs already fetched from this job (for pagination)
 	fetched   bool
@@ -38,7 +38,7 @@ type logIterator struct {
 
 // heapItem represents an item for k-way merge
 type heapItem struct {
-	log       models.JobLogEntry
+	log       models.LogEntry
 	iterator  *logIterator
 	seqAtPush int // Per-job sequence number for stable tie-breaking
 }
@@ -52,8 +52,8 @@ func (h minHeap) Less(i, j int) bool {
 	if h[i].log.FullTimestamp != h[j].log.FullTimestamp {
 		return h[i].log.FullTimestamp < h[j].log.FullTimestamp
 	}
-	if h[i].log.AssociatedJobID != h[j].log.AssociatedJobID {
-		return h[i].log.AssociatedJobID < h[j].log.AssociatedJobID
+	if h[i].log.JobID() != h[j].log.JobID() {
+		return h[i].log.JobID() < h[j].log.JobID()
 	}
 	return h[i].seqAtPush < h[j].seqAtPush // Use seqAtPush for stable ordering
 }
@@ -76,8 +76,8 @@ func (h maxHeap) Less(i, j int) bool {
 	if h[i].log.FullTimestamp != h[j].log.FullTimestamp {
 		return h[i].log.FullTimestamp > h[j].log.FullTimestamp
 	}
-	if h[i].log.AssociatedJobID != h[j].log.AssociatedJobID {
-		return h[i].log.AssociatedJobID > h[j].log.AssociatedJobID
+	if h[i].log.JobID() != h[j].log.JobID() {
+		return h[i].log.JobID() > h[j].log.JobID()
 	}
 	return h[i].seqAtPush > h[j].seqAtPush // Use seqAtPush for stable ordering
 }
@@ -132,7 +132,7 @@ func encodeCursor(key *CursorKey) string {
 }
 
 // newLogIterator creates a new log iterator for a job
-func newLogIterator(ctx context.Context, jobID, level, order string, cursor *CursorKey, storage interfaces.JobLogStorage, batchSize int) *logIterator {
+func newLogIterator(ctx context.Context, jobID, level, order string, cursor *CursorKey, storage interfaces.LogStorage, batchSize int) *logIterator {
 	return &logIterator{
 		jobID:     jobID,
 		level:     level,
@@ -164,7 +164,7 @@ func (it *logIterator) fetch() error {
 		return nil
 	}
 
-	var rawLogs []models.JobLogEntry
+	var rawLogs []models.LogEntry
 	var err error
 
 	// Use offset-based pagination for multi-batch fetching
@@ -178,9 +178,11 @@ func (it *logIterator) fetch() error {
 		return err
 	}
 
-	// Associate logs with job ID
+	// Associate logs with job ID (set field if missing - shouldn't be needed but ensures consistency)
 	for i := range rawLogs {
-		rawLogs[i].AssociatedJobID = it.jobID
+		if rawLogs[i].JobIDField == "" {
+			rawLogs[i].JobIDField = it.jobID
+		}
 	}
 
 	logs := rawLogs
@@ -197,7 +199,7 @@ func (it *logIterator) fetch() error {
 	// Filter logs based on cursor - only for the first batch when offset is 0
 	// Cursor filtering is done AFTER ordering reversal to ensure correct comparison
 	if it.cursor != nil && it.offset == 0 {
-		filtered := make([]models.JobLogEntry, 0, len(logs))
+		filtered := make([]models.LogEntry, 0, len(logs))
 		for idx, log := range logs {
 			// Filter based on cursor position
 			skip := false
@@ -248,7 +250,7 @@ func (it *logIterator) fetch() error {
 }
 
 // next returns the next log from the iterator
-func (it *logIterator) next() (*models.JobLogEntry, error) {
+func (it *logIterator) next() (*models.LogEntry, error) {
 	// Fetch more logs if buffer is empty
 	if it.nextIdx >= len(it.logs) {
 		if err := it.fetch(); err != nil {
@@ -272,7 +274,7 @@ func (it *logIterator) next() (*models.JobLogEntry, error) {
 
 // sortLogsByTimestamp sorts logs chronologically (oldest-first)
 // Uses FullTimestamp for accurate sorting across days/midnight boundaries
-func sortLogsByTimestamp(logs []models.JobLogEntry) {
+func sortLogsByTimestamp(logs []models.LogEntry) {
 	if len(logs) <= 1 {
 		return
 	}

@@ -151,7 +151,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 
 	// Initialize log service (simplified to storage operations only)
 	logService := logs.NewService(
-		app.StorageManager.JobLogStorage(),
+		app.StorageManager.LogStorage(),
 		app.StorageManager.QueueStorage(),
 		app.Logger,
 	)
@@ -160,7 +160,7 @@ func New(cfg *common.Config, logger arbor.ILogger) (*App, error) {
 	// Create log consumer for arbor context channel
 	// Consumer handles log batching, storage, and event publishing
 	logConsumer := logs.NewConsumer(
-		app.StorageManager.JobLogStorage(),
+		app.StorageManager.LogStorage(),
 		app.EventService,
 		app.Logger,
 		app.Config.Logging.MinEventLevel, // Minimum log level for UI events
@@ -403,7 +403,7 @@ func (a *App) initServices() error {
 	// 5.8. Initialize job manager with storage interfaces
 	jobMgr := queue.NewManager(
 		a.StorageManager.QueueStorage(),
-		a.StorageManager.JobLogStorage(),
+		a.StorageManager.LogStorage(),
 		queueMgr,
 		a.EventService,
 		a.Logger,

@@ -13,6 +13,7 @@ import (
 	"github.com/ternarybob/arbor"
 	"github.com/ternarybob/quaero/internal/interfaces"
 	"github.com/ternarybob/quaero/internal/logs"
+	"github.com/ternarybob/quaero/internal/models"
 )
 
 // UnifiedLogsHandler handles the unified /api/logs endpoint
@@ -229,8 +230,13 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Parse limit/size (size is alias for limit per user request)
 	limit := 100
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+	limitStr := r.URL.Query().Get("limit")
+	if limitStr == "" {
+		limitStr = r.URL.Query().Get("size") // Support 'size' as alias
+	}
+	if limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
 			if limit > 5000 {
@@ -249,9 +255,65 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 		order = "desc"
 	}
 
+	// Fast path: direct job log retrieval when not including children
+	// This avoids the expensive GetAggregatedLogs call with descendant traversal
+	if !includeChildren {
+		var logEntries []models.LogEntry
+		var err error
+
+		if level == "all" {
+			logEntries, err = h.logService.GetLogs(ctx, jobID, limit)
+		} else {
+			logEntries, err = h.logService.GetLogsByLevel(ctx, jobID, level, limit)
+		}
+
+		if err != nil {
+			h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get direct job logs")
+			http.Error(w, "Failed to get job logs", http.StatusInternalServerError)
+			return
+		}
+
+		// Build response logs
+		responseLogs := make([]map[string]interface{}, 0, len(logEntries))
+		for _, log := range logEntries {
+			responseLog := map[string]interface{}{
+				"timestamp":      log.Timestamp,
+				"full_timestamp": log.FullTimestamp,
+				"level":          log.Level,
+				"message":        log.Message,
+				"job_id":         log.JobID(),
+				"step_name":      log.StepName(),
+				"source_type":    log.SourceType(),
+				"originator":     log.Originator(),
+				"phase":          log.Phase(),
+			}
+			responseLogs = append(responseLogs, responseLog)
+		}
+
+		// Apply ordering (storage returns desc by default)
+		if order == "asc" {
+			for i, j := 0, len(responseLogs)-1; i < j; i, j = i+1, j-1 {
+				responseLogs[i], responseLogs[j] = responseLogs[j], responseLogs[i]
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"scope":            "job",
+			"job_id":           jobID,
+			"logs":             responseLogs,
+			"count":            len(responseLogs),
+			"limit":            limit,
+			"order":            order,
+			"level":            level,
+			"include_children": false,
+		})
+		return
+	}
+
 	cursor := r.URL.Query().Get("cursor")
 
-	// Fetch aggregated logs
+	// Fetch aggregated logs (includes children)
 	logEntries, metadata, nextCursor, err := h.logService.GetAggregatedLogs(ctx, jobID, includeChildren, level, limit, cursor, order)
 	if err != nil {
 		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job logs")
@@ -271,20 +333,20 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			"full_timestamp": log.FullTimestamp,
 			"level":          log.Level,
 			"message":        log.Message,
-			"job_id":         log.AssociatedJobID,
-			"step_name":      log.StepName,
-			"source_type":    log.SourceType,
-			"originator":     log.Originator,
+			"job_id":         log.JobID(),
+			"step_name":      log.StepName(),
+			"source_type":    log.SourceType(),
+			"originator":     log.Originator(),
 		}
 
-		if meta, exists := metadata[log.AssociatedJobID]; exists {
+		if meta, exists := metadata[log.JobID()]; exists {
 			enrichedLog["job_name"] = meta.JobName
 			enrichedLog["job_url"] = meta.JobURL
 			enrichedLog["job_depth"] = meta.JobDepth
 			enrichedLog["job_type"] = meta.JobType
 			enrichedLog["parent_id"] = meta.ParentID
 		} else {
-			enrichedLog["job_name"] = fmt.Sprintf("Job %s", log.AssociatedJobID)
+			enrichedLog["job_name"] = fmt.Sprintf("Job %s", log.JobID())
 			enrichedLog["job_type"] = "unknown"
 			enrichedLog["parent_id"] = ""
 		}

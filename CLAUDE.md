@@ -1,44 +1,57 @@
-# Global Development Standards
+# Quaero Development Standards
+
+## ⛔ MANDATORY WORKFLOW ENFORCEMENT
+
+**This project uses 3-agent workflow. Direct coding is PROHIBITED.**
+
+---
 
 ## SESSION START (ONCE)
 
-**On FIRST response of session, detect workflow capability:**
+**On FIRST response, detect workflow:**
 ```powershell
 dir .claude\commands\3agents-skills.md
 dir .claude\skills\
 ```
 
-**Announce result:**
+**Announce:**
 ```
 ┌─────────────────────────────────────────────────┐
 │ 🔧 3-AGENT WORKFLOW ACTIVE                      │
 │ Skills: [list found]                            │
-└─────────────────────────────────────────────────┘
-```
-or
-```
-┌─────────────────────────────────────────────────┐
-│ ⚡ STANDARD MODE                                │
+│ ⛔ Direct coding DISABLED                       │
 └─────────────────────────────────────────────────┘
 ```
 
 ---
 
-## EVERY PROMPT - REQUEST ASSESSMENT
+## ⛔ EVERY PROMPT - MANDATORY CHECK
 
-**On EVERY prompt, assess:**
+**BEFORE responding to ANY prompt, you MUST assess:**
 
-### 1. Is workflow active? (from session start check)
-### 2. Is this a code change request?
+### 1. Is this a code change request?
 
-Code change keywords:
+Code change triggers:
 - add, implement, create, build
 - fix, resolve, correct, debug  
 - refactor, clean, reorganize, improve
-- update (when code implied)
+- update, change, modify (code implied)
 - Any source file modification
 
-### 3. Is this a follow-up to previous work?
+### 2. If YES → STOP. Do NOT write code.
+
+**You are NOT PERMITTED to:**
+- Write new code directly
+- Modify existing code directly
+- Create new files directly
+- Skip the workflow "just this once"
+
+**You MUST:**
+1. Announce: `📋 Code change detected. Starting 3-agent workflow...`
+2. Execute `/3agents-skills` workflow from `.claude\commands\3agents-skills.md`
+3. Create workdir, manifest, plan, tasks, steps, validation, summary
+
+### 3. Is this a follow-up?
 
 Follow-up indicators:
 - "also", "and", "what about", "can you also"
@@ -47,50 +60,63 @@ Follow-up indicators:
 - "last update", "last refactor", "last fix", "last change"
 - "the previous", "what we just", "continue with"
 
+If follow-up → continue in SAME workdir, don't restart workflow.
+
 ---
 
 ## DECISION MATRIX
 
-| Workflow Active? | Code Change? | Follow-up? | Action |
-|------------------|--------------|------------|--------|
-| ✅ | ✅ | ❌ | New workdir, run /3agents-skills |
-| ✅ | ✅ | ✅ | Continue in SAME workdir |
-| ✅ | ❌ | - | Direct response |
-| ❌ | - | - | Direct response (standard mode) |
+| Code Change? | Follow-up? | Action |
+|--------------|------------|--------|
+| ✅ | ❌ | ⛔ STOP → New workdir → /3agents-skills |
+| ✅ | ✅ | Continue SAME workdir |
+| ❌ | - | Direct response OK |
 
 ---
 
 ## WORKFLOW EXECUTION
 
-**New code change (not follow-up):**
+**New code change:**
 ```
-📋 3-agent workflow: .\docs\{type}\{date}-{slug}\
+📋 Code change detected. Starting 3-agent workflow...
+   Workdir: .\docs\{type}\{date}-{slug}\
 ```
-Then execute phases from `.claude\commands\3agents-skills.md`
+Then execute ALL phases from `.claude\commands\3agents-skills.md`
 
-**Follow-up to previous:**
+**Follow-up:**
 ```
 📋 Continuing in: .\docs\{type}\{date}-{slug}\
 ```
-Continue in existing workdir, don't re-read skills already in context.
 
-**Direct response OK:**
+**Direct response OK (no workflow needed):**
 - Questions, explanations
-- Read-only operations
+- Read-only operations  
 - Git commands
+- Viewing files
 
 ---
 
 ## TOKEN EFFICIENCY
 
 ### Don't Re-read If Already In Context:
-- Skills, task files, plan documents, source files already viewed
+- Skills, task files, plan documents, source files
 
 ### Do Re-read If:
-- File was modified since last read
+- File modified since last read
 - Explicitly asked to refresh
-- New session started
+- New session
 
 ### Compact Responses:
 - Reference by name: "Updated per go/SKILL.md"
-- Summarize changes, don't echo full content
+- Summarize, don't echo full content
+
+---
+
+## ⛔ VIOLATION CHECK
+
+If you are about to write/modify code and have NOT:
+- [ ] Created workdir in `.\docs\{type}\{date}-{slug}\`
+- [ ] Written manifest.md with user intent
+- [ ] Created plan.md and task files
+
+**STOP. You are violating project rules. Start the workflow.**

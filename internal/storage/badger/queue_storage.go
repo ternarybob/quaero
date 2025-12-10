@@ -173,14 +173,14 @@ func (s *QueueStorage) UpdateJob(ctx context.Context, job interface{}) error {
 	return s.SaveJob(ctx, job)
 }
 
-func (s *QueueStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+func (s *QueueStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.LogEntry) error {
 	// Deprecated
 	return nil
 }
 
-func (s *QueueStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+func (s *QueueStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.LogEntry, error) {
 	// Deprecated
-	return []models.JobLogEntry{}, nil
+	return []models.LogEntry{}, nil
 }
 
 func (s *QueueStorage) ListJobs(ctx context.Context, opts *interfaces.JobListOptions) ([]*models.QueueJobState, error) {

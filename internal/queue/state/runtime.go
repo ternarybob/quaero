@@ -12,16 +12,16 @@ import (
 
 // Manager handles job state mutations.
 type Manager struct {
-	jobStorage    interfaces.QueueStorage
-	jobLogStorage interfaces.JobLogStorage
-	eventService  interfaces.EventService // Optional: may be nil for testing
+	jobStorage   interfaces.QueueStorage
+	logStorage   interfaces.LogStorage
+	eventService interfaces.EventService // Optional: may be nil for testing
 }
 
-func NewManager(jobStorage interfaces.QueueStorage, jobLogStorage interfaces.JobLogStorage, eventService interfaces.EventService) *Manager {
+func NewManager(jobStorage interfaces.QueueStorage, logStorage interfaces.LogStorage, eventService interfaces.EventService) *Manager {
 	return &Manager{
-		jobStorage:    jobStorage,
-		jobLogStorage: jobLogStorage,
-		eventService:  eventService,
+		jobStorage:   jobStorage,
+		logStorage:   logStorage,
+		eventService: eventService,
 	}
 }
 
@@ -197,14 +197,14 @@ func (m *Manager) UpdateJobMetadata(ctx context.Context, jobID string, metadata 
 // AddJobLog adds a log entry for a job
 func (m *Manager) AddJobLog(ctx context.Context, jobID, level, message string) error {
 	now := time.Now()
-	entry := models.JobLogEntry{
-		AssociatedJobID: jobID,
-		Timestamp:       now.Format("15:04:05"),
-		FullTimestamp:   now.Format(time.RFC3339),
-		Level:           level,
-		Message:         message,
+	entry := models.LogEntry{
+		Timestamp:     now.Format("15:04:05"),
+		FullTimestamp: now.Format(time.RFC3339),
+		Level:         level,
+		Message:       message,
+		Context:       map[string]string{models.LogCtxJobID: jobID},
 	}
-	return m.jobLogStorage.AppendLog(ctx, jobID, entry)
+	return m.logStorage.AppendLog(ctx, jobID, entry)
 }
 
 // AddJobError adds an error message to the job's status_report

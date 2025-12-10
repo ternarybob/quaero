@@ -15,13 +15,13 @@ var ErrJobNotFound = fmt.Errorf("job not found")
 
 // Service implements LogService for storage operations only
 type Service struct {
-	storage    interfaces.JobLogStorage
+	storage    interfaces.LogStorage
 	jobStorage interfaces.QueueStorage
 	logger     arbor.ILogger
 }
 
 // NewService creates a new LogService for log storage operations
-func NewService(storage interfaces.JobLogStorage, jobStorage interfaces.QueueStorage, logger arbor.ILogger) interfaces.LogService {
+func NewService(storage interfaces.LogStorage, jobStorage interfaces.QueueStorage, logger arbor.ILogger) interfaces.LogService {
 	return &Service{
 		storage:    storage,
 		jobStorage: jobStorage,
@@ -30,22 +30,22 @@ func NewService(storage interfaces.JobLogStorage, jobStorage interfaces.QueueSto
 }
 
 // AppendLog appends a single log entry (delegates to storage)
-func (s *Service) AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error {
+func (s *Service) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
 	return s.storage.AppendLog(ctx, jobID, entry)
 }
 
 // AppendLogs appends multiple log entries (delegates to storage)
-func (s *Service) AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error {
+func (s *Service) AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error {
 	return s.storage.AppendLogs(ctx, jobID, entries)
 }
 
 // GetLogs retrieves log entries for a job (delegates to storage)
-func (s *Service) GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error) {
+func (s *Service) GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error) {
 	return s.storage.GetLogs(ctx, jobID, limit)
 }
 
 // GetLogsByLevel retrieves log entries filtered by level (delegates to storage)
-func (s *Service) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error) {
+func (s *Service) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error) {
 	return s.storage.GetLogsByLevel(ctx, jobID, level, limit)
 }
 
@@ -62,9 +62,9 @@ func (s *Service) CountLogs(ctx context.Context, jobID string) (int, error) {
 // GetAggregatedLogs fetches logs for parent job and optionally all child jobs
 // Implements k-way merge with cursor-based pagination
 // Returns logs slice, metadata map, and next_cursor for pagination
-func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string, limit int, cursor string, order string) ([]models.JobLogEntry, map[string]*interfaces.AggregatedJobMeta, string, error) {
+func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, includeChildren bool, level string, limit int, cursor string, order string) ([]models.LogEntry, map[string]*interfaces.AggregatedJobMeta, string, error) {
 	metadata := make(map[string]*interfaces.AggregatedJobMeta)
-	var allLogs []models.JobLogEntry
+	var allLogs []models.LogEntry
 
 	// Decode cursor if provided
 	cursorKey, err := decodeCursor(cursor)
@@ -133,7 +133,7 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 	}
 
 	// Extract logs up to limit
-	allLogs = make([]models.JobLogEntry, 0, limit)
+	allLogs = make([]models.LogEntry, 0, limit)
 	var lastItem *heapItem = nil
 
 	for len(allLogs) < limit && h.Len() > 0 {
@@ -181,7 +181,7 @@ func (s *Service) GetAggregatedLogs(ctx context.Context, parentJobID string, inc
 			lastLog := allLogs[len(allLogs)-1]
 			nextCursorKey := &CursorKey{
 				FullTimestamp: lastLog.FullTimestamp,
-				JobID:         lastLog.AssociatedJobID,
+				JobID:         lastLog.JobID(),
 				Seq:           lastItem.seqAtPush,
 			}
 			nextCursor = encodeCursor(nextCursorKey)

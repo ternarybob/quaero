@@ -12,58 +12,74 @@ import (
 	"github.com/ternarybob/quaero/internal/models"
 )
 
-// MockJobLogStorage is a mock implementation of JobLogStorage
-type MockJobLogStorage struct {
+// MockLogStorage is a mock implementation of LogStorage
+type MockLogStorage struct {
 	mock.Mock
 }
 
-func (m *MockJobLogStorage) AppendLog(ctx context.Context, jobID string, entry models.JobLogEntry) error {
+func (m *MockLogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
 	args := m.Called(ctx, jobID, entry)
 	return args.Error(0)
 }
 
-func (m *MockJobLogStorage) AppendLogs(ctx context.Context, jobID string, entries []models.JobLogEntry) error {
+func (m *MockLogStorage) AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error {
 	args := m.Called(ctx, jobID, entries)
 	return args.Error(0)
 }
 
-func (m *MockJobLogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]models.JobLogEntry, error) {
+func (m *MockLogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID, limit)
-	if logs, ok := args.Get(0).([]models.JobLogEntry); ok {
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
 		return logs, args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *MockJobLogStorage) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.JobLogEntry, error) {
+func (m *MockLogStorage) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID, level, limit)
-	if logs, ok := args.Get(0).([]models.JobLogEntry); ok {
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
 		return logs, args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *MockJobLogStorage) DeleteLogs(ctx context.Context, jobID string) error {
+func (m *MockLogStorage) DeleteLogs(ctx context.Context, jobID string) error {
 	args := m.Called(ctx, jobID)
 	return args.Error(0)
 }
 
-func (m *MockJobLogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {
+func (m *MockLogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {
 	args := m.Called(ctx, jobID)
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockJobLogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.JobLogEntry, error) {
+func (m *MockLogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID, limit, offset)
-	if logs, ok := args.Get(0).([]models.JobLogEntry); ok {
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
 		return logs, args.Error(1)
 	}
 	return nil, args.Error(1)
 }
 
-func (m *MockJobLogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.JobLogEntry, error) {
+func (m *MockLogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID, level, limit, offset)
-	if logs, ok := args.Get(0).([]models.JobLogEntry); ok {
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
+		return logs, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockLogStorage) GetLogsByManagerID(ctx context.Context, managerID string, limit int) ([]models.LogEntry, error) {
+	args := m.Called(ctx, managerID, limit)
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
+		return logs, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockLogStorage) GetLogsByStepID(ctx context.Context, stepID string, limit int) ([]models.LogEntry, error) {
+	args := m.Called(ctx, stepID, limit)
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
 		return logs, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -157,14 +173,14 @@ func (m *MockJobStorage) MarkRunningJobsAsPending(ctx context.Context, message s
 	return args.Int(0), args.Error(1)
 }
 
-func (m *MockJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.JobLogEntry) error {
+func (m *MockJobStorage) AppendJobLog(ctx context.Context, jobID string, logEntry models.LogEntry) error {
 	args := m.Called(ctx, jobID, logEntry)
 	return args.Error(0)
 }
 
-func (m *MockJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.JobLogEntry, error) {
+func (m *MockJobStorage) GetJobLogs(ctx context.Context, jobID string) ([]models.LogEntry, error) {
 	args := m.Called(ctx, jobID)
-	if logs, ok := args.Get(0).([]models.JobLogEntry); ok {
+	if logs, ok := args.Get(0).([]models.LogEntry); ok {
 		return logs, args.Error(1)
 	}
 	return nil, args.Error(1)
@@ -226,7 +242,7 @@ func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -243,7 +259,7 @@ func TestService_GetAggregatedLogs_ParentOnly(t *testing.T) {
 		},
 	}
 
-	parentLogs := []models.JobLogEntry{
+	parentLogs := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:10:00", FullTimestamp: "2025-01-01T10:10:00Z", Level: "info", Message: "Job completed"},
 		{Timestamp: "10:05:00", FullTimestamp: "2025-01-01T10:05:00Z", Level: "info", Message: "Processing page 1"},
@@ -282,7 +298,7 @@ func TestService_GetAggregatedLogs_WithChildren(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -323,20 +339,20 @@ func TestService_GetAggregatedLogs_WithChildren(t *testing.T) {
 		},
 	}
 
-	parentLogs := []models.JobLogEntry{
+	parentLogs := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:30:00", FullTimestamp: "2025-01-01T10:30:00Z", Level: "info", Message: "Job completed"},
 		{Timestamp: "10:00:00", FullTimestamp: "2025-01-01T10:00:00Z", Level: "info", Message: "Job started"},
 	}
 
-	childLogs1 := []models.JobLogEntry{
+	childLogs1 := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:15:00", FullTimestamp: "2025-01-01T10:15:00Z", Level: "info", Message: "Child 1 completed"},
 		{Timestamp: "10:10:00", FullTimestamp: "2025-01-01T10:10:00Z", Level: "info", Message: "Child 1 processing"},
 		{Timestamp: "10:05:00", FullTimestamp: "2025-01-01T10:05:00Z", Level: "info", Message: "Child 1 started"},
 	}
 
-	childLogs2 := []models.JobLogEntry{
+	childLogs2 := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:18:00", FullTimestamp: "2025-01-01T10:18:00Z", Level: "info", Message: "Child 2 completed"},
 		{Timestamp: "10:12:00", FullTimestamp: "2025-01-01T10:12:00Z", Level: "info", Message: "Child 2 processing"},
@@ -346,6 +362,9 @@ func TestService_GetAggregatedLogs_WithChildren(t *testing.T) {
 	// Mock expectations
 	mockJobStorage.On("GetJob", ctx, "parent-123").Return(parentJob, nil)
 	mockJobStorage.On("GetChildJobs", ctx, "parent-123").Return(childJobs, nil)
+	// Recursive calls for descendants (children have no children in this test)
+	mockJobStorage.On("GetChildJobs", ctx, "child-456").Return([]*models.QueueJob{}, nil)
+	mockJobStorage.On("GetChildJobs", ctx, "child-789").Return([]*models.QueueJob{}, nil)
 	// Budgeted batch size: (limit + numJobs - 1) / numJobs = (1000 + 3 - 1) / 3 = 334
 	mockLogStorage.On("GetLogsWithOffset", ctx, "parent-123", 334, 0).Return(parentLogs, nil)
 	mockLogStorage.On("GetLogsWithOffset", ctx, "child-456", 334, 0).Return(childLogs1, nil)
@@ -379,7 +398,7 @@ func TestService_GetAggregatedLogs_LevelFiltering(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -392,7 +411,7 @@ func TestService_GetAggregatedLogs_LevelFiltering(t *testing.T) {
 		Type: "crawler",
 	}
 
-	errorLogs := []models.JobLogEntry{
+	errorLogs := []models.LogEntry{
 		{Timestamp: "10:01:00", FullTimestamp: "2025-01-01T10:01:00Z", Level: "error", Message: "Connection failed"},
 		{Timestamp: "10:04:00", FullTimestamp: "2025-01-01T10:04:00Z", Level: "error", Message: "Another error"},
 	}
@@ -419,7 +438,7 @@ func TestService_GetAggregatedLogs_LimitApplied(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -435,11 +454,11 @@ func TestService_GetAggregatedLogs_LimitApplied(t *testing.T) {
 	// Create 15 logs in DESC order (newest first) to match storage behavior
 	// Storage returns DESC order: newest (14) down to oldest (0)
 	// After reversal for ASC: 0, 1, 2, ..., 14
-	parentLogs := make([]models.JobLogEntry, 15)
+	parentLogs := make([]models.LogEntry, 15)
 	for i := 0; i < 15; i++ {
 		// Index 0 gets newest (14), index 14 gets oldest (0)
 		logIndex := 14 - i
-		parentLogs[i] = models.JobLogEntry{
+		parentLogs[i] = models.LogEntry{
 			Timestamp:     fmt.Sprintf("10:%02d:00", logIndex),
 			FullTimestamp: fmt.Sprintf("2025-01-01T10:%02d:00Z", logIndex),
 			Level:         "info",
@@ -469,7 +488,7 @@ func TestService_GetAggregatedLogs_JobNotFound(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -495,7 +514,7 @@ func TestService_GetAggregatedLogs_ChildJobErrorContinues(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -524,12 +543,12 @@ func TestService_GetAggregatedLogs_ChildJobErrorContinues(t *testing.T) {
 		},
 	}
 
-	parentLogs := []models.JobLogEntry{
+	parentLogs := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:00:00", FullTimestamp: "2025-01-01T10:00:00Z", Level: "info", Message: "Job started"},
 	}
 
-	childLogs1 := []models.JobLogEntry{
+	childLogs1 := []models.LogEntry{
 		// Storage returns DESC order (newest first) - these will be reversed for ASC order
 		{Timestamp: "10:05:00", FullTimestamp: "2025-01-01T10:05:00Z", Level: "info", Message: "Child 1 started"},
 	}
@@ -537,6 +556,9 @@ func TestService_GetAggregatedLogs_ChildJobErrorContinues(t *testing.T) {
 	// Mock expectations
 	mockJobStorage.On("GetJob", ctx, "parent-123").Return(parentJob, nil)
 	mockJobStorage.On("GetChildJobs", ctx, "parent-123").Return(childJobs, nil)
+	// Recursive calls for descendants (children have no children in this test)
+	mockJobStorage.On("GetChildJobs", ctx, "child-456").Return([]*models.QueueJob{}, nil)
+	mockJobStorage.On("GetChildJobs", ctx, "child-789").Return([]*models.QueueJob{}, nil)
 	// Budgeted batch size: (limit + numJobs - 1) / numJobs = (1000 + 3 - 1) / 3 = 334
 	mockLogStorage.On("GetLogsWithOffset", ctx, "parent-123", 334, 0).Return(parentLogs, nil)
 	mockLogStorage.On("GetLogsWithOffset", ctx, "child-456", 334, 0).Return(childLogs1, nil)
@@ -561,7 +583,7 @@ func TestService_GetAggregatedLogs_EmptyLogs(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service
@@ -580,7 +602,7 @@ func TestService_GetAggregatedLogs_EmptyLogs(t *testing.T) {
 
 	// Mock expectations
 	mockJobStorage.On("GetJob", ctx, "parent-123").Return(parentJob, nil)
-	mockLogStorage.On("GetLogsWithOffset", ctx, "parent-123", 1000, 0).Return([]models.JobLogEntry{}, nil)
+	mockLogStorage.On("GetLogsWithOffset", ctx, "parent-123", 1000, 0).Return([]models.LogEntry{}, nil)
 
 	// Execute
 	logs, metadata, _, err := service.GetAggregatedLogs(ctx, "parent-123", false, "all", 1000, "", "asc")
@@ -598,7 +620,7 @@ func TestService_extractJobMetadata(t *testing.T) {
 	logger := arbor.NewLogger()
 
 	// Create mock storage
-	mockLogStorage := new(MockJobLogStorage)
+	mockLogStorage := new(MockLogStorage)
 	mockJobStorage := new(MockJobStorage)
 
 	// Create service

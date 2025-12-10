@@ -205,6 +205,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		docCountBefore, _ := o.jobManager.GetDocumentCount(ctx, managerID)
 
 		// Update manager metadata with current step info
+		// Include step_job_ids so UI can find step job ID for fetching events during execution
 		managerStepMetadata := map[string]interface{}{
 			"current_step":        i + 1,
 			"current_step_name":   step.Name,
@@ -212,6 +213,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			"current_step_status": "running",
 			"current_step_id":     stepID,
 			"total_steps":         len(jobDef.Steps),
+			"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 		}
 		if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerStepMetadata); err != nil {
 			// Log but continue
@@ -299,6 +301,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 				"current_step_status": "failed",
 				"current_step_id":     stepID,
 				"step_stats":          stepStats[:i+1],
+				"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 			}
 			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
@@ -361,6 +364,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 				"current_step_status": "failed",
 				"current_step_id":     stepID,
 				"step_stats":          stepStats[:i+1],
+				"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 			}
 			o.jobManager.UpdateJobMetadata(ctx, managerID, failedStepMetadata)
 
@@ -424,6 +428,8 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			waitStart := time.Now()
 			pollInterval := 500 * time.Millisecond
 			lastLoggedStats := ""
+			lastProgressPublish := time.Now()
+			progressPublishInterval := 2 * time.Second // Match unified aggregator threshold
 
 			for {
 				// Check context cancellation
@@ -462,6 +468,33 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
 						fmt.Sprintf("Child jobs: %s", currentStats), "", "run")
 					lastLoggedStats = currentStats
+				}
+
+				// Publish step_progress event periodically so UI receives refresh triggers
+				// This enables real-time step event display during synchronous wait
+				if time.Since(lastProgressPublish) >= progressPublishInterval && o.eventService != nil {
+					stepProgressPayload := map[string]interface{}{
+						"step_id":        stepID,
+						"manager_id":     managerID,
+						"step_name":      step.Name,
+						"status":         "running",
+						"total_jobs":     childStats.ChildCount,
+						"pending_jobs":   childStats.PendingChildren,
+						"running_jobs":   childStats.RunningChildren,
+						"completed_jobs": childStats.CompletedChildren,
+						"failed_jobs":    childStats.FailedChildren,
+						"timestamp":      time.Now().Format(time.RFC3339),
+					}
+					stepProgressEvent := interfaces.Event{
+						Type:    interfaces.EventStepProgress,
+						Payload: stepProgressPayload,
+					}
+					go func() {
+						if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+							// Log but don't fail
+						}
+					}()
+					lastProgressPublish = time.Now()
 				}
 
 				// Check if all children are in terminal state
@@ -574,6 +607,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		}
 
 		// Update manager metadata with step progress
+		// Include step_job_ids so UI can find step job IDs immediately (not just at end)
 		managerCompletedMetadata := map[string]interface{}{
 			"current_step":        i + 1,
 			"current_step_name":   step.Name,
@@ -582,6 +616,7 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 			"current_step_id":     stepID,
 			"completed_steps":     i + 1,
 			"step_stats":          stepStats[:i+1],
+			"step_job_ids":        stepJobIDs, // Include for UI to fetch step events
 		}
 		if err := o.jobManager.UpdateJobMetadata(ctx, managerID, managerCompletedMetadata); err != nil {
 			// Log but continue

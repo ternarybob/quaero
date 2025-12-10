@@ -396,6 +396,24 @@
                             </div>
                         </template>
                     </div>
+
+                    <!-- Pagination Controls -->
+                    <div x-show="!loading && (hasMoreLogs || logs.length > 0)" class="logs-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-top: 1px solid var(--border-color); margin-top: 0.5rem;">
+                        <div class="text-small text-secondary">
+                            <span x-text="`Showing ${filteredLogs.length} log entries`"></span>
+                            <span x-show="logsPageSize && filteredLogs.length >= logsPageSize" x-text="` (limit: ${logsPageSize} per page)`"></span>
+                        </div>
+                        <div x-show="hasMoreLogs">
+                            <button class="btn btn-sm btn-primary" @click="loadMoreLogs()" :disabled="loadingMore">
+                                <template x-if="loadingMore">
+                                    <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
+                                </template>
+                                <template x-if="!loadingMore">
+                                    <span><i class="fas fa-chevron-down"></i> Load More Logs</span>
+                                </template>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -420,8 +438,14 @@
                 wsSubscription: null,
                 refreshInterval: 10, // Default 10 seconds
                 refreshIntervalId: null,
+                // Pagination state
+                logsCursor: null,
+                hasMoreLogs: false,
+                logsTotal: 0,
+                logsPageSize: 1000,
+                loadingMore: false,
 
-                init() {
+                async init() {
                     // Get job ID from URL query parameter
                     const urlParams = new URLSearchParams(window.location.search);
                     this.jobId = urlParams.get('id');
@@ -434,8 +458,9 @@
                         return;
                     }
 
-                    this.loadJob();
-                    this.loadJobLogs();
+                    // Load job first, then logs (logs need job.parent_id to determine endpoint)
+                    await this.loadJob();
+                    await this.loadJobLogs();
 
                     // Start auto-refresh for running jobs
                     this.startAutoRefresh();
@@ -445,11 +470,6 @@
 
                     // Watch selectedLogLevel and reload logs when it changes
                     this.$watch('selectedLogLevel', () => {
-                        this.loadJobLogs();
-                    });
-
-                    // Watch selectedLogType and reload logs when it changes
-                    this.$watch('selectedLogType', () => {
                         this.loadJobLogs();
                     });
 
@@ -507,18 +527,29 @@
                     // For running jobs: load historical logs, then switch to WebSocket for new logs
                     // For completed jobs: load all logs from database
                     this.loading = true;
+                    // Reset pagination state on fresh load
+                    this.logsCursor = null;
+                    this.hasMoreLogs = false;
+                    this.logsTotal = 0;
+
                     try {
-                        // Determine if this is a parent job (no parent_id or parent_id is empty/null)
-                        const isParentJob = !this.job.parent_id || this.job.parent_id === '';
+                        // Use unified /api/logs endpoint with pagination
+                        // Always use include_children=false for fast direct log retrieval
+                        // (aggregation with children is expensive for large job trees)
+                        const params = new URLSearchParams({
+                            scope: 'job',
+                            job_id: this.jobId,
+                            include_children: 'false',
+                            limit: this.logsPageSize.toString(),
+                            order: 'asc'
+                        });
 
-                        // Use aggregated logs endpoint for parent jobs, single job logs for child jobs
-                        const endpoint = isParentJob
-                            ? `/api/jobs/${this.jobId}/logs/aggregated`
-                            : `/api/jobs/${this.jobId}/logs`;
+                        // Add level filter if not 'all'
+                        if (this.selectedLogLevel !== 'all') {
+                            params.append('level', this.selectedLogLevel);
+                        }
 
-                        // Build query string with level parameter for server-side filtering
-                        const qs = this.selectedLogLevel === 'all' ? '' : ('?level=' + encodeURIComponent(this.selectedLogLevel));
-                        const response = await fetch(`${endpoint}${qs}`);
+                        const response = await fetch(`/api/logs?${params.toString()}`);
 
                         if (!response.ok) {
                             // Distinguish between different error types
@@ -537,6 +568,11 @@
                         const data = await response.json();
                         const rawLogs = data.logs || [];
 
+                        // Store pagination info
+                        this.logsCursor = data.next_cursor || null;
+                        this.hasMoreLogs = !!data.next_cursor;
+                        this.logsTotal = data.count || rawLogs.length;
+
                         // Handle empty logs gracefully
                         if (rawLogs.length === 0) {
                             console.info('No logs available for this job');
@@ -546,6 +582,8 @@
 
                         // Parse logs into flat array
                         this.logs = rawLogs.map(log => this._parseLogEntry(log));
+
+                        console.log(`[Job] Loaded ${this.logs.length} logs, hasMore: ${this.hasMoreLogs}`);
 
                         // Auto-scroll to bottom after loading logs
                         if (this.autoScroll) {
@@ -563,6 +601,53 @@
                         this.logs = [];
                     } finally {
                         this.loading = false;
+                    }
+                },
+
+                async loadMoreLogs() {
+                    if (!this.hasMoreLogs || this.loadingMore || !this.logsCursor) return;
+
+                    this.loadingMore = true;
+                    try {
+                        // Always use include_children=false for fast direct log retrieval
+                        const params = new URLSearchParams({
+                            scope: 'job',
+                            job_id: this.jobId,
+                            include_children: 'false',
+                            limit: this.logsPageSize.toString(),
+                            order: 'asc',
+                            cursor: this.logsCursor
+                        });
+
+                        if (this.selectedLogLevel !== 'all') {
+                            params.append('level', this.selectedLogLevel);
+                        }
+
+                        const response = await fetch(`/api/logs?${params.toString()}`);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: Failed to fetch more logs`);
+                        }
+
+                        const data = await response.json();
+                        const rawLogs = data.logs || [];
+
+                        // Update pagination state
+                        this.logsCursor = data.next_cursor || null;
+                        this.hasMoreLogs = !!data.next_cursor;
+
+                        // Append new logs
+                        const newLogs = rawLogs.map(log => this._parseLogEntry(log));
+                        this.logs = [...this.logs, ...newLogs];
+                        this.logsTotal = this.logs.length;
+
+                        console.log(`[Job] Loaded ${newLogs.length} more logs, total: ${this.logs.length}, hasMore: ${this.hasMoreLogs}`);
+
+                    } catch (error) {
+                        console.error('Error loading more logs:', error);
+                        window.showNotification('Failed to load more logs: ' + error.message, 'error');
+                    } finally {
+                        this.loadingMore = false;
                     }
                 },
 
