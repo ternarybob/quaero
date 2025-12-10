@@ -27,7 +27,8 @@ type QueueManager interface {
 
 // LogEntry represents a log entry for WebSocket broadcasting
 type LogEntry struct {
-	Timestamp string `json:"timestamp"`
+	Index     int    `json:"index"`     // Auto-incrementing index for stable ordering (timestamps may collide)
+	Timestamp string `json:"timestamp"` // Display timestamp (HH:MM:SS format)
 	Level     string `json:"level"`
 	Message   string `json:"message"`
 }

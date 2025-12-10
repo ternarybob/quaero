@@ -107,10 +107,10 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 	}
 
 	// Initialize step event aggregator for trigger-based UI updates
-	// Triggers every timeThreshold (default 1s) for steps with pending events
+	// Triggers every timeThreshold (default 2s) for steps with pending events
 	// Also triggers immediately when a step finishes
 	if config != nil {
-		timeThreshold := time.Second // Default
+		timeThreshold := 2 * time.Second // Default 2 seconds to reduce request frequency
 		if config.TimeThreshold != "" {
 			if parsed, err := time.ParseDuration(config.TimeThreshold); err == nil {
 				timeThreshold = parsed
@@ -200,10 +200,8 @@ func (h *WebSocketHandler) broadcastStepRefreshTrigger(ctx context.Context, step
 		}
 	}
 
-	h.logger.Debug().
-		Int("step_count", len(stepIDs)).
-		Int("client_count", len(clients)).
-		Msg("Broadcast refresh_step_events trigger")
+	// NOTE: Don't log here - logging would trigger another log_event
+	// which could affect the refresh cycle
 }
 
 // broadcastLogsRefreshTrigger sends a WebSocket message to trigger UI refresh for logs
@@ -242,9 +240,8 @@ func (h *WebSocketHandler) broadcastLogsRefreshTrigger(ctx context.Context) {
 		}
 	}
 
-	h.logger.Debug().
-		Int("client_count", len(clients)).
-		Msg("Broadcast refresh_logs trigger")
+	// NOTE: Don't log here - logging would trigger another log_event
+	// which would trigger another refresh_logs, creating an infinite loop
 }
 
 // Message types
@@ -606,8 +603,17 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		// Parse and filter logs
-		for _, logLine := range entries {
+		// Extract and sort keys for deterministic ordering
+		// Map keys are timestamps like "2025-01-01T12:00:00.000Z" - sorting gives chronological order
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
+		// Parse and filter logs in sorted order (oldest first)
+		for _, key := range keys {
+			logLine := entries[key]
 			// Skip internal handler logs
 			if strings.Contains(logLine, "WebSocket client connected") ||
 				strings.Contains(logLine, "WebSocket client disconnected") ||
@@ -651,6 +657,7 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 			}
 
 			entry := interfaces.LogEntry{
+				Index:     len(logs), // Assign index based on insertion order from memory writer
 				Timestamp: timestamp,
 				Level:     level,
 				Message:   messageWithFields,
@@ -665,10 +672,10 @@ func (h *WebSocketHandler) GetRecentLogsHandler(w http.ResponseWriter, r *http.R
 		logs = []interfaces.LogEntry{}
 	}
 
-	// Sort logs by timestamp in chronological order (oldest first)
-	// Timestamps are in "HH:MM:SS" format
+	// Sort logs by index (insertion order from memory writer)
+	// This preserves the exact order logs were received, even when timestamps collide
 	sort.Slice(logs, func(i, j int) bool {
-		return logs[i].Timestamp < logs[j].Timestamp
+		return logs[i].Index < logs[j].Index
 	})
 
 	w.Header().Set("Content-Type", "application/json")

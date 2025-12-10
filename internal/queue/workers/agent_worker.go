@@ -437,7 +437,7 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
-		Msg("Agent job orchestration completed")
+		Msgf("Agent job orchestration completed: step=%s, agent=%s, jobs=%d", step.Name, agentType, len(jobIDs))
 
 	return stepID, nil
 }
@@ -742,7 +742,7 @@ func (w *AgentWorker) pollJobCompletion(ctx context.Context, jobIDs []string) er
 			if allCompleted {
 				w.logger.Info().
 					Int("job_count", len(jobIDs)).
-					Msg("All agent jobs completed successfully")
+					Msgf("All agent jobs completed successfully: job_count=%d", len(jobIDs))
 				return nil
 			}
 		}

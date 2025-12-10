@@ -103,6 +103,8 @@ func (a *LogEventAggregator) StartPeriodicFlush(ctx context.Context) {
 }
 
 // flushPending triggers refresh if there are pending logs
+// NOTE: This function must NOT log anything - logging would trigger another log_event
+// which would set hasPendingLogs=true, creating an infinite loop
 func (a *LogEventAggregator) flushPending(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -115,6 +117,5 @@ func (a *LogEventAggregator) flushPending(ctx context.Context) {
 	a.hasPendingLogs = false
 	a.lastTrigger = now
 
-	a.logger.Debug().Msg("Log event aggregator: periodic trigger")
 	go a.safeOnTrigger(ctx)
 }

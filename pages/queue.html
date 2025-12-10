@@ -1870,16 +1870,33 @@
                     // Set initial load flag
                     this.isInitialLoad = true;
 
-                    // Periodically refresh children for parents with children
+                    // Track in-flight child fetch requests to prevent duplicates
+                    this._childFetchInFlight = new Set();
+
+                    // Periodically refresh children for RUNNING parents with missing children
                     // This ensures child rows are displayed even if job_spawn events aren't received
+                    // Only fetches if: parent is running/pending, children missing, no fetch in progress
                     this._childRefreshInterval = setInterval(() => {
-                        const parentsWithChildren = this.filteredJobs.filter(job => !job.parent_id && job.child_count > 0);
-                        parentsWithChildren.forEach(parent => {
+                        // Only check parents that are still active (not completed/failed/cancelled)
+                        const activeStatuses = ['pending', 'running'];
+                        const activeParentsWithChildren = this.filteredJobs.filter(job =>
+                            !job.parent_id &&
+                            job.child_count > 0 &&
+                            activeStatuses.includes(job.status)
+                        );
+                        activeParentsWithChildren.forEach(parent => {
+                            // Skip if already fetching this parent
+                            if (this._childFetchInFlight.has(parent.id)) {
+                                return;
+                            }
                             // Check if we have all children in allJobs
                             const childrenInAllJobs = this.allJobs.filter(j => j.parent_id === parent.id).length;
                             if (childrenInAllJobs < parent.child_count) {
                                 console.log('[Queue] Refreshing children for parent', parent.id.substring(0, 8), '- have', childrenInAllJobs, 'of', parent.child_count);
-                                this.fetchChildrenForParent(parent.id);
+                                this._childFetchInFlight.add(parent.id);
+                                this.fetchChildrenForParent(parent.id).finally(() => {
+                                    this._childFetchInFlight.delete(parent.id);
+                                });
                             }
                         });
                     }, 2000); // Check every 2 seconds
@@ -2258,6 +2275,18 @@
 
                 // Fetch step events by step job ID (for completed steps on page load)
                 async fetchStepEventsById(managerId, stepName, stepJobId) {
+                    // Initialize in-flight tracking
+                    if (!this._stepEventFetchInFlight) {
+                        this._stepEventFetchInFlight = new Set();
+                    }
+
+                    // Skip if already fetching this step's events
+                    if (this._stepEventFetchInFlight.has(stepJobId)) {
+                        console.log('[Queue] Skipping fetch for step', stepJobId.substring(0, 8), '- already in flight');
+                        return;
+                    }
+                    this._stepEventFetchInFlight.add(stepJobId);
+
                     try {
                         console.log('[Queue] Fetching events for completed step', stepName, 'job:', stepJobId.substring(0, 8));
                         const response = await fetch(`/api/jobs/${stepJobId}/logs?limit=100&order=asc&level=info`);
@@ -2281,6 +2310,9 @@
                         console.log('[Queue] Loaded', logs.length, 'events for completed step', stepName);
                     } catch (err) {
                         console.warn('[Queue] Error fetching events for step', stepName, ':', err);
+                    } finally {
+                        // Remove from in-flight set when done
+                        this._stepEventFetchInFlight.delete(stepJobId);
                     }
                 },
 
@@ -3782,7 +3814,19 @@
                         return;
                     }
 
+                    // Initialize in-flight tracking for step event fetches
+                    if (!this._stepEventFetchInFlight) {
+                        this._stepEventFetchInFlight = new Set();
+                    }
+
                     for (const stepJobId of step_ids) {
+                        // Skip if already fetching this step's events
+                        if (this._stepEventFetchInFlight.has(stepJobId)) {
+                            console.log('[Queue] Skipping fetch for step', stepJobId.substring(0, 8), '- already in flight');
+                            continue;
+                        }
+                        this._stepEventFetchInFlight.add(stepJobId);
+
                         try {
                             // Find manager and step name by searching managers for this step job ID
                             // Step jobs may not be in allJobs directly, but manager.metadata.step_job_ids has the mapping
@@ -3860,6 +3904,9 @@
                             console.log('[Queue] Loaded', logs.length, 'events for step', stepName, '[COMPLETE]');
                         } catch (err) {
                             console.error('[Queue] Error fetching step events:', stepJobId.substring(0, 8), err);
+                        } finally {
+                            // Remove from in-flight set when done
+                            this._stepEventFetchInFlight.delete(stepJobId);
                         }
                     }
 

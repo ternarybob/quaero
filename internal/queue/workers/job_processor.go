@@ -290,11 +290,12 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 	jobStartTime := time.Now()
 
 	// Log job start at Info level (significant event)
+	// Include context in message for Service Logs visibility (structured fields not always displayed)
 	jp.logger.Info().
 		Str("job_id", msg.JobID).
 		Str("job_type", msg.Type).
 		Int("worker_id", workerID).
-		Msg("Job started")
+		Msgf("Job started: %s (type=%s, worker=%d)", msg.JobID[:8], msg.Type, workerID)
 
 	jp.logger.Trace().
 		Str("job_id", msg.JobID).
@@ -422,12 +423,14 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 
 	// Check if job was cancelled via context
 	if jobCtx.Err() == context.Canceled {
+		// Include context in message for Service Logs visibility
+		cancelDuration := time.Since(jobStartTime)
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
 			Int("worker_id", workerID).
-			Dur("duration", time.Since(jobStartTime)).
-			Msg("Job cancelled")
+			Dur("duration", cancelDuration).
+			Msgf("Job cancelled: %s (type=%s, worker=%d, duration=%s)", msg.JobID[:8], msg.Type, workerID, cancelDuration.Round(time.Millisecond))
 
 		// Job was cancelled - update status (already done by cancel handler)
 		// Just delete the message and return
@@ -439,13 +442,15 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 
 	if err != nil {
 		// Job failed - log at Error level with duration
+		// Include context in message for Service Logs visibility
+		failDuration := time.Since(jobStartTime)
 		jp.logger.Error().
 			Err(err).
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
 			Int("worker_id", workerID).
-			Dur("duration", time.Since(jobStartTime)).
-			Msg("Job failed")
+			Dur("duration", failDuration).
+			Msgf("Job failed: %s (type=%s, worker=%d, duration=%s) error=%v", msg.JobID[:8], msg.Type, workerID, failDuration.Round(time.Millisecond), err)
 
 		// Error is already set by worker, just ensure status is updated
 		jp.jobMgr.UpdateJobStatus(jp.ctx, msg.JobID, "failed")
@@ -456,12 +461,14 @@ func (jp *JobProcessor) processNextJob(workerID int) bool {
 		}
 	} else {
 		// Job succeeded - log at Info level with duration
+		// Include context in message for Service Logs visibility
+		duration := time.Since(jobStartTime)
 		jp.logger.Info().
 			Str("job_id", msg.JobID).
 			Str("job_type", msg.Type).
 			Int("worker_id", workerID).
-			Dur("duration", time.Since(jobStartTime)).
-			Msg("Job completed")
+			Dur("duration", duration).
+			Msgf("Job completed: %s (type=%s, worker=%d, duration=%s)", msg.JobID[:8], msg.Type, workerID, duration.Round(time.Millisecond))
 
 		// For parent jobs, do NOT mark as completed here - JobMonitor will handle completion
 		// when all children are done. For other job types, mark as completed immediately.

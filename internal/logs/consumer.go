@@ -128,9 +128,11 @@ func (c *Consumer) consumer() {
 
 			// Process each event in the batch
 			for _, event := range batch {
-				// Skip HTTP request logs - these are not job-specific logs
-				// HTTP middleware generates correlation IDs for all requests, but these
-				// should not be stored in job_logs table (they're for request tracing only)
+				// Skip HTTP/WebSocket infrastructure logs - these should not:
+				// 1. Be stored in job_logs table (they're for request tracing only)
+				// 2. Trigger UI refresh events (prevents circular refresh loop)
+				// Without this skip, /api/logs/recent requests trigger log_event
+				// which triggers refresh_logs which triggers more /api/logs/recent requests
 				if event.Message == "HTTP request" ||
 					event.Message == "HTTP request - client error" ||
 					event.Message == "HTTP request - server error" ||
@@ -148,6 +150,7 @@ func (c *Consumer) consumer() {
 				}
 
 				// Publish as event if level >= threshold (for UI real-time updates)
+				// NOTE: This is inside the skip block - HTTP/WebSocket logs won't trigger refresh
 				if c.eventService != nil && c.shouldPublishEvent(event.Level) {
 					c.publishLogEvent(event, logEntry)
 				}

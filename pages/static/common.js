@@ -155,12 +155,16 @@ document.addEventListener('alpine:init', () => {
                 window.debugLog('ServiceLogs', 'Received data:', data);
                 if (data.logs && Array.isArray(data.logs)) {
                     window.debugLog('ServiceLogs', 'Processing', data.logs.length, 'log entries');
-                    this.logs = data.logs.map(log => {
+                    // Parse logs, assign IDs, and sort by serverIndex for stable ordering
+                    const parsed = data.logs.map(log => {
                         const entry = this._parseLogEntry(log);
                         entry.id = ++this.logIdCounter;
                         return entry;
                     });
-                    window.debugLog('ServiceLogs', 'Logs array now contains', this.logs.length, 'entries');
+                    // Sort by serverIndex to ensure correct order (timestamps may collide)
+                    parsed.sort((a, b) => a.serverIndex - b.serverIndex);
+                    this.logs = parsed;
+                    window.debugLog('ServiceLogs', 'Logs array now contains', this.logs.length, 'entries (sorted by index)');
                     // Scroll to bottom after loading recent logs
                     this.$nextTick(() => {
                         const container = this.$refs.logContainer;
@@ -199,8 +203,8 @@ document.addEventListener('alpine:init', () => {
         // Handle refresh_logs trigger from server (batched log delivery)
         handleRefreshTrigger(data) {
             const now = Date.now();
-            // Throttle: don't fetch more than once per 500ms
-            if (now - this._lastRefreshTime < 500) {
+            // Throttle: don't fetch more than once per 2 seconds to reduce request frequency
+            if (now - this._lastRefreshTime < 2000) {
                 window.debugLog('ServiceLogs', 'Skipping refresh_logs trigger - throttled');
                 return;
             }
@@ -240,8 +244,11 @@ document.addEventListener('alpine:init', () => {
             // Server sends level in 3-letter format (INF, WRN, ERR, DBG) - use as-is
             const level = logData.level || 'INF';
             const message = logData.message || logData.msg || '';
+            // Server sends index for stable ordering (timestamps may collide)
+            const serverIndex = logData.index !== undefined ? logData.index : 0;
 
             return {
+                serverIndex: serverIndex,
                 timestamp: this._formatLogTime(timestamp),
                 level: level,
                 levelClass: this._getLevelClass(level),
