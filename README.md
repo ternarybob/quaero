@@ -131,7 +131,7 @@ port = 8080  # Default port (can be overridden with --port flag or QUAERO_SERVER
 type = "badger"
 
 [storage.badger]
-path = "./data/quaero.badger"
+path = "./data"
 
 # Gemini API configuration (required for all AI features)
 [gemini]
@@ -1252,7 +1252,7 @@ min_event_level = "info"     # Minimum log level to publish as real-time events 
 type = "badger"
 
 [storage.badger]
-path = "./data/quaero.badger"
+path = "./data"
 ```
 
 ## Troubleshooting

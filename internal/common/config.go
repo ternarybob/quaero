@@ -183,7 +183,7 @@ func NewDefaultConfig() *Config {
 		},
 		Storage: StorageConfig{
 			Badger: BadgerConfig{
-				Path: "./data/quaero.badger",
+				Path: "./data",
 			},
 			Filesystem: FilesystemConfig{
 				Images:      "./data/images",

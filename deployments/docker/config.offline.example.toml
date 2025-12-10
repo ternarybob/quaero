@@ -58,7 +58,7 @@ host = "0.0.0.0"  # Listen on all interfaces in Docker
 # Storage Configuration
 # =============================================================================
 [storage.badger]
-path = "/data/quaero.badger"  # Docker volume mount point
+path = "/data"  # Docker volume mount point
 
 [storage.filesystem]
 images = "/data/images"
