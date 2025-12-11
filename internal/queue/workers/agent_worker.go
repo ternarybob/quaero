@@ -321,11 +321,18 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 		}
 	}
 
+	// Check for batch_mode option - when true, process all documents in single job
+	batchMode := false
+	if bm, ok := stepConfig["batch_mode"].(bool); ok {
+		batchMode = bm
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
 		Str("agent_type", agentType).
 		Int("document_count", len(documents)).
+		Bool("batch_mode", batchMode).
 		Msg("Agent worker initialized - found documents")
 
 	return &interfaces.WorkerInitResult{
@@ -338,6 +345,7 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 			"resolved_api_key": resolvedAPIKey,
 			"document_filter":  documentFilter,
 			"step_config":      stepConfig,
+			"batch_mode":       batchMode,
 		},
 	}, nil
 }
@@ -347,6 +355,9 @@ func (w *AgentWorker) Init(ctx context.Context, step models.JobStep, jobDef mode
 // and enqueues them for processing.
 // stepID is the ID of the step job - all jobs should have parent_id = stepID
 // If initResult is provided, it uses the document list from init.
+//
+// When batch_mode=true, processes all documents inline without creating child jobs.
+// This dramatically reduces job count (e.g., 2298 jobs -> 1 job) for faster execution.
 func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDef models.JobDefinition, stepID string, initResult *interfaces.WorkerInitResult) (string, error) {
 	// Call Init if not provided
 	if initResult == nil {
@@ -360,9 +371,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 	// Extract metadata from init result
 	agentType, _ := initResult.Metadata["agent_type"].(string)
 	stepConfig, _ := initResult.Metadata["step_config"].(map[string]interface{})
+	batchMode, _ := initResult.Metadata["batch_mode"].(bool)
 
 	// Apply resolved API key if available
-	if resolvedAPIKey, ok := initResult.Metadata["resolved_api_key"].(string); ok && resolvedAPIKey != "" {
+	resolvedAPIKey := ""
+	if key, ok := initResult.Metadata["resolved_api_key"].(string); ok && key != "" {
+		resolvedAPIKey = key
 		if stepConfig == nil {
 			stepConfig = make(map[string]interface{})
 		}
@@ -387,6 +401,12 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		return stepID, nil
 	}
 
+	// BATCH MODE: Process all documents inline without creating child jobs
+	if batchMode {
+		return w.executeBatchMode(ctx, step, stepID, agentType, initResult.WorkItems, stepConfig, managerID, resolvedAPIKey)
+	}
+
+	// STANDARD MODE: Create child jobs for each document
 	w.logger.Info().
 		Str("phase", "run").
 		Str("originator", "worker").
@@ -438,6 +458,121 @@ func (w *AgentWorker) CreateJobs(ctx context.Context, step models.JobStep, jobDe
 		Str("agent_type", agentType).
 		Int("jobs_completed", len(jobIDs)).
 		Msgf("Agent job orchestration completed: step=%s, agent=%s, jobs=%d", step.Name, agentType, len(jobIDs))
+
+	return stepID, nil
+}
+
+// executeBatchMode processes all documents inline without creating child jobs.
+// This is much faster for large document sets as it avoids job creation overhead.
+func (w *AgentWorker) executeBatchMode(ctx context.Context, step models.JobStep, stepID string, agentType string, workItems []interfaces.WorkItem, stepConfig map[string]interface{}, managerID string, resolvedAPIKey string) (string, error) {
+	w.logger.Info().
+		Str("phase", "run").
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("document_count", len(workItems)).
+		Msg("[batch_mode] Processing all documents inline")
+
+	w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[batch_mode] Processing %d documents with agent %s", len(workItems), agentType))
+
+	// Determine if this is a rule-based agent (no LLM) or AI agent
+	isRuleBased := w.agentService.IsRuleBased(agentType)
+	logPrefix := "AI"
+	if isRuleBased {
+		logPrefix = "Rule"
+	}
+
+	// Track progress
+	completed := 0
+	failed := 0
+	startTime := time.Now()
+
+	// Process each document inline
+	for i, workItem := range workItems {
+		docID := workItem.ID
+
+		// Check for cancellation
+		select {
+		case <-ctx.Done():
+			w.logger.Info().
+				Int("completed", completed).
+				Int("failed", failed).
+				Int("remaining", len(workItems)-i).
+				Msg("[batch_mode] Cancelled")
+			return stepID, ctx.Err()
+		default:
+		}
+
+		// Load document
+		doc, err := w.documentStorage.GetDocument(docID)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("document_id", docID).Msg("[batch_mode] Failed to load document")
+			failed++
+			continue
+		}
+
+		// Prepare agent input
+		agentInput := map[string]interface{}{
+			"document_id": docID,
+			"content":     doc.ContentMarkdown,
+		}
+
+		// Add optional parameters
+		if maxKeywords, ok := stepConfig["max_keywords"]; ok {
+			agentInput["max_keywords"] = maxKeywords
+		}
+		if resolvedAPIKey != "" {
+			agentInput["gemini_api_key"] = resolvedAPIKey
+		}
+
+		// Execute agent
+		agentOutput, err := w.agentService.Execute(ctx, agentType, agentInput)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("document_id", docID).Str("agent_type", agentType).Msg("[batch_mode] Agent execution failed")
+			failed++
+			continue
+		}
+
+		// Update document metadata
+		if doc.Metadata == nil {
+			doc.Metadata = make(map[string]interface{})
+		}
+		doc.Metadata[agentType] = agentOutput
+
+		if err := w.documentStorage.UpdateDocument(doc); err != nil {
+			w.logger.Warn().Err(err).Str("document_id", docID).Msg("[batch_mode] Failed to update document")
+			failed++
+			continue
+		}
+
+		completed++
+
+		// Log progress every 50 documents
+		if completed%50 == 0 {
+			w.logger.Info().
+				Int("completed", completed).
+				Int("failed", failed).
+				Int("total", len(workItems)).
+				Msg("[batch_mode] Progress update")
+			w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[batch_mode] %s: %s - %d/%d documents processed", logPrefix, agentType, completed, len(workItems)))
+		}
+	}
+
+	duration := time.Since(startTime)
+	w.logger.Info().
+		Str("phase", "run").
+		Str("step_name", step.Name).
+		Str("agent_type", agentType).
+		Int("completed", completed).
+		Int("failed", failed).
+		Dur("duration", duration).
+		Msg("[batch_mode] Batch processing completed")
+
+	w.jobMgr.AddJobLog(ctx, stepID, "info", fmt.Sprintf("[batch_mode] %s: %s - completed %d documents (%d failed) in %v", logPrefix, agentType, completed, failed, duration))
+
+	// Consider success if at least some documents were processed
+	if completed == 0 && failed > 0 {
+		return stepID, fmt.Errorf("[batch_mode] all %d documents failed processing", failed)
+	}
 
 	return stepID, nil
 }

@@ -346,6 +346,42 @@ func (m *StepMonitor) publishStepProgress(
 				Msg("Failed to publish step progress event")
 		}
 	}()
+
+	// Also publish unified job_update event for immediate UI status sync
+	// This bypasses the log aggregator for direct status updates
+	isTerminalStatus := status == "completed" || status == "failed" || status == "cancelled"
+	m.publishJobUpdate(ctx, managerID, stepName, status, isTerminalStatus)
+}
+
+// publishJobUpdate publishes the unified EventJobUpdate for real-time UI synchronization
+// This is a direct broadcast that doesn't go through the log aggregator
+func (m *StepMonitor) publishJobUpdate(ctx context.Context, managerID, stepName, status string, refreshLogs bool) {
+	if m.eventService == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"context":      "job_step",
+		"job_id":       managerID,
+		"step_name":    stepName,
+		"status":       status,
+		"refresh_logs": refreshLogs,
+		"timestamp":    time.Now().Format(time.RFC3339),
+	}
+
+	event := interfaces.Event{
+		Type:    interfaces.EventJobUpdate,
+		Payload: payload,
+	}
+
+	go func() {
+		if err := m.eventService.Publish(ctx, event); err != nil {
+			m.logger.Warn().Err(err).
+				Str("manager_id", managerID).
+				Str("step_name", stepName).
+				Msg("Failed to publish job update event")
+		}
+	}()
 }
 
 // publishStepLog stores and publishes a job_log event for a step to the step job's log stream.

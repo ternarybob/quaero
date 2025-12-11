@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,6 +107,12 @@ func TestCodebaseAssessment_FullFlow(t *testing.T) {
 		ctc.env.LogTest(t, "Warning: Failed to navigate to queue page: %v", err)
 	}
 	ctc.takeSequentialScreenshot("queue_job_completed")
+
+	// 3.5 Verify tree view is displaying correctly with proper step statuses
+	if err := ctc.verifyTreeView(jobID); err != nil {
+		ctc.env.LogTest(t, "Warning: Tree view verification issue: %v", err)
+		// Don't fail the test, just log the issue
+	}
 
 	// 4. Verify assessment results
 	if err := ctc.verifyAssessmentResults(); err != nil {
@@ -707,8 +714,472 @@ func (ctc *codebaseTestContext) monitorJobWithPolling(jobID string, timeout time
 }
 
 // =============================================================================
+// Private Methods - Tree View Verification
+// =============================================================================
+
+// verifyTreeView tests that the tree view is displaying correctly
+func (ctc *codebaseTestContext) verifyTreeView(jobID string) error {
+	ctc.env.LogTest(ctc.t, "Verifying tree view for job: %s", jobID)
+
+	// First, get the parent job to check its status
+	parentResp, err := ctc.helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
+	if err != nil {
+		return fmt.Errorf("failed to get parent job: %w", err)
+	}
+
+	var parentJob map[string]interface{}
+	if err := ctc.helper.ParseJSONResponse(parentResp, &parentJob); err != nil {
+		parentResp.Body.Close()
+		return fmt.Errorf("failed to parse parent job: %w", err)
+	}
+	parentResp.Body.Close()
+
+	parentStatus, _ := parentJob["status"].(string)
+	ctc.env.LogTest(ctc.t, "  Parent job status: %s", parentStatus)
+
+	// Fetch tree data from API
+	resp, err := ctc.helper.GET(fmt.Sprintf("/api/jobs/%s/tree", jobID))
+	if err != nil {
+		return fmt.Errorf("failed to get tree data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var treeData map[string]interface{}
+	if err := ctc.helper.ParseJSONResponse(resp, &treeData); err != nil {
+		return fmt.Errorf("failed to parse tree response: %w", err)
+	}
+
+	// Verify tree has steps
+	steps, ok := treeData["steps"].([]interface{})
+	if !ok {
+		return fmt.Errorf("tree data missing 'steps' array")
+	}
+
+	ctc.env.LogTest(ctc.t, "  Tree has %d steps", len(steps))
+
+	// Count steps by status for verification
+	statusCounts := map[string]int{}
+	var issues []string
+
+	// Verify each step has correct status
+	for i, stepRaw := range steps {
+		step, ok := stepRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name, _ := step["name"].(string)
+		status, _ := step["status"].(string)
+		logs, _ := step["logs"].([]interface{})
+		childSummary, hasChildSummary := step["child_summary"].(map[string]interface{})
+
+		ctc.env.LogTest(ctc.t, "  Step %d: %s (status: %s, logs: %d)", i+1, name, status, len(logs))
+
+		// Verify step has a valid status
+		validStatuses := map[string]bool{
+			"pending": true, "running": true, "completed": true, "failed": true, "cancelled": true,
+		}
+		if !validStatuses[status] {
+			issues = append(issues, fmt.Sprintf("step %s has invalid status: %s", name, status))
+		}
+
+		statusCounts[status]++
+
+		// Log child summary if available
+		if hasChildSummary {
+			total, _ := childSummary["total"].(float64)
+			completed, _ := childSummary["completed"].(float64)
+			failed, _ := childSummary["failed"].(float64)
+			ctc.env.LogTest(ctc.t, "    Child summary: %d total, %d completed, %d failed", int(total), int(completed), int(failed))
+		}
+	}
+
+	// Log status distribution
+	ctc.env.LogTest(ctc.t, "  Status distribution: %v", statusCounts)
+
+	// If parent job is completed, verify all steps are completed (or at least none are running)
+	if parentStatus == "completed" {
+		if statusCounts["running"] > 0 {
+			issues = append(issues, fmt.Sprintf("parent job is completed but %d steps still show 'running' status", statusCounts["running"]))
+		}
+	}
+
+	if len(issues) > 0 {
+		for _, issue := range issues {
+			ctc.env.LogTest(ctc.t, "  WARNING: %s", issue)
+		}
+	}
+
+	// Take screenshot of tree view in browser
+	// Navigate to queue page and expand the job
+	queueURL := fmt.Sprintf("%s/queue?job=%s", ctc.baseURL, jobID)
+	if err := chromedp.Run(ctc.ctx,
+		chromedp.Navigate(queueURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		ctc.env.LogTest(ctc.t, "  Warning: Could not navigate to queue: %v", err)
+	}
+
+	// Click to expand the job's tree view using JavaScript
+	var expandResult string
+	if err := chromedp.Run(ctc.ctx,
+		chromedp.Evaluate(`
+			(function() {
+				// Find the parent job row and click its expand button
+				const rows = document.querySelectorAll('[class*="job-row"], [class*="queue-item"]');
+				for (const row of rows) {
+					// Look for the steps toggle button (fa-sitemap icon)
+					const stepsBtn = row.querySelector('button[title*="steps"], button[title*="tree"], .fa-sitemap');
+					if (stepsBtn) {
+						// Click the parent element if it's an icon
+						const btn = stepsBtn.tagName === 'I' ? stepsBtn.parentElement : stepsBtn;
+						if (btn) {
+							btn.click();
+							return 'expanded';
+						}
+					}
+				}
+				return 'no steps button found';
+			})()
+		`, &expandResult),
+	); err != nil {
+		ctc.env.LogTest(ctc.t, "  Warning: Could not expand tree view: %v", err)
+	} else {
+		ctc.env.LogTest(ctc.t, "  Tree view expand result: %s", expandResult)
+	}
+
+	time.Sleep(2 * time.Second)
+	ctc.takeSequentialScreenshot("tree_view_expanded")
+
+	ctc.env.LogTest(ctc.t, "✓ Tree view verification completed")
+	return nil
+}
+
+// =============================================================================
 // Private Methods - Verification
 // =============================================================================
+
+// =============================================================================
+// TestCodebaseClassify_LiveLogExpansion - Tests live log expansion without refresh
+// =============================================================================
+
+// TestCodebaseClassify_LiveLogExpansion tests that tree view logs expand in real-time
+// without requiring a page refresh, using the codebase_classify.toml job definition
+func TestCodebaseClassify_LiveLogExpansion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping long-running test")
+	}
+
+	ctc, cleanup := newCodebaseTestContext(t, 10*time.Minute)
+	defer cleanup()
+
+	ctc.env.LogTest(t, "--- Starting Test: Codebase Classify Live Log Expansion ---")
+
+	// Load the codebase_classify job definition
+	if err := ctc.loadCodebaseClassifyDefinition(); err != nil {
+		t.Fatalf("Failed to load codebase_classify definition: %v", err)
+	}
+
+	// Navigate to Queue page and wait for it to load
+	queueURL := ctc.baseURL + "/queue"
+	if err := chromedp.Run(ctc.ctx,
+		chromedp.Navigate(queueURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("Failed to navigate to queue page: %v", err)
+	}
+	ctc.takeSequentialScreenshot("queue_before_job")
+
+	// Trigger the codebase_classify job via API
+	jobID, err := ctc.triggerCodebaseClassify()
+	if err != nil {
+		t.Fatalf("Failed to trigger codebase_classify: %v", err)
+	}
+
+	ctc.env.LogTest(t, "Job triggered: %s", jobID)
+	ctc.takeSequentialScreenshot("after_trigger")
+
+	// Navigate to queue page with job filter
+	jobQueueURL := fmt.Sprintf("%s/queue?job=%s", ctc.baseURL, jobID)
+	if err := chromedp.Run(ctc.ctx,
+		chromedp.Navigate(jobQueueURL),
+		chromedp.Sleep(2*time.Second),
+	); err != nil {
+		t.Fatalf("Failed to navigate to job queue: %v", err)
+	}
+
+	// Wait for tree view to be rendered (auto-expands when logs arrive via WebSocket)
+	ctc.env.LogTest(t, "Waiting for tree view to appear via WebSocket...")
+	ctc.takeSequentialScreenshot("waiting_for_tree")
+
+	// Verify live log expansion - check that steps auto-expand as logs arrive
+	// WITHOUT refreshing the page
+	if err := ctc.verifyLiveLogExpansion(jobID, 5*time.Minute); err != nil {
+		ctc.takeSequentialScreenshot("live_expansion_failed")
+		t.Fatalf("Live log expansion verification failed: %v", err)
+	}
+
+	ctc.takeSequentialScreenshot("live_expansion_complete")
+	ctc.env.LogTest(t, "✓ Test completed successfully")
+}
+
+// loadCodebaseClassifyDefinition loads the codebase_classify.toml job definition
+func (ctc *codebaseTestContext) loadCodebaseClassifyDefinition() error {
+	possiblePaths := []string{
+		"config/job-definitions/codebase_classify.toml",
+		"../config/job-definitions/codebase_classify.toml",
+		"../../test/config/job-definitions/codebase_classify.toml",
+		"test/config/job-definitions/codebase_classify.toml",
+	}
+
+	var foundPath string
+	var content []byte
+	var err error
+	for _, p := range possiblePaths {
+		absPath, _ := filepath.Abs(p)
+		content, err = os.ReadFile(absPath)
+		if err == nil {
+			foundPath = absPath
+			break
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("could not find codebase_classify.toml: %w", err)
+	}
+
+	ctc.env.LogTest(ctc.t, "Found codebase_classify definition at: %s", foundPath)
+
+	// Save to results directory
+	destPath := filepath.Join(ctc.env.GetResultsDir(), "codebase_classify.toml")
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		ctc.env.LogTest(ctc.t, "Warning: Could not save job definition TOML: %v", err)
+	}
+
+	// Load the job definition into the service via API
+	if err := ctc.env.LoadJobDefinitionFile(foundPath); err != nil {
+		return fmt.Errorf("could not load job definition into service: %w", err)
+	}
+
+	return nil
+}
+
+// triggerCodebaseClassify triggers the codebase_classify job via API
+func (ctc *codebaseTestContext) triggerCodebaseClassify() (string, error) {
+	ctc.env.LogTest(ctc.t, "Triggering codebase_classify job via API...")
+
+	// Execute job definition via POST /api/job-definitions/{id}/execute
+	resp, err := ctc.helper.POST("/api/job-definitions/codebase_classify/execute", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute job definition: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	ctc.env.LogTest(ctc.t, "Job definition execution triggered, polling for manager job...")
+
+	// Poll for the manager job to appear
+	var jobID string
+	for i := 0; i < 30; i++ { // Wait up to 30 seconds
+		time.Sleep(1 * time.Second)
+
+		jobsResp, err := ctc.helper.GET("/api/jobs?limit=10&order=desc")
+		if err != nil {
+			continue
+		}
+
+		var jobsResult map[string]interface{}
+		if err := ctc.helper.ParseJSONResponse(jobsResp, &jobsResult); err != nil {
+			jobsResp.Body.Close()
+			continue
+		}
+		jobsResp.Body.Close()
+
+		jobs, ok := jobsResult["jobs"].([]interface{})
+		if !ok || len(jobs) == 0 {
+			continue
+		}
+
+		// Find the most recent manager job for codebase_classify
+		for _, jobRaw := range jobs {
+			job, ok := jobRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			jobType, _ := job["type"].(string)
+			if jobType != "manager" {
+				continue
+			}
+
+			// Check if this job is for codebase_classify
+			metadata, _ := job["metadata"].(map[string]interface{})
+			jobDefID, _ := metadata["job_definition_id"].(string)
+			if jobDefID == "codebase_classify" {
+				jobID, _ = job["id"].(string)
+				break
+			}
+		}
+
+		if jobID != "" {
+			break
+		}
+	}
+
+	if jobID == "" {
+		return "", fmt.Errorf("manager job not found after polling")
+	}
+
+	ctc.env.LogTest(ctc.t, "✓ Job created: %s", jobID)
+	return jobID, nil
+}
+
+// verifyLiveLogExpansion verifies that logs expand in real-time without page refresh
+func (ctc *codebaseTestContext) verifyLiveLogExpansion(jobID string, timeout time.Duration) error {
+	ctc.env.LogTest(ctc.t, "Verifying live log expansion for job: %s", jobID)
+
+	startTime := time.Now()
+	checkInterval := 2 * time.Second
+	lastLogCount := 0
+	expansionVerified := false
+	screenshotCount := 0
+	maxScreenshots := 5
+
+	for {
+		if time.Since(startTime) > timeout {
+			if !expansionVerified {
+				return fmt.Errorf("timeout waiting for live log expansion")
+			}
+			break
+		}
+
+		// Check job status via API
+		resp, err := ctc.helper.GET(fmt.Sprintf("/api/jobs/%s", jobID))
+		if err != nil {
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		var job map[string]interface{}
+		if err := ctc.helper.ParseJSONResponse(resp, &job); err != nil {
+			resp.Body.Close()
+			time.Sleep(checkInterval)
+			continue
+		}
+		resp.Body.Close()
+
+		status, _ := job["status"].(string)
+
+		// Get tree data to count logs
+		treeResp, err := ctc.helper.GET(fmt.Sprintf("/api/jobs/%s/tree", jobID))
+		if err != nil {
+			time.Sleep(checkInterval)
+			continue
+		}
+
+		var treeData map[string]interface{}
+		if err := ctc.helper.ParseJSONResponse(treeResp, &treeData); err != nil {
+			treeResp.Body.Close()
+			time.Sleep(checkInterval)
+			continue
+		}
+		treeResp.Body.Close()
+
+		// Count total logs across all steps
+		totalLogs := 0
+		expandedSteps := 0
+		if steps, ok := treeData["steps"].([]interface{}); ok {
+			for _, stepRaw := range steps {
+				if step, ok := stepRaw.(map[string]interface{}); ok {
+					if logs, ok := step["logs"].([]interface{}); ok {
+						totalLogs += len(logs)
+						if len(logs) > 0 {
+							expandedSteps++
+						}
+					}
+				}
+			}
+		}
+
+		// Check if logs increased (indicating live updates are working)
+		if totalLogs > lastLogCount {
+			ctc.env.LogTest(ctc.t, "  Live update detected: %d -> %d logs (expanded steps: %d)",
+				lastLogCount, totalLogs, expandedSteps)
+
+			// Take periodic screenshots to verify UI is updating
+			if screenshotCount < maxScreenshots {
+				screenshotCount++
+				ctc.takeSequentialScreenshot(fmt.Sprintf("live_log_%d_logs_%d", screenshotCount, totalLogs))
+			}
+
+			// Verify in browser that tree and log lines are visible (without refresh!)
+			var uiStatus struct {
+				TreeSteps int `json:"treeSteps"`
+				LogLines  int `json:"logLines"`
+			}
+			if err := chromedp.Run(ctc.ctx,
+				chromedp.Evaluate(`
+					(function() {
+						// Count tree-step elements (each represents a pipeline step)
+						const treeSteps = document.querySelectorAll('.tree-step');
+
+						// Count visible log lines in the tree view
+						// These are in .tree-log-line elements within expanded steps
+						const logLines = document.querySelectorAll('.tree-log-line');
+						let visibleLogLines = 0;
+						logLines.forEach(line => {
+							// Check if element is visible (has offsetParent and non-zero size)
+							if (line.offsetParent !== null || line.offsetWidth > 0 || line.offsetHeight > 0) {
+								visibleLogLines++;
+							}
+						});
+
+						return {
+							treeSteps: treeSteps.length,
+							logLines: visibleLogLines
+						};
+					})()
+				`, &uiStatus),
+			); err == nil {
+				if uiStatus.TreeSteps > 0 {
+					ctc.env.LogTest(ctc.t, "  UI shows %d tree steps, %d visible log lines (no refresh needed)",
+						uiStatus.TreeSteps, uiStatus.LogLines)
+					if uiStatus.LogLines > 0 {
+						expansionVerified = true
+					}
+				}
+			}
+
+			lastLogCount = totalLogs
+		}
+
+		// Check if job is done
+		if status == "completed" || status == "failed" || status == "cancelled" {
+			ctc.env.LogTest(ctc.t, "  Job finished with status: %s (total logs: %d)", status, totalLogs)
+
+			// Take final screenshot
+			ctc.takeSequentialScreenshot(fmt.Sprintf("job_%s_final", status))
+
+			if status == "failed" {
+				return fmt.Errorf("job failed")
+			}
+			break
+		}
+
+		time.Sleep(checkInterval)
+	}
+
+	if !expansionVerified {
+		return fmt.Errorf("could not verify live log expansion in UI")
+	}
+
+	ctc.env.LogTest(ctc.t, "✓ Live log expansion verified successfully")
+	return nil
+}
 
 // verifyAssessmentResults verifies that the assessment pipeline processed documents
 func (ctc *codebaseTestContext) verifyAssessmentResults() error {

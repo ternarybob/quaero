@@ -1,118 +1,29 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(git push:*)"
-    ],
-    "deny": [],
-    "ask": []
-  },
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node .claude/hooks/project-standards.js"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session completed'"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session started'"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Session ended'"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Claude notification'"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'Subagent stopped'"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'About to compact context'"
-          }
-        ]
-      }
-    ]
-  },
   "env": {
     "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
     "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
     "DISABLE_TELEMETRY": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
-  "spinnerTipsEnabled": false,
-  "statusLine": "custom-status-message"
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(mkdir:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File scriptsbuild.ps1)",
+      "Bash(powershell:*)",
+      "Bash(taskkill:*)",
+      "Bash(git -C \"C:/development/quaero\" status pages/queue.html)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(certutil:*)",
+      "Bash(perl:*)",
+      "Bash(xxd:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "spinnerTipsEnabled": false
 }

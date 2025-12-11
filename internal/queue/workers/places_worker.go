@@ -317,6 +317,13 @@ func (w *PlacesWorker) CreateJobs(ctx context.Context, step models.JobStep, jobD
 			Str("place_name", doc.Title).
 			Msg("Place document saved successfully")
 
+		// Increment document count on manager job for UI display
+		if w.jobMgr != nil && managerID != "" {
+			if err := w.jobMgr.IncrementDocumentCount(ctx, managerID); err != nil {
+				w.logger.Warn().Err(err).Str("manager_id", managerID).Msg("Failed to increment document count")
+			}
+		}
+
 		// Log document saved via Job Manager's unified logging
 		if w.jobMgr != nil && stepID != "" {
 			message := fmt.Sprintf("Document saved: %s (ID: %s)", doc.Title, doc.ID[:8])

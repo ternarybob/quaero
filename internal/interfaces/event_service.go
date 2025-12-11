@@ -269,6 +269,33 @@ const (
 	//   - document_count: int (total documents created)
 	//   - timestamp: string (RFC3339 formatted timestamp)
 	EventManagerProgress EventType = "manager_progress"
+
+	// EventJobStats is published when job statistics change (job created, status changed, deleted).
+	// This enables real-time updates of the queue statistics dashboard.
+	// Published by: QueueStorage (on job create/update/delete)
+	// Subscribed by: WebSocket handler (broadcasts to connected clients)
+	// Payload structure (map[string]interface{}):
+	//   - total_jobs: int (total number of jobs)
+	//   - pending_jobs: int (jobs in pending state)
+	//   - running_jobs: int (jobs currently running)
+	//   - completed_jobs: int (jobs that completed successfully)
+	//   - failed_jobs: int (jobs that failed)
+	//   - cancelled_jobs: int (jobs that were cancelled)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobStats EventType = "job_stats"
+
+	// EventJobUpdate is published when a job or step status changes.
+	// This is a unified event type for real-time UI synchronization.
+	// Published by: StepMonitor (on step status change), JobMonitor (on job status change)
+	// Subscribed by: WebSocket handler (broadcasts to connected clients)
+	// Payload structure (map[string]interface{}):
+	//   - context: string ("job" or "job_step")
+	//   - job_id: string (manager/parent job ID)
+	//   - step_name: string (only if context="job_step")
+	//   - status: string (job or step status)
+	//   - refresh_logs: bool (true if UI should fetch updated logs)
+	//   - timestamp: string (RFC3339 formatted timestamp)
+	EventJobUpdate EventType = "job_update"
 )
 
 // Event represents a system event

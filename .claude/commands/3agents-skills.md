@@ -1,6 +1,6 @@
 ---
 name: 3agents-skills
-description: Opus plans/reviews, Sonnet implements with skills, Sonnet validates against user intent.
+description: Opus plans/reviews/validates, Sonnet implements with skills.
 ---
 
 Execute: $ARGUMENTS
@@ -8,10 +8,10 @@ Execute: $ARGUMENTS
 ## CONFIG
 ```yaml
 models: 
-  planner: claude-opus-4-5-20251101   # PHASE 1: breaks down request, selects skills
-  worker: sonnet                       # PHASE 2: implements tasks with skill patterns
-  validator: sonnet                    # PHASE 3: checks work matches user request
-  reviewer: opus                       # PHASE 4: security/architecture review
+  planner: opus      # PHASE 1: breaks down request, selects skills
+  worker: sonnet     # PHASE 2: implements tasks with skill patterns
+  validator: opus    # PHASE 3: validates + creates fix tasks if needed
+  reviewer: opus     # PHASE 4: architecture review + creates refactor tasks if needed
 opus_override: [security, authentication, crypto, state-machine, architectural-change]
 critical_triggers: [security, authentication, authorization, payments, data-migration, crypto, api-breaking, database-schema]
 paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents-skills/", skills: ".claude/skills/" }
@@ -190,7 +190,7 @@ Build: ✅|❌ | Tests: ✅|❌|⏭️
 
 ---
 
-## PHASE 3: VALIDATE (sonnet - validator)
+## PHASE 3: VALIDATE (opus)
 
 **Purpose: Verify implementation matches user's original request AND skill patterns**
 
@@ -206,7 +206,7 @@ After all tasks complete:
 **WRITE `{workdir}/validation.md`:**
 ```markdown
 # Validation
-Validator: sonnet | Date: {timestamp}
+Validator: opus | Date: {timestamp}
 
 ## User Request
 "{original request from manifest}"
@@ -249,26 +249,71 @@ Build: ✅|❌ | Tests: ✅|❌ ({N} passed, {N} failed)
 
 **Update progress.md** - mark tasks as validated.
 
-**If MISMATCH:** Create fix tasks, return to PHASE 2.
+**If MISMATCH or PARTIAL:**
+1. Create fix tasks in `{workdir}/fix-task-{N}.md`
+2. Return to PHASE 2 to implement fixes
+3. Re-validate after fixes
+4. Max 2 fix iterations before escalating to user
 
 ---
 
 ## PHASE 4: REVIEW (opus) — if any critical tasks
+
+**Purpose: Architectural review focused on separation of concerns and function design**
 
 **WRITE `{workdir}/review.md`:**
 ```markdown
 # Review
 Triggers: {list}
 
-## Security/Architecture Issues
+## Architectural Assessment
+
+### Separation of Concerns
+| Component | Responsibility | Violations |
+|-----------|---------------|------------|
+| {file/package} | {single purpose} | ✅ Clean | ❌ {issue} |
+
+### Function Design
+| Function | Lines | Params | Does One Thing? | Issues |
+|----------|-------|--------|-----------------|--------|
+| {name} | {N} | {N} | ✅|❌ | {issue or "none"} |
+
+**Principles checked:**
+- [ ] Functions do ONE thing within their context
+- [ ] Functions are small and focused (<50 lines preferred)
+- [ ] Parameters are minimal and meaningful
+- [ ] No hidden side effects
+- [ ] Clear input → output relationship
+- [ ] Appropriate abstraction level
+
+### Dependency Flow
+- [ ] Dependencies flow inward (domain doesn't depend on infrastructure)
+- [ ] No circular dependencies
+- [ ] Interfaces at boundaries
+
+### Security/Data Issues
 - {issue or "None"}
 
 ## Skill Concerns
 - {any skill-related architectural issues}
 
 ## Verdict: ✅ APPROVED | ⚠️ NOTES | ❌ CHANGES_REQUIRED
-- {action item}
+
+### Action Items (if any)
+1. {refactor needed}
 ```
+
+**If CHANGES_REQUIRED or NOTES with refactors:**
+1. Create refactor tasks in `{workdir}/refactor-task-{N}.md`
+2. Return to PHASE 2 to implement refactors
+3. Re-review after changes
+4. Max 2 refactor iterations before escalating to user
+
+**Refactor tasks focus on:**
+- Splitting large functions
+- Extracting shared logic
+- Fixing dependency direction
+- Improving separation of concerns
 
 ---
 
@@ -311,37 +356,36 @@ Cleanup: `rm -rf /tmp/3agents-skills/`
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 0: CLASSIFY + SKILL DISCOVERY                 │
-│ Extract intent + assess available skills            │
-│ → manifest.md (with skills assessment)              │
+│ → manifest.md                                       │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 1: PLAN (opus)                                │
-│ Load relevant skills, break into tasks              │
-│ Assign skills to tasks                              │
+│ → plan.md + task-N.md                               │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
-│ PHASE 2: IMPLEMENT (sonnet - worker)                │
-│ Execute tasks with skill patterns                   │
-│ step-N.md for each with skill compliance            │
-└─────────────────┬───────────────────────────────────┘
-                  ▼
-┌─────────────────────────────────────────────────────┐
-│ PHASE 3: VALIDATE (sonnet - validator)              │
-│ Compare implementation to user intent               │
-│ Verify skill pattern compliance                     │
-│ ❌ MISMATCH → loop back to PHASE 2 with fixes      │
-└─────────────────┬───────────────────────────────────┘
-                  ▼
-┌─────────────────────────────────────────────────────┐
-│ PHASE 4: REVIEW (opus) - if critical                │
-│ Security/architecture + skill concerns              │
+│ PHASE 2: IMPLEMENT (sonnet)                         │◄──────────────┐
+│ → step-N.md for each task                           │               │
+└─────────────────┬───────────────────────────────────┘               │
+                  ▼                                                   │
+┌─────────────────────────────────────────────────────┐               │
+│ PHASE 3: VALIDATE (opus)                            │               │
+│ → validation.md                                     │               │
+│ ❌ PARTIAL/MISMATCH → fix-task-N.md ────────────────┼───────────────┤
+│ ✅ MATCHES → continue                               │               │
+└─────────────────┬───────────────────────────────────┘               │
+                  ▼                                                   │
+┌─────────────────────────────────────────────────────┐               │
+│ PHASE 4: REVIEW (opus) - if critical                │               │
+│ → review.md                                         │               │
+│ ❌ CHANGES_REQUIRED → refactor-task-N.md ───────────┼───────────────┘
+│ ✅ APPROVED → continue                              │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 5: SUMMARY                                    │
-│ Final report with validation + skills used          │
+│ → summary.md                                        │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -349,26 +393,30 @@ Cleanup: `rm -rf /tmp/3agents-skills/`
 
 ## ENFORCEMENT
 ```
-PHASE 0 → manifest.md (with intent + skills assessment) EXISTS? → PHASE 1
+PHASE 0 → manifest.md EXISTS? → PHASE 1
 PHASE 1 → plan.md + task-*.md EXIST? → PHASE 2  
-PHASE 2 → step-N.md after EACH task → progress.md updated
-PHASE 3 → validation.md written → MATCHES? continue : fix loop
-PHASE 4 → review.md if critical
+PHASE 2 → step-N.md after EACH task → PHASE 3
+PHASE 3 → validation.md → MATCHES? → PHASE 4 (or 5)
+                        → PARTIAL/MISMATCH? → fix tasks → PHASE 2 (max 2 loops)
+PHASE 4 → review.md → APPROVED? → PHASE 5
+                    → CHANGES_REQUIRED? → refactor tasks → PHASE 2 (max 2 loops)
 PHASE 5 → summary.md EXISTS? → DONE
 ```
 
 **HARD STOPS:**
 - User decision needed
-- `CHANGES_REQUIRED` verdict
 - Ambiguous requirements
-- `MISMATCH` after 2 fix attempts
+- `MISMATCH` after 2 fix iterations
+- `CHANGES_REQUIRED` after 2 refactor iterations
 
-**NOT STOPS (fix and continue):**
-- Compile errors
-- Test failures
-- `APPROVED_WITH_NOTES`
-- `PARTIAL` match (with notes)
-- No matching skills (proceed without)
+**NOT STOPS (iterate and fix):**
+- Compile errors → fix and retry
+- Test failures → fix and retry
+- `PARTIAL` match → create fix tasks, iterate
+- `MISMATCH` (first time) → create fix tasks, iterate
+- `CHANGES_REQUIRED` (first time) → create refactor tasks, iterate
+- `APPROVED_WITH_NOTES` → proceed with notes
+- No matching skills → proceed without
 
 ---
 
@@ -378,8 +426,10 @@ PHASE 5 → summary.md EXISTS? → DONE
 - [ ] task-{N}.md for each task (with skill assignment)
 - [ ] step-{N}.md for each completed task (with skill compliance)
 - [ ] progress.md current
-- [ ] **validation.md with intent comparison + skill compliance**
+- [ ] validation.md with intent comparison + skill compliance
+- [ ] fix-task-{N}.md (if validation found issues)
 - [ ] review.md (if critical)
+- [ ] refactor-task-{N}.md (if review found issues)
 - [ ] summary.md created
 - [ ] /tmp/3agents-skills/ cleaned
 

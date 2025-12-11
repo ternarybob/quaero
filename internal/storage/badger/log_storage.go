@@ -55,8 +55,8 @@ func (s *LogStorage) AppendLogs(ctx context.Context, jobID string, entries []mod
 
 func (s *LogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	// Query using the indexed JobIDField
-	query := badgerhold.Where("JobIDField").Eq(jobID).SortBy("FullTimestamp").Reverse()
+	// Query using the indexed JobIDField - sort ASC (oldest first) for chronological display
+	query := badgerhold.Where("JobIDField").Eq(jobID).SortBy("FullTimestamp")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}

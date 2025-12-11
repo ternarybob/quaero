@@ -278,6 +278,16 @@ type JobStatusUpdate struct {
 	RunningChildren int      `json:"running_children,omitempty"` // Number of running child jobs
 }
 
+// JobUpdatePayload represents a unified job/step status update for real-time UI sync
+// This is a simplified message format that replaces the multiple overlapping message types
+type JobUpdatePayload struct {
+	Context     string `json:"context"`                // "job" or "job_step"
+	JobID       string `json:"job_id"`                 // Manager/parent job ID
+	StepName    string `json:"step_name,omitempty"`    // Only for context="job_step"
+	Status      string `json:"status"`                 // Job or step status
+	RefreshLogs bool   `json:"refresh_logs,omitempty"` // True if UI should fetch updated logs
+}
+
 // CrawlerJobProgressUpdate represents real-time progress updates for crawler jobs
 // This includes comprehensive parent-child job statistics and link following metrics
 type CrawlerJobProgressUpdate struct {
@@ -842,6 +852,52 @@ func (h *WebSocketHandler) BroadcastCrawlerJobProgress(update CrawlerJobProgress
 	}
 }
 
+// BroadcastJobUpdate sends a unified job/step status update to all connected clients
+// This is the primary method for real-time UI status synchronization
+// context: "job" for overall job status, "job_step" for step-level status
+func (h *WebSocketHandler) BroadcastJobUpdate(jobID, context, stepName, status string, refreshLogs bool) {
+	payload := JobUpdatePayload{
+		Context:     context,
+		JobID:       jobID,
+		Status:      status,
+		RefreshLogs: refreshLogs,
+	}
+	if context == "job_step" && stepName != "" {
+		payload.StepName = stepName
+	}
+
+	msg := WSMessage{
+		Type:    "job_update",
+		Payload: payload,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("Failed to marshal job update message")
+		return
+	}
+
+	h.mu.RLock()
+	clients := make([]*websocket.Conn, 0, len(h.clients))
+	mutexes := make([]*sync.Mutex, 0, len(h.clients))
+	for conn := range h.clients {
+		clients = append(clients, conn)
+		mutexes = append(mutexes, h.clientMutex[conn])
+	}
+	h.mu.RUnlock()
+
+	for i, conn := range clients {
+		mutex := mutexes[i]
+		mutex.Lock()
+		err := conn.WriteMessage(websocket.TextMessage, data)
+		mutex.Unlock()
+
+		if err != nil {
+			h.logger.Warn().Err(err).Msg("Failed to send job update to client")
+		}
+	}
+}
+
 // StreamCrawlerJobLog is DEPRECATED - use logger with correlation ID instead
 // Crawler logs should go through: jobLogger.WithCorrelationId(jobID).Info(msg) -> LogService -> EventService -> WebSocket
 func (h *WebSocketHandler) StreamCrawlerJobLog(jobID, level, message string, metadata map[string]interface{}) {
@@ -1399,6 +1455,82 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 			}
 		}
 
+		return nil
+	})
+
+	// Subscribe to job stats events for real-time queue statistics dashboard
+	h.eventService.Subscribe(interfaces.EventJobStats, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid job_stats event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_stats"] {
+			return nil
+		}
+
+		// Broadcast job stats to all clients
+		msg := WSMessage{
+			Type:    "job_stats",
+			Payload: payload,
+		}
+
+		data, err := json.Marshal(msg)
+		if err != nil {
+			h.logger.Error().Err(err).Msg("Failed to marshal job stats message")
+			return nil
+		}
+
+		h.mu.RLock()
+		clients := make([]*websocket.Conn, 0, len(h.clients))
+		mutexes := make([]*sync.Mutex, 0, len(h.clients))
+		for conn := range h.clients {
+			clients = append(clients, conn)
+			mutexes = append(mutexes, h.clientMutex[conn])
+		}
+		h.mu.RUnlock()
+
+		for i, conn := range clients {
+			mutex := mutexes[i]
+			mutex.Lock()
+			err := conn.WriteMessage(websocket.TextMessage, data)
+			mutex.Unlock()
+
+			if err != nil {
+				h.logger.Warn().Err(err).Msg("Failed to send job stats to client")
+			}
+		}
+
+		return nil
+	})
+
+	// Subscribe to unified job update events for real-time UI status sync
+	// This is a direct broadcast that bypasses the log aggregator for immediate status updates
+	h.eventService.Subscribe(interfaces.EventJobUpdate, func(ctx context.Context, event interfaces.Event) error {
+		payload, ok := event.Payload.(map[string]interface{})
+		if !ok {
+			h.logger.Warn().Msg("Invalid job_update event payload type")
+			return nil
+		}
+
+		// Check whitelist (empty allowedEvents = allow all)
+		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_update"] {
+			return nil
+		}
+
+		// Extract fields and call BroadcastJobUpdate
+		jobID := getString(payload, "job_id")
+		context := getString(payload, "context")
+		stepName := getString(payload, "step_name")
+		status := getString(payload, "status")
+		refreshLogs := false
+		if rl, ok := payload["refresh_logs"].(bool); ok {
+			refreshLogs = rl
+		}
+
+		h.BroadcastJobUpdate(jobID, context, stepName, status, refreshLogs)
 		return nil
 	})
 }

@@ -121,10 +121,33 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		return nil, fmt.Errorf("api_key is required for summary")
 	}
 
+	// Extract filter_limit from step config (prevents token overflow on large codebases)
+	filterLimit := 1000 // Default maximum documents
+	if limit, ok := stepConfig["filter_limit"].(int); ok && limit > 0 {
+		filterLimit = limit
+	} else if limitFloat, ok := stepConfig["filter_limit"].(float64); ok && limitFloat > 0 {
+		filterLimit = int(limitFloat)
+	} else if limitInt64, ok := stepConfig["filter_limit"].(int64); ok && limitInt64 > 0 {
+		filterLimit = int(limitInt64)
+	}
+
 	// Query documents matching filter tags
 	opts := interfaces.SearchOptions{
 		Tags:  filterTags,
-		Limit: 1000, // Maximum documents to include in summary
+		Limit: filterLimit,
+	}
+
+	// Apply category filter if specified
+	if categories := extractCategoryFilter(stepConfig); len(categories) > 0 {
+		if opts.MetadataFilters == nil {
+			opts.MetadataFilters = make(map[string]string)
+		}
+		opts.MetadataFilters["rule_classifier.category"] = strings.Join(categories, ",")
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Strs("categories", categories).
+			Msg("Applying category filter to summary query")
 	}
 
 	documents, err := w.searchService.Search(ctx, "", opts)
@@ -136,10 +159,21 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		return nil, fmt.Errorf("no documents found matching tags: %v", filterTags)
 	}
 
+	// Log if filter_limit was applied
+	if filterLimit < 1000 {
+		w.logger.Info().
+			Str("phase", "init").
+			Str("step_name", step.Name).
+			Int("filter_limit", filterLimit).
+			Int("document_count", len(documents)).
+			Msg("filter_limit applied to prevent token overflow")
+	}
+
 	w.logger.Info().
 		Str("phase", "init").
 		Str("step_name", step.Name).
 		Int("document_count", len(documents)).
+		Int("filter_limit", filterLimit).
 		Strs("filter_tags", filterTags).
 		Msg("Summary worker initialized - found documents")
 
@@ -163,11 +197,12 @@ func (w *SummaryWorker) Init(ctx context.Context, step models.JobStep, jobDef mo
 		Strategy:             interfaces.ProcessingStrategyInline, // Synchronous execution
 		SuggestedConcurrency: 1,
 		Metadata: map[string]interface{}{
-			"prompt":      prompt,
-			"filter_tags": filterTags,
-			"api_key":     apiKey,
-			"documents":   documents,
-			"step_config": stepConfig,
+			"prompt":       prompt,
+			"filter_tags":  filterTags,
+			"api_key":      apiKey,
+			"documents":    documents,
+			"step_config":  stepConfig,
+			"filter_limit": filterLimit,
 		},
 	}, nil
 }

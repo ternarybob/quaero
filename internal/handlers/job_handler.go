@@ -1326,6 +1326,721 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// JobTreeResponse represents a GitHub Actions-style tree view of a job
+type JobTreeResponse struct {
+	JobID      string         `json:"job_id"`
+	JobName    string         `json:"job_name"`
+	Status     string         `json:"status"`
+	DurationMs int64          `json:"duration_ms"`
+	StartedAt  *time.Time     `json:"started_at,omitempty"`
+	FinishedAt *time.Time     `json:"finished_at,omitempty"`
+	Steps      []JobTreeStep  `json:"steps"`
+}
+
+// JobTreeStep represents a step in the job tree
+type JobTreeStep struct {
+	Name         string            `json:"name"`
+	Status       string            `json:"status"`
+	DurationMs   int64             `json:"duration_ms"`
+	StartedAt    *time.Time        `json:"started_at,omitempty"`
+	FinishedAt   *time.Time        `json:"finished_at,omitempty"`
+	Expanded     bool              `json:"expanded"`
+	ChildSummary *ChildJobSummary  `json:"child_summary,omitempty"`
+	Logs         []JobTreeLog      `json:"logs"`
+}
+
+// ChildJobSummary aggregates child job status counts
+type ChildJobSummary struct {
+	Total       int           `json:"total"`
+	Completed   int           `json:"completed"`
+	Failed      int           `json:"failed"`
+	Cancelled   int           `json:"cancelled"`
+	Running     int           `json:"running"`
+	Pending     int           `json:"pending"`
+	ErrorGroups []ErrorGroup  `json:"error_groups,omitempty"`
+}
+
+// ErrorGroup groups similar errors by message
+type ErrorGroup struct {
+	Message string `json:"message"`
+	Count   int    `json:"count"`
+}
+
+// JobTreeLog represents a log line in the tree view
+type JobTreeLog struct {
+	Level string `json:"level"`
+	Text  string `json:"text"`
+}
+
+// JobStructureResponse represents a lightweight job structure for UI status updates
+// This is a simplified version of JobTreeResponse without logs or detailed child info
+type JobStructureResponse struct {
+	JobID     string       `json:"job_id"`
+	Status    string       `json:"status"`
+	Steps     []StepStatus `json:"steps"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+// StepStatus represents minimal step status info for the structure endpoint
+type StepStatus struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	LogCount   int    `json:"log_count"`
+	ChildCount int    `json:"child_count,omitempty"`
+}
+
+// GetJobTreeHandler returns a GitHub Actions-style tree view of a job
+// GET /api/jobs/{id}/tree
+//
+// The tree view is built from step_definitions in the parent job's metadata.
+// Each step definition corresponds to a step job (child of the manager job).
+// Grandchildren of step jobs are counted in ChildSummary.
+func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/tree
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the parent job (manager job)
+	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job for tree view")
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	parentJob, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate duration
+	var durationMs int64
+	if parentJob.StartedAt != nil {
+		endTime := time.Now()
+		if parentJob.FinishedAt != nil {
+			endTime = *parentJob.FinishedAt
+		}
+		durationMs = endTime.Sub(*parentJob.StartedAt).Milliseconds()
+	}
+
+	// Get step_definitions from parent job metadata - this is the source of truth
+	var stepDefinitions []map[string]interface{}
+	if parentJob.Metadata != nil {
+		if defs, ok := parentJob.Metadata["step_definitions"]; ok {
+			// Handle both []map[string]interface{} and []interface{} types
+			switch v := defs.(type) {
+			case []map[string]interface{}:
+				stepDefinitions = v
+			case []interface{}:
+				for _, item := range v {
+					if m, ok := item.(map[string]interface{}); ok {
+						stepDefinitions = append(stepDefinitions, m)
+					}
+				}
+			}
+		}
+	}
+
+	// Get child jobs (step jobs) for this parent
+	childOpts := &interfaces.JobListOptions{
+		ParentID: jobID,
+		Limit:    1000,
+		Offset:   0,
+	}
+	stepJobs, err := h.jobStorage.ListJobs(ctx, childOpts)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get step jobs for tree")
+		stepJobs = []*models.QueueJobState{}
+	}
+
+	// Create a map of step_name -> step job for quick lookup
+	stepJobMap := make(map[string]*models.QueueJobState)
+	for _, stepJob := range stepJobs {
+		if stepJob.Metadata != nil {
+			if stepName, ok := stepJob.Metadata["step_name"].(string); ok && stepName != "" {
+				stepJobMap[stepName] = stepJob
+			}
+		}
+	}
+
+	// Get current_step_name from parent metadata for expansion logic
+	var currentStepName string
+	if parentJob.Metadata != nil {
+		if csn, ok := parentJob.Metadata["current_step_name"].(string); ok {
+			currentStepName = csn
+		}
+	}
+
+	// Build steps from step_definitions
+	steps := make([]JobTreeStep, 0, len(stepDefinitions))
+
+	for _, stepDef := range stepDefinitions {
+		stepName, _ := stepDef["name"].(string)
+		if stepName == "" {
+			stepName = "unknown"
+		}
+
+		// Find matching step job
+		stepJob := stepJobMap[stepName]
+
+		// Build step from step definition and step job (if found)
+		step := JobTreeStep{
+			Name:     stepName,
+			Status:   "pending", // Default if no step job found
+			Expanded: false,
+			ChildSummary: &ChildJobSummary{
+				ErrorGroups: []ErrorGroup{},
+			},
+			Logs: []JobTreeLog{},
+		}
+
+		if stepJob != nil {
+			// Use step job's own status directly
+			step.Status = string(stepJob.Status)
+			step.StartedAt = stepJob.StartedAt
+			step.FinishedAt = stepJob.FinishedAt
+			// Expanded is set AFTER logs are fetched (see below)
+
+			// Calculate step duration
+			if stepJob.StartedAt != nil {
+				endTime := time.Now()
+				if stepJob.FinishedAt != nil {
+					endTime = *stepJob.FinishedAt
+				}
+				step.DurationMs = endTime.Sub(*stepJob.StartedAt).Milliseconds()
+			}
+
+			// Get grandchildren (work items spawned by this step job) for ChildSummary
+			grandchildOpts := &interfaces.JobListOptions{
+				ParentID: stepJob.ID,
+				Limit:    10000,
+				Offset:   0,
+			}
+			grandchildren, err := h.jobStorage.ListJobs(ctx, grandchildOpts)
+			if err != nil {
+				h.logger.Warn().Err(err).Str("step_job_id", stepJob.ID).Msg("Failed to get grandchildren for step")
+			} else {
+				for _, grandchild := range grandchildren {
+					step.ChildSummary.Total++
+					switch grandchild.Status {
+					case models.JobStatusCompleted:
+						step.ChildSummary.Completed++
+					case models.JobStatusFailed:
+						step.ChildSummary.Failed++
+						if grandchild.Error != "" {
+							h.addErrorToGroup(step.ChildSummary, grandchild.Error)
+						}
+					case models.JobStatusCancelled:
+						step.ChildSummary.Cancelled++
+					case models.JobStatusRunning:
+						step.ChildSummary.Running++
+					case models.JobStatusPending:
+						step.ChildSummary.Pending++
+					}
+				}
+			}
+
+			// Get logs for this step job specifically
+			stepLogs, err := h.logService.GetLogs(ctx, stepJob.ID, 100)
+			if err != nil {
+				h.logger.Warn().Err(err).Str("step_job_id", stepJob.ID).Msg("Failed to get logs for step")
+			} else {
+				// Logs come from DB in ASC order (oldest first) - ready for display
+				for _, log := range stepLogs {
+					step.Logs = append(step.Logs, JobTreeLog{
+						Level: log.Level,
+						Text:  log.Message,
+					})
+				}
+			}
+
+			// Backend-driven expansion: expand if failed, running, has logs, or is current step
+			// This moves expansion logic from frontend to backend for simpler UI
+			hasLogs := len(step.Logs) > 0
+			isRunning := stepJob.Status == models.JobStatusRunning
+			isFailed := stepJob.Status == models.JobStatusFailed
+			isCurrentStep := stepName == currentStepName
+			step.Expanded = isFailed || isRunning || hasLogs || isCurrentStep
+		}
+
+		// Set child_summary to nil if no grandchildren
+		if step.ChildSummary.Total == 0 {
+			step.ChildSummary = nil
+		}
+
+		steps = append(steps, step)
+	}
+
+	// If no step_definitions, fall back to discovering steps from step jobs
+	if len(stepDefinitions) == 0 && len(stepJobs) > 0 {
+		steps = h.buildStepsFromStepJobs(ctx, stepJobs)
+	}
+
+	// If still no steps, create a single step from parent job logs
+	if len(steps) == 0 {
+		rawLogs, err := h.logService.GetLogs(ctx, jobID, 100)
+		if err != nil {
+			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get logs for tree")
+		}
+
+		// Logs come from DB in ASC order (oldest first) - ready for display
+		parentLogs := make([]JobTreeLog, 0, len(rawLogs))
+		for _, log := range rawLogs {
+			parentLogs = append(parentLogs, JobTreeLog{
+				Level: log.Level,
+				Text:  log.Message,
+			})
+		}
+
+		steps = append(steps, JobTreeStep{
+			Name:       parentJob.Name,
+			Status:     string(parentJob.Status),
+			DurationMs: durationMs,
+			StartedAt:  parentJob.StartedAt,
+			FinishedAt: parentJob.FinishedAt,
+			Expanded:   true,
+			Logs:       parentLogs,
+		})
+	}
+
+	response := JobTreeResponse{
+		JobID:      jobID,
+		JobName:    parentJob.Name,
+		Status:     string(parentJob.Status),
+		DurationMs: durationMs,
+		StartedAt:  parentJob.StartedAt,
+		FinishedAt: parentJob.FinishedAt,
+		Steps:      steps,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetJobTreeLogsHandler returns logs for a job's tree view, grouped by step
+// GET /api/jobs/{id}/tree/logs?step=step_name&limit=100
+//
+// If step is provided, returns logs only for that step.
+// Otherwise returns logs for all steps, grouped by step_name.
+func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/tree/logs
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse query parameters
+	stepFilter := r.URL.Query().Get("step")
+	limit := 100
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+			if limit > 500 {
+				limit = 500
+			}
+		}
+	}
+
+	// Get the parent job (manager job)
+	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
+	if err != nil {
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	parentJob, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
+	}
+
+	// Get step_definitions from parent job metadata
+	var stepDefinitions []map[string]interface{}
+	if parentJob.Metadata != nil {
+		if defs, ok := parentJob.Metadata["step_definitions"]; ok {
+			switch v := defs.(type) {
+			case []map[string]interface{}:
+				stepDefinitions = v
+			case []interface{}:
+				for _, item := range v {
+					if m, ok := item.(map[string]interface{}); ok {
+						stepDefinitions = append(stepDefinitions, m)
+					}
+				}
+			}
+		}
+	}
+
+	// Get child jobs (step jobs) for this parent
+	childOpts := &interfaces.JobListOptions{
+		ParentID: jobID,
+		Limit:    1000,
+		Offset:   0,
+	}
+	stepJobs, err := h.jobStorage.ListJobs(ctx, childOpts)
+	if err != nil {
+		stepJobs = []*models.QueueJobState{}
+	}
+
+	// Create a map of step_name -> step job for quick lookup
+	stepJobMap := make(map[string]*models.QueueJobState)
+	for _, stepJob := range stepJobs {
+		if stepJob.Metadata != nil {
+			if stepName, ok := stepJob.Metadata["step_name"].(string); ok && stepName != "" {
+				stepJobMap[stepName] = stepJob
+			}
+		}
+	}
+
+	// Response structure
+	type StepLogs struct {
+		StepName string       `json:"step_name"`
+		StepID   string       `json:"step_id,omitempty"`
+		Status   string       `json:"status"`
+		Logs     []JobTreeLog `json:"logs"`
+	}
+
+	response := struct {
+		JobID string     `json:"job_id"`
+		Steps []StepLogs `json:"steps"`
+	}{
+		JobID: jobID,
+		Steps: []StepLogs{},
+	}
+
+	// Build logs response for each step
+	for _, stepDef := range stepDefinitions {
+		stepName, _ := stepDef["name"].(string)
+		if stepName == "" {
+			continue
+		}
+
+		// If step filter is set, skip non-matching steps
+		if stepFilter != "" && stepName != stepFilter {
+			continue
+		}
+
+		stepJob := stepJobMap[stepName]
+		stepLogs := StepLogs{
+			StepName: stepName,
+			Status:   "pending",
+			Logs:     []JobTreeLog{},
+		}
+
+		if stepJob != nil {
+			stepLogs.StepID = stepJob.ID
+			stepLogs.Status = string(stepJob.Status)
+
+			// Get logs for this step job - DB returns ASC order (oldest first)
+			logs, err := h.logService.GetLogs(ctx, stepJob.ID, limit)
+			if err == nil {
+				for _, log := range logs {
+					stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
+						Level: log.Level,
+						Text:  log.Message,
+					})
+				}
+			}
+		}
+
+		response.Steps = append(response.Steps, stepLogs)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// buildStepsFromStepJobs builds steps array from step jobs when step_definitions is not available
+func (h *JobHandler) buildStepsFromStepJobs(ctx context.Context, stepJobs []*models.QueueJobState) []JobTreeStep {
+	steps := make([]JobTreeStep, 0, len(stepJobs))
+
+	for _, stepJob := range stepJobs {
+		stepName := "unknown"
+		if stepJob.Metadata != nil {
+			if sn, ok := stepJob.Metadata["step_name"].(string); ok && sn != "" {
+				stepName = sn
+			}
+		}
+
+		step := JobTreeStep{
+			Name:       stepName,
+			Status:     string(stepJob.Status),
+			StartedAt:  stepJob.StartedAt,
+			FinishedAt: stepJob.FinishedAt,
+			// Expanded is set AFTER logs are fetched (see below)
+			ChildSummary: &ChildJobSummary{
+				ErrorGroups: []ErrorGroup{},
+			},
+			Logs: []JobTreeLog{},
+		}
+
+		// Calculate duration
+		if stepJob.StartedAt != nil {
+			endTime := time.Now()
+			if stepJob.FinishedAt != nil {
+				endTime = *stepJob.FinishedAt
+			}
+			step.DurationMs = endTime.Sub(*stepJob.StartedAt).Milliseconds()
+		}
+
+		// Get grandchildren for ChildSummary
+		grandchildOpts := &interfaces.JobListOptions{
+			ParentID: stepJob.ID,
+			Limit:    10000,
+			Offset:   0,
+		}
+		grandchildren, err := h.jobStorage.ListJobs(ctx, grandchildOpts)
+		if err == nil {
+			for _, grandchild := range grandchildren {
+				step.ChildSummary.Total++
+				switch grandchild.Status {
+				case models.JobStatusCompleted:
+					step.ChildSummary.Completed++
+				case models.JobStatusFailed:
+					step.ChildSummary.Failed++
+					if grandchild.Error != "" {
+						h.addErrorToGroup(step.ChildSummary, grandchild.Error)
+					}
+				case models.JobStatusCancelled:
+					step.ChildSummary.Cancelled++
+				case models.JobStatusRunning:
+					step.ChildSummary.Running++
+				case models.JobStatusPending:
+					step.ChildSummary.Pending++
+				}
+			}
+		}
+
+		// Get logs for step job
+		stepLogs, err := h.logService.GetLogs(ctx, stepJob.ID, 100)
+		if err == nil {
+			// Logs come from DB in ASC order (oldest first) - ready for display
+			for _, log := range stepLogs {
+				step.Logs = append(step.Logs, JobTreeLog{
+					Level: log.Level,
+					Text:  log.Message,
+				})
+			}
+		}
+
+		// Backend-driven expansion: expand if failed, running, or has logs
+		// This moves expansion logic from frontend to backend for simpler UI
+		hasLogs := len(step.Logs) > 0
+		isRunning := stepJob.Status == models.JobStatusRunning
+		isFailed := stepJob.Status == models.JobStatusFailed
+		step.Expanded = isFailed || isRunning || hasLogs
+
+		// Set child_summary to nil if no grandchildren
+		if step.ChildSummary.Total == 0 {
+			step.ChildSummary = nil
+		}
+
+		steps = append(steps, step)
+	}
+
+	return steps
+}
+
+// addErrorToGroup adds an error message to the appropriate group or creates a new one
+func (h *JobHandler) addErrorToGroup(summary *ChildJobSummary, errorMsg string) {
+	// Truncate long error messages for grouping
+	truncated := errorMsg
+	if len(truncated) > 100 {
+		truncated = truncated[:100] + "..."
+	}
+
+	// Find existing group
+	for i, group := range summary.ErrorGroups {
+		if group.Message == truncated {
+			summary.ErrorGroups[i].Count++
+			return
+		}
+	}
+
+	// Create new group
+	summary.ErrorGroups = append(summary.ErrorGroups, ErrorGroup{
+		Message: truncated,
+		Count:   1,
+	})
+}
+
+// GetJobStructureHandler returns a lightweight job structure for UI status updates
+// GET /api/jobs/{id}/structure
+//
+// This is a simplified version of the tree endpoint that returns only:
+// - Job status
+// - Step statuses with log counts
+// - No actual log content (UI fetches logs separately for expanded steps)
+func (h *JobHandler) GetJobStructureHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract job ID from path: /api/jobs/{id}/structure
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+	jobID := pathParts[2]
+
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the parent job (manager job)
+	jobInterface, err := h.jobManager.GetJob(ctx, jobID)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_id", jobID).Msg("Failed to get job for structure")
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	parentJob, ok := jobInterface.(*models.QueueJobState)
+	if !ok {
+		http.Error(w, "Invalid job type", http.StatusInternalServerError)
+		return
+	}
+
+	// Get step_definitions from parent job metadata
+	var stepDefinitions []map[string]interface{}
+	if parentJob.Metadata != nil {
+		if defs, ok := parentJob.Metadata["step_definitions"]; ok {
+			switch v := defs.(type) {
+			case []map[string]interface{}:
+				stepDefinitions = v
+			case []interface{}:
+				for _, item := range v {
+					if m, ok := item.(map[string]interface{}); ok {
+						stepDefinitions = append(stepDefinitions, m)
+					}
+				}
+			}
+		}
+	}
+
+	// Get child jobs (step jobs) for this parent
+	childOpts := &interfaces.JobListOptions{
+		ParentID: jobID,
+		Limit:    1000,
+		Offset:   0,
+	}
+	stepJobs, err := h.jobStorage.ListJobs(ctx, childOpts)
+	if err != nil {
+		h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get step jobs for structure")
+		stepJobs = []*models.QueueJobState{}
+	}
+
+	// Create a map of step_name -> step job for quick lookup
+	stepJobMap := make(map[string]*models.QueueJobState)
+	for _, stepJob := range stepJobs {
+		if stepJob.Metadata != nil {
+			if stepName, ok := stepJob.Metadata["step_name"].(string); ok && stepName != "" {
+				stepJobMap[stepName] = stepJob
+			}
+		}
+	}
+
+	// Build minimal step status list
+	steps := make([]StepStatus, 0, len(stepDefinitions))
+
+	for _, stepDef := range stepDefinitions {
+		stepName, _ := stepDef["name"].(string)
+		if stepName == "" {
+			stepName = "unknown"
+		}
+
+		step := StepStatus{
+			Name:   stepName,
+			Status: "pending",
+		}
+
+		// Find matching step job
+		if stepJob, ok := stepJobMap[stepName]; ok {
+			step.Status = string(stepJob.Status)
+
+			// Get log count (not content)
+			if logs, err := h.logService.GetLogs(ctx, stepJob.ID, 1000); err == nil {
+				step.LogCount = len(logs)
+			}
+
+			// Get child count
+			grandchildOpts := &interfaces.JobListOptions{
+				ParentID: stepJob.ID,
+				Limit:    1, // We only need count, not actual jobs
+				Offset:   0,
+			}
+			if grandchildren, err := h.jobStorage.ListJobs(ctx, grandchildOpts); err == nil {
+				// ListJobs returns actual jobs, not count - get count from stats if available
+				if stats, err := h.jobManager.GetJobChildStats(ctx, []string{stepJob.ID}); err == nil {
+					if stepStats, ok := stats[stepJob.ID]; ok {
+						step.ChildCount = stepStats.ChildCount
+					}
+				} else {
+					// Fallback to counting returned jobs
+					step.ChildCount = len(grandchildren)
+				}
+			}
+		}
+
+		steps = append(steps, step)
+	}
+
+	// If no step_definitions, build from step jobs directly
+	if len(stepDefinitions) == 0 && len(stepJobs) > 0 {
+		for _, stepJob := range stepJobs {
+			stepName := "unknown"
+			if stepJob.Metadata != nil {
+				if sn, ok := stepJob.Metadata["step_name"].(string); ok && sn != "" {
+					stepName = sn
+				}
+			}
+
+			step := StepStatus{
+				Name:   stepName,
+				Status: string(stepJob.Status),
+			}
+
+			// Get log count
+			if logs, err := h.logService.GetLogs(ctx, stepJob.ID, 1000); err == nil {
+				step.LogCount = len(logs)
+			}
+
+			steps = append(steps, step)
+		}
+	}
+
+	response := JobStructureResponse{
+		JobID:     jobID,
+		Status:    string(parentJob.Status),
+		Steps:     steps,
+		UpdatedAt: time.Now(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // convertJobToMap converts a QueueJobState struct to a map for JSON response enrichment
 // IMPORTANT: Converts the Config field to a flexible map[string]interface{} for executor-agnostic display
 // Extracts document_count from metadata for easier UI access

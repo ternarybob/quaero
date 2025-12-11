@@ -170,6 +170,21 @@ func (s *Server) handleJobRoutes(w http.ResponseWriter, r *http.Request) {
 			s.app.JobHandler.GetJobResultsHandler(w, r)
 			return
 		}
+		// Check if it's /api/jobs/{id}/structure (lightweight status endpoint)
+		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/structure") {
+			s.app.JobHandler.GetJobStructureHandler(w, r)
+			return
+		}
+		// Check if it's /api/jobs/{id}/tree/logs (tree view logs endpoint)
+		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/tree/logs") {
+			s.app.JobHandler.GetJobTreeLogsHandler(w, r)
+			return
+		}
+		// Check if it's /api/jobs/{id}/tree (GitHub Actions-style tree view)
+		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/tree") {
+			s.app.JobHandler.GetJobTreeHandler(w, r)
+			return
+		}
 		// Check if it's /api/jobs/{id}/logs/aggregated (must come before /logs check)
 		if len(pathSuffix) > 0 && strings.HasSuffix(pathSuffix, "/logs/aggregated") {
 			s.app.JobHandler.GetAggregatedJobLogsHandler(w, r)

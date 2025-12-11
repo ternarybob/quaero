@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +26,10 @@ type Manager struct {
 
 	// Worker registry moved to StepManager
 	kvStorage interfaces.KeyValueStorage // For resolving {key-name} placeholders
+
+	// Job stats throttling to avoid excessive WebSocket broadcasts
+	lastStatsPublish time.Time
+	statsMutex       sync.Mutex
 }
 
 func NewManager(jobStorage interfaces.QueueStorage, logStorage interfaces.LogStorage, queue interfaces.QueueManager, eventService interfaces.EventService, logger arbor.ILogger) *Manager {
@@ -588,10 +593,57 @@ func (m *Manager) UpdateJobStatus(ctx context.Context, jobID, status string) err
 					// Log error but don't fail
 				}
 			}
+
+			// Publish job stats event for real-time dashboard updates (throttled)
+			m.publishJobStats(ctx)
 		}()
 	}
 
 	return nil
+}
+
+// publishJobStats publishes current job statistics via EventJobStats.
+// Throttled to publish at most once per 500ms to avoid flooding WebSocket clients.
+func (m *Manager) publishJobStats(ctx context.Context) {
+	if m.eventService == nil {
+		return
+	}
+
+	// Throttle stats publishing to avoid excessive broadcasts
+	m.statsMutex.Lock()
+	if time.Since(m.lastStatsPublish) < 500*time.Millisecond {
+		m.statsMutex.Unlock()
+		return
+	}
+	m.lastStatsPublish = time.Now()
+	m.statsMutex.Unlock()
+
+	// Query current stats from storage
+	totalCount, _ := m.jobStorage.CountJobs(ctx)
+	pendingCount, _ := m.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusPending))
+	runningCount, _ := m.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusRunning))
+	completedCount, _ := m.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusCompleted))
+	failedCount, _ := m.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusFailed))
+	cancelledCount, _ := m.jobStorage.CountJobsByStatus(ctx, string(models.JobStatusCancelled))
+
+	statsPayload := map[string]interface{}{
+		"total_jobs":     totalCount,
+		"pending_jobs":   pendingCount,
+		"running_jobs":   runningCount,
+		"completed_jobs": completedCount,
+		"failed_jobs":    failedCount,
+		"cancelled_jobs": cancelledCount,
+		"timestamp":      time.Now().Format(time.RFC3339),
+	}
+
+	statsEvent := interfaces.Event{
+		Type:    interfaces.EventJobStats,
+		Payload: statsPayload,
+	}
+
+	if err := m.eventService.Publish(ctx, statsEvent); err != nil {
+		m.logger.Debug().Err(err).Msg("Failed to publish job stats event")
+	}
 }
 
 // SetJobError sets job error message and marks as failed
