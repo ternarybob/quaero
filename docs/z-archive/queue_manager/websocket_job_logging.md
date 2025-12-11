@@ -1,30 +1,40 @@
-# Investigation: WebSocket Real-Time Job Logging
+# Fix: WebSocket Real-Time Job Logging
 
 ## Issue Reported
 
 Step logs in the queue UI were not updating in real-time. A page refresh was required to see the latest log entries.
 
-## Investigation Summary
+## Root Cause
 
-### Initial Hypothesis
+The `refreshStepEvents` function in `pages/queue.html` was updating `jobLogs` (flat view data) but NOT `jobTreeData` (tree view data). The UI was reading from `jobTreeData` for tree view display, so updates to `jobLogs` were invisible.
 
-WebSocket events were not being published or received correctly for job log updates.
+**Before (broken):**
+```javascript
+// refreshStepEvents only updated jobLogs
+this.jobLogs[managerId] = this.jobLogs[managerId].filter(l => l.step_name !== stepName);
+const logsWithStepName = logs.map(log => ({ ...log, step_name: stepName }));
+this.jobLogs[managerId].push(...logsWithStepName);
+// Tree view reads from jobTreeData - never updated!
+```
 
-### Testing Approach
+**After (fixed):**
+```javascript
+// Update jobTreeData (tree view) - this is the primary display source
+if (this.jobTreeData[managerId]) {
+    const treeData = this.jobTreeData[managerId];
+    const stepIdx = treeData.steps?.findIndex(s => s.name === stepName);
+    if (stepIdx >= 0 && treeData.steps) {
+        const newSteps = [...treeData.steps];
+        newSteps[stepIdx] = { ...newSteps[stepIdx], logs: logs };
+        this.jobTreeData = { ...this.jobTreeData, [managerId]: { ...treeData, steps: newSteps } };
+    }
+}
+// Also update jobLogs (flat view fallback)
+```
 
-1. **UI Test** (`test/ui/queue_test.go`) - Initially used but had a 30-second page refresh interval that masked the real behavior
-2. **API Test** (`test/api/websocket_job_events_test.go`) - Created to isolate WebSocket behavior without UI refresh interference
+## Files Modified
 
-### Findings
-
-**WebSocket events ARE working correctly.** The API test demonstrated:
-- Hundreds of `job_log` events received in real-time during crawler execution
-- Events include: `step_progress`, `crawler_job_log`, `job_status_change`
-- No delays or missing events detected
-
-The apparent lack of real-time updates was due to:
-1. UI test's automatic page refresh every 30 seconds
-2. Page navigation between job list and job detail views triggering full reloads
+- `pages/queue.html` - `refreshStepEvents()` function now updates `jobTreeData` in addition to `jobLogs`
 
 ## Job Logging Architecture
 

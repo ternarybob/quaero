@@ -24,6 +24,27 @@ paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents-skills/", skills: ".c
 - **EVERY run creates NEW workdir** - even continuations of previous work
 - **NO phase proceeds without its document written first**
 - **Skills are optional** - if no matching skill exists, proceed without
+- **QUALITY OVER SPEED** - correct code aligned to requirements beats quick finish
+  - Take time to understand requirements fully
+  - Implement correctly the first time
+  - Don't skip validation or review steps
+  - Iterate until right, not until done
+
+## CONTEXT MANAGEMENT
+- **CLEAR context at start of each phase** - don't carry forward conversation history
+- **Documents are the source of truth** - read from markdown, not memory
+- **Each task is self-contained** - task-N.md must have ALL info needed to execute
+- **Each step records everything** - step-N.md must capture full state for validation
+
+### Context Flow
+```
+PHASE 0: Read $ARGUMENTS only → Write manifest.md → CLEAR
+PHASE 1: Read manifest.md + skills → Write plan.md + task-N.md → CLEAR
+PHASE 2: Read task-N.md + skill → Execute → Write step-N.md → CLEAR (per task)
+PHASE 3: Read manifest.md + step-N.md → Write validation.md → CLEAR
+PHASE 4: Read validation.md + changed files → Write review.md → CLEAR
+PHASE 5: Read all docs → Write summary.md → DONE
+```
 
 ---
 
@@ -98,42 +119,98 @@ cat .claude/skills/{skill}/SKILL.md
 **WRITE `{workdir}/plan.md`:**
 ```markdown
 # Plan: {task}
-Type: {feature|fix} | Workdir: {workdir}
+Type: {feature|fix} | Workdir: {workdir} | Date: {YYYY-MM-DD}
+
+## Context
+Project: {project name}
+Related files: {list key files that will be touched}
 
 ## User Intent (from manifest)
-{copy from manifest - validator will check against this}
+{copy FULL user intent from manifest - validator will check against this}
+
+## Success Criteria (from manifest)
+- [ ] {criterion 1}
+- [ ] {criterion 2}
 
 ## Active Skills
-{list from manifest, or "none"}
+| Skill | Key Patterns to Apply |
+|-------|----------------------|
+| {skill} | {2-3 most relevant patterns from SKILL.md} |
+{or "none - no skills apply"}
+
+## Technical Approach
+{Brief description of HOW this will be implemented - key decisions}
+
+## Files to Change
+| File | Action | Purpose |
+|------|--------|---------|
+| {path} | create/modify/delete | {why} |
 
 ## Tasks
-| # | Desc | Depends | Critical | Model | Skill |
-|---|------|---------|----------|-------|-------|
-| 1 | ... | - | no | sonnet | go |
-| 2 | ... | 1 | no | sonnet | go |
-| 3 | ... | - | no | sonnet | - |
+| # | Desc | Depends | Critical | Model | Skill | Est. Files |
+|---|------|---------|----------|-------|-------|------------|
+| 1 | ... | - | no | sonnet | go | 2 |
+| 2 | ... | 1 | no | sonnet | go | 1 |
+| 3 | ... | - | no | sonnet | - | 1 |
 
-## Order
+## Execution Order
 [1,3] → [2]
+
+## Risks/Decisions
+- {potential issue and how it will be handled}
 ```
 
 **WRITE `{workdir}/task-{N}.md`** for each task:
 ```markdown
 # Task {N}: {desc}
-Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus} | Skill: {skill or "none"}
+Workdir: {workdir} | Depends: {ids or "none"} | Critical: {no|yes:trigger}
+Model: {sonnet|opus} | Skill: {skill or "none"}
 
-## Addresses User Intent
-{which part of user request this task fulfills}
+## Context
+This task is part of: {brief description of overall goal from plan}
+Prior tasks completed: {list or "none - this is first"}
+
+## User Intent Addressed
+{which specific part of user request this task fulfills}
+{copy relevant portion from manifest}
+
+## Input State
+Files that exist before this task:
+- `{path}` - {current state/purpose}
+
+## Output State  
+Files after this task completes:
+- `{path}` - {expected state/changes}
 
 ## Skill Patterns to Apply
-{if skill assigned, list key patterns from SKILL.md to follow}
+{if skill assigned:}
+### From {skill}/SKILL.md:
+- **DO:** {pattern 1 - be specific}
+- **DO:** {pattern 2}
+- **DON'T:** {anti-pattern to avoid}
+- **DON'T:** {anti-pattern}
 {or "N/A - no skill for this task"}
 
-## Do
-- {action}
+## Implementation Steps
+1. {specific action with file names}
+2. {next action}
+3. {verification step}
 
-## Accept
-- [ ] {criterion}
+## Code Specifications
+{If creating/modifying code, include:}
+- Function signatures expected
+- Key types/interfaces involved
+- Error handling approach
+- Test requirements
+
+## Accept Criteria
+- [ ] {specific, verifiable criterion}
+- [ ] {another criterion}
+- [ ] Build passes
+- [ ] {test requirement if applicable}
+
+## Handoff
+After completion, next task(s): {task IDs or "validation"}
 ```
 
 ---
@@ -142,40 +219,88 @@ Depends: {ids} | Critical: {no|yes:trigger} | Model: {sonnet|opus} | Skill: {ski
 
 **GATE: Each task writes step-N.md IMMEDIATELY after completion**
 
+**CONTEXT: Clear before each task. Read ONLY task-N.md + skill (if assigned).**
+
+**PRIORITY: Correct implementation over quick completion.**
+- Understand the task fully before coding
+- Follow skill patterns precisely
+- Verify against ALL accept criteria
+- If unsure, re-read task-N.md - don't guess
+
 For each task in dependency order:
 
-### Step 2.1: Load Task's Skill (if assigned)
+### Step 2.1: Load Task Context (fresh each time)
 ```bash
-cat .claude/skills/{task_skill}/SKILL.md
+cat {workdir}/task-{N}.md
+cat .claude/skills/{task_skill}/SKILL.md  # if skill assigned
 ```
 
-### Step 2.2: Execute
-1. Read task-{N}.md
+### Step 2.2: Execute (self-contained)
+1. Read task-{N}.md - this has ALL info needed
 2. Work in `/tmp/3agents-skills/task-{N}/`
-3. Apply skill patterns (if skill assigned)
-4. Execute + verify compiles
-5. Copy results to source
-6. **WRITE step-N.md BEFORE next task**
+3. Apply skill patterns listed in task-{N}.md
+4. Execute implementation steps from task-{N}.md
+5. Verify against accept criteria in task-{N}.md
+6. Copy results to source
+7. **WRITE step-N.md with FULL detail**
+8. **CLEAR context before next task**
 
 **WRITE `{workdir}/step-{N}.md`:**
 ```markdown
 # Step {N}: {desc}
-Model: {used} | Skill: {used or "none"} | Status: ✅|⚠️|❌
+Workdir: {workdir} | Model: {used} | Skill: {used or "none"}
+Status: ✅ Complete | ⚠️ Partial | ❌ Failed
+Timestamp: {ISO timestamp}
 
-## Done
-- {action}: {outcome}
+## Task Reference
+From task-{N}.md:
+- Intent: {what this task was supposed to do}
+- Accept criteria: {list from task}
+
+## Implementation Summary
+{2-3 sentences describing what was actually done}
 
 ## Files Changed
-- `{path}` - {what}
+| File | Action | Lines | Description |
+|------|--------|-------|-------------|
+| `{path}` | created/modified/deleted | +{N}/-{N} | {what changed} |
 
-## Skill Compliance (if skill used)
-- [x] {pattern followed}
-- [x] {anti-pattern avoided}
-- [ ] N/A - {reason}
-{or "No skill applied"}
+## Code Changes Detail
+### {filename}
+```{lang}
+// Key changes (not full file, just important parts)
+{function signature or key code block}
+```
+**Why:** {reasoning for this implementation}
 
-## Build Check
-Build: ✅|❌ | Tests: ✅|❌|⏭️
+## Skill Compliance
+{if skill used:}
+### {skill}/SKILL.md Checklist
+- [x] {pattern followed} - {where/how}
+- [x] {pattern followed} - {where/how}
+- [x] {anti-pattern avoided} - {evidence}
+- [ ] N/A: {pattern not applicable because...}
+{or "No skill applied to this task"}
+
+## Accept Criteria Verification
+- [x] {criterion 1} - {evidence}
+- [x] {criterion 2} - {evidence}
+- [ ] {criterion failed} - {why}
+
+## Build & Test
+```
+Build: ✅ Pass | ❌ Fail ({error if failed})
+Tests: ✅ Pass ({N} passed) | ❌ Fail ({N} passed, {N} failed) | ⏭️ Skipped
+```
+
+## Issues Encountered
+- {issue and how it was resolved, or "None"}
+
+## State for Next Phase
+Files ready for validation:
+- `{path}` - {state}
+
+Remaining work: {none, or what's left}
 ```
 
 **UPDATE `{workdir}/progress.md`** after each step:
@@ -194,12 +319,24 @@ Build: ✅|❌ | Tests: ✅|❌|⏭️
 
 **Purpose: Verify implementation matches user's original request AND skill patterns**
 
+**CONTEXT: Clear. Read ONLY from documents, not conversation history.**
+
+**PRIORITY: Correctness over completion.**
+- Don't approve partial solutions to "move on"
+- Every success criterion must be MET, not "close enough"
+- Skill patterns must be followed, not approximated
+- If implementation is wrong, create fix tasks - don't let it slide
+
 After all tasks complete:
 
-### Step 3.1: Load Context
-1. **Re-read manifest.md** - get User Intent + Success Criteria + Active Skills
-2. **Read all step-N.md** - what was actually done
-3. **Load active skills** - for pattern verification
+### Step 3.1: Load Context (from documents only)
+```bash
+cat {workdir}/manifest.md      # User intent + success criteria
+cat {workdir}/step-*.md        # What was actually done
+cat .claude/skills/*/SKILL.md  # For pattern verification (if skills used)
+```
+
+Do NOT rely on conversation memory. Documents are truth.
 
 ### Step 3.2: Validate
 
@@ -250,8 +387,33 @@ Build: ✅|❌ | Tests: ✅|❌ ({N} passed, {N} failed)
 **Update progress.md** - mark tasks as validated.
 
 **If MISMATCH or PARTIAL:**
-1. Create fix tasks in `{workdir}/fix-task-{N}.md`
-2. Return to PHASE 2 to implement fixes
+1. Create fix tasks in `{workdir}/fix-task-{N}.md`:
+```markdown
+# Fix Task {N}: {issue to fix}
+Source: validation.md | Iteration: {1|2}
+
+## Problem
+{exact issue from validation.md gaps}
+
+## Root Cause
+{what went wrong in original implementation}
+
+## Fix Required
+{specific change needed}
+
+## Files to Modify
+| File | Current State | Required State |
+|------|--------------|----------------|
+| `{path}` | {what it does now} | {what it should do} |
+
+## Implementation
+1. {specific fix step}
+2. {verification}
+
+## Accept Criteria
+- [ ] {how to verify fix works}
+```
+2. Return to PHASE 2 to implement fixes (CLEAR context first)
 3. Re-validate after fixes
 4. Max 2 fix iterations before escalating to user
 
@@ -260,6 +422,21 @@ Build: ✅|❌ | Tests: ✅|❌ ({N} passed, {N} failed)
 ## PHASE 4: REVIEW (opus) — if any critical tasks
 
 **Purpose: Architectural review focused on separation of concerns and function design**
+
+**CONTEXT: Clear. Read ONLY from documents and changed files.**
+
+**PRIORITY: Clean architecture over quick approval.**
+- Don't approve "good enough" code
+- Functions must do ONE thing - no exceptions
+- Separation of concerns must be maintained
+- If architecture is wrong, create refactor tasks - fix it now
+
+### Step 4.1: Load Context
+```bash
+cat {workdir}/validation.md    # What was validated
+cat {workdir}/step-*.md        # What was changed
+# Read actual changed files listed in step-*.md
+```
 
 **WRITE `{workdir}/review.md`:**
 ```markdown
@@ -304,22 +481,62 @@ Triggers: {list}
 ```
 
 **If CHANGES_REQUIRED or NOTES with refactors:**
-1. Create refactor tasks in `{workdir}/refactor-task-{N}.md`
-2. Return to PHASE 2 to implement refactors
+1. Create refactor tasks in `{workdir}/refactor-task-{N}.md`:
+```markdown
+# Refactor Task {N}: {architectural issue}
+Source: review.md | Iteration: {1|2}
+
+## Architectural Issue
+{exact issue from review.md}
+
+## Principle Violated
+{which principle: separation of concerns, function size, dependency direction, etc.}
+
+## Current State
+```{lang}
+// problematic code
+{code snippet showing the issue}
+```
+
+## Required Refactor
+{what needs to change}
+
+## Target State
+```{lang}
+// expected structure (signatures, not full implementation)
+{target code structure}
+```
+
+## Files to Modify
+| File | Refactor Type |
+|------|--------------|
+| `{path}` | split function / extract interface / move logic / etc. |
+
+## Accept Criteria
+- [ ] {architectural criterion met}
+- [ ] Functions < 50 lines
+- [ ] Single responsibility maintained
+```
+2. Return to PHASE 2 to implement refactors (CLEAR context first)
 3. Re-review after changes
 4. Max 2 refactor iterations before escalating to user
-
-**Refactor tasks focus on:**
-- Splitting large functions
-- Extracting shared logic
-- Fixing dependency direction
-- Improving separation of concerns
 
 ---
 
 ## PHASE 5: SUMMARY
 
 **GATE: Cannot complete until summary.md exists**
+
+**CONTEXT: Clear. Read ONLY from workdir documents.**
+
+### Step 5.1: Load All Docs
+```bash
+cat {workdir}/manifest.md
+cat {workdir}/plan.md
+cat {workdir}/step-*.md
+cat {workdir}/validation.md
+cat {workdir}/review.md  # if exists
+```
 
 **WRITE `{workdir}/summary.md`:**
 ```markdown
@@ -351,41 +568,52 @@ Cleanup: `rm -rf /tmp/3agents-skills/`
 ## AGENT ROLES
 ```
 ┌─────────────────────────────────────────────────────┐
-│ USER REQUEST                                        │
+│ USER REQUEST ($ARGUMENTS)                           │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 0: CLASSIFY + SKILL DISCOVERY                 │
-│ → manifest.md                                       │
+│ Read: $ARGUMENTS                                    │
+│ Write: manifest.md                                  │
+│ [CLEAR CONTEXT]                                     │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 1: PLAN (opus)                                │
-│ → plan.md + task-N.md                               │
+│ Read: manifest.md + skills                          │
+│ Write: plan.md + task-N.md                          │
+│ [CLEAR CONTEXT]                                     │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 2: IMPLEMENT (sonnet)                         │◄──────────────┐
-│ → step-N.md for each task                           │               │
+│ For each task:                                      │               │
+│   Read: task-N.md + skill                           │               │
+│   Write: step-N.md                                  │               │
+│   [CLEAR CONTEXT]                                   │               │
 └─────────────────┬───────────────────────────────────┘               │
                   ▼                                                   │
 ┌─────────────────────────────────────────────────────┐               │
 │ PHASE 3: VALIDATE (opus)                            │               │
-│ → validation.md                                     │               │
+│ Read: manifest.md + step-*.md + skills              │               │
+│ Write: validation.md                                │               │
 │ ❌ PARTIAL/MISMATCH → fix-task-N.md ────────────────┼───────────────┤
-│ ✅ MATCHES → continue                               │               │
+│ ✅ MATCHES → [CLEAR CONTEXT]                        │               │
 └─────────────────┬───────────────────────────────────┘               │
                   ▼                                                   │
 ┌─────────────────────────────────────────────────────┐               │
 │ PHASE 4: REVIEW (opus) - if critical                │               │
-│ → review.md                                         │               │
+│ Read: validation.md + step-*.md + changed files     │               │
+│ Write: review.md                                    │               │
 │ ❌ CHANGES_REQUIRED → refactor-task-N.md ───────────┼───────────────┘
-│ ✅ APPROVED → continue                              │
+│ ✅ APPROVED → [CLEAR CONTEXT]                       │
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
 │ PHASE 5: SUMMARY                                    │
-│ → summary.md                                        │
+│ Read: all workdir docs                              │
+│ Write: summary.md                                   │
+│ [DONE]                                              │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -409,14 +637,21 @@ PHASE 5 → summary.md EXISTS? → DONE
 - `MISMATCH` after 2 fix iterations
 - `CHANGES_REQUIRED` after 2 refactor iterations
 
-**NOT STOPS (iterate and fix):**
-- Compile errors → fix and retry
-- Test failures → fix and retry
-- `PARTIAL` match → create fix tasks, iterate
+**NOT STOPS (iterate until correct):**
+- Compile errors → fix and retry (don't skip)
+- Test failures → fix and retry (don't skip tests)
+- `PARTIAL` match → create fix tasks, iterate (don't accept partial)
 - `MISMATCH` (first time) → create fix tasks, iterate
 - `CHANGES_REQUIRED` (first time) → create refactor tasks, iterate
 - `APPROVED_WITH_NOTES` → proceed with notes
 - No matching skills → proceed without
+
+**NEVER:**
+- Skip validation to finish faster
+- Approve partial matches to avoid iteration
+- Ignore skill pattern violations
+- Leave "TODO" or "FIXME" in code
+- Ship code that doesn't meet accept criteria
 
 ---
 
