@@ -128,12 +128,6 @@
                         </div>
                     </template>
 
-                    <!-- Last Update Time -->
-                    <div x-show="lastUpdateTime" style="margin-bottom: 0.5rem; font-size: 0.8rem; color: #666;">
-                        <i class="fas fa-clock"></i>
-                        <span x-text="'Last updated: ' + formatTimeSince(lastUpdateTime)"></span>
-                    </div>
-
                     <!-- Jobs Cards Container -->
                     <div id="jobs-cards-container">
                         <template x-for="(item, index) in itemsToRender" :key="item.job.id + '-' + (item.type || 'flat') + (item.step ? '-step-' + item.step.index : '') + (item.childIndex ? '-child-' + item.childIndex : '')">
@@ -588,12 +582,6 @@
                                                             <span style="color: #666;">
                                                                 <i class="fas fa-flag-checkered" style="margin-right: 0.25rem;"></i>
                                                                 <span x-text="getFinishedDate(item.job)"></span>
-                                                            </span>
-                                                        </template>
-                                                        <template x-if="jobTreeData[item.job.id]">
-                                                            <span style="color: #0d8a6c;">
-                                                                <i class="fas fa-clock" style="margin-right: 0.25rem;"></i>
-                                                                <span x-text="formatTreeDuration(jobTreeData[item.job.id].duration_ms)"></span>
                                                             </span>
                                                         </template>
                                                         <span style="flex: 1;"></span>
@@ -1807,18 +1795,11 @@
             // Create global queue state store for shared loading state
             Alpine.store('queueState', {
                 isLoading: false,
-                lastUpdateTime: null,
 
                 // Helper method to set loading state
                 setLoading(value) {
                     console.log('[Queue] Store setLoading called:', value);
                     this.isLoading = Boolean(value);
-                },
-
-                // Helper method to set last update timestamp
-                setLastUpdate(date) {
-                    console.log('[Queue] Store setLastUpdate called:', date);
-                    this.lastUpdateTime = date instanceof Date ? date : new Date();
                 }
             });
             console.log('[Queue] Alpine store initialized:', Alpine.store('queueState'));
@@ -1982,7 +1963,6 @@
                 isInitialLoad: true,
                 pendingUpdates: [],
                 pendingUpdatesMaxSize: 1000,
-                lastUpdateTime: null,
 
                 // Throttled rendering
                 _renderPending: false,
@@ -2533,10 +2513,6 @@
                         this.isInitialLoad = false;
                         console.log('[Queue] Cleared isInitialLoad flag, isLoading will be set to false in finally block');
 
-                        // Update timestamp
-                        this.lastUpdateTime = new Date();
-                        console.log('[Queue] Last update time:', this.lastUpdateTime.toISOString());
-
                         // Apply any pending updates that arrived during fetch
                         if (this.pendingUpdates.length > 0) {
                             console.log('[Queue] Applying', this.pendingUpdates.length, 'pending updates');
@@ -2899,14 +2875,6 @@
                         return job.progress.current_url;
                     }
                     return null;
-                },
-
-                formatTimeSince(date) {
-                    if (!date) return '';
-                    const seconds = Math.floor((new Date() - date) / 1000);
-                    if (seconds < 60) return seconds + 's ago';
-                    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
-                    return Math.floor(seconds / 3600) + 'h ago';
                 },
 
                 deriveParentStatus(job) {
