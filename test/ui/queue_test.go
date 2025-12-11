@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/ternarybob/quaero/test/common"
 )
@@ -1391,27 +1392,153 @@ func TestNearbyRestaurantsKeywordsMultiStep(t *testing.T) {
 	}
 	qtc.env.LogTest(t, "✓ Multi-step job triggered")
 
-	// Monitor job with longer timeout (5 min for places + agent steps)
-	// The CRITICAL test is that the job reaches a terminal state - not hanging in "running"
-	qtc.env.LogTest(t, "Monitoring multi-step job execution...")
+	// Navigate back to Queue page to monitor progress
+	if err := chromedp.Run(qtc.ctx, chromedp.Navigate(qtc.queueURL)); err != nil {
+		t.Fatalf("Failed to navigate to queue page: %v", err)
+	}
+	// Wait for page to load
+	if err := chromedp.Run(qtc.ctx, chromedp.WaitVisible(`.page-title`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("Queue page did not load: %v", err)
+	}
 
-	// Use monitorJobAllowFailure pattern - job may fail due to API limits but should not hang
-	err := qtc.monitorJob(jobName, 5*time.Minute, false, false)
+	// Monitor job execution dynamically WITHOUT refreshing the page
+	// This verifies that WebSockets and JS updates are working correctly
+	qtc.env.LogTest(t, "Monitoring job dynamically (NO REFRESH) to verify auto-expansion and live logs...")
 
-	// Get final job status
+	// Capture console logs
+	chromedp.ListenTarget(qtc.ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *runtime.EventConsoleAPICalled:
+			args := make([]string, len(ev.Args))
+			for i, arg := range ev.Args {
+				args[i] = string(arg.Value)
+			}
+			// Filter for Queue logs to reduce noise
+			msg := strings.Join(args, " ")
+			if strings.Contains(msg, "[Queue]") || ev.Type == runtime.APITypeError || ev.Type == runtime.APITypeWarning {
+				qtc.env.LogTest(t, "[CONSOLE] %s: %s", ev.Type, msg)
+			}
+		}
+	})
+
+	timeout := 5 * time.Minute
+	startTime := time.Now()
+	lastScreenshotTime := startTime
+
+	var treeExpanded bool
+	var logsFound bool
+	var initialLogsSeen bool
+	var dynamicLogsSeen bool // Tracks if we see *new* logs after initial load
+	var prevLogCount int
 	var finalStatus string
-	chromedp.Run(qtc.ctx,
-		chromedp.Evaluate(fmt.Sprintf(`
-			(() => {
-				const element = document.querySelector('[x-data="jobList"]');
-				if (!element) return '';
-				const component = Alpine.$data(element);
-				if (!component || !component.allJobs) return '';
-				const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
-				return job ? job.status : '';
-			})()
-		`, jobName), &finalStatus),
-	)
+
+	for time.Since(startTime) < timeout {
+		// Take periodic screenshot every 15 seconds to track progress
+		if time.Since(lastScreenshotTime) > 15*time.Second {
+			qtc.env.TakeFullScreenshot(qtc.ctx, fmt.Sprintf("multistep_progress_%ds", int(time.Since(startTime).Seconds())))
+			lastScreenshotTime = time.Now()
+		}
+
+		var result map[string]interface{}
+		err := chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					// Find job row
+					const card = Array.from(document.querySelectorAll('.card')).find(c => 
+						c.querySelector('.card-title') && c.querySelector('.card-title').textContent.includes('%s')
+					);
+					if (!card) return { status: 'missing' };
+
+					// Get status
+					const statusBadge = card.querySelector('.label[data-status]');
+					const status = statusBadge ? statusBadge.getAttribute('data-status') : 'unknown';
+
+					// Check keys for tree view and logs
+					const treeView = card.querySelector('.inline-tree-view');
+					const logs = card.querySelectorAll('.tree-log-line');
+
+					return {
+						status: status,
+						hasTree: !!treeView && treeView.offsetParent !== null, // Visible
+						logCount: logs.length
+					};
+				})()
+			`, jobName), &result),
+		)
+
+		if err != nil {
+			t.Logf("Error evaluating page state: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		status := fmt.Sprintf("%v", result["status"])
+		hasTree := result["hasTree"] == true
+		logCount := 0
+		if val, ok := result["logCount"].(float64); ok {
+			logCount = int(val)
+		}
+
+		if hasTree {
+			treeExpanded = true
+		}
+		if logCount > 0 {
+			logsFound = true
+
+			// Track dynamic updates
+			if !initialLogsSeen {
+				initialLogsSeen = true
+				prevLogCount = logCount
+			} else {
+				// If log count increases, we have dynamic updates
+				if logCount > prevLogCount {
+					dynamicLogsSeen = true
+					qtc.env.LogTest(t, "Dynamic log update detected: count increased from %d to %d", prevLogCount, logCount)
+				}
+				prevLogCount = logCount
+			}
+		}
+
+		qtc.env.LogTest(t, "Status: %s | Tree: %v | Logs: %d", status, hasTree, logCount)
+
+		if status == "completed" || status == "failed" || status == "cancelled" {
+			finalStatus = status
+			qtc.env.LogTest(t, "Job reached terminal state: %s", status)
+			break
+		}
+
+		if time.Since(startTime) > 30*time.Second && status == "running" && !treeExpanded {
+			qtc.env.TakeScreenshot(qtc.ctx, "multistep_not_expanded")
+			t.Fatalf("Job is running but tree view did not auto-expand within 30s")
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+
+	qtc.env.TakeScreenshot(qtc.ctx, "multistep_final_state")
+
+	if finalStatus == "" {
+		t.Fatalf("Job timed out without reaching terminal state")
+	}
+
+	// Assertions
+	if !treeExpanded {
+		t.Errorf("FAIL: Inline Tree View never expanded")
+	} else {
+		qtc.env.LogTest(t, "✓ Inline Tree View auto-expanded")
+	}
+
+	if !logsFound {
+		t.Errorf("FAIL: No step logs were ever displayed")
+	} else {
+		qtc.env.LogTest(t, "✓ Logs appeared in Tree View")
+	}
+
+	if !dynamicLogsSeen {
+		t.Errorf("FAIL: No dynamic log updates detected (logs remained static at %d)", prevLogCount)
+	} else {
+		qtc.env.LogTest(t, "✓ Dynamic log updates verified")
+	}
 
 	qtc.env.LogTest(t, "Job reached terminal status: %s", finalStatus)
 
@@ -1422,13 +1549,29 @@ func TestNearbyRestaurantsKeywordsMultiStep(t *testing.T) {
 	}
 
 	// Job completed or failed gracefully
-	if err != nil {
+	// Job completed or failed gracefully
+	if finalStatus == "failed" {
+		// Fetch job error from UI
+		var jobError string
+		chromedp.Run(qtc.ctx,
+			chromedp.Evaluate(fmt.Sprintf(`
+				(() => {
+					const element = document.querySelector('[x-data="jobList"]');
+					if (!element) return '';
+					const component = Alpine.$data(element);
+					if (!component || !component.allJobs) return '';
+					const job = component.allJobs.find(j => j.name && j.name.includes('%s'));
+					return job ? (job.error || '') : '';
+				})()
+			`, jobName), &jobError),
+		)
+
 		// Job failed - check if it was due to agent failures (acceptable due to API limits)
-		if strings.Contains(err.Error(), "agent jobs") {
-			qtc.env.LogTest(t, "⚠ Job failed due to agent API issues (acceptable): %v", err)
+		if strings.Contains(jobError, "agent jobs") {
+			qtc.env.LogTest(t, "⚠ Job failed due to agent API issues (acceptable): %v", jobError)
 		} else {
 			qtc.env.TakeScreenshot(qtc.ctx, "multistep_failed")
-			t.Fatalf("Multi-step job failed unexpectedly: %v", err)
+			t.Fatalf("Multi-step job failed unexpectedly: %v", jobError)
 		}
 	} else {
 		qtc.env.LogTest(t, "✓ Multi-step job completed successfully")

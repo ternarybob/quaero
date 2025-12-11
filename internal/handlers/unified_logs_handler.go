@@ -273,6 +273,13 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// Get total count for pagination/scrolling indicator
+		totalCount, countErr := h.logService.CountLogs(ctx, jobID)
+		if countErr != nil {
+			h.logger.Warn().Err(countErr).Str("job_id", jobID).Msg("Failed to count logs, using returned count")
+			totalCount = len(logEntries)
+		}
+
 		// Build response logs
 		responseLogs := make([]map[string]interface{}, 0, len(logEntries))
 		for _, log := range logEntries {
@@ -303,6 +310,7 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			"job_id":           jobID,
 			"logs":             responseLogs,
 			"count":            len(responseLogs),
+			"total_count":      totalCount,
 			"limit":            limit,
 			"order":            order,
 			"level":            level,
