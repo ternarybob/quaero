@@ -150,7 +150,7 @@ func (gtc *githubTestContext) triggerJob(jobName string) error {
 
 	// Take screenshot of jobs page before clicking
 	screenshotName := fmt.Sprintf("jobs_page_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"))
-	if err := gtc.env.TakeScreenshot(gtc.ctx, screenshotName); err != nil {
+	if err := TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, screenshotName); err != nil {
 		gtc.env.LogTest(gtc.t, "Failed to take jobs page screenshot: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func (gtc *githubTestContext) triggerJob(jobName string) error {
 		chromedp.WaitVisible(runBtnSelector, chromedp.ByQuery),
 		chromedp.Click(runBtnSelector, chromedp.ByQuery),
 	); err != nil {
-		gtc.env.TakeScreenshot(gtc.ctx, "run_click_failed_"+jobName)
+		TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "run_click_failed_"+jobName)
 		return fmt.Errorf("failed to click run button for %s (selector: %s): %w", jobName, runBtnSelector, err)
 	}
 
@@ -179,13 +179,13 @@ func (gtc *githubTestContext) triggerJob(jobName string) error {
 		chromedp.WaitVisible(`.modal.active`, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond), // Wait for animation
 	); err != nil {
-		gtc.env.TakeScreenshot(gtc.ctx, "modal_wait_failed_"+jobName)
+		TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "modal_wait_failed_"+jobName)
 		return fmt.Errorf("confirmation modal did not appear for %s: %w", jobName, err)
 	}
 
 	// Take screenshot of confirmation modal
 	modalScreenshotName := fmt.Sprintf("confirmation_modal_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"))
-	if err := gtc.env.TakeScreenshot(gtc.ctx, modalScreenshotName); err != nil {
+	if err := TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, modalScreenshotName); err != nil {
 		gtc.env.LogTest(gtc.t, "Failed to take modal screenshot: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func (gtc *githubTestContext) triggerJob(jobName string) error {
 		chromedp.Click(`.modal.active .modal-footer .btn-primary`, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second), // Wait for action to register
 	); err != nil {
-		gtc.env.TakeScreenshot(gtc.ctx, "confirm_click_failed_"+jobName)
+		TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "confirm_click_failed_"+jobName)
 		return fmt.Errorf("failed to confirm run for %s: %w", jobName, err)
 	}
 
@@ -280,7 +280,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 		),
 	)
 	if pollErr != nil || jobID == "" {
-		gtc.env.TakeScreenshot(gtc.ctx, "job_not_found_"+jobName)
+		TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "job_not_found_"+jobName)
 		return fmt.Errorf("job %s not found in queue after 30s: %w", jobName, pollErr)
 	}
 	gtc.env.LogTest(gtc.t, "✓ Job found in queue (ID: %s)", jobID)
@@ -305,7 +305,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 
 		// Check if we've exceeded the timeout
 		if time.Since(pollStart) > timeout {
-			gtc.env.TakeFullScreenshot(gtc.ctx, "job_not_completed_"+jobName)
+			TakeFullScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "job_not_completed_"+jobName)
 			return fmt.Errorf("job %s did not complete within %v (last status: %s, checks: %d): timeout", jobName, timeout, lastStatus, checkCount)
 		}
 
@@ -320,7 +320,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 		if time.Since(lastScreenshotTime) >= 30*time.Second {
 			elapsed := time.Since(startTime)
 			screenshotName := fmt.Sprintf("monitor_%s_%ds", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"), int(elapsed.Seconds()))
-			if err := gtc.env.TakeFullScreenshot(gtc.ctx, screenshotName); err != nil {
+			if err := TakeFullScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, screenshotName); err != nil {
 				gtc.env.LogTest(gtc.t, "  Warning: Failed to take periodic screenshot: %v", err)
 			} else {
 				gtc.env.LogTest(gtc.t, "  Captured periodic screenshot: %s", screenshotName)
@@ -369,7 +369,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 			if gtc.ctx.Err() != nil {
 				return fmt.Errorf("context cancelled while checking status (checks: %d): %w", checkCount, gtc.ctx.Err())
 			}
-			gtc.env.TakeFullScreenshot(gtc.ctx, "status_check_failed_"+jobName)
+			TakeFullScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "status_check_failed_"+jobName)
 			return fmt.Errorf("failed to check job status: %w", err)
 		}
 
@@ -385,7 +385,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 
 			// Take full page screenshot on status change for debugging (captures all child rows)
 			screenshotName := fmt.Sprintf("status_%s_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_"), currentStatus)
-			gtc.env.TakeFullScreenshot(gtc.ctx, screenshotName)
+			TakeFullScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, screenshotName)
 		}
 
 		// Check if job is done
@@ -401,7 +401,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 	gtc.env.LogTest(gtc.t, "✓ Final job status: %s", currentStatus)
 
 	// Take final full page screenshot
-	gtc.env.TakeFullScreenshot(gtc.ctx, fmt.Sprintf("final_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_")))
+	TakeFullScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, fmt.Sprintf("final_%s", strings.ReplaceAll(strings.ToLower(jobName), " ", "_")))
 
 	// Verify document count via API if expectDocs is true
 	if expectDocs {
@@ -439,7 +439,7 @@ func TestGitHubRepoCollector(t *testing.T) {
 	if err := chromedp.Run(gtc.ctx, chromedp.Navigate(gtc.queueURL)); err != nil {
 		t.Fatalf("failed to navigate to queue page: %v", err)
 	}
-	if err := gtc.env.TakeScreenshot(gtc.ctx, "github_repo_before"); err != nil {
+	if err := TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "github_repo_before"); err != nil {
 		gtc.env.LogTest(gtc.t, "Failed to take before screenshot: %v", err)
 	}
 
@@ -474,7 +474,7 @@ func TestGitHubActionsCollector(t *testing.T) {
 	if err := chromedp.Run(gtc.ctx, chromedp.Navigate(gtc.queueURL)); err != nil {
 		t.Fatalf("failed to navigate to queue page: %v", err)
 	}
-	if err := gtc.env.TakeScreenshot(gtc.ctx, "github_actions_before"); err != nil {
+	if err := TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "github_actions_before"); err != nil {
 		gtc.env.LogTest(gtc.t, "Failed to take before screenshot: %v", err)
 	}
 
@@ -560,7 +560,7 @@ func TestGitHubRepoCollectorByName(t *testing.T) {
 	if err := chromedp.Run(gtc.ctx, chromedp.Navigate(gtc.queueURL)); err != nil {
 		t.Fatalf("failed to navigate to queue page: %v", err)
 	}
-	if err := gtc.env.TakeScreenshot(gtc.ctx, "github_repo_by_name_before"); err != nil {
+	if err := TakeScreenshotInDir(gtc.ctx, gtc.env.ResultsDir, "github_repo_by_name_before"); err != nil {
 		gtc.env.LogTest(gtc.t, "Failed to take before screenshot: %v", err)
 	}
 

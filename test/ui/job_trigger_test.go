@@ -157,4 +157,3 @@ func TestJobCancel(t *testing.T) {
 	utc.Screenshot("job_cancelled")
 	utc.Log("✓ Job cancelled successfully")
 }
-

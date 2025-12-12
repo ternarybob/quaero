@@ -31,7 +31,7 @@ type localDirTestContext struct {
 func (ltc *localDirTestContext) screenshot(name string) {
 	ltc.screenshotCount++
 	prefixedName := fmt.Sprintf("%02d_%s", ltc.screenshotCount, name)
-	ltc.env.TakeFullScreenshot(ltc.ctx, prefixedName)
+	TakeFullScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, prefixedName)
 }
 
 // saveJobToml saves the job definition as TOML to the results directory

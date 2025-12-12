@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestSettings(t *testing.T) {
 	}
 
 	// Take initial screenshot
-	if err := env.TakeFullScreenshot(ctx, "settings_page_loaded"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "settings_page_loaded"); err != nil {
 		t.Logf("Failed to take screenshot: %v", err)
 	}
 
@@ -78,7 +79,7 @@ func TestSettings(t *testing.T) {
 	if err := chromedp.Run(ctx, chromedp.OuterHTML("body", &bodyHTML)); err != nil {
 		t.Logf("Failed to get body HTML: %v", err)
 	} else {
-		dumpPath := env.GetScreenshotPath("page_dump.html")
+		dumpPath := filepath.Join(env.ResultsDir, "page_dump.html")
 		if err := os.WriteFile(dumpPath, []byte(bodyHTML), 0644); err != nil {
 			t.Logf("Failed to write page dump: %v", err)
 		}
@@ -104,7 +105,7 @@ func TestSettings(t *testing.T) {
 		}
 	}
 
-	env.TakeScreenshot(ctx, "key_values_verified")
+	TakeScreenshotInDir(ctx, env.ResultsDir, "key_values_verified")
 
 	// 4. Verify Menu Items and Navigation
 	menuItems := []struct {
@@ -128,7 +129,7 @@ func TestSettings(t *testing.T) {
 		// Click the menu item
 		linkSelector := fmt.Sprintf(`//ul[@class="nav"]//li//a[contains(., "%s")]`, item.selector)
 
-		err := env.TakeBeforeAfterScreenshots(ctx, "menu_"+item.id, func() error {
+		err := TakeBeforeAfterScreenshots(ctx, env.ResultsDir, "menu_"+item.id, func() error {
 			if err := chromedp.Run(ctx,
 				chromedp.Click(linkSelector, chromedp.BySearch),
 				chromedp.Sleep(1*time.Second), // Fixed wait for transition
@@ -203,7 +204,7 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("Failed to add connector: %v", err)
 	}
 
-	env.TakeScreenshot(ctx, "connector_added")
+	TakeScreenshotInDir(ctx, env.ResultsDir, "connector_added")
 
 	// Verify connector appears in the list
 	// We look for a table row containing the connector name
@@ -218,7 +219,7 @@ func TestSettings(t *testing.T) {
 		// Dump HTML for debugging
 		var bodyHTML string
 		if dumpErr := chromedp.Run(ctx, chromedp.OuterHTML("body", &bodyHTML)); dumpErr == nil {
-			dumpPath := env.GetScreenshotPath("connector_fail_dump.html")
+			dumpPath := filepath.Join(env.ResultsDir, "connector_fail_dump.html")
 			os.WriteFile(dumpPath, []byte(bodyHTML), 0644)
 		}
 		t.Errorf("Newly added connector '%s' not found in list: %v", connectorName, err)

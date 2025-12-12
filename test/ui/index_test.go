@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestIndex(t *testing.T) {
 	}
 
 	// Take initial screenshot
-	if err := env.TakeFullScreenshot(ctx, "index_page_loaded"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "index_page_loaded"); err != nil {
 		t.Logf("Failed to take screenshot: %v", err)
 	}
 
@@ -86,7 +87,7 @@ func TestIndex(t *testing.T) {
 			// Dump HTML if navbar fails
 			var bodyHTML string
 			chromedp.Run(ctx, chromedp.OuterHTML("body", &bodyHTML))
-			dumpPath := env.GetScreenshotPath("navbar_fail_dump.html")
+			dumpPath := filepath.Join(env.ResultsDir, "navbar_fail_dump.html")
 			os.WriteFile(dumpPath, []byte(bodyHTML), 0644)
 
 			t.Errorf("Navbar link '%s' not found: %v", linkText, err)
@@ -100,7 +101,7 @@ func TestIndex(t *testing.T) {
 	// Capture initial state (Before)
 	// Since we changed default to OFFLINE, this should capture the offline state
 	// or the transition state.
-	if err := env.TakeScreenshot(ctx, "index_status_before"); err != nil {
+	if err := TakeScreenshotInDir(ctx, env.ResultsDir, "index_status_before"); err != nil {
 		t.Logf("Failed to take before screenshot: %v", err)
 	}
 
@@ -125,7 +126,7 @@ func TestIndex(t *testing.T) {
 	env.LogTest(t, "✓ Online Indicator is ONLINE (Green)")
 
 	// Capture final state (After)
-	if err := env.TakeScreenshot(ctx, "index_status_after"); err != nil {
+	if err := TakeScreenshotInDir(ctx, env.ResultsDir, "index_status_after"); err != nil {
 		t.Logf("Failed to take after screenshot: %v", err)
 	}
 
@@ -168,7 +169,7 @@ func TestIndex(t *testing.T) {
 	}
 
 	// Take final screenshot to capture test completion state
-	if err := env.TakeFullScreenshot(ctx, "index_test_complete"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "index_test_complete"); err != nil {
 		t.Logf("Failed to take final screenshot: %v", err)
 	}
 	env.LogTest(t, "✓ Test completed successfully")

@@ -1203,12 +1203,6 @@ func (env *TestEnvironment) killLingeringProcesses() {
 	}
 }
 
-// GetScreenshotPath returns the path for saving a screenshot
-func (env *TestEnvironment) GetScreenshotPath(name string) string {
-	filename := fmt.Sprintf("%s.png", name)
-	return filepath.Join(env.ResultsDir, filename)
-}
-
 // GetBaseURL returns the base URL for the service
 func (env *TestEnvironment) GetBaseURL() string {
 	return fmt.Sprintf("http://%s:%d", env.Config.Service.Host, env.Config.Service.Port)
@@ -1355,64 +1349,6 @@ func (env *TestEnvironment) LoadTestJobDefinitions(jobDefPaths ...string) error 
 	}
 
 	fmt.Fprintf(env.LogFile, "✓ All test job definitions loaded successfully\n")
-	return nil
-}
-
-// TakeScreenshot captures a screenshot using chromedp and saves it to the test results directory
-func (env *TestEnvironment) TakeScreenshot(ctx context.Context, name string) error {
-	screenshotPath := env.GetScreenshotPath(name)
-
-	var buf []byte
-	if err := chromedp.Run(ctx, chromedp.CaptureScreenshot(&buf)); err != nil {
-		return fmt.Errorf("failed to capture screenshot: %w", err)
-	}
-
-	if err := os.WriteFile(screenshotPath, buf, 0644); err != nil {
-		return fmt.Errorf("failed to save screenshot: %w", err)
-	}
-
-	return nil
-}
-
-// TakeFullScreenshot captures a full page screenshot using chromedp and saves it to the test results directory
-func (env *TestEnvironment) TakeFullScreenshot(ctx context.Context, name string) error {
-	screenshotPath := env.GetScreenshotPath(name)
-
-	var buf []byte
-	if err := chromedp.Run(ctx, chromedp.FullScreenshot(&buf, 90)); err != nil {
-		return fmt.Errorf("failed to capture full screenshot: %w", err)
-	}
-
-	if err := os.WriteFile(screenshotPath, buf, 0644); err != nil {
-		return fmt.Errorf("failed to save screenshot: %w", err)
-	}
-
-	return nil
-}
-
-// TakeBeforeAfterScreenshots is a helper to capture before/after screenshots for UI tests
-// Takes a "before" screenshot, executes the action function, then takes an "after" screenshot
-func (env *TestEnvironment) TakeBeforeAfterScreenshots(ctx context.Context, baseName string, action func() error) error {
-	// Take "before" screenshot
-	beforeName := fmt.Sprintf("%s_before", baseName)
-	if err := env.TakeScreenshot(ctx, beforeName); err != nil {
-		return fmt.Errorf("failed to take before screenshot: %w", err)
-	}
-
-	// Execute the action
-	if err := action(); err != nil {
-		// Still take "after" screenshot even if action fails
-		afterName := fmt.Sprintf("%s_after_error", baseName)
-		env.TakeFullScreenshot(ctx, afterName)
-		return err
-	}
-
-	// Take "after" screenshot
-	afterName := fmt.Sprintf("%s_after", baseName)
-	if err := env.TakeScreenshot(ctx, afterName); err != nil {
-		return fmt.Errorf("failed to take after screenshot: %w", err)
-	}
-
 	return nil
 }
 

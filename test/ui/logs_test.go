@@ -91,7 +91,7 @@ func TestLogsUIDisplay(t *testing.T) {
 			t.Fatalf("Jobs page did not load: %v", err)
 		}
 
-		ltc.env.TakeScreenshot(ltc.ctx, "logs_test_jobs_page")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_jobs_page")
 		ltc.env.LogTest(t, "Jobs page loaded")
 
 		// Look for any available job and trigger it
@@ -119,7 +119,7 @@ func TestLogsUIDisplay(t *testing.T) {
 			chromedp.Click(`.card .btn-success`, chromedp.ByQuery),
 			chromedp.Sleep(500*time.Millisecond),
 		); err != nil {
-			ltc.env.TakeScreenshot(ltc.ctx, "logs_test_run_click_failed")
+			TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_run_click_failed")
 			t.Fatalf("Failed to click run button: %v", err)
 		}
 
@@ -137,7 +137,7 @@ func TestLogsUIDisplay(t *testing.T) {
 			)
 		}
 
-		ltc.env.TakeScreenshot(ltc.ctx, "logs_test_job_triggered")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_job_triggered")
 		ltc.env.LogTest(t, "Job triggered successfully")
 	})
 
@@ -157,7 +157,7 @@ func TestLogsUIDisplay(t *testing.T) {
 			t.Fatalf("Queue page did not load: %v", err)
 		}
 
-		ltc.env.TakeScreenshot(ltc.ctx, "logs_test_queue_page_initial")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_queue_page_initial")
 		ltc.env.LogTest(t, "Queue page loaded")
 
 		// Wait for job to appear and generate logs
@@ -185,7 +185,7 @@ func TestLogsUIDisplay(t *testing.T) {
 			}
 		}
 
-		ltc.env.TakeScreenshot(ltc.ctx, "logs_test_queue_expanded")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_queue_expanded")
 
 		// Check for step logs containers
 		var stepLogsContainerCount int
@@ -218,7 +218,7 @@ func TestLogsUIDisplay(t *testing.T) {
 		logsFound = logLineCount > 0
 		ltc.env.LogTest(t, "Log lines found in UI: %d", logLineCount)
 
-		ltc.env.TakeScreenshot(ltc.ctx, "logs_test_final_state")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_final_state")
 
 		// Log test results
 		if logsFound {
@@ -344,7 +344,7 @@ func TestLogsUITiming(t *testing.T) {
 		time.Sleep(pollInterval)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "logs_test_timing_final")
+	TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_timing_final")
 
 	if !firstLogTime.IsZero() {
 		elapsed := firstLogTime.Sub(startTime)
@@ -414,7 +414,7 @@ func TestLogsUICodebaseClassify(t *testing.T) {
 		t.Fatalf("Queue page did not load: %v", err)
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "codebase_classify_queue_initial")
+	TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "codebase_classify_queue_initial")
 	ltc.env.LogTest(t, "Queue page loaded")
 
 	// Wait for job to appear
@@ -446,7 +446,7 @@ func TestLogsUICodebaseClassify(t *testing.T) {
 	}
 
 	if !jobFound {
-		ltc.env.TakeScreenshot(ltc.ctx, "codebase_classify_job_not_found")
+		TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "codebase_classify_job_not_found")
 		t.Fatalf("Job %s did not appear in queue within %v", jobID, pollTimeout)
 	}
 
@@ -461,7 +461,7 @@ func TestLogsUICodebaseClassify(t *testing.T) {
 		ltc.env.LogTest(t, "Expanded job card")
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "codebase_classify_expanded")
+	TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "codebase_classify_expanded")
 
 	// Wait for job to complete (with timeout)
 	ltc.env.LogTest(t, "Waiting for job to complete...")
@@ -497,7 +497,7 @@ func TestLogsUICodebaseClassify(t *testing.T) {
 		}
 	}
 
-	ltc.env.TakeScreenshot(ltc.ctx, "codebase_classify_completed")
+	TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "codebase_classify_completed")
 
 	// Now verify that completed steps have events (not "No events yet")
 	t.Run("VerifyCompletedStepsHaveEvents", func(t *testing.T) {
@@ -566,7 +566,7 @@ func TestLogsUICodebaseClassify(t *testing.T) {
 		ltc.env.LogTest(t, "Event button texts: %v", eventButtonTexts)
 
 		// Take final screenshot
-		ltc.env.TakeFullScreenshot(ltc.ctx, "codebase_classify_events_check")
+		TakeFullScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "codebase_classify_events_check")
 
 		// Fail test if any completed steps have no events
 		if len(failedSteps) > 0 {
@@ -645,7 +645,7 @@ func TestLogsUILogLevels(t *testing.T) {
 	)
 
 	ltc.env.LogTest(t, "Log levels found in UI: %v", levelStyles)
-	ltc.env.TakeScreenshot(ltc.ctx, "logs_test_levels")
+	TakeScreenshotInDir(ltc.ctx, ltc.env.ResultsDir, "logs_test_levels")
 
 	// Log which levels were found
 	for level, found := range levelStyles {

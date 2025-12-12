@@ -148,4 +148,3 @@ func TestMultiStepJob(t *testing.T) {
 
 	utc.Log("✓ Multi-step job completed successfully")
 }
-

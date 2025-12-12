@@ -102,18 +102,18 @@ func (utc *UITestContext) Log(format string, args ...interface{}) {
 	utc.Env.LogTest(utc.T, format, args...)
 }
 
-// Screenshot takes a screenshot with a sequential number prefix
+// Screenshot takes a full page screenshot with a sequential number prefix
 func (utc *UITestContext) Screenshot(name string) error {
 	utc.screenshotNum++
 	fullName := fmt.Sprintf("%02d_%s", utc.screenshotNum, name)
-	return utc.Env.TakeScreenshot(utc.Ctx, fullName)
+	return TakeFullScreenshotInDir(utc.Ctx, utc.Env.ResultsDir, fullName)
 }
 
 // FullScreenshot takes a full page screenshot with sequential number prefix
 func (utc *UITestContext) FullScreenshot(name string) error {
 	utc.screenshotNum++
 	fullName := fmt.Sprintf("%02d_%s", utc.screenshotNum, name)
-	return utc.Env.TakeFullScreenshot(utc.Ctx, fullName)
+	return TakeFullScreenshotInDir(utc.Ctx, utc.Env.ResultsDir, fullName)
 }
 
 // Navigate navigates to a URL and waits for the page title

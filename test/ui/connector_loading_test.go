@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestConnectorUI_NoConnectorsMessage(t *testing.T) {
 	}
 
 	// Take screenshot
-	if err := env.TakeFullScreenshot(ctx, "connectors_section"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "connectors_section"); err != nil {
 		t.Logf("Failed to take screenshot: %v", err)
 	}
 
@@ -77,13 +78,13 @@ func TestConnectorUI_NoConnectorsMessage(t *testing.T) {
 	}
 
 	// Save HTML dump for debugging
-	dumpPath := env.GetScreenshotPath("connectors_page_dump.html")
+	dumpPath := filepath.Join(env.ResultsDir, "connectors_page_dump.html")
 	if err := os.WriteFile(dumpPath, []byte(bodyHTML), 0644); err != nil {
 		t.Logf("Failed to write page dump: %v", err)
 	}
 
 	// Take final screenshot
-	if err := env.TakeFullScreenshot(ctx, "connectors_test_complete"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "connectors_test_complete"); err != nil {
 		t.Logf("Failed to take final screenshot: %v", err)
 	}
 	env.LogTest(t, "✓ No connectors message test completed")
@@ -170,7 +171,7 @@ func TestConnectorUI_ConnectorDetails(t *testing.T) {
 	}
 
 	// Take screenshot
-	if err := env.TakeFullScreenshot(ctx, "connectors_with_created"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "connectors_with_created"); err != nil {
 		t.Logf("Failed to take screenshot: %v", err)
 	}
 
@@ -204,7 +205,7 @@ func TestConnectorUI_ConnectorDetails(t *testing.T) {
 	)
 
 	// Take final screenshot
-	if err := env.TakeFullScreenshot(ctx, "connector_details_test_complete"); err != nil {
+	if err := TakeFullScreenshotInDir(ctx, env.ResultsDir, "connector_details_test_complete"); err != nil {
 		t.Logf("Failed to take final screenshot: %v", err)
 	}
 	env.LogTest(t, "✓ Connector details test completed")

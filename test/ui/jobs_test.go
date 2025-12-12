@@ -107,7 +107,7 @@ func TestJobs(t *testing.T) {
 
 	if actualJobCount != 5 {
 		// Take screenshot for debugging
-		env.TakeScreenshot(ctx, "job_count_mismatch")
+		TakeScreenshotInDir(ctx, env.ResultsDir, "job_count_mismatch")
 		t.Fatalf("Expected 5 job definitions, but found %d: %v", actualJobCount, jobNames)
 	}
 
@@ -129,7 +129,7 @@ func TestJobs(t *testing.T) {
 			}
 		}
 		if !found {
-			env.TakeScreenshot(ctx, "missing_job_"+strings.ReplaceAll(expectedName, " ", "_"))
+			TakeScreenshotInDir(ctx, env.ResultsDir, "missing_job_"+strings.ReplaceAll(expectedName, " ", "_"))
 			t.Errorf("Expected job definition '%s' not found in page", expectedName)
 		}
 	}
@@ -153,7 +153,7 @@ func TestJobs(t *testing.T) {
 
 	// 5. Verify Edit Navigation
 	env.LogTest(t, "Testing Edit Navigation")
-	err = env.TakeBeforeAfterScreenshots(ctx, "edit_navigation", func() error {
+	err = TakeBeforeAfterScreenshots(ctx, env.ResultsDir, "edit_navigation", func() error {
 		// Click Edit button
 		if err := chromedp.Run(ctx, chromedp.Click(editBtnID, chromedp.ByQuery)); err != nil {
 			return err
@@ -187,7 +187,7 @@ func TestJobs(t *testing.T) {
 
 	// 6. Verify Run Confirmation (Cancel)
 	env.LogTest(t, "Testing Run Confirmation (Cancel)")
-	err = env.TakeBeforeAfterScreenshots(ctx, "run_confirmation", func() error {
+	err = TakeBeforeAfterScreenshots(ctx, env.ResultsDir, "run_confirmation", func() error {
 		return chromedp.Run(ctx,
 			// Click Run button
 			chromedp.Click(runBtnID, chromedp.ByQuery),
