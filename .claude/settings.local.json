@@ -20,7 +20,10 @@
       "Bash(certutil:*)",
       "Bash(perl:*)",
       "Bash(xxd:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git merge:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
