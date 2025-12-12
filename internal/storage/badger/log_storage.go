@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -106,9 +107,30 @@ func (s *LogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]mo
 	return logs, nil
 }
 
+// normalizeLevel converts API level names to the 3-letter codes used in storage
+// API uses: "info", "warn", "error", "debug"
+// Storage uses: "INF", "WRN", "ERR", "DBG"
+func normalizeLevel(level string) string {
+	switch strings.ToLower(level) {
+	case "info", "inf":
+		return "INF"
+	case "warn", "warning", "wrn":
+		return "WRN"
+	case "error", "err":
+		return "ERR"
+	case "debug", "dbg":
+		return "DBG"
+	default:
+		// Return as-is if already in correct format or unknown
+		return strings.ToUpper(level)
+	}
+}
+
 func (s *LogStorage) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level)
+	// Normalize level to 3-letter format used in storage
+	normalizedLevel := normalizeLevel(level)
+	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level: %w", err)
@@ -165,7 +187,9 @@ func (s *LogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit 
 
 func (s *LogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level)
+	// Normalize level to 3-letter format used in storage
+	normalizedLevel := normalizeLevel(level)
+	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(normalizedLevel)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level with offset: %w", err)

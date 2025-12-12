@@ -3505,14 +3505,21 @@
                     // Also update Tree Data if available (tree view source)
                     // This ensures the tree view updates in real-time for streaming logs
                     if (this.jobTreeData[job_id] && this.jobTreeData[job_id].steps) {
-                        const step = this.jobTreeData[job_id].steps.find(s => s.name === step_name);
-                        if (step) {
+                        const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
+                        if (stepIdx >= 0) {
+                            const step = this.jobTreeData[job_id].steps[stepIdx];
                             if (!step.logs) step.logs = [];
                             step.logs.push(logEntry);
 
-                            // Maintain max log size in tree view
-                            // We allow array to grow slightly larger than display limit to handle buffering
-                            // Display slicing happens in getFilteredTreeLogs
+                            // Update totalLogCount to match actual log count for correct line numbering
+                            // During streaming, we don't have a separate "total" from API, so use logs.length
+                            step.totalLogCount = step.logs.length;
+
+                            // Auto-expand step when it receives logs during streaming
+                            const treeStepKey = `${job_id}:${stepIdx}`;
+                            if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
+                            }
 
                             // Force reactivity for deep update in tree data
                             // Re-assigning the root property is the surest way in Alpine v3 for deep changes.
