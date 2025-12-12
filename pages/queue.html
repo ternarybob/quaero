@@ -701,8 +701,8 @@
                                                                             <!-- Log lines (limited to step-specific limit, earliest-to-latest) -->
                                                                             <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id, step.name)" :key="logIdx">
                                                                                 <div class="tree-log-line" :class="{ 'log-error': log.level === 'error' }">
-                                                                                    <!-- Line number -->
-                                                                                    <span class="tree-log-num" x-text="getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1"></span>
+                                                                                    <!-- Line number (from server, falls back to calculated if not available) -->
+                                                                                    <span class="tree-log-num" x-text="log.line_number || (getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1)"></span>
                                                                                     <!-- Log level badge -->
                                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)" style="margin-right: 0.5rem; font-weight: 500;"></span>
                                                                                     <!-- Log text -->
