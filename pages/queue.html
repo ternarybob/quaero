@@ -3763,23 +3763,58 @@
                     this.throttledRenderJobs();
                 },
 
+                // Debounced step event refresh - collects step_ids and processes after delay
+                // This prevents API flooding when many refresh_logs triggers arrive rapidly
+                _pendingStepIds: new Set(),
+                _refreshDebounceTimer: null,
+                _refreshDebounceMs: 500, // Wait 500ms for more triggers before fetching
+
                 // Refresh step events from API (triggered by refresh_logs WebSocket message)
-                // Uses incremental fetching with cursor-based pagination for efficiency
-                // Only fetches new logs since last cursor position
+                // Uses debouncing to batch multiple triggers together
                 async refreshStepEvents(detail) {
                     const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
+
+                    // Collect step_ids into pending set
+                    for (const stepId of step_ids) {
+                        this._pendingStepIds.add(stepId);
+                    }
+
+                    // Clear existing timer
+                    if (this._refreshDebounceTimer) {
+                        clearTimeout(this._refreshDebounceTimer);
+                    }
+
+                    // If finished=true (step completed), process immediately
+                    if (finished) {
+                        this._processRefreshStepEvents();
+                        return;
+                    }
+
+                    // Otherwise debounce - wait for more triggers
+                    this._refreshDebounceTimer = setTimeout(() => {
+                        this._processRefreshStepEvents();
+                    }, this._refreshDebounceMs);
+                },
+
+                // Process pending step events (debounced)
+                async _processRefreshStepEvents() {
+                    this._refreshDebounceTimer = null;
+
+                    // Get and clear pending step_ids
+                    const stepIds = Array.from(this._pendingStepIds);
+                    this._pendingStepIds.clear();
+
+                    if (stepIds.length === 0) return;
+
+                    console.log('[Queue] Processing', stepIds.length, 'step refresh triggers (debounced)');
 
                     // Initialize tracking structures
                     if (!this._stepEventFetchInFlight) {
                         this._stepEventFetchInFlight = new Set();
                     }
-                    // Track cursors per step job for incremental fetching
-                    if (!this._stepLogCursors) {
-                        this._stepLogCursors = {};
-                    }
 
-                    for (const stepJobId of step_ids) {
+                    for (const stepJobId of stepIds) {
                         // Skip if already fetching this step's events
                         if (this._stepEventFetchInFlight.has(stepJobId)) {
                             continue;
@@ -3787,11 +3822,13 @@
                         this._stepEventFetchInFlight.add(stepJobId);
 
                         try {
-                            // Find manager, step name, and step status
+                            // Find manager, step name, and step status from local data first
                             let managerId = null;
                             let stepName = null;
                             let stepStatus = null;
+                            let stepIdx = -1;
 
+                            // Check local job data first (avoid API call if possible)
                             for (const job of this.allJobs) {
                                 const stepJobIds = job.metadata?.step_job_ids;
                                 if (stepJobIds) {
@@ -3799,6 +3836,13 @@
                                         if (id === stepJobId) {
                                             managerId = job.id;
                                             stepName = name;
+                                            // Get status from tree data if available
+                                            if (this.jobTreeData[managerId]?.steps) {
+                                                stepIdx = this.jobTreeData[managerId].steps.findIndex(s => s.name === name);
+                                                if (stepIdx >= 0) {
+                                                    stepStatus = this.jobTreeData[managerId].steps[stepIdx].status;
+                                                }
+                                            }
                                             break;
                                         }
                                     }
@@ -3806,19 +3850,19 @@
                                 }
                             }
 
-                            // Always fetch step job to get current status
-                            try {
-                                const stepResponse = await fetch(`/api/jobs/${stepJobId}`);
-                                if (stepResponse.ok) {
-                                    const stepJob = await stepResponse.json();
-                                    stepStatus = stepJob.status;
-                                    if (!managerId && stepJob.parent_id) {
+                            // Only fetch step job from API if we couldn't find it locally
+                            if (!managerId) {
+                                try {
+                                    const stepResponse = await fetch(`/api/jobs/${stepJobId}`);
+                                    if (stepResponse.ok) {
+                                        const stepJob = await stepResponse.json();
+                                        stepStatus = stepJob.status;
                                         managerId = stepJob.parent_id;
                                         stepName = stepJob.metadata?.step_name || stepJob.name;
                                     }
+                                } catch (fetchErr) {
+                                    console.warn('[Queue] Failed to fetch step job:', fetchErr);
                                 }
-                            } catch (fetchErr) {
-                                console.warn('[Queue] Failed to fetch step job:', fetchErr);
                             }
 
                             if (!managerId || !stepName) {
