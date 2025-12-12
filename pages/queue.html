@@ -1448,24 +1448,9 @@
                 }));
             }));
 
-            // Subscribe to job log events
-            wsUnsubscribers.push(WebSocketManager.subscribe('job_log', (payload) => {
-                window.dispatchEvent(new CustomEvent('jobList:jobLog', {
-                    detail: {
-                        job_id: payload.job_id,
-                        parent_job_id: payload.parent_job_id,
-                        manager_id: payload.manager_id,
-                        level: payload.level,
-                        message: payload.message,
-                        step_name: payload.step_name,
-                        source_type: payload.source_type,
-                        originator: payload.originator,
-                        phase: payload.phase,
-                        metadata: payload.metadata,
-                        timestamp: payload.timestamp
-                    }
-                }));
-            }));
+            // NOTE: job_log subscription REMOVED - architecture uses trigger-based approach
+            // WebSocket sends only 'refresh_logs' triggers, UI fetches logs from /api/logs
+            // This prevents heavy WebSocket load when jobs produce 5000+ log entries
 
             console.log('[Queue] Subscribed to', wsUnsubscribers.length, 'WebSocket message types');
         }
@@ -2002,7 +1987,7 @@
                     window.addEventListener('jobList:load', () => this.loadJobs());
                     window.addEventListener('jobList:render', () => this.renderJobs());
                     window.addEventListener('jobList:updateJob', (e) => this.updateJobInList(e.detail));
-                    window.addEventListener('jobList:jobLog', (e) => this.handleJobLog(e.detail));
+                    // NOTE: jobLog listener REMOVED - architecture uses trigger-based approach
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.handleRefreshStepEvents(e.detail));
                     // Handle child job spawn events - fetch children when new children are created
                     window.addEventListener('jobList:childSpawned', (e) => {
@@ -2022,7 +2007,7 @@
                     // WebSocket real-time updates
                     window.addEventListener('jobList:recalculateStats', () => this.recalculateStats());
                     window.addEventListener('jobList:updateJobProgress', (e) => this.updateJobProgress(e.detail));
-                    window.addEventListener('jobList:jobLog', (e) => this.handleJobLog(e.detail));
+                    // NOTE: jobLog listener REMOVED - logs fetched via API on refresh_logs trigger
                     // Step hierarchy progress updates
                     window.addEventListener('jobList:updateStepProgress', (e) => this.updateStepProgress(e.detail));
                     window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
@@ -3480,65 +3465,19 @@
                     }, this._statsDebounceMs);
                 },
 
-                // Handle individual job log event (legacy/streaming)
+                // DEPRECATED: handleJobLog - no longer used
+                // Architecture: WebSocket sends only 'refresh_logs' triggers, not actual logs
+                // Logs are fetched from REST API /api/logs when trigger is received
+                // This prevents heavy WebSocket load when jobs produce 5000+ log entries
                 handleJobLog(detail) {
-                    const { job_id, step_name, text, level, timestamp } = detail;
-                    if (!job_id) return;
-
-                    // Initialize logs array if needed
-                    if (!this.jobLogs[job_id]) {
-                        this.jobLogs[job_id] = [];
-                    }
-
-                    // Create log object
-                    const logEntry = {
-                        step_name,
-                        text: text || detail.message,
-                        message: text || detail.message, // property compatibility
-                        level,
-                        timestamp
-                    };
-
-                    // Add to jobLogs (flat view source)
-                    this.jobLogs[job_id].push(logEntry);
-
-                    // Also update Tree Data if available (tree view source)
-                    // This ensures the tree view updates in real-time for streaming logs
-                    if (this.jobTreeData[job_id] && this.jobTreeData[job_id].steps) {
-                        const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
-                        if (stepIdx >= 0) {
-                            const step = this.jobTreeData[job_id].steps[stepIdx];
-                            if (!step.logs) step.logs = [];
-                            step.logs.push(logEntry);
-
-                            // Update totalLogCount to match actual log count for correct line numbering
-                            // During streaming, we don't have a separate "total" from API, so use logs.length
-                            step.totalLogCount = step.logs.length;
-
-                            // Auto-expand step when it receives logs during streaming
-                            const treeStepKey = `${job_id}:${stepIdx}`;
-                            if (!this.jobTreeExpandedSteps[treeStepKey]) {
-                                this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
-                            }
-
-                            // Force reactivity for deep update in tree data
-                            // Re-assigning the root property is the surest way in Alpine v3 for deep changes.
-                            // Ensure the job's data object reference changes too
-                            const updatedJobData = { ...this.jobTreeData[job_id] };
-                            this.jobTreeData = {
-                                ...this.jobTreeData,
-                                [job_id]: updatedJobData
-                            };
-                        }
-                    }
-
-                    // Throttle render to avoid freezing UI on log bursts
-                    this.throttledRenderJobs();
+                    // No-op: This function is deprecated
+                    // Logs are now fetched via handleRefreshStepEvents -> fetchStepLogs -> /api/logs
                 },
 
                 // Handle refresh step events trigger (notify-pull model)
+                // This is the primary mechanism for updating logs - fetches from REST API
                 handleRefreshStepEvents(detail) {
-                    const { step_ids, timestamp } = detail;
+                    const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
 
                     step_ids.forEach(stepId => {
@@ -3557,6 +3496,13 @@
                             treeSteps.forEach((s, idx) => {
                                 // If stepName is specified, only refresh that step.
                                 if (stepName && s.name !== stepName) return;
+
+                                // Auto-expand step when it receives log updates (replaces handleJobLog auto-expand)
+                                const treeStepKey = `${jobId}:${idx}`;
+                                if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                    this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
+                                }
+
                                 this.fetchStepLogs(jobId, s.name, idx);
                             });
                         }

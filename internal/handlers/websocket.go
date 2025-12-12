@@ -914,58 +914,16 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	}
 
 	// Subscribe to log events from LogService (replaces direct BroadcastLog calls)
-	// Uses unified aggregator for trigger-based UI updates instead of direct broadcast
+	// Uses unified aggregator for trigger-based UI updates - NO direct log broadcasting
+	// Architecture: WebSocket sends only triggers, UI fetches logs from REST API
 	h.eventService.Subscribe("log_event", func(ctx context.Context, event interfaces.Event) error {
-		// Use unified aggregator for trigger-based updates if available
+		// Route all service logs through the unified aggregator for trigger-based updates
+		// This avoids heavy WebSocket load from streaming thousands of log entries
 		if h.unifiedLogAggregator != nil {
-			// Record that a service log event occurred (will be included in next periodic trigger)
 			h.unifiedLogAggregator.RecordServiceLog(ctx)
-			return nil
 		}
-
-		// Fallback: Direct broadcast (legacy behavior if aggregator not initialized)
-		payload, ok := event.Payload.(map[string]interface{})
-		if !ok {
-			h.logger.Warn().Msg("Invalid log_event payload type")
-			return nil
-		}
-
-		// Build log payload with job_id for client-side filtering
-		logPayload := map[string]interface{}{
-			"timestamp": getString(payload, "timestamp"),
-			"level":     getString(payload, "level"),
-			"message":   getString(payload, "message"),
-			"job_id":    getString(payload, "job_id"), // Include job_id for filtering
-		}
-
-		// Broadcast log message to all clients
-		msg := WSMessage{
-			Type:    "log",
-			Payload: logPayload,
-		}
-
-		data, err := json.Marshal(msg)
-		if err != nil {
-			h.logger.Error().Err(err).Msg("Failed to marshal log message")
-			return nil
-		}
-
-		h.mu.RLock()
-		clients := make([]*websocket.Conn, 0, len(h.clients))
-		mutexes := make([]*sync.Mutex, 0, len(h.clients))
-		for conn := range h.clients {
-			clients = append(clients, conn)
-			mutexes = append(mutexes, h.clientMutex[conn])
-		}
-		h.mu.RUnlock()
-
-		for i, conn := range clients {
-			mutex := mutexes[i]
-			mutex.Lock()
-			conn.WriteMessage(websocket.TextMessage, data)
-			mutex.Unlock()
-		}
-
+		// No fallback - aggregator is always initialized in production
+		// If not initialized, logs are still persisted and available via REST API
 		return nil
 	})
 
@@ -1381,80 +1339,32 @@ func (h *WebSocketHandler) SubscribeToCrawlerEvents() {
 	})
 
 	// Subscribe to unified job log events (EventJobLog) for all job types
-	// This is the unified event type for agent, places_search, web_search workers
+	// Architecture: NO direct log broadcasting via WebSocket - use trigger-based approach
+	// Logs are persisted to storage and UI fetches them via REST API when triggered
+	// This prevents heavy WebSocket load when jobs produce 5000+ log entries
 	h.eventService.Subscribe(interfaces.EventJobLog, func(ctx context.Context, event interfaces.Event) error {
 		payload, ok := event.Payload.(map[string]interface{})
 		if !ok {
-			h.logger.Warn().Msg("Invalid job_log event payload type")
 			return nil
 		}
 
-		// Check whitelist (empty allowedEvents = allow all)
-		if len(h.allowedEvents) > 0 && !h.allowedEvents["job_log"] {
-			return nil
-		}
-
-		// Skip individual job_log broadcasts for step logs - they use the aggregator trigger approach
-		// Step events are fetched from API when refresh_step_events trigger is received
-		sourceType := getString(payload, "source_type")
-		stepName := getString(payload, "step_name")
-		if sourceType == "step" || stepName != "" {
-			// Step logs use trigger-based refresh, not individual broadcasts
-			return nil
-		}
-
-		// Create WebSocket message for job log
-		wsPayload := map[string]interface{}{
-			"job_id":        getString(payload, "job_id"),
-			"parent_job_id": getString(payload, "parent_job_id"),
-			"manager_id":    getString(payload, "manager_id"),
-			"level":         getString(payload, "level"),
-			"message":       getString(payload, "message"),
-			"step_name":     stepName,
-			"source_type":   sourceType,
-			"originator":    getString(payload, "originator"),
-			"timestamp":     getString(payload, "timestamp"),
-		}
-
-		// Include metadata if present
-		if metadataRaw, ok := payload["metadata"]; ok {
-			if metadataMap, ok := metadataRaw.(map[string]interface{}); ok {
-				wsPayload["metadata"] = metadataMap
+		// Route all job logs through the unified aggregator for trigger-based updates
+		// The aggregator will send a refresh_logs trigger, and UI will fetch from /api/logs
+		if h.unifiedLogAggregator != nil {
+			stepName := getString(payload, "step_name")
+			if stepName != "" {
+				// Step logs - record step event for batch triggering
+				stepID := getString(payload, "job_id")
+				if stepID != "" {
+					h.unifiedLogAggregator.RecordStepEvent(ctx, stepID)
+				}
+			} else {
+				// Non-step job logs - record as service log
+				h.unifiedLogAggregator.RecordServiceLog(ctx)
 			}
 		}
-
-		// Broadcast to all clients
-		msg := WSMessage{
-			Type:    "job_log",
-			Payload: wsPayload,
-		}
-
-		data, err := json.Marshal(msg)
-		if err != nil {
-			h.logger.Error().Err(err).Msg("Failed to marshal job log message")
-			return nil
-		}
-
-		h.mu.RLock()
-		clients := make([]*websocket.Conn, 0, len(h.clients))
-		mutexes := make([]*sync.Mutex, 0, len(h.clients))
-		for conn := range h.clients {
-			clients = append(clients, conn)
-			mutexes = append(mutexes, h.clientMutex[conn])
-		}
-		h.mu.RUnlock()
-
-		for i, conn := range clients {
-			mutex := mutexes[i]
-			mutex.Lock()
-			err := conn.WriteMessage(websocket.TextMessage, data)
-			mutex.Unlock()
-
-			if err != nil {
-				h.logger.Warn().Err(err).Msg("Failed to send job log to client")
-			}
-		}
-
+		// Logs are already persisted to storage by LogService
+		// UI will fetch them via REST API when it receives the refresh trigger
 		return nil
 	})
 
