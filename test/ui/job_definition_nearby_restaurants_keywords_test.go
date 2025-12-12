@@ -7,7 +7,7 @@ import (
 
 // TestJobDefinitionNearbyRestaurantsKeywords tests the multi-step Places + Keywords job definition
 func TestJobDefinitionNearbyRestaurantsKeywords(t *testing.T) {
-	utc := NewUITestContext(t, 15*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	utc.Log("--- Testing Job Definition: Nearby Restaurants + Keywords ---")

@@ -25,8 +25,8 @@ func TestJobs(t *testing.T) {
 		t.Fatalf("Failed to load test job definition: %v", err)
 	}
 
-	// Create a timeout context
-	ctx, cancelTimeout := context.WithTimeout(context.Background(), 60*time.Second)
+	// Create a timeout context (use MaxJobTestTimeout for consistency)
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), MaxJobTestTimeout)
 	defer cancelTimeout()
 
 	// Create allocator context

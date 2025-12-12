@@ -75,12 +75,33 @@ This document explains Quaero's canonical format strategy for storing content fr
 - **MCP Documentation:** `docs/implement-mcp-server/` - Model Context Protocol integration
 - **Feature Documentation:** `docs/features/` - Specific feature implementation details
 
+## Queue System Documentation (For AI Refactoring)
+
+The following documents provide comprehensive guidance for AI agents refactoring the queue path:
+
+| Document | Purpose |
+|----------|---------|
+| [Manager/Worker Architecture](manager_worker_architecture.md) | Core architecture, job hierarchy, data flow |
+| [Queue Logging](QUEUE_LOGGING.md) | Logging flow, WebSocket events, log entry schema |
+| [Queue UI](QUEUE_UI.md) | Frontend architecture, Alpine.js components, icon standards |
+| [Queue Services](QUEUE_SERVICES.md) | Supporting services, event system, initialization order |
+| [Workers Reference](workers.md) | Complete worker documentation (17+ workers) |
+
+**Reading Order for Refactoring:**
+1. Start with `manager_worker_architecture.md` for overall understanding
+2. Read the specific document for the area you're modifying
+3. Check `workers.md` if implementing or modifying workers
+
 ## Document History
 
 | Document | Version | Last Updated | Status |
 |----------|---------|--------------|--------|
-| MANAGER_WORKER_ARCHITECTURE.md | 1.0 | 2025-11-11 | ✅ Current - Single comprehensive document covering the Manager/Worker job system architecture |
-| architecture.md | - | 2024-11-06 | ✅ Current |
+| MANAGER_WORKER_ARCHITECTURE.md | 2.0 | 2025-12-12 | ✅ Current - Comprehensive architecture with AI refactoring guidance |
+| QUEUE_LOGGING.md | 1.0 | 2025-12-12 | ✅ Current - Logging architecture for queue system |
+| QUEUE_UI.md | 1.0 | 2025-12-12 | ✅ Current - UI architecture for queue management |
+| QUEUE_SERVICES.md | 1.0 | 2025-12-12 | ✅ Current - Supporting services documentation |
+| workers.md | 1.0 | 2025-12-12 | ✅ Current - Complete worker reference |
+| architecture.md | - | 2024-11-06 | ✅ Current - Markdown + Metadata architecture |
 | ~~JOB_EXECUTOR_ARCHITECTURE.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |
 | ~~JOB_QUEUE_MANAGEMENT.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |
 | ~~QUEUE_ARCHITECTURE.md~~ | - | - | ❌ Deleted - Consolidated into MANAGER_WORKER_ARCHITECTURE.md |

@@ -1,336 +1,248 @@
 ---
-name: 3agents
-description: Three-phase workflow. Opus plans, executes, validates - all inline.
+name: 3agents-skills
+description: Adversarial worker/validator loop - validator checks against docs/architecture
 ---
 
-Execute workflow for: $ARGUMENTS
+Execute: $ARGUMENTS
+
+## OVERVIEW
+
+Simple two-agent adversarial loop:
+1. **WORKER** implements the request
+2. **VALIDATOR** checks against `docs/architecture/*.md` requirements
+3. **Iterate** until validator approves or max iterations reached
 
 ## CONFIG
-
 ```yaml
-model: claude-opus-4-5-20251101
-
-skills:
-  code-architect: [architecture, design, refactoring]
-  go-coder: [implementation, handlers, functions]
-  test-writer: [tests, coverage]
-  none: [documentation, planning]
-
-critical_triggers:
-  - security
-  - authentication
-  - authorization
-  - payments
-  - data-migration
-  - crypto
-  - api-breaking
-  - database-schema
+architecture_docs: docs/architecture/
+max_iterations: 3
+workdir: ./docs/{type}/{date}-{slug}/
 ```
 
 ## RULES
-
-- **Tests:** Only `/test/api` and `/test/ui`
-- **Binaries:** `go build -o /tmp/` or `go run` - never in root
-- **Decisions:** Make technical decisions - only stop for architecture choices
-- **Complete:** Run ALL phases to completion
-- **Document:** Write output files as you go - this is your audit trail
+- Tests: `/test/api`, `/test/ui` only
+- Binaries: `go build -o /tmp/` - never in root
+- **Validator is adversarial** - actively looks for violations
+- **Architecture docs are the requirements** - not suggestions
+- **Iterate until correct** - don't accept partial compliance
 
 ---
 
-## WORKDIR SETUP
+## PHASE 0: SETUP
 
+### Step 0.1: Create Workdir
 ```bash
-# If $ARGUMENTS is a file path
-DIR=$(dirname "$ARGUMENTS")
-BASE=$(basename "$ARGUMENTS" .md)
-WORKDIR="${DIR}/$(date +%Y%m%d-%H%M%S)-${BASE}/"
-
-# If $ARGUMENTS is a task description  
-WORKDIR="docs/features/$(date +%Y%m%d-%H%M%S)-${SLUG}/"
+# Type: feature | fix
+# Slug: kebab-case from request
+mkdir -p ./docs/{type}/{YYYYMMDD}-{slug}/
 ```
 
-Create the workdir before starting.
+### Step 0.2: Load Architecture Requirements
+```bash
+cat docs/architecture/manager_worker_architecture.md
+cat docs/architecture/QUEUE_LOGGING.md
+cat docs/architecture/QUEUE_UI.md
+cat docs/architecture/QUEUE_SERVICES.md
+cat docs/architecture/workers.md
+```
 
----
-
-## PHASE 1: PLAN
-
-**Think deeply before planning:**
-1. What are ALL discrete tasks?
-2. What depends on what?
-3. What's the critical path?
-4. What triggers final review?
-
-**Create: `{workdir}/plan.md`**
-
+### Step 0.3: Write Manifest
+**WRITE `{workdir}/manifest.md`:**
 ```markdown
-# Plan: {task}
+# {Type}: {Title}
+Date: {YYYY-MM-DD}
+Request: "{original input}"
 
-## Analysis
-{dependencies, approach, risks}
-
-## Steps
-
-### Step 1: {Description}
-- Skill: @{skill}
-- Files: {paths}
-- Critical: no | yes:{trigger}
-- Depends: none
-
-### Step 2: {Description}
-- Skill: @{skill}
-- Files: {paths}
-- Critical: yes:security
-- Depends: Step 1
-
-### Step 3: {Description}
-- Skill: @{skill}
-- Files: {paths}
-- Critical: yes:api-breaking
-- Depends: Step 2
-- User decision: {if needed}
-
-## Execution Order
-1 → 2 → 3 → Final Review (if critical)
+## User Intent
+{What the user wants - this is the goal}
 
 ## Success Criteria
-- {condition}
-- {condition}
+- [ ] {criterion 1}
+- [ ] {criterion 2}
+
+## Applicable Architecture Requirements
+| Doc | Section | Requirement |
+|-----|---------|-------------|
+| manager_worker_architecture.md | {section} | {key requirement} |
+| QUEUE_LOGGING.md | {section} | {key requirement} |
+| QUEUE_UI.md | {section} | {key requirement} |
 ```
 
 ---
 
-## PHASE 2: EXECUTE
+## PHASE 1: WORKER IMPLEMENTS
 
-For EACH step in plan.md:
+**WORKER implements the request, documenting work in `step-{N}.md`**
 
-### 2.1 Execute the Step
+### Step 1.1: Implement
+1. Read manifest.md for requirements
+2. Read relevant architecture docs
+3. Implement changes
+4. Run build and tests
 
-Do the implementation work.
-
-### 2.2 Write Step File
-
-**Create: `{workdir}/step-{N}.md`**
-
+**WRITE `{workdir}/step-{iteration}.md`:**
 ```markdown
-# Step {N}: {Description}
+# Step {N}: Implementation
+Iteration: {N} | Status: complete | partial | failed
 
-## Actions Taken
-1. {what you did}
-2. {what you did}
+## Changes Made
+| File | Action | Description |
+|------|--------|-------------|
+| `{path}` | created/modified | {what changed} |
 
-## Files Modified
-- `{path}` - {what changed}
-- `{path}` - {what changed}
+## Build & Test
+Build: Pass | Fail
+Tests: Pass | Fail ({details})
 
-## Decisions Made
-- **{choice}**: {rationale}
-- **{choice}**: {rationale}
+## Architecture Compliance (self-check)
+- [ ] {requirement from manifest} - {how addressed}
+```
 
-## Verification
+---
+
+## PHASE 2: VALIDATOR CHECKS
+
+**VALIDATOR adversarially checks against architecture docs. Be harsh.**
+
+### Step 2.1: Load Requirements
 ```bash
-# Compilation
-go build -o /tmp/test ./...
-# Result: ✅ Pass | ❌ Fail: {error}
-
-# Tests (if applicable)
-go test ./test/api/... -run {relevant}
-# Result: ✅ Pass | ❌ Fail | ⚙️ Skipped
+cat {workdir}/manifest.md
+cat docs/architecture/*.md
 ```
 
-## Issues/Notes
-- {any concerns, TODOs, or observations}
+### Step 2.2: Validate Against Each Doc
 
-## Status: ✅ COMPLETE | ⚠️ PARTIAL | ❌ BLOCKED
-```
-
-### 2.3 Update Progress
-
-**Create/Update: `{workdir}/progress.md`**
-
+**WRITE `{workdir}/validation-{iteration}.md`:**
 ```markdown
-# Progress: {task}
+# Validation {N}
+Validator: adversarial | Date: {timestamp}
 
-Started: {timestamp}
+## Architecture Compliance Check
 
-| Step | Description | Status | Quality | Notes |
-|------|-------------|--------|---------|-------|
-| 1 | {desc} | ✅ | 9/10 | |
-| 2 | {desc} | ✅ | 8/10 | Minor TODO |
-| 3 | {desc} | 🔄 | - | In progress |
-| 4 | {desc} | ⏳ | - | Waiting |
+### manager_worker_architecture.md
+| Requirement | Compliant | Evidence |
+|-------------|-----------|----------|
+| Job hierarchy (Manager->Step->Worker) | Y/N | {proof} |
+| Correct layer (orchestration/queue/execution) | Y/N | {proof} |
 
-Last updated: {timestamp}
-```
+### QUEUE_LOGGING.md
+| Requirement | Compliant | Evidence |
+|-------------|-----------|----------|
+| Uses AddJobLog variants correctly | Y/N | {proof} |
+| Log lines start at 1, increment sequentially | Y/N | {proof} |
 
-### 2.4 Handle Failures
+### QUEUE_UI.md
+| Requirement | Compliant | Evidence |
+|-------------|-----------|----------|
+| Icon standards (fa-clock, fa-spinner, etc.) | Y/N | {proof} |
+| Auto-expand behavior for running steps | Y/N | {proof} |
+| API call count < 10 per step | Y/N | {proof} |
 
-- **Compilation fails:** Fix and retry (max 2 attempts), document in step file
-- **Tests fail:** Fix if obvious, otherwise document and continue
-- **Blocked:** Document why, continue to next step if possible
+## Build & Test Verification
+Build: Pass/Fail | Tests: Pass/Fail
 
----
+## Verdict: PASS | FAIL
 
-## PHASE 3: VALIDATE
-
-After ALL steps complete:
-
-1. **Full compilation check**
-   ```bash
-   go build -o /tmp/final ./...
-   ```
-
-2. **Full test suite**
-   ```bash
-   go test ./test/api/... ./test/ui/...
-   ```
-
-3. **Document results in progress.md**
-
----
-
-## PHASE 4: FINAL REVIEW
-
-**Run if ANY step has `Critical: yes:{trigger}`**
-
-Review all changes for:
-- Security vulnerabilities
-- Architecture issues
-- Breaking change impact
-- Migration requirements
-
-**Create: `{workdir}/final-review.md`**
-
-```markdown
-# Final Review: {task}
-
-## Scope
-- Triggers: {list from plan}
-- Steps reviewed: {N}
-- Files changed: {N}
-
-## Security Findings
-
-### Critical Issues
-{must fix before merge - or "None"}
-
-### Warnings
-- {concern}
-
-### Passed
-- {check}
-
-## Architecture Findings
-
-### Breaking Changes
-{impact assessment}
-
-### Migration Required
-{steps if any}
-
-## Code Quality
-- {observation}
-- {recommendation}
-
-## Verdict
-
-**Status:** ✅ APPROVED | ⚠️ APPROVED_WITH_NOTES | ❌ CHANGES_REQUIRED
-
-### Required Actions (if CHANGES_REQUIRED)
-1. {must do}
-
-### Recommended Actions
-1. [ ] {should do}
+## Violations Found (if FAIL)
+1. **Violation:** {specific issue}
+   **Requirement:** {from which doc, which section}
+   **Fix Required:** {what worker must do}
 ```
 
 ---
 
-## PHASE 5: SUMMARY
+## PHASE 3: ITERATE OR COMPLETE
 
-**Create: `{workdir}/summary.md`**
+### If FAIL:
+1. Worker reads `validation-{N}.md`
+2. Worker implements fixes in `step-{N+1}.md`
+3. Validator checks again in `validation-{N+1}.md`
+4. Repeat until PASS or max_iterations (3)
 
+### If PASS:
+**WRITE `{workdir}/summary.md`:**
 ```markdown
 # Complete: {task}
+Iterations: {N}
 
-## Overview
-{one paragraph summary of what was done}
+## Result
+{What was delivered}
 
-## Stats
-| Metric | Value |
-|--------|-------|
-| Steps | {N} |
-| Files Changed | {N} |
-| Duration | {time} |
-| Quality | {avg}/10 |
+## Architecture Compliance
+All requirements from docs/architecture/ verified.
 
-## Changes by Step
-
-### Step 1: {title}
-{copy key points from step-1.md}
-
-### Step 2: {title}
-{copy key points from step-2.md}
-
-## Final Review
-**Status:** {verdict}
-**Triggers:** {list}
-
-### Action Items
-1. [ ] {from final review}
-
-## Verification
-```bash
-go build ./...     # ✅ Pass
-go test ./test/... # ✅ {N} passed, {N} failed
+## Files Changed
+- `{path}` - {description}
 ```
 
-## Files Modified
-```
-{tree or list of all changed files}
-```
+### If max_iterations reached:
+**STOP and report remaining violations and what user action is required.**
 
-## Completed: {ISO8601}
+---
+
+## WORKFLOW DIAGRAM
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 0: SETUP                                                   │
+│ - Create workdir                                                 │
+│ - Load docs/architecture/*.md                                    │
+│ - Write manifest.md with requirements                            │
+└─────────────────┬───────────────────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 1: WORKER                                                  │◄─────┐
+│ - Implement changes                                              │      │
+│ - Write step-{N}.md                                              │      │
+│ - Run build/tests                                                │      │
+└─────────────────┬───────────────────────────────────────────────┘      │
+                  ▼                                                      │
+┌─────────────────────────────────────────────────────────────────┐      │
+│ PHASE 2: VALIDATOR (adversarial)                                 │      │
+│ - Check against ALL docs/architecture/*.md                       │      │
+│ - Write validation-{N}.md                                        │      │
+│ - Be harsh - find violations                                     │      │
+├─────────────────────────────────────────────────────────────────┤      │
+│ FAIL → List violations → Worker fixes ──────────────────────────┼──────┘
+│ PASS → PHASE 3                                                   │
+└─────────────────┬───────────────────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 3: COMPLETE                                                │
+│ - Write summary.md                                               │
+│ - All architecture requirements verified                         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## STOP CONDITIONS
+## VALIDATOR ADVERSARIAL RULES
 
-### STOP for:
-- `User decision: yes` in plan step
-- Final review verdict: `CHANGES_REQUIRED`
-- Ambiguous requirements (can't determine what to build)
+The validator MUST be harsh. Do NOT approve unless:
 
-### NEVER stop for:
-- Moving to next step
-- Compilation errors (fix or document)
-- Test failures (fix or document)
-- `APPROVED_WITH_NOTES` (continue, log warnings)
+1. **Every applicable requirement is MET** - not "close enough"
+2. **Evidence is concrete** - not "probably compliant"
+3. **Build passes** - no exceptions
+4. **Tests pass** - no skipping
 
----
+**Validator actively looks for:**
+- Icon classes that don't match standard (QUEUE_UI.md)
+- Log lines not starting at 1 (QUEUE_LOGGING.md)
+- Steps not auto-expanding (QUEUE_UI.md)
+- Wrong layer for code placement (manager_worker_architecture.md)
+- Missing event publishing (QUEUE_SERVICES.md)
+- Incorrect worker interface (workers.md)
 
-## EXECUTION CHECKLIST
-
-Claude must complete ALL of these:
-
-- [ ] Create workdir
-- [ ] Write plan.md
-- [ ] For each step:
-  - [ ] Execute implementation
-  - [ ] Write step-{N}.md
-  - [ ] Update progress.md
-  - [ ] Verify (compile/test)
-- [ ] Run final validation
-- [ ] Write final-review.md (if critical triggers)
-- [ ] Write summary.md
-
-**Do not stop until summary.md is written.**
+**Validator NEVER:**
+- Approves "mostly compliant" implementations
+- Ignores small violations "because they're minor"
+- Lets things slide to finish faster
+- Trusts worker's self-assessment
 
 ---
 
 ## INVOKE
+```
+/3agents-skills Fix the step icon mismatch    → ./docs/fix/20251212-step-icons/
+/3agents-skills Add log line numbering        → ./docs/fix/20251212-log-numbering/
+```
 
-```
-/3agents Add JWT authentication
-/3agents docs/fixes/01-plan-xyz.md
-```

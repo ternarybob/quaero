@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,28 +18,40 @@ import (
 // logSequence is a global counter to ensure unique log keys even within the same nanosecond
 var logSequence uint64
 
+// jobLineCounters tracks per-job line number counters
+// Key: jobID, Value: pointer to uint64 counter
+var jobLineCounters sync.Map
+
 // sortLogsAsc sorts logs in ascending order (oldest first)
-// Uses Sequence field if available, falls back to FullTimestamp for backwards compatibility
+// Uses LineNumber as primary key for per-job sorting, falls back to Sequence for cross-job
 func sortLogsAsc(logs []models.LogEntry) {
 	sort.SliceStable(logs, func(i, j int) bool {
-		// Both have Sequence - compare by Sequence
+		// Both have LineNumber - compare by LineNumber (per-job ordering)
+		if logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
+			return logs[i].LineNumber < logs[j].LineNumber
+		}
+		// Fall back to Sequence for cross-job or legacy logs
 		if logs[i].Sequence != "" && logs[j].Sequence != "" {
 			return logs[i].Sequence < logs[j].Sequence
 		}
-		// One or both missing Sequence - fall back to FullTimestamp
+		// Final fallback to FullTimestamp
 		return logs[i].FullTimestamp < logs[j].FullTimestamp
 	})
 }
 
 // sortLogsDesc sorts logs in descending order (newest first)
-// Uses Sequence field if available, falls back to FullTimestamp for backwards compatibility
+// Uses LineNumber as primary key for per-job sorting, falls back to Sequence for cross-job
 func sortLogsDesc(logs []models.LogEntry) {
 	sort.SliceStable(logs, func(i, j int) bool {
-		// Both have Sequence - compare by Sequence
+		// Both have LineNumber - compare by LineNumber (per-job ordering)
+		if logs[i].LineNumber > 0 && logs[j].LineNumber > 0 {
+			return logs[i].LineNumber > logs[j].LineNumber
+		}
+		// Fall back to Sequence for cross-job or legacy logs
 		if logs[i].Sequence != "" && logs[j].Sequence != "" {
 			return logs[i].Sequence > logs[j].Sequence
 		}
-		// One or both missing Sequence - fall back to FullTimestamp
+		// Final fallback to FullTimestamp
 		return logs[i].FullTimestamp > logs[j].FullTimestamp
 	})
 }
@@ -57,9 +70,52 @@ func NewLogStorage(db *BadgerDB, logger arbor.ILogger) interfaces.LogStorage {
 	}
 }
 
+// getNextLineNumber returns the next line number for a job (1-based, atomically incremented)
+// On first call for a job, it queries the DB to find the current max LineNumber
+func (s *LogStorage) getNextLineNumber(ctx context.Context, jobID string) int {
+	// Try to get existing counter
+	if counterPtr, ok := jobLineCounters.Load(jobID); ok {
+		return int(atomic.AddUint64(counterPtr.(*uint64), 1))
+	}
+
+	// First access for this job - need to initialize from DB
+	// Query to find max LineNumber for this job
+	var logs []models.LogEntry
+	query := badgerhold.Where("JobIDField").Eq(jobID)
+	if err := s.db.Store().Find(&logs, query); err != nil {
+		// On error, start from 1
+		var counter uint64 = 1
+		jobLineCounters.Store(jobID, &counter)
+		return 1
+	}
+
+	// Find max LineNumber
+	var maxLineNumber uint64 = 0
+	for _, log := range logs {
+		if uint64(log.LineNumber) > maxLineNumber {
+			maxLineNumber = uint64(log.LineNumber)
+		}
+	}
+
+	// Initialize counter at maxLineNumber (next call will increment to max+1)
+	// Use LoadOrStore to handle race condition where another goroutine initialized first
+	newCounter := maxLineNumber
+	actual, loaded := jobLineCounters.LoadOrStore(jobID, &newCounter)
+	if loaded {
+		// Another goroutine initialized first, use their counter
+		return int(atomic.AddUint64(actual.(*uint64), 1))
+	}
+
+	// We initialized, increment and return
+	return int(atomic.AddUint64(&newCounter, 1))
+}
+
 func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.LogEntry) error {
 	// Set JobIDField directly (primary indexed field)
 	entry.JobIDField = jobID
+
+	// Get next per-job line number (1-based, contiguous within each job)
+	entry.LineNumber = s.getNextLineNumber(ctx, jobID)
 
 	// Generate unique key using timestamp + atomic sequence counter
 	// This ensures uniqueness even when multiple logs are written within the same nanosecond
@@ -150,6 +206,8 @@ func (s *LogStorage) DeleteLogs(ctx context.Context, jobID string) error {
 	if err := s.db.Store().DeleteMatching(&models.LogEntry{}, badgerhold.Where("JobIDField").Eq(jobID)); err != nil {
 		return fmt.Errorf("failed to delete logs: %w", err)
 	}
+	// Clear the line number counter for this job
+	jobLineCounters.Delete(jobID)
 	return nil
 }
 

@@ -10,7 +10,7 @@ import (
 
 // TestPlacesJob tests the Nearby Restaurants (Places API) job
 func TestPlacesJob(t *testing.T) {
-	utc := NewUITestContext(t, 5*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	jobName := "Nearby Restaurants (Wheelers Hill)"
@@ -42,7 +42,7 @@ func TestPlacesJob(t *testing.T) {
 
 // TestNewsCrawlerJob tests the News Crawler job
 func TestNewsCrawlerJob(t *testing.T) {
-	utc := NewUITestContext(t, 10*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	jobName := "News Crawler"
@@ -68,7 +68,7 @@ func TestNewsCrawlerJob(t *testing.T) {
 
 // TestKeywordExtractionJob tests the Keyword Extraction agent job
 func TestKeywordExtractionJob(t *testing.T) {
-	utc := NewUITestContext(t, 10*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	utc.Log("--- Testing Keyword Extraction Job ---")
@@ -116,7 +116,7 @@ func TestKeywordExtractionJob(t *testing.T) {
 
 // TestMultiStepJob tests a multi-step job (Places + Keywords)
 func TestMultiStepJob(t *testing.T) {
-	utc := NewUITestContext(t, 10*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	jobName := "Nearby Restaurants + Keywords"

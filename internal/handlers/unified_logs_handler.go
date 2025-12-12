@@ -293,6 +293,7 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 				"source_type":    log.SourceType(),
 				"originator":     log.Originator(),
 				"phase":          log.Phase(),
+				"line_number":    log.LineNumber,
 			}
 			responseLogs = append(responseLogs, responseLog)
 		}
@@ -346,6 +347,7 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			"step_name":      log.StepName(),
 			"source_type":    log.SourceType(),
 			"originator":     log.Originator(),
+			"line_number":    log.LineNumber,
 		}
 
 		if meta, exists := metadata[log.JobID()]; exists {

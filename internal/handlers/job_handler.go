@@ -1370,8 +1370,9 @@ type ErrorGroup struct {
 
 // JobTreeLog represents a log line in the tree view
 type JobTreeLog struct {
-	Level string `json:"level"`
-	Text  string `json:"text"`
+	LineNumber int    `json:"line_number"` // Per-job line number (1-based)
+	Level      string `json:"level"`
+	Text       string `json:"text"`
 }
 
 // JobStructureResponse represents a lightweight job structure for UI status updates
@@ -1785,8 +1786,9 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 				// Reverse to get ASC order for display (oldest of the newest N at top)
 				for i := len(logs) - 1; i >= 0; i-- {
 					stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
-						Level: logs[i].Level,
-						Text:  logs[i].Message,
+						LineNumber: logs[i].LineNumber,
+						Level:      logs[i].Level,
+						Text:       logs[i].Message,
 					})
 				}
 			}

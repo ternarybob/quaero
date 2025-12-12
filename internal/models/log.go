@@ -28,9 +28,15 @@ type LogEntry struct {
 	Level         string `json:"level" badgerhold:"index"` // Log level (indexed)
 	Message       string `json:"message"`                  // Log message
 
-	// Sequence is a monotonically increasing counter for stable ordering when timestamps are identical
+	// LineNumber is a per-job monotonically increasing counter (1-based)
+	// This provides stable, contiguous line numbers for each job's logs
+	// Used for UI display and pagination
+	LineNumber int `json:"line_number" badgerhold:"index"`
+
+	// Sequence is a global counter for stable ordering when timestamps are identical
 	// Format: UnixNano timestamp + sequence counter (e.g., "1702393191123456789_0000000001")
 	// This ensures logs are ordered correctly even when written in rapid succession
+	// Note: LineNumber is preferred for per-job ordering; Sequence is for cross-job aggregation
 	Sequence string `json:"sequence" badgerhold:"index"` // Composite sort key for stable ordering
 
 	// JobIDField is the primary query field - stored separately for efficient badgerhold indexing

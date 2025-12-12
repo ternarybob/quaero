@@ -667,6 +667,26 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 						// Log but don't fail
 					}
 				}()
+
+				// Also publish job_update event for direct UI status sync (bypasses throttling)
+				// This is critical for fast-completing steps that don't use StepMonitor
+				jobUpdatePayload := map[string]interface{}{
+					"context":      "job_step",
+					"job_id":       managerID,
+					"step_name":    step.Name,
+					"status":       "completed",
+					"refresh_logs": true,
+					"timestamp":    time.Now().Format(time.RFC3339),
+				}
+				jobUpdateEvent := interfaces.Event{
+					Type:    interfaces.EventJobUpdate,
+					Payload: jobUpdatePayload,
+				}
+				go func() {
+					if err := o.eventService.Publish(ctx, jobUpdateEvent); err != nil {
+						// Log but don't fail
+					}
+				}()
 			}
 		} else if stepStatus == "spawned" && stepMonitor != nil {
 			stepQueueJob := &models.QueueJob{

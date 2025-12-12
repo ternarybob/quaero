@@ -258,8 +258,8 @@ func NewDefaultConfig() *Config {
 				"job_spawn":      "500ms", // Max 2 job spawn events per second
 			},
 			// Event aggregator for trigger-based UI updates (step events)
-			EventCountThreshold: 100,  // Trigger UI refresh after 100 step events
-			TimeThreshold:       "1s", // Or after 1 second, whichever comes first
+			EventCountThreshold: 100,   // Trigger UI refresh after 100 step events
+			TimeThreshold:       "10s", // Or after 10 seconds - reduces WebSocket message frequency
 		},
 		PlacesAPI: PlacesAPIConfig{
 			APIKey:              "",              // User must provide API key in config file

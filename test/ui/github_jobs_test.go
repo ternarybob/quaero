@@ -423,7 +423,7 @@ func (gtc *githubTestContext) monitorJob(jobName string, timeout time.Duration, 
 
 // TestGitHubRepoCollector tests the GitHub Repository Collector job via UI
 func TestGitHubRepoCollector(t *testing.T) {
-	gtc, cleanup := newGitHubTestContext(t, 5*time.Minute)
+	gtc, cleanup := newGitHubTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	gtc.env.LogTest(t, "--- Starting Test: GitHub Repository Collector ---")
@@ -458,7 +458,7 @@ func TestGitHubRepoCollector(t *testing.T) {
 
 // TestGitHubActionsCollector tests the GitHub Actions Log Collector job via UI
 func TestGitHubActionsCollector(t *testing.T) {
-	gtc, cleanup := newGitHubTestContext(t, 5*time.Minute)
+	gtc, cleanup := newGitHubTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	gtc.env.LogTest(t, "--- Starting Test: GitHub Actions Log Collector ---")
@@ -542,7 +542,7 @@ func (gtc *githubTestContext) createGitHubConnectorWithoutKV() error {
 // TestGitHubRepoCollectorByName tests the GitHub Repository Collector using connector_name
 // This validates that jobs can resolve connectors by name instead of ID
 func TestGitHubRepoCollectorByName(t *testing.T) {
-	gtc, cleanup := newGitHubTestContext(t, 7*time.Minute)
+	gtc, cleanup := newGitHubTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	gtc.env.LogTest(t, "--- Starting Test: GitHub Repository Collector (By Name) ---")

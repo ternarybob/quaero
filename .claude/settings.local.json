@@ -22,8 +22,12 @@
       "Bash(xxd:*)",
       "Bash(ls:*)",
       "Bash(git merge:*)",
+      "Bash(git config:*)",
+      "Bash(gofmt:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": []

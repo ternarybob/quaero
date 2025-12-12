@@ -642,7 +642,7 @@
                                                                             'text-gray': step.status === 'cancelled'
                                                                         }">
                                                                             <i class="fas" :class="{
-                                                                                'fa-circle': step.status === 'pending',
+                                                                                'fa-clock': step.status === 'pending',
                                                                                 'fa-spinner fa-pulse': step.status === 'running',
                                                                                 'fa-check-circle': step.status === 'completed',
                                                                                 'fa-times-circle': step.status === 'failed',
@@ -701,8 +701,8 @@
                                                                             <!-- Log lines (limited to step-specific limit, earliest-to-latest) -->
                                                                             <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id, step.name)" :key="logIdx">
                                                                                 <div class="tree-log-line" :class="{ 'log-error': log.level === 'error' }">
-                                                                                    <!-- Line number -->
-                                                                                    <span class="tree-log-num" x-text="getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1"></span>
+                                                                                    <!-- Line number (from server, falls back to calculated if not available) -->
+                                                                                    <span class="tree-log-num" x-text="log.line_number || (getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1)"></span>
                                                                                     <!-- Log level badge -->
                                                                                     <span :class="getTerminalLevelClass(log.level)" x-text="getLogLevelTag(log.level)" style="margin-right: 0.5rem; font-weight: 500;"></span>
                                                                                     <!-- Log text -->
@@ -1448,24 +1448,9 @@
                 }));
             }));
 
-            // Subscribe to job log events
-            wsUnsubscribers.push(WebSocketManager.subscribe('job_log', (payload) => {
-                window.dispatchEvent(new CustomEvent('jobList:jobLog', {
-                    detail: {
-                        job_id: payload.job_id,
-                        parent_job_id: payload.parent_job_id,
-                        manager_id: payload.manager_id,
-                        level: payload.level,
-                        message: payload.message,
-                        step_name: payload.step_name,
-                        source_type: payload.source_type,
-                        originator: payload.originator,
-                        phase: payload.phase,
-                        metadata: payload.metadata,
-                        timestamp: payload.timestamp
-                    }
-                }));
-            }));
+            // NOTE: job_log subscription REMOVED - architecture uses trigger-based approach
+            // WebSocket sends only 'refresh_logs' triggers, UI fetches logs from /api/logs
+            // This prevents heavy WebSocket load when jobs produce 5000+ log entries
 
             console.log('[Queue] Subscribed to', wsUnsubscribers.length, 'WebSocket message types');
         }
@@ -1968,6 +1953,7 @@
                 jobTreeSearchFilter: {},
                 treeLogLevelFilter: {},  // Per-job log level filter for tree view (all/warn/error)
                 collapsedJobs: {}, // Track collapsed state of parent jobs (default expanded)
+                _pendingStepExpansions: {}, // Queue step expansions that arrive before tree data loads
 
                 // Logs
                 itemsToRender: [],
@@ -1994,6 +1980,12 @@
                 _statsTimeout: null,
                 _statsDebounceMs: 2000,
 
+                // Step log fetch debouncing - prevents API flooding
+                _stepFetchDebounceTimers: {},  // key: jobId:stepName, value: timer ID
+                _stepFetchInFlight: new Set(), // tracks currently fetching steps
+                _stepFetchDebounceMs: 1000,    // 1 second debounce per user request
+
+
                 init() {
                     // Initialize timeouts map for debounced parent refreshes
                     this.parentRefreshTimeouts = new Map();
@@ -2002,7 +1994,7 @@
                     window.addEventListener('jobList:load', () => this.loadJobs());
                     window.addEventListener('jobList:render', () => this.renderJobs());
                     window.addEventListener('jobList:updateJob', (e) => this.updateJobInList(e.detail));
-                    window.addEventListener('jobList:jobLog', (e) => this.handleJobLog(e.detail));
+                    // NOTE: jobLog listener REMOVED - architecture uses trigger-based approach
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.handleRefreshStepEvents(e.detail));
                     // Handle child job spawn events - fetch children when new children are created
                     window.addEventListener('jobList:childSpawned', (e) => {
@@ -2022,7 +2014,7 @@
                     // WebSocket real-time updates
                     window.addEventListener('jobList:recalculateStats', () => this.recalculateStats());
                     window.addEventListener('jobList:updateJobProgress', (e) => this.updateJobProgress(e.detail));
-                    window.addEventListener('jobList:jobLog', (e) => this.handleJobLog(e.detail));
+                    // NOTE: jobLog listener REMOVED - logs fetched via API on refresh_logs trigger
                     // Step hierarchy progress updates
                     window.addEventListener('jobList:updateStepProgress', (e) => this.updateStepProgress(e.detail));
                     window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
@@ -2683,7 +2675,7 @@
                 // Status Icon Mapping Functions
                 getStatusIcon(status) {
                     const iconMap = {
-                        'pending': 'fa-circle',
+                        'pending': 'fa-clock',
                         'running': 'fa-spinner fa-pulse',
                         'completed': 'fa-check-circle',
                         'failed': 'fa-times-circle',
@@ -3480,65 +3472,19 @@
                     }, this._statsDebounceMs);
                 },
 
-                // Handle individual job log event (legacy/streaming)
+                // DEPRECATED: handleJobLog - no longer used
+                // Architecture: WebSocket sends only 'refresh_logs' triggers, not actual logs
+                // Logs are fetched from REST API /api/logs when trigger is received
+                // This prevents heavy WebSocket load when jobs produce 5000+ log entries
                 handleJobLog(detail) {
-                    const { job_id, step_name, text, level, timestamp } = detail;
-                    if (!job_id) return;
-
-                    // Initialize logs array if needed
-                    if (!this.jobLogs[job_id]) {
-                        this.jobLogs[job_id] = [];
-                    }
-
-                    // Create log object
-                    const logEntry = {
-                        step_name,
-                        text: text || detail.message,
-                        message: text || detail.message, // property compatibility
-                        level,
-                        timestamp
-                    };
-
-                    // Add to jobLogs (flat view source)
-                    this.jobLogs[job_id].push(logEntry);
-
-                    // Also update Tree Data if available (tree view source)
-                    // This ensures the tree view updates in real-time for streaming logs
-                    if (this.jobTreeData[job_id] && this.jobTreeData[job_id].steps) {
-                        const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
-                        if (stepIdx >= 0) {
-                            const step = this.jobTreeData[job_id].steps[stepIdx];
-                            if (!step.logs) step.logs = [];
-                            step.logs.push(logEntry);
-
-                            // Update totalLogCount to match actual log count for correct line numbering
-                            // During streaming, we don't have a separate "total" from API, so use logs.length
-                            step.totalLogCount = step.logs.length;
-
-                            // Auto-expand step when it receives logs during streaming
-                            const treeStepKey = `${job_id}:${stepIdx}`;
-                            if (!this.jobTreeExpandedSteps[treeStepKey]) {
-                                this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
-                            }
-
-                            // Force reactivity for deep update in tree data
-                            // Re-assigning the root property is the surest way in Alpine v3 for deep changes.
-                            // Ensure the job's data object reference changes too
-                            const updatedJobData = { ...this.jobTreeData[job_id] };
-                            this.jobTreeData = {
-                                ...this.jobTreeData,
-                                [job_id]: updatedJobData
-                            };
-                        }
-                    }
-
-                    // Throttle render to avoid freezing UI on log bursts
-                    this.throttledRenderJobs();
+                    // No-op: This function is deprecated
+                    // Logs are now fetched via handleRefreshStepEvents -> fetchStepLogs -> /api/logs
                 },
 
                 // Handle refresh step events trigger (notify-pull model)
+                // This is the primary mechanism for updating logs - fetches from REST API
                 handleRefreshStepEvents(detail) {
-                    const { step_ids, timestamp } = detail;
+                    const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
 
                     step_ids.forEach(stepId => {
@@ -3557,6 +3503,13 @@
                             treeSteps.forEach((s, idx) => {
                                 // If stepName is specified, only refresh that step.
                                 if (stepName && s.name !== stepName) return;
+
+                                // Auto-expand step when it receives log updates (replaces handleJobLog auto-expand)
+                                const treeStepKey = `${jobId}:${idx}`;
+                                if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                    this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
+                                }
+
                                 this.fetchStepLogs(jobId, s.name, idx);
                             });
                         }
@@ -3784,6 +3737,30 @@
                                 progress_text: progress.progress_text
                             };
                             console.log('[Queue] Stored step progress for', progress.step_name, 'on manager', progress.manager_id.substring(0, 8), ':', manager._stepProgress[progress.step_name]);
+
+                            // Auto-expand step when it receives progress update (handles synchronous step completion)
+                            // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                            const status = progress.status;
+                            if (status === 'running' || status === 'completed' || status === 'failed') {
+                                // Queue expansion for when tree data loads
+                                if (!this._pendingStepExpansions[progress.manager_id]) {
+                                    this._pendingStepExpansions[progress.manager_id] = new Set();
+                                }
+                                this._pendingStepExpansions[progress.manager_id].add(progress.step_name);
+
+                                // If tree data already exists, expand immediately
+                                if (this.jobTreeData[progress.manager_id]?.steps) {
+                                    const treeData = this.jobTreeData[progress.manager_id];
+                                    const stepIdx = treeData.steps.findIndex(s => s.name === progress.step_name);
+                                    if (stepIdx >= 0) {
+                                        const treeStepKey = `${progress.manager_id}:${stepIdx}`;
+                                        if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step from progress:', progress.step_name, 'status:', status);
+                                            this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -3817,23 +3794,58 @@
                     this.throttledRenderJobs();
                 },
 
+                // Debounced step event refresh - collects step_ids and processes after delay
+                // This prevents API flooding when many refresh_logs triggers arrive rapidly
+                _pendingStepIds: new Set(),
+                _refreshDebounceTimer: null,
+                _refreshDebounceMs: 500, // Wait 500ms for more triggers before fetching
+
                 // Refresh step events from API (triggered by refresh_logs WebSocket message)
-                // Uses incremental fetching with cursor-based pagination for efficiency
-                // Only fetches new logs since last cursor position
+                // Uses debouncing to batch multiple triggers together
                 async refreshStepEvents(detail) {
                     const { step_ids, timestamp, finished } = detail;
                     if (!step_ids || step_ids.length === 0) return;
+
+                    // Collect step_ids into pending set
+                    for (const stepId of step_ids) {
+                        this._pendingStepIds.add(stepId);
+                    }
+
+                    // Clear existing timer
+                    if (this._refreshDebounceTimer) {
+                        clearTimeout(this._refreshDebounceTimer);
+                    }
+
+                    // If finished=true (step completed), process immediately
+                    if (finished) {
+                        this._processRefreshStepEvents();
+                        return;
+                    }
+
+                    // Otherwise debounce - wait for more triggers
+                    this._refreshDebounceTimer = setTimeout(() => {
+                        this._processRefreshStepEvents();
+                    }, this._refreshDebounceMs);
+                },
+
+                // Process pending step events (debounced)
+                async _processRefreshStepEvents() {
+                    this._refreshDebounceTimer = null;
+
+                    // Get and clear pending step_ids
+                    const stepIds = Array.from(this._pendingStepIds);
+                    this._pendingStepIds.clear();
+
+                    if (stepIds.length === 0) return;
+
+                    console.log('[Queue] Processing', stepIds.length, 'step refresh triggers (debounced)');
 
                     // Initialize tracking structures
                     if (!this._stepEventFetchInFlight) {
                         this._stepEventFetchInFlight = new Set();
                     }
-                    // Track cursors per step job for incremental fetching
-                    if (!this._stepLogCursors) {
-                        this._stepLogCursors = {};
-                    }
 
-                    for (const stepJobId of step_ids) {
+                    for (const stepJobId of stepIds) {
                         // Skip if already fetching this step's events
                         if (this._stepEventFetchInFlight.has(stepJobId)) {
                             continue;
@@ -3841,11 +3853,13 @@
                         this._stepEventFetchInFlight.add(stepJobId);
 
                         try {
-                            // Find manager, step name, and step status
+                            // Find manager, step name, and step status from local data first
                             let managerId = null;
                             let stepName = null;
                             let stepStatus = null;
+                            let stepIdx = -1;
 
+                            // Check local job data first (avoid API call if possible)
                             for (const job of this.allJobs) {
                                 const stepJobIds = job.metadata?.step_job_ids;
                                 if (stepJobIds) {
@@ -3853,6 +3867,13 @@
                                         if (id === stepJobId) {
                                             managerId = job.id;
                                             stepName = name;
+                                            // Get status from tree data if available
+                                            if (this.jobTreeData[managerId]?.steps) {
+                                                stepIdx = this.jobTreeData[managerId].steps.findIndex(s => s.name === name);
+                                                if (stepIdx >= 0) {
+                                                    stepStatus = this.jobTreeData[managerId].steps[stepIdx].status;
+                                                }
+                                            }
                                             break;
                                         }
                                     }
@@ -3860,23 +3881,32 @@
                                 }
                             }
 
-                            // Always fetch step job to get current status
-                            try {
-                                const stepResponse = await fetch(`/api/jobs/${stepJobId}`);
-                                if (stepResponse.ok) {
-                                    const stepJob = await stepResponse.json();
-                                    stepStatus = stepJob.status;
-                                    if (!managerId && stepJob.parent_id) {
+                            // Only fetch step job from API if we couldn't find it locally
+                            if (!managerId) {
+                                try {
+                                    const stepResponse = await fetch(`/api/jobs/${stepJobId}`);
+                                    if (stepResponse.ok) {
+                                        const stepJob = await stepResponse.json();
+                                        stepStatus = stepJob.status;
                                         managerId = stepJob.parent_id;
                                         stepName = stepJob.metadata?.step_name || stepJob.name;
                                     }
+                                } catch (fetchErr) {
+                                    console.warn('[Queue] Failed to fetch step job:', fetchErr);
                                 }
-                            } catch (fetchErr) {
-                                console.warn('[Queue] Failed to fetch step job:', fetchErr);
                             }
 
                             if (!managerId || !stepName) {
                                 continue;
+                            }
+
+                            // Queue expansion for when tree data loads (handles race condition)
+                            // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                            if (stepStatus === 'running' || stepStatus === 'completed' || stepStatus === 'failed') {
+                                if (!this._pendingStepExpansions[managerId]) {
+                                    this._pendingStepExpansions[managerId] = new Set();
+                                }
+                                this._pendingStepExpansions[managerId].add(stepName);
                             }
 
                             // Fetch latest 100 logs (newest first, then reverse for display)
@@ -3926,10 +3956,14 @@
                                         [managerId]: { ...treeData, steps: newSteps }
                                     };
 
-                                    // Auto-expand step when it receives logs (key fix for real-time expansion)
-                                    if (newLogs.length > 0) {
+                                    // Auto-expand step when it has activity (running/completed/failed)
+                                    // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                                    // Also expand on completed/failed even without logs
+                                    const effectiveStatus = stepStatus || currentStep.status;
+                                    if (effectiveStatus === 'running' || effectiveStatus === 'completed' || effectiveStatus === 'failed' || newLogs.length > 0) {
                                         const treeStepKey = `${managerId}:${stepIdx}`;
                                         if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step from refresh event:', stepName, 'status:', effectiveStatus, 'logs:', newLogs.length);
                                             this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
                                         }
                                     }
@@ -4030,27 +4064,45 @@
                             }
                         }
                     } else if (context === 'job_step' && step_name) {
-                        // Update step status in tree view data
+                        // Queue expansion for when tree data loads if not yet available
+                        // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                        if (status === 'running' || status === 'completed' || status === 'failed') {
+                            if (!this._pendingStepExpansions[job_id]) {
+                                this._pendingStepExpansions[job_id] = new Set();
+                            }
+                            this._pendingStepExpansions[job_id].add(step_name);
+                        }
+
+                        // Update step status in tree view data (immutable for Alpine reactivity)
                         if (this.jobTreeData[job_id]) {
                             const treeData = this.jobTreeData[job_id];
                             if (treeData.steps) {
                                 const stepIdx = treeData.steps.findIndex(s => s.name === step_name);
                                 if (stepIdx >= 0) {
-                                    // Update step status directly
                                     const oldStatus = treeData.steps[stepIdx].status;
-                                    treeData.steps[stepIdx].status = status;
-                                    console.log('[Queue] Updated step status:', step_name, ':', oldStatus, '->', status);
 
-                                    // Auto-expand running/failed steps
-                                    if (status === 'running' || status === 'failed') {
+                                    // Auto-expand running/completed/failed steps ALWAYS (even if status same)
+                                    // Handle race condition where step completes before tree loads
+                                    if (status === 'running' || status === 'completed' || status === 'failed') {
                                         const treeStepKey = `${job_id}:${stepIdx}`;
                                         if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step:', step_name, 'status:', status);
                                             this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
                                         }
                                     }
 
-                                    // Trigger reactive update
-                                    this.jobTreeData = { ...this.jobTreeData };
+                                    if (oldStatus !== status) {
+                                        // Immutable update for step status
+                                        const newSteps = [...treeData.steps];
+                                        newSteps[stepIdx] = { ...newSteps[stepIdx], status: status };
+                                        console.log('[Queue] Updated step status:', step_name, ':', oldStatus, '->', status);
+
+                                        // Trigger reactive update with fully immutable data
+                                        this.jobTreeData = {
+                                            ...this.jobTreeData,
+                                            [job_id]: { ...treeData, steps: newSteps }
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -4063,6 +4115,14 @@
                         stepJobs.forEach(stepJob => {
                             stepJob.status = status;
                         });
+
+                        // Fetch logs immediately on status change (bypass debounce)
+                        if (this.jobTreeData[job_id]?.steps) {
+                            const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
+                            if (stepIdx >= 0) {
+                                this.fetchStepLogs(job_id, step_name, stepIdx, true);
+                            }
+                        }
                     }
 
                     // Fetch updated structure if refresh_logs is true
@@ -4088,29 +4148,42 @@
                             this.allJobs[jobIndex].status = structure.status;
                         }
 
-                        // Update step statuses in tree view
+                        // Update step statuses in tree view (immutable update for Alpine reactivity)
                         if (this.jobTreeData[jobId] && structure.steps) {
                             const treeData = this.jobTreeData[jobId];
                             if (treeData.steps) {
+                                const newSteps = [...treeData.steps];
+                                let hasChanges = false;
                                 structure.steps.forEach(stepStatus => {
-                                    const stepIdx = treeData.steps.findIndex(s => s.name === stepStatus.name);
+                                    const stepIdx = newSteps.findIndex(s => s.name === stepStatus.name);
                                     if (stepIdx >= 0) {
-                                        treeData.steps[stepIdx].status = stepStatus.status;
+                                        const oldStatus = newSteps[stepIdx].status;
+                                        if (oldStatus !== stepStatus.status) {
+                                            // Immutable step update
+                                            newSteps[stepIdx] = { ...newSteps[stepIdx], status: stepStatus.status };
+                                            hasChanges = true;
+                                            console.log('[Queue] fetchJobStructure updated step:', stepStatus.name, oldStatus, '->', stepStatus.status);
+                                        }
                                         // Update log count for expanded step indication
-                                        if (stepStatus.log_count > 0 && treeData.steps[stepIdx].logs) {
+                                        if (stepStatus.log_count > 0 && newSteps[stepIdx].logs) {
                                             // Only update if we have more logs than before
-                                            if (stepStatus.log_count > treeData.steps[stepIdx].logs.length) {
+                                            if (stepStatus.log_count > newSteps[stepIdx].logs.length) {
                                                 // Trigger log refresh for expanded steps
                                                 const treeStepKey = `${jobId}:${stepIdx}`;
                                                 if (this.jobTreeExpandedSteps[treeStepKey]) {
-                                                    this.fetchStepLogs(jobId, stepStatus.name, stepIdx);
+                                                    this.fetchStepLogs(jobId, stepStatus.name, stepIdx, true);
                                                 }
                                             }
                                         }
                                     }
                                 });
-                                // Trigger reactive update
-                                this.jobTreeData = { ...this.jobTreeData };
+                                // Trigger reactive update with immutable data
+                                if (hasChanges) {
+                                    this.jobTreeData = {
+                                        ...this.jobTreeData,
+                                        [jobId]: { ...treeData, steps: newSteps }
+                                    };
+                                }
                             }
                         }
                     } catch (error) {
@@ -4118,8 +4191,42 @@
                     }
                 },
 
-                // Fetch logs for a specific step
-                async fetchStepLogs(jobId, stepName, stepIdx) {
+                // Fetch logs for a specific step (with debouncing to prevent API flooding)
+                // immediate=true bypasses debounce for status changes
+                fetchStepLogs(jobId, stepName, stepIdx, immediate = false) {
+                    const key = `${jobId}:${stepName}`;
+
+                    // Skip if already fetching this step
+                    if (this._stepFetchInFlight.has(key)) {
+                        return;
+                    }
+
+                    // Clear existing debounce timer for this step
+                    if (this._stepFetchDebounceTimers[key]) {
+                        clearTimeout(this._stepFetchDebounceTimers[key]);
+                        delete this._stepFetchDebounceTimers[key];
+                    }
+
+                    // For immediate requests (status changes), fetch now
+                    if (immediate) {
+                        this._doFetchStepLogs(jobId, stepName, stepIdx);
+                        return;
+                    }
+
+                    // Otherwise debounce - wait 1 second before fetching
+                    this._stepFetchDebounceTimers[key] = setTimeout(() => {
+                        delete this._stepFetchDebounceTimers[key];
+                        this._doFetchStepLogs(jobId, stepName, stepIdx);
+                    }, this._stepFetchDebounceMs);
+                },
+
+                // Internal: Actually perform the step logs fetch
+                async _doFetchStepLogs(jobId, stepName, stepIdx) {
+                    const key = `${jobId}:${stepName}`;
+
+                    // Mark as in-flight
+                    this._stepFetchInFlight.add(key);
+
                     try {
                         const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=100`);
                         if (!response.ok) return;
@@ -4149,6 +4256,9 @@
                         }
                     } catch (error) {
                         console.error('[Queue] Failed to fetch step logs:', error);
+                    } finally {
+                        // Clear in-flight flag
+                        this._stepFetchInFlight.delete(key);
                     }
                 },
 
@@ -4180,21 +4290,34 @@
                         console.log('[Queue] loaded tree data for:', jobId.substring(0, 8), 'steps:', treeData.steps?.length);
                         this.jobTreeData = { ...this.jobTreeData, [jobId]: treeData };
 
-                        // Use backend-driven expansion state (step.expanded)
-                        // Only apply if user hasn't explicitly collapsed the step
+                        // Auto-expand ALL steps with activity (running, completed, failed)
+                        // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
                         if (treeData.steps) {
+                            // Get pending expansions that arrived before tree data loaded
+                            const pendingExpansions = this._pendingStepExpansions[jobId] || new Set();
+
                             treeData.steps.forEach((step, idx) => {
                                 const key = `${jobId}:${idx}`;
-                                // Backend provides step.expanded based on: failed, running, hasLogs, isCurrentStep
+                                // Auto-expand if:
+                                // - Step has activity (running/completed/failed)
+                                // - Backend marked it as expanded
+                                // - Step was in pending expansions (arrived before tree loaded)
                                 // Only skip if user explicitly collapsed (value is false, not undefined)
-                                if (step.expanded && this.jobTreeExpandedSteps[key] !== false) {
+                                const shouldExpand = step.expanded ||
+                                    ['running', 'completed', 'failed'].includes(step.status) ||
+                                    pendingExpansions.has(step.name);
+                                if (shouldExpand && this.jobTreeExpandedSteps[key] !== false) {
                                     this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: true };
+                                    console.log('[Queue] Auto-expanding step on tree load:', step.name, 'status:', step.status, 'wasPending:', pendingExpansions.has(step.name));
                                 }
 
                                 // Load initial logs for all steps (as they might not be in the tree payload)
                                 // This ensures existing logs are visible before WebSockets start streaming new ones
                                 this.fetchStepLogs(jobId, step.name, idx);
                             });
+
+                            // Clear pending expansions for this job
+                            delete this._pendingStepExpansions[jobId];
                         }
                     } catch (error) {
                         console.error('[Queue] Failed to load job tree:', error);
@@ -4304,16 +4427,10 @@
                 },
 
                 // Get the starting log index for line numbers
+                // Per QUEUE_LOGGING.md: "Log lines MUST start at line 1 (not 0, not 5)"
+                // Always return 0 so line numbers are: 0 + logIdx + 1 = 1, 2, 3, ...
                 getStepLogStartIndex(jobId, stepName, stepIndex) {
-                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
-                    if (!step) return 0;
-
-                    const logs = step.logs || [];
-                    const totalCount = step.totalLogCount || logs.length;
-                    const limit = this.getStepLogLimit(jobId, stepName);
-                    const displayedCount = Math.min(logs.length, limit);
-
-                    return totalCount - displayedCount;
+                    return 0;
                 },
 
                 // Load more logs for a step (increases the limit and fetches from API)

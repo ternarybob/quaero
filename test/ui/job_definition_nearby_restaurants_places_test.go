@@ -7,7 +7,7 @@ import (
 
 // TestJobDefinitionNearbyRestaurantsPlaces tests the Places API job definition end-to-end
 func TestJobDefinitionNearbyRestaurantsPlaces(t *testing.T) {
-	utc := NewUITestContext(t, 10*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	utc.Log("--- Testing Job Definition: Nearby Restaurants (Places API) ---")

@@ -13,7 +13,7 @@ import (
 
 // TestJobTrigger tests basic job triggering via the UI
 func TestJobTrigger(t *testing.T) {
-	utc := NewUITestContext(t, 5*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	jobName := "News Crawler"
@@ -60,7 +60,7 @@ func TestJobTrigger(t *testing.T) {
 
 // TestJobCancel tests cancelling a running job via the Queue UI
 func TestJobCancel(t *testing.T) {
-	utc := NewUITestContext(t, 5*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	jobName := "News Crawler"
