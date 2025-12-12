@@ -297,7 +297,8 @@ func (h *UnifiedLogsHandler) getJobLogs(w http.ResponseWriter, r *http.Request) 
 			responseLogs = append(responseLogs, responseLog)
 		}
 
-		// Apply ordering (storage returns desc by default)
+		// Storage always returns DESC order (newest first)
+		// Reverse if ASC order requested
 		if order == "asc" {
 			for i, j := 0, len(responseLogs)-1; i < j; i, j = i+1, j-1 {
 				responseLogs[i], responseLogs[j] = responseLogs[j], responseLogs[i]

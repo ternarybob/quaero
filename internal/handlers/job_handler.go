@@ -1339,6 +1339,7 @@ type JobTreeResponse struct {
 
 // JobTreeStep represents a step in the job tree
 type JobTreeStep struct {
+	StepID       string           `json:"step_id,omitempty"` // Step job ID (for fetching more logs)
 	Name         string           `json:"name"`
 	Status       string           `json:"status"`
 	DurationMs   int64            `json:"duration_ms"`
@@ -1347,6 +1348,7 @@ type JobTreeStep struct {
 	Expanded     bool             `json:"expanded"`
 	ChildSummary *ChildJobSummary `json:"child_summary,omitempty"`
 	Logs         []JobTreeLog     `json:"logs"`
+	TotalLogs    int              `json:"total_logs,omitempty"` // Total log count for "Show earlier logs"
 }
 
 // ChildJobSummary aggregates child job status counts
@@ -1507,6 +1509,9 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if stepJob != nil {
+			// Set step job ID for "Show earlier logs" functionality
+			step.StepID = stepJob.ID
+
 			// Use step job's own status directly
 			step.Status = string(stepJob.Status)
 			step.StartedAt = stepJob.StartedAt
@@ -1552,16 +1557,26 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			// Get logs for this step job specifically
-			stepLogs, err := h.logService.GetLogs(ctx, stepJob.ID, 100)
+			// Get total log count for "Show earlier logs" indicator
+			totalCount, countErr := h.logService.CountLogs(ctx, stepJob.ID)
+			if countErr != nil {
+				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Msg("Failed to count logs for step")
+			} else {
+				step.TotalLogs = totalCount
+			}
+
+			// Get the NEWEST 100 logs for this step job (newest first, then reverse for display)
+			// Using GetLogsWithOffset to get DESC order, limit 100, offset 0 = newest 100
+			stepLogs, err := h.logService.GetLogsWithOffset(ctx, stepJob.ID, 100, 0)
 			if err != nil {
 				h.logger.Warn().Err(err).Str("step_job_id", stepJob.ID).Msg("Failed to get logs for step")
 			} else {
-				// Logs come from DB in ASC order (oldest first) - ready for display
-				for _, log := range stepLogs {
+				// Logs from GetLogsWithOffset are in DESC order (newest first)
+				// Reverse to get ASC order for display (oldest of the newest 100 at top)
+				for i := len(stepLogs) - 1; i >= 0; i-- {
 					step.Logs = append(step.Logs, JobTreeLog{
-						Level: log.Level,
-						Text:  log.Message,
+						Level: stepLogs[i].Level,
+						Text:  stepLogs[i].Message,
 					})
 				}
 			}
@@ -1595,12 +1610,13 @@ func (h *JobHandler) GetJobTreeHandler(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to get logs for tree")
 		}
 
-		// Logs come from DB in ASC order (oldest first) - ready for display
+		// Logs from storage are in DESC order (newest first)
+		// Reverse to get ASC order for display (oldest at top)
 		parentLogs := make([]JobTreeLog, 0, len(rawLogs))
-		for _, log := range rawLogs {
+		for i := len(rawLogs) - 1; i >= 0; i-- {
 			parentLogs = append(parentLogs, JobTreeLog{
-				Level: log.Level,
-				Text:  log.Message,
+				Level: rawLogs[i].Level,
+				Text:  rawLogs[i].Message,
 			})
 		}
 
@@ -1762,13 +1778,15 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 				stepLogs.TotalCount = totalCount
 			}
 
-			// Get logs for this step job - DB returns ASC order (oldest first)
-			logs, err := h.logService.GetLogs(ctx, stepJob.ID, limit)
+			// Get the NEWEST logs for this step job (newest first, then reverse for display)
+			logs, err := h.logService.GetLogsWithOffset(ctx, stepJob.ID, limit, 0)
 			if err == nil {
-				for _, log := range logs {
+				// Logs from GetLogsWithOffset are in DESC order (newest first)
+				// Reverse to get ASC order for display (oldest of the newest N at top)
+				for i := len(logs) - 1; i >= 0; i-- {
 					stepLogs.Logs = append(stepLogs.Logs, JobTreeLog{
-						Level: log.Level,
-						Text:  log.Message,
+						Level: logs[i].Level,
+						Text:  logs[i].Message,
 					})
 				}
 			}
@@ -1794,6 +1812,7 @@ func (h *JobHandler) buildStepsFromStepJobs(ctx context.Context, stepJobs []*mod
 		}
 
 		step := JobTreeStep{
+			StepID:     stepJob.ID, // Step job ID for "Show earlier logs" functionality
 			Name:       stepName,
 			Status:     string(stepJob.Status),
 			StartedAt:  stepJob.StartedAt,
@@ -1842,14 +1861,23 @@ func (h *JobHandler) buildStepsFromStepJobs(ctx context.Context, stepJobs []*mod
 			}
 		}
 
-		// Get logs for step job
-		stepLogs, err := h.logService.GetLogs(ctx, stepJob.ID, 100)
+		// Get total log count for "Show earlier logs" indicator
+		totalCount, countErr := h.logService.CountLogs(ctx, stepJob.ID)
+		if countErr != nil {
+			h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Msg("Failed to count logs for step")
+		} else {
+			step.TotalLogs = totalCount
+		}
+
+		// Get the NEWEST 100 logs for this step job (newest first, then reverse for display)
+		stepLogs, err := h.logService.GetLogsWithOffset(ctx, stepJob.ID, 100, 0)
 		if err == nil {
-			// Logs come from DB in ASC order (oldest first) - ready for display
-			for _, log := range stepLogs {
+			// Logs from GetLogsWithOffset are in DESC order (newest first)
+			// Reverse to get ASC order for display (oldest of the newest 100 at top)
+			for i := len(stepLogs) - 1; i >= 0; i-- {
 				step.Logs = append(step.Logs, JobTreeLog{
-					Level: log.Level,
-					Text:  log.Message,
+					Level: stepLogs[i].Level,
+					Text:  stepLogs[i].Message,
 				})
 			}
 		}

@@ -95,10 +95,11 @@ func (s *LogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]mo
 		return nil, fmt.Errorf("failed to get logs: %w", err)
 	}
 
-	// Sort in-memory to handle logs with/without Sequence field
-	sortLogsAsc(logs)
+	// Sort in-memory (newest first) to handle logs with/without Sequence field
+	// All log retrieval methods return DESC order (newest first) for consistency
+	sortLogsDesc(logs)
 
-	// Apply limit after sorting
+	// Apply limit after sorting - returns newest N logs
 	if limit > 0 && len(logs) > limit {
 		logs = logs[:limit]
 	}

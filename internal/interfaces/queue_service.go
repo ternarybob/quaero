@@ -53,6 +53,10 @@ type LogService interface {
 	AppendLogs(ctx context.Context, jobID string, entries []models.LogEntry) error
 	GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error)
 	GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error)
+	// GetLogsWithOffset fetches the newest logs with offset-based pagination
+	// Returns logs in DESC order (newest first) after skipping 'offset' newest logs
+	// Used by "Show earlier logs" functionality to paginate through log history
+	GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error)
 	DeleteLogs(ctx context.Context, jobID string) error
 	CountLogs(ctx context.Context, jobID string) (int, error)
 	// GetAggregatedLogs fetches logs for parent job and optionally all child jobs

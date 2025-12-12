@@ -59,6 +59,12 @@ func (s *Service) CountLogs(ctx context.Context, jobID string) (int, error) {
 	return s.storage.CountLogs(ctx, jobID)
 }
 
+// GetLogsWithOffset fetches logs with offset-based pagination (delegates to storage)
+// Returns logs in DESC order (newest first) after skipping 'offset' newest logs
+func (s *Service) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
+	return s.storage.GetLogsWithOffset(ctx, jobID, limit, offset)
+}
+
 // GetAggregatedLogs fetches logs for parent job and optionally all child jobs
 // Implements k-way merge with cursor-based pagination
 // Returns logs slice, metadata map, and next_cursor for pagination

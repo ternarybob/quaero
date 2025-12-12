@@ -9,10 +9,9 @@ Execute: $ARGUMENTS
 ```yaml
 models: 
   planner: opus      # PHASE 1: breaks down request, selects skills
-  worker: sonnet     # PHASE 2: implements tasks with skill patterns
+  worker: opus       # PHASE 2: implements tasks with skill patterns
   validator: opus    # PHASE 3: validates + creates fix tasks if needed
   reviewer: opus     # PHASE 4: architecture review + creates refactor tasks if needed
-opus_override: [security, authentication, crypto, state-machine, architectural-change]
 critical_triggers: [security, authentication, authorization, payments, data-migration, crypto, api-breaking, database-schema]
 paths: { root: ".", docs: "./docs", sandbox: "/tmp/3agents-skills/", skills: ".claude/skills/" }
 ```
@@ -149,9 +148,9 @@ Related files: {list key files that will be touched}
 ## Tasks
 | # | Desc | Depends | Critical | Model | Skill | Est. Files |
 |---|------|---------|----------|-------|-------|------------|
-| 1 | ... | - | no | sonnet | go | 2 |
-| 2 | ... | 1 | no | sonnet | go | 1 |
-| 3 | ... | - | no | sonnet | - | 1 |
+| 1 | ... | - | no | opus | go | 2 |
+| 2 | ... | 1 | no | opus | go | 1 |
+| 3 | ... | - | no | opus | - | 1 |
 
 ## Execution Order
 [1,3] → [2]
@@ -164,7 +163,7 @@ Related files: {list key files that will be touched}
 ```markdown
 # Task {N}: {desc}
 Workdir: {workdir} | Depends: {ids or "none"} | Critical: {no|yes:trigger}
-Model: {sonnet|opus} | Skill: {skill or "none"}
+Model: opus | Skill: {skill or "none"}
 
 ## Context
 This task is part of: {brief description of overall goal from plan}
@@ -215,7 +214,7 @@ After completion, next task(s): {task IDs or "validation"}
 
 ---
 
-## PHASE 2: IMPLEMENT (sonnet - worker)
+## PHASE 2: IMPLEMENT (opus - worker)
 
 **GATE: Each task writes step-N.md IMMEDIATELY after completion**
 
@@ -586,7 +585,7 @@ Cleanup: `rm -rf /tmp/3agents-skills/`
 └─────────────────┬───────────────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────────────┐
-│ PHASE 2: IMPLEMENT (sonnet)                         │◄──────────────┐
+│ PHASE 2: IMPLEMENT (opus)                          │◄──────────────┐
 │ For each task:                                      │               │
 │   Read: task-N.md + skill                           │               │
 │   Write: step-N.md                                  │               │

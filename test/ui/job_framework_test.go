@@ -6,6 +6,9 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -415,4 +418,145 @@ func (utc *UITestContext) TriggerAndMonitorJob(jobName string, timeout time.Dura
 		return err
 	}
 	return utc.MonitorJob(jobName, DefaultMonitorOptions(timeout))
+}
+
+// JobDefinitionTestConfig configures a job definition end-to-end test
+type JobDefinitionTestConfig struct {
+	JobName           string        // Name as shown in UI (e.g., "News Crawler")
+	JobDefinitionPath string        // Path to TOML file (relative to test/ui/)
+	Timeout           time.Duration // Max time to wait for job completion
+	RequiredEnvVars   []string      // Env vars that must be set (skip if missing)
+	AllowFailure      bool          // If true, don't fail test if job fails
+}
+
+// CopyJobDefinitionToResults copies the job definition TOML to test results directory
+func (utc *UITestContext) CopyJobDefinitionToResults(jobDefPath string) error {
+	utc.Log("Copying job definition: %s", jobDefPath)
+
+	// Resolve absolute path from relative path
+	testUIDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	sourcePath := filepath.Join(testUIDir, jobDefPath)
+
+	// Open source file
+	srcFile, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open job definition file %s: %w", sourcePath, err)
+	}
+	defer srcFile.Close()
+
+	// Create destination path in results directory
+	fileName := filepath.Base(jobDefPath)
+	destPath := filepath.Join(utc.Env.ResultsDir, fileName)
+
+	// Create destination file
+	dstFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file %s: %w", destPath, err)
+	}
+	defer dstFile.Close()
+
+	// Copy file contents
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("failed to copy job definition: %w", err)
+	}
+
+	utc.Log("✓ Job definition copied to: %s", destPath)
+	return nil
+}
+
+// RefreshAndScreenshot refreshes the page and takes a screenshot
+func (utc *UITestContext) RefreshAndScreenshot(name string) error {
+	utc.Log("Refreshing page and taking screenshot: %s", name)
+
+	// Get current URL
+	var currentURL string
+	if err := chromedp.Run(utc.Ctx, chromedp.Location(&currentURL)); err != nil {
+		return fmt.Errorf("failed to get current URL: %w", err)
+	}
+
+	// Navigate to current URL (refresh)
+	if err := chromedp.Run(utc.Ctx, chromedp.Navigate(currentURL)); err != nil {
+		return fmt.Errorf("failed to refresh page: %w", err)
+	}
+
+	// Wait for page to load
+	if err := chromedp.Run(utc.Ctx,
+		chromedp.WaitVisible(`.page-title`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	); err != nil {
+		return fmt.Errorf("page did not load after refresh: %w", err)
+	}
+
+	// Take screenshot
+	if err := utc.FullScreenshot(name); err != nil {
+		return fmt.Errorf("failed to take screenshot after refresh: %w", err)
+	}
+
+	utc.Log("✓ Page refreshed and screenshot taken")
+	return nil
+}
+
+// RunJobDefinitionTest runs a complete job definition test with monitoring and screenshots
+func (utc *UITestContext) RunJobDefinitionTest(config JobDefinitionTestConfig) error {
+	utc.Log("Starting job definition test: %s", config.JobName)
+
+	// Check required environment variables
+	if len(config.RequiredEnvVars) > 0 {
+		missingVars := make([]string, 0)
+		for _, envVar := range config.RequiredEnvVars {
+			if os.Getenv(envVar) == "" {
+				missingVars = append(missingVars, envVar)
+			}
+		}
+		if len(missingVars) > 0 {
+			utc.Log("Skipping test: missing required environment variables: %v", missingVars)
+			utc.T.Skipf("Missing required environment variables: %v", missingVars)
+			return nil
+		}
+	}
+
+	// Copy job definition to results directory
+	if err := utc.CopyJobDefinitionToResults(config.JobDefinitionPath); err != nil {
+		return fmt.Errorf("failed to copy job definition: %w", err)
+	}
+
+	// Navigate to Jobs page
+	if err := utc.Navigate(utc.JobsURL); err != nil {
+		return fmt.Errorf("failed to navigate to Jobs page: %w", err)
+	}
+
+	// Wait for page to fully load
+	time.Sleep(2 * time.Second)
+
+	// Take job definition screenshot
+	if err := utc.Screenshot("job_definition"); err != nil {
+		return fmt.Errorf("failed to take job definition screenshot: %w", err)
+	}
+
+	// Trigger the job
+	if err := utc.TriggerJob(config.JobName); err != nil {
+		return fmt.Errorf("failed to trigger job: %w", err)
+	}
+
+	// Monitor the job until completion
+	monitorOpts := MonitorJobOptions{
+		Timeout:              config.Timeout,
+		ExpectDocuments:      false,
+		ValidateAllProcessed: false,
+		AllowFailure:         config.AllowFailure,
+	}
+	if err := utc.MonitorJob(config.JobName, monitorOpts); err != nil {
+		return fmt.Errorf("failed to monitor job: %w", err)
+	}
+
+	// Refresh page and take final screenshot
+	if err := utc.RefreshAndScreenshot("final_state"); err != nil {
+		return fmt.Errorf("failed to refresh and screenshot: %w", err)
+	}
+
+	utc.Log("✓ Job definition test completed: %s", config.JobName)
+	return nil
 }
