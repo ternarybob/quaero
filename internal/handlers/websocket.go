@@ -107,10 +107,10 @@ func NewWebSocketHandler(eventService interfaces.EventService, logger arbor.ILog
 
 	// Initialize unified log aggregator for trigger-based UI updates
 	// Handles both service logs and step logs with a single aggregator
-	// Triggers every timeThreshold (default 2s) for pending events
+	// Triggers every timeThreshold (default 10s) for pending events
 	// Also triggers immediately when a step finishes
 	if config != nil {
-		timeThreshold := 2 * time.Second // Default 2 seconds to reduce request frequency
+		timeThreshold := 10 * time.Second // Default 10 seconds to reduce WebSocket message frequency
 		if config.TimeThreshold != "" {
 			if parsed, err := time.ParseDuration(config.TimeThreshold); err == nil {
 				timeThreshold = parsed

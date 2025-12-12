@@ -46,7 +46,7 @@ func NewUnifiedLogAggregator(
 	logger arbor.ILogger,
 ) *UnifiedLogAggregator {
 	if timeThreshold <= 0 {
-		timeThreshold = 2 * time.Second // Default 2 seconds
+		timeThreshold = 10 * time.Second // Default 10 seconds to reduce WebSocket message frequency
 	}
 
 	return &UnifiedLogAggregator{
@@ -89,14 +89,28 @@ func (a *UnifiedLogAggregator) RecordStepEvent(ctx context.Context, stepID strin
 }
 
 // TriggerStepImmediately sends a refresh trigger for a step immediately (e.g., when step finishes)
+// Uses debouncing to prevent excessive triggers - if a trigger was sent recently (within timeThreshold/2),
+// the step is marked for the next periodic flush instead of sending immediately.
 func (a *UnifiedLogAggregator) TriggerStepImmediately(ctx context.Context, stepID string) {
 	if stepID == "" {
 		return
 	}
 
 	a.mu.Lock()
+	now := time.Now()
+	lastTrigger := a.stepLastTrigger[stepID]
+	minInterval := a.timeThreshold / 2 // Debounce: don't trigger more often than half the threshold
+
+	// Check if we triggered this step recently - if so, mark for next periodic flush instead
+	if !lastTrigger.IsZero() && now.Sub(lastTrigger) < minInterval {
+		// Recent trigger exists - mark as having events and let periodic flush handle it
+		a.stepHasEvents[stepID] = true
+		a.mu.Unlock()
+		return
+	}
+
 	a.stepHasEvents[stepID] = false
-	a.stepLastTrigger[stepID] = time.Now()
+	a.stepLastTrigger[stepID] = now
 	a.mu.Unlock()
 
 	// NOTE: Don't log here - logging triggers log_event which can cause loops
@@ -105,7 +119,7 @@ func (a *UnifiedLogAggregator) TriggerStepImmediately(ctx context.Context, stepI
 		Scope:     "job",
 		StepIDs:   []string{stepID},
 		Finished:  true,
-		Timestamp: time.Now(),
+		Timestamp: now,
 	})
 }
 

@@ -18,6 +18,18 @@ import (
 	"github.com/ternarybob/quaero/test/common"
 )
 
+// Job/Queue test constants
+const (
+	// MaxJobTestTimeout is the maximum timeout for all job/queue tests (10 minutes)
+	MaxJobTestTimeout = 10 * time.Minute
+
+	// ScreenshotInterval is the interval for periodic screenshots during job monitoring
+	ScreenshotInterval = 30 * time.Second
+
+	// ProgressLogInterval is the interval for logging progress during job monitoring
+	ProgressLogInterval = 10 * time.Second
+)
+
 // UITestContext holds shared state for UI tests
 // This replaces the separate queueTestContext, codebaseTestContext, etc.
 type UITestContext struct {
@@ -91,6 +103,14 @@ func NewUITestContext(t *testing.T, timeout time.Duration) *UITestContext {
 
 // Cleanup releases all resources. Call this with defer.
 func (utc *UITestContext) Cleanup() {
+	// Write test result to log file before cleanup
+	// This ensures PASS/FAIL status is captured in test.log
+	if utc.T.Failed() {
+		utc.Log("=== TEST RESULT: FAIL ===")
+	} else {
+		utc.Log("=== TEST RESULT: PASS ===")
+	}
+
 	// Execute cleanup functions in reverse order
 	for i := len(utc.cleanup) - 1; i >= 0; i-- {
 		utc.cleanup[i]()

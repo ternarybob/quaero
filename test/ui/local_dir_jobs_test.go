@@ -559,7 +559,7 @@ func (ltc *localDirTestContext) verifyJobAddPage() error {
 
 // TestLocalDirJobAddPage tests the job add page UI
 func TestLocalDirJobAddPage(t *testing.T) {
-	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
+	ltc, cleanup := newLocalDirTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job Add Page ---")
@@ -575,7 +575,7 @@ func TestLocalDirJobAddPage(t *testing.T) {
 
 // TestLocalDirJobExecution tests triggering and monitoring a local_dir job via UI
 func TestLocalDirJobExecution(t *testing.T) {
-	ltc, cleanup := newLocalDirTestContext(t, 5*time.Minute)
+	ltc, cleanup := newLocalDirTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job Execution ---")
@@ -616,7 +616,7 @@ func TestLocalDirJobExecution(t *testing.T) {
 
 // TestLocalDirJobWithEmptyDirectory tests job behavior with empty directory via UI
 func TestLocalDirJobWithEmptyDirectory(t *testing.T) {
-	ltc, cleanup := newLocalDirTestContext(t, 3*time.Minute)
+	ltc, cleanup := newLocalDirTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Local Dir Job With Empty Directory ---")
@@ -696,7 +696,7 @@ func (ltc *localDirTestContext) verifyTomlStepFormat(filename string) error {
 
 // TestSummaryAgentWithDependency tests summary agent with step dependency via UI
 func TestSummaryAgentWithDependency(t *testing.T) {
-	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
+	ltc, cleanup := newLocalDirTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent With Dependency ---")
@@ -754,7 +754,7 @@ func TestSummaryAgentWithDependency(t *testing.T) {
 
 // TestSummaryAgentPlainRequest tests summary agent with plain text prompt via UI
 func TestSummaryAgentPlainRequest(t *testing.T) {
-	ltc, cleanup := newLocalDirTestContext(t, 10*time.Minute)
+	ltc, cleanup := newLocalDirTestContext(t, MaxJobTestTimeout)
 	defer cleanup()
 
 	ltc.env.LogTest(t, "--- Starting Test: Summary Agent Plain Request ---")

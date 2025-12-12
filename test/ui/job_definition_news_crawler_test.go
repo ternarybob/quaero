@@ -2,12 +2,11 @@ package ui
 
 import (
 	"testing"
-	"time"
 )
 
 // TestJobDefinitionNewsCrawler tests the News Crawler job definition end-to-end
 func TestJobDefinitionNewsCrawler(t *testing.T) {
-	utc := NewUITestContext(t, 15*time.Minute)
+	utc := NewUITestContext(t, MaxJobTestTimeout)
 	defer utc.Cleanup()
 
 	utc.Log("--- Testing Job Definition: News Crawler ---")
@@ -15,7 +14,7 @@ func TestJobDefinitionNewsCrawler(t *testing.T) {
 	config := JobDefinitionTestConfig{
 		JobName:           "News Crawler",
 		JobDefinitionPath: "../config/job-definitions/news-crawler.toml",
-		Timeout:           10 * time.Minute,
+		Timeout:           MaxJobTestTimeout,
 		RequiredEnvVars:   nil, // No API keys needed
 		AllowFailure:      false,
 	}

@@ -642,7 +642,7 @@
                                                                             'text-gray': step.status === 'cancelled'
                                                                         }">
                                                                             <i class="fas" :class="{
-                                                                                'fa-circle': step.status === 'pending',
+                                                                                'fa-clock': step.status === 'pending',
                                                                                 'fa-spinner fa-pulse': step.status === 'running',
                                                                                 'fa-check-circle': step.status === 'completed',
                                                                                 'fa-times-circle': step.status === 'failed',
@@ -1953,6 +1953,7 @@
                 jobTreeSearchFilter: {},
                 treeLogLevelFilter: {},  // Per-job log level filter for tree view (all/warn/error)
                 collapsedJobs: {}, // Track collapsed state of parent jobs (default expanded)
+                _pendingStepExpansions: {}, // Queue step expansions that arrive before tree data loads
 
                 // Logs
                 itemsToRender: [],
@@ -1978,6 +1979,12 @@
                 // Stats debouncing
                 _statsTimeout: null,
                 _statsDebounceMs: 2000,
+
+                // Step log fetch debouncing - prevents API flooding
+                _stepFetchDebounceTimers: {},  // key: jobId:stepName, value: timer ID
+                _stepFetchInFlight: new Set(), // tracks currently fetching steps
+                _stepFetchDebounceMs: 1000,    // 1 second debounce per user request
+
 
                 init() {
                     // Initialize timeouts map for debounced parent refreshes
@@ -2668,7 +2675,7 @@
                 // Status Icon Mapping Functions
                 getStatusIcon(status) {
                     const iconMap = {
-                        'pending': 'fa-circle',
+                        'pending': 'fa-clock',
                         'running': 'fa-spinner fa-pulse',
                         'completed': 'fa-check-circle',
                         'failed': 'fa-times-circle',
@@ -3730,6 +3737,30 @@
                                 progress_text: progress.progress_text
                             };
                             console.log('[Queue] Stored step progress for', progress.step_name, 'on manager', progress.manager_id.substring(0, 8), ':', manager._stepProgress[progress.step_name]);
+
+                            // Auto-expand step when it receives progress update (handles synchronous step completion)
+                            // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                            const status = progress.status;
+                            if (status === 'running' || status === 'completed' || status === 'failed') {
+                                // Queue expansion for when tree data loads
+                                if (!this._pendingStepExpansions[progress.manager_id]) {
+                                    this._pendingStepExpansions[progress.manager_id] = new Set();
+                                }
+                                this._pendingStepExpansions[progress.manager_id].add(progress.step_name);
+
+                                // If tree data already exists, expand immediately
+                                if (this.jobTreeData[progress.manager_id]?.steps) {
+                                    const treeData = this.jobTreeData[progress.manager_id];
+                                    const stepIdx = treeData.steps.findIndex(s => s.name === progress.step_name);
+                                    if (stepIdx >= 0) {
+                                        const treeStepKey = `${progress.manager_id}:${stepIdx}`;
+                                        if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step from progress:', progress.step_name, 'status:', status);
+                                            this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -3869,6 +3900,15 @@
                                 continue;
                             }
 
+                            // Queue expansion for when tree data loads (handles race condition)
+                            // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                            if (stepStatus === 'running' || stepStatus === 'completed' || stepStatus === 'failed') {
+                                if (!this._pendingStepExpansions[managerId]) {
+                                    this._pendingStepExpansions[managerId] = new Set();
+                                }
+                                this._pendingStepExpansions[managerId].add(stepName);
+                            }
+
                             // Fetch latest 100 logs (newest first, then reverse for display)
                             // No cursor - always get the latest logs for sliding window display
                             let url = `/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=100&order=desc&level=info`;
@@ -3916,10 +3956,14 @@
                                         [managerId]: { ...treeData, steps: newSteps }
                                     };
 
-                                    // Auto-expand step when it receives logs (key fix for real-time expansion)
-                                    if (newLogs.length > 0) {
+                                    // Auto-expand step when it has activity (running/completed/failed)
+                                    // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                                    // Also expand on completed/failed even without logs
+                                    const effectiveStatus = stepStatus || currentStep.status;
+                                    if (effectiveStatus === 'running' || effectiveStatus === 'completed' || effectiveStatus === 'failed' || newLogs.length > 0) {
                                         const treeStepKey = `${managerId}:${stepIdx}`;
                                         if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step from refresh event:', stepName, 'status:', effectiveStatus, 'logs:', newLogs.length);
                                             this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
                                         }
                                     }
@@ -4020,27 +4064,45 @@
                             }
                         }
                     } else if (context === 'job_step' && step_name) {
-                        // Update step status in tree view data
+                        // Queue expansion for when tree data loads if not yet available
+                        // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
+                        if (status === 'running' || status === 'completed' || status === 'failed') {
+                            if (!this._pendingStepExpansions[job_id]) {
+                                this._pendingStepExpansions[job_id] = new Set();
+                            }
+                            this._pendingStepExpansions[job_id].add(step_name);
+                        }
+
+                        // Update step status in tree view data (immutable for Alpine reactivity)
                         if (this.jobTreeData[job_id]) {
                             const treeData = this.jobTreeData[job_id];
                             if (treeData.steps) {
                                 const stepIdx = treeData.steps.findIndex(s => s.name === step_name);
                                 if (stepIdx >= 0) {
-                                    // Update step status directly
                                     const oldStatus = treeData.steps[stepIdx].status;
-                                    treeData.steps[stepIdx].status = status;
-                                    console.log('[Queue] Updated step status:', step_name, ':', oldStatus, '->', status);
 
-                                    // Auto-expand running/failed steps
-                                    if (status === 'running' || status === 'failed') {
+                                    // Auto-expand running/completed/failed steps ALWAYS (even if status same)
+                                    // Handle race condition where step completes before tree loads
+                                    if (status === 'running' || status === 'completed' || status === 'failed') {
                                         const treeStepKey = `${job_id}:${stepIdx}`;
                                         if (!this.jobTreeExpandedSteps[treeStepKey]) {
+                                            console.log('[Queue] Auto-expanding step:', step_name, 'status:', status);
                                             this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [treeStepKey]: true };
                                         }
                                     }
 
-                                    // Trigger reactive update
-                                    this.jobTreeData = { ...this.jobTreeData };
+                                    if (oldStatus !== status) {
+                                        // Immutable update for step status
+                                        const newSteps = [...treeData.steps];
+                                        newSteps[stepIdx] = { ...newSteps[stepIdx], status: status };
+                                        console.log('[Queue] Updated step status:', step_name, ':', oldStatus, '->', status);
+
+                                        // Trigger reactive update with fully immutable data
+                                        this.jobTreeData = {
+                                            ...this.jobTreeData,
+                                            [job_id]: { ...treeData, steps: newSteps }
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -4053,6 +4115,14 @@
                         stepJobs.forEach(stepJob => {
                             stepJob.status = status;
                         });
+
+                        // Fetch logs immediately on status change (bypass debounce)
+                        if (this.jobTreeData[job_id]?.steps) {
+                            const stepIdx = this.jobTreeData[job_id].steps.findIndex(s => s.name === step_name);
+                            if (stepIdx >= 0) {
+                                this.fetchStepLogs(job_id, step_name, stepIdx, true);
+                            }
+                        }
                     }
 
                     // Fetch updated structure if refresh_logs is true
@@ -4078,29 +4148,42 @@
                             this.allJobs[jobIndex].status = structure.status;
                         }
 
-                        // Update step statuses in tree view
+                        // Update step statuses in tree view (immutable update for Alpine reactivity)
                         if (this.jobTreeData[jobId] && structure.steps) {
                             const treeData = this.jobTreeData[jobId];
                             if (treeData.steps) {
+                                const newSteps = [...treeData.steps];
+                                let hasChanges = false;
                                 structure.steps.forEach(stepStatus => {
-                                    const stepIdx = treeData.steps.findIndex(s => s.name === stepStatus.name);
+                                    const stepIdx = newSteps.findIndex(s => s.name === stepStatus.name);
                                     if (stepIdx >= 0) {
-                                        treeData.steps[stepIdx].status = stepStatus.status;
+                                        const oldStatus = newSteps[stepIdx].status;
+                                        if (oldStatus !== stepStatus.status) {
+                                            // Immutable step update
+                                            newSteps[stepIdx] = { ...newSteps[stepIdx], status: stepStatus.status };
+                                            hasChanges = true;
+                                            console.log('[Queue] fetchJobStructure updated step:', stepStatus.name, oldStatus, '->', stepStatus.status);
+                                        }
                                         // Update log count for expanded step indication
-                                        if (stepStatus.log_count > 0 && treeData.steps[stepIdx].logs) {
+                                        if (stepStatus.log_count > 0 && newSteps[stepIdx].logs) {
                                             // Only update if we have more logs than before
-                                            if (stepStatus.log_count > treeData.steps[stepIdx].logs.length) {
+                                            if (stepStatus.log_count > newSteps[stepIdx].logs.length) {
                                                 // Trigger log refresh for expanded steps
                                                 const treeStepKey = `${jobId}:${stepIdx}`;
                                                 if (this.jobTreeExpandedSteps[treeStepKey]) {
-                                                    this.fetchStepLogs(jobId, stepStatus.name, stepIdx);
+                                                    this.fetchStepLogs(jobId, stepStatus.name, stepIdx, true);
                                                 }
                                             }
                                         }
                                     }
                                 });
-                                // Trigger reactive update
-                                this.jobTreeData = { ...this.jobTreeData };
+                                // Trigger reactive update with immutable data
+                                if (hasChanges) {
+                                    this.jobTreeData = {
+                                        ...this.jobTreeData,
+                                        [jobId]: { ...treeData, steps: newSteps }
+                                    };
+                                }
                             }
                         }
                     } catch (error) {
@@ -4108,8 +4191,42 @@
                     }
                 },
 
-                // Fetch logs for a specific step
-                async fetchStepLogs(jobId, stepName, stepIdx) {
+                // Fetch logs for a specific step (with debouncing to prevent API flooding)
+                // immediate=true bypasses debounce for status changes
+                fetchStepLogs(jobId, stepName, stepIdx, immediate = false) {
+                    const key = `${jobId}:${stepName}`;
+
+                    // Skip if already fetching this step
+                    if (this._stepFetchInFlight.has(key)) {
+                        return;
+                    }
+
+                    // Clear existing debounce timer for this step
+                    if (this._stepFetchDebounceTimers[key]) {
+                        clearTimeout(this._stepFetchDebounceTimers[key]);
+                        delete this._stepFetchDebounceTimers[key];
+                    }
+
+                    // For immediate requests (status changes), fetch now
+                    if (immediate) {
+                        this._doFetchStepLogs(jobId, stepName, stepIdx);
+                        return;
+                    }
+
+                    // Otherwise debounce - wait 1 second before fetching
+                    this._stepFetchDebounceTimers[key] = setTimeout(() => {
+                        delete this._stepFetchDebounceTimers[key];
+                        this._doFetchStepLogs(jobId, stepName, stepIdx);
+                    }, this._stepFetchDebounceMs);
+                },
+
+                // Internal: Actually perform the step logs fetch
+                async _doFetchStepLogs(jobId, stepName, stepIdx) {
+                    const key = `${jobId}:${stepName}`;
+
+                    // Mark as in-flight
+                    this._stepFetchInFlight.add(key);
+
                     try {
                         const response = await fetch(`/api/jobs/${jobId}/tree/logs?step=${encodeURIComponent(stepName)}&limit=100`);
                         if (!response.ok) return;
@@ -4139,6 +4256,9 @@
                         }
                     } catch (error) {
                         console.error('[Queue] Failed to fetch step logs:', error);
+                    } finally {
+                        // Clear in-flight flag
+                        this._stepFetchInFlight.delete(key);
                     }
                 },
 
@@ -4170,21 +4290,34 @@
                         console.log('[Queue] loaded tree data for:', jobId.substring(0, 8), 'steps:', treeData.steps?.length);
                         this.jobTreeData = { ...this.jobTreeData, [jobId]: treeData };
 
-                        // Use backend-driven expansion state (step.expanded)
-                        // Only apply if user hasn't explicitly collapsed the step
+                        // Auto-expand ALL steps with activity (running, completed, failed)
+                        // Per QUEUE_UI.md: "ALL steps should auto-expand when they start running"
                         if (treeData.steps) {
+                            // Get pending expansions that arrived before tree data loaded
+                            const pendingExpansions = this._pendingStepExpansions[jobId] || new Set();
+
                             treeData.steps.forEach((step, idx) => {
                                 const key = `${jobId}:${idx}`;
-                                // Backend provides step.expanded based on: failed, running, hasLogs, isCurrentStep
+                                // Auto-expand if:
+                                // - Step has activity (running/completed/failed)
+                                // - Backend marked it as expanded
+                                // - Step was in pending expansions (arrived before tree loaded)
                                 // Only skip if user explicitly collapsed (value is false, not undefined)
-                                if (step.expanded && this.jobTreeExpandedSteps[key] !== false) {
+                                const shouldExpand = step.expanded ||
+                                    ['running', 'completed', 'failed'].includes(step.status) ||
+                                    pendingExpansions.has(step.name);
+                                if (shouldExpand && this.jobTreeExpandedSteps[key] !== false) {
                                     this.jobTreeExpandedSteps = { ...this.jobTreeExpandedSteps, [key]: true };
+                                    console.log('[Queue] Auto-expanding step on tree load:', step.name, 'status:', step.status, 'wasPending:', pendingExpansions.has(step.name));
                                 }
 
                                 // Load initial logs for all steps (as they might not be in the tree payload)
                                 // This ensures existing logs are visible before WebSockets start streaming new ones
                                 this.fetchStepLogs(jobId, step.name, idx);
                             });
+
+                            // Clear pending expansions for this job
+                            delete this._pendingStepExpansions[jobId];
                         }
                     } catch (error) {
                         console.error('[Queue] Failed to load job tree:', error);
@@ -4294,16 +4427,10 @@
                 },
 
                 // Get the starting log index for line numbers
+                // Per QUEUE_LOGGING.md: "Log lines MUST start at line 1 (not 0, not 5)"
+                // Always return 0 so line numbers are: 0 + logIdx + 1 = 1, 2, 3, ...
                 getStepLogStartIndex(jobId, stepName, stepIndex) {
-                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
-                    if (!step) return 0;
-
-                    const logs = step.logs || [];
-                    const totalCount = step.totalLogCount || logs.length;
-                    const limit = this.getStepLogLimit(jobId, stepName);
-                    const displayedCount = Math.min(logs.length, limit);
-
-                    return totalCount - displayedCount;
+                    return 0;
                 },
 
                 // Load more logs for a step (increases the limit and fetches from API)
