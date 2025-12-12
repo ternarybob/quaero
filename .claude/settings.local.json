@@ -23,7 +23,8 @@
       "Bash(ls:*)",
       "Bash(git config:*)",
       "Bash(gofmt:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
