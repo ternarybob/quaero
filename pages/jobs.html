@@ -125,8 +125,9 @@
                                     <!-- Right side: Actions -->
                                     <div class="column col-2 text-right">
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-run'" class="btn btn-sm btn-success" @click="executeJobDefinition(jobDef.id, jobDef.name)"
-                                            :disabled="!jobDef.enabled || jobDef.runtime_status === 'disabled'" :title="jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : 'Run Job'" aria-label="Run Job">
-                                            <i class="fas fa-play"></i>
+                                            :disabled="!jobDef.enabled || jobDef.runtime_status === 'disabled' || isJobExecuting(jobDef.id)"
+                                            :title="isJobExecuting(jobDef.id) ? 'Job execution in progress...' : (jobDef.runtime_status === 'disabled' ? jobDef.runtime_error : 'Run Job')" aria-label="Run Job">
+                                            <i :class="isJobExecuting(jobDef.id) ? 'fas fa-spinner fa-spin' : 'fas fa-play'"></i>
                                         </button>
                                         <button :id="jobDef.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-edit'" class="btn btn-sm" @click="editJobDefinition(jobDef, $event)"
                                             :disabled="jobDef.job_type === 'system' || jobDef.runtime_status === 'disabled'"

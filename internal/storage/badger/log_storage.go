@@ -3,6 +3,7 @@ package badger
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -14,6 +15,32 @@ import (
 
 // logSequence is a global counter to ensure unique log keys even within the same nanosecond
 var logSequence uint64
+
+// sortLogsAsc sorts logs in ascending order (oldest first)
+// Uses Sequence field if available, falls back to FullTimestamp for backwards compatibility
+func sortLogsAsc(logs []models.LogEntry) {
+	sort.SliceStable(logs, func(i, j int) bool {
+		// Both have Sequence - compare by Sequence
+		if logs[i].Sequence != "" && logs[j].Sequence != "" {
+			return logs[i].Sequence < logs[j].Sequence
+		}
+		// One or both missing Sequence - fall back to FullTimestamp
+		return logs[i].FullTimestamp < logs[j].FullTimestamp
+	})
+}
+
+// sortLogsDesc sorts logs in descending order (newest first)
+// Uses Sequence field if available, falls back to FullTimestamp for backwards compatibility
+func sortLogsDesc(logs []models.LogEntry) {
+	sort.SliceStable(logs, func(i, j int) bool {
+		// Both have Sequence - compare by Sequence
+		if logs[i].Sequence != "" && logs[j].Sequence != "" {
+			return logs[i].Sequence > logs[j].Sequence
+		}
+		// One or both missing Sequence - fall back to FullTimestamp
+		return logs[i].FullTimestamp > logs[j].FullTimestamp
+	})
+}
 
 // LogStorage implements the LogStorage interface for Badger
 type LogStorage struct {
@@ -36,7 +63,13 @@ func (s *LogStorage) AppendLog(ctx context.Context, jobID string, entry models.L
 	// Generate unique key using timestamp + atomic sequence counter
 	// This ensures uniqueness even when multiple logs are written within the same nanosecond
 	seq := atomic.AddUint64(&logSequence, 1)
-	key := fmt.Sprintf("%s_%d_%d", jobID, time.Now().UnixNano(), seq)
+	now := time.Now().UnixNano()
+	key := fmt.Sprintf("%s_%d_%d", jobID, now, seq)
+
+	// Set Sequence field for stable sorting - combines timestamp and sequence
+	// Format: 19-digit nanosecond timestamp + underscore + 10-digit zero-padded sequence
+	// This ensures lexicographic sorting matches chronological order
+	entry.Sequence = fmt.Sprintf("%019d_%010d", now, seq)
 
 	if err := s.db.Store().Insert(key, &entry); err != nil {
 		return fmt.Errorf("failed to append log: %w", err)
@@ -55,27 +88,37 @@ func (s *LogStorage) AppendLogs(ctx context.Context, jobID string, entries []mod
 
 func (s *LogStorage) GetLogs(ctx context.Context, jobID string, limit int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	// Query using the indexed JobIDField - sort ASC (oldest first) for chronological display
-	query := badgerhold.Where("JobIDField").Eq(jobID).SortBy("FullTimestamp")
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
+	// Query using the indexed JobIDField
+	query := badgerhold.Where("JobIDField").Eq(jobID)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs: %w", err)
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field
+	sortLogsAsc(logs)
+
+	// Apply limit after sorting
+	if limit > 0 && len(logs) > limit {
+		logs = logs[:limit]
 	}
 	return logs, nil
 }
 
 func (s *LogStorage) GetLogsByLevel(ctx context.Context, jobID string, level string, limit int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level).SortBy("FullTimestamp").Reverse()
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
+	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level: %w", err)
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field (newest first)
+	sortLogsDesc(logs)
+
+	// Apply limit after sorting
+	if limit > 0 && len(logs) > limit {
+		logs = logs[:limit]
 	}
 	return logs, nil
 }
@@ -97,32 +140,48 @@ func (s *LogStorage) CountLogs(ctx context.Context, jobID string) (int, error) {
 
 func (s *LogStorage) GetLogsWithOffset(ctx context.Context, jobID string, limit int, offset int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID).SortBy("FullTimestamp").Reverse()
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	if offset > 0 {
-		query = query.Skip(offset)
-	}
+	query := badgerhold.Where("JobIDField").Eq(jobID)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs with offset: %w", err)
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field (newest first)
+	sortLogsDesc(logs)
+
+	// Apply offset and limit after sorting
+	if offset > 0 {
+		if offset >= len(logs) {
+			return []models.LogEntry{}, nil
+		}
+		logs = logs[offset:]
+	}
+	if limit > 0 && len(logs) > limit {
+		logs = logs[:limit]
 	}
 	return logs, nil
 }
 
 func (s *LogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string, level string, limit int, offset int) ([]models.LogEntry, error) {
 	var logs []models.LogEntry
-	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level).SortBy("FullTimestamp").Reverse()
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	if offset > 0 {
-		query = query.Skip(offset)
-	}
+	query := badgerhold.Where("JobIDField").Eq(jobID).And("Level").Eq(level)
 
 	if err := s.db.Store().Find(&logs, query); err != nil {
 		return nil, fmt.Errorf("failed to get logs by level with offset: %w", err)
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field (newest first)
+	sortLogsDesc(logs)
+
+	// Apply offset and limit after sorting
+	if offset > 0 {
+		if offset >= len(logs) {
+			return []models.LogEntry{}, nil
+		}
+		logs = logs[offset:]
+	}
+	if limit > 0 && len(logs) > limit {
+		logs = logs[:limit]
 	}
 	return logs, nil
 }
@@ -133,7 +192,7 @@ func (s *LogStorage) GetLogsByLevelWithOffset(ctx context.Context, jobID string,
 func (s *LogStorage) GetLogsByManagerID(ctx context.Context, managerID string, limit int) ([]models.LogEntry, error) {
 	var allLogs []models.LogEntry
 	// Fetch all logs - badgerhold doesn't support querying into map fields
-	if err := s.db.Store().Find(&allLogs, badgerhold.Where("JobIDField").Ne("").SortBy("FullTimestamp").Reverse()); err != nil {
+	if err := s.db.Store().Find(&allLogs, badgerhold.Where("JobIDField").Ne("")); err != nil {
 		return nil, fmt.Errorf("failed to get all logs: %w", err)
 	}
 
@@ -142,10 +201,15 @@ func (s *LogStorage) GetLogsByManagerID(ctx context.Context, managerID string, l
 	for _, log := range allLogs {
 		if log.GetContext(models.LogCtxManagerID) == managerID {
 			filtered = append(filtered, log)
-			if limit > 0 && len(filtered) >= limit {
-				break
-			}
 		}
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field (newest first)
+	sortLogsDesc(filtered)
+
+	// Apply limit after sorting
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
 	}
 	return filtered, nil
 }
@@ -156,7 +220,7 @@ func (s *LogStorage) GetLogsByManagerID(ctx context.Context, managerID string, l
 func (s *LogStorage) GetLogsByStepID(ctx context.Context, stepID string, limit int) ([]models.LogEntry, error) {
 	var allLogs []models.LogEntry
 	// Fetch all logs - badgerhold doesn't support querying into map fields
-	if err := s.db.Store().Find(&allLogs, badgerhold.Where("JobIDField").Ne("").SortBy("FullTimestamp").Reverse()); err != nil {
+	if err := s.db.Store().Find(&allLogs, badgerhold.Where("JobIDField").Ne("")); err != nil {
 		return nil, fmt.Errorf("failed to get all logs: %w", err)
 	}
 
@@ -165,10 +229,15 @@ func (s *LogStorage) GetLogsByStepID(ctx context.Context, stepID string, limit i
 	for _, log := range allLogs {
 		if log.GetContext(models.LogCtxStepID) == stepID {
 			filtered = append(filtered, log)
-			if limit > 0 && len(filtered) >= limit {
-				break
-			}
 		}
+	}
+
+	// Sort in-memory to handle logs with/without Sequence field (newest first)
+	sortLogsDesc(filtered)
+
+	// Apply limit after sorting
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
 	}
 	return filtered, nil
 }

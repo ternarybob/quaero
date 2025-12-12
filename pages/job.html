@@ -36,388 +36,277 @@
             </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="tabs mb-4">
-            <button class="tab" :class="{'active': activeTab === 'details'}" @click="activeTab = 'details'">
-                Details
-            </button>
-            <button class="tab" :class="{'active': activeTab === 'output'}" @click="activeTab = 'output'">
-                Output
-            </button>
-        </div>
-
-        <!-- Details Tab -->
-        <div x-show="activeTab === 'details'" x-cloak>
-
-            <!-- Job Details Section -->
-            <section class="card" style="margin-bottom: 1.5rem;">
-                <div class="card-header">
-                    <h3>Job Details</h3>
-                </div>
-                <div class="card-body">
-                    <div class="columns">
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Status</p>
-                            <p class="text-small" x-text="getStatusText(job.status) || 'N/A'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Job ID</p>
-                            <p class="text-small" style="font-family: monospace;" x-text="job.id || 'N/A'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Job Type</p>
-                            <p class="text-small" x-text="job.job_type || 'Unknown Type'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Created</p>
-                            <p class="text-small" x-text="formatTimestamp(job.created_at) || 'N/A'"></p>
-                        </div>
+        <!-- Job Details Section -->
+        <section class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+                <h3>Job Details</h3>
+            </div>
+            <div class="card-body">
+                <div class="columns">
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Status</p>
+                        <p class="text-small" x-text="getStatusText(job.status) || 'N/A'"></p>
                     </div>
-                    <div class="columns" style="margin-top: 1rem;">
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Started</p>
-                            <p class="text-small" x-text="formatTimestamp(job.started_at) || 'N/A'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Finished</p>
-                            <p class="text-small" x-text="formatTimestamp(job.finished_at) || 'N/A'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Source</p>
-                            <p class="text-small" x-text="job.source_type || 'job_definition'"></p>
-                        </div>
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Parent</p>
-                            <p class="text-small" x-text="job.parent_id || 'None'"></p>
-                        </div>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Job ID</p>
+                        <p class="text-small" style="font-family: monospace;" x-text="job.id || 'N/A'"></p>
                     </div>
-                    <div class="columns" style="margin-top: 1rem;">
-                        <div class="column col-3">
-                            <p class="text-small text-gray">Documents Created</p>
-                            <p class="text-small" x-text="job.document_count || job.metadata?.document_count || job.result_count || '0'"></p>
-                        </div>
-                        <div class="column col-3" x-show="isCrawlerJob(job)">
-                            <p class="text-small text-gray">Current URL</p>
-                            <p class="text-small" style="font-family: monospace; word-break: break-all;" x-text="getCurrentUrl(job) || 'N/A'"></p>
-                        </div>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Job Type</p>
+                        <p class="text-small" x-text="job.job_type || 'Unknown Type'"></p>
+                    </div>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Created</p>
+                        <p class="text-small" x-text="formatTimestamp(job.created_at) || 'N/A'"></p>
                     </div>
                 </div>
-            </section>
-
-            <!-- Crawler Progress Section (for crawler jobs only) -->
-            <template x-if="isCrawlerJob(job)">
-                <section class="card" style="margin-bottom: 1.5rem;">
-                    <div class="card-header">
-                        <h3>Crawling Progress</h3>
-                        <span x-show="job.status === 'running'" class="label label-success" style="margin-left: 1rem;">
-                            <i class="fas fa-circle" style="animation: pulse 2s infinite;"></i> Live Updates
-                        </span>
+                <div class="columns" style="margin-top: 1rem;">
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Started</p>
+                        <p class="text-small" x-text="formatTimestamp(job.started_at) || 'N/A'"></p>
                     </div>
-                    <div class="card-body">
-                        <!-- Progress Overview -->
-                        <div style="margin-bottom: 1.5rem;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                                <span style="font-weight: 500;">Overall Progress</span>
-                                <span x-text="getCrawlerProgressText(job)" style="font-weight: 500;"></span>
-                            </div>
-                            <div class="progress-bar" style="width: 100%; height: 12px; background-color: #e0e0e0; border-radius: 6px; overflow: hidden;">
-                                <div class="progress-bar-fill" :style="'width: ' + getCrawlerProgressPercentage(job) + '%; background-color: ' + getCrawlerProgressColor(job)" style="height: 100%; transition: width 0.3s ease;"></div>
-                            </div>
-                        </div>
-
-                        <!-- Link Following Statistics Grid -->
-                        <div class="crawler-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
-                            <div class="stat-card" style="padding: 1rem; background-color: #e3f2fd; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #1976d2; font-weight: 500; margin-bottom: 0.5rem;">
-                                    URLs Found</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #1976d2;" x-text="getCrawlerStat(job, 'links_found') || '0'"></div>
-                                <div style="font-size: 0.7rem; color: #1976d2; margin-top: 0.25rem;">Total discovered
-                                </div>
-                            </div>
-                            <div class="stat-card" style="padding: 1rem; background-color: #f3e5f5; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #7b1fa2; font-weight: 500; margin-bottom: 0.5rem;">
-                                    Filtered</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #7b1fa2;" x-text="getCrawlerStat(job, 'links_filtered') || '0'"></div>
-                                <div style="font-size: 0.7rem; color: #7b1fa2; margin-top: 0.25rem;">Passed filters
-                                </div>
-                            </div>
-                            <div class="stat-card" style="padding: 1rem; background-color: #e8f5e8; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #388e3c; font-weight: 500; margin-bottom: 0.5rem;">
-                                    Followed</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #388e3c;" x-text="getCrawlerStat(job, 'links_followed') || '0'"></div>
-                                <div style="font-size: 0.7rem; color: #388e3c; margin-top: 0.25rem;">Successfully
-                                    crawled</div>
-                            </div>
-                            <div class="stat-card" style="padding: 1rem; background-color: #fff3e0; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #f57c00; font-weight: 500; margin-bottom: 0.5rem;">
-                                    Max Depth</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #f57c00;" x-text="getCrawlerStat(job, 'max_depth') || '1'"></div>
-                                <div style="font-size: 0.7rem; color: #f57c00; margin-top: 0.25rem;">Levels deep</div>
-                            </div>
-                            <div class="stat-card" style="padding: 1rem; background-color: #ffebee; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #d32f2f; font-weight: 500; margin-bottom: 0.5rem;">
-                                    Failed</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #d32f2f;" x-text="getCrawlerStat(job, 'failed_urls') || '0'"></div>
-                                <div style="font-size: 0.7rem; color: #d32f2f; margin-top: 0.25rem;">Errors encountered
-                                </div>
-                            </div>
-                            <div class="stat-card" style="padding: 1rem; background-color: #f5f5f5; border-radius: 8px; text-align: center;">
-                                <div style="font-size: 0.8rem; color: #666; font-weight: 500; margin-bottom: 0.5rem;">
-                                    Processing Time</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: #666;" x-text="getProcessingTime(job)"></div>
-                                <div style="font-size: 0.7rem; color: #666; margin-top: 0.25rem;">Duration</div>
-                            </div>
-                        </div>
-
-                        <!-- Current Activity (for running jobs) -->
-                        <template x-if="job.status === 'running' && getCurrentUrl(job)">
-                            <div style="margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border-left: 4px solid #3b82f6; border-radius: 4px;">
-                                <div style="font-weight: 500; margin-bottom: 0.5rem; color: #3b82f6;">
-                                    <i class="fas fa-spinner fa-pulse"></i> Currently Processing
-                                </div>
-                                <div style="font-family: monospace; font-size: 0.9rem; word-break: break-all;" x-text="getCurrentUrl(job)"></div>
-                            </div>
-                        </template>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Finished</p>
+                        <p class="text-small" x-text="formatTimestamp(job.finished_at) || 'N/A'"></p>
                     </div>
-                </section>
-            </template>
-
-            <!-- Crawler Configuration Section (for crawler jobs) -->
-            <template x-if="isCrawlerJob(job) && job.config">
-                <section class="card" style="margin-bottom: 1.5rem;">
-                    <div class="card-header">
-                        <h3>Crawler Configuration</h3>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Source</p>
+                        <p class="text-small" x-text="job.source_type || 'job_definition'"></p>
                     </div>
-                    <div class="card-body">
-                        <!-- Start URLs -->
-                        <template x-if="getStartUrls(job).length > 0">
-                            <div style="margin-bottom: 1.5rem;">
-                                <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">Start URLs</h4>
-                                <div class="start-urls-list">
-                                    <template x-for="url in getStartUrls(job)" :key="url">
-                                        <div style="margin-bottom: 0.5rem; padding: 0.5rem; background-color: #f8f9fa; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
-                                            <i class="fas fa-link" style="color: #3b82f6;"></i>
-                                            <a :href="url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none; flex: 1; word-break: break-all;">
-                                                <span x-text="url"></span>
-                                                <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
-                                            </a>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                        </template>
-
-                        <!-- Crawler Settings Grid -->
-                        <div class="crawler-config-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
-                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
-                                <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
-                                    <i class="fas fa-layer-group" style="color: #3b82f6; margin-right: 0.5rem;"></i>
-                                    Max Depth
-                                </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;" x-text="job.config?.max_depth || 'Unlimited'"></div>
-                            </div>
-                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
-                                <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
-                                    <i class="fas fa-file-alt" style="color: #10b981; margin-right: 0.5rem;"></i>
-                                    Max Pages
-                                </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #10b981;" x-text="job.config?.max_pages || 'Unlimited'"></div>
-                            </div>
-                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
-                                <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
-                                    <i class="fas fa-clock" style="color: #f59e0b; margin-right: 0.5rem;"></i>
-                                    Timeout
-                                </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #f59e0b;" x-text="job.config?.timeout || 'Default'"></div>
-                            </div>
-                            <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
-                                <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
-                                    <i class="fas fa-code" style="color: #7c3aed; margin-right: 0.5rem;"></i>
-                                    JavaScript
-                                </div>
-                                <div style="font-size: 1.2rem; font-weight: 600; color: #7c3aed;" x-text="job.config?.enable_js ? 'Enabled' : 'Disabled'"></div>
-                            </div>
-                        </div>
-
-                        <!-- URL Patterns -->
-                        <template x-if="hasUrlPatterns(job)">
-                            <div style="margin-bottom: 1.5rem;">
-                                <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">URL Filtering Patterns
-                                </h4>
-                                <div class="patterns-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                    <template x-if="job.config?.include_patterns && job.config.include_patterns.length > 0">
-                                        <div>
-                                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #10b981;">
-                                                <i class="fas fa-check-circle"></i> Include Patterns
-                                            </div>
-                                            <div class="pattern-list">
-                                                <template x-for="pattern in job.config.include_patterns" :key="pattern">
-                                                    <div style="padding: 0.25rem 0.5rem; background-color: #d1fae5; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
-                                                </template>
-                                            </div>
-                                        </div>
-                                    </template>
-                                    <template x-if="job.config?.exclude_patterns && job.config.exclude_patterns.length > 0">
-                                        <div>
-                                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #ef4444;">
-                                                <i class="fas fa-times-circle"></i> Exclude Patterns
-                                            </div>
-                                            <div class="pattern-list">
-                                                <template x-for="pattern in job.config.exclude_patterns" :key="pattern">
-                                                    <div style="padding: 0.25rem 0.5rem; background-color: #fee2e2; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
-                                                </template>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                        </template>
-                    </div>
-                </section>
-            </template>
-
-            <!-- Standard Configuration Section (for non-crawler jobs) -->
-            <template x-if="!isCrawlerJob(job) && job.config">
-                <section class="card" style="margin-bottom: 1.5rem;">
-                    <div class="card-header">
-                        <h3>Configuration</h3>
-                    </div>
-                    <div class="card-body">
-                        <pre class="code" data-lang="JSON"><code x-text="formatJSON(job.config)"></code></pre>
-                    </div>
-                </section>
-            </template>
-
-            <!-- Job Management Section -->
-            <section class="card" style="margin-bottom: 1.5rem;">
-                <div class="card-header">
-                    <h3>Job Management</h3>
-                </div>
-                <div class="card-body">
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <template x-if="job.status === 'running'">
-                            <button class="btn btn-error" @click="cancelJob()" title="Cancel running job" :id="'cancel-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
-                                <i class="fas fa-stop"></i> Cancel Job
-                            </button>
-                        </template>
-                        <template x-if="job.status !== 'running'">
-                            <button class="btn btn-primary" @click="rerunJob()" title="Create a copy of this job and add to queue" :id="'rerun-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
-                                <i class="fas fa-redo"></i> Rerun Job
-                            </button>
-                        </template>
-                        <template x-if="job.status !== 'running' || job.type === 'parent'">
-                            <button class="btn btn-error" @click="deleteJob()" :title="job.status === 'running' && job.type === 'parent' ? 'Cancel and delete this orchestrating job' : 'Delete this job permanently'"
-                                :id="'delete-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
-                                <i class="fas fa-trash"></i>
-                                <span x-text="job.status === 'running' && job.type === 'parent' ? 'Cancel & Delete' : 'Delete Job'"></span>
-                            </button>
-                        </template>
-                        <template x-if="isCrawlerJob(job) && (job.status === 'completed' || job.result_count > 0)">
-                            <button class="btn btn-success" @click="viewDocuments()" title="View documents created by this crawl">
-                                <i class="fas fa-file-alt"></i> View Documents (<span x-text="job.result_count || 0"></span>)
-                            </button>
-                        </template>
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Parent</p>
+                        <p class="text-small" x-text="job.parent_id || 'None'"></p>
                     </div>
                 </div>
-            </section>
-
-        </div>
-
-        <!-- Output Tab -->
-        <div x-show="activeTab === 'output'" x-cloak>
-
-            <div class="card">
-                <div class="card-header">
-                    <header class="navbar">
-                        <section class="navbar-section">
-                            <h3>Job Logs</h3>
-                            <!-- Live indicator for running jobs with WebSocket -->
-                            <template x-if="job.status === 'running' && wsConnected">
-                                <span class="label label-success" style="margin-left: 1rem;">
-                                    <i class="fas fa-circle" style="animation: pulse 2s infinite;"></i> Live (WebSocket)
-                                </span>
-                            </template>
-                            <!-- Polling indicator for running jobs without WebSocket -->
-                            <template x-if="job.status === 'running' && !wsConnected">
-                                <span class="label label-warning" style="margin-left: 1rem;">
-                                    <i class="fas fa-sync"></i> Polling (<span x-text="refreshInterval"></span>s)
-                                </span>
-                            </template>
-                        </section>
-                        <section class="navbar-section">
-                            <!-- Refresh Interval Selector (for running jobs) -->
-                            <template x-if="job.status === 'running'">
-                                <select class="form-select select-sm" x-model="refreshInterval" @change="updateRefreshInterval()" title="Auto-refresh interval" style="margin-right: 0.5rem;">
-                                    <option value="5">5s</option>
-                                    <option value="10">10s</option>
-                                    <option value="15">15s</option>
-                                    <option value="30">30s</option>
-                                    <option value="60">60s</option>
-                                </select>
-                            </template>
-
-                            <!-- Log Level Filter -->
-                            <select class="form-select select-sm" x-model="selectedLogLevel" title="Filter by log level" style="margin-right: 0.5rem;">
-                                <option value="all">All Levels</option>
-                                <option value="error">Error</option>
-                                <option value="warning">Warning</option>
-                                <option value="info">Info</option>
-                                <option value="debug">Debug</option>
-                            </select>
-
-                            <button class="btn btn-sm" @click="toggleAutoScroll()" :title="autoScroll ? 'Pause Auto-Scroll' : 'Resume Auto-Scroll'">
-                                <i :class="autoScroll ? 'fas fa-pause' : 'fas fa-play'"></i>
-                            </button>
-                            <button class="btn btn-sm" @click="refreshLogs()" title="Refresh Logs">
-                                <i class="fa-solid fa-rotate-right"></i>
-                            </button>
-                        </section>
-                    </header>
-                </div>
-                <div class="card-body">
-                    <template x-if="loading">
-                        <div class="text-center" style="padding: 2rem;">
-                            <div class="loading loading-lg"></div>
-                            <p class="text-secondary" style="margin-top: 1rem;">Loading logs...</p>
-                        </div>
-                    </template>
-
-                    <div class="terminal" x-ref="logContainer" x-show="!loading">
-                        <template x-if="filteredLogs.length === 0">
-                            <div style="text-align: center; color: var(--text-secondary);">
-                                No logs available for this job
-                            </div>
-                        </template>
-                        <template x-for="(log, index) in filteredLogs" :key="`log-${index}-${log.timestamp}`">
-                            <div class="terminal-line">
-                                <span class="terminal-time" x-text="`[${log.timestamp}]`"></span>
-                                <span :class="log.levelClass" x-text="`[${log.level.toUpperCase()}]`"></span>
-                                <span x-text="log.message"></span>
-                            </div>
-                        </template>
+                <div class="columns" style="margin-top: 1rem;">
+                    <div class="column col-3">
+                        <p class="text-small text-gray">Documents Created</p>
+                        <p class="text-small" x-text="job.document_count || job.metadata?.document_count || job.result_count || '0'"></p>
                     </div>
-
-                    <!-- Pagination Controls -->
-                    <div x-show="!loading && (hasMoreLogs || logs.length > 0)" class="logs-pagination" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-top: 1px solid var(--border-color); margin-top: 0.5rem;">
-                        <div class="text-small text-secondary">
-                            <span x-text="`Showing ${filteredLogs.length} log entries`"></span>
-                            <span x-show="logsPageSize && filteredLogs.length >= logsPageSize" x-text="` (limit: ${logsPageSize} per page)`"></span>
-                        </div>
-                        <div x-show="hasMoreLogs">
-                            <button class="btn btn-sm btn-primary" @click="loadMoreLogs()" :disabled="loadingMore">
-                                <template x-if="loadingMore">
-                                    <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
-                                </template>
-                                <template x-if="!loadingMore">
-                                    <span><i class="fas fa-chevron-down"></i> Load More Logs</span>
-                                </template>
-                            </button>
-                        </div>
+                    <div class="column col-3" x-show="isCrawlerJob(job)">
+                        <p class="text-small text-gray">Current URL</p>
+                        <p class="text-small" style="font-family: monospace; word-break: break-all;" x-text="getCurrentUrl(job) || 'N/A'"></p>
                     </div>
                 </div>
             </div>
+        </section>
 
-        </div>
+        <!-- Crawler Progress Section (for crawler jobs only) -->
+        <template x-if="isCrawlerJob(job)">
+            <section class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h3>Crawling Progress</h3>
+                    <span x-show="job.status === 'running'" class="label label-success" style="margin-left: 1rem;">
+                        <i class="fas fa-circle" style="animation: pulse 2s infinite;"></i> Live Updates
+                    </span>
+                </div>
+                <div class="card-body">
+                    <!-- Progress Overview -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <span style="font-weight: 500;">Overall Progress</span>
+                            <span x-text="getCrawlerProgressText(job)" style="font-weight: 500;"></span>
+                        </div>
+                        <div class="progress-bar" style="width: 100%; height: 12px; background-color: #e0e0e0; border-radius: 6px; overflow: hidden;">
+                            <div class="progress-bar-fill" :style="'width: ' + getCrawlerProgressPercentage(job) + '%; background-color: ' + getCrawlerProgressColor(job)" style="height: 100%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Link Following Statistics Grid -->
+                    <div class="crawler-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                        <div class="stat-card" style="padding: 1rem; background-color: #e3f2fd; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #1976d2; font-weight: 500; margin-bottom: 0.5rem;">
+                                URLs Found</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #1976d2;" x-text="getCrawlerStat(job, 'links_found') || '0'"></div>
+                            <div style="font-size: 0.7rem; color: #1976d2; margin-top: 0.25rem;">Total discovered
+                            </div>
+                        </div>
+                        <div class="stat-card" style="padding: 1rem; background-color: #f3e5f5; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #7b1fa2; font-weight: 500; margin-bottom: 0.5rem;">
+                                Filtered</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #7b1fa2;" x-text="getCrawlerStat(job, 'links_filtered') || '0'"></div>
+                            <div style="font-size: 0.7rem; color: #7b1fa2; margin-top: 0.25rem;">Passed filters
+                            </div>
+                        </div>
+                        <div class="stat-card" style="padding: 1rem; background-color: #e8f5e8; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #388e3c; font-weight: 500; margin-bottom: 0.5rem;">
+                                Followed</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #388e3c;" x-text="getCrawlerStat(job, 'links_followed') || '0'"></div>
+                            <div style="font-size: 0.7rem; color: #388e3c; margin-top: 0.25rem;">Successfully
+                                crawled</div>
+                        </div>
+                        <div class="stat-card" style="padding: 1rem; background-color: #fff3e0; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #f57c00; font-weight: 500; margin-bottom: 0.5rem;">
+                                Max Depth</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #f57c00;" x-text="getCrawlerStat(job, 'max_depth') || '1'"></div>
+                            <div style="font-size: 0.7rem; color: #f57c00; margin-top: 0.25rem;">Levels deep</div>
+                        </div>
+                        <div class="stat-card" style="padding: 1rem; background-color: #ffebee; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #d32f2f; font-weight: 500; margin-bottom: 0.5rem;">
+                                Failed</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #d32f2f;" x-text="getCrawlerStat(job, 'failed_urls') || '0'"></div>
+                            <div style="font-size: 0.7rem; color: #d32f2f; margin-top: 0.25rem;">Errors encountered
+                            </div>
+                        </div>
+                        <div class="stat-card" style="padding: 1rem; background-color: #f5f5f5; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 0.8rem; color: #666; font-weight: 500; margin-bottom: 0.5rem;">
+                                Processing Time</div>
+                            <div style="font-size: 1.5rem; font-weight: 600; color: #666;" x-text="getProcessingTime(job)"></div>
+                            <div style="font-size: 0.7rem; color: #666; margin-top: 0.25rem;">Duration</div>
+                        </div>
+                    </div>
+
+                    <!-- Current Activity (for running jobs) -->
+                    <template x-if="job.status === 'running' && getCurrentUrl(job)">
+                        <div style="margin-top: 1.5rem; padding: 1rem; background-color: #f8f9fa; border-left: 4px solid #3b82f6; border-radius: 4px;">
+                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #3b82f6;">
+                                <i class="fas fa-spinner fa-pulse"></i> Currently Processing
+                            </div>
+                            <div style="font-family: monospace; font-size: 0.9rem; word-break: break-all;" x-text="getCurrentUrl(job)"></div>
+                        </div>
+                    </template>
+                </div>
+            </section>
+        </template>
+
+        <!-- Crawler Configuration Section (for crawler jobs) -->
+        <template x-if="isCrawlerJob(job) && job.config">
+            <section class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h3>Crawler Configuration</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Start URLs -->
+                    <template x-if="getStartUrls(job).length > 0">
+                        <div style="margin-bottom: 1.5rem;">
+                            <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">Start URLs</h4>
+                            <div class="start-urls-list">
+                                <template x-for="url in getStartUrls(job)" :key="url">
+                                    <div style="margin-bottom: 0.5rem; padding: 0.5rem; background-color: #f8f9fa; border-radius: 4px; display: flex; align-items: center; gap: 0.5rem;">
+                                        <i class="fas fa-link" style="color: #3b82f6;"></i>
+                                        <a :href="url" target="_blank" rel="noopener noreferrer" class="text-primary" style="text-decoration: none; flex: 1; word-break: break-all;">
+                                            <span x-text="url"></span>
+                                            <i class="fas fa-external-link-alt" style="font-size: 0.7rem; margin-left: 0.25rem;"></i>
+                                        </a>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Crawler Settings Grid -->
+                    <div class="crawler-config-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
+                                <i class="fas fa-layer-group" style="color: #3b82f6; margin-right: 0.5rem;"></i>
+                                Max Depth
+                            </div>
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #3b82f6;" x-text="job.config?.max_depth || 'Unlimited'"></div>
+                        </div>
+                        <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
+                                <i class="fas fa-file-alt" style="color: #10b981; margin-right: 0.5rem;"></i>
+                                Max Pages
+                            </div>
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #10b981;" x-text="job.config?.max_pages || 'Unlimited'"></div>
+                        </div>
+                        <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
+                                <i class="fas fa-clock" style="color: #f59e0b; margin-right: 0.5rem;"></i>
+                                Timeout
+                            </div>
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #f59e0b;" x-text="job.config?.timeout || 'Default'"></div>
+                        </div>
+                        <div class="config-item" style="padding: 1rem; background-color: #f8f9fa; border-radius: 6px;">
+                            <div style="font-weight: 500; margin-bottom: 0.5rem; color: #333;">
+                                <i class="fas fa-code" style="color: #7c3aed; margin-right: 0.5rem;"></i>
+                                JavaScript
+                            </div>
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #7c3aed;" x-text="job.config?.enable_js ? 'Enabled' : 'Disabled'"></div>
+                        </div>
+                    </div>
+
+                    <!-- URL Patterns -->
+                    <template x-if="hasUrlPatterns(job)">
+                        <div style="margin-bottom: 1.5rem;">
+                            <h4 style="margin-bottom: 0.5rem; font-size: 1rem; color: #333;">URL Filtering Patterns
+                            </h4>
+                            <div class="patterns-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <template x-if="job.config?.include_patterns && job.config.include_patterns.length > 0">
+                                    <div>
+                                        <div style="font-weight: 500; margin-bottom: 0.5rem; color: #10b981;">
+                                            <i class="fas fa-check-circle"></i> Include Patterns
+                                        </div>
+                                        <div class="pattern-list">
+                                            <template x-for="pattern in job.config.include_patterns" :key="pattern">
+                                                <div style="padding: 0.25rem 0.5rem; background-color: #d1fae5; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="job.config?.exclude_patterns && job.config.exclude_patterns.length > 0">
+                                    <div>
+                                        <div style="font-weight: 500; margin-bottom: 0.5rem; color: #ef4444;">
+                                            <i class="fas fa-times-circle"></i> Exclude Patterns
+                                        </div>
+                                        <div class="pattern-list">
+                                            <template x-for="pattern in job.config.exclude_patterns" :key="pattern">
+                                                <div style="padding: 0.25rem 0.5rem; background-color: #fee2e2; border-radius: 4px; margin-bottom: 0.25rem; font-family: monospace; font-size: 0.85rem;" x-text="pattern"></div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </section>
+        </template>
+
+        <!-- Standard Configuration Section (for non-crawler jobs) -->
+        <template x-if="!isCrawlerJob(job) && job.config">
+            <section class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h3>Configuration</h3>
+                </div>
+                <div class="card-body">
+                    <pre class="code" data-lang="JSON"><code x-text="formatJSON(job.config)"></code></pre>
+                </div>
+            </section>
+        </template>
+
+        <!-- Job Management Section -->
+        <section class="card" style="margin-bottom: 1.5rem;">
+            <div class="card-header">
+                <h3>Job Management</h3>
+            </div>
+            <div class="card-body">
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <template x-if="job.status === 'running'">
+                        <button class="btn btn-error" @click="cancelJob()" title="Cancel running job" :id="'cancel-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
+                            <i class="fas fa-stop"></i> Cancel Job
+                        </button>
+                    </template>
+                    <template x-if="job.status !== 'running'">
+                        <button class="btn btn-primary" @click="rerunJob()" title="Create a copy of this job and add to queue" :id="'rerun-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
+                            <i class="fas fa-redo"></i> Rerun Job
+                        </button>
+                    </template>
+                    <template x-if="job.status !== 'running' || job.type === 'parent'">
+                        <button class="btn btn-error" @click="deleteJob()" :title="job.status === 'running' && job.type === 'parent' ? 'Cancel and delete this orchestrating job' : 'Delete this job permanently'"
+                            :id="'delete-' + (job.name || 'job').toLowerCase().replace(/\s+/g, '-')">
+                            <i class="fas fa-trash"></i>
+                            <span x-text="job.status === 'running' && job.type === 'parent' ? 'Cancel & Delete' : 'Delete Job'"></span>
+                        </button>
+                    </template>
+                    <template x-if="isCrawlerJob(job) && (job.status === 'completed' || job.result_count > 0)">
+                        <button class="btn btn-success" @click="viewDocuments()" title="View documents created by this crawl">
+                            <i class="fas fa-file-alt"></i> View Documents (<span x-text="job.result_count || 0"></span>)
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </section>
 
     </main>
 
@@ -428,22 +317,10 @@
         document.addEventListener('alpine:init', () => {
             Alpine.data('jobDetailPage', () => ({
                 job: {},
-                logs: [],
                 loading: true,
-                selectedLogLevel: 'all',
-                autoScroll: true,
                 jobId: null,
-                activeTab: 'details',
-                wsConnected: false,
-                wsSubscription: null,
                 refreshInterval: 10, // Default 10 seconds
                 refreshIntervalId: null,
-                // Pagination state
-                logsCursor: null,
-                hasMoreLogs: false,
-                logsTotal: 0,
-                logsPageSize: 1000,
-                loadingMore: false,
 
                 async init() {
                     // Get job ID from URL query parameter
@@ -458,55 +335,11 @@
                         return;
                     }
 
-                    // Load job first, then logs (logs need job.parent_id to determine endpoint)
+                    // Load job details
                     await this.loadJob();
-                    await this.loadJobLogs();
 
                     // Start auto-refresh for running jobs
                     this.startAutoRefresh();
-
-                    // Setup WebSocket for real-time log streaming
-                    this.setupWebSocket();
-
-                    // Watch selectedLogLevel and reload logs when it changes
-                    this.$watch('selectedLogLevel', () => {
-                        this.loadJobLogs();
-                    });
-
-                    // Watch job status changes to switch between WebSocket and database logs
-                    this.$watch('job.status', (newStatus, oldStatus) => {
-                        if (oldStatus === 'running' && newStatus !== 'running') {
-                            // Job finished - reload logs from database
-                            console.log('Job finished, loading final logs from database');
-                            this.loadJobLogs();
-                        }
-                    });
-                },
-
-                get filteredLogs() {
-                    if (this.selectedLogLevel === 'all') {
-                        return this.logs;
-                    }
-
-                    return this.logs.filter(log => {
-                        const logLevel = log.level.toUpperCase();
-                        const filterLevel = this.selectedLogLevel.toUpperCase();
-
-                        // Exact match
-                        if (logLevel === filterLevel) {
-                            return true;
-                        }
-
-                        // Handle variations
-                        if (filterLevel === 'ERROR' && (logLevel === 'ERR' || logLevel === 'ERROR')) {
-                            return true;
-                        }
-                        if (filterLevel === 'WARNING' && (logLevel === 'WARN' || logLevel === 'WARNING')) {
-                            return true;
-                        }
-
-                        return false;
-                    });
                 },
 
                 async loadJob() {
@@ -519,266 +352,14 @@
                     } catch (error) {
                         console.error('Error loading job:', error);
                         window.showNotification('Failed to load job details: ' + error.message, 'error');
-                    }
-                },
-
-                async loadJobLogs() {
-                    // Always load existing logs from database first
-                    // For running jobs: load historical logs, then switch to WebSocket for new logs
-                    // For completed jobs: load all logs from database
-                    this.loading = true;
-                    // Reset pagination state on fresh load
-                    this.logsCursor = null;
-                    this.hasMoreLogs = false;
-                    this.logsTotal = 0;
-
-                    try {
-                        // Use unified /api/logs endpoint with pagination
-                        // Always use include_children=false for fast direct log retrieval
-                        // (aggregation with children is expensive for large job trees)
-                        const params = new URLSearchParams({
-                            scope: 'job',
-                            job_id: this.jobId,
-                            include_children: 'false',
-                            limit: this.logsPageSize.toString(),
-                            order: 'asc'
-                        });
-
-                        // Add level filter if not 'all'
-                        if (this.selectedLogLevel !== 'all') {
-                            params.append('level', this.selectedLogLevel);
-                        }
-
-                        const response = await fetch(`/api/logs?${params.toString()}`);
-
-                        if (!response.ok) {
-                            // Distinguish between different error types
-                            if (response.status === 404) {
-                                console.warn('Job not found or has no logs');
-                                this.logs = [];
-                                // Don't show error for 404 - job might not have logs yet
-                                return;
-                            } else if (response.status >= 500) {
-                                throw new Error(`Server error (${response.status}): Failed to retrieve logs`);
-                            } else {
-                                throw new Error(`HTTP ${response.status}: Failed to fetch job logs`);
-                            }
-                        }
-
-                        const data = await response.json();
-                        const rawLogs = data.logs || [];
-
-                        // Store pagination info
-                        this.logsCursor = data.next_cursor || null;
-                        this.hasMoreLogs = !!data.next_cursor;
-                        this.logsTotal = data.count || rawLogs.length;
-
-                        // Handle empty logs gracefully
-                        if (rawLogs.length === 0) {
-                            console.info('No logs available for this job');
-                            this.logs = [];
-                            return;
-                        }
-
-                        // Parse logs into flat array
-                        this.logs = rawLogs.map(log => this._parseLogEntry(log));
-
-                        console.log(`[Job] Loaded ${this.logs.length} logs, hasMore: ${this.hasMoreLogs}`);
-
-                        // Auto-scroll to bottom after loading logs
-                        if (this.autoScroll) {
-                            this.$nextTick(() => {
-                                const container = this.$refs.logContainer;
-                                if (container) {
-                                    container.scrollTop = container.scrollHeight;
-                                }
-                            });
-                        }
-
-                    } catch (error) {
-                        console.error('Error loading job logs:', error);
-                        window.showNotification('Failed to load logs: ' + error.message, 'error');
-                        this.logs = [];
                     } finally {
                         this.loading = false;
                     }
                 },
 
-                async loadMoreLogs() {
-                    if (!this.hasMoreLogs || this.loadingMore || !this.logsCursor) return;
-
-                    this.loadingMore = true;
-                    try {
-                        // Always use include_children=false for fast direct log retrieval
-                        const params = new URLSearchParams({
-                            scope: 'job',
-                            job_id: this.jobId,
-                            include_children: 'false',
-                            limit: this.logsPageSize.toString(),
-                            order: 'asc',
-                            cursor: this.logsCursor
-                        });
-
-                        if (this.selectedLogLevel !== 'all') {
-                            params.append('level', this.selectedLogLevel);
-                        }
-
-                        const response = await fetch(`/api/logs?${params.toString()}`);
-
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: Failed to fetch more logs`);
-                        }
-
-                        const data = await response.json();
-                        const rawLogs = data.logs || [];
-
-                        // Update pagination state
-                        this.logsCursor = data.next_cursor || null;
-                        this.hasMoreLogs = !!data.next_cursor;
-
-                        // Append new logs
-                        const newLogs = rawLogs.map(log => this._parseLogEntry(log));
-                        this.logs = [...this.logs, ...newLogs];
-                        this.logsTotal = this.logs.length;
-
-                        console.log(`[Job] Loaded ${newLogs.length} more logs, total: ${this.logs.length}, hasMore: ${this.hasMoreLogs}`);
-
-                    } catch (error) {
-                        console.error('Error loading more logs:', error);
-                        window.showNotification('Failed to load more logs: ' + error.message, 'error');
-                    } finally {
-                        this.loadingMore = false;
-                    }
-                },
-
-                _parseLogEntry(log) {
-                    return {
-                        timestamp: this.formatLogTimestamp(log.timestamp),
-                        level: log.level || 'info',
-                        levelClass: this.getLevelClass(log.level || 'info'),
-                        message: log.message || ''
-                    };
-                },
-
-                formatLogTimestamp(timestamp) {
-                    if (!timestamp) return '';
-
-                    // If timestamp is already in HH:MM:SS format, return as-is
-                    if (typeof timestamp === 'string' && /^\d{2}:\d{2}:\d{2}$/.test(timestamp)) {
-                        return timestamp;
-                    }
-
-                    // Handle ISO 8601 strings and Unix timestamps
-                    const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000);
-
-                    // Check if date is valid
-                    if (isNaN(date.getTime())) {
-                        return timestamp; // Return original if can't parse
-                    }
-
-                    return date.toLocaleTimeString();
-                },
-
-                getLevelClass(level) {
-                    const levelUpper = level.toUpperCase();
-                    if (levelUpper === 'ERROR' || levelUpper === 'ERR') return 'terminal-error';
-                    if (levelUpper === 'WARNING' || levelUpper === 'WARN') return 'terminal-warning';
-                    if (levelUpper === 'INFO') return 'terminal-info';
-                    if (levelUpper === 'DEBUG') return 'terminal-debug';
-                    return 'terminal-info';
-                },
-
                 async refreshJob() {
                     await this.loadJob();
                     window.showNotification('Job details refreshed', 'success');
-                },
-
-                async refreshLogs() {
-                    // Always reload logs from database (includes historical logs for running jobs)
-                    await this.loadJobLogs();
-                    window.showNotification('Logs refreshed', 'success');
-                },
-
-                toggleAutoScroll() {
-                    this.autoScroll = !this.autoScroll;
-                    if (this.autoScroll) {
-                        this.$nextTick(() => {
-                            const container = this.$refs.logContainer;
-                            if (container) {
-                                container.scrollTop = container.scrollHeight;
-                            }
-                        });
-                    }
-                },
-
-                setupWebSocket() {
-                    // Get WebSocket manager from global scope
-                    if (!window.wsManager) {
-                        console.warn('WebSocket manager not available');
-                        return;
-                    }
-
-                    // Subscribe to log events
-                    this.wsSubscription = window.wsManager.subscribe('log', (data) => {
-                        this.handleWebSocketLog(data);
-                    });
-
-                    // Subscribe to connection status
-                    window.wsManager.subscribe('connection', (connected) => {
-                        this.wsConnected = connected;
-                        if (connected) {
-                            console.log('WebSocket connected - ready for real-time logs');
-                        } else {
-                            console.warn('WebSocket disconnected - falling back to polling');
-                        }
-                    });
-
-                    console.log('WebSocket subscription setup for job logs');
-                },
-
-                handleWebSocketLog(logData) {
-                    // Only process logs for this specific job (filter by job_id/correlation_id)
-                    if (logData.job_id !== this.jobId) {
-                        return;
-                    }
-
-                    // Only process logs if job is running
-                    if (this.job.status !== 'running') {
-                        return;
-                    }
-
-                    // Parse the log entry
-                    const logEntry = this._parseLogEntry({
-                        timestamp: logData.timestamp,
-                        level: logData.level,
-                        message: logData.message
-                    });
-
-                    // Apply level filter
-                    if (this.selectedLogLevel !== 'all') {
-                        const logLevel = logEntry.level.toUpperCase();
-                        const filterLevel = this.selectedLogLevel.toUpperCase();
-
-                        // Skip if doesn't match filter
-                        if (logLevel !== filterLevel &&
-                            !(filterLevel === 'ERROR' && (logLevel === 'ERR' || logLevel === 'ERROR')) &&
-                            !(filterLevel === 'WARNING' && (logLevel === 'WARN' || logLevel === 'WARNING'))) {
-                            return;
-                        }
-                    }
-
-                    // Add log to array
-                    this.logs.push(logEntry);
-
-                    // Auto-scroll to bottom if enabled
-                    if (this.autoScroll) {
-                        this.$nextTick(() => {
-                            const container = this.$refs.logContainer;
-                            if (container) {
-                                container.scrollTop = container.scrollHeight;
-                            }
-                        });
-                    }
                 },
 
                 startAutoRefresh() {
@@ -791,19 +372,8 @@
                     this.refreshIntervalId = setInterval(async () => {
                         if (this.job.status === 'running' || this.job.status === 'pending') {
                             await this.loadJob();
-
-                            // If WebSocket is not connected, also reload logs
-                            if (!this.wsConnected) {
-                                await this.loadJobLogs();
-                            }
                         }
                     }, this.refreshInterval * 1000); // Convert seconds to milliseconds
-                },
-
-                updateRefreshInterval() {
-                    // Restart auto-refresh with new interval
-                    console.log('Refresh interval changed to', this.refreshInterval, 'seconds');
-                    this.startAutoRefresh();
                 },
 
                 getStatusText(status) {

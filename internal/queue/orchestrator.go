@@ -319,7 +319,37 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 
 		// Phase 2: Create jobs based on init result
 		// Execute step via StepManager, passing the init result
+		o.logger.Debug().
+			Str("step_name", step.Name).
+			Str("step_id", stepID).
+			Msg("[orchestrator] Calling StepManager.Execute")
+
+		// Check if worker returns child jobs BEFORE calling Execute
+		// This ensures "Spawning child jobs" log appears before child job completion logs
+		preExecWorker := o.stepManager.GetWorker(models.WorkerType(step.Type))
+		if preExecWorker != nil && preExecWorker.ReturnsChildJobs() {
+			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawning child jobs...", step.Name), "", "run")
+			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Spawning child jobs...", "", "run")
+		}
+
 		childJobID, err := o.stepManager.Execute(ctx, resolvedStep, *jobDef, stepID, initResult)
+
+		// CRITICAL: This log MUST appear immediately after StepManager.Execute returns
+		// If this log doesn't appear, the goroutine is blocked or crashed
+		o.logger.Info().
+			Str("step_name", step.Name).
+			Str("step_id", stepID).
+			Str("child_job_id", childJobID).
+			Bool("has_error", err != nil).
+			Msg("[orchestrator] StepManager.Execute returned - CHECKPOINT 1")
+
+		o.logger.Debug().
+			Str("step_name", step.Name).
+			Str("step_id", stepID).
+			Str("child_job_id", childJobID).
+			Err(err).
+			Msg("[orchestrator] StepManager.Execute returned")
+
 		if err != nil {
 			o.jobManager.AddJobLogWithPhase(ctx, managerID, "error", fmt.Sprintf("Step %s failed: %v", step.Name, err), "", "run")
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Failed: %v", err), "", "run")
@@ -400,114 +430,155 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		// Worker.CreateJobs returns jobID.
 		// If ReturnsChildJobs is true, we expect child jobs.
 		// We can use StepManager.GetWorker to check.
+		o.logger.Debug().
+			Str("step_name", step.Name).
+			Str("step_type", step.Type.String()).
+			Str("child_job_id", childJobID).
+			Msg("[orchestrator] StepManager.Execute returned, checking worker type")
+
 		worker := o.stepManager.GetWorker(models.WorkerType(step.Type))
 		returnsChildJobs := false
 		if worker != nil {
 			returnsChildJobs = worker.ReturnsChildJobs()
+			o.logger.Debug().
+				Str("step_name", step.Name).
+				Bool("returns_child_jobs", returnsChildJobs).
+				Msg("[orchestrator] Worker found, checking ReturnsChildJobs")
+		} else {
+			o.logger.Warn().
+				Str("step_name", step.Name).
+				Str("step_type", step.Type.String()).
+				Msg("[orchestrator] Worker not found for step type")
 		}
+
+		// CHECKPOINT 2: Log after worker check
+		o.logger.Info().
+			Str("step_name", step.Name).
+			Bool("returns_child_jobs", returnsChildJobs).
+			Bool("worker_found", worker != nil).
+			Msg("[orchestrator] Worker check complete - CHECKPOINT 2")
 
 		// Track whether we waited for children synchronously (vs async StepMonitor)
 		childrenWaitedSynchronously := false
 
 		if returnsChildJobs {
 			hasChildJobs = true
-			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s spawned child jobs", step.Name), "", "run")
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Spawned child jobs (job: %s)", childJobID), "", "run")
 
-			// Wait for child jobs to complete before proceeding to the next step
-			// This is critical for steps that depend on data produced by child jobs (e.g., summary depending on index)
-			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Waiting for child jobs to complete...", "", "run")
-
-			waitTimeout := 30 * time.Minute // Default timeout for waiting
-			if jobDef.Timeout != "" {
-				if parsedTimeout, err := time.ParseDuration(jobDef.Timeout); err == nil {
-					waitTimeout = parsedTimeout
-				}
+			// Check if children are already complete (worker waited internally, e.g., AgentWorker with pollJobCompletion)
+			initialStats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
+			if err != nil {
+				o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get initial child stats")
 			}
+			initialChildStats := initialStats[stepID]
 
-			waitStart := time.Now()
-			pollInterval := 500 * time.Millisecond
-			lastLoggedStats := ""
-			lastProgressPublish := time.Now()
-			progressPublishInterval := 2 * time.Second // Match unified aggregator threshold
+			// If children are already all complete, skip the wait loop entirely
+			if initialChildStats != nil && initialChildStats.PendingChildren == 0 && initialChildStats.RunningChildren == 0 && initialChildStats.CompletedChildren > 0 {
+				o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+					fmt.Sprintf("All child jobs completed (%d completed, %d failed) - worker waited internally",
+						initialChildStats.CompletedChildren, initialChildStats.FailedChildren), "", "run")
+				childrenWaitedSynchronously = true
+			} else {
+				// Log that we're waiting for child jobs
+				o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", "Waiting for child jobs to complete...", "", "run")
 
-			for {
-				// Check context cancellation
-				select {
-				case <-ctx.Done():
-					o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", "Context cancelled while waiting for child jobs", "", "run")
-					return managerID, ctx.Err()
-				default:
-				}
-
-				// Check timeout
-				if time.Since(waitStart) > waitTimeout {
-					o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Timeout waiting for child jobs after %v", waitTimeout), "", "run")
-					return managerID, fmt.Errorf("timeout waiting for child jobs of step %s", step.Name)
-				}
-
-				// Get current child stats
-				stats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
-				if err != nil {
-					o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get child stats while waiting")
-					time.Sleep(pollInterval)
-					continue
-				}
-
-				childStats := stats[stepID]
-				if childStats == nil {
-					time.Sleep(pollInterval)
-					continue
-				}
-
-				// Log progress periodically (only when stats change)
-				currentStats := fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
-					childStats.PendingChildren, childStats.RunningChildren,
-					childStats.CompletedChildren, childStats.FailedChildren)
-				if currentStats != lastLoggedStats {
-					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
-						fmt.Sprintf("Child jobs: %s", currentStats), "", "run")
-					lastLoggedStats = currentStats
-				}
-
-				// Publish step_progress event periodically so UI receives refresh triggers
-				// This enables real-time step event display during synchronous wait
-				if time.Since(lastProgressPublish) >= progressPublishInterval && o.eventService != nil {
-					stepProgressPayload := map[string]interface{}{
-						"step_id":        stepID,
-						"manager_id":     managerID,
-						"step_name":      step.Name,
-						"status":         "running",
-						"total_jobs":     childStats.ChildCount,
-						"pending_jobs":   childStats.PendingChildren,
-						"running_jobs":   childStats.RunningChildren,
-						"completed_jobs": childStats.CompletedChildren,
-						"failed_jobs":    childStats.FailedChildren,
-						"timestamp":      time.Now().Format(time.RFC3339),
+				waitTimeout := 30 * time.Minute // Default timeout for waiting
+				if jobDef.Timeout != "" {
+					if parsedTimeout, err := time.ParseDuration(jobDef.Timeout); err == nil {
+						waitTimeout = parsedTimeout
 					}
-					stepProgressEvent := interfaces.Event{
-						Type:    interfaces.EventStepProgress,
-						Payload: stepProgressPayload,
+				}
+
+				waitStart := time.Now()
+				pollInterval := 500 * time.Millisecond
+				lastLoggedStats := ""
+				lastProgressPublish := time.Now()
+				progressPublishInterval := 2 * time.Second // Match unified aggregator threshold
+
+				for {
+					// Check context cancellation
+					select {
+					case <-ctx.Done():
+						o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", "Context cancelled while waiting for child jobs", "", "run")
+						return managerID, ctx.Err()
+					default:
 					}
-					go func() {
-						if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
-							// Log but don't fail
+
+					// Check timeout
+					if time.Since(waitStart) > waitTimeout {
+						o.jobManager.AddJobLogWithPhase(ctx, stepID, "error", fmt.Sprintf("Timeout waiting for child jobs after %v", waitTimeout), "", "run")
+						return managerID, fmt.Errorf("timeout waiting for child jobs of step %s", step.Name)
+					}
+
+					// Get current child stats
+					stats, err := o.jobManager.GetJobChildStats(ctx, []string{stepID})
+					if err != nil {
+						o.logger.Warn().Err(err).Str("step_id", stepID).Msg("Failed to get child stats while waiting")
+						time.Sleep(pollInterval)
+						continue
+					}
+
+					childStats := stats[stepID]
+					if childStats == nil {
+						time.Sleep(pollInterval)
+						continue
+					}
+
+					// Log progress periodically (only when stats change)
+					currentStats := fmt.Sprintf("%d pending, %d running, %d completed, %d failed",
+						childStats.PendingChildren, childStats.RunningChildren,
+						childStats.CompletedChildren, childStats.FailedChildren)
+					if currentStats != lastLoggedStats {
+						o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+							fmt.Sprintf("Child jobs: %s", currentStats), "", "run")
+						lastLoggedStats = currentStats
+					}
+
+					// Publish step_progress event periodically so UI receives refresh triggers
+					// This enables real-time step event display during synchronous wait
+					if time.Since(lastProgressPublish) >= progressPublishInterval && o.eventService != nil {
+						stepProgressPayload := map[string]interface{}{
+							"step_id":        stepID,
+							"manager_id":     managerID,
+							"step_name":      step.Name,
+							"status":         "running",
+							"total_jobs":     childStats.ChildCount,
+							"pending_jobs":   childStats.PendingChildren,
+							"running_jobs":   childStats.RunningChildren,
+							"completed_jobs": childStats.CompletedChildren,
+							"failed_jobs":    childStats.FailedChildren,
+							"timestamp":      time.Now().Format(time.RFC3339),
 						}
-					}()
-					lastProgressPublish = time.Now()
-				}
+						stepProgressEvent := interfaces.Event{
+							Type:    interfaces.EventStepProgress,
+							Payload: stepProgressPayload,
+						}
+						go func() {
+							if err := o.eventService.Publish(ctx, stepProgressEvent); err != nil {
+								// Log but don't fail
+							}
+						}()
+						lastProgressPublish = time.Now()
+					}
 
-				// Check if all children are in terminal state
-				if childStats.PendingChildren == 0 && childStats.RunningChildren == 0 {
-					o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
-						fmt.Sprintf("All child jobs completed (%d completed, %d failed) in %v",
-							childStats.CompletedChildren, childStats.FailedChildren, time.Since(waitStart)), "", "run")
-					childrenWaitedSynchronously = true
-					break
-				}
+					// Check if all children are in terminal state
+					if childStats.PendingChildren == 0 && childStats.RunningChildren == 0 {
+						o.jobManager.AddJobLogWithPhase(ctx, stepID, "info",
+							fmt.Sprintf("All child jobs completed (%d completed, %d failed) in %v",
+								childStats.CompletedChildren, childStats.FailedChildren, time.Since(waitStart)), "", "run")
+						childrenWaitedSynchronously = true
+						break
+					}
 
-				time.Sleep(pollInterval)
+					time.Sleep(pollInterval)
+				}
 			}
+
+			// CHECKPOINT 3: After wait loop or immediate completion check
+			o.logger.Info().
+				Str("step_name", step.Name).
+				Str("step_id", stepID).
+				Bool("children_waited_synchronously", childrenWaitedSynchronously).
+				Msg("[orchestrator] Wait loop completed - CHECKPOINT 3")
 		} else {
 			o.jobManager.AddJobLogWithPhase(ctx, managerID, "info", fmt.Sprintf("Step %s completed", step.Name), "", "run")
 			o.jobManager.AddJobLogWithPhase(ctx, stepID, "info", fmt.Sprintf("Completed (job: %s)", childJobID), "", "run")
@@ -569,6 +640,13 @@ func (o *Orchestrator) ExecuteJobDefinition(ctx context.Context, jobDef *models.
 		if stepStatus == "completed" {
 			o.jobManager.UpdateJobStatus(ctx, stepID, "completed")
 			o.jobManager.SetJobFinished(ctx, stepID)
+
+			// CHECKPOINT 4: After step status update
+			o.logger.Info().
+				Str("step_name", step.Name).
+				Str("step_id", stepID).
+				Str("step_status", stepStatus).
+				Msg("[orchestrator] Step status updated - CHECKPOINT 4")
 
 			// Publish step_progress event so UI gets refresh trigger with finished=true
 			// This is critical for steps that complete synchronously (no StepMonitor)

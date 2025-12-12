@@ -1328,36 +1328,36 @@ func (h *JobHandler) UpdateJobHandler(w http.ResponseWriter, r *http.Request) {
 
 // JobTreeResponse represents a GitHub Actions-style tree view of a job
 type JobTreeResponse struct {
-	JobID      string         `json:"job_id"`
-	JobName    string         `json:"job_name"`
-	Status     string         `json:"status"`
-	DurationMs int64          `json:"duration_ms"`
-	StartedAt  *time.Time     `json:"started_at,omitempty"`
-	FinishedAt *time.Time     `json:"finished_at,omitempty"`
-	Steps      []JobTreeStep  `json:"steps"`
+	JobID      string        `json:"job_id"`
+	JobName    string        `json:"job_name"`
+	Status     string        `json:"status"`
+	DurationMs int64         `json:"duration_ms"`
+	StartedAt  *time.Time    `json:"started_at,omitempty"`
+	FinishedAt *time.Time    `json:"finished_at,omitempty"`
+	Steps      []JobTreeStep `json:"steps"`
 }
 
 // JobTreeStep represents a step in the job tree
 type JobTreeStep struct {
-	Name         string            `json:"name"`
-	Status       string            `json:"status"`
-	DurationMs   int64             `json:"duration_ms"`
-	StartedAt    *time.Time        `json:"started_at,omitempty"`
-	FinishedAt   *time.Time        `json:"finished_at,omitempty"`
-	Expanded     bool              `json:"expanded"`
-	ChildSummary *ChildJobSummary  `json:"child_summary,omitempty"`
-	Logs         []JobTreeLog      `json:"logs"`
+	Name         string           `json:"name"`
+	Status       string           `json:"status"`
+	DurationMs   int64            `json:"duration_ms"`
+	StartedAt    *time.Time       `json:"started_at,omitempty"`
+	FinishedAt   *time.Time       `json:"finished_at,omitempty"`
+	Expanded     bool             `json:"expanded"`
+	ChildSummary *ChildJobSummary `json:"child_summary,omitempty"`
+	Logs         []JobTreeLog     `json:"logs"`
 }
 
 // ChildJobSummary aggregates child job status counts
 type ChildJobSummary struct {
-	Total       int           `json:"total"`
-	Completed   int           `json:"completed"`
-	Failed      int           `json:"failed"`
-	Cancelled   int           `json:"cancelled"`
-	Running     int           `json:"running"`
-	Pending     int           `json:"pending"`
-	ErrorGroups []ErrorGroup  `json:"error_groups,omitempty"`
+	Total       int          `json:"total"`
+	Completed   int          `json:"completed"`
+	Failed      int          `json:"failed"`
+	Cancelled   int          `json:"cancelled"`
+	Running     int          `json:"running"`
+	Pending     int          `json:"pending"`
+	ErrorGroups []ErrorGroup `json:"error_groups,omitempty"`
 }
 
 // ErrorGroup groups similar errors by message
@@ -1715,10 +1715,11 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 
 	// Response structure
 	type StepLogs struct {
-		StepName string       `json:"step_name"`
-		StepID   string       `json:"step_id,omitempty"`
-		Status   string       `json:"status"`
-		Logs     []JobTreeLog `json:"logs"`
+		StepName   string       `json:"step_name"`
+		StepID     string       `json:"step_id,omitempty"`
+		Status     string       `json:"status"`
+		Logs       []JobTreeLog `json:"logs"`
+		TotalCount int          `json:"total_count"` // Total logs available (for pagination)
 	}
 
 	response := struct {
@@ -1743,14 +1744,23 @@ func (h *JobHandler) GetJobTreeLogsHandler(w http.ResponseWriter, r *http.Reques
 
 		stepJob := stepJobMap[stepName]
 		stepLogs := StepLogs{
-			StepName: stepName,
-			Status:   "pending",
-			Logs:     []JobTreeLog{},
+			StepName:   stepName,
+			Status:     "pending",
+			Logs:       []JobTreeLog{},
+			TotalCount: 0,
 		}
 
 		if stepJob != nil {
 			stepLogs.StepID = stepJob.ID
 			stepLogs.Status = string(stepJob.Status)
+
+			// Get total log count first (for pagination indicator)
+			totalCount, countErr := h.logService.CountLogs(ctx, stepJob.ID)
+			if countErr != nil {
+				h.logger.Warn().Err(countErr).Str("step_job_id", stepJob.ID).Msg("Failed to count logs for step")
+			} else {
+				stepLogs.TotalCount = totalCount
+			}
 
 			// Get logs for this step job - DB returns ASC order (oldest first)
 			logs, err := h.logService.GetLogs(ctx, stepJob.ID, limit)

@@ -463,6 +463,47 @@ func (h *JobDefinitionHandler) DeleteJobDefinitionHandler(w http.ResponseWriter,
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// isJobDefinitionRunning checks if there's already a running job for the given job definition ID
+// Returns the running job ID if found, empty string if no running job exists
+func (h *JobDefinitionHandler) isJobDefinitionRunning(ctx context.Context, jobDefID string) (string, error) {
+	// Get all running manager jobs
+	runningJobs, err := h.jobStorage.GetJobsByStatus(ctx, string(models.JobStatusRunning))
+	if err != nil {
+		return "", fmt.Errorf("failed to check running jobs: %w", err)
+	}
+
+	// Check if any running job belongs to this job definition
+	for _, job := range runningJobs {
+		// Only check manager jobs (root-level jobs that represent job definition executions)
+		if job.Type != string(models.JobTypeManager) {
+			continue
+		}
+
+		// Check metadata for job_definition_id
+		if job.Metadata != nil {
+			if defID, ok := job.Metadata["job_definition_id"].(string); ok && defID == jobDefID {
+				return job.ID, nil
+			}
+			// Also check for "job_def_id" (used in some places)
+			if defID, ok := job.Metadata["job_def_id"].(string); ok && defID == jobDefID {
+				return job.ID, nil
+			}
+		}
+
+		// Also check config for job_definition_id
+		if job.Config != nil {
+			if defID, ok := job.Config["job_definition_id"].(string); ok && defID == jobDefID {
+				return job.ID, nil
+			}
+			if defID, ok := job.Config["job_def_id"].(string); ok && defID == jobDefID {
+				return job.ID, nil
+			}
+		}
+	}
+
+	return "", nil
+}
+
 // ExecuteJobDefinitionHandler handles POST /api/job-definitions/{id}/execute
 func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter, r *http.Request) {
 	if !RequireMethod(w, r, "POST") {
@@ -501,6 +542,22 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 		return
 	}
 
+	// Check if this job definition is already running (prevent concurrent execution)
+	runningJobID, err := h.isJobDefinitionRunning(ctx, id)
+	if err != nil {
+		h.logger.Error().Err(err).Str("job_def_id", id).Msg("Failed to check running jobs")
+		WriteError(w, http.StatusInternalServerError, "Failed to check running jobs")
+		return
+	}
+	if runningJobID != "" {
+		h.logger.Warn().
+			Str("job_def_id", id).
+			Str("running_job_id", runningJobID).
+			Msg("Job definition is already running")
+		WriteError(w, http.StatusConflict, fmt.Sprintf("Job definition is already running (job ID: %s)", runningJobID))
+		return
+	}
+
 	h.logger.Debug().
 		Str("job_def_id", jobDef.ID).
 		Str("job_name", jobDef.Name).
@@ -511,6 +568,16 @@ func (h *JobDefinitionHandler) ExecuteJobDefinitionHandler(w http.ResponseWriter
 
 	// Launch goroutine to execute job definition asynchronously
 	go func() {
+		// Recover from panics to prevent server crash and log the error
+		defer func() {
+			if r := recover(); r != nil {
+				h.logger.Error().
+					Str("panic", fmt.Sprintf("%v", r)).
+					Str("job_def_id", jobDef.ID).
+					Msg("PANIC in job definition execution goroutine")
+			}
+		}()
+
 		bgCtx := context.Background()
 
 		parentJobID, err := h.orchestrator.ExecuteJobDefinition(bgCtx, jobDef, h.jobMonitor, h.stepMonitor)

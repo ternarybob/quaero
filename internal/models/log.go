@@ -28,6 +28,11 @@ type LogEntry struct {
 	Level         string `json:"level" badgerhold:"index"` // Log level (indexed)
 	Message       string `json:"message"`                  // Log message
 
+	// Sequence is a monotonically increasing counter for stable ordering when timestamps are identical
+	// Format: UnixNano timestamp + sequence counter (e.g., "1702393191123456789_0000000001")
+	// This ensures logs are ordered correctly even when written in rapid succession
+	Sequence string `json:"sequence" badgerhold:"index"` // Composite sort key for stable ordering
+
 	// JobIDField is the primary query field - stored separately for efficient badgerhold indexing
 	// (badgerhold cannot query into map fields with dot notation)
 	// Access via JobID() method for consistency with other getters

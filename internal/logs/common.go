@@ -48,10 +48,16 @@ type minHeap []heapItem
 
 func (h minHeap) Len() int { return len(h) }
 func (h minHeap) Less(i, j int) bool {
-	// Compare FullTimestamp, then jobID, then seqAtPush
+	// Compare by Sequence field first (combines timestamp + sequence counter)
+	// Sequence format: "timestamp_sequence" which sorts lexicographically correctly
+	if h[i].log.Sequence != h[j].log.Sequence {
+		return h[i].log.Sequence < h[j].log.Sequence
+	}
+	// Fallback to FullTimestamp for logs without Sequence (backwards compatibility)
 	if h[i].log.FullTimestamp != h[j].log.FullTimestamp {
 		return h[i].log.FullTimestamp < h[j].log.FullTimestamp
 	}
+	// Tie-break by job ID
 	if h[i].log.JobID() != h[j].log.JobID() {
 		return h[i].log.JobID() < h[j].log.JobID()
 	}
@@ -72,10 +78,16 @@ type maxHeap []heapItem
 
 func (h maxHeap) Len() int { return len(h) }
 func (h maxHeap) Less(i, j int) bool {
-	// Compare FullTimestamp, then jobID, then seqAtPush
+	// Compare by Sequence field first (combines timestamp + sequence counter)
+	// Sequence format: "timestamp_sequence" which sorts lexicographically correctly
+	if h[i].log.Sequence != h[j].log.Sequence {
+		return h[i].log.Sequence > h[j].log.Sequence
+	}
+	// Fallback to FullTimestamp for logs without Sequence (backwards compatibility)
 	if h[i].log.FullTimestamp != h[j].log.FullTimestamp {
 		return h[i].log.FullTimestamp > h[j].log.FullTimestamp
 	}
+	// Tie-break by job ID
 	if h[i].log.JobID() != h[j].log.JobID() {
 		return h[i].log.JobID() > h[j].log.JobID()
 	}
@@ -273,7 +285,7 @@ func (it *logIterator) next() (*models.LogEntry, error) {
 }
 
 // sortLogsByTimestamp sorts logs chronologically (oldest-first)
-// Uses FullTimestamp for accurate sorting across days/midnight boundaries
+// Uses Sequence field (timestamp_counter) for accurate sorting
 func sortLogsByTimestamp(logs []models.LogEntry) {
 	if len(logs) <= 1 {
 		return
@@ -281,7 +293,11 @@ func sortLogsByTimestamp(logs []models.LogEntry) {
 
 	// Use stable sort for O(n log n) performance and to preserve order for equal timestamps
 	sort.SliceStable(logs, func(i, j int) bool {
-		// Sort by FullTimestamp (RFC3339) for accurate chronological ordering
+		// Sort by Sequence field (combines timestamp + sequence counter)
+		// Falls back to FullTimestamp for backwards compatibility
+		if logs[i].Sequence != logs[j].Sequence {
+			return logs[i].Sequence < logs[j].Sequence
+		}
 		return logs[i].FullTimestamp < logs[j].FullTimestamp
 	})
 }

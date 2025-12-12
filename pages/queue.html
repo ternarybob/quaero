@@ -193,7 +193,7 @@
                                                             <i class="fas" :class="isStepLogsExpanded(item.job.id, item.step.name) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                             <i class="fas fa-stream"></i>
                                                             <span class="events-count-text"
-                                                                x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + (getStepEventFilter(item.job.id, item.step.name) !== 'all' ? '/' + getStepLogsTotal(item.job.id, item.step.name) : '') + ')'"></span>
+                                                                x-text="'Events (' + getStepLogs(item.job.id, item.step.name).length + (getStepLogsTotal(item.job.id, item.step.name) > getStepLogs(item.job.id, item.step.name).length || getStepEventFilter(item.job.id, item.step.name) !== 'all' ? '/' + getStepLogsTotal(item.job.id, item.step.name) : '') + ')'"></span>
                                                         </button>
                                                         <!-- Filter dropdown (only show when expanded) -->
                                                         <template x-if="isStepLogsExpanded(item.job.id, item.step.name)">
@@ -557,7 +557,7 @@
 
                                             <!-- Inline Tree View (shown when job is expanded) - Light Theme -->
                                             <template x-if="item.type === 'parent' && (item.job.metadata?.step_definitions?.length > 0 || jobTreeData[item.job.id]) && !isJobStepsCollapsed(item.job.id)">
-                                                <div class="inline-tree-view" style="margin-top: 1rem; background-color: #f5f5f5; border-radius: 6px; overflow: hidden; border: 1px solid #ddd;">
+                                                <div class="inline-tree-view" @click.stop style="margin-top: 1rem; background-color: #f5f5f5; border-radius: 6px; overflow: hidden; border: 1px solid #ddd;">
                                                     <!-- Tree header with job details and search -->
                                                     <div style="padding: 0.5rem 1rem; border-bottom: 1px solid #ddd; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; background-color: #e8e8e8; font-size: 0.8rem;">
                                                         <span style="color: #333; font-family: monospace;">
@@ -601,18 +601,17 @@
 
                                                     <!-- Tree content -->
                                                     <template x-if="jobTreeData[item.job.id]">
-                                                        <div style="font-family: Consolas, Monaco, monospace; font-size: 0.85rem;">
+                                                        <div class="tree-step-container">
                                                             <template x-for="(step, stepIndex) in jobTreeData[item.job.id].steps" :key="stepIndex">
-                                                                <div class="tree-step" style="border-bottom: 1px solid #ddd;">
+                                                                <div class="tree-step">
                                                                     <!-- Step header -->
-                                                                    <div class="tree-step-header" @click.stop="toggleTreeStep(item.job.id, stepIndex)" style="display: flex; align-items: center; padding: 0.5rem 1rem; cursor: pointer;"
-                                                                        :style="step.status === 'failed' ? 'background-color: rgba(220, 53, 69, 0.1);' : ''">
+                                                                    <div class="tree-step-header" :class="{ 'step-failed': step.status === 'failed' }" @click.stop="toggleTreeStep(item.job.id, stepIndex)">
                                                                         <!-- Expand/collapse indicator -->
-                                                                        <span style="width: 1rem; color: #666;">
+                                                                        <span class="tree-step-chevron">
                                                                             <i class="fas" :class="isTreeStepExpanded(item.job.id, stepIndex) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                                                                         </span>
                                                                         <!-- Status icon -->
-                                                                        <span style="width: 1.5rem;" :class="{
+                                                                        <span class="tree-step-status" :class="{
                                                                             'text-warning': step.status === 'pending',
                                                                             'text-primary': step.status === 'running',
                                                                             'text-success': step.status === 'completed',
@@ -628,86 +627,67 @@
                                                                             }"></i>
                                                                         </span>
                                                                         <!-- Step name -->
-                                                                        <span style="flex: 1; font-weight: 500; color: #333;" x-text="step.name"></span>
+                                                                        <span class="tree-step-name" x-text="step.name"></span>
                                                                         <!-- Step status badge -->
-                                                                        <span class="label" style="font-size: 0.65rem; padding: 0.1rem 0.4rem; margin-right: 0.5rem;" :class="{
+                                                                        <span class="label" style="font-size: 0.65rem; padding: 0.1rem 0.4rem;" :class="{
                                                                                 'label-warning': step.status === 'pending',
                                                                                 'label-primary': step.status === 'running',
                                                                                 'label-success': step.status === 'completed',
                                                                                 'label-error': step.status === 'failed',
                                                                                 'bg-gray': step.status === 'cancelled'
-                                                                            }" :data-status="step.status" x-text="step.status"></span>
-                                                                        <!-- Child summary badges -->
-                                                                        <template x-if="step.child_summary && step.child_summary.total > 0">
-                                                                            <span style="display: flex; gap: 0.25rem; margin-right: 0.5rem; font-size: 0.7rem;">
-                                                                                <span class="label label-success" style="font-size: 0.65rem; padding: 0.1rem 0.3rem;" x-text="'✓' + step.child_summary.completed"></span>
-                                                                                <template x-if="step.child_summary.failed > 0">
-                                                                                    <span class="label label-error" style="font-size: 0.65rem; padding: 0.1rem 0.3rem;" x-text="'✗' + step.child_summary.failed"></span>
-                                                                                </template>
-                                                                                <template x-if="step.child_summary.running > 0">
-                                                                                    <span class="label label-primary" style="font-size: 0.65rem; padding: 0.1rem 0.3rem;" x-text="'◐' + step.child_summary.running"></span>
-                                                                                </template>
-                                                                                <template x-if="step.child_summary.pending > 0">
-                                                                                    <span class="label" style="font-size: 0.65rem; padding: 0.1rem 0.3rem; background: #999;" x-text="'○' + step.child_summary.pending"></span>
-                                                                                </template>
-                                                                            </span>
+                                                                            }" x-text="step.status"></span>
+                                                                        <!-- Download logs button (enabled when step is completed/failed) -->
+                                                                        <template x-if="step.status === 'completed' || step.status === 'failed'">
+                                                                            <button class="btn btn-sm btn-link step-download-btn" @click.stop="downloadStepLogs(item.job.id, step.name, step.step_id)" title="Download step logs"
+                                                                                style="margin-left: auto; padding: 0.1rem 0.3rem;">
+                                                                                <i class="fas fa-download"></i>
+                                                                            </button>
                                                                         </template>
-                                                                        <!-- Duration -->
-                                                                        <span style="color: #666; font-size: 0.75rem;" x-text="formatTreeDuration(step.duration_ms)"></span>
                                                                     </div>
 
                                                                     <!-- Step logs (collapsible) -->
                                                                     <template x-if="isTreeStepExpanded(item.job.id, stepIndex)">
-                                                                        <div style="padding: 0.25rem 1rem 0.5rem 2.5rem; border-left: 2px solid #ccc; margin-left: 1.5rem; background-color: #fafafa;">
+                                                                        <div class="tree-step-logs" @click.stop>
                                                                             <!-- Error groups -->
                                                                             <template x-if="step.child_summary && step.child_summary.error_groups && step.child_summary.error_groups.length > 0">
-                                                                                <div style="margin-bottom: 0.5rem;">
+                                                                                <div>
                                                                                     <template x-for="(errGroup, errIdx) in step.child_summary.error_groups" :key="errIdx">
-                                                                                        <div style="padding: 0.25rem 0.5rem; background: rgba(220, 53, 69, 0.15); border-radius: 3px; margin-bottom: 0.25rem; font-size: 0.75rem; color: #333;">
-                                                                                            <span class="text-error"><i class="fas fa-exclamation-circle"></i></span>
+                                                                                        <div class="tree-error-group">
+                                                                                            <i class="fas fa-times"></i>
                                                                                             <span x-text="errGroup.message"></span>
-                                                                                            <span class="label label-error" style="font-size: 0.6rem; margin-left: 0.5rem;" x-text="errGroup.count + 'x'"></span>
+                                                                                            <span style="opacity: 0.7; margin-left: 0.5rem;" x-text="'(' + errGroup.count + ')'"></span>
                                                                                         </div>
                                                                                     </template>
                                                                                 </div>
                                                                             </template>
 
-                                                                            <!-- Earlier logs indicator (when log count exceeds limit) -->
-                                                                            <template x-if="(step.logOffset || 0) > 0">
-                                                                                <div style="color: #888; font-style: italic; padding: 0.25rem 0; font-size: 0.7rem; text-align: center; border-bottom: 1px dashed #ccc; margin-bottom: 0.25rem;">
-                                                                                    <i class="fas fa-ellipsis-h"></i>
-                                                                                    <span x-text="'... ' + (step.logOffset || 0) + ' earlier logs'"></span>
+                                                                            <!-- Show More button (when there are earlier logs) -->
+                                                                            <template x-if="hasStepEarlierLogs(item.job.id, step.name, stepIndex)">
+                                                                                <div class="tree-logs-show-more">
+                                                                                    <button class="btn btn-sm btn-link" @click.stop="loadMoreStepLogs(item.job.id, step.name, stepIndex)" :disabled="stepLogLoading[item.job.id + ':' + step.name]">
+                                                                                        <template x-if="stepLogLoading[item.job.id + ':' + step.name]">
+                                                                                            <span><i class="fas fa-spinner fa-spin"></i> Loading...</span>
+                                                                                        </template>
+                                                                                        <template x-if="!stepLogLoading[item.job.id + ':' + step.name]">
+                                                                                            <span><i class="fas fa-chevron-up"></i> Show <span x-text="getStepEarlierLogsCount(item.job.id, step.name, stepIndex)"></span> earlier logs</span>
+                                                                                        </template>
+                                                                                    </button>
                                                                                 </div>
                                                                             </template>
 
-                                                                            <!-- Log lines (limited to maxLogsPerStep, earliest-to-latest) -->
-                                                                            <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id)" :key="logIdx">
-                                                                                <div class="tree-log-line" style="display: flex; padding: 0.1rem 0; font-size: 0.75rem; color: #333;">
-                                                                                    <!-- Line number (offset by earlier logs count from API total_count) -->
-                                                                                    <span class="tree-log-num" style="width: 2rem; text-align: right; color: #999; margin-right: 0.5rem; user-select: none;"
-                                                                                        x-text="(step.logOffset || 0) + logIdx + 1"></span>
-                                                                                    <!-- Level indicator -->
-                                                                                    <span style="width: 1rem;" :class="{
-                                                                                        'text-error': log.level === 'error',
-                                                                                        'text-warning': log.level === 'warn' || log.level === 'warning',
-                                                                                        'text-success': log.level === 'info',
-                                                                                        'text-gray': log.level === 'debug'
-                                                                                    }">
-                                                                                        <i class="fas" :class="{
-                                                                                            'fa-times-circle': log.level === 'error',
-                                                                                            'fa-exclamation-triangle': log.level === 'warn' || log.level === 'warning',
-                                                                                            'fa-info-circle': log.level === 'info',
-                                                                                            'fa-bug': log.level === 'debug'
-                                                                                        }"></i>
-                                                                                    </span>
+                                                                            <!-- Log lines (limited to step-specific limit, earliest-to-latest) -->
+                                                                            <template x-for="(log, logIdx) in getFilteredTreeLogs(getStepLogs(item.job.id, step.name), item.job.id, step.name)" :key="logIdx">
+                                                                                <div class="tree-log-line" :class="{ 'log-error': log.level === 'error' }">
+                                                                                    <!-- Line number -->
+                                                                                    <span class="tree-log-num" x-text="getStepLogStartIndex(item.job.id, step.name, stepIndex) + logIdx + 1"></span>
                                                                                     <!-- Log text -->
-                                                                                    <span style="flex: 1; word-break: break-word;" x-text="log.text || log.message"></span>
+                                                                                    <span class="tree-log-text" x-text="log.text || log.message"></span>
                                                                                 </div>
                                                                             </template>
 
                                                                             <!-- Empty logs message -->
                                                                             <template x-if="!step.logs || step.logs.length === 0">
-                                                                                <div style="color: #666; font-style: italic; padding: 0.25rem 0; font-size: 0.75rem;">
+                                                                                <div class="tree-logs-empty">
                                                                                     No logs for this step
                                                                                 </div>
                                                                             </template>
@@ -1428,6 +1408,21 @@
                 }));
             }));
 
+            // Subscribe to job_update events (unified job/step status updates)
+            // This is the primary mechanism for real-time step status updates
+            wsUnsubscribers.push(WebSocketManager.subscribe('job_update', (payload) => {
+                window.dispatchEvent(new CustomEvent('jobList:jobUpdate', {
+                    detail: {
+                        context: payload.context,
+                        job_id: payload.job_id,
+                        step_name: payload.step_name,
+                        status: payload.status,
+                        refresh_logs: payload.refresh_logs,
+                        timestamp: payload.timestamp
+                    }
+                }));
+            }));
+
             // Subscribe to job log events
             wsUnsubscribers.push(WebSocketManager.subscribe('job_log', (payload) => {
                 window.dispatchEvent(new CustomEvent('jobList:jobLog', {
@@ -2007,6 +2002,8 @@
                     window.addEventListener('jobList:updateManagerProgress', (e) => this.updateManagerProgress(e.detail));
                     // Trigger-based event refresh (from event aggregator)
                     window.addEventListener('jobList:refreshStepEvents', (e) => this.refreshStepEvents(e.detail));
+                    // Unified job/step status updates (primary mechanism for step status)
+                    window.addEventListener('jobList:jobUpdate', (e) => this.handleJobUpdate(e.detail));
 
                     // Set initial load flag
                     this.isInitialLoad = true;
@@ -2113,10 +2110,13 @@
                 },
 
                 getStepLogsTotal(jobId, stepName) {
-                    // Try Tree data first
+                    // Try Tree data first - use totalLogCount if available (from API)
                     if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
                         const step = this.jobTreeData[jobId].steps.find(s => s.name === stepName);
-                        if (step && step.logs) return step.logs.length;
+                        if (step) {
+                            // Prefer totalLogCount from API, fallback to logs array length
+                            return step.totalLogCount || (step.logs ? step.logs.length : 0);
+                        }
                     }
                     // Fallback
                     if (this.jobLogs[jobId]) {
@@ -2163,10 +2163,13 @@
                 },
 
                 getStepLogsTotal(jobId, stepName) {
-                    // Try Tree data first
+                    // Try Tree data first - use totalLogCount if available (from API)
                     if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
                         const step = this.jobTreeData[jobId].steps.find(s => s.name === stepName);
-                        if (step && step.logs) return step.logs.length;
+                        if (step) {
+                            // Prefer totalLogCount from API, fallback to logs array length
+                            return step.totalLogCount || (step.logs ? step.logs.length : 0);
+                        }
                     }
                     // Fallback
                     if (this.jobLogs[jobId]) {
@@ -4098,7 +4101,8 @@
                                 const newSteps = [...treeData.steps];
                                 newSteps[stepIdx] = {
                                     ...newSteps[stepIdx],
-                                    logs: stepLogs.logs
+                                    logs: stepLogs.logs,
+                                    totalLogCount: stepLogs.total_count || stepLogs.logs.length // Store total count from API
                                 };
 
                                 this.jobTreeData = {
@@ -4191,10 +4195,20 @@
                     this.jobTreeSearchFilter = { ...this.jobTreeSearchFilter, [jobId]: value };
                 },
 
-                // Maximum logs to display per step in tree view
-                maxLogsPerStep: 100,
+                // Default maximum logs to display per step in tree view
+                defaultLogsPerStep: 100,
+                // Per-step expanded log limits (key: jobId:stepName, value: current limit)
+                stepLogLimits: {},
+                // Loading state for step log fetching
+                stepLogLoading: {},
 
-                getFilteredTreeLogs(logs, jobId) {
+                // Get current log limit for a step (defaults to defaultLogsPerStep)
+                getStepLogLimit(jobId, stepName) {
+                    const key = `${jobId}:${stepName}`;
+                    return this.stepLogLimits[key] || this.defaultLogsPerStep;
+                },
+
+                getFilteredTreeLogs(logs, jobId, stepName) {
                     if (!logs) return [];
                     let filteredLogs = logs;
 
@@ -4207,59 +4221,167 @@
                         });
                     }
 
-                    // Limit to last N logs (earliest-to-latest order, show most recent)
-                    if (filteredLogs.length > this.maxLogsPerStep) {
-                        filteredLogs = filteredLogs.slice(-this.maxLogsPerStep);
+                    // Limit to step-specific limit (earliest-to-latest order, show most recent)
+                    const limit = this.getStepLogLimit(jobId, stepName);
+                    if (filteredLogs.length > limit) {
+                        filteredLogs = filteredLogs.slice(-limit);
                     }
 
-                    // Debug log every now and then (or just once per render? Too noisy)
-                    // Let's rely on fetch log.
                     return filteredLogs;
                 },
 
-                // Check if there are earlier logs not shown
+                // Check if there are earlier logs not shown for a step
+                hasStepEarlierLogs(jobId, stepName, stepIndex) {
+                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
+                    if (!step) return false;
+
+                    const logs = step.logs || [];
+                    const totalCount = step.totalLogCount || logs.length;
+                    const limit = this.getStepLogLimit(jobId, stepName);
+
+                    return totalCount > limit;
+                },
+
+                // Get count of earlier logs not shown for a step
+                getStepEarlierLogsCount(jobId, stepName, stepIndex) {
+                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
+                    if (!step) return 0;
+
+                    const logs = step.logs || [];
+                    const totalCount = step.totalLogCount || logs.length;
+                    const limit = this.getStepLogLimit(jobId, stepName);
+
+                    return Math.max(0, totalCount - limit);
+                },
+
+                // Get the starting log index for line numbers
+                getStepLogStartIndex(jobId, stepName, stepIndex) {
+                    const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
+                    if (!step) return 0;
+
+                    const logs = step.logs || [];
+                    const totalCount = step.totalLogCount || logs.length;
+                    const limit = this.getStepLogLimit(jobId, stepName);
+                    const displayedCount = Math.min(logs.length, limit);
+
+                    return totalCount - displayedCount;
+                },
+
+                // Load more logs for a step (increases the limit and fetches from API)
+                async loadMoreStepLogs(jobId, stepName, stepIndex) {
+                    const key = `${jobId}:${stepName}`;
+
+                    // Mark as loading
+                    this.stepLogLoading = { ...this.stepLogLoading, [key]: true };
+
+                    try {
+                        // Increase the limit by 100 (or double if already high)
+                        const currentLimit = this.getStepLogLimit(jobId, stepName);
+                        const newLimit = currentLimit + 100;
+                        this.stepLogLimits = { ...this.stepLogLimits, [key]: newLimit };
+
+                        // Get the step job ID from tree data
+                        const step = this.jobTreeData[jobId]?.steps?.[stepIndex];
+                        const stepJobId = step?.step_id;
+
+                        if (stepJobId) {
+                            // Fetch more logs from API
+                            const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=${newLimit}&order=desc&level=info`);
+                            if (response.ok) {
+                                const data = await response.json();
+                                let newLogs = data.logs || [];
+                                const totalCount = data.total_count || newLogs.length;
+
+                                // Reverse to get chronological order
+                                newLogs = newLogs.reverse();
+
+                                // Update step logs in tree data
+                                if (this.jobTreeData[jobId] && this.jobTreeData[jobId].steps) {
+                                    const newSteps = [...this.jobTreeData[jobId].steps];
+                                    newSteps[stepIndex] = {
+                                        ...newSteps[stepIndex],
+                                        logs: newLogs,
+                                        totalLogCount: totalCount
+                                    };
+                                    this.jobTreeData = {
+                                        ...this.jobTreeData,
+                                        [jobId]: { ...this.jobTreeData[jobId], steps: newSteps }
+                                    };
+                                }
+
+                                console.log(`[Queue] Loaded ${newLogs.length}/${totalCount} logs for step ${stepName}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('[Queue] Failed to load more logs:', error);
+                    } finally {
+                        this.stepLogLoading = { ...this.stepLogLoading, [key]: false };
+                    }
+                },
+
+                // Download logs for a step as text file
+                async downloadStepLogs(jobId, stepName, stepJobId) {
+                    try {
+                        // Get step job ID from tree data if not provided
+                        if (!stepJobId && this.jobTreeData[jobId]) {
+                            const step = this.jobTreeData[jobId].steps?.find(s => s.name === stepName);
+                            stepJobId = step?.step_id;
+                        }
+
+                        if (!stepJobId) {
+                            window.showNotification('Step job ID not found', 'error');
+                            return;
+                        }
+
+                        // Fetch all logs (higher limit for download)
+                        const response = await fetch(`/api/logs?scope=job&job_id=${stepJobId}&include_children=false&limit=10000&order=asc&level=info`);
+                        if (!response.ok) {
+                            throw new Error(`Failed to fetch logs: ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        const logs = data.logs || [];
+
+                        if (logs.length === 0) {
+                            window.showNotification('No logs to download', 'warning');
+                            return;
+                        }
+
+                        // Format logs as text
+                        const logText = logs.map((log, idx) => {
+                            const timestamp = log.full_timestamp || log.timestamp || '';
+                            const level = (log.level || 'info').toUpperCase().padEnd(5);
+                            const message = log.message || log.text || '';
+                            return `${idx + 1}. [${timestamp}] [${level}] ${message}`;
+                        }).join('\n');
+
+                        // Create and download file
+                        const blob = new Blob([logText], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${stepName}-logs.txt`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+
+                        window.showNotification(`Downloaded ${logs.length} log entries`, 'success');
+                    } catch (error) {
+                        console.error('[Queue] Failed to download logs:', error);
+                        window.showNotification('Failed to download logs: ' + error.message, 'error');
+                    }
+                },
+
+                // Legacy compatibility - keep old functions
                 hasEarlierLogs(logs, jobId) {
                     if (!logs) return false;
-                    let filteredCount = logs.length;
-
-                    const filter = this.getTreeSearchFilter(jobId).toLowerCase();
-                    if (filter) {
-                        filteredCount = logs.filter(log => {
-                            const text = log.text || log.message || '';
-                            return text.toLowerCase().includes(filter);
-                        }).length;
-                    }
-
-                    return filteredCount > this.maxLogsPerStep;
+                    return logs.length > this.defaultLogsPerStep;
                 },
 
-                // Get count of earlier logs not shown
                 getEarlierLogsCount(logs, jobId) {
                     if (!logs) return 0;
-                    let filteredCount = logs.length;
-
-                    const filter = this.getTreeSearchFilter(jobId).toLowerCase();
-                    if (filter) {
-                        filteredCount = logs.filter(log => {
-                            const text = log.text || log.message || '';
-                            return text.toLowerCase().includes(filter);
-                        }).length;
-                    }
-
-                    return Math.max(0, filteredCount - this.maxLogsPerStep);
-                },
-
-                formatTreeDuration(ms) {
-                    if (!ms || ms <= 0) return '';
-                    if (ms < 1000) return ms + 'ms';
-                    const seconds = Math.floor(ms / 1000);
-                    if (seconds < 60) return seconds + 's';
-                    const minutes = Math.floor(seconds / 60);
-                    const remainingSecs = seconds % 60;
-                    if (minutes < 60) return minutes + 'm ' + remainingSecs + 's';
-                    const hours = Math.floor(minutes / 60);
-                    const remainingMins = minutes % 60;
-                    return hours + 'h ' + remainingMins + 'm';
+                    return Math.max(0, logs.length - this.defaultLogsPerStep);
                 },
 
                 // Debounced parent refresh to reduce load under high child job churn

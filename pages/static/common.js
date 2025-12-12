@@ -423,11 +423,16 @@ document.addEventListener('alpine:init', () => {
         showEditModal: false,
         loading: true,
         modalTriggerElement: null,
+        executingJobIds: new Set(), // Track in-flight job execution requests
 
         init() {
             window.debugLog('JobDefinitionsManagement', 'Initializing component');
             this.loadJobDefinitions();
             this.resetCurrentJobDefinition();
+        },
+
+        isJobExecuting(jobDefId) {
+            return this.executingJobIds.has(jobDefId);
         },
 
         async loadJobDefinitions() {
@@ -722,6 +727,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         async executeJobDefinition(jobDefId, jobDefName) {
+            // Prevent duplicate submissions
+            if (this.executingJobIds.has(jobDefId)) {
+                window.debugLog('JobDefinitionsManagement', 'Job execution already in progress:', jobDefId);
+                window.showNotification('Job execution already in progress', 'warning');
+                return;
+            }
+
             const confirmed = await window.confirmAction({
                 title: 'Run Job',
                 message: `Are you sure you want to execute "${jobDefName}"?`,
@@ -733,7 +745,10 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
+            // Mark as executing
+            this.executingJobIds.add(jobDefId);
             window.debugLog('JobDefinitionsManagement', 'Executing job definition:', jobDefId);
+
             try {
                 const response = await fetch(`/api/job-definitions/${jobDefId}/execute`, {
                     method: 'POST'
@@ -750,6 +765,9 @@ document.addEventListener('alpine:init', () => {
             } catch (err) {
                 window.debugError('JobDefinitionsManagement', 'Error executing job definition:', err);
                 window.showNotification('Failed to execute job: ' + err.message, 'error');
+            } finally {
+                // Clear executing state after request completes
+                this.executingJobIds.delete(jobDefId);
             }
         },
 
