@@ -148,4 +148,3 @@ func (utc *UITestContext) getCurrentURL() (string, error) {
 	err := chromedp.Run(utc.Ctx, chromedp.Location(&url))
 	return url, err
 }
-
